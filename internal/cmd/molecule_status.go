@@ -184,10 +184,29 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build set of closed issue IDs and collect open step IDs for dependency checking
+	closedIDs := make(map[string]bool)
+	var openStepIDs []string
+	for _, child := range children {
+		if child.Status == "closed" {
+			closedIDs[child.ID] = true
+		} else if child.Status == "open" {
+			openStepIDs = append(openStepIDs, child.ID)
+		}
+	}
+
+	// Fetch full details for open steps to get dependency info.
+	// bd list doesn't return dependencies, but bd show does.
+	var openStepsMap map[string]*beads.Issue
+	if len(openStepIDs) > 0 {
+		openStepsMap, err = b.ShowMultiple(openStepIDs)
+		if err != nil {
+			// Non-fatal: continue without dependency info (all open steps will be "ready")
+			openStepsMap = make(map[string]*beads.Issue)
+		}
+	}
+
 	// Categorize steps
-	// NOTE: bd list --json only returns dependency_count, not the actual
-	// depends_on array. For steps with dependencies, we use bd show to get
-	// the full dependency info with status.
 	for _, child := range children {
 		progress.TotalSteps++
 
@@ -197,27 +216,30 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 		case "in_progress":
 			progress.InProgress++
 		case "open":
-			// Check if all dependencies are closed
-			allDepsClosed := true
+			// Get full step info with dependencies
+			step := openStepsMap[child.ID]
 
-			if child.DependencyCount > 0 {
-				// Fetch full issue details to check dependency status
-				fullChild, err := b.Show(child.ID)
-				if err == nil && fullChild != nil && len(fullChild.Dependencies) > 0 {
-					for _, dep := range fullChild.Dependencies {
-						if dep.Status != "closed" {
-							allDepsClosed = false
-							break
-						}
-					}
-				} else {
-					// Couldn't get dependency info - assume blocked to be safe
+			// Check if all dependencies are closed using Dependencies field
+			// (from bd show), not DependsOn (which is empty from bd list).
+			// Only "blocks" type dependencies block progress - ignore "parent-child".
+			allDepsClosed := true
+			hasBlockingDeps := false
+			var deps []beads.IssueDep
+			if step != nil {
+				deps = step.Dependencies
+			}
+			for _, dep := range deps {
+				if dep.DependencyType != "blocks" {
+					continue // Skip parent-child and other non-blocking relationships
+				}
+				hasBlockingDeps = true
+				if !closedIDs[dep.ID] {
 					allDepsClosed = false
+					break
 				}
 			}
-			// If dependency_count is 0, allDepsClosed stays true (no deps = ready)
 
-			if allDepsClosed {
+			if !hasBlockingDeps || allDepsClosed {
 				progress.ReadySteps = append(progress.ReadySteps, child.ID)
 			} else {
 				progress.BlockedSteps = append(progress.BlockedSteps, child.ID)
@@ -309,6 +331,11 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+		if roleCtx.Role == RoleUnknown {
+			// Fall back to GT_ROLE when cwd doesn't identify an agent
+			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
+			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
+		}
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -515,10 +542,29 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 		}
 	}
 
+	// Build set of closed issue IDs and collect open step IDs for dependency checking
+	closedIDs := make(map[string]bool)
+	var openStepIDs []string
+	for _, child := range children {
+		if child.Status == "closed" {
+			closedIDs[child.ID] = true
+		} else if child.Status == "open" {
+			openStepIDs = append(openStepIDs, child.ID)
+		}
+	}
+
+	// Fetch full details for open steps to get dependency info.
+	// bd list doesn't return dependencies, but bd show does.
+	var openStepsMap map[string]*beads.Issue
+	if len(openStepIDs) > 0 {
+		openStepsMap, err = b.ShowMultiple(openStepIDs)
+		if err != nil {
+			// Non-fatal: continue without dependency info (all open steps will be "ready")
+			openStepsMap = make(map[string]*beads.Issue)
+		}
+	}
+
 	// Categorize steps
-	// NOTE: bd list --json only returns dependency_count, not the actual
-	// depends_on array. For steps with dependencies, we use bd show to get
-	// the full dependency info with status.
 	for _, child := range children {
 		progress.TotalSteps++
 
@@ -528,27 +574,30 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 		case "in_progress":
 			progress.InProgress++
 		case "open":
-			// Check if all dependencies are closed
-			allDepsClosed := true
+			// Get full step info with dependencies
+			step := openStepsMap[child.ID]
 
-			if child.DependencyCount > 0 {
-				// Fetch full issue details to check dependency status
-				fullChild, err := b.Show(child.ID)
-				if err == nil && fullChild != nil && len(fullChild.Dependencies) > 0 {
-					for _, dep := range fullChild.Dependencies {
-						if dep.Status != "closed" {
-							allDepsClosed = false
-							break
-						}
-					}
-				} else {
-					// Couldn't get dependency info - assume blocked to be safe
+			// Check if all dependencies are closed using Dependencies field
+			// (from bd show), not DependsOn (which is empty from bd list).
+			// Only "blocks" type dependencies block progress - ignore "parent-child".
+			allDepsClosed := true
+			hasBlockingDeps := false
+			var deps []beads.IssueDep
+			if step != nil {
+				deps = step.Dependencies
+			}
+			for _, dep := range deps {
+				if dep.DependencyType != "blocks" {
+					continue // Skip parent-child and other non-blocking relationships
+				}
+				hasBlockingDeps = true
+				if !closedIDs[dep.ID] {
 					allDepsClosed = false
+					break
 				}
 			}
-			// If dependency_count is 0, allDepsClosed stays true (no deps = ready)
 
-			if allDepsClosed {
+			if !hasBlockingDeps || allDepsClosed {
 				progress.ReadySteps = append(progress.ReadySteps, child.ID)
 			} else {
 				progress.BlockedSteps = append(progress.BlockedSteps, child.ID)
@@ -716,6 +765,11 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+		if roleCtx.Role == RoleUnknown {
+			// Fall back to GT_ROLE when cwd doesn't identify an agent
+			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
+			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
+		}
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -786,47 +840,58 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 
 	info.StepsTotal = len(children)
 
-	// Categorize steps
+	// Build set of closed issue IDs and collect open step IDs for dependency checking
+	closedIDs := make(map[string]bool)
 	var inProgressSteps []*beads.Issue
-	var readySteps []*beads.Issue
+	var openStepIDs []string
 
 	for _, child := range children {
 		switch child.Status {
 		case "closed":
 			info.StepsComplete++
+			closedIDs[child.ID] = true
 		case "in_progress":
 			inProgressSteps = append(inProgressSteps, child)
+		case "open":
+			openStepIDs = append(openStepIDs, child.ID)
+		}
+	}
+
+	// Fetch full details for open steps to get dependency info.
+	// bd list doesn't return dependencies, but bd show does.
+	var openStepsMap map[string]*beads.Issue
+	if len(openStepIDs) > 0 {
+		openStepsMap, _ = b.ShowMultiple(openStepIDs)
+		if openStepsMap == nil {
+			openStepsMap = make(map[string]*beads.Issue)
 		}
 	}
 
 	// Find ready steps (open with all deps closed)
-	// NOTE: bd list --json only returns dependency_count, not the actual
-	// depends_on array. For steps with dependencies, we use bd show to get
-	// the full dependency info with status.
-	for _, child := range children {
-		if child.Status == "open" {
-			allDepsClosed := true
+	var readySteps []*beads.Issue
+	for _, stepID := range openStepIDs {
+		step := openStepsMap[stepID]
+		if step == nil {
+			continue
+		}
 
-			if child.DependencyCount > 0 {
-				// Fetch full issue details to check dependency status
-				fullChild, err := b.Show(child.ID)
-				if err == nil && fullChild != nil && len(fullChild.Dependencies) > 0 {
-					for _, dep := range fullChild.Dependencies {
-						if dep.Status != "closed" {
-							allDepsClosed = false
-							break
-						}
-					}
-				} else {
-					// Couldn't get dependency info - assume blocked to be safe
-					allDepsClosed = false
-				}
+		// Check dependencies using Dependencies field (from bd show),
+		// not DependsOn (which is empty from bd list).
+		// Only "blocks" type dependencies block progress - ignore "parent-child".
+		allDepsClosed := true
+		hasBlockingDeps := false
+		for _, dep := range step.Dependencies {
+			if dep.DependencyType != "blocks" {
+				continue // Skip parent-child and other non-blocking relationships
 			}
-			// If dependency_count is 0, allDepsClosed stays true (no deps = ready)
-
-			if allDepsClosed {
-				readySteps = append(readySteps, child)
+			hasBlockingDeps = true
+			if !closedIDs[dep.ID] {
+				allDepsClosed = false
+				break
 			}
+		}
+		if !hasBlockingDeps || allDepsClosed {
+			readySteps = append(readySteps, step)
 		}
 	}
 

@@ -97,15 +97,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		// Use IsClaudeRunning for robust detection: Claude can report as "node", "claude",
-		// or version number like "2.0.76". IsAgentRunning with just "node" was too strict
-		// and caused healthy sessions to be killed. See: gastown#566
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -128,22 +124,27 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
 	// write into the source repo. Runtime walks up the tree to find settings.
 	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
-	townRoot := filepath.Dir(m.rig.Path)
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Check your hook and begin patrol.")
+
 	var command string
 	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
+		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -173,6 +174,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
 
+	// Accept bypass permissions warning dialog if it appears.
+	// Must be before WaitForRuntimeReady to avoid race where dialog blocks prompt detection.
+	_ = t.AcceptBypassPermissionsWarning(sessionID)
+
 	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
 	// WaitForRuntimeReady waits for the runtime to be ready
 	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
@@ -181,26 +186,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
-
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/refinery", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
 
 	return nil
 }

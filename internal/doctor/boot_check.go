@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // BootHealthCheck verifies Boot watchdog health.
@@ -63,9 +64,9 @@ func (c *BootHealthCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check 2: Session alive
 	sessionAlive := b.IsSessionAlive()
 	if sessionAlive {
-		details = append(details, fmt.Sprintf("Session: %s (alive)", boot.SessionName))
+		details = append(details, fmt.Sprintf("Session: %s (alive)", session.BootSessionName()))
 	} else {
-		details = append(details, fmt.Sprintf("Session: %s (not running)", boot.SessionName))
+		details = append(details, fmt.Sprintf("Session: %s (not running)", session.BootSessionName()))
 	}
 
 	// Check 3: Last execution status

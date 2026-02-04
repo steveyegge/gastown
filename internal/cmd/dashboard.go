@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -44,32 +43,26 @@ func init() {
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	// Verify we're in a workspace
-	if _, err := workspace.FindFromCwdOrError(); err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
+	// Check if we're in a workspace - if not, run in setup mode
+	var handler http.Handler
+	var err error
 
-	// Create the live convoy fetcher
-	fetcher, err := web.NewLiveConvoyFetcher()
-	if err != nil {
-		return fmt.Errorf("creating convoy fetcher: %w", err)
-	}
+	if _, wsErr := workspace.FindFromCwdOrError(); wsErr != nil {
+		// No workspace - run in setup mode
+		handler, err = web.NewSetupMux()
+		if err != nil {
+			return fmt.Errorf("creating setup handler: %w", err)
+		}
+	} else {
+		// In a workspace - run normal dashboard
+		fetcher, fetchErr := web.NewLiveConvoyFetcher()
+		if fetchErr != nil {
+			return fmt.Errorf("creating convoy fetcher: %w", fetchErr)
+		}
 
-	// Create the handler
-	handler, err := web.NewConvoyHandler(fetcher)
-	if err != nil {
-		return fmt.Errorf("creating convoy handler: %w", err)
-	}
-
-	// Set rig path for footer display (simplify path for display)
-	wsPath, _ := workspace.FindFromCwdOrError()
-	if wsPath != "" {
-		// Replace home dir with ~ for cleaner display
-		home, _ := os.UserHomeDir()
-		if home != "" && len(wsPath) > len(home) && wsPath[:len(home)] == home {
-			handler.RigPath = "~" + wsPath[len(home):]
-		} else {
-			handler.RigPath = wsPath
+		handler, err = web.NewDashboardMux(fetcher)
+		if err != nil {
+			return fmt.Errorf("creating dashboard handler: %w", err)
 		}
 	}
 
@@ -82,8 +75,29 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start the server with timeouts
-	fmt.Printf("🚚 Gas Town Dashboard starting at %s\n", url)
-	fmt.Printf("   Press Ctrl+C to stop\n")
+	fmt.Print(`
+ __       __  ________  __        ______    ______   __       __  ________                        
+|  \  _  |  \|        \|  \      /      \  /      \ |  \     /  \|        \                       
+| $$ / \ | $$| $$$$$$$$| $$     |  $$$$$$\|  $$$$$$\| $$\   /  $$| $$$$$$$$                       
+| $$/  $\| $$| $$__    | $$     | $$   \$$| $$  | $$| $$$\ /  $$$| $$__                           
+| $$  $$$\ $$| $$  \   | $$     | $$      | $$  | $$| $$$$\  $$$$| $$  \                          
+| $$ $$\$$\$$| $$$$$   | $$     | $$   __ | $$  | $$| $$\$$ $$ $$| $$$$$                          
+| $$$$  \$$$$| $$_____ | $$_____| $$__/  \| $$__/ $$| $$ \$$$| $$| $$_____                        
+| $$$    \$$$| $$     \| $$     \\$$    $$ \$$    $$| $$  \$ | $$| $$     \                       
+ \$$      \$$ \$$$$$$$$ \$$$$$$$$ \$$$$$$   \$$$$$$  \$$      \$$ \$$$$$$$$                       
+                                                                                                  
+ ________   ______          ______    ______    ______   ________   ______   __       __  __    __ 
+|        \ /      \        /      \  /      \  /      \ |        \ /      \ |  \  _  |  \|  \  |  \
+ \$$$$$$$$|  $$$$$$\      |  $$$$$$\|  $$$$$$\|  $$$$$$\ \$$$$$$$$|  $$$$$$\| $$ / \ | $$| $$\ | $$
+   | $$   | $$  | $$      | $$ __\$$| $$__| $$| $$___\$$   | $$   | $$  | $$| $$/  $\| $$| $$$\| $$
+   | $$   | $$  | $$      | $$|    \| $$    $$ \$$    \    | $$   | $$  | $$| $$  $$$\ $$| $$$$\ $$
+   | $$   | $$  | $$      | $$ \$$$$| $$$$$$$$ _\$$$$$$\   | $$   | $$  | $$| $$ $$\$$\$$| $$\$$ $$
+   | $$   | $$__/ $$      | $$__| $$| $$  | $$|  \__| $$   | $$   | $$__/ $$| $$$$  \$$$$| $$ \$$$$
+   | $$    \$$    $$       \$$    $$| $$  | $$ \$$    $$   | $$    \$$    $$| $$$    \$$$| $$  \$$$
+    \$$     \$$$$$$         \$$$$$$  \$$   \$$  \$$$$$$     \$$     \$$$$$$  \$$      \$$ \$$   \$$
+
+`)
+	fmt.Printf("  launching dashboard at %s  •  api: %s/api/  •  ctrl+c to stop\n", url, url)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", dashboardPort),

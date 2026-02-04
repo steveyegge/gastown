@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +13,10 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // Common errors
@@ -275,11 +276,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	// Check if directory already exists
 	if _, err := os.Stat(rigPath); err == nil {
-		return nil, fmt.Errorf("directory already exists: %s", rigPath)
+		return nil, fmt.Errorf("directory already exists: %s\n\nTo adopt an existing directory, use --adopt:\n  gt rig add %s --adopt", rigPath, opts.Name)
 	}
 
 	// Track whether user explicitly provided --prefix (before deriving)
 	userProvidedPrefix := opts.BeadsPrefix != ""
+	opts.BeadsPrefix = strings.TrimSuffix(opts.BeadsPrefix, "-")
 
 	// Derive defaults
 	if opts.BeadsPrefix == "" {
@@ -393,12 +395,18 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	sourceBeadsDir := filepath.Join(mayorRigPath, ".beads")
 	sourceBeadsDB := filepath.Join(sourceBeadsDir, "beads.db")
 	if _, err := os.Stat(sourceBeadsDir); err == nil {
+		// Remove any redirect file that might have been accidentally tracked.
+		// Redirect files are runtime/local config and should not be in git.
+		// If not removed, they can cause circular redirect warnings during rig setup.
+		sourceRedirectFile := filepath.Join(sourceBeadsDir, "redirect")
+		_ = os.Remove(sourceRedirectFile) // Ignore error if doesn't exist
+
 		// Tracked beads exist - try to detect prefix from existing issues
 		sourceBeadsConfig := filepath.Join(sourceBeadsDir, "config.yaml")
 		if sourcePrefix := detectBeadsPrefixFromConfig(sourceBeadsConfig); sourcePrefix != "" {
 			fmt.Printf("  Detected existing beads prefix '%s' from source repo\n", sourcePrefix)
 			// Only error on mismatch if user explicitly provided --prefix
-			if userProvidedPrefix && opts.BeadsPrefix != sourcePrefix {
+			if userProvidedPrefix && strings.TrimSuffix(opts.BeadsPrefix, "-") != strings.TrimSuffix(sourcePrefix, "-") {
 				return nil, fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided; use --prefix %s to match existing issues", sourcePrefix, opts.BeadsPrefix, sourcePrefix)
 			}
 			// Use detected prefix (overrides derived prefix)
@@ -417,21 +425,23 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
+			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
 			// Configure custom types for Gas Town (beads v0.46.0+)
-			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+			configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}
 	}
 
-	// Create mayor CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
+	// Create mayor CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing mayor/rig/CLAUDE.md\n")
 	}
 
 	// Initialize beads at rig level BEFORE creating worktrees.
@@ -467,9 +477,17 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := beads.SetupRedirect(m.townRoot, refineryRigPath); err != nil {
 		fmt.Printf("  Warning: Could not set up refinery beads redirect: %v\n", err)
 	}
-	// Create refinery CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
+	// Create refinery CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing refinery/rig/CLAUDE.md\n")
+	}
+	// Copy overlay files from .runtime/overlay/ to refinery root.
+	// This allows services to have .env and other config files at their root.
+	if err := CopyOverlay(rigPath, refineryRigPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("  Warning: Could not copy overlay files to refinery: %v\n", err)
 	}
 	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
 	refineryPath := filepath.Dir(refineryRigPath)
@@ -522,10 +540,10 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
 
-	// Install Claude settings for all agent directories.
+	// Install runtime settings for all agent directories.
 	// Settings are placed in parent directories (not inside git repos) so Claude
 	// finds them via directory traversal without polluting source repos.
-	fmt.Printf("  Installing Claude settings...\n")
+	fmt.Printf("  Installing runtime settings...\n")
 	settingsRoles := []struct {
 		dir  string
 		role string
@@ -536,18 +554,12 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		{polecatsPath, "polecat"},
 	}
 	for _, sr := range settingsRoles {
-		if err := claude.EnsureSettingsForRole(sr.dir, sr.role); err != nil {
+		runtimeConfig := config.ResolveRoleAgentConfig(sr.role, m.townRoot, rigPath)
+		if err := runtime.EnsureSettingsForRole(sr.dir, sr.role, runtimeConfig); err != nil {
 			fmt.Fprintf(os.Stderr, "  Warning: Could not create %s settings: %v\n", sr.role, err)
 		}
 	}
-	fmt.Printf("   ✓ Installed Claude settings\n")
-
-	// Initialize beads at rig level
-	fmt.Printf("  Initializing beads database...\n")
-	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
-		return nil, fmt.Errorf("initializing beads: %w", err)
-	}
-	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
+	fmt.Printf("   ✓ Installed runtime settings\n")
 
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
@@ -650,7 +662,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
 	// Run bd init if available
-	cmd := exec.Command("bd", "init", "--prefix", prefix)
+	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()
@@ -666,7 +678,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	// Ignore errors - older beads versions don't need this
@@ -675,7 +687,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
-	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id")
+	migrateCmd := exec.Command("bd", "--no-daemon", "migrate", "--update-repo-id")
 	migrateCmd.Dir = rigPath
 	migrateCmd.Env = filteredEnv
 	// Ignore errors - fingerprint is optional for functionality
@@ -898,7 +910,7 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 				// Remove quotes if present
 				value = strings.Trim(value, `"'`)
 				if value != "" && isValidBeadsPrefix(value) {
-					return value
+					return strings.TrimSuffix(value, "-")
 				}
 			}
 		}
@@ -948,6 +960,114 @@ func (m *Manager) RemoveRig(name string) error {
 }
 
 // ListRigNames returns the names of all registered rigs.
+// RegisterRigOptions contains options for registering an existing rig directory.
+type RegisterRigOptions struct {
+	Name        string // Rig name (directory name)
+	GitURL      string // Override git URL (auto-detected from origin if empty)
+	BeadsPrefix string // Beads issue prefix (defaults to derived from name or existing config)
+	Force       bool   // Register even if directory structure looks incomplete
+}
+
+// RegisterRigResult contains the result of registering a rig.
+type RegisterRigResult struct {
+	Name          string // Rig name
+	GitURL        string // Detected or provided git URL
+	BeadsPrefix   string // Detected or derived beads prefix
+	FromConfig    bool   // True if values were read from existing config.json
+	DefaultBranch string // Default branch from existing config (if any)
+}
+
+// RegisterRig registers an existing rig directory with the town.
+// Complementary to AddRig: while AddRig creates a new rig from scratch,
+// RegisterRig adopts an existing directory structure.
+func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, error) {
+	if m.RigExists(opts.Name) {
+		return nil, ErrRigExists
+	}
+
+	if strings.ContainsAny(opts.Name, "-. ") {
+		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(opts.Name)
+		sanitized = strings.ToLower(sanitized)
+		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, and spaces are reserved for agent ID parsing. Try %q instead (underscores are allowed)", opts.Name, sanitized)
+	}
+
+	rigPath := filepath.Join(m.townRoot, opts.Name)
+
+	info, err := os.Stat(rigPath)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("directory does not exist: %s", rigPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("checking directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("not a directory: %s", rigPath)
+	}
+
+	result := &RegisterRigResult{Name: opts.Name}
+
+	// Try to load existing config.json
+	existingConfig, err := LoadRigConfig(rigPath)
+	if err == nil && existingConfig != nil {
+		result.FromConfig = true
+		if opts.GitURL == "" {
+			result.GitURL = existingConfig.GitURL
+		}
+		if opts.BeadsPrefix == "" && existingConfig.Beads != nil {
+			result.BeadsPrefix = existingConfig.Beads.Prefix
+		}
+		result.DefaultBranch = existingConfig.DefaultBranch
+	}
+
+	// If no git URL, try to detect from git remote
+	if result.GitURL == "" && opts.GitURL == "" {
+		detectedURL, detectErr := m.detectGitURL(rigPath)
+		if detectErr != nil && !opts.Force {
+			return nil, fmt.Errorf("could not detect git URL (use --url to specify, or --force to skip): %w", detectErr)
+		}
+		result.GitURL = detectedURL
+	}
+	if opts.GitURL != "" {
+		result.GitURL = opts.GitURL
+	}
+
+	// Derive beads prefix
+	if result.BeadsPrefix == "" && opts.BeadsPrefix == "" {
+		result.BeadsPrefix = deriveBeadsPrefix(opts.Name)
+	}
+	if opts.BeadsPrefix != "" {
+		result.BeadsPrefix = opts.BeadsPrefix
+	}
+
+	// Register in town config
+	m.config.Rigs[opts.Name] = config.RigEntry{
+		GitURL:  result.GitURL,
+		AddedAt: time.Now(),
+		BeadsConfig: &config.BeadsConfig{
+			Prefix: result.BeadsPrefix,
+		},
+	}
+
+	return result, nil
+}
+
+// detectGitURL attempts to detect the git remote URL from an existing repository.
+func (m *Manager) detectGitURL(rigPath string) (string, error) {
+	possiblePaths := []string{
+		rigPath,
+		filepath.Join(rigPath, "mayor", "rig"),
+		filepath.Join(rigPath, "refinery", "rig"),
+	}
+	for _, p := range possiblePaths {
+		g := git.NewGitWithDir(p, "")
+		url, err := g.RemoteURL("origin")
+		if err == nil && url != "" {
+			return strings.TrimSpace(url), nil
+		}
+	}
+	return "", fmt.Errorf("no git repository with origin remote found in %s", rigPath)
+}
+
 func (m *Manager) ListRigNames() []string {
 	names := make([]string, 0, len(m.config.Rigs))
 	for name := range m.config.Rigs {
@@ -959,28 +1079,40 @@ func (m *Manager) ListRigNames() []string {
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
 // Full context is injected ephemerally by `gt prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
-func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations from cloned repos.
+func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) (bool, error) {
+	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
+
+	// Check if file already exists - preserve existing from cloned repo
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	// Create role-specific bootstrap pointer
 	var bootstrap string
 	switch role {
 	case "mayor":
 		bootstrap = `# Mayor Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 `
 	case "refinery":
 		bootstrap = `# Refinery Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check MQ: ` + "`gt mq list`" + `
-- Process next: ` + "`gt mq process`" + `
+- Check MQ: ` + "`" + cli.Name() + " mq list`" + `
+- Process next: ` + "`" + cli.Name() + " mq process`" + `
 `
 	case "crew":
 		name := workerName
@@ -989,14 +1121,14 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		}
 		bootstrap = `# Crew Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`gt hook`" + `
-- Check mail: ` + "`gt mail inbox`" + `
+- Check hook: ` + "`" + cli.Name() + " hook`" + `
+- Check mail: ` + "`" + cli.Name() + " mail inbox`" + `
 `
 	case "polecat":
 		name := workerName
@@ -1005,26 +1137,25 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		}
 		bootstrap = `# Polecat Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`gt hook`" + `
-- Report done: ` + "`gt done`" + `
+- Check hook: ` + "`" + cli.Name() + " hook`" + `
+- Report done: ` + "`" + cli.Name() + " done`" + `
 `
 	default:
 		bootstrap = `# Agent Context
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 `
 	}
 
-	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
+	return true, os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 // createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
@@ -1090,7 +1221,7 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
 // These molecules define the work loops for Deacon, Witness, and Refinery roles.
 func (m *Manager) seedPatrolMolecules(rigPath string) error {
 	// Use bd command to seed molecules (more reliable than internal API)
-	cmd := exec.Command("bd", "mol", "seed", "--patrol")
+	cmd := exec.Command("bd", "--no-daemon", "mol", "seed", "--patrol")
 	cmd.Dir = rigPath
 	if err := cmd.Run(); err != nil {
 		// Fallback: bd mol seed might not support --patrol yet
@@ -1123,7 +1254,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 
 	for _, mol := range patrolMols {
 		// Check if already exists by title
-		checkCmd := exec.Command("bd", "list", "--type=molecule", "--format=json")
+		checkCmd := exec.Command("bd", "--no-daemon", "list", "--type=molecule", "--format=json")
 		checkCmd.Dir = rigPath
 		output, _ := checkCmd.Output()
 		if strings.Contains(string(output), mol.title) {
@@ -1131,7 +1262,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 		}
 
 		// Create the molecule
-		cmd := exec.Command("bd", "create", //nolint:gosec // G204: bd is a trusted internal tool
+		cmd := exec.Command("bd", "--no-daemon", "create", //nolint:gosec // G204: bd is a trusted internal tool
 			"--type=molecule",
 			"--title="+mol.title,
 			"--description="+mol.desc,

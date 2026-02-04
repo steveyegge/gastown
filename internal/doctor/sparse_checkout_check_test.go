@@ -370,11 +370,11 @@ func TestSparseCheckoutCheck_VerifiesAllPatterns(t *testing.T) {
 	contentStr := string(content)
 
 	// Verify all required patterns are present
+	// Note: .mcp.json is NOT excluded so worktrees inherit MCP server config
 	requiredPatterns := []string{
 		"!/.claude/",        // Settings, rules, agents, commands
 		"!/CLAUDE.md",       // Primary context file
 		"!/CLAUDE.local.md", // Personal context file
-		"!/.mcp.json",       // MCP server configuration
 	}
 
 	for _, pattern := range requiredPatterns {
@@ -464,7 +464,7 @@ func TestSparseCheckoutCheck_FixUpgradesLegacyPatterns(t *testing.T) {
 	}
 
 	contentStr := string(content)
-	requiredPatterns := []string{"!/.claude/", "!/CLAUDE.md", "!/CLAUDE.local.md", "!/.mcp.json"}
+	requiredPatterns := []string{"!/.claude/", "!/CLAUDE.md", "!/CLAUDE.local.md"}
 	for _, pattern := range requiredPatterns {
 		if !strings.Contains(contentStr, pattern) {
 			t.Errorf("after fix, sparse-checkout file missing pattern %q", pattern)
@@ -620,10 +620,11 @@ func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
 	initGitRepo(t, mayorRig)
 
 	// Create multiple untracked context files
+	// Note: .mcp.json is NOT excluded (worktrees inherit MCP config), so we test with CLAUDE.md and CLAUDE.local.md
 	if err := os.WriteFile(filepath.Join(mayorRig, "CLAUDE.md"), []byte("# Context\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(mayorRig, ".mcp.json"), []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(mayorRig, "CLAUDE.local.md"), []byte("# Local context\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -647,7 +648,7 @@ func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
 	if !strings.Contains(errStr, "CLAUDE.md") {
 		t.Errorf("expected error to mention CLAUDE.md, got: %v", err)
 	}
-	if !strings.Contains(errStr, ".mcp.json") {
-		t.Errorf("expected error to mention .mcp.json, got: %v", err)
+	if !strings.Contains(errStr, "CLAUDE.local.md") {
+		t.Errorf("expected error to mention CLAUDE.local.md, got: %v", err)
 	}
 }

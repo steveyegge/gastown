@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -14,6 +15,9 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// crewAtRetried tracks if we've already retried after stale session cleanup
+var crewAtRetried bool
 
 func runCrewAt(cmd *cobra.Command, args []string) error {
 	var name string
@@ -189,10 +193,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		}
 
 		// Build startup beacon for predecessor discovery via /resume
-		// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+		// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 		// The SessionStart hook handles context injection (gt prime --hook)
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",
 			Topic:     "start",
@@ -209,6 +213,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
 			startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
 		}
+		// Note: Don't call KillPaneProcesses here - this is a NEW session with just
+		// a fresh shell. Killing it would destroy the pane before we can respawn.
+		// KillPaneProcesses is only needed when restarting in an EXISTING session
+		// where Claude/Node processes might be running and ignoring SIGHUP.
 		if err := t.RespawnPane(paneID, startupCmd); err != nil {
 			return fmt.Errorf("starting runtime: %w", err)
 		}
@@ -234,9 +242,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build startup beacon for predecessor discovery via /resume
-			// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+			// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 			address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: address,
 				Sender:    "human",
 				Topic:     "restart",
@@ -252,7 +260,26 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
 				startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
 			}
+			// Kill all processes in the pane before respawning to prevent orphan leaks
+			// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+			if err := t.KillPaneProcesses(paneID); err != nil {
+				// Non-fatal but log the warning
+				style.PrintWarning("could not kill pane processes: %v", err)
+			}
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
+				// If pane is stale (session exists but pane doesn't), recreate the session
+				if strings.Contains(err.Error(), "can't find pane") {
+					if crewAtRetried {
+						return fmt.Errorf("stale session persists after cleanup: %w", err)
+					}
+					fmt.Printf("Stale session detected, recreating...\n")
+					if killErr := t.KillSession(sessionID); killErr != nil {
+						return fmt.Errorf("failed to kill stale session: %w", killErr)
+					}
+					crewAtRetried = true
+					defer func() { crewAtRetried = false }()
+					return runCrewAt(cmd, args) // Retry with fresh session
+				}
 				return fmt.Errorf("restarting runtime: %w", err)
 			}
 		}
@@ -274,7 +301,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// We're in the session at a shell prompt - start the agent
 		// Build startup beacon for predecessor discovery via /resume
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",
 			Topic:     "start",

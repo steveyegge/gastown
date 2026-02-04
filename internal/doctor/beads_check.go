@@ -62,6 +62,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// If database file is empty but JSONL has content, this is the bug
+	// Note: This check is for SQLite backend; Dolt backend doesn't use these files
 	if dbErr == nil && dbInfo.Size() == 0 {
 		if jsonlErr == nil && jsonlInfo.Size() > 0 {
 			return &CheckResult{
@@ -72,7 +73,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 					"This can cause 'table issues has no column named pinned' errors",
 					"The database needs to be rebuilt from the JSONL file",
 				},
-				FixHint: "Run 'gt doctor --fix' or delete issues.db and run 'bd sync --from-main'",
+				FixHint: "Run 'gt doctor --fix' or 'bd repair' to rebuild the database",
 			}
 		}
 	}
@@ -113,6 +114,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix attempts to rebuild the database from JSONL.
+// Note: This fix is for SQLite backend. With Dolt backend, this is a no-op.
 func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	issuesDB := filepath.Join(beadsDir, "issues.db")
@@ -128,8 +130,8 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 			return err
 		}
 
-		// Run bd sync to rebuild from JSONL
-		cmd := exec.Command("bd", "sync", "--from-main")
+		// Run bd import to rebuild from JSONL
+		cmd := exec.Command("bd", "import")
 		cmd.Dir = ctx.TownRoot
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -152,7 +154,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 				return err
 			}
 
-			cmd := exec.Command("bd", "sync", "--from-main")
+			cmd := exec.Command("bd", "import")
 			cmd.Dir = ctx.RigPath()
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
@@ -572,5 +574,162 @@ func (c *RoleLabelCheck) Fix(ctx *CheckContext) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// DatabasePrefixCheck detects when a rig's database has a different issue_prefix
+// than what routes.jsonl specifies. This can happen when:
+// - The database was initialized with a different prefix
+// - Manual database edits changed the prefix
+// - A bug in prefix derivation caused a mismatch
+//
+// Unlike PrefixMismatchCheck (rigs.json ↔ routes.jsonl), this check verifies
+// the actual database configuration matches the routing table.
+type DatabasePrefixCheck struct {
+	FixableCheck
+	mismatches []databasePrefixMismatch
+}
+
+type databasePrefixMismatch struct {
+	rigPath      string
+	beadsDir     string
+	routesPrefix string // From routes.jsonl (without trailing hyphen)
+	dbPrefix     string // From database config
+}
+
+// NewDatabasePrefixCheck creates a new database prefix check.
+func NewDatabasePrefixCheck() *DatabasePrefixCheck {
+	return &DatabasePrefixCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "database-prefix",
+				CheckDescription: "Check rig database issue_prefix matches routes.jsonl",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+	}
+}
+
+// Run checks if each rig's database issue_prefix matches routes.jsonl.
+func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
+	c.mismatches = nil // Reset
+
+	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
+
+	// Load routes.jsonl
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No routes.jsonl found (nothing to check)",
+			Category: c.Category(),
+		}
+	}
+	if len(routes) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No routes configured (nothing to check)",
+			Category: c.Category(),
+		}
+	}
+
+	// Check if bd command is available
+	if _, err := exec.LookPath("bd"); err != nil {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "beads not installed (skipped)",
+			Category: c.Category(),
+		}
+	}
+
+	var problems []string
+
+	for _, route := range routes {
+		// Skip town root route
+		if route.Path == "." || route.Path == "" {
+			continue
+		}
+
+		// Resolve the rig's beads directory (follows redirects)
+		rigPath := filepath.Join(ctx.TownRoot, route.Path)
+		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+
+		// Check if beads directory exists
+		if _, err := os.Stat(rigBeadsDir); os.IsNotExist(err) {
+			continue // No beads dir for this rig
+		}
+
+		// Query database for issue_prefix using bd config get
+		dbPrefix, err := c.getDBPrefix(rigBeadsDir)
+		if err != nil {
+			// No issue_prefix configured - that's OK
+			continue
+		}
+
+		// Normalize routes prefix (strip trailing hyphen)
+		routesPrefix := strings.TrimSuffix(route.Prefix, "-")
+
+		// Compare prefixes
+		if dbPrefix != routesPrefix {
+			problems = append(problems, fmt.Sprintf("Route '%s': routes.jsonl says '%s', database has '%s'",
+				route.Path, routesPrefix, dbPrefix))
+			c.mismatches = append(c.mismatches, databasePrefixMismatch{
+				rigPath:      route.Path,
+				beadsDir:     rigBeadsDir,
+				routesPrefix: routesPrefix,
+				dbPrefix:     dbPrefix,
+			})
+		}
+	}
+
+	if len(c.mismatches) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "All database prefixes match routes.jsonl",
+			Category: c.Category(),
+		}
+	}
+
+	return &CheckResult{
+		Name:     c.Name(),
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("%d database prefix mismatch(es) with routes.jsonl", len(c.mismatches)),
+		Details:  problems,
+		FixHint:  "Run 'gt doctor --fix' to update database configs to match routes.jsonl",
+		Category: c.Category(),
+	}
+}
+
+// getDBPrefix queries the database for issue_prefix config value.
+func (c *DatabasePrefixCheck) getDBPrefix(beadsDir string) (string, error) {
+	cmd := exec.Command("bd", "config", "get", "issue_prefix", "--db", beadsDir)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// Fix updates database configs to match routes.jsonl prefixes.
+func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
+	// Re-run check to populate mismatches if needed
+	if len(c.mismatches) == 0 {
+		result := c.Run(ctx)
+		if result.Status == StatusOK {
+			return nil // Nothing to fix
+		}
+	}
+
+	for _, m := range c.mismatches {
+		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix, "--db", m.beadsDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("updating %s: %s", m.rigPath, strings.TrimSpace(string(output)))
+		}
+	}
+
 	return nil
 }

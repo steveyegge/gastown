@@ -591,10 +591,13 @@ func runPolecatIdentityRename(cmd *cobra.Command, args []string) error {
 
 	// Create new identity bead with inherited fields
 	newFields := &beads.AgentFields{
-		RoleType:      "polecat",
-		Rig:           rigName,
-		AgentState:    oldFields.AgentState,
-		CleanupStatus: oldFields.CleanupStatus,
+		RoleType:          "polecat",
+		Rig:               rigName,
+		AgentState:        oldFields.AgentState,
+		HookBead:          oldFields.HookBead,
+		CleanupStatus:     oldFields.CleanupStatus,
+		ActiveMR:          oldFields.ActiveMR,
+		NotificationLevel: oldFields.NotificationLevel,
 	}
 
 	newTitle := fmt.Sprintf("Polecat %s in %s", newName, rigName)

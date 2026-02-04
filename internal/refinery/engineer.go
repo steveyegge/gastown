@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/convoy"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -319,13 +320,20 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
 	}
 
-	// Step 5: Perform the actual merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s", branch, target)
-	if sourceIssue != "" {
-		mergeMsg = fmt.Sprintf("Merge %s into %s (%s)", branch, target, sourceIssue)
+	// Step 5: Perform the actual merge using squash merge
+	// Get the original commit message from the polecat branch to preserve the
+	// conventional commit format (feat:/fix:) instead of creating redundant merge commits
+	originalMsg, err := e.git.GetBranchCommitMessage(branch)
+	if err != nil {
+		// Fallback to a descriptive message if we can't get the original
+		originalMsg = fmt.Sprintf("Squash merge %s into %s", branch, target)
+		if sourceIssue != "" {
+			originalMsg = fmt.Sprintf("Squash merge %s into %s (%s)", branch, target, sourceIssue)
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not get original commit message: %v\n", err)
 	}
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
-	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Squash merging with message: %s\n", strings.TrimSpace(originalMsg))
+	if err := e.git.MergeSquash(branch, originalMsg); err != nil {
 		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
 		// GetConflictingFiles() uses `git diff --diff-filter=U` which is proper.
 		conflicts, conflictErr := e.git.GetConflictingFiles()
@@ -483,8 +491,43 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 		}
 	}
 
-	// 5. Log success
+	// 5. Sync crew workspaces with the newly pushed changes
+	e.syncCrewWorkspaces()
+
+	// 6. Log success
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+}
+
+// syncCrewWorkspaces pulls latest changes to all crew workspaces.
+// This ensures crew members have access to newly merged code without manual sync.
+func (e *Engineer) syncCrewWorkspaces() {
+	crewGit := git.NewGit(e.rig.Path)
+	crewMgr := crew.NewManager(e.rig, crewGit)
+
+	workers, err := crewMgr.List()
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to list crew workspaces: %v\n", err)
+		return
+	}
+
+	if len(workers) == 0 {
+		return
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Syncing %d crew workspace(s)...\n", len(workers))
+
+	for _, worker := range workers {
+		result, err := crewMgr.Pristine(worker.Name)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to sync crew/%s: %v\n", worker.Name, err)
+			continue
+		}
+		if result.Pulled {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Synced crew/%s\n", worker.Name)
+		} else if result.PullError != "" {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: crew/%s pull failed: %s\n", worker.Name, result.PullError)
+		}
+	}
 }
 
 // handleFailure handles a failed merge request.

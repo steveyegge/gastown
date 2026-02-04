@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,31 +30,62 @@ func isTrackedByConvoy(beadID string) string {
 		return ""
 	}
 
-	// Query town beads for any convoy that tracks this issue
-	// Convoys use "tracks" dependency type: convoy -> tracked issue
-	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
+	// Primary: Use bd dep list to find what tracks this issue (direction=up)
+	// This is authoritative when cross-rig routing works
+	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
 
-	// Query dependencies where this bead is being tracked
-	// Also check for external reference format: external:rig:issue-id
-	query := fmt.Sprintf(`
-		SELECT d.issue_id
-		FROM dependencies d
-		JOIN issues i ON d.issue_id = i.id
-		WHERE d.type = 'tracks'
-		AND i.issue_type = 'convoy'
-		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
-		LIMIT 1
-	`, beadID, beadID)
+	out, err := depCmd.Output()
+	if err == nil {
+		var trackers []struct {
+			ID        string `json:"id"`
+			IssueType string `json:"issue_type"`
+			Status    string `json:"status"`
+		}
+		if err := json.Unmarshal(out, &trackers); err == nil {
+			for _, tracker := range trackers {
+				if tracker.IssueType == "convoy" && tracker.Status == "open" {
+					return tracker.ID
+				}
+			}
+		}
+	}
 
-	queryCmd := exec.Command("sqlite3", dbPath, query)
-	out, err := queryCmd.Output()
+	// Fallback: Query convoys directly by description pattern
+	// This is more robust when cross-rig routing has issues (G19, G21)
+	// Auto-convoys have description "Auto-created convoy tracking <beadID>"
+	return findConvoyByDescription(townRoot, beadID)
+}
+
+// findConvoyByDescription searches open convoys for one tracking the given beadID.
+// Returns convoy ID if found, empty string otherwise.
+func findConvoyByDescription(townRoot, beadID string) string {
+	// Query all open convoys from HQ
+	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=convoy", "--status=open", "--json")
+	listCmd.Dir = filepath.Join(townRoot, ".beads")
+
+	out, err := listCmd.Output()
 	if err != nil {
 		return ""
 	}
 
-	convoyID := strings.TrimSpace(string(out))
-	return convoyID
+	var convoys []struct {
+		ID          string `json:"id"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(out, &convoys); err != nil {
+		return ""
+	}
+
+	// Check if any convoy's description mentions tracking this beadID
+	trackingPattern := fmt.Sprintf("tracking %s", beadID)
+	for _, convoy := range convoys {
+		if strings.Contains(convoy.Description, trackingPattern) {
+			return convoy.ID
+		}
+	}
+
+	return ""
 }
 
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.

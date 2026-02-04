@@ -60,10 +60,16 @@ The command also:
   - Creates ~/gt/plugins/ (town-level) if it doesn't exist
   - Creates <rig>/plugins/ (rig-level)
 
+Use --adopt to register an existing directory instead of creating new:
+  - Reads existing config.json if present
+  - Auto-detects git URL from origin remote (git-url argument not required)
+  - Adds entry to mayor/rigs.json
+
 Example:
   gt rig add gastown https://github.com/steveyegge/gastown
-  gt rig add my-project git@github.com:user/repo.git --prefix mp`,
-	Args: cobra.ExactArgs(2),
+  gt rig add my-project git@github.com:user/repo.git --prefix mp
+  gt rig add existing-rig --adopt`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runRigAdd,
 }
 
@@ -256,6 +262,9 @@ var (
 	rigAddPrefix       string
 	rigAddLocalRepo    string
 	rigAddBranch       string
+	rigAddAdopt        bool
+	rigAddAdoptURL     string
+	rigAddAdoptForce   bool
 	rigResetHandoff    bool
 	rigResetMail       bool
 	rigResetStale      bool
@@ -286,6 +295,9 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
+	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
+	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
+	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -307,7 +319,21 @@ func init() {
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Handle --adopt mode: register existing directory
+	if rigAddAdopt {
+		return runRigAdopt(cmd, args)
+	}
+
+	// Normal add mode requires git URL
+	if len(args) < 2 {
+		return fmt.Errorf("git-url is required (or use --adopt to register an existing directory)")
+	}
 	gitURL := args[1]
+
+	if !isGitRemoteURL(gitURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
+	}
 
 	// Ensure beads (bd) is available before proceeding
 	if err := deps.EnsureBeads(true); err != nil {
@@ -505,6 +531,12 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading rigs config: %w", err)
 	}
 
+	// Get the rig's beads prefix before removing (needed for route cleanup)
+	var beadsPrefix string
+	if entry, ok := rigsConfig.Rigs[name]; ok && entry.BeadsConfig != nil {
+		beadsPrefix = entry.BeadsConfig.Prefix
+	}
+
 	// Create rig manager
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
@@ -518,9 +550,93 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Remove route from routes.jsonl (issue #899)
+	if beadsPrefix != "" {
+		if err := beads.RemoveRoute(townRoot, beadsPrefix+"-"); err != nil {
+			// Non-fatal: log warning but continue
+			fmt.Printf("  %s Could not remove route from routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
 	fmt.Printf("%s Rig %s removed from registry\n", style.Success.Render("✓"), name)
 	fmt.Printf("\nNote: Files at %s were NOT deleted.\n", filepath.Join(townRoot, name))
 	fmt.Printf("To delete: %s\n", style.Dim.Render(fmt.Sprintf("rm -rf %s", filepath.Join(townRoot, name))))
+
+	return nil
+}
+
+func runRigAdopt(_ *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{
+			Version: 1,
+			Rigs:    make(map[string]config.RigEntry),
+		}
+	}
+
+	// Create rig manager
+	g := git.NewGit(townRoot)
+	mgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	fmt.Printf("Adopting existing rig %s...\n", style.Bold.Render(name))
+
+	// Validate --url if provided
+	if rigAddAdoptURL != "" && !isGitRemoteURL(rigAddAdoptURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
+	}
+
+	// Register the existing rig
+	result, err := mgr.RegisterRig(rig.RegisterRigOptions{
+		Name:        name,
+		GitURL:      rigAddAdoptURL,
+		BeadsPrefix: rigAddPrefix,
+		Force:       rigAddAdoptForce,
+	})
+	if err != nil {
+		return fmt.Errorf("adopting rig: %w", err)
+	}
+
+	// Save updated config
+	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+		return fmt.Errorf("saving rigs config: %w", err)
+	}
+
+	// Add route to town-level routes.jsonl for prefix-based routing
+	if result.BeadsPrefix != "" {
+		routePath := name
+		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			routePath = name + "/mayor/rig"
+		}
+		route := beads.Route{
+			Prefix: result.BeadsPrefix + "-",
+			Path:   routePath,
+		}
+		if err := beads.AppendRoute(townRoot, route); err != nil {
+			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Print results
+	fmt.Printf("\n%s Rig %s adopted\n", style.Success.Render("✓"), name)
+	if result.FromConfig {
+		fmt.Printf("  %s Read configuration from existing config.json\n", style.Dim.Render("ℹ"))
+	}
+	fmt.Printf("  Repository: %s\n", result.GitURL)
+	fmt.Printf("  Prefix: %s\n", result.BeadsPrefix)
+	if result.DefaultBranch != "" {
+		fmt.Printf("  Default branch: %s\n", result.DefaultBranch)
+	}
 
 	return nil
 }
@@ -1518,4 +1634,48 @@ func getRigOperationalState(townRoot, rigName string) (state string, source stri
 
 	// Default: operational
 	return "OPERATIONAL", "default"
+}
+
+// isGitRemoteURL returns true if s looks like a remote git URL
+// (https, http, ssh, git protocol, or SCP-style) rather than a local path.
+func isGitRemoteURL(s string) bool {
+	// Reject flag-like strings (defense-in-depth against argument injection)
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	// Reject absolute paths
+	if strings.HasPrefix(s, "/") {
+		return false
+	}
+	// Reject Windows-style paths (C:\...)
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
+		return false
+	}
+	// Reject relative paths
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		return false
+	}
+	// Reject home-relative paths
+	if strings.HasPrefix(s, "~/") {
+		return false
+	}
+	// Reject file:// URIs (local filesystem access)
+	if strings.HasPrefix(s, "file://") {
+		return false
+	}
+	// Accept known remote URL schemes
+	if strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "git://") {
+		return true
+	}
+	// Accept SCP-style SSH URLs (user@host:path) where user and host are non-empty
+	// and host contains no slashes (distinguishes from file:// or path-like strings)
+	atIdx := strings.Index(s, "@")
+	colonIdx := strings.Index(s, ":")
+	if atIdx > 0 && colonIdx > atIdx+1 && !strings.Contains(s[:colonIdx], "/") {
+		return true
+	}
+	return false
 }

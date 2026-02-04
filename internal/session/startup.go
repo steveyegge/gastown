@@ -2,14 +2,14 @@
 package session
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"fmt"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// StartupNudgeConfig configures a startup nudge message.
-type StartupNudgeConfig struct {
+// BeaconConfig configures a startup beacon message.
+// The beacon is injected into the CLI prompt to identify sessions in /resume picker.
+type BeaconConfig struct {
 	// Recipient is the address of the agent being nudged.
 	// Examples: "gastown/crew/gus", "deacon", "gastown/witness"
 	Recipient string
@@ -25,29 +25,30 @@ type StartupNudgeConfig struct {
 	// MolID is an optional molecule ID being worked.
 	// If provided, appended to topic as "topic:mol-id"
 	MolID string
+
+	// IncludePrimeInstruction adds "Run gt prime" to beacon for non-hook agents.
+	// When true, the beacon tells the agent to manually run gt prime since
+	// there's no SessionStart hook to do it automatically.
+	IncludePrimeInstruction bool
+
+	// ExcludeWorkInstructions omits work instructions from the beacon.
+	// When true, work instructions will be sent as a separate nudge later.
+	// Used for non-hook agents where gt prime must complete first.
+	// Default (false) preserves backward compatible behavior.
+	ExcludeWorkInstructions bool
 }
 
-// StartupNudge sends a formatted startup message to a Claude Code session.
-// The message becomes the session title in Claude Code's /resume picker,
-// enabling workers to find predecessor sessions.
+// FormatStartupBeacon builds the formatted startup beacon message.
+// The beacon is injected into the CLI prompt, making sessions identifiable
+// in Claude Code's /resume picker for predecessor discovery.
 //
 // Format: [GAS TOWN] <recipient> <- <sender> • <timestamp> • <topic[:mol-id]>
 //
 // Examples:
 //   - [GAS TOWN] gastown/crew/gus <- deacon • 2025-12-30T15:42 • assigned:gt-abc12
-//   - [GAS TOWN] deacon <- mayor • 2025-12-30T08:00 • cold-start
-//   - [GAS TOWN] gastown/witness <- self • 2025-12-30T14:00 • handoff
-//
-// The message content doesn't trigger GUPP - CLAUDE.md and hooks handle that.
-// The metadata makes sessions identifiable in /resume.
-func StartupNudge(t *tmux.Tmux, session string, cfg StartupNudgeConfig) error {
-	message := FormatStartupNudge(cfg)
-	return t.NudgeSession(session, message)
-}
-
-// FormatStartupNudge builds the formatted startup nudge message.
-// Separated from StartupNudge for testing and reuse.
-func FormatStartupNudge(cfg StartupNudgeConfig) string {
+//   - [GAS TOWN] deacon <- daemon • 2025-12-30T08:00 • patrol
+//   - [GAS TOWN] gastown/witness <- deacon • 2025-12-30T14:00 • patrol
+func FormatStartupBeacon(cfg BeaconConfig) string {
 	// Use local time in compact format
 	timestamp := time.Now().Format("2006-01-02T15:04")
 
@@ -65,29 +66,46 @@ func FormatStartupNudge(cfg StartupNudgeConfig) string {
 	beacon := fmt.Sprintf("[GAS TOWN] %s <- %s • %s • %s",
 		cfg.Recipient, cfg.Sender, timestamp, topic)
 
+	// For non-hook agents, add "Run gt prime" instruction since there's no
+	// SessionStart hook to do it automatically. Work instructions will
+	// come as a separate nudge after gt prime completes.
+	if cfg.IncludePrimeInstruction {
+		beacon += "\n\nRun `" + cli.Name() + " prime` to initialize your context."
+		// Don't add work instructions here - they come as a delayed nudge after gt prime
+		return beacon
+	}
+
 	// For handoff, cold-start, and attach, add explicit instructions so the agent knows
 	// what to do even if hooks haven't loaded CLAUDE.md yet
 	if cfg.Topic == "handoff" || cfg.Topic == "cold-start" || cfg.Topic == "attach" {
 		beacon += "\n\nCheck your hook and mail, then act on the hook if present:\n" +
-			"1. `gt hook` - shows hooked work (if any)\n" +
-			"2. `gt mail inbox` - check for messages\n" +
+			"1. `" + cli.Name() + " hook` - shows hooked work (if any)\n" +
+			"2. `" + cli.Name() + " mail inbox` - check for messages\n" +
 			"3. If work is hooked → execute it immediately\n" +
 			"4. If nothing hooked → wait for instructions"
 	}
 
 	// For assigned, work is already on the hook - just tell them to run it
 	// This prevents the "helpful assistant" exploration pattern (see PRIMING.md)
-	if cfg.Topic == "assigned" {
-		beacon += "\n\nWork is on your hook. Run `gt hook` now and begin immediately."
-	}
-
-	// For start/restart, add fallback instructions in case SessionStart hook fails
-	// to inject context via gt prime. This prevents the "No recent activity" state
-	// where agents sit idle because they received only metadata, no instructions.
-	// See: gt-uoc64 (crew workers starting without proper context injection)
-	if cfg.Topic == "start" || cfg.Topic == "restart" {
-		beacon += "\n\nRun `gt prime` now for full context, then check your hook and mail."
+	// Exclude work instructions only if explicitly set (non-hook agents get them via delayed nudge)
+	if cfg.Topic == "assigned" && !cfg.ExcludeWorkInstructions {
+		beacon += "\n\nWork is on your hook. Run `" + cli.Name() + " hook` now and begin immediately."
 	}
 
 	return beacon
+}
+
+// BuildStartupPrompt creates the CLI prompt for agent startup.
+//
+// GUPP (Gas Town Universal Propulsion Principle) implementation:
+//   - Beacon identifies session for /resume predecessor discovery
+//   - Instructions tell agent to start working immediately
+//   - SessionStart hook runs `gt prime` which injects full context including
+//     "AUTONOMOUS WORK MODE" instructions when work is hooked
+//
+// This replaces the old two-step StartupNudge + PropulsionNudge pattern.
+// The beacon is processed in Claude's first turn along with gt prime context,
+// so no separate propulsion nudge is needed.
+func BuildStartupPrompt(cfg BeaconConfig, instructions string) string {
+	return FormatStartupBeacon(cfg) + "\n\n" + instructions
 }

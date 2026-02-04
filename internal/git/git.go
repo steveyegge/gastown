@@ -4,10 +4,10 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -43,70 +43,14 @@ func moveDir(src, dest string) error {
 		return nil
 	}
 
-	// Rename failed, try copy+delete as fallback for cross-filesystem moves
-	if err := copyDir(src, dest); err != nil {
+	// Rename failed, use platform-specific copy for cross-filesystem moves
+	if err := copyDirPreserving(src, dest); err != nil {
 		return fmt.Errorf("copying directory: %w", err)
 	}
 	if err := os.RemoveAll(src); err != nil {
 		return fmt.Errorf("removing source after copy: %w", err)
 	}
 	return nil
-}
-
-// copyDir recursively copies a directory from src to dest.
-func copyDir(src, dest string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(dest, srcInfo.Mode()); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		destPath := filepath.Join(dest, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(srcPath, destPath); err != nil {
-				return err
-			}
-		} else {
-			if err := copyFile(srcPath, destPath); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// copyFile copies a single file from src to dest, preserving permissions.
-func copyFile(src, dest string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return err
-	}
-
-	destFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, srcFile)
-	return err
 }
 
 // Git wraps git operations for a working directory.
@@ -246,14 +190,18 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
-	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, tmpDest)
+	args := []string{"clone", "--reference-if-able", reference, url, tmpDest}
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.symlinks=true"}, args...)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = tmpDir
 	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	// Move to final destination (handles cross-filesystem moves)
@@ -558,6 +506,17 @@ func (g *Git) Remotes() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ConfigGet returns the value of a git config key.
+// Returns empty string if the key is not set.
+func (g *Git) ConfigGet(key string) (string, error) {
+	out, err := g.run("config", "--get", key)
+	if err != nil {
+		// git config --get returns exit code 1 if key not found
+		return "", nil
+	}
+	return out, nil
+}
+
 // Merge merges the given branch into the current branch.
 func (g *Git) Merge(branch string) error {
 	_, err := g.run("merge", branch)
@@ -568,6 +527,27 @@ func (g *Git) Merge(branch string) error {
 func (g *Git) MergeNoFF(branch, message string) error {
 	_, err := g.run("merge", "--no-ff", "-m", message, branch)
 	return err
+}
+
+// MergeSquash performs a squash merge of the given branch and commits with the provided message.
+// This stages all changes from the branch without creating a merge commit, then commits them
+// as a single commit with the given message. This eliminates redundant merge commits while
+// preserving the original commit message from the source branch.
+func (g *Git) MergeSquash(branch, message string) error {
+	// Stage all changes from the branch without committing
+	if _, err := g.run("merge", "--squash", branch); err != nil {
+		return err
+	}
+	// Commit the staged changes with the provided message
+	_, err := g.run("commit", "-m", message)
+	return err
+}
+
+// GetBranchCommitMessage returns the commit message of the HEAD commit on the given branch.
+// This is useful for preserving the original conventional commit message (feat:/fix:) when
+// performing squash merges.
+func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
+	return g.run("log", "-1", "--format=%B", branch)
 }
 
 // DeleteRemoteBranch deletes a branch on the remote.
@@ -843,18 +823,18 @@ func ConfigureSparseCheckout(repoPath string) error {
 
 	// Write patterns directly to sparse-checkout file
 	// (git sparse-checkout set --stdin escapes the ! character incorrectly)
-	// Exclude all Claude Code context files to prevent source repo instructions
+	// Exclude Claude Code context files to prevent source repo instructions
 	// from interfering with Gas Town agent context:
 	// - .claude/      : settings, rules, agents, commands
 	// - CLAUDE.md     : primary context file
 	// - CLAUDE.local.md : personal context file
-	// - .mcp.json     : MCP server configuration
+	// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n"
 	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
@@ -878,11 +858,11 @@ func ConfigureSparseCheckout(repoPath string) error {
 }
 
 // ExcludedContextFiles lists all Claude context files that should be excluded by sparse checkout.
+// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config (e.g., Puppeteer).
 var ExcludedContextFiles = []string{
 	".claude",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
-	".mcp.json",
 }
 
 // CheckExcludedFilesExist checks if any Claude context files still exist in the repo

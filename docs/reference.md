@@ -89,6 +89,58 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 Process state, PIDs, ephemeral data.
 
+### Rig-Level Configuration
+
+Rigs support layered configuration through:
+1. **Wisp layer** (`.beads-wisp/config/`) - transient, local overrides
+2. **Rig identity bead labels** - persistent rig settings
+3. **Town defaults** (`~/gt/settings/config.json`)
+4. **System defaults** - compiled-in fallbacks
+
+#### Polecat Branch Naming
+
+Configure custom branch name templates for polecats:
+
+```bash
+# Set via wisp (transient - for testing)
+echo '{"polecat_branch_template": "adam/{year}/{month}/{description}"}' > \
+  ~/gt/.beads-wisp/config/myrig.json
+
+# Or set via rig identity bead labels (persistent)
+bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{description}"
+```
+
+**Template Variables:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{user}` | From `git config user.name` | `adam` |
+| `{year}` | Current year (YY format) | `26` |
+| `{month}` | Current month (MM format) | `01` |
+| `{name}` | Polecat name | `alpha` |
+| `{issue}` | Issue ID without prefix | `123` (from `gt-123`) |
+| `{description}` | Sanitized issue title | `fix-auth-bug` |
+| `{timestamp}` | Unique timestamp | `1ks7f9a` |
+
+**Default Behavior (backward compatible):**
+
+When `polecat_branch_template` is empty or not set:
+- With issue: `polecat/{name}/{issue}@{timestamp}`
+- Without issue: `polecat/{name}-{timestamp}`
+
+**Example Configurations:**
+
+```bash
+# GitHub enterprise format
+"adam/{year}/{month}/{description}"
+
+# Simple feature branches
+"feature/{issue}"
+
+# Include polecat name for clarity
+"work/{name}/{issue}"
+```
+
 ## Formula Format
 
 ```toml
@@ -330,18 +382,19 @@ persisting it to disk.
 ### Sparse Checkout (Source Repo Isolation)
 
 When agents work on source repositories that have their own Claude Code configuration,
-Gas Town uses git sparse checkout to exclude all context files:
+Gas Town uses git sparse checkout to exclude Claude Code context files:
 
 ```bash
 # Automatically configured for worktrees - excludes:
 # - .claude/       : settings, rules, agents, commands
 # - CLAUDE.md      : primary context file
 # - CLAUDE.local.md: personal context file
-# - .mcp.json      : MCP server configuration
-git sparse-checkout set --no-cone '/*' '!/.claude/' '!/CLAUDE.md' '!/CLAUDE.local.md' '!/.mcp.json'
+# Note: .mcp.json is NOT excluded so worktrees inherit MCP server config
+git sparse-checkout set --no-cone '/*' '!/.claude/' '!/CLAUDE.md' '!/CLAUDE.local.md'
 ```
 
 This ensures agents use Gas Town's context, not the source repo's instructions.
+MCP servers defined in `.mcp.json` are inherited by all worktrees for tool access.
 
 **Doctor check**: `gt doctor` verifies sparse checkout is configured correctly.
 Run `gt doctor --fix` to update legacy configurations missing the newer patterns.
@@ -574,7 +627,6 @@ bd create --title="..." --type=task
 bd update <id> --status=in_progress
 bd close <id>
 bd dep add <child> <parent>  # child depends on parent
-bd sync                      # Push/pull changes
 ```
 
 ## Patrol Agents

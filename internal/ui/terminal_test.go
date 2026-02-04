@@ -245,3 +245,90 @@ func TestIsAgentMode_CLAUDE_CODE_AnyValue(t *testing.T) {
 		t.Error("IsAgentMode() should return true when CLAUDE_CODE is set to any value")
 	}
 }
+
+func TestInitTheme_EnvOverridesConfig(t *testing.T) {
+	oldGTTheme := os.Getenv("GT_THEME")
+	defer func() {
+		if oldGTTheme != "" {
+			os.Setenv("GT_THEME", oldGTTheme)
+		} else {
+			os.Unsetenv("GT_THEME")
+		}
+	}()
+
+	// Test: env var overrides config
+	os.Setenv("GT_THEME", "dark")
+	InitTheme("light") // config says light
+	if GetThemeMode() != ThemeModeDark {
+		t.Errorf("Expected dark mode from env var, got %s", GetThemeMode())
+	}
+
+	os.Setenv("GT_THEME", "light")
+	InitTheme("dark") // config says dark
+	if GetThemeMode() != ThemeModeLight {
+		t.Errorf("Expected light mode from env var, got %s", GetThemeMode())
+	}
+}
+
+func TestInitTheme_ConfigUsedWhenNoEnv(t *testing.T) {
+	oldGTTheme := os.Getenv("GT_THEME")
+	defer func() {
+		if oldGTTheme != "" {
+			os.Setenv("GT_THEME", oldGTTheme)
+		} else {
+			os.Unsetenv("GT_THEME")
+		}
+	}()
+
+	os.Unsetenv("GT_THEME")
+
+	InitTheme("dark")
+	if GetThemeMode() != ThemeModeDark {
+		t.Errorf("Expected dark mode from config, got %s", GetThemeMode())
+	}
+
+	InitTheme("light")
+	if GetThemeMode() != ThemeModeLight {
+		t.Errorf("Expected light mode from config, got %s", GetThemeMode())
+	}
+}
+
+func TestInitTheme_DefaultsToAuto(t *testing.T) {
+	oldGTTheme := os.Getenv("GT_THEME")
+	defer func() {
+		if oldGTTheme != "" {
+			os.Setenv("GT_THEME", oldGTTheme)
+		} else {
+			os.Unsetenv("GT_THEME")
+		}
+	}()
+
+	os.Unsetenv("GT_THEME")
+	InitTheme("") // no config
+	if GetThemeMode() != ThemeModeAuto {
+		t.Errorf("Expected auto mode as default, got %s", GetThemeMode())
+	}
+}
+
+func TestHasDarkBackground_ForcedModes(t *testing.T) {
+	oldGTTheme := os.Getenv("GT_THEME")
+	defer func() {
+		if oldGTTheme != "" {
+			os.Setenv("GT_THEME", oldGTTheme)
+		} else {
+			os.Unsetenv("GT_THEME")
+		}
+	}()
+
+	os.Setenv("GT_THEME", "dark")
+	InitTheme("")
+	if !HasDarkBackground() {
+		t.Error("Expected HasDarkBackground() to return true when mode is dark")
+	}
+
+	os.Setenv("GT_THEME", "light")
+	InitTheme("")
+	if HasDarkBackground() {
+		t.Error("Expected HasDarkBackground() to return false when mode is light")
+	}
+}

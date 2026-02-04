@@ -41,6 +41,7 @@ type Issue struct {
 	Blocks      []string `json:"blocks,omitempty"`
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
+	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
@@ -218,7 +219,10 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Limit concurrent bd processes to prevent dolt embedded lock contention.
+	AcquireBd()
 	err := cmd.Run()
+	ReleaseBd()
 	if err != nil {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}
@@ -327,7 +331,7 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 }
 
 // ListByAssignee returns all issues assigned to a specific assignee.
-// The assignee is typically in the format "rig/polecatName" (e.g., "gastown/Toast").
+// The assignee is typically in the format "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast").
 func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	return b.List(ListOptions{
 		Status:   "all", // Include both open and closed for state derivation
@@ -626,6 +630,26 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 	return err
 }
 
+// ForceCloseWithReason closes one or more issues with --force, bypassing
+// dependency checks. Used by gt done where the polecat is about to be nuked
+// and open molecule wisps should not block issue closure.
+func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	args := append([]string{"close"}, ids...)
+	args = append(args, "--reason="+reason, "--force")
+
+	// Pass session ID for work attribution if available
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
+		args = append(args, "--session="+sessionID)
+	}
+
+	_, err := b.run(args...)
+	return err
+}
+
 // Release moves an in_progress issue back to open status.
 // This is used to recover stuck steps when a worker dies mid-task.
 // It clears the assignee so the step can be claimed by another worker.
@@ -739,18 +763,15 @@ This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 - ` + "`gt mol status`" + ` - Check your hooked work
 - ` + "`gt mail inbox`" + ` - Check for messages
 - ` + "`bd ready`" + ` - Find available work (no blockers)
-- ` + "`bd sync`" + ` - Sync beads changes
 
 ## Session Close Protocol
 
 Before signaling completion:
 1. git status (check what changed)
 2. git add <files> (stage code changes)
-3. bd sync (commit beads changes)
-4. git commit -m "..." (commit code)
-5. bd sync (commit any new beads changes)
-6. git push (push to remote)
-7. ` + "`gt done`" + ` (submit to merge queue and exit)
+3. git commit -m "..." (commit code)
+4. git push (push to remote)
+5. ` + "`gt done`" + ` (submit to merge queue and exit)
 
 **Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
 `

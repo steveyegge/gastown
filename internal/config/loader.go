@@ -981,6 +981,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check rig's RoleAgents first
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
 		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -992,6 +995,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check town's RoleAgents
 	if townSettings.RoleAgents != nil {
 		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -1074,23 +1080,104 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 	return DefaultRuntimeConfig()
 }
 
+// lookupCustomAgentConfig looks up custom agents only (rig or town).
+// It skips binary validation so tests and config resolution can proceed
+// even if the command isn't on PATH yet.
+func lookupCustomAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	if rigSettings != nil && rigSettings.Agents != nil {
+		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	if townSettings != nil && townSettings.Agents != nil {
+		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	return nil
+}
+
 // fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.
+// It creates a deep copy to prevent mutation of the original config.
+//
+// Default behavior:
+//   - Command defaults to "claude" if empty
+//   - Args defaults to ["--dangerously-skip-permissions"] if nil
+//   - Empty Args slice ([]string{}) means "no args" and is preserved as-is
+//
+// All fields are deep-copied: modifying the returned config will not affect
+// the input config, including nested structs and slices.
 func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		return DefaultRuntimeConfig()
 	}
-	// Create a copy to avoid modifying the original
+
+	// Create result with scalar fields (strings are immutable in Go)
 	result := &RuntimeConfig{
+		Provider:      rc.Provider,
 		Command:       rc.Command,
-		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
+		PromptMode:    rc.PromptMode,
 	}
+
+	// Deep copy Args slice to avoid sharing backing array
+	if rc.Args != nil {
+		result.Args = make([]string, len(rc.Args))
+		copy(result.Args, rc.Args)
+	}
+
+	// Deep copy Env map
+	if len(rc.Env) > 0 {
+		result.Env = make(map[string]string, len(rc.Env))
+		for k, v := range rc.Env {
+			result.Env[k] = v
+		}
+	}
+
+	// Deep copy nested structs (nil checks prevent panic on access)
+	if rc.Session != nil {
+		result.Session = &RuntimeSessionConfig{
+			SessionIDEnv: rc.Session.SessionIDEnv,
+			ConfigDirEnv: rc.Session.ConfigDirEnv,
+		}
+	}
+
+	if rc.Hooks != nil {
+		result.Hooks = &RuntimeHooksConfig{
+			Provider:     rc.Hooks.Provider,
+			Dir:          rc.Hooks.Dir,
+			SettingsFile: rc.Hooks.SettingsFile,
+		}
+	}
+
+	if rc.Tmux != nil {
+		result.Tmux = &RuntimeTmuxConfig{
+			ReadyPromptPrefix: rc.Tmux.ReadyPromptPrefix,
+			ReadyDelayMs:      rc.Tmux.ReadyDelayMs,
+		}
+		// Deep copy ProcessNames slice
+		if rc.Tmux.ProcessNames != nil {
+			result.Tmux.ProcessNames = make([]string, len(rc.Tmux.ProcessNames))
+			copy(result.Tmux.ProcessNames, rc.Tmux.ProcessNames)
+		}
+	}
+
+	if rc.Instructions != nil {
+		result.Instructions = &RuntimeInstructionsConfig{
+			File: rc.Instructions.File,
+		}
+	}
+
+	// Apply defaults for required fields
 	if result.Command == "" {
 		result.Command = "claude"
 	}
 	if result.Args == nil {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
+
 	return result
 }
 
@@ -1200,6 +1287,37 @@ func findTownRootFromCwd() (string, error) {
 	}
 }
 
+// extractSimpleRole extracts the simple role name from a GT_ROLE value.
+// GT_ROLE can be:
+//   - Simple: "mayor", "deacon"
+//   - Compound: "rig/witness", "rig/refinery", "rig/crew/name", "rig/polecats/name"
+//
+// For compound format, returns the role segment (second part).
+// For simple format, returns the role as-is.
+func extractSimpleRole(gtRole string) string {
+	if gtRole == "" {
+		return ""
+	}
+	parts := strings.Split(gtRole, "/")
+	switch len(parts) {
+	case 1:
+		// Simple format: "mayor", "deacon"
+		return parts[0]
+	case 2:
+		// "rig/witness", "rig/refinery"
+		return parts[1]
+	case 3:
+		// "rig/crew/name" → "crew", "rig/polecats/name" → "polecat"
+		role := parts[1]
+		if role == "polecats" {
+			return "polecat"
+		}
+		return role
+	default:
+		return gtRole
+	}
+}
+
 // BuildStartupCommand builds a full startup command with environment exports.
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
@@ -1212,8 +1330,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	var rc *RuntimeConfig
 	var townRoot string
 
-	// Extract role from envVars for role-based agent resolution
-	role := envVars["GT_ROLE"]
+	// Extract role from envVars for role-based agent resolution.
+	// GT_ROLE may be compound format (e.g., "rig/refinery") so we extract
+	// the simple role name for role_agents lookup.
+	role := extractSimpleRole(envVars["GT_ROLE"])
 
 	if rigPath != "" {
 		// Derive town root from rig path
@@ -1252,11 +1372,15 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	// Sort for deterministic output
@@ -1282,6 +1406,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 }
 
 // PrependEnv prepends export statements to a command string.
+// Values containing special characters are properly shell-quoted.
 func PrependEnv(command string, envVars map[string]string) string {
 	if len(envVars) == 0 {
 		return command
@@ -1289,7 +1414,7 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 	var exports []string
 	for k, v := range envVars {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	sort.Strings(exports)
@@ -1361,11 +1486,15 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if agentOverride != "" {
 		resolvedEnv["GT_AGENT"] = agentOverride
 	}
+	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 	sort.Strings(exports)
 

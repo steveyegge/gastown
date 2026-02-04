@@ -135,7 +135,7 @@ func TestAssigneeID(t *testing.T) {
 	m := NewManager(r, git.NewGit(r.Path), nil)
 
 	id := m.assigneeID("Toast")
-	expected := "test-rig/Toast"
+	expected := "test-rig/polecats/Toast"
 	if id != expected {
 		t.Errorf("assigneeID = %q, want %q", id, expected)
 	}
@@ -446,81 +446,120 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
+
+// TestAddWithOptions_CleansUpOnRepoBaseError verifies that if repoBase() fails,
+// the polecatDir is cleaned up to avoid partial state where exists() returns true
+// but the worktree doesn't actually exist.
+// See: br-w2ee9 (worktrees not being created)
+func TestAddWithOptions_CleansUpOnRepoBaseError(t *testing.T) {
+	root := t.TempDir()
+
+	// Create rig WITHOUT mayor/rig or .repo.git - this will cause repoBase() to fail
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	// Attempt to create polecat - should fail
+	_, err := m.AddWithOptions("TestCleanup", AddOptions{})
+	if err == nil {
+		t.Fatalf("AddWithOptions should have failed with no repo base")
+	}
+
+	// Verify error mentions repo base
+	if !strings.Contains(err.Error(), "repo base") {
+		t.Errorf("error = %q, should mention 'repo base'", err)
+	}
+
+	// Verify polecatDir was cleaned up (doesn't exist)
+	polecatDir := filepath.Join(root, "polecats", "TestCleanup")
+	if _, err := os.Stat(polecatDir); !os.IsNotExist(err) {
+		t.Errorf("polecatDir %s should not exist after failed AddWithOptions, got stat error: %v", polecatDir, err)
+	}
+
+	// Verify exists() returns false
+	if m.exists("TestCleanup") {
+		t.Errorf("exists(TestCleanup) = true, want false after failed AddWithOptions")
+	}
+}
+
 // TestReconcilePoolWith tests all permutations of directory and session existence.
 // This is the core allocation policy logic.
 //
 // Truth table:
-//   HasDir | HasSession | Result
-//   -------|------------|------------------
-//   false  | false      | available (not in-use)
-//   true   | false      | in-use (normal finished polecat)
-//   false  | true       | orphan → kill session, available
-//   true   | true       | in-use (normal working polecat)
+//
+//	HasDir | HasSession | Result
+//	-------|------------|------------------
+//	false  | false      | available (not in-use)
+//	true   | false      | in-use (normal finished polecat)
+//	false  | true       | orphan → kill session, available
+//	true   | true       | in-use (normal working polecat)
 func TestReconcilePoolWith(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		namesWithDirs    []string
+		name              string
+		namesWithDirs     []string
 		namesWithSessions []string
-		wantInUse        []string // names that should be marked in-use
-		wantOrphans      []string // sessions that should be killed
+		wantInUse         []string // names that should be marked in-use
+		wantOrphans       []string // sessions that should be killed
 	}{
 		{
-			name:             "no dirs, no sessions - all available",
-			namesWithDirs:    []string{},
+			name:              "no dirs, no sessions - all available",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{},
-			wantInUse:        []string{},
-			wantOrphans:      []string{},
+			wantInUse:         []string{},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "has dir, no session - in use",
-			namesWithDirs:    []string{"toast"},
+			name:              "has dir, no session - in use",
+			namesWithDirs:     []string{"toast"},
 			namesWithSessions: []string{},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"toast"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "no dir, has session - orphan killed",
-			namesWithDirs:    []string{},
+			name:              "no dir, has session - orphan killed",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{"nux"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"nux"},
+			wantInUse:         []string{},
+			wantOrphans:       []string{"nux"},
 		},
 		{
-			name:             "has dir, has session - in use",
-			namesWithDirs:    []string{"capable"},
+			name:              "has dir, has session - in use",
+			namesWithDirs:     []string{"capable"},
 			namesWithSessions: []string{"capable"},
-			wantInUse:        []string{"capable"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"capable"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "mixed: one with dir, one orphan session",
-			namesWithDirs:    []string{"toast"},
+			name:              "mixed: one with dir, one orphan session",
+			namesWithDirs:     []string{"toast"},
 			namesWithSessions: []string{"toast", "nux"},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{"nux"},
+			wantInUse:         []string{"toast"},
+			wantOrphans:       []string{"nux"},
 		},
 		{
-			name:             "multiple dirs, no sessions",
-			namesWithDirs:    []string{"toast", "nux", "capable"},
+			name:              "multiple dirs, no sessions",
+			namesWithDirs:     []string{"toast", "nux", "capable"},
 			namesWithSessions: []string{},
-			wantInUse:        []string{"capable", "nux", "toast"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"capable", "nux", "toast"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "multiple orphan sessions",
-			namesWithDirs:    []string{},
+			name:              "multiple orphan sessions",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{"slit", "rictus"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"rictus", "slit"},
+			wantInUse:         []string{},
+			wantOrphans:       []string{"rictus", "slit"},
 		},
 		{
-			name:             "complex: dirs, valid sessions, orphan sessions",
-			namesWithDirs:    []string{"toast", "capable"},
+			name:              "complex: dirs, valid sessions, orphan sessions",
+			namesWithDirs:     []string{"toast", "capable"},
 			namesWithSessions: []string{"toast", "nux", "slit"},
-			wantInUse:        []string{"capable", "toast"},
-			wantOrphans:      []string{"nux", "slit"},
+			wantInUse:         []string{"capable", "toast"},
+			wantOrphans:       []string{"nux", "slit"},
 		},
 	}
 
@@ -652,5 +691,109 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 
 	if name != "furiosa" {
 		t.Errorf("expected furiosa (orphan freed), got %q", name)
+	}
+}
+
+func TestBuildBranchName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize a git repo for config access
+	gitCmd := exec.Command("git", "init")
+	gitCmd.Dir = tmpDir
+	if err := gitCmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	// Set git user.name for testing
+	configCmd := exec.Command("git", "config", "user.name", "testuser")
+	configCmd.Dir = tmpDir
+	if err := configCmd.Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		template string
+		issue    string
+		want     string
+	}{
+		{
+			name:     "default_with_issue",
+			template: "", // Empty template = default behavior
+			issue:    "gt-123",
+			want:     "polecat/alpha/gt-123@", // timestamp suffix varies
+		},
+		{
+			name:     "default_without_issue",
+			template: "",
+			issue:    "",
+			want:     "polecat/alpha-", // timestamp suffix varies
+		},
+		{
+			name:     "custom_template_user_year_month",
+			template: "{user}/{year}/{month}/fix",
+			issue:    "",
+			want:     "testuser/", // year/month will vary
+		},
+		{
+			name:     "custom_template_with_name",
+			template: "feature/{name}",
+			issue:    "",
+			want:     "feature/alpha",
+		},
+		{
+			name:     "custom_template_with_issue",
+			template: "work/{issue}",
+			issue:    "gt-456",
+			want:     "work/456",
+		},
+		{
+			name:     "custom_template_with_timestamp",
+			template: "feature/{name}-{timestamp}",
+			issue:    "",
+			want:     "feature/alpha-", // timestamp suffix varies
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create rig with test template
+			r := &rig.Rig{
+				Name: "test-rig",
+				Path: tmpDir,
+			}
+
+			// Override system defaults for this test if template is set
+			if tt.template != "" {
+				origDefault := rig.SystemDefaults["polecat_branch_template"]
+				rig.SystemDefaults["polecat_branch_template"] = tt.template
+				defer func() {
+					rig.SystemDefaults["polecat_branch_template"] = origDefault
+				}()
+			}
+
+			g := git.NewGit(tmpDir)
+			m := NewManager(r, g, nil)
+
+			got := m.buildBranchName("alpha", tt.issue)
+
+			// For default templates, just check prefix since timestamp varies
+			if tt.template == "" {
+				if !strings.HasPrefix(got, tt.want) {
+					t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+				}
+			} else {
+				// For custom templates with time-varying fields, check prefix
+				if strings.Contains(tt.template, "{year}") || strings.Contains(tt.template, "{month}") || strings.Contains(tt.template, "{timestamp}") {
+					if !strings.HasPrefix(got, tt.want) {
+						t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+					}
+				} else {
+					if got != tt.want {
+						t.Errorf("buildBranchName() = %q, want %q", got, tt.want)
+					}
+				}
+			}
+		})
 	}
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
@@ -94,7 +94,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("cannot proceed: %w", err)
 		}
-		defer func() { _ = lock.Unlock() }()
+		defer func() {
+			_ = lock.Unlock()
+			// Clean up lock file after releasing (defense in depth)
+			_ = os.Remove(filepath.Join(townRoot, shutdownLockFile))
+		}()
 
 		// Prevent tmux server from exiting when all sessions are killed.
 		// By default, tmux exits when there are no sessions (exit-empty on).
@@ -110,9 +114,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	rigs := discoverRigs(townRoot)
-
-	// Pre-fetch all sessions once for O(1) lookups (avoids N+1 subprocess calls)
-	sessionSet, _ := t.GetSessionSet() // Ignore error - empty set is safe fallback
 
 	// Phase 0.5: Stop polecats if --polecats
 	if downPolecats {
@@ -138,44 +139,16 @@ func runDown(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Phase 1: Stop bd resurrection layer (--all only)
-	if downAll {
-		daemonsKilled, activityKilled, err := beads.StopAllBdProcesses(downDryRun, downForce)
-		if err != nil {
-			printDownStatus("bd processes", false, err.Error())
-			allOK = false
-		} else {
-			if downDryRun {
-				if daemonsKilled > 0 || activityKilled > 0 {
-					printDownStatus("bd daemon", true, fmt.Sprintf("%d would stop", daemonsKilled))
-					printDownStatus("bd activity", true, fmt.Sprintf("%d would stop", activityKilled))
-				} else {
-					printDownStatus("bd processes", true, "none running")
-				}
-			} else {
-				if daemonsKilled > 0 {
-					printDownStatus("bd daemon", true, fmt.Sprintf("%d stopped", daemonsKilled))
-				}
-				if activityKilled > 0 {
-					printDownStatus("bd activity", true, fmt.Sprintf("%d stopped", activityKilled))
-				}
-				if daemonsKilled == 0 && activityKilled == 0 {
-					printDownStatus("bd processes", true, "none running")
-				}
-			}
-		}
-	}
-
-	// Phase 2a: Stop refineries
+	// Phase 1: Stop refineries
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
 		if downDryRun {
-			if sessionSet.Has(sessionName) {
+			if running, _ := t.HasSession(sessionName); running {
 				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
+		wasRunning, err := stopSession(t, sessionName)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
 			allOK = false
@@ -186,16 +159,16 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 2b: Stop witnesses
+	// Phase 2: Stop witnesses
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
 		if downDryRun {
-			if sessionSet.Has(sessionName) {
+			if running, _ := t.HasSession(sessionName); running {
 				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
+		wasRunning, err := stopSession(t, sessionName)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 			allOK = false
@@ -209,12 +182,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
 	for _, ts := range session.TownSessions() {
 		if downDryRun {
-			if sessionSet.Has(ts.SessionID) {
+			if running, _ := t.HasSession(ts.SessionID); running {
 				printDownStatus(ts.Name, true, "would stop")
 			}
 			continue
 		}
-		stopped, err := session.StopTownSessionWithCache(t, ts, downForce, sessionSet)
+		stopped, err := session.StopTownSession(t, ts, downForce)
 		if err != nil {
 			printDownStatus(ts.Name, false, err.Error())
 			allOK = false
@@ -399,23 +372,6 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	return true, t.KillSessionWithProcesses(sessionName)
 }
 
-// stopSessionWithCache is like stopSession but uses a pre-fetched SessionSet
-// for O(1) existence check instead of spawning a subprocess.
-func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionSet) (bool, error) {
-	if !cache.Has(sessionName) {
-		return false, nil // Already stopped
-	}
-
-	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
-	if !downForce {
-		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
-}
-
 // acquireShutdownLock prevents concurrent shutdowns.
 // Returns the lock (caller must defer Unlock()) or error if lock held.
 func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
@@ -447,14 +403,6 @@ func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
 func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	var respawned []string
 
-	if count := beads.CountBdDaemons(); count > 0 {
-		respawned = append(respawned, fmt.Sprintf("bd daemon (%d running)", count))
-	}
-
-	if count := beads.CountBdActivityProcesses(); count > 0 {
-		respawned = append(respawned, fmt.Sprintf("bd activity (%d running)", count))
-	}
-
 	sessions, err := t.ListSessions()
 	if err == nil {
 		for _, sess := range sessions {
@@ -474,5 +422,65 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		}
 	}
 
+	// Check for orphaned Claude/node processes
+	// These can be left behind if tmux sessions were killed but child processes didn't terminate
+	if pids := findOrphanedClaudeProcesses(townRoot); len(pids) > 0 {
+		respawned = append(respawned, fmt.Sprintf("orphaned Claude processes (PIDs: %v)", pids))
+	}
+
 	return respawned
 }
+
+// findOrphanedClaudeProcesses finds Claude/node processes that are running in the
+// town directory but aren't associated with any active tmux session.
+// This can happen when tmux sessions are killed but child processes don't terminate.
+func findOrphanedClaudeProcesses(townRoot string) []int {
+	// Use pgrep to find all claude/node processes
+	cmd := exec.Command("pgrep", "-l", "node")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil // pgrep found no processes or failed
+	}
+
+	var orphaned []int
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "PID command"
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		pidStr := parts[0]
+		var pid int
+		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil {
+			continue
+		}
+
+		// Check if this process is running in the town directory
+		if isProcessInTown(pid, townRoot) {
+			orphaned = append(orphaned, pid)
+		}
+	}
+
+	return orphaned
+}
+
+// isProcessInTown checks if a process is running in the given town directory.
+// Uses ps to check the process's working directory.
+func isProcessInTown(pid int, townRoot string) bool {
+	// Use ps to get the process's working directory
+	cmd := exec.Command("ps", "-o", "command=", "-p", fmt.Sprintf("%d", pid))
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Check if the command line includes the town path
+	command := string(output)
+	return strings.Contains(command, townRoot)
+}
+

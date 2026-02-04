@@ -172,16 +172,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If subject/message provided, send handoff mail to self first
-	// The mail is auto-hooked so the next session picks it up
-	if handoffSubject != "" || handoffMessage != "" {
-		beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
-		if err != nil {
-			style.PrintWarning("could not send handoff mail: %v", err)
-			// Continue anyway - the respawn is more important
-		} else {
-			fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
-		}
+	// Send handoff mail to self (defaults applied inside sendHandoffMail).
+	// The mail is auto-hooked so the next session picks it up.
+	beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
+	if err != nil {
+		style.PrintWarning("could not send handoff mail: %v", err)
+		// Continue anyway - the respawn is more important
+	} else {
+		fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
 	}
 
 	// NOTE: reportAgentState("stopped") removed (gt-zecmc)
@@ -204,27 +202,37 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
-	// Fork-and-kill pattern: spawn background process that survives Claude's death.
-	// This fixes the SIGHUP issue where Node.js (Claude Code) ignores the signal
-	// from tmux respawn-pane -k, causing sessions to never truly reset.
-	// See: https://github.com/steveyegge/gastown/issues/881
-	//
-	// The background process:
-	// 1. Sleeps 100ms to ensure it's fully detached
-	// 2. Kills the current process with SIGKILL (signal 9)
-	// 3. Runs tmux respawn-pane to restart with fresh Claude instance
-	pid := os.Getpid()
-	// Shell-escape the restart command for safe embedding
-	escapedCmd := strings.ReplaceAll(restartCmd, "'", "'\\''")
-	bgScript := fmt.Sprintf("sleep 0.1 && kill -9 %d 2>/dev/null; tmux respawn-pane -k -t %s '%s'",
-		pid, pane, escapedCmd)
-	bgCmd := exec.Command("bash", "-c", bgScript)
-	if err := bgCmd.Start(); err != nil {
-		return fmt.Errorf("starting background respawn: %w", err)
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(pane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
-	// Exit cleanly - background process handles kill+respawn
-	os.Exit(0)
-	return nil // Unreachable but satisfies compiler
+
+	// NOTE: For self-handoff, we do NOT call KillPaneProcesses here.
+	// That would kill the gt handoff process itself before it can call RespawnPane,
+	// leaving the pane dead with no respawn. RespawnPane's -k flag handles killing
+	// atomically - tmux kills the old process and spawns the new one together.
+	// See: https://github.com/steveyegge/gastown/issues/859 (pane is dead bug)
+	//
+	// For orphan prevention, we rely on respawn-pane -k which sends SIGHUP/SIGTERM.
+	// If orphans still occur, the solution is to adjust the restart command to
+	// kill orphans at startup, not to kill ourselves before respawning.
+
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
+	if paneWorkDir != "" {
+		if _, err := os.Stat(paneWorkDir); err != nil {
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				style.PrintWarning("pane working directory deleted, using town root")
+				return t.RespawnPaneWithWorkDir(pane, townRoot, restartCmd)
+			}
+		}
+	}
+
+	// Use respawn-pane -k to atomically kill current process and start new one
+	// Note: respawn-pane automatically resets remain-on-exit to off
+	return t.RespawnPane(pane, restartCmd)
 }
 
 // getCurrentTmuxSession returns the current tmux session name.
@@ -389,9 +397,9 @@ func buildRestartCommand(sessionName string) (string, error) {
 	gtRole := identity.GTRole()
 
 	// Build startup beacon for predecessor discovery via /resume
-	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 	// The SessionStart hook handles context injection (gt prime --hook)
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: identity.Address(),
 		Sender:    "self",
 		Topic:     "handoff",
@@ -430,6 +438,10 @@ func buildRestartCommand(sessionName string) (string, error) {
 		}
 	}
 
+	// Propagate GT_ROOT so subsequent handoffs can use it as fallback
+	// when cwd-based detection fails (broken state recovery)
+	exports = append(exports, "GT_ROOT="+townRoot)
+
 	// Preserve GT_AGENT across handoff so agent override persists
 	if currentAgent != "" {
 		exports = append(exports, "GT_AGENT="+currentAgent)
@@ -458,7 +470,9 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 
 	switch {
 	case sessionName == mayorSession:
-		return townRoot, nil
+		// Mayor runs from ~/gt/mayor/, not town root.
+		// Tools use workspace.FindFromCwd() which walks UP to find town root.
+		return townRoot + "/mayor", nil
 
 	case sessionName == deaconSession:
 		return townRoot + "/deacon", nil
@@ -517,14 +531,33 @@ func sessionToGTRole(sessionName string) string {
 }
 
 // detectTownRootFromCwd walks up from the current directory to find the town root.
+// Falls back to GT_TOWN_ROOT or GT_ROOT env vars if cwd detection fails (broken state recovery).
 func detectTownRootFromCwd() string {
 	// Use workspace.FindFromCwd which handles both primary (mayor/town.json)
 	// and secondary (mayor/ directory) markers
 	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		return ""
+	if err == nil && townRoot != "" {
+		return townRoot
 	}
-	return townRoot
+
+	// Fallback: try environment variables for town root
+	// GT_TOWN_ROOT is set by shell integration, GT_ROOT is set by session manager
+	// This enables handoff to work even when cwd detection fails due to
+	// detached HEAD, wrong branch, deleted worktree, etc.
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if envRoot := os.Getenv(envName); envRoot != "" {
+			// Verify it's actually a workspace
+			if _, statErr := os.Stat(filepath.Join(envRoot, workspace.PrimaryMarker)); statErr == nil {
+				return envRoot
+			}
+			// Try secondary marker too
+			if info, statErr := os.Stat(filepath.Join(envRoot, workspace.SecondaryMarker)); statErr == nil && info.IsDir() {
+				return envRoot
+			}
+		}
+	}
+
+	return ""
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.
@@ -556,15 +589,41 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		return nil
 	}
 
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(targetPane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
 	if err := t.ClearHistory(targetPane); err != nil {
 		// Non-fatal - continue with respawn even if clear fails
 		style.PrintWarning("could not clear history: %v", err)
 	}
 
-	// Respawn the remote session's pane
-	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
-		return fmt.Errorf("respawning pane: %w", err)
+	// Respawn the remote session's pane, handling deleted working directories
+	respawnErr := func() error {
+		paneWorkDir, _ := t.GetPaneWorkDir(targetSession)
+		if paneWorkDir != "" {
+			if _, statErr := os.Stat(paneWorkDir); statErr != nil {
+				if townRoot := detectTownRootFromCwd(); townRoot != "" {
+					style.PrintWarning("pane working directory deleted, using town root")
+					return t.RespawnPaneWithWorkDir(targetPane, townRoot, restartCmd)
+				}
+			}
+		}
+		return t.RespawnPane(targetPane, restartCmd)
+	}()
+	if respawnErr != nil {
+		return fmt.Errorf("respawning pane: %w", respawnErr)
 	}
 
 	// If --watch, switch to that session

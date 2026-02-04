@@ -60,15 +60,15 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update npm for OIDC trusted publishing
-        run: npm install -g npm@latest  # Requires npm >= 11.5.1 for trusted publishing
+      - name: Update npm for provenance support
+        run: npm install -g npm@latest
 
       - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd npm-package
-          npm publish --access public
-          # Uses OIDC trusted publishing - no token needed
-          # Provenance attestations are automatic with trusted publishing
+          npm publish --access public --provenance
 
   update-homebrew:
     runs-on: ubuntu-latest

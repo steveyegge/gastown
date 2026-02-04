@@ -40,6 +40,7 @@ func (d *Daemon) ProcessLifecycleRequests() {
 	// Get mail for deacon identity (using gt mail, not bd mail)
 	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -394,20 +395,6 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send startup nudge for predecessor discovery via /resume
-	recipient := identityToBDActor(identity)
-	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
-		Recipient: recipient,
-		Sender:    "deacon",
-		Topic:     "lifecycle-restart",
-	}) // Non-fatal
-
-	// Send propulsion nudge to trigger autonomous execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
-
 	return nil
 }
 
@@ -463,6 +450,7 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 
 // getStartCommand determines the startup command for an agent.
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
+// Includes beacon + role-specific instructions in the CLI prompt.
 func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
 	// If role config is available, use it
 	if roleConfig != nil && roleConfig.StartCommand != "" {
@@ -478,8 +466,22 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 	// Use role-based agent resolution for per-role model selection
 	runtimeConfig := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
 
+	// Build recipient for beacon
+	recipient := identityToBDActor(parsed.RigName + "/" + parsed.RoleType)
+	if parsed.AgentName != "" {
+		recipient = identityToBDActor(parsed.RigName + "/" + parsed.RoleType + "/" + parsed.AgentName)
+	}
+	if parsed.RoleType == "deacon" || parsed.RoleType == "mayor" {
+		recipient = parsed.RoleType
+	}
+	prompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: recipient,
+		Sender:    "daemon",
+		Topic:     "lifecycle-restart",
+	}, "Check your hook and begin work.")
+
 	// Build default command using the role-resolved runtime config
-	defaultCmd := "exec " + runtimeConfig.BuildCommand()
+	defaultCmd := "exec " + runtimeConfig.BuildCommandWithPrompt(prompt)
 	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
 	}
@@ -497,7 +499,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
 	if parsed.RoleType == "crew" {
@@ -512,7 +514,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
 	return defaultCmd
@@ -576,6 +578,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	fetchCmd := exec.Command("git", "fetch", "origin")
 	fetchCmd.Dir = workDir
 	fetchCmd.Stderr = &stderr
+	fetchCmd.Env = os.Environ() // Inherit PATH to find git executable
 	if err := fetchCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -592,6 +595,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	pullCmd := exec.Command("git", "pull", "--rebase", "origin", defaultBranch)
 	pullCmd.Dir = workDir
 	pullCmd.Stderr = &stderr
+	pullCmd.Env = os.Environ() // Inherit PATH to find git executable
 	if err := pullCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -601,21 +605,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		// Don't fail - agent can handle conflicts
 	}
 
-	// Reset stderr buffer
-	stderr.Reset()
-
-	// Sync beads
-	bdCmd := exec.Command("bd", "sync")
-	bdCmd.Dir = workDir
-	bdCmd.Stderr = &stderr
-	if err := bdCmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		d.logger.Printf("Warning: bd sync failed in %s: %s", workDir, errMsg)
-		// Don't fail - sync issues may be recoverable
-	}
+	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
 }
 
 // closeMessage removes a lifecycle mail message after processing.
@@ -625,6 +615,7 @@ func (d *Daemon) closeMessage(id string) error {
 	// Use gt mail delete to actually remove the message
 	cmd := exec.Command("gt", "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -662,6 +653,7 @@ func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
 func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	cmd := exec.Command("bd", "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -799,6 +791,7 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -840,8 +833,8 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-		// Check if tmux session exists and Claude is running
-		if d.tmux.IsClaudeRunning(sessionName) {
+		// Check if tmux session exists and agent is running
+		if d.tmux.IsAgentAlive(sessionName) {
 			// Session is alive - check if it's been stuck too long
 			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
 			if err != nil {
@@ -874,6 +867,7 @@ Action needed: Check if agent is alive and responsive. Consider restarting if st
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of GUPP violation: %v", err)
@@ -897,6 +891,7 @@ func (d *Daemon) checkOrphanedWork() {
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -933,7 +928,7 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 		// Session running = not orphaned (work is being processed)
-		if d.tmux.IsClaudeRunning(sessionName) {
+		if d.tmux.IsAgentAlive(sessionName) {
 			continue
 		}
 
@@ -970,6 +965,7 @@ Action needed: Either restart the agent or reassign the work.`,
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of orphaned work: %v", err)

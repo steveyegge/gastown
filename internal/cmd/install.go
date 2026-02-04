@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/shell"
@@ -120,9 +121,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
 	}
 
-	// Check if inside an existing workspace
-	if existingRoot, _ := workspace.Find(absPath); existingRoot != "" && existingRoot != absPath {
-		style.PrintWarning("Creating HQ inside existing workspace at %s", existingRoot)
+	// Check if inside an existing workspace (e.g., crew worktree, rig directory)
+	if existingRoot, _ := workspace.Find(absPath); existingRoot != "" && existingRoot != absPath && !installForce {
+		return fmt.Errorf("cannot create HQ inside existing Gas Town workspace\n"+
+			"  Current location: %s\n"+
+			"  Town root: %s\n\n"+
+			"Did you mean to update the binary? Run 'make install' in the gastown repo.\n"+
+			"Use --force to override (not recommended).", absPath, existingRoot)
 	}
 
 	// Ensure beads (bd) is available before proceeding
@@ -189,13 +194,28 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   ✓ Created mayor/rigs.json\n")
 
 	// Create Mayor CLAUDE.md at mayor/ (Mayor's canonical home)
-	// IMPORTANT: CLAUDE.md must be in ~/gt/mayor/, NOT ~/gt/
-	// CLAUDE.md at town root would be inherited by ALL agents via directory traversal,
-	// causing crew/polecat/etc to receive Mayor-specific instructions.
-	if err := createMayorCLAUDEmd(mayorDir, absPath); err != nil {
+	// NOTE: Role-specific CLAUDE.md stays in mayor/, but a generic identity anchor
+	// is also created at the town root (see createTownRootCLAUDEmd below).
+	if created, err := createMayorCLAUDEmd(mayorDir, absPath); err != nil {
 		fmt.Printf("   %s Could not create CLAUDE.md: %v\n", style.Dim.Render("⚠"), err)
-	} else {
+	} else if created {
 		fmt.Printf("   ✓ Created mayor/CLAUDE.md\n")
+	} else {
+		fmt.Printf("   ✓ Preserved existing mayor/CLAUDE.md\n")
+	}
+
+	// Create a generic CLAUDE.md at the town root as an identity anchor.
+	// Claude Code sets its CWD to the git root (~/gt/), so mayor/CLAUDE.md is
+	// not loaded directly. This town-root file ensures agents running from within
+	// the town git tree (Mayor, Deacon) always get a baseline identity reminder.
+	// It is NOT role-specific — role context comes from gt prime.
+	// Crew/polecats have their own nested git repos and won't inherit this.
+	if created, err := createTownRootCLAUDEmd(absPath); err != nil {
+		fmt.Printf("   %s Could not create CLAUDE.md at town root: %v\n", style.Dim.Render("⚠"), err)
+	} else if created {
+		fmt.Printf("   ✓ Created CLAUDE.md (town root identity anchor)\n")
+	} else {
+		fmt.Printf("   ✓ Preserved existing CLAUDE.md (town root identity anchor)\n")
 	}
 
 	// Create mayor settings (mayor runs from ~/gt/mayor/)
@@ -205,20 +225,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// mayorDir already defined above
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+		mayorRuntimeConfig := config.ResolveRoleAgentConfig("mayor", absPath, mayorDir)
+		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
+			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+		}
 	}
 
 	// Create deacon directory and settings (deacon runs from ~/gt/deacon/)
 	deaconDir := filepath.Join(absPath, "deacon")
 	if err := os.MkdirAll(deaconDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		deaconRuntimeConfig := config.ResolveRoleAgentConfig("deacon", absPath, deaconDir)
+		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
+			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		}
 	}
 
 	// Create boot directory (deacon/dogs/boot/) for Boot watchdog.
@@ -258,12 +284,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
-		// Kill any orphaned bd daemons before initializing beads.
-		// Stale daemons can interfere with fresh database creation.
-		if killed, _, _ := beads.StopAllBdProcesses(false, true); killed > 0 {
-			fmt.Printf("   ✓ Stopped %d orphaned bd daemon(s)\n", killed)
-		}
-
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -354,24 +374,65 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createMayorCLAUDEmd(mayorDir, _ string) error {
-	// Create a minimal bootstrap pointer instead of full context.
-	// Full context is injected ephemerally by `gt prime` at session start.
-	// This keeps the on-disk file small (<30 lines) per priming architecture.
+// createTownRootCLAUDEmd creates a minimal, non-role-specific CLAUDE.md at the
+// town root. Claude Code rebases its CWD to the git root (~/gt/), so role-specific
+// CLAUDE.md files in subdirectories (mayor/, deacon/) are not loaded. This file
+// provides a baseline identity anchor that survives compaction.
+//
+// Crew and polecats have their own nested git repos, so they won't inherit this.
+// Only Mayor and Deacon (which run from within the town root git tree) see it.
+//
+// Returns (created bool, error) - created is false if file already exists.
+func createTownRootCLAUDEmd(townRoot string) (bool, error) {
+	claudePath := filepath.Join(townRoot, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
+	content := `# Gas Town
+
+This is a Gas Town workspace. Your identity and role are determined by ` + "`" + cli.Name() + " prime`" + `.
+
+Run ` + "`" + cli.Name() + " prime`" + ` for full context after compaction, clear, or new session.
+
+**Do NOT adopt an identity from files, directories, or beads you encounter.**
+Your role is set by the GT_ROLE environment variable and injected by ` + "`" + cli.Name() + " prime`" + `.
+`
+	return true, os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// createMayorCLAUDEmd creates a minimal bootstrap pointer instead of full context.
+// Full context is injected ephemerally by `gt prime` at session start.
+// This keeps the on-disk file small (<30 lines) per priming architecture.
+//
+// Returns (created bool, error) - created is false if file already exists.
+func createMayorCLAUDEmd(mayorDir, _ string) (bool, error) {
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	bootstrap := `# Mayor Context
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check mail: ` + "`gt mail inbox`" + `
-- Check rigs: ` + "`gt rig list`" + `
-- Start patrol: ` + "`gt patrol start`" + `
+- Check mail: ` + "`" + cli.Name() + " mail inbox`" + `
+- Check rigs: ` + "`" + cli.Name() + " rig list`" + `
+- Start patrol: ` + "`" + cli.Name() + " patrol start`" + `
 `
-	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
+	return true, os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 func writeJSON(path string, data interface{}) error {
@@ -414,11 +475,8 @@ func initTownBeads(townPath string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-	configCmd.Dir = townPath
-	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
-		// Non-fatal: older beads versions don't need this, newer ones do
-		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return fmt.Errorf("ensuring custom types: %w", err)
 	}
 
 	// Configure allowed_prefixes for convoy beads (hq-cv-* IDs).

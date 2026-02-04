@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,12 +10,57 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// resolveBeadDir returns the directory to run bd commands for a given bead ID.
+// Uses prefix-based routing to find the correct rig directory.
+// Falls back to rigs.json prefix mapping, then town root.
+func resolveBeadDir(beadID string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return "."
+	}
+	prefix := beads.ExtractPrefix(beadID)
+	if rigPath := beads.GetRigPathForPrefix(townRoot, prefix); rigPath != "" {
+		return rigPath
+	}
+	// Fallback: consult rigs.json for prefix-to-rig mapping
+	if rigDir := resolveBeadDirFromRigsJSON(townRoot, prefix); rigDir != "" {
+		return rigDir
+	}
+	return townRoot
+}
+
+// resolveBeadDirFromRigsJSON looks up the rig directory from rigs.json using prefix.
+func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
+	rigsPath := townRoot + "/mayor/rigs.json"
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return ""
+	}
+	var rigsFile struct {
+		Rigs map[string]struct {
+			Beads struct {
+				Prefix string `json:"prefix"`
+			} `json:"beads"`
+		} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &rigsFile); err != nil {
+		return ""
+	}
+	// prefix includes trailing hyphen (e.g., "bd-"), rigs.json stores without (e.g., "bd")
+	trimmedPrefix := strings.TrimSuffix(prefix, "-")
+	for rigName, rigConfig := range rigsFile.Rigs {
+		if rigConfig.Beads.Prefix == trimmedPrefix {
+			// Return mayor/rig path within the rig (where .beads/ lives)
+			return townRoot + "/" + rigName + "/mayor/rig"
+		}
+	}
+	return ""
+}
 
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
@@ -27,18 +73,11 @@ type beadInfo struct {
 // Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
 // as that overrides routing and breaks resolution of rig-level beads.
 //
-// Uses --no-daemon with --allow-stale to avoid daemon socket timing issues
-// while still finding beads when database is out of sync with JSONL.
-// For existence checks, stale data is acceptable - we just need to know it exists.
+// Checks bead existence using bd show.
+// Resolves the rig directory from the bead's prefix for correct dolt access.
 func verifyBeadExists(beadID string) error {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
-	// Run from town root so bd can find routes.jsonl for prefix-based routing.
-	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Dir = townRoot
-	}
-	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
-	// when issue not found, --no-daemon exits 0 but produces empty stdout.
+	cmd.Dir = resolveBeadDir(beadID)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
@@ -50,20 +89,14 @@ func verifyBeadExists(beadID string) error {
 }
 
 // getBeadInfo returns status and assignee for a bead.
-// Uses bd's native prefix-based routing via routes.jsonl.
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Resolves the rig directory from the bead's prefix for correct dolt access.
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
-	// Run from town root so bd can find routes.jsonl for prefix-based routing.
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Dir = townRoot
-	}
+	cmd.Dir = resolveBeadDir(beadID)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
-	// Handle bd --no-daemon exit 0 bug: when issue not found,
-	// --no-daemon exits 0 but produces empty stdout (error goes to stderr).
 	if len(out) == 0 {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
@@ -83,11 +116,11 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 func storeArgsInBead(beadID, args string) error {
 	// Get the bead to preserve existing description content
 	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	showCmd.Dir = resolveBeadDir(beadID)
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
 	}
-	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
 	if len(out) == 0 {
 		return fmt.Errorf("bead not found")
 	}
@@ -122,7 +155,7 @@ func storeArgsInBead(beadID, args string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -237,6 +270,53 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	return nil
 }
 
+// storeNoMergeInBead sets the no_merge field in a bead's description.
+// When set, gt done will skip the merge queue and keep work on the feature branch.
+// This is useful for upstream contributions or when human review is needed before merge.
+func storeNoMergeInBead(beadID string, noMerge bool) error {
+	if !noMerge {
+		return nil
+	}
+
+	// Get the bead to preserve existing description content
+	showCmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("fetching bead: %w", err)
+	}
+
+	// Parse the bead
+	var issues []beads.Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return fmt.Errorf("parsing bead: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("bead not found")
+	}
+	issue := &issues[0]
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the no_merge flag
+	fields.NoMerge = true
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject, args string) error {
@@ -261,7 +341,7 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	} else if subject != "" {
 		prompt = fmt.Sprintf("Work slung: %s (%s). Start working on it now - no questions, just begin.", beadID, subject)
 	} else {
-		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `gt hook` to see the hook, then begin.", beadID)
+		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `" + cli.Name() + " hook` to see the hook, then begin.", beadID)
 	}
 
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
@@ -307,7 +387,8 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	// Claude-only: accept bypass permissions warning if present
-	if t.IsClaudeRunning(sessionName) {
+	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
+	if agentName == "" || agentName == "claude" {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
 
 		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
@@ -345,6 +426,9 @@ func detectActor() string {
 // Rig-level agents use the rig's configured prefix (default "gt-").
 // townRoot is needed to look up the rig's configured prefix.
 func agentIDToBeadID(agentID, townRoot string) string {
+	// Normalize: strip trailing slash (resolveSelfTarget returns "mayor/" not "mayor")
+	agentID = strings.TrimSuffix(agentID, "/")
+
 	// Handle simple cases (town-level agents with hq- prefix)
 	if agentID == "mayor" {
 		return beads.MayorBeadIDTown()
@@ -371,6 +455,9 @@ func agentIDToBeadID(agentID, townRoot string) string {
 		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
 		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+	case len(parts) == 3 && parts[0] == "deacon" && parts[1] == "dogs":
+		// Dogs are town-level agents with hq- prefix
+		return beads.DogBeadIDTown(parts[2])
 	default:
 		return ""
 	}
@@ -428,25 +515,49 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
+		// Dogs created before canonical IDs need recreation: gt dog rm <name> && gt dog add <name>
+		if strings.Contains(agentBeadID, "-dog-") {
+			fmt.Fprintf(os.Stderr, "  (Old dog? Recreate with: gt dog rm <name> && gt dog add <name>)\n")
+		}
 		return
 	}
 }
 
-// wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
-// This ensures the patrol agents are ready to monitor and merge.
+// wakeRigAgents wakes the witness for a rig after polecat dispatch.
+// This ensures the witness is ready to monitor. The refinery is nudged
+// separately when an MR is actually created (by nudgeRefinery).
 func wakeRigAgents(rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
-	// Nudge witness and refinery to clear any backoff
+	// Nudge witness to clear any backoff
 	t := tmux.NewTmux()
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+
+	// Silent nudge - session might not exist yet
+	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+}
+
+// nudgeRefinery wakes the refinery for a rig after an MR is created.
+// This ensures the refinery picks up the new merge request promptly
+// instead of waiting for its next poll cycle.
+func nudgeRefinery(rigName, message string) {
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
 
-	// Silent nudges - sessions might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
-	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+	// Test hook: log nudge for test observability (same pattern as GT_TEST_ATTACHED_MOLECULE_LOG)
+	if logPath := os.Getenv("GT_TEST_NUDGE_LOG"); logPath != "" {
+		entry := fmt.Sprintf("nudge:%s:%s\n", refinerySession, message)
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			_, _ = f.WriteString(entry)
+			_ = f.Close()
+		}
+		return // Don't actually nudge tmux in tests
+	}
+
+	t := tmux.NewTmux()
+	_ = t.NudgeSession(refinerySession, message)
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.
@@ -458,57 +569,91 @@ func isPolecatTarget(target string) bool {
 	return len(parts) >= 3 && parts[1] == "polecats"
 }
 
-// attachPolecatWorkMolecule attaches the mol-polecat-work molecule to a polecat's agent bead.
-// This ensures all polecats have the standard work molecule attached for guidance.
-// The molecule is attached by storing it in the agent bead's description using attachment fields.
+// FormulaOnBeadResult contains the result of instantiating a formula on a bead.
+type FormulaOnBeadResult struct {
+	WispRootID string // The wisp root ID (compound root after bonding)
+	BeadToHook string // The bead ID to hook (BASE bead, not wisp - lifecycle fix)
+}
+
+// InstantiateFormulaOnBead creates a wisp from a formula, bonds it to a bead.
+// This is the formula-on-bead pattern used by issue #288 for auto-applying mol-polecat-work.
 //
-// Per issue #288: gt sling should auto-attach mol-polecat-work when slinging to polecats.
-func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
-	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
-	parts := strings.Split(targetAgent, "/")
-	if len(parts) != 3 || parts[1] != "polecats" {
-		return fmt.Errorf("invalid polecat agent format: %s", targetAgent)
-	}
-	rigName := parts[0]
-	polecatName := parts[2]
+// Parameters:
+//   - formulaName: the formula to instantiate (e.g., "mol-polecat-work")
+//   - beadID: the base bead to bond the wisp to
+//   - title: the bead title (used for --var feature=<title>)
+//   - hookWorkDir: working directory for bd commands (polecat's worktree)
+//   - townRoot: the town root directory
+//   - skipCook: if true, skip cooking (for batch mode optimization where cook happens once)
+//   - extraVars: additional --var values supplied by the user
+//
+// Returns the wisp root ID which should be hooked.
+func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (*FormulaOnBeadResult, error) {
+	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
+	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
-	// Get the polecat's agent bead ID
-	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
-	prefix := config.GetRigPrefix(townRoot, rigName)
-	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
-
-	// Resolve the rig directory for running bd commands.
-	// Use ResolveHookDir to ensure we run bd from the correct rig directory
-	// (not from the polecat's worktree, which doesn't have a .beads directory).
-	// This fixes issue #197: polecat fails to hook when slinging with molecule.
-	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
-
-	b := beads.New(rigDir)
-
-	// Check if molecule is already attached (avoid duplicate attach)
-	attachment, err := b.GetAttachment(agentBeadID)
-	if err == nil && attachment != nil && attachment.AttachedMolecule != "" {
-		// Already has a molecule attached - skip
-		return nil
+	// Step 1: Cook the formula (ensures proto exists)
+	if !skipCook {
+		cookCmd := exec.Command("bd", "cook", formulaName)
+		cookCmd.Dir = formulaWorkDir
+		cookCmd.Stderr = os.Stderr
+		if err := cookCmd.Run(); err != nil {
+			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
+		}
 	}
 
-	// Cook the mol-polecat-work formula to ensure the proto exists
-	// This is safe to run multiple times - cooking is idempotent
-	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
-	cookCmd.Dir = rigDir
-	cookCmd.Stderr = os.Stderr
-	if err := cookCmd.Run(); err != nil {
-		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
+	// Step 2: Create wisp with feature and issue variables from bead
+	featureVar := fmt.Sprintf("feature=%s", title)
+	issueVar := fmt.Sprintf("issue=%s", beadID)
+	wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+	for _, variable := range extraVars {
+		wispArgs = append(wispArgs, "--var", variable)
 	}
-
-	// Attach the molecule to the polecat's agent bead
-	// The molecule ID is the formula name "mol-polecat-work"
-	moleculeID := "mol-polecat-work"
-	_, err = b.AttachMolecule(agentBeadID, moleculeID)
+	wispArgs = append(wispArgs, "--json")
+	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd.Dir = formulaWorkDir
+	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
+	wispCmd.Stderr = os.Stderr
+	wispOut, err := wispCmd.Output()
 	if err != nil {
-		return fmt.Errorf("attaching molecule %s to %s: %w", moleculeID, agentBeadID, err)
+		return nil, fmt.Errorf("creating wisp for formula %s: %w", formulaName, err)
 	}
 
-	fmt.Printf("%s Attached %s to %s\n", style.Bold.Render("✓"), moleculeID, agentBeadID)
-	return nil
+	// Parse wisp output to get the root ID
+	wispRootID, err := parseWispIDFromJSON(wispOut)
+	if err != nil {
+		return nil, fmt.Errorf("parsing wisp output: %w", err)
+	}
+
+	// Step 3: Bond wisp to original bead (creates compound)
+	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
+	bondCmd := exec.Command("bd", bondArgs...)
+	bondCmd.Dir = formulaWorkDir
+	bondCmd.Stderr = os.Stderr
+	bondOut, err := bondCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bonding formula to bead: %w", err)
+	}
+
+	// Parse bond output - the wisp root becomes the compound root
+	var bondResult struct {
+		RootID string `json:"root_id"`
+	}
+	if err := json.Unmarshal(bondOut, &bondResult); err == nil && bondResult.RootID != "" {
+		wispRootID = bondResult.RootID
+	}
+
+	return &FormulaOnBeadResult{
+		WispRootID: wispRootID,
+		BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
+	}, nil
+}
+
+// CookFormula cooks a formula to ensure its proto exists.
+// This is useful for batch mode where we cook once before processing multiple beads.
+func CookFormula(formulaName, workDir string) error {
+	cookCmd := exec.Command("bd", "cook", formulaName)
+	cookCmd.Dir = workDir
+	cookCmd.Stderr = os.Stderr
+	return cookCmd.Run()
 }

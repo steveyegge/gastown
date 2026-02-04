@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -58,11 +58,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -75,15 +75,17 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist in deaconDir where session runs.
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command with initial prompt for autonomous patrol.
-	// The prompt triggers GUPP: deacon starts patrol immediately without waiting for input.
-	// This prevents the agent from sitting idle at the prompt after SessionStart hooks run.
-	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -120,19 +122,6 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
 
 	return nil
 }

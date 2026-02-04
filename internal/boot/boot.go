@@ -4,6 +4,7 @@
 package boot
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,16 +12,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
-
-// SessionName is the tmux session name for Boot.
-// Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
-// matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"
-// would match when checking for "hq-deacon", causing HasSession("hq-deacon")
-// to return true when only Boot is running.
-const SessionName = "gt-boot"
 
 // MarkerFileName is the lock file for Boot startup coordination.
 const MarkerFileName = ".boot-running"
@@ -40,11 +36,12 @@ type Status struct {
 
 // Boot manages the Boot watchdog lifecycle.
 type Boot struct {
-	townRoot  string
-	bootDir   string // ~/gt/deacon/dogs/boot/
-	deaconDir string // ~/gt/deacon/
-	tmux      *tmux.Tmux
-	degraded  bool
+	townRoot   string
+	bootDir    string // ~/gt/deacon/dogs/boot/
+	deaconDir  string // ~/gt/deacon/
+	tmux       *tmux.Tmux
+	degraded   bool
+	lockHandle *flock.Flock // held during triage execution
 }
 
 // New creates a new Boot manager.
@@ -81,32 +78,43 @@ func (b *Boot) IsRunning() bool {
 
 // IsSessionAlive checks if the Boot tmux session exists.
 func (b *Boot) IsSessionAlive() bool {
-	has, err := b.tmux.HasSession(SessionName)
+	has, err := b.tmux.HasSession(session.BootSessionName())
 	return err == nil && has
 }
 
-// AcquireLock creates the marker file to indicate Boot is starting.
-// Returns error if Boot is already running.
+// AcquireLock acquires an exclusive flock on the marker file.
+// Returns error if another triage is already running.
+// Uses flock instead of session existence check because triage runs inside
+// the Boot session - checking session existence would always fail.
 func (b *Boot) AcquireLock() error {
-	if b.IsRunning() {
-		return fmt.Errorf("boot is already running (session exists)")
-	}
-
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Create marker file
-	f, err := os.Create(b.markerPath())
+	// Use flock for actual mutual exclusion
+	b.lockHandle = flock.New(b.markerPath())
+	locked, err := b.lockHandle.TryLock()
 	if err != nil {
-		return fmt.Errorf("creating marker: %w", err)
+		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	return f.Close()
+	if !locked {
+		return fmt.Errorf("boot triage is already running (lock held)")
+	}
+
+	return nil
 }
 
-// ReleaseLock removes the marker file.
+// ReleaseLock releases the flock and removes the marker file.
 func (b *Boot) ReleaseLock() error {
-	return os.Remove(b.markerPath())
+	if b.lockHandle != nil {
+		if err := b.lockHandle.Unlock(); err != nil {
+			return fmt.Errorf("releasing lock: %w", err)
+		}
+		b.lockHandle = nil
+	}
+	// Remove marker file (ignore error if already gone)
+	_ = os.Remove(b.markerPath())
+	return nil
 }
 
 // SaveStatus saves Boot's execution status.
@@ -145,10 +153,10 @@ func (b *Boot) LoadStatus() (*Status, error) {
 // Boot runs the mol-boot-triage molecule and exits when done.
 // In degraded mode (no tmux), it runs in a subprocess.
 // The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+// Boot is ephemeral - each spawn kills any existing session and starts fresh.
 func (b *Boot) Spawn(agentOverride string) error {
-	if b.IsRunning() {
-		return fmt.Errorf("boot is already running")
-	}
+	// No IsRunning() guard here - Boot is ephemeral by design.
+	// spawnTmux() kills any existing session before spawning fresh.
 
 	// Check for degraded mode
 	if b.degraded {
@@ -163,7 +171,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first.
 	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	if b.IsSessionAlive() {
-		_ = b.tmux.KillSessionWithProcesses(SessionName)
+		_ = b.tmux.KillSessionWithProcesses(session.BootSessionName())
 	}
 
 	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
@@ -171,22 +179,26 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Build startup command with optional agent override
-	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "boot",
+		Sender:    "daemon",
+		Topic:     "triage",
+	}, "Run `" + cli.Name() + " boot triage` now.")
+
 	var startCmd string
 	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", "gt boot triage", agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", initialPrompt)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := b.tmux.NewSessionWithCommand(SessionName, b.bootDir, startCmd); err != nil {
+	if err := b.tmux.NewSessionWithCommand(session.BootSessionName(), b.bootDir, startCmd); err != nil {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
@@ -196,7 +208,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		TownRoot: b.townRoot,
 	})
 	for k, v := range envVars {
-		_ = b.tmux.SetEnvironment(SessionName, k, v)
+		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
 	}
 
 	return nil

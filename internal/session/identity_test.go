@@ -250,3 +250,71 @@ func TestParseSessionName_RoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		want    AgentIdentity
+		wantErr bool
+	}{
+		{
+			name:    "mayor",
+			address: "mayor/",
+			want:    AgentIdentity{Role: RoleMayor},
+		},
+		{
+			name:    "deacon",
+			address: "deacon",
+			want:    AgentIdentity{Role: RoleDeacon},
+		},
+		{
+			name:    "witness",
+			address: "gastown/witness",
+			want:    AgentIdentity{Role: RoleWitness, Rig: "gastown"},
+		},
+		{
+			name:    "refinery",
+			address: "rig-a/refinery",
+			want:    AgentIdentity{Role: RoleRefinery, Rig: "rig-a"},
+		},
+		{
+			name:    "crew",
+			address: "gastown/crew/max",
+			want:    AgentIdentity{Role: RoleCrew, Rig: "gastown", Name: "max"},
+		},
+		{
+			name:    "polecat explicit",
+			address: "gastown/polecats/nux",
+			want:    AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "nux"},
+		},
+		{
+			name:    "polecat canonical",
+			address: "gastown/nux",
+			want:    AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "nux"},
+		},
+		{
+			name:    "invalid",
+			address: "gastown/crew",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseAddress(tt.address)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseAddress(%q) error = %v", tt.address, err)
+			}
+			if *got != tt.want {
+				t.Fatalf("ParseAddress(%q) = %#v, want %#v", tt.address, *got, tt.want)
+			}
+		})
+	}
+}

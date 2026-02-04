@@ -467,6 +467,12 @@ func runOrphansKill(cmd *cobra.Command, args []string) error {
 	// Kill orphaned processes
 	if len(procOrphans) > 0 {
 		fmt.Printf("\nKilling orphaned processes...\n")
+		// Use SIGKILL with --force for immediate termination, SIGTERM otherwise
+		signal := syscall.SIGTERM
+		if orphansKillForce {
+			signal = syscall.SIGKILL
+		}
+
 		var killed, failed int
 		for _, o := range procOrphans {
 			proc, err := os.FindProcess(o.PID)
@@ -476,7 +482,7 @@ func runOrphansKill(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			if err := proc.Signal(syscall.SIGTERM); err != nil {
+			if err := proc.Signal(signal); err != nil {
 				if err == os.ErrProcessDone {
 					fmt.Printf("  %s PID %d: already terminated\n", style.Dim.Render("○"), o.PID)
 					continue
@@ -712,6 +718,12 @@ func runOrphansKillProcesses(cmd *cobra.Command, args []string) error {
 	}
 
 	// Kill the processes
+	// Use SIGKILL with --force for immediate termination, SIGTERM otherwise
+	signal := syscall.SIGTERM
+	if orphansProcsForce {
+		signal = syscall.SIGKILL
+	}
+
 	var killed, failed int
 	for _, o := range orphans {
 		proc, err := os.FindProcess(o.PID)
@@ -721,8 +733,7 @@ func runOrphansKillProcesses(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Send SIGTERM first for graceful shutdown
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if err := proc.Signal(signal); err != nil {
 			// Process may have already exited
 			if err == os.ErrProcessDone {
 				fmt.Printf("  %s PID %d: already terminated\n", style.Dim.Render("○"), o.PID)
@@ -784,6 +795,12 @@ func runOrphansKillProcessesAggressive() error {
 	}
 
 	// Kill the processes
+	// Use SIGKILL with --force for immediate termination, SIGTERM otherwise
+	signal := syscall.SIGTERM
+	if orphansProcsForce {
+		signal = syscall.SIGKILL
+	}
+
 	var killed, failed int
 	for _, z := range zombies {
 		proc, err := os.FindProcess(z.PID)
@@ -793,8 +810,7 @@ func runOrphansKillProcessesAggressive() error {
 			continue
 		}
 
-		// Send SIGTERM first for graceful shutdown
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if err := proc.Signal(signal); err != nil {
 			// Process may have already exited
 			if err == os.ErrProcessDone {
 				fmt.Printf("  %s PID %d: already terminated\n", style.Dim.Render("○"), z.PID)

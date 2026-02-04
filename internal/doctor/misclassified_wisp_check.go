@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -122,19 +123,19 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 		}
 
 		var issue struct {
-			ID     string   `json:"id"`
-			Title  string   `json:"title"`
-			Status string   `json:"status"`
-			Type   string   `json:"issue_type"`
-			Labels []string `json:"labels"`
-			Wisp   bool     `json:"wisp"`
+			ID        string   `json:"id"`
+			Title     string   `json:"title"`
+			Status    string   `json:"status"`
+			Type      string   `json:"issue_type"`
+			Labels    []string `json:"labels"`
+			Ephemeral bool     `json:"ephemeral"`
 		}
 		if err := json.Unmarshal([]byte(line), &issue); err != nil {
 			continue
 		}
 
-		// Skip issues already marked as wisps
-		if issue.Wisp {
+		// Skip issues already marked as ephemeral/wisps
+		if issue.Ephemeral {
 			continue
 		}
 
@@ -193,14 +194,34 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 	return ""
 }
 
-// Fix marks misclassified issues as wisps using bd update.
+// Fix closes misclassified issues that should have been wisps.
+// Since bd does not support retroactively marking issues as ephemeral,
+// we close them with a descriptive close reason noting they were operational.
 func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
-	// Note: bd doesn't have a direct flag to set wisp:true on existing issues.
-	// The proper fix is to ensure issues are created with --ephemeral flag.
-	// For now, we just report the issues - they'll be cleaned up by wisp-gc
-	// if they become abandoned, or manually closed.
-	//
-	// A true fix would require bd to support: bd update <id> --ephemeral
-	// Until then, this check serves as a diagnostic.
-	return nil
+	if len(c.misclassified) == 0 {
+		return nil
+	}
+
+	var lastErr error
+
+	for _, wisp := range c.misclassified {
+		// Determine working directory: town-level or rig-level
+		var workDir string
+		if wisp.rigName == "town" {
+			workDir = ctx.TownRoot
+		} else {
+			workDir = filepath.Join(ctx.TownRoot, wisp.rigName)
+		}
+
+		// Close the issue with a descriptive reason
+		// Note: bd update does not support --ephemeral flag for existing issues
+		closeReason := fmt.Sprintf("Closed by doctor: %s (should have been ephemeral wisp)", wisp.reason)
+		cmd := exec.Command("bd", "close", wisp.id, "--reason", closeReason)
+		cmd.Dir = workDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			lastErr = fmt.Errorf("%s/%s: %v (%s)", wisp.rigName, wisp.id, err, string(output))
+		}
+	}
+
+	return lastErr
 }

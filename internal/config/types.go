@@ -39,6 +39,12 @@ type TownSettings struct {
 	Type    string `json:"type"`    // "town-settings"
 	Version int    `json:"version"` // schema version
 
+	// CLITheme controls CLI output color scheme.
+	// Values: "dark", "light", "auto" (default).
+	// "auto" lets the terminal emulator's background color guide the choice.
+	// Can be overridden by GT_THEME environment variable.
+	CLITheme string `json:"cli_theme,omitempty"`
+
 	// DefaultAgent is the name of the agent preset to use by default.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent name defined in settings/agents.json.
@@ -262,6 +268,11 @@ type RuntimeConfig struct {
 	// Default: ["--dangerously-skip-permissions"] for built-in agents.
 	// Empty array [] means no args (not "use defaults").
 	Args []string `json:"args"`
+
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
 
 	// InitialPrompt is an optional first message to send after startup.
 	// For claude, this is passed as the prompt argument.
@@ -570,6 +581,11 @@ func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
 	}
+	if provider == "opencode" {
+		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
+		// tmux pane_current_command may show "node" or "opencode" depending on how invoked.
+		return []string{"opencode", "node"}
+	}
 	if command != "" {
 		return []string{filepath.Base(command)}
 	}
@@ -590,6 +606,12 @@ func defaultReadyDelayMs(provider string) int {
 	}
 	if provider == "codex" {
 		return 3000
+	}
+	if provider == "opencode" {
+		// OpenCode requires delay-based detection because its TUI uses
+		// box-drawing characters (┃) that break prompt prefix matching.
+		// 8000ms provides reliable startup detection across models.
+		return 8000
 	}
 	return 0
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -191,7 +195,23 @@ func runSeanceTalk(sessionID, prompt string) error {
 	// Expand short IDs if needed (user might provide partial)
 	// For now, require full ID or let claude --resume handle it
 
+	// Clean up any orphaned symlinks from previous interrupted sessions
+	cleanupOrphanedSessionSymlinks()
+
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)
+
+	// Find the session in another account and symlink it to the current account
+	// This allows Claude to load sessions from any account while keeping
+	// the forked session in the current account
+	townRoot, _ := workspace.FindFromCwd()
+	cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
+	if err != nil {
+		// Not fatal - session might already be in current account
+		fmt.Printf("%s\n", style.Dim.Render("Note: "+err.Error()))
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 
 	// Build the command
 	args := []string{"--fork-session", "--resume", sessionID}
@@ -286,4 +306,428 @@ func formatEventTime(ts string) string {
 		return ts
 	}
 	return t.Local().Format("2006-01-02 15:04")
+}
+
+// sessionsIndex represents the structure of sessions-index.json files.
+// We use json.RawMessage for entries to preserve all fields when copying.
+type sessionsIndex struct {
+	Version int               `json:"version"`
+	Entries []json.RawMessage `json:"entries"`
+}
+
+// sessionsIndexEntry is a minimal struct to extract just the sessionId from an entry.
+type sessionsIndexEntry struct {
+	SessionID string `json:"sessionId"`
+}
+
+// sessionLocation contains the location info for a session.
+type sessionLocation struct {
+	configDir  string // The account's config directory
+	projectDir string // The project directory name (e.g., "-Users-jv-gt-gastown-crew-propane")
+}
+
+// sessionsIndexLockTimeout is how long to wait for the index lock.
+const sessionsIndexLockTimeout = 5 * time.Second
+
+// lockSessionsIndex acquires an exclusive lock on the sessions index file.
+// Returns the lock (caller must unlock) or error if lock cannot be acquired.
+// The lock file is created adjacent to the index file with a .lock suffix.
+func lockSessionsIndex(indexPath string) (*flock.Flock, error) {
+	lockPath := indexPath + ".lock"
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", err)
+	}
+
+	lock := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), sessionsIndexLockTimeout)
+	defer cancel()
+
+	locked, err := lock.TryLockContext(ctx, 100*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring lock: %w", err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("timeout waiting for sessions index lock")
+	}
+
+	return lock, nil
+}
+
+// findSessionLocation searches all account config directories for a session.
+// Returns the config directory and project directory that contain the session.
+func findSessionLocation(townRoot, sessionID string) *sessionLocation {
+	if townRoot == "" {
+		return nil
+	}
+
+	// Load accounts config
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	cfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return nil
+	}
+
+	// Search each account's config directory
+	for _, acct := range cfg.Accounts {
+		if acct.ConfigDir == "" {
+			continue
+		}
+
+		// Expand ~ in path
+		configDir := acct.ConfigDir
+		if strings.HasPrefix(configDir, "~/") {
+			home, _ := os.UserHomeDir()
+			configDir = filepath.Join(home, configDir[2:])
+		}
+
+		// Search all sessions-index.json files in this account
+		projectsDir := filepath.Join(configDir, "projects")
+		if _, err := os.Stat(projectsDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Walk through project directories
+		entries, err := os.ReadDir(projectsDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			indexPath := filepath.Join(projectsDir, entry.Name(), "sessions-index.json")
+			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+				continue
+			}
+
+			// Read and parse the sessions index
+			data, err := os.ReadFile(indexPath)
+			if err != nil {
+				continue
+			}
+
+			var index sessionsIndex
+			if err := json.Unmarshal(data, &index); err != nil {
+				continue
+			}
+
+			// Check if this index contains our session
+			for _, rawEntry := range index.Entries {
+				var e sessionsIndexEntry
+				if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
+					return &sessionLocation{
+						configDir:  configDir,
+						projectDir: entry.Name(),
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// symlinkSessionToCurrentAccount finds a session in any account and symlinks
+// it to the current account so Claude can access it.
+// Returns a cleanup function to remove the symlink after use.
+func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(), err error) {
+	// Find where the session lives
+	loc := findSessionLocation(townRoot, sessionID)
+	if loc == nil {
+		return nil, fmt.Errorf("session not found in any account")
+	}
+
+	// Get current account's config directory (resolve ~/.claude symlink)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting home directory: %w", err)
+	}
+
+	claudeDir := filepath.Join(home, ".claude")
+	currentConfigDir, err := filepath.EvalSymlinks(claudeDir)
+	if err != nil {
+		// ~/.claude might not be a symlink, use it directly
+		currentConfigDir = claudeDir
+	}
+
+	// If session is already in current account, nothing to do
+	if loc.configDir == currentConfigDir {
+		return nil, nil
+	}
+
+	// Source: the session file in the other account
+	sourceSessionFile := filepath.Join(loc.configDir, "projects", loc.projectDir, sessionID+".jsonl")
+
+	// Check source exists
+	if _, err := os.Stat(sourceSessionFile); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session file not found: %s", sourceSessionFile)
+	}
+
+	// Target: the project directory in current account
+	currentProjectDir := filepath.Join(currentConfigDir, "projects", loc.projectDir)
+
+	// Create project directory if it doesn't exist
+	if err := os.MkdirAll(currentProjectDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating project directory: %w", err)
+	}
+
+	// Symlink the specific session file
+	targetSessionFile := filepath.Join(currentProjectDir, sessionID+".jsonl")
+
+	// Check if target session file already exists
+	if info, err := os.Lstat(targetSessionFile); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Already a symlink - check if it points to the right place
+			existing, _ := os.Readlink(targetSessionFile)
+			if existing == sourceSessionFile {
+				// Already symlinked correctly, no cleanup needed
+				return nil, nil
+			}
+			// Different symlink, remove it
+			_ = os.Remove(targetSessionFile)
+		} else {
+			// Real file exists - session already in current account
+			return nil, nil
+		}
+	}
+
+	// Create the symlink to the session file
+	if err := os.Symlink(sourceSessionFile, targetSessionFile); err != nil {
+		return nil, fmt.Errorf("creating symlink: %w", err)
+	}
+
+	// Also need to update/create sessions-index.json so Claude can find the session
+	// Read source index to get the session entry
+	sourceIndexPath := filepath.Join(loc.configDir, "projects", loc.projectDir, "sessions-index.json")
+	sourceIndexData, err := os.ReadFile(sourceIndexPath)
+	if err != nil {
+		// Clean up the symlink we just created
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("reading source sessions index: %w", err)
+	}
+
+	var sourceIndex sessionsIndex
+	if err := json.Unmarshal(sourceIndexData, &sourceIndex); err != nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("parsing source sessions index: %w", err)
+	}
+
+	// Find the session entry (as raw JSON to preserve all fields)
+	var sessionEntry json.RawMessage
+	for _, rawEntry := range sourceIndex.Entries {
+		var e sessionsIndexEntry
+		if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
+			sessionEntry = rawEntry
+			break
+		}
+	}
+
+	if sessionEntry == nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("session not found in source index")
+	}
+
+	// Read or create target index (with file locking to prevent race conditions)
+	targetIndexPath := filepath.Join(currentProjectDir, "sessions-index.json")
+
+	// Acquire lock for read-modify-write operation
+	lock, err := lockSessionsIndex(targetIndexPath)
+	if err != nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("locking sessions index: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	var targetIndex sessionsIndex
+	if targetIndexData, err := os.ReadFile(targetIndexPath); err == nil {
+		_ = json.Unmarshal(targetIndexData, &targetIndex)
+	} else {
+		targetIndex.Version = 1
+	}
+
+	// Check if session already in target index
+	sessionInIndex := false
+	for _, rawEntry := range targetIndex.Entries {
+		var e sessionsIndexEntry
+		if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
+			sessionInIndex = true
+			break
+		}
+	}
+
+	// Add session to target index if not present
+	indexModified := false
+	if !sessionInIndex {
+		targetIndex.Entries = append(targetIndex.Entries, sessionEntry)
+		indexModified = true
+
+		// Write updated index
+		targetIndexData, err := json.MarshalIndent(targetIndex, "", "  ")
+		if err != nil {
+			_ = os.Remove(targetSessionFile)
+			return nil, fmt.Errorf("encoding target sessions index: %w", err)
+		}
+		if err := os.WriteFile(targetIndexPath, targetIndexData, 0600); err != nil {
+			_ = os.Remove(targetSessionFile)
+			return nil, fmt.Errorf("writing target sessions index: %w", err)
+		}
+	}
+
+	// Return cleanup function
+	cleanup = func() {
+		_ = os.Remove(targetSessionFile)
+		// If we modified the index, remove the entry we added
+		if indexModified {
+			// Acquire lock for read-modify-write operation
+			cleanupLock, lockErr := lockSessionsIndex(targetIndexPath)
+			if lockErr != nil {
+				// Best effort cleanup - proceed without lock
+				return
+			}
+			defer func() { _ = cleanupLock.Unlock() }()
+
+			// Re-read index, remove our entry, write it back
+			if data, err := os.ReadFile(targetIndexPath); err == nil {
+				var idx sessionsIndex
+				if json.Unmarshal(data, &idx) == nil {
+					newEntries := make([]json.RawMessage, 0, len(idx.Entries))
+					for _, rawEntry := range idx.Entries {
+						var e sessionsIndexEntry
+						if json.Unmarshal(rawEntry, &e) == nil && e.SessionID != sessionID {
+							newEntries = append(newEntries, rawEntry)
+						}
+					}
+					idx.Entries = newEntries
+					if newData, err := json.MarshalIndent(idx, "", "  "); err == nil {
+						_ = os.WriteFile(targetIndexPath, newData, 0600)
+					}
+				}
+			}
+		}
+	}
+
+	return cleanup, nil
+}
+
+// cleanupOrphanedSessionSymlinks removes stale session symlinks from the current account.
+// This handles cases where a previous seance was interrupted (e.g., SIGKILL) and
+// couldn't run its cleanup function. Call this at the start of seance operations.
+func cleanupOrphanedSessionSymlinks() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	claudeDir := filepath.Join(home, ".claude")
+	currentConfigDir, err := filepath.EvalSymlinks(claudeDir)
+	if err != nil {
+		currentConfigDir = claudeDir
+	}
+
+	projectsDir := filepath.Join(currentConfigDir, "projects")
+	if _, err := os.Stat(projectsDir); os.IsNotExist(err) {
+		return
+	}
+
+	// Walk through project directories
+	projectEntries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return
+	}
+
+	for _, projEntry := range projectEntries {
+		if !projEntry.IsDir() {
+			continue
+		}
+
+		projPath := filepath.Join(projectsDir, projEntry.Name())
+		files, err := os.ReadDir(projPath)
+		if err != nil {
+			continue
+		}
+
+		var orphanedSessionIDs []string
+
+		for _, f := range files {
+			if !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+
+			filePath := filepath.Join(projPath, f.Name())
+			info, err := os.Lstat(filePath)
+			if err != nil {
+				continue
+			}
+
+			// Only check symlinks
+			if info.Mode()&os.ModeSymlink == 0 {
+				continue
+			}
+
+			// Check if symlink target exists
+			target, err := os.Readlink(filePath)
+			if err != nil {
+				continue
+			}
+
+			if _, err := os.Stat(target); os.IsNotExist(err) {
+				// Target doesn't exist - this is an orphaned symlink
+				sessionID := strings.TrimSuffix(f.Name(), ".jsonl")
+				orphanedSessionIDs = append(orphanedSessionIDs, sessionID)
+				_ = os.Remove(filePath)
+			}
+		}
+
+		// Clean up orphaned entries from sessions-index.json
+		if len(orphanedSessionIDs) > 0 {
+			indexPath := filepath.Join(projPath, "sessions-index.json")
+
+			// Acquire lock for read-modify-write operation
+			lock, lockErr := lockSessionsIndex(indexPath)
+			if lockErr != nil {
+				// Best effort cleanup - skip this project if lock fails
+				continue
+			}
+
+			data, err := os.ReadFile(indexPath)
+			if err != nil {
+				_ = lock.Unlock()
+				continue
+			}
+
+			var index sessionsIndex
+			if err := json.Unmarshal(data, &index); err != nil {
+				_ = lock.Unlock()
+				continue
+			}
+
+			// Build a set of orphaned IDs for fast lookup
+			orphanedSet := make(map[string]bool)
+			for _, id := range orphanedSessionIDs {
+				orphanedSet[id] = true
+			}
+
+			// Filter out orphaned entries
+			newEntries := make([]json.RawMessage, 0, len(index.Entries))
+			for _, rawEntry := range index.Entries {
+				var e sessionsIndexEntry
+				if json.Unmarshal(rawEntry, &e) == nil && !orphanedSet[e.SessionID] {
+					newEntries = append(newEntries, rawEntry)
+				}
+			}
+
+			if len(newEntries) != len(index.Entries) {
+				index.Entries = newEntries
+				if newData, err := json.MarshalIndent(index, "", "  "); err == nil {
+					_ = os.WriteFile(indexPath, newData, 0600)
+				}
+			}
+
+			_ = lock.Unlock()
+		}
+	}
 }

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,9 +22,6 @@ import (
 // This prevents interleaving when multiple nudges arrive concurrently,
 // which can cause garbled input and missed Enter keys.
 var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
-
-// versionPattern matches Claude Code version numbers like "2.0.76"
-var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // validSessionNameRe validates session names to prevent shell injection
 var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -128,7 +127,8 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 		if !t.IsAgentRunning(name) {
 			// Zombie session: tmux alive but Claude dead
 			// Kill it so we can create a fresh one
-			if err := t.KillSession(name); err != nil {
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed
+			if err := t.KillSessionWithProcesses(name); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		} else {
@@ -147,16 +147,26 @@ func (t *Tmux) KillSession(name string) error {
 	return err
 }
 
+// processKillGracePeriod is how long to wait after SIGTERM before sending SIGKILL.
+// 2 seconds gives processes time to clean up gracefully. The previous 100ms was too short
+// and caused Claude processes to become orphans when they couldn't shut down in time.
+const processKillGracePeriod = 2 * time.Second
+
 // KillSessionWithProcesses explicitly kills all processes in a session before terminating it.
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
 // Process:
-// 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
+// 1. Get the pane's main process PID and its process group ID (PGID)
+// 2. Kill the entire process group (catches reparented processes that stayed in the group)
+// 3. Find all descendant processes recursively (catches any stragglers)
+// 4. Send SIGTERM/SIGKILL to descendants
+// 5. Kill the pane process itself
 // 6. Kill the tmux session
+//
+// The process group kill is critical because:
+// - pgrep -P only finds direct children (PPID matching)
+// - Processes that reparent to init (PID 1) are missed by pgrep
+// - But they typically stay in the same process group unless they call setsid()
 //
 // This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
@@ -168,7 +178,22 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
+		// First, kill the entire process group. This catches processes that:
+		// - Reparented to init (PID 1) when their parent died
+		// - Are not direct children but stayed in the same process group
+		// Note: Processes that called setsid() will have a new PGID and won't be killed here
+		pgid := getProcessGroupID(pid)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			// Kill process group using syscall.Kill() directly, rather than shelling
+			// out to /usr/bin/kill which has parsing ambiguity with negative PGIDs.
+			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
+			// syscall.Kill with negative PID targets the process group (POSIX).
+			pgidInt, _ := strconv.Atoi(pgid)
+			killProcessGroup(pgidInt)
+		}
+
+		// Also walk the process tree for any descendants that might have called setsid()
+		// and created their own process groups (rare but possible)
 		descendants := getAllDescendants(pid)
 
 		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
@@ -176,8 +201,8 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			_ = exec.Command("kill", "-TERM", dpid).Run()
 		}
 
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
+		// Wait for graceful shutdown (2s gives processes time to clean up)
+		time.Sleep(processKillGracePeriod)
 
 		// Send SIGKILL to any remaining descendants
 		for _, dpid := range descendants {
@@ -186,7 +211,7 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 
 		// Kill the pane process itself (may have called setsid() and detached)
 		_ = exec.Command("kill", "-TERM", pid).Run()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(processKillGracePeriod)
 		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
@@ -219,27 +244,45 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 	}
 
 	if pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
-		descendants := getAllDescendants(pid)
+		// Get the process group ID
+		pgid := getProcessGroupID(pid)
 
-		// Filter out excluded PIDs
-		var filtered []string
-		for _, dpid := range descendants {
-			if !exclude[dpid] {
-				filtered = append(filtered, dpid)
+		// Collect all PIDs to kill (from multiple sources)
+		toKill := make(map[string]bool)
+
+		// 1. Get all process group members (catches reparented processes)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			for _, member := range getProcessGroupMembers(pgid) {
+				if !exclude[member] {
+					toKill[member] = true
+				}
 			}
 		}
 
-		// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
-		for _, dpid := range filtered {
+		// 2. Get all descendant PIDs recursively (catches processes that called setsid())
+		descendants := getAllDescendants(pid)
+		for _, dpid := range descendants {
+			if !exclude[dpid] {
+				toKill[dpid] = true
+			}
+		}
+
+		// Convert to slice for iteration
+		var killList []string
+		for p := range toKill {
+			killList = append(killList, p)
+		}
+
+		// Send SIGTERM to all non-excluded processes
+		for _, dpid := range killList {
 			_ = exec.Command("kill", "-TERM", dpid).Run()
 		}
 
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
+		// Wait for graceful shutdown (2s gives processes time to clean up)
+		time.Sleep(processKillGracePeriod)
 
-		// Send SIGKILL to any remaining non-excluded descendants
-		for _, dpid := range filtered {
+		// Send SIGKILL to any remaining non-excluded processes
+		for _, dpid := range killList {
 			_ = exec.Command("kill", "-KILL", dpid).Run()
 		}
 
@@ -247,7 +290,7 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		// Only if not excluded
 		if !exclude[pid] {
 			_ = exec.Command("kill", "-TERM", pid).Run()
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(processKillGracePeriod)
 			_ = exec.Command("kill", "-KILL", pid).Run()
 		}
 	}
@@ -288,11 +331,11 @@ func getAllDescendants(pid string) []string {
 // This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
 //
 // Process:
-// 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
+// 1. Get the pane's main process PID and its process group ID (PGID)
+// 2. Kill the entire process group (catches reparented processes)
+// 3. Find all descendant processes recursively (catches any stragglers)
+// 4. Send SIGTERM/SIGKILL to descendants
+// 5. Kill the pane process itself
 //
 // This ensures Claude processes and all their children are properly terminated
 // before respawning the pane.
@@ -307,7 +350,18 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		return fmt.Errorf("pane PID is empty")
 	}
 
-	// Get all descendant PIDs recursively (returns deepest-first order)
+	// First, kill the entire process group. This catches processes that:
+	// - Reparented to init (PID 1) when their parent died
+	// - Are not direct children but stayed in the same process group
+	pgid := getProcessGroupID(pid)
+	if pgid != "" && pgid != "0" && pgid != "1" {
+		// Kill process group using syscall.Kill() directly.
+		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
+		pgidInt, _ := strconv.Atoi(pgid)
+		killProcessGroup(pgidInt)
+	}
+
+	// Also walk the process tree for any descendants that might have called setsid()
 	descendants := getAllDescendants(pid)
 
 	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
@@ -315,12 +369,77 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		_ = exec.Command("kill", "-TERM", dpid).Run()
 	}
 
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
+	// Wait for graceful shutdown (2s gives processes time to clean up)
+	time.Sleep(processKillGracePeriod)
 
 	// Send SIGKILL to any remaining descendants
 	for _, dpid := range descendants {
 		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	// Kill the pane process itself (may have called setsid() and detached,
+	// or may have no children like Claude Code)
+	_ = exec.Command("kill", "-TERM", pid).Run()
+	time.Sleep(processKillGracePeriod)
+	_ = exec.Command("kill", "-KILL", pid).Run()
+
+	return nil
+}
+
+// KillPaneProcessesExcluding is like KillPaneProcesses but excludes specified PIDs
+// from being killed. This is essential for self-handoff scenarios where the calling
+// process (e.g., gt handoff running inside Claude Code) needs to survive long enough
+// to call RespawnPane. Without exclusion, the caller would be killed before completing.
+//
+// The excluded PIDs should include the calling process and any ancestors that must
+// survive. After this function returns, RespawnPane's -k flag will send SIGHUP to
+// clean up the remaining processes.
+func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(pane)
+	if err != nil {
+		return fmt.Errorf("getting pane PID: %w", err)
+	}
+
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
+	}
+
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
+
+	// Filter out excluded PIDs
+	var filtered []string
+	for _, dpid := range descendants {
+		if !exclude[dpid] {
+			filtered = append(filtered, dpid)
+		}
+	}
+
+	// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining non-excluded descendants
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	// Kill the pane process itself only if not excluded
+	if !exclude[pid] {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
 	return nil
@@ -566,9 +685,43 @@ func getSessionNudgeLock(session string) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// IsSessionAttached returns true if the session has any clients attached.
+func (t *Tmux) IsSessionAttached(target string) bool {
+	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
+	return err == nil && attached == "1"
+}
+
+// WakePane triggers a SIGWINCH in a pane by resizing it slightly then restoring.
+// This wakes up Claude Code's event loop by simulating a terminal resize.
+//
+// When Claude runs in a detached tmux session, its TUI library may not process
+// stdin until a terminal event occurs. Attaching triggers SIGWINCH which wakes
+// the event loop. This function simulates that by doing a resize dance.
+//
+// Note: This always performs the resize. Use WakePaneIfDetached to skip
+// attached sessions where the wake is unnecessary.
+func (t *Tmux) WakePane(target string) {
+	// Resize pane down by 1 row, then up by 1 row
+	// This triggers SIGWINCH without changing the final pane size
+	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	time.Sleep(50 * time.Millisecond)
+	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+}
+
+// WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
+// This avoids unnecessary latency on attached sessions where Claude is
+// already processing terminal events.
+func (t *Tmux) WakePaneIfDetached(target string) {
+	if t.IsSessionAttached(target) {
+		return
+	}
+	t.WakePane(target)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Verification is the Witness's job (AI), not this function.
 //
 // IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
@@ -604,6 +757,8 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -611,6 +766,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// Serialize nudges to this pane to prevent interleaving
@@ -641,6 +797,8 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -728,16 +886,52 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasClaudeChild checks if a process has a child running claude/node.
-// Used when the pane command is a shell (bash, zsh) that launched claude.
-func hasClaudeChild(pid string) bool {
+// processMatchesNames checks if a process's binary name matches any of the given names.
+// Uses ps to get the actual command name from the process's executable path.
+// This handles cases where argv[0] is modified (e.g., Claude showing version "2.1.30").
+func processMatchesNames(pid string, names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	// Use ps to get the command name (COMM column gives the executable name)
+	cmd := exec.Command("ps", "-p", pid, "-o", "comm=")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// Get just the base name (in case it's a full path like /Users/.../claude)
+	commPath := strings.TrimSpace(string(out))
+	comm := filepath.Base(commPath)
+
+	// Check if any name matches
+	for _, name := range names {
+		if comm == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDescendantWithNames checks if a process has any descendant (child, grandchild, etc.)
+// matching any of the given names. Recursively traverses the process tree up to maxDepth.
+// Used when the pane command is a shell (bash, zsh) that launched an agent.
+func hasDescendantWithNames(pid string, names []string, depth int) bool {
+	const maxDepth = 10 // Prevent infinite loops in case of circular references
+	if len(names) == 0 || depth > maxDepth {
+		return false
+	}
 	// Use pgrep to find child processes
 	cmd := exec.Command("pgrep", "-P", pid, "-l")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	// Check if any child is node or claude
+	// Build a set of names for fast lookup
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+	// Check if any child matches, or recursively check grandchildren
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -747,13 +941,25 @@ func hasClaudeChild(pid string) bool {
 		// Format: "PID name" e.g., "29677 node"
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			name := parts[1]
-			if name == "node" || name == "claude" {
+			childPid := parts[0]
+			childName := parts[1]
+			// Direct match
+			if nameSet[childName] {
+				return true
+			}
+			// Recursive check of descendants
+			if hasDescendantWithNames(childPid, names, depth+1) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasChildWithNames checks if a process has a child matching any of the given names.
+// Deprecated: Use hasDescendantWithNames for more robust detection.
+func hasChildWithNames(pid string, names []string) bool {
+	return hasDescendantWithNames(pid, names, 0)
 }
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
@@ -950,40 +1156,9 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 	return cmd != ""
 }
 
-// IsClaudeRunning checks if Claude appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-// Claude can report as "node", "claude", or a version number like "2.0.76".
-// Also checks for child processes when the pane is a shell running claude via "bash -c".
-func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check for known command names first
-	if t.IsAgentRunning(session, "node", "claude") {
-		return true
-	}
-	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
-	cmd, err := t.GetPaneCommand(session)
-	if err != nil {
-		return false
-	}
-	if versionPattern.MatchString(cmd) {
-		return true
-	}
-	// If pane command is a shell, check for claude/node child processes.
-	// This handles the case where sessions are started with "bash -c 'export ... && claude ...'"
-	for _, shell := range constants.SupportedShells {
-		if cmd == shell {
-			pid, err := t.GetPanePID(session)
-			if err == nil && pid != "" {
-				return hasClaudeChild(pid)
-			}
-			break
-		}
-	}
-	return false
-}
-
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-// This is the runtime-config-aware version of IsAgentRunning.
+// Checks both pane command and child processes (for agents started via shell).
+// This is the unified agent detection method for all agent types.
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false
@@ -992,12 +1167,44 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if err != nil {
 		return false
 	}
+	// Check direct pane command match
 	for _, name := range processNames {
 		if cmd == name {
 			return true
 		}
 	}
-	return false
+	// Check for child processes if pane command is a shell or unrecognized.
+	// This handles:
+	// - Agents started with "bash -c 'export ... && agent ...'"
+	// - Claude Code showing version as argv[0] (e.g., "2.1.29")
+	pid, err := t.GetPanePID(session)
+	if err != nil || pid == "" {
+		return false
+	}
+	// If pane command is a shell, check descendants
+	for _, shell := range constants.SupportedShells {
+		if cmd == shell {
+			return hasDescendantWithNames(pid, processNames, 0)
+		}
+	}
+	// If pane command is unrecognized (not in processNames, not a shell),
+	// check if the process ITSELF matches (handles version-as-argv[0] like "2.1.30")
+	// before checking descendants.
+	if processMatchesNames(pid, processNames) {
+		return true
+	}
+	// Finally check descendants as fallback
+	return hasDescendantWithNames(pid, processNames, 0)
+}
+
+// IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
+// It reads GT_AGENT from the session environment to determine which process names to check.
+// Falls back to Claude's process names if GT_AGENT is not set (legacy sessions).
+// This is the preferred method for zombie detection across all agent types.
+func (t *Tmux) IsAgentAlive(session string) bool {
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	processNames := config.GetProcessNames(agentName) // Returns Claude defaults if empty
+	return t.IsRuntimeRunning(session, processNames)
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
@@ -1238,6 +1445,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetFeedBinding(session); err != nil {
 		return fmt.Errorf("setting feed binding: %w", err)
 	}
+	if err := t.SetAgentsBinding(session); err != nil {
+		return fmt.Errorf("setting agents binding: %w", err)
+	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
@@ -1247,11 +1457,17 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	return nil
 }
 
-// EnableMouseMode enables mouse support for a tmux session.
+// EnableMouseMode enables mouse support and clipboard integration for a tmux session.
 // This allows clicking to select panes/windows, scrolling with mouse wheel,
 // and dragging to resize panes. Hold Shift for native terminal text selection.
+// Also enables clipboard integration so copied text goes to system clipboard.
 func (t *Tmux) EnableMouseMode(session string) error {
-	_, err := t.run("set-option", "-t", session, "mouse", "on")
+	if _, err := t.run("set-option", "-t", session, "mouse", "on"); err != nil {
+		return err
+	}
+	// Enable clipboard integration with terminal (OSC 52)
+	// This allows copying text to system clipboard when selecting with mouse
+	_, err := t.run("set-option", "-t", session, "set-clipboard", "on")
 	return err
 }
 
@@ -1279,11 +1495,37 @@ func (t *Tmux) RespawnPane(pane, command string) error {
 	return err
 }
 
+// RespawnPaneWithWorkDir kills all processes in a pane and starts a new command
+// in the specified working directory. Use this when the pane's current working
+// directory may have been deleted.
+func (t *Tmux) RespawnPaneWithWorkDir(pane, workDir, command string) error {
+	args := []string{"respawn-pane", "-k", "-t", pane}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	args = append(args, command)
+	_, err := t.run(args...)
+	return err
+}
+
 // ClearHistory clears the scrollback history buffer for a pane.
 // This resets copy-mode display from [0/N] to [0/0].
 // The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
 func (t *Tmux) ClearHistory(pane string) error {
 	_, err := t.run("clear-history", "-t", pane)
+	return err
+}
+
+// SetRemainOnExit controls whether a pane stays around after its process exits.
+// When on, the pane remains with "[Exited]" status, allowing respawn-pane to restart it.
+// When off (default), the pane is destroyed when its process exits.
+// This is essential for handoff: set on before killing processes, so respawn-pane works.
+func (t *Tmux) SetRemainOnExit(pane string, on bool) error {
+	value := "on"
+	if !on {
+		value = "off"
+	}
+	_, err := t.run("set-option", "-t", pane, "remain-on-exit", value)
 	return err
 }
 
@@ -1359,6 +1601,54 @@ func (t *Tmux) SetFeedBinding(session string) error {
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
 	return err
+}
+
+// SetAgentsBinding configures C-b g to open the agent switcher popup menu.
+// This runs `gt agents` which displays a tmux popup with all Gas Town agents.
+//
+// IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+func (t *Tmux) SetAgentsBinding(session string) error {
+	// C-b g → gt agents for GT sessions, help message otherwise
+	_, err := t.run("bind-key", "-T", "prefix", "g",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"run-shell 'gt agents'",
+		"display-message 'C-b g is for Gas Town sessions only'")
+	return err
+}
+
+// CleanupOrphanedSessions scans for zombie Gas Town sessions and kills them.
+// A zombie session is one where tmux is alive but the Claude process has died.
+// This runs at `gt start` time to prevent session name conflicts and resource accumulation.
+//
+// Returns:
+//   - cleaned: number of zombie sessions that were killed
+//   - err: error if session listing failed (individual kill errors are logged but not returned)
+func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return 0, fmt.Errorf("listing sessions: %w", err)
+	}
+
+	for _, sess := range sessions {
+		// Only process Gas Town sessions (gt-* for rigs, hq-* for town-level)
+		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+			continue
+		}
+
+		// Check if the session is a zombie (tmux alive, agent dead)
+		if !t.IsAgentAlive(sess) {
+			// Kill the zombie session
+			if killErr := t.KillSessionWithProcesses(sess); killErr != nil {
+				// Log but continue - other sessions may still need cleanup
+				fmt.Printf("  warning: failed to kill orphaned session %s: %v\n", sess, killErr)
+				continue
+			}
+			cleaned++
+		}
+	}
+
+	return cleaned, nil
 }
 
 // SetPaneDiedHook sets a pane-died hook on a session to detect crashes.

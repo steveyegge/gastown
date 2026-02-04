@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -83,12 +83,13 @@ Batch Slinging:
 }
 
 var (
-	slingSubject  string
-	slingMessage  string
-	slingDryRun   bool
-	slingOnTarget string   // --on flag: target bead when slinging a formula
-	slingVars     []string // --var flag: formula variables (key=value)
-	slingArgs     string   // --args flag: natural language instructions for executor
+	slingSubject     string
+	slingMessage     string
+	slingDryRun      bool
+	slingOnTarget    string   // --on flag: target bead when slinging a formula
+	slingVars        []string // --var flag: formula variables (key=value)
+	slingArgs        string   // --args flag: natural language instructions for executor
+	slingHookRawBead bool     // --hook-raw-bead: hook raw bead without default formula (expert mode)
 
 	// Flags migrated for polecat spawning (used by sling for work assignment)
 	slingCreate   bool   // --create: create polecat if it doesn't exist
@@ -96,6 +97,8 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
+	slingNoBoot   bool   // --no-boot: skip waking witness+refinery after dispatch (G11)
 )
 
 func init() {
@@ -112,6 +115,9 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
+	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
+	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip waking witness+refinery after polecat dispatch (avoids dolt lock contention)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -130,9 +136,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// --var is only for standalone formula mode, not formula-on-bead mode
-	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+	// Normalize target arguments: trim trailing slashes from target to handle tab-completion
+	// artifacts like "gt sling sl-123 slingshot/" → "gt sling sl-123 slingshot"
+	// This makes sling more forgiving without breaking existing functionality.
+	// Note: Internal agent IDs like "mayor/" are outputs, not user inputs.
+	for i := range args {
+		args[i] = strings.TrimRight(args[i], "/")
 	}
 
 	// Batch mode detection: multiple beads with rig target
@@ -190,7 +199,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string // Working directory for running bd hook commands
+	var hookWorkDir string                  // Working directory for running bd hook commands
+	var hookSetAtomically bool              // True if hook was set during polecat spawn (skip redundant update)
+	var delayedDogInfo *DogDispatchInfo     // For delayed dog session start after hook is set
+	var newPolecatInfo *SpawnedPolecatInfo  // Spawned polecat info (session started after bead setup)
+	var isSelfSling bool                    // True if slinging to self (skip nudge - agent already knows)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -201,6 +214,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
+			isSelfSling = true
 		} else if dogName, isDog := IsDogTarget(target); isDog {
 			if slingDryRun {
 				if dogName == "" {
@@ -214,14 +228,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetPane = "<dog-pane>"
 			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
+				// Dispatch to dog with delayed session start
+				// Session starts after hook is set to avoid race condition
+				dispatchOpts := DogDispatchOptions{
+					Create:            slingCreate,
+					WorkDesc:          beadID,
+					DelaySessionStart: true,
+				}
+				dispatchInfo, dispatchErr := DispatchToDog(dogName, dispatchOpts)
 				if dispatchErr != nil {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
+				delayedDogInfo = dispatchInfo // Store for later session start
+				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
 			// Check if target is a rig name (auto-spawn polecat)
@@ -245,11 +265,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
+				newPolecatInfo = spawnInfo      // Store for later session start
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
 
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
+				if !slingNoBoot {
+					wakeRigAgents(rigName)
+				}
 			}
 		} else {
 			// Slinging to an existing agent
@@ -276,11 +299,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
 						}
 						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
+						newPolecatInfo = spawnInfo // Store for later session start
 						hookWorkDir = spawnInfo.ClonePath
+						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
 
-						// Wake witness and refinery to monitor the new polecat
-						wakeRigAgents(rigName)
+						// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
+						if !slingNoBoot {
+							wakeRigAgents(rigName)
+						}
 					} else {
 						return fmt.Errorf("resolving target: %w", err)
 					}
@@ -300,6 +326,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		isSelfSling = true
 		// Use self's working directory for bd commands
 		if selfWorkDir != "" {
 			hookWorkDir = selfWorkDir
@@ -395,6 +422,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Issue #288: Auto-apply mol-polecat-work when slinging bare bead to polecat.
+	// This ensures polecats get structured work guidance through formula-on-bead.
+	// Use --hook-raw-bead to bypass for expert/debugging scenarios.
+	if formulaName == "" && !slingHookRawBead && strings.Contains(targetAgent, "/polecats/") {
+		formulaName = "mol-polecat-work"
+		fmt.Printf("  Auto-applying %s for polecat work...\n", formulaName)
+	}
+
 	if slingDryRun {
 		if formulaName != "" {
 			fmt.Printf("Would instantiate formula %s:\n", formulaName)
@@ -422,80 +457,87 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
-		// Some bd mol commands don't support prefix routing, so we must run them from the
-		// rig directory that owns the bead's database.
-		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-
-		// Step 1: Cook the formula (ensures proto exists)
-		// Cook runs from rig directory to access the correct formula database
-		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
-		cookCmd.Dir = formulaWorkDir
-		cookCmd.Stderr = os.Stderr
-		if err := cookCmd.Run(); err != nil {
-			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
-		}
-
-		// Step 2: Create wisp with feature and issue variables from bead
-		// Run from rig directory so wisp is created in correct database
-		featureVar := fmt.Sprintf("feature=%s", info.Title)
-		issueVar := fmt.Sprintf("issue=%s", beadID)
-		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
-		wispCmd := exec.Command("bd", wispArgs...)
-		wispCmd.Dir = formulaWorkDir
-		wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
-		wispCmd.Stderr = os.Stderr
-		wispOut, err := wispCmd.Output()
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
-			return fmt.Errorf("creating wisp for formula %s: %w", formulaName, err)
+			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
 
-		// Parse wisp output to get the root ID
-		wispRootID, err := parseWispIDFromJSON(wispOut)
-		if err != nil {
-			return fmt.Errorf("parsing wisp output: %w", err)
-		}
-		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-		// Step 3: Bond wisp to original bead (creates compound)
-		// Use --no-daemon for mol bond (requires direct database access)
-		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
-		bondCmd := exec.Command("bd", bondArgs...)
-		bondCmd.Dir = formulaWorkDir
-		bondCmd.Stderr = os.Stderr
-		bondOut, err := bondCmd.Output()
-		if err != nil {
-			return fmt.Errorf("bonding formula to bead: %w", err)
-		}
-
-		// Parse bond output - the wisp root becomes the compound root
-		// After bonding, we hook the wisp root (which now contains the original bead)
-		var bondResult struct {
-			RootID string `json:"root_id"`
-		}
-		if err := json.Unmarshal(bondOut, &bondResult); err != nil {
-			// Fallback: use wisp root as the compound root
-			fmt.Printf("%s Could not parse bond output, using wisp root\n", style.Dim.Render("Warning:"))
-		} else if bondResult.RootID != "" {
-			wispRootID = bondResult.RootID
-		}
-
+		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), result.WispRootID)
 		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
-		// Record attached molecule after other description updates to avoid overwrite.
-		attachedMoleculeID = wispRootID
+		// Record attached molecule - will be stored in BASE bead (not wisp).
+		// The base bead is hooked, and its attached_molecule points to the wisp.
+		// This enables:
+		// - gt hook/gt prime: read base bead, follow attached_molecule to show wisp steps
+		// - gt done: close attached_molecule (wisp) first, then close base bead
+		// - Compound resolution: base bead -> attached_molecule -> wisp
+		attachedMoleculeID = result.WispRootID
 
-		// Update beadID to hook the compound root instead of bare bead
-		beadID = wispRootID
+		// NOTE: We intentionally keep beadID as the ORIGINAL base bead, not the wisp.
+		// The base bead is hooked so that:
+		// 1. gt done closes both the base bead AND the attached molecule (wisp)
+		// 2. The base bead's attached_molecule field points to the wisp for compound resolution
+		// Previously, this line incorrectly set beadID = wispRootID, causing:
+		// - Wisp hooked instead of base bead
+		// - attached_molecule stored as self-reference in wisp (meaningless)
+		// - Base bead left orphaned after gt done
 	}
 
-	// Hook the bead using bd update.
+	// Hook the bead using bd update with retry logic.
+	// Dolt can fail with concurrency errors (HTTP 400) when multiple agents write simultaneously.
+	// We retry with exponential backoff and verify the hook actually stuck.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking bead: %w", err)
+	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+	const maxRetries = 3
+	skipVerify := os.Getenv("GT_TEST_SKIP_HOOK_VERIFY") != "" // For tests with stub bd
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd.Dir = hookDir
+		hookCmd.Stderr = os.Stderr
+		if err := hookCmd.Run(); err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hooking bead after %d attempts: %w", maxRetries, err)
+		}
+
+		// Skip verification in test mode (stubs don't track state)
+		if skipVerify {
+			break
+		}
+
+		// Verify the hook actually stuck (Dolt concurrency can cause silent failures)
+		verifyInfo, verifyErr := getBeadInfo(beadID)
+		if verifyErr != nil {
+			lastErr = fmt.Errorf("verifying hook: %w", verifyErr)
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s Hook verification failed, retrying in %v...\n", style.Warning.Render("⚠"), backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("verifying hook after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		if verifyInfo.Status != "hooked" || verifyInfo.Assignee != targetAgent {
+			lastErr = fmt.Errorf("hook did not stick: status=%s, assignee=%s (expected hooked, %s)",
+				verifyInfo.Status, verifyInfo.Assignee, targetAgent)
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s %v, retrying in %v...\n", style.Warning.Render("⚠"), lastErr, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hook failed after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		// Success!
+		break
 	}
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
@@ -505,17 +547,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
-	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
-
-	// Auto-attach mol-polecat-work to polecat agent beads
-	// This ensures polecats have the standard work molecule attached for guidance.
-	// Only do this for bare beads (no --on formula), since formula-on-bead
-	// mode already attaches the formula as a molecule.
-	if formulaName == "" && strings.Contains(targetAgent, "/polecats/") {
-		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
-			// Warn but don't fail - polecat will still work without molecule
-			fmt.Printf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
-		}
+	// Skip if hook was already set atomically during polecat spawn - avoids "agent bead not found"
+	// error when polecat redirect setup fails (GH #gt-mzyk5: agent bead created in rig beads
+	// but updateAgentHookBead looks in polecat's local beads if redirect is missing).
+	if !hookSetAtomically {
+		updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 	}
 
 	// Store dispatcher in bead description (enables completion notification to dispatcher)
@@ -534,8 +570,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Record the attached molecule in the wisp's description.
-	// This is required for gt hook to recognize the molecule attachment.
+	// Store no_merge flag in bead (skips merge queue on completion)
+	if slingNoMerge {
+		if err := storeNoMergeInBead(beadID, true); err != nil {
+			fmt.Printf("%s Could not store no_merge in bead: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Record the attached molecule in the BASE bead's description.
+	// This field points to the wisp (compound root) and enables:
+	// - gt hook/gt prime: follow attached_molecule to show molecule steps
+	// - gt done: close attached_molecule (wisp) before closing hooked bead
+	// - Compound resolution: base bead -> attached_molecule -> wisp
 	if attachedMoleculeID != "" {
 		if err := storeAttachedMoleculeInBead(beadID, attachedMoleculeID); err != nil {
 			// Warn but don't fail - polecat can still work through steps
@@ -543,8 +591,37 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
+		}
+		targetPane = pane
+	}
+
+	// Start polecat session now that attached_molecule is set.
+	// This ensures polecat sees the molecule when gt prime runs on session start.
+	freshlySpawned := newPolecatInfo != nil
+	if freshlySpawned {
+		pane, err := newPolecatInfo.StartSession()
+		if err != nil {
+			return fmt.Errorf("starting polecat session: %w", err)
+		}
+		targetPane = pane
+	}
+
 	// Try to inject the "start now" prompt (graceful if no tmux)
-	if targetPane == "" {
+	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Skip for self-sling - agent is currently processing the sling command and will see
+	// the hooked work on next turn. Nudging would inject text while agent is busy.
+	if freshlySpawned {
+		// Fresh polecat already got StartupNudge from SessionManager.Start()
+	} else if isSelfSling {
+		// Self-sling: agent already knows about the work (just slung it)
+		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
+	} else if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
 		// Ensure agent is ready before nudging (prevents race condition where

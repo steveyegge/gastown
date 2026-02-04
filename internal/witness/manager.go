@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -101,7 +101,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		if t.IsAgentAlive(sessionID) {
 			// Healthy - Claude is running
 			return ErrAlreadyRunning
 		}
@@ -116,19 +116,19 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure Claude settings exist in witness/ (not witness/rig/) so we don't
+	// Ensure runtime settings exist in witness/ (not witness/rig/) so we don't
 	// write into the source repo. Claude walks up the tree to find settings.
 	witnessParentDir := filepath.Join(m.rig.Path, "witness")
-	if err := claude.EnsureSettingsForRole(witnessParentDir, "witness"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	townRoot := m.townRoot()
+	runtimeConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(witnessParentDir, "witness", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	roleConfig, err := m.roleConfig()
 	if err != nil {
 		return err
 	}
-
-	townRoot := m.townRoot()
 
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
@@ -182,20 +182,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/witness", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("witness", witnessDir)) // Non-fatal
-
 	return nil
 }
 
@@ -236,9 +222,11 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
-	// Add initial prompt for autonomous patrol startup.
-	// The prompt triggers GUPP: witness starts patrol immediately without waiting for input.
-	initialPrompt := "I am Witness for " + rigName + ". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/witness", rigName),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.")
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)
