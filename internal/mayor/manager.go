@@ -33,14 +33,20 @@ func NewManager(townRoot string) *Manager {
 }
 
 // SessionName returns the tmux session name for the mayor.
-// This is a package-level function for convenience.
+// Deprecated: Use SessionNameForTown for multi-town support.
 func SessionName() string {
 	return session.MayorSessionName()
 }
 
+// SessionNameForTown returns the tmux session name for the mayor in a specific town.
+func SessionNameForTown(townRoot string) string {
+	return session.MayorSessionNameForTown(townRoot)
+}
+
 // SessionName returns the tmux session name for the mayor.
+// Uses the manager's townRoot for multi-town support.
 func (m *Manager) SessionName() string {
-	return SessionName()
+	return session.MayorSessionNameForTown(m.townRoot)
 }
 
 // mayorDir returns the working directory for the mayor.

@@ -23,6 +23,7 @@ type AgentIdentity struct {
 	Role Role   // mayor, deacon, witness, refinery, crew, polecat
 	Rig  string // rig name (empty for mayor/deacon)
 	Name string // crew/polecat name (empty for mayor/deacon/witness/refinery)
+	Town string // town ID for town-scoped sessions (mayor/deacon)
 }
 
 // ParseAddress parses a mail-style address into an AgentIdentity.
@@ -81,8 +82,10 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 // ParseSessionName parses a tmux session name into an AgentIdentity.
 //
 // Session name formats:
-//   - hq-mayor → Role: mayor (town-level, one per machine)
-//   - hq-deacon → Role: deacon (town-level, one per machine)
+//   - hq-mayor → Role: mayor (legacy, town-level)
+//   - hq-{townID}-mayor → Role: mayor, Town: {townID} (multi-town)
+//   - hq-deacon → Role: deacon (legacy, town-level)
+//   - hq-{townID}-deacon → Role: deacon, Town: {townID} (multi-town)
 //   - gt-<rig>-witness → Role: witness, Rig: <rig>
 //   - gt-<rig>-refinery → Role: refinery, Rig: <rig>
 //   - gt-<rig>-crew-<name> → Role: crew, Rig: <rig>, Name: <name>
@@ -95,12 +98,25 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 	// Check for town-level roles (hq- prefix)
 	if strings.HasPrefix(session, HQPrefix) {
 		suffix := strings.TrimPrefix(session, HQPrefix)
+
+		// Legacy format: hq-mayor, hq-deacon
 		if suffix == "mayor" {
 			return &AgentIdentity{Role: RoleMayor}, nil
 		}
 		if suffix == "deacon" {
 			return &AgentIdentity{Role: RoleDeacon}, nil
 		}
+
+		// New format: hq-{townID}-mayor, hq-{townID}-deacon
+		if strings.HasSuffix(suffix, "-mayor") {
+			townID := strings.TrimSuffix(suffix, "-mayor")
+			return &AgentIdentity{Role: RoleMayor, Town: townID}, nil
+		}
+		if strings.HasSuffix(suffix, "-deacon") {
+			townID := strings.TrimSuffix(suffix, "-deacon")
+			return &AgentIdentity{Role: RoleDeacon, Town: townID}, nil
+		}
+
 		return nil, fmt.Errorf("invalid session name %q: unknown hq- role", session)
 	}
 
@@ -149,11 +165,18 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 }
 
 // SessionName returns the tmux session name for this identity.
+// For town-scoped roles (mayor/deacon), uses Town field if set.
 func (a *AgentIdentity) SessionName() string {
 	switch a.Role {
 	case RoleMayor:
+		if a.Town != "" {
+			return fmt.Sprintf("%s%s-mayor", HQPrefix, a.Town)
+		}
 		return MayorSessionName()
 	case RoleDeacon:
+		if a.Town != "" {
+			return fmt.Sprintf("%s%s-deacon", HQPrefix, a.Town)
+		}
 		return DeaconSessionName()
 	case RoleWitness:
 		return WitnessSessionName(a.Rig)

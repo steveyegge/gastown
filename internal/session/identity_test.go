@@ -11,18 +11,39 @@ func TestParseSessionName(t *testing.T) {
 		wantRole Role
 		wantRig  string
 		wantName string
+		wantTown string
 		wantErr  bool
 	}{
-		// Town-level roles (hq-mayor, hq-deacon)
+		// Town-level roles (hq-mayor, hq-deacon) - legacy format
 		{
-			name:     "mayor",
+			name:     "mayor legacy",
 			session:  "hq-mayor",
 			wantRole: RoleMayor,
 		},
 		{
-			name:     "deacon",
+			name:     "deacon legacy",
 			session:  "hq-deacon",
 			wantRole: RoleDeacon,
+		},
+
+		// Town-scoped roles (hq-{townID}-mayor, hq-{townID}-deacon)
+		{
+			name:     "mayor town-scoped",
+			session:  "hq-gt-mayor",
+			wantRole: RoleMayor,
+			wantTown: "gt",
+		},
+		{
+			name:     "deacon town-scoped",
+			session:  "hq-gastown-deacon",
+			wantRole: RoleDeacon,
+			wantTown: "gastown",
+		},
+		{
+			name:     "mayor town-scoped hyphenated",
+			session:  "hq-my-town-mayor",
+			wantRole: RoleMayor,
+			wantTown: "my-town",
 		},
 
 		// Witness (simple rig)
@@ -129,6 +150,9 @@ func TestParseSessionName(t *testing.T) {
 			if got.Name != tt.wantName {
 				t.Errorf("ParseSessionName(%q).Name = %v, want %v", tt.session, got.Name, tt.wantName)
 			}
+			if got.Town != tt.wantTown {
+				t.Errorf("ParseSessionName(%q).Town = %v, want %v", tt.session, got.Town, tt.wantTown)
+			}
 		})
 	}
 }
@@ -140,14 +164,24 @@ func TestAgentIdentity_SessionName(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "mayor",
+			name:     "mayor legacy",
 			identity: AgentIdentity{Role: RoleMayor},
 			want:     "hq-mayor",
 		},
 		{
-			name:     "deacon",
+			name:     "deacon legacy",
 			identity: AgentIdentity{Role: RoleDeacon},
 			want:     "hq-deacon",
+		},
+		{
+			name:     "mayor town-scoped",
+			identity: AgentIdentity{Role: RoleMayor, Town: "gt"},
+			want:     "hq-gt-mayor",
+		},
+		{
+			name:     "deacon town-scoped",
+			identity: AgentIdentity{Role: RoleDeacon, Town: "gastown"},
+			want:     "hq-gastown-deacon",
 		},
 		{
 			name:     "witness",
@@ -232,6 +266,8 @@ func TestParseSessionName_RoundTrip(t *testing.T) {
 	sessions := []string{
 		"hq-mayor",
 		"hq-deacon",
+		"hq-gt-mayor",
+		"hq-gastown-deacon",
 		"gt-gastown-witness",
 		"gt-foo-bar-refinery",
 		"gt-gastown-crew-max",

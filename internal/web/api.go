@@ -92,6 +92,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleMailRead(w, r)
 	case path == "/mail/send" && r.Method == http.MethodPost:
 		h.handleMailSend(w, r)
+	case path == "/nudge" && r.Method == http.MethodPost:
+		h.handleNudge(w, r)
 	case path == "/issues/show" && r.Method == http.MethodGet:
 		h.handleIssueShow(w, r)
 	case path == "/pr/show" && r.Method == http.MethodGet:
@@ -349,6 +351,40 @@ func (h *APIHandler) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Message sent",
+		"output":  output,
+	})
+}
+
+// NudgeRequest is the request body for /api/nudge.
+type NudgeRequest struct {
+	Target  string `json:"target"`
+	Message string `json:"message"`
+}
+
+// handleNudge sends a nudge to an agent session.
+func (h *APIHandler) handleNudge(w http.ResponseWriter, r *http.Request) {
+	var req NudgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Target == "" || req.Message == "" {
+		h.sendError(w, "Missing required fields (target, message)", http.StatusBadRequest)
+		return
+	}
+
+	// Execute gt nudge command
+	output, err := h.runGtCommand(r.Context(), 30*time.Second, []string{"nudge", req.Target, req.Message})
+	if err != nil {
+		h.sendError(w, "Failed to nudge: "+err.Error()+"\n"+output, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Nudge sent",
 		"output":  output,
 	})
 }

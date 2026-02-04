@@ -106,3 +106,64 @@ func TestPrefix(t *testing.T) {
 		t.Errorf("Prefix = %q, want %q", Prefix, want)
 	}
 }
+
+func TestTownIDFromRoot(t *testing.T) {
+	tests := []struct {
+		townRoot string
+		want     string
+	}{
+		{"/Users/user/gt", "gt"},
+		{"/Users/user/gastown", "gastown"},
+		{"/home/user/my-town", "my-town"},
+		{"/opt/gas_town", "gas_town"},
+		{"/Users/user/gt/", "gt"}, // trailing slash
+		{"", "default"},           // empty path
+		{"/", "default"},          // root path with no base name
+	}
+	for _, tt := range tests {
+		t.Run(tt.townRoot, func(t *testing.T) {
+			got := TownIDFromRoot(tt.townRoot)
+			if got != tt.want {
+				t.Errorf("TownIDFromRoot(%q) = %q, want %q", tt.townRoot, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMayorSessionNameForTown(t *testing.T) {
+	tests := []struct {
+		townRoot string
+		want     string
+	}{
+		{"/Users/user/gt", "hq-gt-mayor"},
+		{"/Users/user/gastown", "hq-gastown-mayor"},
+		{"/home/user/my-town", "hq-my-town-mayor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.townRoot, func(t *testing.T) {
+			got := MayorSessionNameForTown(tt.townRoot)
+			if got != tt.want {
+				t.Errorf("MayorSessionNameForTown(%q) = %q, want %q", tt.townRoot, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeaconSessionNameForTown(t *testing.T) {
+	tests := []struct {
+		townRoot string
+		want     string
+	}{
+		{"/Users/user/gt", "hq-gt-deacon"},
+		{"/Users/user/gastown", "hq-gastown-deacon"},
+		{"/home/user/my-town", "hq-my-town-deacon"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.townRoot, func(t *testing.T) {
+			got := DeaconSessionNameForTown(tt.townRoot)
+			if got != tt.want {
+				t.Errorf("DeaconSessionNameForTown(%q) = %q, want %q", tt.townRoot, got, tt.want)
+			}
+		})
+	}
+}

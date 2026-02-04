@@ -33,14 +33,20 @@ func NewManager(townRoot string) *Manager {
 }
 
 // SessionName returns the tmux session name for the deacon.
-// This is a package-level function for convenience.
+// Deprecated: Use SessionNameForTown for multi-town support.
 func SessionName() string {
 	return session.DeaconSessionName()
 }
 
+// SessionNameForTown returns the tmux session name for the deacon in a specific town.
+func SessionNameForTown(townRoot string) string {
+	return session.DeaconSessionNameForTown(townRoot)
+}
+
 // SessionName returns the tmux session name for the deacon.
+// Uses the manager's townRoot for multi-town support.
 func (m *Manager) SessionName() string {
-	return SessionName()
+	return session.DeaconSessionNameForTown(m.townRoot)
 }
 
 // deaconDir returns the working directory for the deacon.

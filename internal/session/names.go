@@ -3,6 +3,8 @@ package session
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 )
 
 // Prefix is the common prefix for rig-level Gas Town tmux sessions.
@@ -11,16 +13,59 @@ const Prefix = "gt-"
 // HQPrefix is the prefix for town-level services (Mayor, Deacon).
 const HQPrefix = "hq-"
 
+// TownIDFromRoot derives a unique town identifier from the town root path.
+// Uses the base directory name, sanitized for tmux session names.
+// Examples:
+//   - /Users/user/gt → "gt"
+//   - /Users/user/gastown → "gastown"
+//   - /home/user/my-town → "my-town"
+func TownIDFromRoot(townRoot string) string {
+	// Clean and get base name
+	clean := filepath.Clean(townRoot)
+	base := filepath.Base(clean)
+
+	// Sanitize for tmux session names (alphanumeric, dash, underscore)
+	var sanitized strings.Builder
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	result := sanitized.String()
+	if result == "" {
+		result = "default"
+	}
+	return result
+}
+
 // MayorSessionName returns the session name for the Mayor agent.
-// One mayor per machine - multi-town requires containers/VMs for isolation.
+// Deprecated: Use MayorSessionNameForTown for multi-town support.
 func MayorSessionName() string {
 	return HQPrefix + "mayor"
 }
 
+// MayorSessionNameForTown returns the session name for the Mayor agent in a specific town.
+// Format: hq-{townID}-mayor
+// This allows multiple towns on the same machine, each with their own Mayor.
+func MayorSessionNameForTown(townRoot string) string {
+	townID := TownIDFromRoot(townRoot)
+	return fmt.Sprintf("%s%s-mayor", HQPrefix, townID)
+}
+
 // DeaconSessionName returns the session name for the Deacon agent.
-// One deacon per machine - multi-town requires containers/VMs for isolation.
+// Deprecated: Use DeaconSessionNameForTown for multi-town support.
 func DeaconSessionName() string {
 	return HQPrefix + "deacon"
+}
+
+// DeaconSessionNameForTown returns the session name for the Deacon agent in a specific town.
+// Format: hq-{townID}-deacon
+// This allows multiple towns on the same machine, each with their own Deacon.
+func DeaconSessionNameForTown(townRoot string) string {
+	townID := TownIDFromRoot(townRoot)
+	return fmt.Sprintf("%s%s-deacon", HQPrefix, townID)
 }
 
 // WitnessSessionName returns the session name for a rig's Witness agent.
