@@ -387,6 +387,7 @@ if [[ "$1" == "init" ]]; then
   # Simulate successful bd init
   exit 0
 fi
+mkdir $BEADS_DIR
 exit 0
 `
 	windowsScript := "@echo off\r\nif \"%1\"==\"init\" exit /b 0\r\nexit /b 0\r\n"
@@ -411,15 +412,12 @@ exit 0
 	}
 }
 
-func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
+func TestInitBeadsExitsOnFailure(t *testing.T) {
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
 	script := `#!/usr/bin/env bash
 set -e
-if [[ -n "$BEADS_DIR_LOG" ]]; then
-  echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
-fi
 cmd="$1"
 shift
 if [[ "$cmd" == "init" ]]; then
@@ -429,27 +427,21 @@ fi
 echo "unexpected command: $cmd" >&2
 exit 1
 `
-	windowsScript := "@echo off\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nif \"%1\"==\"init\" (\r\n  exit /b 1\r\n)\r\nexit /b 1\r\n"
+	windowsScript := "@echo off\r\nif \"%1\"==\"init\" (\r\n  exit /b 1\r\n)\r\nexit /b 1\r\n"
 
 	binDir := writeFakeBD(t, script, windowsScript)
-	beadsDirLog := filepath.Join(t.TempDir(), "beads-dir.log")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "gt"); err != nil {
-		t.Fatalf("initBeads: %v", err)
+	err := manager.initBeads(rigPath, "gt")
+	if err == nil {
+		t.Fatal("initBeads should have returned an error when bd init fails")
 	}
 
-	configPath := filepath.Join(beadsDir, "config.yaml")
-	config, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("reading config.yaml: %v", err)
+	// Verify .beads directory was NOT created
+	if _, statErr := os.Stat(beadsDir); !os.IsNotExist(statErr) {
+		t.Errorf("expected .beads directory to not exist after failed init, but it does")
 	}
-	if string(config) != "prefix: gt\n" {
-		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
-	}
-	assertBeadsDirLog(t, beadsDirLog, beadsDir)
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
