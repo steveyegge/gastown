@@ -464,6 +464,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/rigs/{rig}/polecats/{name}", s.handleGetPolecat)
 	mux.HandleFunc("POST /api/rigs/{rig}/polecats/{name}/nuke", s.handleNukePolecat)
 
+	// Polecat logs
+	mux.HandleFunc("GET /api/rigs/{rig}/polecats/{name}/logs", s.handlePolecatLogs)
+
 	// Refinery
 	mux.HandleFunc("GET /api/rigs/{rig}/refinery", s.handleRefineryStatus)
 	mux.HandleFunc("POST /api/rigs/{rig}/refinery/start", s.handleRefineryStart)
@@ -490,6 +493,11 @@ func (s *Server) Start() error {
 
 	// Nudge
 	mux.HandleFunc("POST /api/nudge", s.handleNudge)
+
+	// Sessions & branches (for Blaze frontend)
+	mux.HandleFunc("GET /api/rigs/{rig}/sessions", s.handleListSessions)
+	mux.HandleFunc("GET /api/rigs/{rig}/branches", s.handleListBranches)
+	mux.HandleFunc("GET /api/rigs/{rig}/logs/stream", s.handleLogStream)
 
 	// Dashboard (HTML UI) - mount if enabled
 	if s.includeDashboard {
@@ -553,6 +561,7 @@ func (s *Server) Start() error {
 	fmt.Printf("     GET  /api/rigs/{rig}/polecats\n")
 	fmt.Printf("     GET  /api/rigs/{rig}/polecats/{name}\n")
 	fmt.Printf("     POST /api/rigs/{rig}/polecats/{name}/nuke\n")
+	fmt.Printf("     GET  /api/rigs/{rig}/polecats/{name}/logs\n")
 	fmt.Printf("   Refinery:\n")
 	fmt.Printf("     GET  /api/rigs/{rig}/refinery\n")
 	fmt.Printf("     POST /api/rigs/{rig}/refinery/start\n")
@@ -572,6 +581,10 @@ func (s *Server) Start() error {
 	fmt.Printf("   Mail:\n")
 	fmt.Printf("     POST /api/mail/send\n")
 	fmt.Printf("     GET  /api/rigs/{rig}/agents/{agent}/inbox\n")
+	fmt.Printf("   Sessions & Branches (Blaze):\n")
+	fmt.Printf("     GET  /api/rigs/{rig}/sessions\n")
+	fmt.Printf("     GET  /api/rigs/{rig}/branches\n")
+	fmt.Printf("     GET  /api/rigs/{rig}/logs/stream\n")
 
 	return s.server.ListenAndServe()
 }
@@ -2229,4 +2242,292 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		Target: req.Target,
 		Output: stdout,
 	})
+}
+
+// ============================================================================
+// Session/Log Handlers (for Blaze frontend)
+// ============================================================================
+
+// SessionInfo represents an active tmux session
+type SessionInfo struct {
+	Name      string `json:"name"`
+	Polecat   string `json:"polecat"`
+	Active    bool   `json:"active"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// SessionListResponse lists active sessions for a rig
+type SessionListResponse struct {
+	Sessions []SessionInfo `json:"sessions"`
+	Count    int           `json:"count"`
+}
+
+// BranchInfo represents a git branch
+type BranchInfo struct {
+	Name   string `json:"name"`
+	Remote string `json:"remote,omitempty"`
+}
+
+// BranchListResponse lists branches for a rig
+type BranchListResponse struct {
+	Branches []BranchInfo `json:"branches"`
+	Count    int          `json:"count"`
+}
+
+// handleListSessions lists active tmux sessions for a rig
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	rig := r.PathValue("rig")
+
+	stdout, _, err := s.runGT("polecat", "list", rig, "--json")
+	if err != nil {
+		// Fall back to tmux directly
+		cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
+		cmd.Dir = s.townRoot
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if tmuxErr := cmd.Run(); tmuxErr != nil {
+			jsonResponse(w, http.StatusOK, SessionListResponse{Sessions: []SessionInfo{}, Count: 0})
+			return
+		}
+
+		prefix := fmt.Sprintf("gt-%s-", rig)
+		var sessions []SessionInfo
+		for _, line := range strings.Split(out.String(), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, prefix) {
+				polecatName := strings.TrimPrefix(line, prefix)
+				sessions = append(sessions, SessionInfo{
+					Name:    line,
+					Polecat: polecatName,
+					Active:  true,
+				})
+			}
+		}
+		jsonResponse(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
+		return
+	}
+
+	// Parse JSON output from gt polecat list
+	var data struct {
+		Polecats []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"polecats"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &data); err != nil {
+		jsonResponse(w, http.StatusOK, SessionListResponse{Sessions: []SessionInfo{}, Count: 0})
+		return
+	}
+
+	var sessions []SessionInfo
+	for _, p := range data.Polecats {
+		sessions = append(sessions, SessionInfo{
+			Name:    fmt.Sprintf("gt-%s-%s", rig, p.Name),
+			Polecat: p.Name,
+			Active:  p.State == "working" || p.State == "spawning",
+		})
+	}
+	jsonResponse(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
+}
+
+// handlePolecatLogs captures tmux pane output for a polecat
+func (s *Server) handlePolecatLogs(w http.ResponseWriter, r *http.Request) {
+	rig := r.PathValue("rig")
+	name := r.PathValue("name")
+	sessionID := fmt.Sprintf("gt-%s-%s", rig, name)
+
+	// Get line count from query param (default 100)
+	lineCount := "100"
+	if lc := r.URL.Query().Get("lines"); lc != "" {
+		lineCount = lc
+	}
+
+	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", sessionID, "-S", "-"+lineCount)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"lines":   []string{},
+			"session": sessionID,
+			"active":  false,
+		})
+		return
+	}
+
+	lines := strings.Split(stdout.String(), "\n")
+	// Filter empty trailing lines
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"lines":   lines,
+		"session": sessionID,
+		"active":  true,
+	})
+}
+
+// handleListBranches lists git branches for a rig (filtered to polecat/ branches)
+func (s *Server) handleListBranches(w http.ResponseWriter, r *http.Request) {
+	rig := r.PathValue("rig")
+	rigPath := filepath.Join(s.townRoot, rig, "mayor", "rig")
+
+	// Fetch and list remote branches
+	fetchCmd := exec.Command("git", "fetch", "origin")
+	fetchCmd.Dir = rigPath
+	fetchCmd.Run() // ignore errors
+
+	cmd := exec.Command("git", "branch", "-r")
+	cmd.Dir = rigPath
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		jsonResponse(w, http.StatusOK, BranchListResponse{Branches: []BranchInfo{}, Count: 0})
+		return
+	}
+
+	filter := r.URL.Query().Get("filter") // e.g., "polecat/"
+	var branches []BranchInfo
+
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip HEAD pointer
+		if strings.Contains(line, "->") {
+			continue
+		}
+
+		if filter != "" && !strings.Contains(line, filter) {
+			continue
+		}
+
+		// Split remote/branch
+		parts := strings.SplitN(line, "/", 2)
+		if len(parts) == 2 {
+			branches = append(branches, BranchInfo{
+				Name:   parts[1],
+				Remote: parts[0],
+			})
+		} else {
+			branches = append(branches, BranchInfo{Name: line})
+		}
+	}
+
+	jsonResponse(w, http.StatusOK, BranchListResponse{Branches: branches, Count: len(branches)})
+}
+
+// handleLogStream provides an SSE stream of logs from all polecats in a rig
+func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
+	rig := r.PathValue("rig")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Send connected event
+	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+		"type":      "connected",
+		"rig_id":    rig,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}))
+	flusher.Flush()
+
+	ctx := r.Context()
+	logPositions := make(map[string]int)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Get polecats
+			stdout, _, err := s.runGT("polecat", "list", rig, "--json")
+			if err != nil {
+				continue
+			}
+
+			var data struct {
+				Polecats []struct {
+					Name  string `json:"name"`
+					State string `json:"state"`
+				} `json:"polecats"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &data); err != nil {
+				continue
+			}
+
+			// Send status
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+				"type":       "status",
+				"polecats":   data.Polecats,
+				"isBuilding": hasWorkingPolecat(data.Polecats),
+				"rig_id":     rig,
+				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			}))
+			flusher.Flush()
+
+			// Capture logs from each polecat
+			for _, p := range data.Polecats {
+				sessionID := fmt.Sprintf("gt-%s-%s", rig, p.Name)
+				cmd := exec.Command("tmux", "capture-pane", "-p", "-t", sessionID, "-S", "-50")
+				var out bytes.Buffer
+				cmd.Stdout = &out
+				if cmd.Run() != nil {
+					continue
+				}
+
+				lines := strings.Split(out.String(), "\n")
+				lastPos := logPositions[p.Name]
+				if len(lines) > lastPos {
+					for _, line := range lines[lastPos:] {
+						if strings.TrimSpace(line) == "" {
+							continue
+						}
+						fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+							"type":      "log",
+							"polecat":   p.Name,
+							"line":      line,
+							"timestamp": time.Now().UTC().Format(time.RFC3339),
+						}))
+					}
+					logPositions[p.Name] = len(lines)
+					flusher.Flush()
+				}
+			}
+		}
+	}
+}
+
+func hasWorkingPolecat(polecats []struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}) bool {
+	for _, p := range polecats {
+		if p.State == "working" {
+			return true
+		}
+	}
+	return false
+}
+
+func mustJSON(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return `{"error":"marshal failed"}`
+	}
+	return string(b)
 }

@@ -1,0 +1,26 @@
+# Render deployment configuration for Gas Town API
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: gastown
+    runtime: docker
+    plan: standard
+    healthCheckPath: /health
+    envVars:
+      - key: GT_ROOT
+        value: /data/gt
+      - key: HOME
+        value: /data/home
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://blaze.vercel.app
+    disk:
+      name: gastown-data
+      mountPath: /data
+      sizeGB: 50

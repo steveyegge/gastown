@@ -1,0 +1,9 @@
+.git
+*.md
+docs/
+scripts/
+templates/
+*.test.go
+*_test.go
+Makefile
+.github/
