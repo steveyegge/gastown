@@ -202,6 +202,7 @@ const (
 	IconFail = "✖"
 	IconSkip = "-"
 	IconInfo = "ℹ"
+	IconFix  = "🔧"
 )
 
 // Issue status icons - used consistently across all commands
@@ -303,6 +304,11 @@ func RenderSkipIcon() string {
 // RenderInfoIcon renders the info icon with styling
 func RenderInfoIcon() string {
 	return AccentStyle.Render(IconInfo)
+}
+
+// RenderFixIcon renders the fix icon (wrench emoji, double-width)
+func RenderFixIcon() string {
+	return IconFix
 }
 
 // === Issue Component Renderers ===
