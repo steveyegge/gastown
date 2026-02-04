@@ -945,77 +945,11 @@ func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create CLAUDE.md at town root (wrong location)
-	staleCLAUDEmd := filepath.Join(tmpDir, "CLAUDE.md")
-	if err := os.WriteFile(staleCLAUDEmd, []byte("# Mayor Context\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	check := NewClaudeSettingsCheck()
-	ctx := &CheckContext{TownRoot: tmpDir}
-
-	result := check.Run(ctx)
-
-	if result.Status != StatusError {
-		t.Errorf("expected StatusError for stale CLAUDE.md at town root, got %v", result.Status)
-	}
-
-	// Should mention wrong location
-	found := false
-	for _, d := range result.Details {
-		if strings.Contains(d, "CLAUDE.md") && strings.Contains(d, "wrong location") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected details to mention CLAUDE.md wrong location, got %v", result.Details)
-	}
-}
-
-func TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create mayor directory (needed for fix to create CLAUDE.md there)
-	mayorDir := filepath.Join(tmpDir, "mayor")
-	if err := os.MkdirAll(mayorDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create CLAUDE.md at town root (wrong location)
-	staleCLAUDEmd := filepath.Join(tmpDir, "CLAUDE.md")
-	if err := os.WriteFile(staleCLAUDEmd, []byte("# Mayor Context\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	check := NewClaudeSettingsCheck()
-	ctx := &CheckContext{TownRoot: tmpDir}
-
-	// Run to detect
-	result := check.Run(ctx)
-	if result.Status != StatusError {
-		t.Fatalf("expected StatusError before fix, got %v", result.Status)
-	}
-
-	// Apply fix
-	if err := check.Fix(ctx); err != nil {
-		t.Fatalf("Fix failed: %v", err)
-	}
-
-	// Verify old file was deleted
-	if _, err := os.Stat(staleCLAUDEmd); !os.IsNotExist(err) {
-		t.Error("expected CLAUDE.md at town root to be deleted")
-	}
-
-	// Verify new file was created at mayor/
-	correctCLAUDEmd := filepath.Join(mayorDir, "CLAUDE.md")
-	if _, err := os.Stat(correctCLAUDEmd); os.IsNotExist(err) {
-		t.Error("expected CLAUDE.md to be created at mayor/")
-	}
-}
+// NOTE: TestClaudeSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot and
+// TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor were removed because
+// CLAUDE.md at town root is now intentionally created by gt install.
+// It serves as an identity anchor for Mayor/Deacon who run from the town root.
+// See install.go createTownRootCLAUDEmd() for details.
 
 func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T) {
 	tmpDir := t.TempDir()

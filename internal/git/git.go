@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -189,14 +190,18 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
-	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, tmpDest)
+	args := []string{"clone", "--reference-if-able", reference, url, tmpDest}
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.symlinks=true"}, args...)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = tmpDir
 	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	// Move to final destination (handles cross-filesystem moves)

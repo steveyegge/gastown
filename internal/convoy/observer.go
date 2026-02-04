@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
-	"strings"
 )
 
 // CheckConvoysForIssue finds any convoys tracking the given issue and triggers
@@ -55,33 +53,20 @@ func CheckConvoysForIssue(townRoot, issueID, observer string, logger func(format
 }
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
-// Uses direct SQLite query for efficiency (same approach as daemon/convoy_watcher).
+// Uses bd dep list to query the dependency graph.
 func getTrackingConvoys(townRoot, issueID string) []string {
-	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query for convoys that track this issue
-	// Handle both direct ID and external reference format
-	safeIssueID := strings.ReplaceAll(issueID, "'", "''")
-
-	// Query for dependencies where this issue is the target
-	// Convoys use "tracks" type: convoy -> tracked issue (depends_on_id)
-	query := fmt.Sprintf(`
-		SELECT DISTINCT issue_id FROM dependencies
-		WHERE type = 'tracks'
-		AND (depends_on_id = '%s' OR depends_on_id LIKE '%%:%s')
-	`, safeIssueID, safeIssueID)
-
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
+	// Query for convoys that track this issue (direction=up finds dependents)
+	cmd := exec.Command("bd", "dep", "list", issueID, "--direction=up", "-t", "tracks", "--json")
+	cmd.Dir = townRoot
 	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
+	cmd.Stdout = &stdout
 
-	if err := queryCmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return nil
 	}
 
 	var results []struct {
-		IssueID string `json:"issue_id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
 		return nil
@@ -89,24 +74,19 @@ func getTrackingConvoys(townRoot, issueID string) []string {
 
 	convoyIDs := make([]string, 0, len(results))
 	for _, r := range results {
-		convoyIDs = append(convoyIDs, r.IssueID)
+		convoyIDs = append(convoyIDs, r.ID)
 	}
 	return convoyIDs
 }
 
 // isConvoyClosed checks if a convoy is already closed.
 func isConvoyClosed(townRoot, convoyID string) bool {
-	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	query := fmt.Sprintf(`SELECT status FROM issues WHERE id = '%s'`, safeConvoyID)
-
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
+	cmd := exec.Command("bd", "show", convoyID, "--json")
+	cmd.Dir = townRoot
 	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
+	cmd.Stdout = &stdout
 
-	if err := queryCmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return false
 	}
 

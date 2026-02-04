@@ -124,6 +124,9 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 		{"hq-mayor", true},
 		{"hq-deacon", true},
 
+		// Boot watchdog session
+		{"gt-boot", true},
+
 		// Valid rig sessions
 		{"gt-gastown-witness", true},
 		{"gt-gastown-refinery", true},

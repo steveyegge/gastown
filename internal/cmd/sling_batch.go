@@ -168,8 +168,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: true})
 	}
 
-	// Wake witness and refinery once at the end
-	wakeRigAgents(rigName)
+	// Wake witness and refinery once at the end (G11: skip if --no-boot)
+	if !slingNoBoot {
+		wakeRigAgents(rigName)
+	}
 
 	// Print summary
 	successCount := 0

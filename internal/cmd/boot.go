@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -308,16 +309,104 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 				if err := tm.KillSessionWithProcesses(deaconSession); err == nil {
 					return "restart", "deacon-stuck", nil
 				}
+				// Kill failed - report it (daemon will retry next tick)
+				fmt.Printf("Failed to kill session: %v\n", err)
+				return "restart-failed", "deacon-stuck", nil
 			} else {
 				// Stuck but not critically - try nudging first
 				fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
 				_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
 				return "nudge", "deacon-stale", nil
 			}
+		} else {
+			// Heartbeat is fresh - but is Deacon actually working?
+			// Check for idle state (no work on hook, or work not progressing)
+			hookBead := getDeaconHookBead()
+			if hookBead == "" {
+				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, start patrol: gt deacon patrol")
+				return "nudge", "deacon-idle", nil
+			}
+
+			// Has work on hook - check if it's actually progressing
+			// by looking at when the last molecule step was closed.
+			lastActivity, err := getMoleculeLastActivity(hookBead)
+			if err == nil && !lastActivity.IsZero() && time.Since(lastActivity) > 15*time.Minute {
+				fmt.Printf("Deacon has hooked work but no progress in %s - nudging\n", time.Since(lastActivity).Round(time.Minute))
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue work or restart patrol: gt deacon patrol")
+				return "nudge", "deacon-stale-work", nil
+			}
 		}
 	}
 
 	return "nothing", "", nil
+}
+
+// getDeaconHookBead returns the bead ID hooked to Deacon, or "" if none.
+// Uses bd slot show to check the hook slot on the deacon agent bead.
+func getDeaconHookBead() string {
+	// The deacon agent bead is hq-deacon (town-level)
+	cmd := exec.Command("bd", "slot", "show", "hq-deacon", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// If we can't check, assume no hook (may false-positive nudge on bd failure)
+		return ""
+	}
+
+	// Parse JSON to get hook slot value
+	var result struct {
+		Slots struct {
+			Hook *string `json:"hook"`
+		} `json:"slots"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "" // Parse error - assume no hook
+	}
+
+	if result.Slots.Hook == nil {
+		return ""
+	}
+	return *result.Slots.Hook
+}
+
+// getMoleculeLastActivity returns the most recent closed_at timestamp among
+// a molecule's steps. This indicates when the molecule last made progress.
+// Returns zero time if unable to determine (caller should assume working).
+//
+// TODO(steveyegge/beads#1456): Replace with `bd mol last-activity` when available.
+func getMoleculeLastActivity(molID string) (time.Time, error) {
+	cmd := exec.Command("bd", "mol", "current", molID, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// bd mol current returns an array of molecules (usually one)
+	// Each has a steps array with issue details including closed_at
+	var molecules []struct {
+		Steps []struct {
+			Status string `json:"status"`
+			Issue  struct {
+				ClosedAt *time.Time `json:"closed_at"`
+			} `json:"issue"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(output, &molecules); err != nil {
+		return time.Time{}, err
+	}
+
+	// Find the most recent closed_at among all done steps
+	var latest time.Time
+	for _, mol := range molecules {
+		for _, step := range mol.Steps {
+			if step.Status == "done" && step.Issue.ClosedAt != nil {
+				if step.Issue.ClosedAt.After(latest) {
+					latest = *step.Issue.ClosedAt
+				}
+			}
+		}
+	}
+	return latest, nil
 }
 
 // formatDurationAgo formats a duration for human display.

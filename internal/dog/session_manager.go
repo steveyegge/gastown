@@ -2,6 +2,7 @@
 package dog
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"errors"
 	"fmt"
 	"os"
@@ -119,7 +120,7 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		Sender:    "deacon",
 		Topic:     "assigned",
 	})
-	initialPrompt := fmt.Sprintf("I am Dog %s.%s Check mail for work: `gt mail inbox`. Execute assigned formula/bead. When done, send DOG_DONE mail to deacon/ and return to idle.", dogName, workInfo)
+	initialPrompt := fmt.Sprintf("I am Dog %s.%s Check mail for work: `" + cli.Name() + " mail inbox`. Execute assigned formula/bead. When done, send DOG_DONE mail to deacon/ and return to idle.", dogName, workInfo)
 
 	// Build startup command
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("dog", "", m.townRoot, "", beacon+"\n"+initialPrompt, opts.AgentOverride)

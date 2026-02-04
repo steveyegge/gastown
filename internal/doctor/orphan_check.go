@@ -202,6 +202,7 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 // Valid patterns:
 //   - hq-mayor (headquarters mayor session)
 //   - hq-deacon (headquarters deacon session)
+//   - gt-boot (boot watchdog session)
 //   - gt-<rig>-witness
 //   - gt-<rig>-refinery
 //   - gt-<rig>-<polecat> (where polecat is any name)
@@ -215,6 +216,11 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 
 	// Deacon session is always valid (dynamic name based on town)
 	if deaconSession != "" && sess == deaconSession {
+		return true
+	}
+
+	// Boot watchdog session is always valid
+	if sess == session.BootSessionName() {
 		return true
 	}
 

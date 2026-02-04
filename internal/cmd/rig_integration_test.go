@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -108,11 +109,70 @@ func mockBdCommand(t *testing.T) string {
 	bdPath := filepath.Join(binDir, "bd")
 	logPath := filepath.Join(binDir, "bd.log")
 
-	// Create a script that simulates bd init and other commands
-	// Also logs all create commands for verification.
-	// Note: beads.run() prepends --no-daemon --allow-stale to all commands,
-	// so we need to find the actual command in the argument list.
-	script := `#!/bin/sh
+	if runtime.GOOS == "windows" {
+		bdPath = filepath.Join(binDir, "bd.cmd")
+		psPath := filepath.Join(binDir, "bd.ps1")
+
+		psScript := `# Mock bd for testing (PowerShell)
+$logFile = '` + logPath + `'
+$cmd = ''
+foreach ($arg in $args) {
+  if ($arg -like '--*') { continue }
+  $cmd = $arg
+  break
+}
+
+switch ($cmd) {
+  'init' {
+    $prefix = 'gt'
+    for ($i = 0; $i -lt $args.Length; $i++) {
+      $arg = $args[$i]
+      if ($arg -like '--prefix=*') {
+        $prefix = $arg.Substring(9)
+      } elseif ($arg -eq '--prefix' -and $i + 1 -lt $args.Length) {
+        $prefix = $args[$i + 1]
+      }
+    }
+    New-Item -ItemType Directory -Force -Path .beads | Out-Null
+    Set-Content -Path (Join-Path .beads 'config.yaml') -Value ("prefix: " + $prefix)
+    exit 0
+  }
+  'migrate' { exit 0 }
+  'show' {
+    [Console]::Error.WriteLine('{"error":"not found"}')
+    exit 1
+  }
+  'create' {
+    Add-Content -Path $logFile -Value ($args -join ' ')
+    $beadId = ''
+    foreach ($arg in $args) {
+      if ($arg -like '--id=*') {
+        $beadId = $arg.Substring(5)
+      }
+    }
+    Write-Output ("{""id"":""" + $beadId + """,""status"":""open"",""created_at"":""2025-01-01T00:00:00Z""}")
+    exit 0
+  }
+  'mol' { exit 0 }
+  'list' { exit 0 }
+  default { exit 0 }
+}
+`
+		cmdScript := `@echo off
+pwsh -NoProfile -NoLogo -File "` + psPath + `" %*
+`
+		if err := os.WriteFile(psPath, []byte(psScript), 0644); err != nil {
+			t.Fatalf("write mock bd ps1: %v", err)
+		}
+		if err := os.WriteFile(bdPath, []byte(cmdScript), 0644); err != nil {
+			t.Fatalf("write mock bd cmd: %v", err)
+		}
+	} else {
+		// Create a script that simulates bd init and other commands
+		// Also logs all create commands for verification.
+		// Note: beads.run() prepends --no-daemon --allow-stale to all commands,
+		// so we need to find the actual command in the argument list.
+		script := `#!/bin/sh
 # Mock bd for testing
 LOG_FILE="` + logPath + `"
 
@@ -175,8 +235,9 @@ case "$cmd" in
     ;;
 esac
 `
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("write mock bd: %v", err)
+		if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+			t.Fatalf("write mock bd: %v", err)
+		}
 	}
 
 	// Prepend to PATH

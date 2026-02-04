@@ -2,11 +2,15 @@
 
 package lock
 
-import "golang.org/x/sys/windows"
+import (
+	"math"
+
+	"golang.org/x/sys/windows"
+)
 
 // processExists checks if a process with the given PID exists and is alive.
 func processExists(pid int) bool {
-	if pid <= 0 {
+	if pid <= 0 || pid > math.MaxUint32 {
 		return false
 	}
 

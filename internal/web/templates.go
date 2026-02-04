@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"io/fs"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/activity"
 )
@@ -119,6 +120,7 @@ type IssueRow struct {
 	Priority int    // 1=critical, 2=high, 3=medium, 4=low
 	Age      string // Time since created
 	Labels   string // Comma-separated labels
+	Assignee string // Who it's hooked to (empty if unassigned)
 }
 
 // ActivityRow represents an event in the activity feed.
@@ -223,6 +225,9 @@ func LoadTemplates() (*template.Template, error) {
 		"dogStateClass":      dogStateClass,
 		"queueStatusClass":   queueStatusClass,
 		"polecatStatusClass": polecatStatusClass,
+		"contains": func(s, substr string) bool {
+			return strings.Contains(s, substr)
+		},
 	}
 
 	// Get the templates subdirectory

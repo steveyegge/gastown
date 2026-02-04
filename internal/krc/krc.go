@@ -228,8 +228,8 @@ func (p *Pruner) Prune() (*PruneResult, error) {
 }
 
 // pruneFile prunes a single JSONL file.
-func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
-	result := &PruneResult{
+func (p *Pruner) pruneFile(filePath string) (result *PruneResult, err error) {
+	result = &PruneResult{
 		PrunedByType: make(map[string]int),
 	}
 
@@ -248,7 +248,15 @@ func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer srcFile.Close()
+	srcClosed := false
+	defer func() {
+		if srcClosed {
+			return
+		}
+		if closeErr := srcFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// Create temp file for output
 	tmpPath := filePath + ".tmp"
@@ -256,9 +264,19 @@ func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	tmpClosed := false
 	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpPath) // Clean up on error
+		if err == nil {
+			return
+		}
+		if !tmpClosed {
+			if closeErr := tmpFile.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
+		}
+		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
+			err = removeErr
+		}
 	}()
 
 	now := time.Now()
@@ -331,8 +349,16 @@ func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
 	result.BytesAfter = tmpInfo.Size()
 
 	// Close files before rename
-	srcFile.Close()
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		tmpClosed = true
+		return nil, err
+	}
+	tmpClosed = true
+	if err := srcFile.Close(); err != nil {
+		srcClosed = true
+		return nil, err
+	}
+	srcClosed = true
 
 	// Atomic replace
 	if err := os.Rename(tmpPath, filePath); err != nil {

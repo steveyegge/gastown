@@ -60,9 +60,10 @@ func runShellInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Could not enable Gas Town: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	fmt.Printf("%s Shell integration installed (%s)\n", style.Success.Render("✓"), shell.RCFilePath(shell.DetectShell()))
+	rcPath := shell.RCFilePath(shell.DetectShell())
+	fmt.Printf("%s Shell integration installed (%s)\n", style.Success.Render("✓"), rcPath)
 	fmt.Println()
-	fmt.Println("Run 'source ~/.zshrc' or open a new terminal to activate.")
+	fmt.Printf("Run 'source %s' or open a new terminal to activate.\n", rcPath)
 	return nil
 }
 

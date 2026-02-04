@@ -15,10 +15,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// convoyIDPattern validates convoy IDs to prevent SQL injection
+// convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
 
-// convoySubprocessTimeout is the timeout for bd and sqlite3 calls in the convoy panel.
+// convoySubprocessTimeout is the timeout for bd subprocess calls in the convoy panel.
 // Prevents TUI freezing if these commands hang.
 const convoySubprocessTimeout = 5 * time.Second
 
@@ -155,23 +155,18 @@ type trackedStatus struct {
 	Status string
 }
 
-// getTrackedIssueStatus queries tracked issues and their status
+// getTrackedIssueStatus queries tracked issues and their status.
 func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
-	// Validate convoyID to prevent SQL injection
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil
 	}
 
-	dbPath := filepath.Join(beadsDir, "beads.db")
-
 	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
 	defer cancel()
 
-	// Query tracked dependencies from SQLite
-	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, //nolint:gosec // G204: convoyID is validated against strict pattern
-		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
-
+	// Query tracked issues using bd dep list (returns full issue details)
+	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -179,7 +174,8 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 	}
 
 	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
+		ID     string `json:"id"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
 		return nil
@@ -187,45 +183,10 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 
 	var tracked []trackedStatus
 	for _, dep := range deps {
-		issueID := dep.DependsOnID
-
-		// Handle external reference format: external:rig:issue-id
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				issueID = parts[2]
-			}
-		}
-
-		// Get issue status
-		status := getIssueStatus(issueID)
-		tracked = append(tracked, trackedStatus{ID: issueID, Status: status})
+		tracked = append(tracked, trackedStatus{ID: dep.ID, Status: dep.Status})
 	}
 
 	return tracked
-}
-
-// getIssueStatus fetches just the status of an issue
-func getIssueStatus(issueID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bd", "show", issueID, "--json")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return "unknown"
-	}
-
-	var issues []struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
-		return "unknown"
-	}
-
-	return issues[0].Status
 }
 
 // Convoy panel styles

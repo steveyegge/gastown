@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -166,7 +167,7 @@ func outputMoleculeContext(ctx RoleContext) {
 		fmt.Println("1. Complete current step, then `bd close " + issue.ID + "`")
 		fmt.Println("2. Check for next steps: `bd ready --parent " + rootID + "`")
 		fmt.Println("3. Work on next ready step(s)")
-		fmt.Println("4. When all steps done, run `gt done`")
+		fmt.Println("4. When all steps done, run `" + cli.Name() + " done`")
 		break // Only show context for first molecule step found
 	}
 }
@@ -256,7 +257,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 			"Execute the step (heartbeat, mail, health checks, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-deacon-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-deacon-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -274,12 +275,12 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		HeaderTitle:     "Witness Patrol Status",
 		CheckInProgress: true,
 		WorkLoopSteps: []string{
-			"Check inbox: `gt mail inbox`",
+			"Check inbox: `" + cli.Name() + " mail inbox`",
 			"Check next step: `bd ready`",
 			"Execute the step (survey polecats, inspect, nudge, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-witness-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-witness-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -297,12 +298,12 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		HeaderTitle:     "Refinery Patrol Status",
 		CheckInProgress: true,
 		WorkLoopSteps: []string{
-			"Check inbox: `gt mail inbox`",
+			"Check inbox: `" + cli.Name() + " mail inbox`",
 			"Check next step: `bd ready`",
 			"Execute the step (queue scan, process branch, tests, merge)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd ready`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-refinery-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `gt handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `bd mol wisp mol-refinery-patrol`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)

@@ -123,19 +123,19 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 		}
 
 		var issue struct {
-			ID     string   `json:"id"`
-			Title  string   `json:"title"`
-			Status string   `json:"status"`
-			Type   string   `json:"issue_type"`
-			Labels []string `json:"labels"`
-			Wisp   bool     `json:"wisp"`
+			ID        string   `json:"id"`
+			Title     string   `json:"title"`
+			Status    string   `json:"status"`
+			Type      string   `json:"issue_type"`
+			Labels    []string `json:"labels"`
+			Ephemeral bool     `json:"ephemeral"`
 		}
 		if err := json.Unmarshal([]byte(line), &issue); err != nil {
 			continue
 		}
 
-		// Skip issues already marked as wisps
-		if issue.Wisp {
+		// Skip issues already marked as ephemeral/wisps
+		if issue.Ephemeral {
 			continue
 		}
 
@@ -194,7 +194,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 	return ""
 }
 
-// Fix marks misclassified issues as wisps using bd update --ephemeral.
+// Fix closes misclassified issues that should have been wisps.
+// Since bd does not support retroactively marking issues as ephemeral,
+// we close them with a descriptive close reason noting they were operational.
 func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 	if len(c.misclassified) == 0 {
 		return nil
@@ -211,8 +213,10 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 			workDir = filepath.Join(ctx.TownRoot, wisp.rigName)
 		}
 
-		// Run bd update <id> --ephemeral
-		cmd := exec.Command("bd", "update", wisp.id, "--ephemeral")
+		// Close the issue with a descriptive reason
+		// Note: bd update does not support --ephemeral flag for existing issues
+		closeReason := fmt.Sprintf("Closed by doctor: %s (should have been ephemeral wisp)", wisp.reason)
+		cmd := exec.Command("bd", "close", wisp.id, "--reason", closeReason)
 		cmd.Dir = workDir
 		if output, err := cmd.CombinedOutput(); err != nil {
 			lastErr = fmt.Errorf("%s/%s: %v (%s)", wisp.rigName, wisp.id, err, string(output))

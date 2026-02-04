@@ -447,6 +447,43 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 }
 
+// TestAddWithOptions_CleansUpOnRepoBaseError verifies that if repoBase() fails,
+// the polecatDir is cleaned up to avoid partial state where exists() returns true
+// but the worktree doesn't actually exist.
+// See: br-w2ee9 (worktrees not being created)
+func TestAddWithOptions_CleansUpOnRepoBaseError(t *testing.T) {
+	root := t.TempDir()
+
+	// Create rig WITHOUT mayor/rig or .repo.git - this will cause repoBase() to fail
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	// Attempt to create polecat - should fail
+	_, err := m.AddWithOptions("TestCleanup", AddOptions{})
+	if err == nil {
+		t.Fatalf("AddWithOptions should have failed with no repo base")
+	}
+
+	// Verify error mentions repo base
+	if !strings.Contains(err.Error(), "repo base") {
+		t.Errorf("error = %q, should mention 'repo base'", err)
+	}
+
+	// Verify polecatDir was cleaned up (doesn't exist)
+	polecatDir := filepath.Join(root, "polecats", "TestCleanup")
+	if _, err := os.Stat(polecatDir); !os.IsNotExist(err) {
+		t.Errorf("polecatDir %s should not exist after failed AddWithOptions, got stat error: %v", polecatDir, err)
+	}
+
+	// Verify exists() returns false
+	if m.exists("TestCleanup") {
+		t.Errorf("exists(TestCleanup) = true, want false after failed AddWithOptions")
+	}
+}
+
 // TestReconcilePoolWith tests all permutations of directory and session existence.
 // This is the core allocation policy logic.
 //

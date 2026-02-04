@@ -86,14 +86,14 @@ func (c *GlobalStateCheck) Run(ctx *CheckContext) *CheckResult {
 	if len(errors) > 0 {
 		result.Status = StatusError
 		result.Message = errors[0]
-		result.FixHint = "Run: gt install --shell"
+		result.FixHint = "Run: gt shell install"
 	} else if len(warnings) > 0 {
 		result.Status = StatusWarning
 		result.Message = warnings[0]
 		if !s.Enabled {
 			result.FixHint = "Run: gt enable"
 		} else {
-			result.FixHint = "Run: gt install --shell"
+			result.FixHint = "Run: gt shell install"
 		}
 	} else {
 		result.Message = "Global state healthy"

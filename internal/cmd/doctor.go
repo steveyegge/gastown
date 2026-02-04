@@ -137,6 +137,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
+	d.Register(doctor.NewRigNameMismatchCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
 	d.Register(doctor.NewDatabasePrefixCheck())
 	d.Register(doctor.NewRoutesCheck())

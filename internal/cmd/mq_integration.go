@@ -131,6 +131,20 @@ func getIntegrationBranchField(description string) string {
 	return ""
 }
 
+// getRigGit returns a Git object for the rig's repository.
+// Prefers .repo.git (bare repo) if it exists, falls back to mayor/rig.
+func getRigGit(rigPath string) (*git.Git, error) {
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+		return git.NewGitWithDir(bareRepoPath, ""), nil
+	}
+	mayorPath := filepath.Join(rigPath, "mayor", "rig")
+	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("no repo base found (neither .repo.git nor mayor/rig exists)")
+	}
+	return git.NewGit(mayorPath), nil
+}
+
 // getIntegrationBranchTemplate returns the integration branch template to use.
 // Priority: CLI flag > rig config > default
 func getIntegrationBranchTemplate(rigPath, cliOverride string) string {
@@ -212,7 +226,10 @@ func runMqIntegrationCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize git for the rig
-	g := git.NewGit(r.Path)
+	g, err := getRigGit(r.Path)
+	if err != nil {
+		return fmt.Errorf("initializing git: %w", err)
+	}
 
 	// Check if integration branch already exists locally
 	exists, err := g.BranchExists(branchName)
@@ -325,7 +342,10 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 
 	// Initialize beads and git for the rig
 	bd := beads.New(r.Path)
-	g := git.NewGit(r.Path)
+	g, err := getRigGit(r.Path)
+	if err != nil {
+		return fmt.Errorf("initializing git: %w", err)
+	}
 
 	// Show what we're about to do
 	if mqIntegrationLandDryRun {
@@ -618,7 +638,10 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize git for the rig
-	g := git.NewGit(r.Path)
+	g, err := getRigGit(r.Path)
+	if err != nil {
+		return fmt.Errorf("initializing git: %w", err)
+	}
 
 	// Fetch from origin to ensure we have latest refs
 	if err := g.Fetch("origin"); err != nil {
