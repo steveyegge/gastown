@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -215,7 +216,26 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 
 			// Note: respawn-pane automatically resets remain-on-exit to off
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
-				return fmt.Errorf("restarting runtime: %w", err)
+				if strings.Contains(err.Error(), "can't find pane") {
+					newPaneID, paneErr := t.GetPaneID(sessionID)
+					if paneErr == nil && newPaneID != paneID {
+						if err := t.SetRemainOnExit(newPaneID, true); err != nil {
+							style.PrintWarning("could not set remain-on-exit: %v", err)
+						}
+						if err := t.KillPaneProcesses(newPaneID); err != nil {
+							style.PrintWarning("could not kill pane processes: %v", err)
+						}
+						if retryErr := t.RespawnPane(newPaneID, startupCmd); retryErr == nil {
+							paneID = newPaneID
+						} else {
+							return fmt.Errorf("restarting runtime: %w", retryErr)
+						}
+					} else {
+						return fmt.Errorf("restarting runtime: %w", err)
+					}
+				} else {
+					return fmt.Errorf("restarting runtime: %w", err)
+				}
 			}
 
 			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))
