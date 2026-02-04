@@ -48,6 +48,7 @@ type Daemon struct {
 	convoyWatcher *ConvoyWatcher
 	doltServer    *DoltServerManager
 	krcPruner     *KRCPruner
+	nudgeManager  *NudgeManager
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -189,6 +190,19 @@ func (d *Daemon) Run() error {
 			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
 		} else {
 			d.logger.Println("KRC pruner started")
+		}
+	}
+
+	// Start nudge manager for reliable nudge delivery
+	nudgeManager, err := NewNudgeManager(d.config.TownRoot, d.tmux, d.logger.Printf)
+	if err != nil {
+		d.logger.Printf("Warning: failed to create nudge manager: %v", err)
+	} else {
+		d.nudgeManager = nudgeManager
+		if err := d.nudgeManager.Start(); err != nil {
+			d.logger.Printf("Warning: failed to start nudge manager: %v", err)
+		} else {
+			d.logger.Println("Nudge manager started")
 		}
 	}
 
@@ -951,6 +965,12 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 	if d.krcPruner != nil {
 		d.krcPruner.Stop()
 		d.logger.Println("KRC pruner stopped")
+	}
+
+	// Stop nudge manager
+	if d.nudgeManager != nil {
+		d.nudgeManager.Stop()
+		d.logger.Println("Nudge manager stopped")
 	}
 
 	// Stop Dolt server if we're managing it

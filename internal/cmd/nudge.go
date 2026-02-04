@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -17,11 +18,16 @@ import (
 
 var nudgeMessageFlag string
 var nudgeForceFlag bool
+var nudgeNoDaemonFlag bool
+
+// NudgeMaxMessageLength is the maximum length of a nudge message.
+const NudgeMaxMessageLength = 280
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
 	nudgeCmd.Flags().StringVarP(&nudgeMessageFlag, "message", "m", "", "Message to send")
-	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
+	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Override DND and force delivery of complex messages")
+	nudgeCmd.Flags().BoolVar(&nudgeNoDaemonFlag, "no-daemon", false, "Bypass daemon queue and deliver directly")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -81,6 +87,14 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("message required: use -m flag or provide as second argument")
 	}
 
+	// Validate message content
+	if err := validateNudgeMessage(message, nudgeForceFlag); err != nil {
+		return err
+	}
+
+	// Sanitize if --force was used
+	message = sanitizeNudgeMessage(message)
+
 	// Handle channel syntax: channel:<name>
 	if strings.HasPrefix(target, "channel:") {
 		channelName := strings.TrimPrefix(target, "channel:")
@@ -108,11 +122,9 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Prefix message with sender
-	message = fmt.Sprintf("[from %s] %s", sender, message)
+	townRoot, _ := workspace.FindFromCwd()
 
 	// Check DND status for target (unless force flag or channel target)
-	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" && !nudgeForceFlag && !strings.HasPrefix(target, "channel:") {
 		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
 		if !shouldSend {
@@ -121,6 +133,23 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+
+	// Try daemon queue for reliable delivery (if daemon is running and not bypassed)
+	if townRoot != "" && !nudgeNoDaemonFlag {
+		queued, err := tryDaemonQueue(townRoot, target, message, sender)
+		if err != nil {
+			return err
+		}
+		if queued {
+			fmt.Printf("%s Nudge queued for %s (daemon will deliver)\n", style.Bold.Render("✓"), target)
+			_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
+			return nil
+		}
+		// Daemon not running - fall back to direct delivery
+	}
+
+	// Prefix message with sender (for direct delivery)
+	message = fmt.Sprintf("[from %s] %s", sender, message)
 
 	t := tmux.NewTmux()
 
@@ -501,4 +530,92 @@ func addressToAgentBeadID(address string) string {
 		}
 		return fmt.Sprintf("gt-%s-polecat-%s", rig, role)
 	}
+}
+
+// validateNudgeMessage checks if a message is valid for nudging.
+// Returns error with suggestions if invalid (unless force is true).
+func validateNudgeMessage(message string, force bool) error {
+	hasNewlines := strings.ContainsAny(message, "\n\r")
+	tooLong := len(message) > NudgeMaxMessageLength
+
+	if !hasNewlines && !tooLong {
+		return nil // Valid
+	}
+
+	if force {
+		return nil // Allow with --force, will be sanitized
+	}
+
+	if hasNewlines {
+		return fmt.Errorf(`nudge contains newlines
+
+Nudges are for short notifications. For complex content, use:
+  gt mail send <target> -s "Subject" -m "your message"
+
+Or send anyway with newlines replaced by spaces:
+  gt nudge <target> "..." --force`)
+	}
+
+	if tooLong {
+		return fmt.Errorf(`nudge exceeds %d characters (got %d)
+
+Nudges are for short notifications. For longer content, use:
+  gt mail send <target> -s "Subject" -m "your message"
+
+Or send truncated (first %d chars + "..."):
+  gt nudge <target> "..." --force`, NudgeMaxMessageLength, len(message), NudgeMaxMessageLength-3)
+	}
+
+	return nil
+}
+
+// sanitizeNudgeMessage cleans a message for delivery.
+// Replaces newlines with spaces and truncates if too long.
+func sanitizeNudgeMessage(message string) string {
+	// Replace newlines with spaces
+	message = strings.ReplaceAll(message, "\n", " ")
+	message = strings.ReplaceAll(message, "\r", "")
+
+	// Truncate if too long
+	if len(message) > NudgeMaxMessageLength {
+		message = message[:NudgeMaxMessageLength-3] + "..."
+	}
+
+	return message
+}
+
+// resolveNudgeTarget converts a target address to a tmux session name.
+// Delegates to resolveRoleToSession which handles role shortcuts and path formats.
+func resolveNudgeTarget(target string) (string, error) {
+	return resolveRoleToSession(target)
+}
+
+// tryDaemonQueue attempts to queue a nudge via the daemon.
+// Returns true if queued successfully, false if daemon not running.
+func tryDaemonQueue(townRoot, target, message, sender string) (bool, error) {
+	running, _, err := daemon.IsRunning(townRoot)
+	if err != nil || !running {
+		return false, nil // Fall back to direct delivery
+	}
+
+	// Resolve target to session name before queuing
+	sessionName, err := resolveNudgeTarget(target)
+	if err != nil {
+		return false, err
+	}
+
+	// Create a temporary NudgeManager just to queue
+	// (The daemon's NudgeManager will process it)
+	t := tmux.NewTmux()
+	nm, err := daemon.NewNudgeManager(townRoot, t, func(format string, args ...interface{}) {})
+	if err != nil {
+		return false, nil // Fall back to direct delivery
+	}
+
+	// Queue the nudge (NudgeManager adds sentinel format)
+	if err := nm.QueueNudge(sessionName, message, sender); err != nil {
+		return false, fmt.Errorf("queue nudge: %w", err)
+	}
+
+	return true, nil
 }
