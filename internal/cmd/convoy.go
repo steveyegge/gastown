@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/base32"
@@ -1322,6 +1323,8 @@ type trackedIssueInfo struct {
 }
 
 // getTrackedIssues uses bd dep list to get issues tracked by a convoy.
+// Falls back to JSONL parsing for external dependencies when bd dep list
+// fails to resolve them (e.g., when using Dolt backend).
 // Returns issue details including status, type, and worker info.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	// Use bd dep list to get tracked dependencies
@@ -1333,7 +1336,8 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	var stdout bytes.Buffer
 	depCmd.Stdout = &stdout
 	if err := depCmd.Run(); err != nil {
-		return nil
+		// bd dep list failed, try JSONL fallback
+		return getTrackedIssuesFromJSONL(townBeads, convoyID)
 	}
 
 	// Parse the JSON output - bd dep list returns full issue details
@@ -1347,7 +1351,13 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 		Labels         []string `json:"labels"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
-		return nil
+		return getTrackedIssuesFromJSONL(townBeads, convoyID)
+	}
+
+	// If bd dep list returned empty, try JSONL fallback
+	// This handles the case where external deps exist but bd dep list doesn't resolve them
+	if len(deps) == 0 {
+		return getTrackedIssuesFromJSONL(townBeads, convoyID)
 	}
 
 	// Collect non-closed issue IDs for worker lookup
@@ -1381,6 +1391,215 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	}
 
 	return tracked
+}
+
+// getTrackedIssuesFromJSONL reads convoy dependencies directly from JSONL.
+// This is a fallback for when bd dep list fails to resolve external dependencies.
+func getTrackedIssuesFromJSONL(townBeads, convoyID string) []trackedIssueInfo {
+	jsonlPath := filepath.Join(townBeads, "issues.jsonl")
+	file, err := os.Open(jsonlPath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	// Scan JSONL for the convoy record
+	scanner := bufio.NewScanner(file)
+	// Increase buffer size for large lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	var convoyLine []byte
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Quick check before full parse
+		if !bytes.Contains(line, []byte(convoyID)) {
+			continue
+		}
+		// Parse to verify it's the right issue
+		var issue struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(line, &issue); err == nil && issue.ID == convoyID {
+			convoyLine = make([]byte, len(line))
+			copy(convoyLine, line)
+			break
+		}
+	}
+
+	if convoyLine == nil {
+		return nil
+	}
+
+	// Parse the full convoy record including dependencies
+	var convoy struct {
+		ID           string `json:"id"`
+		Dependencies []struct {
+			IssueID     string `json:"issue_id"`
+			DependsOnID string `json:"depends_on_id"`
+			Type        string `json:"type"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal(convoyLine, &convoy); err != nil {
+		return nil
+	}
+
+	// Filter to 'tracks' dependencies and extract issue IDs
+	var issueIDs []string
+	for _, dep := range convoy.Dependencies {
+		if dep.Type != "tracks" {
+			continue
+		}
+		// Parse external ref: external:<rig>:<issue-id>
+		issueID := parseExternalRefIssueID(dep.DependsOnID)
+		if issueID != "" {
+			issueIDs = append(issueIDs, issueID)
+		}
+	}
+
+	if len(issueIDs) == 0 {
+		return nil
+	}
+
+	// Batch fetch issue details via bd show
+	// bd show handles routing and storage backend automatically
+	townRoot := filepath.Dir(townBeads)
+	details := getIssueDetailsBatchFromDir(townRoot, issueIDs)
+
+	// Build result
+	var tracked []trackedIssueInfo
+	for _, issueID := range issueIDs {
+		info := trackedIssueInfo{
+			ID:   issueID,
+			Type: "tracks",
+		}
+		if detail, ok := details[issueID]; ok {
+			info.Title = detail.Title
+			info.Status = detail.Status
+			info.IssueType = detail.IssueType
+			info.Assignee = detail.Assignee
+		} else {
+			// Issue not found, use placeholder
+			info.Title = "(not found)"
+			info.Status = "unknown"
+		}
+		tracked = append(tracked, info)
+	}
+
+	// Get worker info for non-closed issues
+	openIssueIDs := make([]string, 0, len(tracked))
+	for _, t := range tracked {
+		if t.Status != "closed" {
+			openIssueIDs = append(openIssueIDs, t.ID)
+		}
+	}
+	workersMap := getWorkersForIssues(openIssueIDs)
+	for i := range tracked {
+		if worker, ok := workersMap[tracked[i].ID]; ok {
+			tracked[i].Worker = worker.Worker
+			tracked[i].WorkerAge = worker.Age
+		}
+	}
+
+	return tracked
+}
+
+// parseExternalRefIssueID extracts the issue ID from an external reference.
+// Input: "external:da:da-dvbq" -> Output: "da-dvbq"
+// Returns empty string if not an external ref.
+func parseExternalRefIssueID(ref string) string {
+	if !strings.HasPrefix(ref, "external:") {
+		return ref // Not external, return as-is
+	}
+	parts := strings.SplitN(ref, ":", 3)
+	if len(parts) != 3 {
+		return ""
+	}
+	return parts[2] // Return the issue ID part
+}
+
+// getIssueDetailsBatchFromDir fetches issue details using bd show from a specific directory.
+func getIssueDetailsBatchFromDir(dir string, issueIDs []string) map[string]*issueDetails {
+	result := make(map[string]*issueDetails)
+	if len(issueIDs) == 0 {
+		return result
+	}
+
+	// Build args: bd --no-daemon show id1 id2 id3 ... --json
+	args := append([]string{"--no-daemon", "show"}, issueIDs...)
+	args = append(args, "--json")
+
+	showCmd := exec.Command("bd", args...)
+	showCmd.Dir = dir
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		// Batch failed - fall back to individual lookups
+		for _, id := range issueIDs {
+			if details := getIssueDetailsFromDir(dir, id); details != nil {
+				result[id] = details
+			}
+		}
+		return result
+	}
+
+	var issues []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		IssueType string `json:"issue_type"`
+		Assignee  string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return result
+	}
+
+	for _, issue := range issues {
+		result[issue.ID] = &issueDetails{
+			ID:        issue.ID,
+			Title:     issue.Title,
+			Status:    issue.Status,
+			IssueType: issue.IssueType,
+			Assignee:  issue.Assignee,
+		}
+	}
+
+	return result
+}
+
+// getIssueDetailsFromDir fetches a single issue's details using bd show from a specific directory.
+func getIssueDetailsFromDir(dir, issueID string) *issueDetails {
+	showCmd := exec.Command("bd", "--no-daemon", "show", issueID, "--json")
+	showCmd.Dir = dir
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return nil
+	}
+	if stdout.Len() == 0 {
+		return nil
+	}
+
+	var issues []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		IssueType string `json:"issue_type"`
+		Assignee  string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
+		return nil
+	}
+
+	return &issueDetails{
+		ID:        issues[0].ID,
+		Title:     issues[0].Title,
+		Status:    issues[0].Status,
+		IssueType: issues[0].IssueType,
+		Assignee:  issues[0].Assignee,
+	}
 }
 
 // getExternalIssueDetails fetches issue details from an external rig database.
