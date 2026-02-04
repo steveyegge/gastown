@@ -201,7 +201,6 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		beadsDB := filepath.Join(beadsDir, "beads.db")
 		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
 	}
-
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 

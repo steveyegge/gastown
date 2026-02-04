@@ -645,11 +645,6 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		return nil
 	}
 
-	// No tracked beads - create local database
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		return err
-	}
-
 	// Build environment with explicit BEADS_DIR to prevent bd from
 	// finding a parent directory's .beads/ database
 	env := os.Environ()
@@ -662,18 +657,16 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
 	// Run bd init if available
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+	initArgs := []string{"--no-daemon", "init", "--prefix", prefix}
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// bd might not be installed or failed, create minimal structure
-		// Note: beads currently expects YAML format for config
-		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\n", prefix)
-		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
-			return writeErr
-		}
+		// if beads isn't installed or fails, then we can't proceed.
+		fmt.Printf("Error initializing beads for rig %s: %v\n", rigPath, err)
+		fmt.Printf("Ran with BEADS_DIR %s: bd %v\nOutput: %s", beadsDir, initArgs, output)
+		return err
 	}
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy).
@@ -681,8 +674,10 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
-	// Ignore errors - older beads versions don't need this
-	_, _ = configCmd.CombinedOutput()
+	_, err = configCmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error configuring custom types for rig %s: %v\n", rigPath, err)
+	}
 
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
@@ -690,8 +685,11 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	migrateCmd := exec.Command("bd", "--no-daemon", "migrate", "--update-repo-id")
 	migrateCmd.Dir = rigPath
 	migrateCmd.Env = filteredEnv
-	// Ignore errors - fingerprint is optional for functionality
-	_, _ = migrateCmd.CombinedOutput()
+	_, err = migrateCmd.CombinedOutput()
+	if err != nil {
+		// Just log, don't fail on error - fingerprint is optional for functionality
+		fmt.Printf("Error migrating repository fingerprint for rig %s: %v\n", rigPath, err)
+	}
 
 	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
 	// bd init creates beads.db but not issues.jsonl in SQLite mode.
