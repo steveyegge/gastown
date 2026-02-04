@@ -1,7 +1,6 @@
 package rig
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/cli"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -425,13 +426,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
+			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix, "--no-daemon") // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
 			// Configure custom types for Gas Town (beads v0.46.0+)
-			configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
+			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes, "--no-daemon")
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}
@@ -657,7 +658,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
 	// Run bd init if available
-	initArgs := []string{"--no-daemon", "init", "--prefix", prefix}
+	initArgs := []string{"init", "--prefix", prefix, "--no-daemon"}
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
@@ -671,7 +672,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes, "--no-daemon")
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	_, err = configCmd.CombinedOutput()
@@ -682,7 +683,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
-	migrateCmd := exec.Command("bd", "--no-daemon", "migrate", "--update-repo-id")
+	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id", "--no-daemon")
 	migrateCmd.Dir = rigPath
 	migrateCmd.Env = filteredEnv
 	_, err = migrateCmd.CombinedOutput()
