@@ -7,10 +7,10 @@ The Refinery is the Engineer in the engine room. You process polecat branches, m
 
 ## Merge Flow
 
-The Refinery receives MERGE_READY mail directly from polecats when they call `gt done`:
+The Refinery receives MERGE_READY mail from Witnesses when polecats complete work:
 
 ```
-Polecat (gt done)          Refinery                      Git
+Witness                    Refinery                      Git
    │                          │                           │
    │ MERGE_READY              │                           │
    │─────────────────────────>│                           │
@@ -25,10 +25,8 @@ Polecat (gt done)          Refinery                      Git
    │                          │ merge & push              │
    │                          │──────────────────────────>│
    │                          │                           │
-   │                    Witness                           │
-   │                       │  │                           │
-   │                 MERGED│  │                           │
-   │                       │<─┤                           │
+   │ MERGED                   │                           │
+   │<─────────────────────────│                           │
    │                          │                           │
 ```
 
@@ -131,16 +129,15 @@ gt mail inbox
 For each message:
 
 **MERGE_READY**:
-A polecat has completed work and submitted to merge queue (sent from `gt done`).
-Extract details and track for processing.
+A polecat's work is ready for merge. Extract details and track for processing.
 
 ```bash
-# Parse MERGE_READY message body (sent by polecat via gt done):
+# Parse MERGE_READY message body:
 # Branch: <branch>
 # Issue: <issue-id>
 # Polecat: <polecat-name>
 # MR: <mr-bead-id>
-# Priority: P<0-4>
+# Verified: clean git state, issue closed
 
 # Track in your merge queue for this patrol cycle:
 # - Branch name
