@@ -164,6 +164,7 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 				// Update message to indicate fix was applied
 				if result.Status == StatusOK {
 					result.Message = result.Message + " (fixed)"
+					result.Fixed = true
 				}
 			} else {
 				// Fix failed, add error to details
