@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -21,6 +22,7 @@ var (
 	seedHooks    bool
 	seedMCP      bool
 	seedAccounts bool
+	seedDaemon   bool
 	seedForce    bool
 )
 
@@ -39,6 +41,7 @@ By default, seeds all config types. Use flags to seed specific types:
   gt config seed --hooks      # Only Claude hooks
   gt config seed --mcp        # Only MCP config
   gt config seed --accounts   # Only account config
+  gt config seed --daemon     # Only daemon patrol config
   gt config seed --dry-run    # Show what would be created
   gt config seed --force      # Overwrite existing beads`,
 	RunE: runConfigSeed,
@@ -49,6 +52,7 @@ func init() {
 	configSeedCmd.Flags().BoolVar(&seedHooks, "hooks", false, "Only seed Claude hook config beads")
 	configSeedCmd.Flags().BoolVar(&seedMCP, "mcp", false, "Only seed MCP config beads")
 	configSeedCmd.Flags().BoolVar(&seedAccounts, "accounts", false, "Only seed account config beads")
+	configSeedCmd.Flags().BoolVar(&seedDaemon, "daemon", false, "Only seed daemon patrol config beads")
 	configSeedCmd.Flags().BoolVar(&seedForce, "force", false, "Overwrite existing config beads")
 
 	configCmd.AddCommand(configSeedCmd)
@@ -63,7 +67,7 @@ func runConfigSeed(cmd *cobra.Command, args []string) error {
 	bd := beads.New(townRoot)
 
 	// If no specific flags, seed everything
-	seedAll := !seedHooks && !seedMCP && !seedAccounts
+	seedAll := !seedHooks && !seedMCP && !seedAccounts && !seedDaemon
 
 	var created, skipped, updated int
 
@@ -91,6 +95,16 @@ func runConfigSeed(cmd *cobra.Command, args []string) error {
 		c, s, u, err := seedAccountBeads(bd, townRoot)
 		if err != nil {
 			return fmt.Errorf("seeding account beads: %w", err)
+		}
+		created += c
+		skipped += s
+		updated += u
+	}
+
+	if seedAll || seedDaemon {
+		c, s, u, err := seedDaemonBeads(bd, townRoot)
+		if err != nil {
+			return fmt.Errorf("seeding daemon beads: %w", err)
 		}
 		created += c
 		skipped += s
@@ -360,6 +374,37 @@ func seedAccountBeads(bd *beads.Beads, townRoot string) (created, skipped, updat
 	}
 
 	return created, skipped, updated, nil
+}
+
+// seedDaemonBeads creates a config bead for daemon patrol configuration.
+// It reads the existing mayor/daemon.json file (or uses defaults if not found)
+// and creates a single global config bead: hq-cfg-daemon-patrol.
+func seedDaemonBeads(bd *beads.Beads, townRoot string) (created, skipped, updated int, err error) {
+	// Read daemon.json from filesystem
+	configPath := config.DaemonPatrolConfigPath(townRoot)
+	daemonConfig, loadErr := config.LoadDaemonPatrolConfig(configPath)
+	if loadErr != nil {
+		if errors.Is(loadErr, config.ErrNotFound) {
+			// No daemon.json exists, use defaults
+			daemonConfig = config.NewDaemonPatrolConfig()
+		} else {
+			return 0, 0, 0, fmt.Errorf("reading daemon patrol config: %w", loadErr)
+		}
+	}
+
+	// Marshal to generic map for bead metadata storage
+	daemonJSON, err := json.Marshal(daemonConfig)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("marshaling daemon patrol config: %w", err)
+	}
+
+	var daemonMap map[string]interface{}
+	if err := json.Unmarshal(daemonJSON, &daemonMap); err != nil {
+		return 0, 0, 0, fmt.Errorf("parsing daemon patrol config: %w", err)
+	}
+
+	return createOrSkipConfigBead(bd, "daemon-patrol", beads.ConfigCategoryDaemon,
+		"*", "", "", daemonMap, "Global daemon patrol configuration")
 }
 
 // extractHooksMap extracts the "hooks" key from a settings map.

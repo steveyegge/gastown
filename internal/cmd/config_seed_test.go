@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestExtractHooksMap(t *testing.T) {
@@ -201,5 +202,57 @@ func TestSeedAccountBeadsMetadataExcludesAuthToken(t *testing.T) {
 	}
 	if !strings.Contains(metaStr, "http://localhost:4000") {
 		t.Error("metadata should contain base_url")
+	}
+}
+
+func TestDaemonConfigSeedMetadata(t *testing.T) {
+	// Verify that NewDaemonPatrolConfig can be marshaled to valid JSON
+	// suitable for bead metadata storage
+	daemonConfig := config.NewDaemonPatrolConfig()
+
+	daemonJSON, err := json.Marshal(daemonConfig)
+	if err != nil {
+		t.Fatalf("marshaling daemon config: %v", err)
+	}
+
+	// Must be valid JSON
+	var daemonMap map[string]interface{}
+	if err := json.Unmarshal(daemonJSON, &daemonMap); err != nil {
+		t.Fatalf("daemon config JSON is not a valid map: %v", err)
+	}
+
+	// Must have required fields
+	if daemonMap["type"] != "daemon-patrol-config" {
+		t.Errorf("expected type 'daemon-patrol-config', got %v", daemonMap["type"])
+	}
+	if daemonMap["version"] != float64(1) {
+		t.Errorf("expected version 1, got %v", daemonMap["version"])
+	}
+
+	// Must have heartbeat
+	heartbeat, ok := daemonMap["heartbeat"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected heartbeat to be a map")
+	}
+	if heartbeat["enabled"] != true {
+		t.Errorf("expected heartbeat.enabled=true, got %v", heartbeat["enabled"])
+	}
+
+	// Must have patrols
+	patrols, ok := daemonMap["patrols"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected patrols to be a map")
+	}
+
+	// Check required patrols exist
+	for _, name := range []string{"deacon", "witness", "refinery"} {
+		patrol, ok := patrols[name].(map[string]interface{})
+		if !ok {
+			t.Errorf("expected patrols.%s to be a map", name)
+			continue
+		}
+		if patrol["enabled"] != true {
+			t.Errorf("expected patrols.%s.enabled=true, got %v", name, patrol["enabled"])
+		}
 	}
 }
