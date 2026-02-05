@@ -325,6 +325,24 @@ gt rig list                 # List projects
 gt crew add <name> --rig <rig>  # Create crew workspace
 ```
 
+### Town Lifecycle
+
+```bash
+gt up                       # Start the town (daemon, mayor, witnesses, etc.)
+gt down                     # Stop all agents and the daemon
+gt restart                  # Graceful restart (stop all, then start all)
+gt restart -s drain         # Wait for agents to finish before restarting
+gt restart -s immediate     # Skip graceful shutdown, kill directly
+gt restart -s clean         # Nuke worktrees and clear beads, fresh start
+```
+
+| Restart Strategy | What happens | When to use |
+|------------------|--------------|-------------|
+| `graceful` (default) | Notifies agents to save state, waits 15s, then sends Ctrl-C and kills. | Routine restarts, config reloads. Agents get a chance to commit WIP before shutdown. |
+| `drain` | Waits for all agents to finish their current work, then restarts. No interruption. | Active work in progress. All work committed before shutdown. Zero loss. |
+| `immediate` | Skips Ctrl-C, kills processes directly. | Stuck/unresponsive agents that won't respond to graceful shutdown. |
+| `clean` | Kills all, nukes polecat worktrees, clears agent beads, restarts infra only. | Broken state, corrupted worktrees, starting over from scratch. |
+
 ### Agent Operations
 
 ```bash
@@ -487,6 +505,20 @@ Restart Mayor session:
 ```bash
 gt mayor detach
 gt mayor attach
+```
+
+### Agents stuck or unresponsive
+
+```bash
+gt restart -s immediate     # Kill directly, skip graceful shutdown
+gt restart -s clean         # Nuclear option: nuke worktrees and start fresh
+```
+
+### Need to stop everything
+
+```bash
+gt down                     # Stop all agents and daemon
+gt up                       # Start everything back up
 ```
 
 ## License
