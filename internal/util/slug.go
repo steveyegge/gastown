@@ -199,8 +199,31 @@ func ResolveSemanticSlug(id string) string {
 		slugWithRandom = slugWithRandom[:dotIdx]
 	}
 
-	// Extract random from end of slug (4-6 alphanumeric chars)
-	// Try lengths 6, 5, 4 to find the random component
+	// Extract random from end of slug (4-8 alphanumeric chars)
+	// Strategy: Look for underscore boundary first (reliable), then fall back to length heuristics.
+	// Bug fix: gt-3vqgi4 - previously only tried 6,5,4 which failed for 7-char randoms.
+	//
+	// The slug format is: title_slug + random (no separator between them)
+	// e.g., "cache_strategy" + "abc123" = "cache_strategyabc123"
+	// But "refinery_patrol_complete_merged_" + "1syec3r" has underscore before random.
+
+	// First pass: Look for underscore boundaries (handles cases like "merged_1syec3r")
+	for randLen := 8; randLen >= 4; randLen-- {
+		if len(slugWithRandom) >= 3+randLen {
+			potentialRandom := slugWithRandom[len(slugWithRandom)-randLen:]
+			if isAlphanumeric(potentialRandom) {
+				// Check if there's an underscore right before the random
+				charBeforeRandom := len(slugWithRandom) - randLen - 1
+				if charBeforeRandom >= 0 && slugWithRandom[charBeforeRandom] == '_' {
+					// Underscore boundary - this is a reliable delimiter
+					return prefix + "-" + potentialRandom + childSuffix
+				}
+			}
+		}
+	}
+
+	// Second pass: Fall back to standard length heuristics (6, 5, 4)
+	// This handles the common case where random is directly appended to slug word
 	for randLen := 6; randLen >= 4; randLen-- {
 		if len(slugWithRandom) >= 3+randLen {
 			potentialRandom := slugWithRandom[len(slugWithRandom)-randLen:]

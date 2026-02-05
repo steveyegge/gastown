@@ -500,6 +500,12 @@ func (s *DecisionServer) CreateDecision(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("creating decision: %w", err))
 	}
 
+	// Verify the decision was persisted (gt-3vqgi4: guard against false success)
+	if _, verifyErr := client.Show(issue.ID); verifyErr != nil {
+		log.Printf("Warning: decision %s created but not retrievable: %v", issue.ID, verifyErr)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("decision created but not persisted: %s (verify error: %w)", issue.ID, verifyErr))
+	}
+
 	// Build response decision
 	var protoOptions []*gastownv1.DecisionOption
 	for _, opt := range options {

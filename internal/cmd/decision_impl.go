@@ -305,6 +305,11 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("creating decision: %w", err)
 		}
+
+		// Verify the decision was persisted (gt-3vqgi4: guard against false success)
+		if _, verifyErr := bd.Show(issue.ID); verifyErr != nil {
+			return fmt.Errorf("decision created but not persisted: %s (verify error: %w)", issue.ID, verifyErr)
+		}
 	}
 
 	// Note: blocker dependency is now handled by bd decision create --blocks flag
