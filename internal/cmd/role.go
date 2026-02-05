@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/configbeads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -564,15 +566,19 @@ func runRoleDef(cmd *cobra.Command, args []string) error {
 	// Determine town root and rig path
 	townRoot, _ := workspace.FindFromCwd()
 	rigPath := ""
+	rigName := ""
 	if townRoot != "" {
 		// Try to get rig path if we're in a rig directory
 		if rigInfo, err := GetRole(); err == nil && rigInfo.Rig != "" {
 			rigPath = filepath.Join(townRoot, rigInfo.Rig)
+			rigName = rigInfo.Rig
 		}
 	}
 
-	// Load role definition with overrides
-	def, err := config.LoadRoleDefinition(townRoot, rigPath, roleName)
+	// Load role definition via beads-first wrapper (tries config beads, falls back to TOML)
+	bd := beads.New(townRoot)
+	townName, _ := workspace.GetTownName(townRoot)
+	def, err := configbeads.LoadRoleDefinition(bd, townRoot, townName, rigPath, rigName, roleName)
 	if err != nil {
 		return fmt.Errorf("loading role definition: %w", err)
 	}

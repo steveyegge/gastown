@@ -12,10 +12,12 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/configbeads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // BeadsMessage represents a message from gt mail inbox --json.
@@ -272,7 +274,7 @@ func parseIdentity(identity string) (*ParsedIdentity, error) {
 }
 
 // getRoleConfigForIdentity loads role configuration from the config-based role system.
-// Uses config.LoadRoleDefinition() with layered override resolution (builtin → town → rig).
+// Uses configbeads.LoadRoleDefinition() which tries beads first, then falls back to TOML.
 // Returns config in beads.RoleConfig format for backward compatibility.
 func (d *Daemon) getRoleConfigForIdentity(identity string) (*beads.RoleConfig, *ParsedIdentity, error) {
 	parsed, err := parseIdentity(identity)
@@ -286,8 +288,10 @@ func (d *Daemon) getRoleConfigForIdentity(identity string) (*beads.RoleConfig, *
 		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 	}
 
-	// Load role definition from config system (Phase 2: config-based roles)
-	roleDef, err := config.LoadRoleDefinition(d.config.TownRoot, rigPath, parsed.RoleType)
+	// Load role definition via beads-first wrapper (tries config beads, falls back to TOML)
+	bd := beads.New(d.config.TownRoot)
+	townName, _ := workspace.GetTownName(d.config.TownRoot)
+	roleDef, err := configbeads.LoadRoleDefinition(bd, d.config.TownRoot, townName, rigPath, parsed.RigName, parsed.RoleType)
 	if err != nil {
 		d.logger.Printf("Warning: failed to load role definition for %s: %v", parsed.RoleType, err)
 		// Return parsed identity even if config fails (caller can use defaults)
