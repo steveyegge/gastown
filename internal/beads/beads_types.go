@@ -108,11 +108,15 @@ func EnsureCustomTypes(beadsDir string) error {
 		return fmt.Errorf("beads directory does not exist: %s", beadsDir)
 	}
 
-	// Configure custom types via bd CLI
-	cmd := exec.Command(resolvedBdPath, "config", "set", "types.custom", currentTypes)
+	// Configure custom types via bd CLI using --db to bypass daemon routing.
+	// This ensures the config is set on the local database even when
+	// BD_DAEMON_HOST is set (e.g., in test environments).
+	dbPath := filepath.Join(beadsDir, "beads.db")
+	cmd := exec.Command(resolvedBdPath, "--db", dbPath, "config", "set", "types.custom", currentTypes)
 	cmd.Dir = beadsDir
-	// Set BEADS_DIR explicitly to ensure bd operates on the correct database
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	// Filter BD_DAEMON_HOST to prevent daemon routing when we need local access
+	cmd.Env = filterBeadsEnv(os.Environ())
+	cmd.Env = append(cmd.Env, "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure custom types in %s: %s: %w",
 			beadsDir, strings.TrimSpace(string(output)), err)

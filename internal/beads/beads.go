@@ -319,10 +319,12 @@ func filterBeadsEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {
 		// Skip beads-related env vars that could interfere with test isolation
-		// BD_ACTOR, BEADS_* - direct beads config
+		// BD_ACTOR, BD_DAEMON_HOST - direct beads config and daemon routing
+		// BEADS_* - beads configuration
 		// GT_ROOT - causes bd to find global routes file
 		// HOME - causes bd to find ~/.beads-planning routing
 		if strings.HasPrefix(env, "BD_ACTOR=") ||
+			strings.HasPrefix(env, "BD_DAEMON_HOST=") ||
 			strings.HasPrefix(env, "BEADS_") ||
 			strings.HasPrefix(env, "GT_ROOT=") ||
 			strings.HasPrefix(env, "HOME=") {
