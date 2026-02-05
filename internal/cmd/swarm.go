@@ -8,26 +8,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
-
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/swarm"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// swarmTask represents a task to dispatch to a fresh polecat.
+type swarmTask struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
 // Swarm command flags
 var (
-	swarmEpic       string
-	swarmTasks      []string
-	swarmWorkers    []string
-	swarmStart      bool
+	swarmEpic  string
+	swarmTasks []string
+	swarmStart bool
 	swarmStatusJSON bool
 	swarmListRig    string
 	swarmListStatus string
@@ -64,11 +65,11 @@ var swarmCreateCmd = &cobra.Command{
 	Long: `Create a new swarm in a rig.
 
 Creates a swarm that coordinates multiple polecats working on tasks from
-a beads epic. All workers branch from the same base commit.
+a beads epic. Fresh polecats are spawned for each task via gt sling.
 
 Examples:
-  gt swarm create greenplace --epic gp-abc --worker Toast --worker Nux
-  gt swarm create greenplace --epic gp-abc --worker Toast --start`,
+  gt swarm create greenplace --epic gp-abc
+  gt swarm create greenplace --epic gp-abc --start`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSwarmCreate,
 }
@@ -150,7 +151,6 @@ var swarmDispatchRig string
 func init() {
 	// Create flags
 	swarmCreateCmd.Flags().StringVar(&swarmEpic, "epic", "", "Beads epic ID for this swarm (required)")
-	swarmCreateCmd.Flags().StringSliceVar(&swarmWorkers, "worker", nil, "Polecat names to assign (repeatable)")
 	swarmCreateCmd.Flags().BoolVar(&swarmStart, "start", false, "Start swarm immediately after creation")
 	swarmCreateCmd.Flags().StringVar(&swarmTarget, "target", "main", "Target branch for landing")
 	_ = swarmCreateCmd.MarkFlagRequired("epic") // cobra flags: error only at runtime if missing
@@ -272,12 +272,6 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Base commit: %s\n", truncate(baseCommit, 8))
 	fmt.Printf("  Integration: %s\n", integration)
 	fmt.Printf("  Target:      %s\n", swarmTarget)
-	fmt.Printf("  Workers:     %s\n", strings.Join(swarmWorkers, ", "))
-
-	// If workers specified, assign them to tasks
-	if len(swarmWorkers) > 0 {
-		fmt.Printf("\nNote: Worker assignment to tasks is handled during swarm start\n")
-	}
 
 	// Start if requested
 	if swarmStart {
@@ -290,19 +284,15 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("getting swarm status: %w", err)
 		}
 
-		// Parse status to dispatch workers
+		// Parse status to dispatch fresh polecats
 		var status struct {
-			Ready []struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-			} `json:"ready"`
+			Ready []swarmTask `json:"ready"`
 		}
 		if err := json.Unmarshal(statusOut.Bytes(), &status); err == nil && len(status.Ready) > 0 {
 			fmt.Printf("\nReady front has %d tasks available\n", len(status.Ready))
-			if len(swarmWorkers) > 0 {
-				// Spawn workers for ready tasks
-				fmt.Printf("Spawning workers...\n")
-				_ = spawnSwarmWorkersFromBeads(r, townRoot, swarmEpic, swarmWorkers, status.Ready)
+			// Self-cleaning model: always spawn fresh polecats via gt sling
+			if err := slingReadyTasks(townRoot, rigName, status.Ready); err != nil {
+				return fmt.Errorf("dispatching tasks: %w", err)
 			}
 		}
 	} else {
@@ -348,11 +338,8 @@ func runSwarmStart(cmd *cobra.Command, args []string) error {
 	}
 
 	var status struct {
-		EpicID string `json:"epic_id"`
-		Ready  []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-		} `json:"ready"`
+		EpicID string      `json:"epic_id"`
+		Ready  []swarmTask `json:"ready"`
 		Active []struct {
 			ID       string `json:"id"`
 			Assignee string `json:"assignee"`
@@ -373,16 +360,9 @@ func runSwarmStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Swarm %s starting with %d ready tasks\n", style.Bold.Render("✓"), swarmID, len(status.Ready))
 
-	// If workers were specified in create, use them; otherwise prompt user
-	if len(swarmWorkers) > 0 {
-		fmt.Printf("\nSpawning workers...\n")
-		_ = spawnSwarmWorkersFromBeads(foundRig, townRoot, swarmID, swarmWorkers, status.Ready)
-	} else {
-		fmt.Printf("\nReady tasks:\n")
-		for _, task := range status.Ready {
-			fmt.Printf("  ○ %s: %s\n", task.ID, task.Title)
-		}
-		fmt.Printf("\nUse 'gt sling <task-id> <rig>/<worker>' to assign tasks\n")
+	// Self-cleaning model: always spawn fresh polecats via gt sling
+	if err := slingReadyTasks(townRoot, foundRig.Name, status.Ready); err != nil {
+		return fmt.Errorf("dispatching tasks: %w", err)
 	}
 
 	return nil
@@ -441,16 +421,10 @@ func runSwarmDispatch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Filter to unassigned ready tasks
-	var unassigned []struct {
-		ID    string
-		Title string
-	}
+	var unassigned []swarmTask
 	for _, task := range status.Ready {
 		if task.Assignee == "" {
-			unassigned = append(unassigned, struct {
-				ID    string
-				Title string
-			}{task.ID, task.Title})
+			unassigned = append(unassigned, swarmTask{ID: task.ID, Title: task.Title})
 		}
 	}
 
@@ -486,63 +460,22 @@ func runSwarmDispatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// spawnSwarmWorkersFromBeads spawns sessions for swarm workers using beads task list.
-func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}) error { //nolint:unparam // error return kept for future use
-	t := tmux.NewTmux()
-	polecatSessMgr := polecat.NewSessionManager(t, r)
-	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
-
-	// Pair workers with tasks (round-robin if more tasks than workers)
-	workerIdx := 0
+// slingReadyTasks dispatches tasks to fresh polecats via gt sling.
+// Self-cleaning model: polecats are always freshly spawned, never reused.
+func slingReadyTasks(townRoot string, rigName string, tasks []swarmTask) error {
+	fmt.Printf("Spawning fresh polecats for %d tasks...\n", len(tasks))
 	for _, task := range tasks {
-		if workerIdx >= len(workers) {
-			break // No more workers
-		}
-
-		worker := workers[workerIdx]
-		workerIdx++
-
-		// Use gt sling to assign task to worker (this updates beads)
-		slingCmd := exec.Command("gt", "sling", task.ID, fmt.Sprintf("%s/%s", r.Name, worker))
+		slingCmd := exec.Command("gt", "sling", task.ID, rigName)
 		slingCmd.Dir = townRoot
+		slingCmd.Stdout = os.Stdout
+		slingCmd.Stderr = os.Stderr
+
 		if err := slingCmd.Run(); err != nil {
-			style.PrintWarning("  couldn't sling %s to %s: %v", task.ID, worker, err)
-
-			// Fallback: update polecat state directly
-			if err := polecatMgr.AssignIssue(worker, task.ID); err != nil {
-				style.PrintWarning("  couldn't assign %s to %s: %v", task.ID, worker, err)
-				continue
-			}
+			style.PrintWarning("  couldn't sling %s: %v", task.ID, err)
+			continue
 		}
-
-		// Check if already running
-		running, _ := polecatSessMgr.IsRunning(worker)
-		if running {
-			fmt.Printf("  %s already running, injecting task...\n", worker)
-		} else {
-			fmt.Printf("  Starting %s...\n", worker)
-			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil {
-				style.PrintWarning("  couldn't start %s: %v", worker, err)
-				continue
-			}
-			// Wait for Claude to initialize
-			time.Sleep(5 * time.Second)
-		}
-
-		// Inject work assignment
-		context := fmt.Sprintf("[SWARM] You are part of swarm %s.\n\nAssigned task: %s\nTitle: %s\n\nWork on this task. When complete, commit and signal DONE.",
-			swarmID, task.ID, task.Title)
-		if err := polecatSessMgr.Inject(worker, context); err != nil {
-			style.PrintWarning("  couldn't inject to %s: %v", worker, err)
-		} else {
-			fmt.Printf("  %s → %s ✓\n", worker, task.ID)
-		}
+		fmt.Printf("  %s Dispatched %s: %s → fresh polecat\n", style.Bold.Render("✓"), task.ID, task.Title)
 	}
-
 	return nil
 }
 
