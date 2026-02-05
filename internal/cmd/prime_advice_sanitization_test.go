@@ -91,7 +91,7 @@ func TestAdviceBead_ANSIEscapeCodes(t *testing.T) {
 			}
 
 			// Verify getAdviceScope doesn't crash
-			scope := getAdviceScope(bead)
+			scope := getAdviceScope(bead, RolePolecat)
 			if scope == "" {
 				t.Error("getAdviceScope returned empty string")
 			}
@@ -298,7 +298,7 @@ func TestAdviceBead_VeryLongTitle(t *testing.T) {
 			}
 
 			// Verify scope extraction doesn't crash on long content
-			_ = getAdviceScope(bead)
+			_ = getAdviceScope(bead, RolePolecat)
 		})
 	}
 }
@@ -582,16 +582,14 @@ func TestGetAdviceScope_EdgeCases(t *testing.T) {
 			expected: "\uFFFD\x85\u0631\u062D\u0628\u0627", // Corrupted output
 		},
 		{
-			name:   "multiple prefix matches",
-			labels: []string{"rig:gastown", "role:polecat", "agent:test"},
-			// BUG: getAdviceScope iterates labels in order - first matching wins
-			// regardless of prefix priority. Filed as gt-dzvg2m.
-			expected: "gastown", // First label "rig:gastown" matches first
+			name:     "multiple prefix matches",
+			labels:   []string{"rig:gastown", "role:polecat", "agent:test"},
+			expected: "Agent", // agent: is most specific scope
 		},
 		{
 			name:     "rig before role",
 			labels:   []string{"rig:gastown", "role:polecat"},
-			expected: "gastown", // rig: comes before role: in iteration
+			expected: "Polecat", // role: is more specific than rig:
 		},
 		{
 			name:     "label with colons",
@@ -608,7 +606,7 @@ func TestGetAdviceScope_EdgeCases(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			bead := AdviceBead{Labels: tc.labels}
-			result := getAdviceScope(bead)
+			result := getAdviceScope(bead, RolePolecat)
 			if result != tc.expected {
 				t.Errorf("getAdviceScope with labels %v = %q, want %q", tc.labels, result, tc.expected)
 			}
@@ -788,7 +786,7 @@ func TestAdviceOutputBuffer(t *testing.T) {
 			// Simulate the output formatting from outputAdviceContext
 			var buf bytes.Buffer
 
-			scope := getAdviceScope(bead)
+			scope := getAdviceScope(bead, RolePolecat)
 			buf.WriteString("**[" + scope + "]** " + bead.Title + "\n")
 
 			if bead.Description != "" {

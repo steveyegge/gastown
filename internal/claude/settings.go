@@ -149,6 +149,11 @@ func ProvisionFileAfterFail(workDir string) error {
 	return nil
 }
 
+// MCPTemplateContent returns the raw content of the embedded MCP config template.
+func MCPTemplateContent() ([]byte, error) {
+	return configFS.ReadFile("config/mcp.json")
+}
+
 // EnsureMCPConfig ensures .mcp.json exists in the given directory.
 // This configures MCP servers (like Playwright) for Claude Code.
 // If the file already exists, it's left unchanged.
