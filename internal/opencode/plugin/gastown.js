@@ -7,10 +7,83 @@ export const GasTown = async ({ client, $ }) => {
   const role = (process.env.GT_ROLE || "").toLowerCase();
   const autoInit = process.env.GT_AUTO_INIT === "1";
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
+  const defaultFallbackModels = [
+    "openai/gpt-5.2-codex",
+    "openai/gpt-5.1-codex",
+    "openai/gpt-5.1",
+  ];
 
   // Track transformed sessions to avoid duplicate processing
   const transformedSessions = new Set();
   const injectedSessions = new Set();
+  const fallbackState = new Map();
+
+  function parseFallbackModels() {
+    const raw = process.env.GT_OPENCODE_MODEL_FALLBACKS || process.env.OPENCODE_MODEL_FALLBACKS;
+    if (!raw) return defaultFallbackModels;
+    return raw
+      .split(",")
+      .map(entry => entry.trim())
+      .filter(Boolean);
+  }
+
+  function normalizeModel(value) {
+    if (!value || typeof value !== "string") return "";
+    return value.trim();
+  }
+
+  function splitModel(model) {
+    if (!model || !model.includes("/")) return null;
+    const [providerID, ...rest] = model.split("/");
+    const modelID = rest.join("/").trim();
+    if (!providerID || !modelID) return null;
+    return { providerID, modelID };
+  }
+
+  function isCreditError(event) {
+    const payload = JSON.stringify(event?.properties || {}).toLowerCase();
+    return (
+      payload.includes("insufficient") ||
+      payload.includes("quota") ||
+      payload.includes("credit") ||
+      payload.includes("billing") ||
+      payload.includes("402")
+    );
+  }
+
+  function getNextFallbackModel(currentModel, fallbacks) {
+    if (!fallbacks.length) return "";
+    const current = normalizeModel(currentModel);
+    const index = fallbacks.findIndex(model => model === current);
+    if (index >= 0 && index + 1 < fallbacks.length) {
+      return fallbacks[index + 1];
+    }
+    if (index === -1 && fallbacks.length > 0) {
+      return fallbacks[0];
+    }
+    return "";
+  }
+
+  async function updateSessionModel(sessionID, model) {
+    const parsed = splitModel(model);
+    try {
+      await client.session.update({
+        path: { id: sessionID },
+        body: { model: parsed || model },
+      });
+      return true;
+    } catch {
+      try {
+        await client.session.update({
+          path: { id: sessionID },
+          body: { model },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
 
   /**
    * Build Gas Town context from gt prime and optionally mail.
@@ -120,6 +193,32 @@ export const GasTown = async ({ client, $ }) => {
         }
       }
 
+      if (event.type === "session.error" && isCreditError(event)) {
+        const sessionID = event.properties?.sessionID || event.properties?.info?.id;
+        if (!sessionID) return;
+
+        const fallbacks = parseFallbackModels();
+        if (!fallbacks.length) return;
+
+        const sessionContext = await getSessionContext(sessionID);
+        const currentModel = normalizeModel(sessionContext?.model) || fallbackState.get(sessionID);
+        const nextModel = getNextFallbackModel(currentModel, fallbacks);
+        if (!nextModel || nextModel === currentModel || fallbackState.get(sessionID) === nextModel) return;
+
+        const updated = await updateSessionModel(sessionID, nextModel);
+        if (updated) {
+          fallbackState.set(sessionID, nextModel);
+          client.tui
+            .showToast({
+              body: {
+                message: `Switched model to ${nextModel} after credit exhaustion`,
+                variant: "warning",
+              },
+            })
+            .catch(() => {});
+        }
+      }
+
       // Re-inject context after compaction (context is lost during compaction)
       if (event.type === "session.compacted") {
         const sessionID = event.properties.sessionID;
@@ -131,6 +230,7 @@ export const GasTown = async ({ client, $ }) => {
       if (event.type === "session.deleted") {
         const sessionID = event.properties?.info?.id;
         injectedSessions.delete(sessionID);
+        fallbackState.delete(sessionID);
         
         // Record session cost (Stop hook equivalent)
         $`gt costs record --session ${sessionID}`.text().catch(() => {});

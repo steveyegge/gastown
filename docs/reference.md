@@ -510,6 +510,11 @@ For OpenCode autonomous mode, set env var in your shell profile:
 export OPENCODE_PERMISSION='{"*":"allow"}'
 ```
 
+Optional OpenCode model fallback (comma-separated provider/model list):
+```bash
+export GT_OPENCODE_MODEL_FALLBACKS="openai/gpt-5.2-codex,openai/gpt-5.1-codex,openai/gpt-5.1"
+```
+
 ### Rig Management
 
 ```bash
