@@ -52,36 +52,21 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Phase 1: Stop services (reuse down logic)
-	// Set the package-level flags for runDown
-	savedDownQuiet := downQuiet
-	savedDownPolecats := downPolecats
-	savedDownForce := downForce
-	savedDownAll := downAll
-	savedDownNuke := downNuke
-	savedDownDryRun := downDryRun
-
-	downQuiet = restartQuiet
-	downPolecats = restartPolecats
-	downForce = false // Don't force kill during restart
-	downAll = false
-	downNuke = false
-	downDryRun = false
+	// Phase 1: Stop services
+	downOpts := DownOptions{
+		Quiet:    restartQuiet,
+		Polecats: restartPolecats,
+		Force:    false, // Don't force kill during restart
+		All:      false,
+		Nuke:     false,
+		DryRun:   false,
+	}
 
 	if !restartQuiet {
 		fmt.Println("Stopping services...")
 	}
-	err := runDown(cmd, []string{})
 
-	// Restore flags
-	downQuiet = savedDownQuiet
-	downPolecats = savedDownPolecats
-	downForce = savedDownForce
-	downAll = savedDownAll
-	downNuke = savedDownNuke
-	downDryRun = savedDownDryRun
-
-	if err != nil {
+	if err := runDownWithOptions(downOpts); err != nil {
 		// Continue with startup even if some services failed to stop
 		if !restartQuiet {
 			fmt.Printf("%s Some services failed to stop, continuing with startup...\n", style.Warning.Render("⚠"))
@@ -90,23 +75,17 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 
-	// Phase 2: Start services (reuse up logic)
-	savedUpQuiet := upQuiet
-	savedUpRestore := upRestore
-
-	upQuiet = restartQuiet
-	upRestore = restartRestore
+	// Phase 2: Start services
+	upOpts := UpOptions{
+		Quiet:   restartQuiet,
+		Restore: restartRestore,
+	}
 
 	if !restartQuiet {
 		fmt.Println("Starting services...")
 	}
-	err = runUp(cmd, []string{})
 
-	// Restore flags
-	upQuiet = savedUpQuiet
-	upRestore = savedUpRestore
-
-	if err != nil {
+	if err := runUpWithOptions(upOpts); err != nil {
 		return fmt.Errorf("restart failed during startup: %w", err)
 	}
 

@@ -59,68 +59,46 @@ Use --restore to also start:
   • Crew       - Per rig settings (settings/config.json crew.startup)
   • Polecats   - Those with pinned beads (work attached)
 
-Use --restart to stop running services before starting. This is useful
-when agents need to pick up new configuration. Equivalent to 'gt down && gt up'
-or simply 'gt restart'.
-
 Running 'gt up' multiple times is safe - it only starts services that
-aren't already running.`,
+aren't already running.
+
+To restart services (stop then start), use 'gt restart' instead.`,
 	RunE: runUp,
 }
 
 var (
 	upQuiet   bool
 	upRestore bool
-	upRestart bool
 )
 
 func init() {
 	upCmd.Flags().BoolVarP(&upQuiet, "quiet", "q", false, "Only show errors")
 	upCmd.Flags().BoolVar(&upRestore, "restore", false, "Also restore crew (from settings) and polecats (from hooks)")
-	upCmd.Flags().BoolVar(&upRestart, "restart", false, "Stop running services before starting (equivalent to 'gt down && gt up')")
 	rootCmd.AddCommand(upCmd)
 }
 
+// UpOptions configures the behavior of runUpWithOptions.
+type UpOptions struct {
+	Quiet   bool
+	Restore bool
+}
+
+// upOptionsFromFlags creates UpOptions from the package-level flag variables.
+func upOptionsFromFlags() UpOptions {
+	return UpOptions{
+		Quiet:   upQuiet,
+		Restore: upRestore,
+	}
+}
+
 func runUp(cmd *cobra.Command, args []string) error {
+	return runUpWithOptions(upOptionsFromFlags())
+}
+
+func runUpWithOptions(opts UpOptions) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
-	// If --restart flag is set, stop services first
-	if upRestart {
-		if !upQuiet {
-			fmt.Println("Stopping services first (--restart)...")
-		}
-		// Save and set down flags
-		savedDownQuiet := downQuiet
-		savedDownPolecats := downPolecats
-		savedDownForce := downForce
-		savedDownAll := downAll
-		savedDownNuke := downNuke
-		savedDownDryRun := downDryRun
-
-		downQuiet = upQuiet
-		downPolecats = false
-		downForce = false
-		downAll = false
-		downNuke = false
-		downDryRun = false
-
-		_ = runDown(cmd, []string{}) // Ignore errors, continue with startup
-
-		// Restore down flags
-		downQuiet = savedDownQuiet
-		downPolecats = savedDownPolecats
-		downForce = savedDownForce
-		downAll = savedDownAll
-		downNuke = savedDownNuke
-		downDryRun = savedDownDryRun
-
-		if !upQuiet {
-			fmt.Println()
-			fmt.Println("Starting services...")
-		}
 	}
 
 	allOK := true
@@ -191,16 +169,16 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Print daemon/deacon/mayor results
 	if daemonErr != nil {
-		printStatus("Daemon", false, daemonErr.Error())
+		printStatus("Daemon", false, daemonErr.Error(), opts.Quiet)
 		allOK = false
 	} else if daemonPID > 0 {
-		printStatus("Daemon", true, fmt.Sprintf("PID %d", daemonPID))
+		printStatus("Daemon", true, fmt.Sprintf("PID %d", daemonPID), opts.Quiet)
 	}
-	printStatus(deaconResult.name, deaconResult.ok, deaconResult.detail)
+	printStatus(deaconResult.name, deaconResult.ok, deaconResult.detail, opts.Quiet)
 	if !deaconResult.ok {
 		allOK = false
 	}
-	printStatus(mayorResult.name, mayorResult.ok, mayorResult.detail)
+	printStatus(mayorResult.name, mayorResult.ok, mayorResult.detail, opts.Quiet)
 	if !mayorResult.ok {
 		allOK = false
 	}
@@ -211,7 +189,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Print results in order: all witnesses first, then all refineries
 	for _, rigName := range rigs {
 		if result, ok := witnessResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
+			printStatus(result.name, result.ok, result.detail, opts.Quiet)
 			if !result.ok {
 				allOK = false
 			}
@@ -219,7 +197,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	for _, rigName := range rigs {
 		if result, ok := refineryResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
+			printStatus(result.name, result.ok, result.detail, opts.Quiet)
 			if !result.ok {
 				allOK = false
 			}
@@ -227,14 +205,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// 7. Crew (if --restore)
-	if upRestore {
+	if opts.Restore {
 		for _, rigName := range rigs {
 			crewStarted, crewErrors := startCrewFromSettings(townRoot, rigName)
 			for _, name := range crewStarted {
-				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), true, fmt.Sprintf("gt-%s-crew-%s", rigName, name))
+				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), true, fmt.Sprintf("gt-%s-crew-%s", rigName, name), opts.Quiet)
 			}
 			for name, err := range crewErrors {
-				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), false, err.Error())
+				printStatus(fmt.Sprintf("Crew (%s/%s)", rigName, name), false, err.Error(), opts.Quiet)
 				allOK = false
 			}
 		}
@@ -243,10 +221,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 		for _, rigName := range rigs {
 			polecatsStarted, polecatErrors := startPolecatsWithWork(townRoot, rigName)
 			for _, name := range polecatsStarted {
-				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), true, fmt.Sprintf("gt-%s-polecat-%s", rigName, name))
+				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), true, fmt.Sprintf("gt-%s-polecat-%s", rigName, name), opts.Quiet)
 			}
 			for name, err := range polecatErrors {
-				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), false, err.Error())
+				printStatus(fmt.Sprintf("Polecat (%s/%s)", rigName, name), false, err.Error(), opts.Quiet)
 				allOK = false
 			}
 		}
@@ -270,8 +248,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printStatus(name string, ok bool, detail string) {
-	if upQuiet && ok {
+func printStatus(name string, ok bool, detail string, quiet bool) {
+	if quiet && ok {
 		return
 	}
 	if ok {
