@@ -22,11 +22,14 @@ func TestRestartCmd_Flags(t *testing.T) {
 	if flags.Lookup("quiet") == nil {
 		t.Error("--quiet flag not registered")
 	}
-	if flags.Lookup("restore") == nil {
-		t.Error("--restore flag not registered")
+	if flags.Lookup("wait") == nil {
+		t.Error("--wait flag not registered")
 	}
-	if flags.Lookup("polecats") == nil {
-		t.Error("--polecats flag not registered")
+	if flags.Lookup("force") == nil {
+		t.Error("--force flag not registered")
+	}
+	if flags.Lookup("infra") == nil {
+		t.Error("--infra flag not registered")
 	}
 }
 
@@ -37,8 +40,23 @@ func TestRestartCmd_ShortFlags(t *testing.T) {
 	if flags.ShorthandLookup("q") == nil {
 		t.Error("-q short flag not registered")
 	}
-	if flags.ShorthandLookup("p") == nil {
-		t.Error("-p short flag not registered")
+	if flags.ShorthandLookup("w") == nil {
+		t.Error("-w short flag not registered")
+	}
+	if flags.ShorthandLookup("f") == nil {
+		t.Error("-f short flag not registered")
+	}
+}
+
+func TestRestartCmd_NoOldFlags(t *testing.T) {
+	// Verify old flags are removed
+	flags := restartCmd.Flags()
+
+	if flags.Lookup("restore") != nil {
+		t.Error("--restore flag should be removed (default behavior now)")
+	}
+	if flags.Lookup("polecats") != nil {
+		t.Error("--polecats flag should be removed (default behavior now)")
 	}
 }
 
