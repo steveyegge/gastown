@@ -91,11 +91,16 @@ func EnsureCustomTypes(beadsDir string) error {
 		return nil
 	}
 
-	// Fast path: sentinel file exists (previous CLI invocation)
+	// Fast path: sentinel file exists and matches current types (previous CLI invocation)
 	sentinelPath := filepath.Join(beadsDir, typesSentinel)
-	if _, err := os.Stat(sentinelPath); err == nil {
-		ensuredDirs[beadsDir] = true
-		return nil
+	currentTypes := strings.Join(constants.BeadsCustomTypesList(), ",")
+	if data, err := os.ReadFile(sentinelPath); err == nil {
+		if strings.TrimSpace(string(data)) == currentTypes {
+			ensuredDirs[beadsDir] = true
+			return nil
+		}
+		// Sentinel is stale (types changed) - remove it so we re-register
+		_ = os.Remove(sentinelPath)
 	}
 
 	// Verify beads directory exists
@@ -104,8 +109,7 @@ func EnsureCustomTypes(beadsDir string) error {
 	}
 
 	// Configure custom types via bd CLI
-	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
-	cmd := exec.Command(resolvedBdPath, "config", "set", "types.custom", typesList)
+	cmd := exec.Command(resolvedBdPath, "config", "set", "types.custom", currentTypes)
 	cmd.Dir = beadsDir
 	// Set BEADS_DIR explicitly to ensure bd operates on the correct database
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
@@ -115,8 +119,8 @@ func EnsureCustomTypes(beadsDir string) error {
 	}
 
 	// Write sentinel file (best effort - don't fail if this fails)
-	// The sentinel contains a version marker for future compatibility
-	_ = os.WriteFile(sentinelPath, []byte("v1\n"), 0644)
+	// The sentinel stores the configured types list for cache invalidation
+	_ = os.WriteFile(sentinelPath, []byte(currentTypes+"\n"), 0644)
 
 	ensuredDirs[beadsDir] = true
 	return nil

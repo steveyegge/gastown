@@ -3,7 +3,10 @@ package beads
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestFindTownRoot(t *testing.T) {
@@ -151,16 +154,17 @@ func TestEnsureCustomTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create sentinel file
+		// Create sentinel file with current types list
 		sentinelPath := filepath.Join(beadsDir, typesSentinel)
-		if err := os.WriteFile(sentinelPath, []byte("v1\n"), 0644); err != nil {
+		currentTypes := strings.Join(constants.BeadsCustomTypesList(), ",")
+		if err := os.WriteFile(sentinelPath, []byte(currentTypes+"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
 		// Reset cache to ensure we're testing sentinel detection
 		ResetEnsuredDirs()
 
-		// This should succeed without running bd (sentinel exists)
+		// This should succeed without running bd (sentinel exists and matches)
 		err := EnsureCustomTypes(beadsDir)
 		if err != nil {
 			t.Errorf("expected success with sentinel file, got: %v", err)
@@ -174,9 +178,10 @@ func TestEnsureCustomTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create sentinel to avoid bd call
+		// Create sentinel with current types to avoid bd call
 		sentinelPath := filepath.Join(beadsDir, typesSentinel)
-		if err := os.WriteFile(sentinelPath, []byte("v1\n"), 0644); err != nil {
+		currentTypes := strings.Join(constants.BeadsCustomTypesList(), ",")
+		if err := os.WriteFile(sentinelPath, []byte(currentTypes+"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -192,6 +197,31 @@ func TestEnsureCustomTypes(t *testing.T) {
 
 		if err := EnsureCustomTypes(beadsDir); err != nil {
 			t.Errorf("expected cache hit, got: %v", err)
+		}
+	})
+
+	t.Run("stale sentinel triggers re-registration", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create sentinel with old types list (missing "config")
+		sentinelPath := filepath.Join(beadsDir, typesSentinel)
+		if err := os.WriteFile(sentinelPath, []byte("agent,role,rig\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// This should NOT cache-hit because sentinel content doesn't match current types.
+		// It will fail because bd isn't available in test, but the sentinel should be removed.
+		_ = EnsureCustomTypes(beadsDir)
+
+		// Verify sentinel was removed (stale content)
+		if _, err := os.Stat(sentinelPath); err == nil {
+			t.Error("expected stale sentinel to be removed, but it still exists")
 		}
 	})
 }
