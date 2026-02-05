@@ -230,7 +230,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+			fmt.Printf("   ✓ Created mayor/.claude/settings.local.json\n")
 		}
 	}
 
@@ -243,7 +243,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+			fmt.Printf("   ✓ Created deacon/.claude/settings.local.json\n")
 		}
 	}
 
