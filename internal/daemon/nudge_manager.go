@@ -342,23 +342,14 @@ func (m *NudgeManager) processQueue() {
 }
 
 // deliverNudge sends a nudge to the target session.
+// Uses the reliable Clear/Inject/Verify/Restore protocol via tmux.NudgeSession
+// which preserves any user input that was in the field.
 func (m *NudgeManager) deliverNudge(nudge *NudgeRequest) error {
-	// Format message with sentinel
+	// Format message with sentinel for tracking
 	msg := fmt.Sprintf("%s-[from %s] %s", nudge.ID, nudge.From, nudge.Message)
 
-	// Use tmux NudgeSession for delivery
-	if err := m.tmux.NudgeSession(nudge.Target, msg); err != nil {
-		return err
-	}
-
-	// Brief wait then verify not stuck
-	time.Sleep(nudgeDeliveryVerifyDelay)
-
-	if m.isStuckInInput(nudge.Target, nudge.ID) {
-		return fmt.Errorf("stuck in input")
-	}
-
-	return nil
+	// NudgeSession now uses the reliable protocol internally
+	return m.tmux.NudgeSession(nudge.Target, msg)
 }
 
 // isStuckInInput checks if our nudge is stuck in the input line.
