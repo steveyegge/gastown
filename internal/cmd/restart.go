@@ -34,9 +34,8 @@ Flags:
            Blocks until all polecats reach a checkpoint or complete.
            Use this for graceful restarts during active work.
 
-  --now    Immediate shutdown without graceful stop.
-           Sends SIGKILL instead of SIGTERM. Use when agents are
-           stuck or unresponsive.
+  --now    Skip graceful interrupt (Ctrl-C) and kill immediately.
+           Use when agents are stuck or unresponsive to interrupts.
 
   --infra  Only restart infrastructure (daemon, deacon, mayor,
            witnesses, refineries). Leave polecats and crew running.`,
@@ -51,7 +50,7 @@ Flags:
 type RestartOptions struct {
 	Quiet bool // Only show errors
 	Wait  bool // Wait for agents to finish work before stopping
-	Now   bool // Immediate shutdown without graceful stop
+	Now   bool // Skip graceful interrupt (Ctrl-C), kill immediately
 	Infra bool // Only restart infrastructure, leave polecats/crew running
 }
 
@@ -65,7 +64,7 @@ var (
 func init() {
 	restartCmd.Flags().BoolVarP(&restartQuiet, "quiet", "q", false, "Only show errors")
 	restartCmd.Flags().BoolVarP(&restartWait, "wait", "w", false, "Wait for agents to finish work before stopping")
-	restartCmd.Flags().BoolVarP(&restartNow, "now", "n", false, "Immediate shutdown without graceful stop")
+	restartCmd.Flags().BoolVarP(&restartNow, "now", "n", false, "Skip graceful interrupt, kill immediately")
 	restartCmd.Flags().BoolVar(&restartInfra, "infra", false, "Only restart infrastructure, leave polecats/crew running")
 	rootCmd.AddCommand(restartCmd)
 }
