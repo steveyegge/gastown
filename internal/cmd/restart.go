@@ -15,10 +15,10 @@ import (
 
 // Restart strategy constants.
 const (
-	// StrategyGraceful sends Ctrl-C to give agents a chance to handle the
-	// interrupt, then kills processes. State is preserved in beads so
-	// polecats resume assigned work on restart. Uncommitted WIP in git
-	// worktrees may be lost.
+	// StrategyGraceful notifies agents to save state (commit WIP, write
+	// checkpoint), waits 15s, then sends Ctrl-C and kills processes.
+	// State is preserved in beads so polecats resume assigned work on
+	// restart.
 	StrategyGraceful = "graceful"
 
 	// StrategyDrain waits for all polecats to finish their current work
@@ -63,10 +63,10 @@ Use this when you need to:
 Strategies (--strategy):
 
   graceful (default)
-    Send Ctrl-C to all sessions, giving agents a chance to handle the
-    interrupt, then stop and restart everything. Work state is preserved
-    via hook beads so polecats resume assigned work after restart.
-    Uncommitted WIP in git worktrees may be lost.
+    Notify all agents to save state (commit WIP, write checkpoint),
+    wait 15s, then send Ctrl-C and stop everything. Work state is
+    preserved via hook beads so polecats resume assigned work after
+    restart. Use --no-save on gt down to skip the notification.
     Use for: routine restarts, updates, config reloads.
 
   drain
@@ -151,12 +151,13 @@ func runRestartWithOptions(opts RestartOptions) error {
 	return nil
 }
 
-// restartGraceful sends Ctrl-C, waits briefly, then kills and restarts.
+// restartGraceful notifies agents to save state, waits briefly, then kills and restarts.
 func restartGraceful(opts RestartOptions) error {
 	return restartWithDown(opts, DownOptions{
-		Quiet:    opts.Quiet,
-		Polecats: true,
-		Force:    false, // Graceful: send Ctrl-C first
+		Quiet:      opts.Quiet,
+		Polecats:   true,
+		Force:      false, // Graceful: send Ctrl-C first
+		NotifySave: true,  // Nudge agents to save state before killing
 	}, true) // restore polecats/crew
 }
 

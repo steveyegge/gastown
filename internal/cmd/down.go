@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -24,8 +25,10 @@ import (
 )
 
 const (
-	shutdownLockFile    = "daemon/shutdown.lock"
-	shutdownLockTimeout = 5 * time.Second
+	shutdownLockFile         = "daemon/shutdown.lock"
+	shutdownLockTimeout      = 5 * time.Second
+	shutdownSaveGracePeriod  = 15 * time.Second
+	shutdownNudgeMessage     = "[SHUTDOWN] Gas Town is shutting down. You have ~15 seconds. Please: 1) git add and commit any uncommitted changes with a WIP message describing your progress and next steps, 2) run `gt checkpoint write` to save your checkpoint. Do this NOW — your session will be terminated shortly."
 )
 
 var downCmd = &cobra.Command{
@@ -65,6 +68,7 @@ var (
 	downNuke     bool
 	downDryRun   bool
 	downPolecats bool
+	downNoSave   bool
 )
 
 func init() {
@@ -74,28 +78,31 @@ func init() {
 	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Stop bd daemons/activity and verify shutdown")
 	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill entire tmux server (DESTRUCTIVE - kills non-GT sessions!)")
 	downCmd.Flags().BoolVar(&downDryRun, "dry-run", false, "Preview what would be stopped without taking action")
+	downCmd.Flags().BoolVar(&downNoSave, "no-save", false, "Skip notifying agents to save state before shutdown")
 	rootCmd.AddCommand(downCmd)
 }
 
 // DownOptions configures the behavior of runDownWithOptions.
 type DownOptions struct {
-	Quiet    bool
-	Force    bool
-	All      bool
-	Nuke     bool
-	DryRun   bool
-	Polecats bool
+	Quiet      bool
+	Force      bool
+	All        bool
+	Nuke       bool
+	DryRun     bool
+	Polecats   bool
+	NotifySave bool // Nudge agents to save state before killing
 }
 
 // downOptionsFromFlags creates DownOptions from the package-level flag variables.
 func downOptionsFromFlags() DownOptions {
 	return DownOptions{
-		Quiet:    downQuiet,
-		Force:    downForce,
-		All:      downAll,
-		Nuke:     downNuke,
-		DryRun:   downDryRun,
-		Polecats: downPolecats,
+		Quiet:      downQuiet,
+		Force:      downForce,
+		All:        downAll,
+		Nuke:       downNuke,
+		DryRun:     downDryRun,
+		Polecats:   downPolecats,
+		NotifySave: !downNoSave,
 	}
 }
 
@@ -140,6 +147,22 @@ func runDownWithOptions(opts DownOptions) error {
 	}
 
 	rigs := discoverRigs(townRoot)
+
+	// Phase 0.1: Notify agents to save state before shutdown
+	if opts.NotifySave && !opts.Force {
+		if opts.DryRun {
+			fmt.Println("Would notify agents to save state before shutdown")
+		} else {
+			nudged := notifyAgentsOfShutdown(t, opts.Quiet)
+			if nudged > 0 {
+				if !opts.Quiet {
+					fmt.Printf("Notified %d agent(s) to save state, waiting %s...\n",
+						nudged, shutdownSaveGracePeriod)
+				}
+				time.Sleep(shutdownSaveGracePeriod)
+			}
+		}
+	}
 
 	// Phase 0.5: Stop polecats if --polecats
 	if opts.Polecats {
@@ -396,6 +419,35 @@ func stopSession(t *tmux.Tmux, sessionName string, force bool) (bool, error) {
 
 	// Kill the session (with explicit process termination to prevent orphans)
 	return true, t.KillSessionWithProcesses(sessionName)
+}
+
+// notifyAgentsOfShutdown nudges all active agent sessions with a shutdown
+// message, giving them a chance to commit WIP and write checkpoints.
+// Nudges are sent in parallel. Returns the number of agents nudged.
+func notifyAgentsOfShutdown(t *tmux.Tmux, quiet bool) int {
+	agents, err := getAgentSessions(true)
+	if err != nil || len(agents) == 0 {
+		return 0
+	}
+
+	var wg sync.WaitGroup
+	nudged := 0
+	for _, agent := range agents {
+		// Verify session is actually alive before nudging
+		running, _ := t.HasSession(agent.Name)
+		if !running {
+			continue
+		}
+		nudged++
+		wg.Add(1)
+		go func(sessionName string) {
+			defer wg.Done()
+			_ = t.NudgeSession(sessionName, shutdownNudgeMessage)
+		}(agent.Name)
+	}
+	wg.Wait()
+
+	return nudged
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.

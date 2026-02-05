@@ -202,6 +202,7 @@ func TestDownOptions_FromFlags(t *testing.T) {
 	savedNuke := downNuke
 	savedDryRun := downDryRun
 	savedPolecats := downPolecats
+	savedNoSave := downNoSave
 
 	defer func() {
 		downQuiet = savedQuiet
@@ -210,6 +211,7 @@ func TestDownOptions_FromFlags(t *testing.T) {
 		downNuke = savedNuke
 		downDryRun = savedDryRun
 		downPolecats = savedPolecats
+		downNoSave = savedNoSave
 	}()
 
 	downQuiet = true
@@ -218,6 +220,7 @@ func TestDownOptions_FromFlags(t *testing.T) {
 	downNuke = false
 	downDryRun = true
 	downPolecats = true
+	downNoSave = false
 
 	opts := downOptionsFromFlags()
 
@@ -239,6 +242,9 @@ func TestDownOptions_FromFlags(t *testing.T) {
 	if opts.Polecats != true {
 		t.Error("Polecats should be true")
 	}
+	if opts.NotifySave != true {
+		t.Error("NotifySave should be true when --no-save is false")
+	}
 }
 
 func TestDownOptions_ZeroValue(t *testing.T) {
@@ -252,6 +258,46 @@ func TestDownOptions_ZeroValue(t *testing.T) {
 	}
 	if opts.Polecats != false {
 		t.Error("zero-value Polecats should be false")
+	}
+	if opts.NotifySave != false {
+		t.Error("zero-value NotifySave should be false")
+	}
+}
+
+func TestDownOptions_NotifySave(t *testing.T) {
+	savedNoSave := downNoSave
+	savedForce := downForce
+	defer func() {
+		downNoSave = savedNoSave
+		downForce = savedForce
+	}()
+
+	// Default: NotifySave is true (--no-save not set)
+	downNoSave = false
+	downForce = false
+	opts := downOptionsFromFlags()
+	if !opts.NotifySave {
+		t.Error("NotifySave should be true by default")
+	}
+
+	// --no-save disables NotifySave
+	downNoSave = true
+	downForce = false
+	opts = downOptionsFromFlags()
+	if opts.NotifySave {
+		t.Error("NotifySave should be false when --no-save is set")
+	}
+
+	// NotifySave true but Force true: nudge phase is skipped at runtime
+	// (the guard is in runDownWithOptions, not in downOptionsFromFlags)
+	downNoSave = false
+	downForce = true
+	opts = downOptionsFromFlags()
+	if !opts.NotifySave {
+		t.Error("NotifySave should still be true even with --force (runtime guard handles it)")
+	}
+	if !opts.Force {
+		t.Error("Force should be true")
 	}
 }
 
