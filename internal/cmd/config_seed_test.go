@@ -205,6 +205,128 @@ func TestSeedAccountBeadsMetadataExcludesAuthToken(t *testing.T) {
 	}
 }
 
+func TestSlackSeedMetadataExcludesSecrets(t *testing.T) {
+	// Simulate what seedSlackBeads does: parse config, remove secrets
+	slackJSON := `{
+		"type": "slack",
+		"version": 1,
+		"enabled": true,
+		"default_channel": "C0123456789",
+		"channels": {"gastown/polecats/*": "C0987654321"},
+		"channel_names": {"C0987654321": "#polecat-decisions"},
+		"bot_token": "xoxb-secret-bot-token",
+		"app_token": "xapp-secret-app-token"
+	}`
+
+	var slackMap map[string]interface{}
+	if err := json.Unmarshal([]byte(slackJSON), &slackMap); err != nil {
+		t.Fatalf("parsing slack JSON: %v", err)
+	}
+
+	// Remove secrets (same as seedSlackBeads does)
+	delete(slackMap, "bot_token")
+	delete(slackMap, "app_token")
+
+	metaJSON, err := json.Marshal(slackMap)
+	if err != nil {
+		t.Fatalf("marshaling metadata: %v", err)
+	}
+
+	metaStr := string(metaJSON)
+	if strings.Contains(metaStr, "bot_token") {
+		t.Errorf("metadata should not contain bot_token, got: %s", metaStr)
+	}
+	if strings.Contains(metaStr, "app_token") {
+		t.Errorf("metadata should not contain app_token, got: %s", metaStr)
+	}
+	if strings.Contains(metaStr, "xoxb-") {
+		t.Errorf("metadata should not contain bot token value, got: %s", metaStr)
+	}
+	if strings.Contains(metaStr, "xapp-") {
+		t.Errorf("metadata should not contain app token value, got: %s", metaStr)
+	}
+
+	// Verify non-secret fields are preserved
+	if !strings.Contains(metaStr, "C0123456789") {
+		t.Error("metadata should contain default_channel")
+	}
+	if !strings.Contains(metaStr, "C0987654321") {
+		t.Error("metadata should contain channel mappings")
+	}
+	if !strings.Contains(metaStr, "gastown/polecats/*") {
+		t.Error("metadata should contain channel patterns")
+	}
+	if !strings.Contains(metaStr, "#polecat-decisions") {
+		t.Error("metadata should contain channel names")
+	}
+}
+
+func TestMessagingConfigSeedMetadata(t *testing.T) {
+	// Verify that NewMessagingConfig can be marshaled to valid JSON
+	// suitable for bead metadata storage
+	msgConfig := config.NewMessagingConfig()
+
+	msgJSON, err := json.Marshal(msgConfig)
+	if err != nil {
+		t.Fatalf("marshaling messaging config: %v", err)
+	}
+
+	// Must be valid JSON
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal(msgJSON, &msgMap); err != nil {
+		t.Fatalf("messaging config JSON is not a valid map: %v", err)
+	}
+
+	// Must have required fields
+	if msgMap["type"] != "messaging" {
+		t.Errorf("expected type 'messaging', got %v", msgMap["type"])
+	}
+	if msgMap["version"] != float64(1) {
+		t.Errorf("expected version 1, got %v", msgMap["version"])
+	}
+}
+
+func TestEscalationConfigSeedMetadata(t *testing.T) {
+	// Verify that NewEscalationConfig can be marshaled to valid JSON
+	// suitable for bead metadata storage
+	escConfig := config.NewEscalationConfig()
+
+	escJSON, err := json.Marshal(escConfig)
+	if err != nil {
+		t.Fatalf("marshaling escalation config: %v", err)
+	}
+
+	// Must be valid JSON
+	var escMap map[string]interface{}
+	if err := json.Unmarshal(escJSON, &escMap); err != nil {
+		t.Fatalf("escalation config JSON is not a valid map: %v", err)
+	}
+
+	// Must have required fields
+	if escMap["type"] != "escalation" {
+		t.Errorf("expected type 'escalation', got %v", escMap["type"])
+	}
+	if escMap["version"] != float64(1) {
+		t.Errorf("expected version 1, got %v", escMap["version"])
+	}
+
+	// Must have routes with severity levels
+	routes, ok := escMap["routes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected routes to be a map")
+	}
+	for _, severity := range []string{"low", "medium", "high", "critical"} {
+		if _, ok := routes[severity]; !ok {
+			t.Errorf("expected routes to contain severity '%s'", severity)
+		}
+	}
+
+	// Must have stale_threshold
+	if escMap["stale_threshold"] != "4h" {
+		t.Errorf("expected stale_threshold '4h', got %v", escMap["stale_threshold"])
+	}
+}
+
 func TestDaemonConfigSeedMetadata(t *testing.T) {
 	// Verify that NewDaemonPatrolConfig can be marshaled to valid JSON
 	// suitable for bead metadata storage

@@ -405,3 +405,45 @@ func TestGetAgentByChannel_NilOverrides(t *testing.T) {
 		t.Errorf("GetAgentByChannel with nil overrides = %q, want empty string", got)
 	}
 }
+
+func TestExtractMetadataFromDescription(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		want        string
+	}{
+		{
+			name: "valid metadata line",
+			description: `slack-routing: slack-routing
+
+rig: *
+category: slack-routing
+metadata: {"enabled":true,"default_channel":"C0123456789"}`,
+			want: `{"enabled":true,"default_channel":"C0123456789"}`,
+		},
+		{
+			name:        "no metadata line",
+			description: "rig: *\ncategory: slack-routing\n",
+			want:        "",
+		},
+		{
+			name:        "empty description",
+			description: "",
+			want:        "",
+		},
+		{
+			name:        "metadata with nested JSON",
+			description: "metadata: {\"channels\":{\"gastown/polecats/*\":\"C0987654321\"}}",
+			want:        `{"channels":{"gastown/polecats/*":"C0987654321"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractMetadataFromDescription(tt.description)
+			if got != tt.want {
+				t.Errorf("extractMetadataFromDescription() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

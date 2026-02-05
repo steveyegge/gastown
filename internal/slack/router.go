@@ -84,10 +84,17 @@ func NewRouter(cfg *Config) *Router {
 	return r
 }
 
-// LoadRouter loads router configuration from beads first, then falls back to file.
-// Priority: 1. Beads config (bd config slack.*), 2. File ($GT_ROOT/settings/slack.json)
+// LoadRouter loads router configuration with the following priority:
+//  1. Config bead (hq-cfg-slack-routing)
+//  2. Beads config namespace (bd config slack.*)
+//  3. File ($GT_ROOT/settings/slack.json)
 func LoadRouter() (*Router, error) {
-	// Try loading from beads first
+	// Try config bead first (formal config beads system)
+	if router, err := LoadRouterFromConfigBead(); err == nil {
+		return router, nil
+	}
+
+	// Try legacy beads config namespace
 	if router, err := LoadRouterFromBeads(); err == nil {
 		return router, nil
 	}
@@ -148,6 +155,57 @@ func LoadRouterFromBeads() (*Router, error) {
 	r := NewRouter(cfg)
 	r.beadsBacked = true
 	return r, nil
+}
+
+// LoadRouterFromConfigBead loads router configuration from the hq-cfg-slack-routing
+// config bead. This is the formal config beads approach (vs the legacy bd config get).
+// Returns error if the config bead doesn't exist or can't be parsed.
+func LoadRouterFromConfigBead() (*Router, error) {
+	// Use bd show to retrieve the config bead
+	cmd := exec.Command("bd", "show", "hq-cfg-slack-routing", "--json", "--quiet")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("config bead hq-cfg-slack-routing not found")
+	}
+
+	// Parse the bead JSON to extract the description
+	var issue struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(output, &issue); err != nil {
+		return nil, fmt.Errorf("parsing config bead JSON: %w", err)
+	}
+
+	// Extract metadata from the description (format: "metadata: {json}")
+	metadata := extractMetadataFromDescription(issue.Description)
+	if metadata == "" {
+		return nil, fmt.Errorf("no metadata found in config bead description")
+	}
+
+	cfg := &Config{
+		Channels:     make(map[string]string),
+		Overrides:    make(map[string]string),
+		ChannelNames: make(map[string]string),
+	}
+	if err := json.Unmarshal([]byte(metadata), cfg); err != nil {
+		return nil, fmt.Errorf("parsing config bead metadata: %w", err)
+	}
+
+	r := NewRouter(cfg)
+	r.beadsBacked = true
+	return r, nil
+}
+
+// extractMetadataFromDescription extracts the metadata JSON from a config bead description.
+// The description format has "metadata: {json}" as the last line.
+func extractMetadataFromDescription(description string) string {
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "metadata: ") {
+			return strings.TrimPrefix(line, "metadata: ")
+		}
+	}
+	return ""
 }
 
 // bdConfigGet retrieves a value from beads config using bd CLI.
