@@ -46,6 +46,11 @@ func setupTestBeads(t *testing.T, dir string) *beads.Beads {
 		t.Skipf("cannot initialize beads repo (bd not available?): %v", err)
 		return nil
 	}
+	// Ensure custom types are configured (config, agent, etc.)
+	beadsDir := filepath.Join(dir, ".beads")
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		t.Logf("warning: could not set custom types: %v", err)
+	}
 	return bd
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/configbeads"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
@@ -308,6 +309,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// These use hq- prefix and are stored in town beads for cross-rig coordination.
 		if err := initTownAgentBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
+		}
+
+		// Seed town identity config bead from the town.json we just created.
+		// This makes the beads DB the source of truth for town identity.
+		if err := configbeads.SeedTownIdentityBead(absPath, townConfig); err != nil {
+			fmt.Printf("   %s Could not seed town identity config bead: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Seeded town identity config bead\n")
 		}
 	}
 

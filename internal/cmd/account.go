@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/configbeads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -224,6 +225,14 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 	// Save config
 	if err := config.SaveAccountsConfig(accountsPath, cfg); err != nil {
 		return fmt.Errorf("saving accounts config: %w", err)
+	}
+
+	// Seed account config bead (beads-first bootstrap).
+	// This creates hq-cfg-account-<handle> so beads is the source of truth.
+	// Auth tokens are intentionally excluded from beads (secrets stay in filesystem).
+	if seedErr := configbeads.SeedAccountBead(townRoot, handle, cfg.Accounts[handle]); seedErr != nil {
+		// Non-fatal: account is functional without the bead
+		fmt.Printf("  Warning: Could not seed account config bead: %v\n", seedErr)
 	}
 
 	fmt.Printf("Added account '%s'\n", handle)

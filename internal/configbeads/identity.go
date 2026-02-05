@@ -32,6 +32,49 @@ func LoadTownConfigFromBeads(bd *beads.Beads, townName string) (*config.TownConf
 	return &tc, nil
 }
 
+// SeedTownIdentityBead creates the town identity config bead from a TownConfig.
+// Called during gt install to make beads the source of truth for town identity.
+// The bead ID is hq-cfg-town-<name>.
+func SeedTownIdentityBead(townRoot string, tc *config.TownConfig) error {
+	bd := beads.New(townRoot)
+
+	slug := "town-" + tc.Name
+
+	// Check if already exists
+	existing, _, err := bd.GetConfigBeadBySlug(slug)
+	if err == nil && existing != nil {
+		return nil // Already seeded
+	}
+
+	// Build metadata from TownConfig fields
+	metadata := map[string]interface{}{
+		"type":       tc.Type,
+		"version":    tc.Version,
+		"name":       tc.Name,
+		"created_at": tc.CreatedAt,
+	}
+	if tc.Owner != "" {
+		metadata["owner"] = tc.Owner
+	}
+	if tc.PublicName != "" {
+		metadata["public_name"] = tc.PublicName
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling town identity metadata: %w", err)
+	}
+
+	fields := &beads.ConfigFields{
+		Rig:      tc.Name,
+		Category: beads.ConfigCategoryIdentity,
+		Metadata: string(metadataJSON),
+	}
+
+	_, err = bd.CreateConfigBead(slug, fields, "", "")
+	return err
+}
+
 // LoadTownIdentity loads town identity, trying beads first with filesystem fallback.
 func LoadTownIdentity(townRoot string) (*config.TownConfig, error) {
 	// Derive town name from filesystem config first (needed for bead lookup)

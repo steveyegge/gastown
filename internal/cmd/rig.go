@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/configbeads"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/git"
@@ -383,6 +384,17 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Seed rig registry config bead (beads-first bootstrap).
+	// This creates hq-cfg-rig-<town>-<name> so beads is the source of truth.
+	if townCfg, tcErr := config.LoadTownConfig(filepath.Join(townRoot, "mayor", "town.json")); tcErr == nil {
+		rigEntry := rigsConfig.Rigs[name]
+		if seedErr := configbeads.SeedRigRegistryBead(townRoot, townCfg.Name, name, rigEntry); seedErr != nil {
+			fmt.Printf("  %s Could not seed rig registry config bead: %v\n", style.Warning.Render("!"), seedErr)
+		} else {
+			fmt.Printf("  ✓ Seeded rig registry config bead\n")
+		}
+	}
+
 	// Add route bead for prefix-based routing.
 	// Route points to the canonical beads location:
 	// - If source repo has .beads/ tracked in git, route to mayor/rig
@@ -568,6 +580,13 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 		if err := beads.RemoveRoute(townRoot, beadsPrefix+"-"); err != nil {
 			// Non-fatal: log warning but continue
 			fmt.Printf("  %s Could not remove route from routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Delete rig registry config bead (beads-first cleanup).
+	if townCfg, tcErr := config.LoadTownConfig(filepath.Join(townRoot, "mayor", "town.json")); tcErr == nil {
+		if delErr := configbeads.DeleteRigRegistryBead(townRoot, townCfg.Name, name); delErr != nil {
+			fmt.Printf("  %s Could not delete rig registry config bead: %v\n", style.Warning.Render("!"), delErr)
 		}
 	}
 
