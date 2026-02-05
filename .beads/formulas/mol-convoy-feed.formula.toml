@@ -1,5 +1,5 @@
 description = """
-Feed stranded convoys by dispatching ready work to available polecats.
+Feed stranded convoys by dispatching ready work to polecats.
 
 Dogs execute this formula when the Deacon detects a stranded convoy. A convoy
 is stranded when it has ready issues (open, unblocked, no assignee) but no
@@ -10,10 +10,9 @@ workers are processing them.
 This is infrastructure work. You:
 1. Receive convoy ID via variable
 2. Load convoy and find ready issues
-3. Check idle polecat capacity across rigs
-4. Dispatch min(ready_issues, idle_polecats) using gt sling
-5. Report actions taken
-6. Return to kennel
+3. Dispatch each ready issue using gt sling (auto-spawns polecats)
+4. Report actions taken
+5. Return to kennel
 
 ## Variables
 
@@ -37,7 +36,6 @@ dispatched. This keeps the system stateless and batch-oriented.
 |-----------|--------|
 | Convoy not found | Exit with error, notify Deacon |
 | No ready issues | Exit success (false positive, convoy is fine) |
-| No idle polecats | Exit success, note in report (will retry next cycle) |
 | Sling fails | Continue with remaining issues, note failures |"""
 formula = "mol-convoy-feed"
 version = 1
@@ -99,45 +97,9 @@ Sort by priority (P0 first) for dispatch order.
 **Exit criteria:** Ready issues identified and prioritized."""
 
 [[steps]]
-id = "check-capacity"
-title = "Check polecat capacity across rigs"
-needs = ["load-convoy"]
-description = """
-Determine how many polecats are available for dispatch.
-
-**1. For each rig that has ready issues:**
-```bash
-gt polecats <rig>
-# Shows polecat status: idle, working, etc.
-```
-
-**2. Count available capacity:**
-Available polecats are those that:
-- Exist in the rig's polecat pool
-- Currently idle (no hooked work)
-- Session is running
-
-**3. Calculate dispatch count:**
-```
-dispatch_count = min(ready_issues, available_polecats)
-```
-
-If dispatch_count = 0:
-- Log: "No capacity available, will retry next cycle"
-- Proceed to report step (no dispatches to make)
-
-**4. Match issues to rigs:**
-For each ready issue, determine target rig from issue prefix:
-- gt-* issues → gastown rig
-- bd-* issues → beads rig
-- etc.
-
-**Exit criteria:** Dispatch plan created with issue→rig mappings."""
-
-[[steps]]
 id = "dispatch-work"
 title = "Dispatch ready issues to polecats"
-needs = ["check-capacity"]
+needs = ["load-convoy"]
 description = """
 Sling each ready issue to an available polecat.
 
@@ -183,7 +145,6 @@ Create summary report of convoy feeding actions.
 ## Convoy Feed Report: {{convoy}}
 
 **Ready issues found**: {{ready_count}}
-**Polecats available**: {{available_count}}
 **Issues dispatched**: {{dispatch_count}}
 
 ### Dispatched Work
@@ -257,3 +218,39 @@ or retire the dog if pool is oversized.
 [vars.convoy]
 description = "The convoy ID to feed"
 required = true
+
+[vars.ready_count]
+description = "Number of ready issues found (computed)"
+default = ""
+
+[vars.dispatch_count]
+description = "Number of issues dispatched (computed)"
+default = ""
+
+[vars.issue_id]
+description = "Issue ID being processed (computed)"
+default = ""
+
+[vars.title]
+description = "Issue title (computed)"
+default = ""
+
+[vars.rig]
+description = "Target rig for dispatch (computed)"
+default = ""
+
+[vars.polecat]
+description = "Assigned polecat identifier (computed)"
+default = ""
+
+[vars.error]
+description = "Error message if dispatch fails (computed)"
+default = ""
+
+[vars.error_count]
+description = "Number of errors encountered (computed)"
+default = ""
+
+[vars.report_summary]
+description = "Summary text for report (computed)"
+default = ""

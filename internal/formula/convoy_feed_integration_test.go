@@ -53,7 +53,7 @@ func TestConvoyFeedWorkflow_Integration(t *testing.T) {
 
 	// Step 5: Verify computed variables have defaults (not required as inputs)
 	computedVars := []string{
-		"ready_count", "available_count", "dispatch_count",
+		"ready_count", "dispatch_count",
 		"issue_id", "title", "rig", "polecat",
 		"error", "error_count", "report_summary",
 	}
@@ -73,7 +73,6 @@ func TestConvoyFeedWorkflow_Integration(t *testing.T) {
 	// Step 6: Verify the formula has the expected steps
 	expectedSteps := []string{
 		"load-convoy",
-		"check-capacity",
 		"dispatch-work",
 		"report-results",
 		"return-to-kennel",
