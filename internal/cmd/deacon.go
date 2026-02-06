@@ -456,8 +456,34 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	runtimeCfg := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
+	runtimeConfig := config.LoadRuntimeConfig("")
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Directly execute gt prime to trigger autonomous patrol execution.
+	// This bypasses the prompt area - the command runs immediately.
+	// Wait for Claude to be ready before sending command.
+	time.Sleep(2 * time.Second)
+	_ = t.SendKeys(sessionName, "gt prime") // Non-fatal
+
+	// Inject startup nudge for predecessor discovery via /resume
+	// Send AFTER gt prime so the beacon appears in session history, not prompt area
+	time.Sleep(1 * time.Second)
+	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}); err != nil {
+		style.PrintWarning("failed to send startup nudge: %v", err)
+	}
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
+		return fmt.Errorf("sending propulsion nudge: %w", err)
+	}
 
 	return nil
 }
