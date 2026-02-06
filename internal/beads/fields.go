@@ -24,6 +24,7 @@ type AttachmentFields struct {
 	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
 	MergeStrategy    string // Merge strategy: direct (push to main), mr (refinery), local (merge locally)
 	ConvoyOwned      bool   // If true, convoy is caller-managed (no witness/refinery)
+	OjJobID          string // OJ job ID when polecat is managed by OJ daemon (GT_SLING_OJ=1)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -77,6 +78,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "convoy_owned", "convoy-owned", "convoyowned":
 			fields.ConvoyOwned = strings.ToLower(value) == "true"
 			hasFields = true
+		case "oj_job_id", "oj-job-id", "ojjobid":
+			fields.OjJobID = value
+			hasFields = true
 		}
 	}
 
@@ -116,6 +120,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.ConvoyOwned {
 		lines = append(lines, "convoy_owned: true")
 	}
+	if fields.OjJobID != "" {
+		lines = append(lines, "oj_job_id: "+fields.OjJobID)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -147,6 +154,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"convoy_owned":      true,
 		"convoy-owned":      true,
 		"convoyowned":       true,
+		"oj_job_id":         true,
+		"oj-job-id":         true,
+		"ojjobid":           true,
 	}
 
 	// Collect non-attachment lines from existing description

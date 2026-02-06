@@ -598,7 +598,54 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Execute deferred polecat spawn if needed (for rig targets).
 	// This happens AFTER formula instantiation to prevent orphan polecats on failure (GH #gt-e9o).
-	if deferredRigName != "" {
+	//
+	// Two paths: OJ dispatch (GT_SLING_OJ=1) or legacy tmux spawn.
+	var ojDispatch *OjDispatchInfo // Non-nil when OJ dispatch is used
+	if deferredRigName != "" && ojSlingEnabled() {
+		// OJ dispatch path: GT allocates name, OJ daemon owns the polecat lifecycle.
+		// OJ handles workspace creation, agent spawn, monitoring, crash recovery, cleanup.
+		fmt.Printf("  Dispatching to OJ daemon for %s...\n", deferredRigName)
+
+		// Ensure the gt-sling runbook is available for OJ
+		if err := ensureOjRunbook(townRoot); err != nil {
+			return fmt.Errorf("ensuring OJ runbook: %w", err)
+		}
+
+		// Get instructions from bead title for the OJ job
+		instructions := getBeadInstructions(beadID)
+		if slingArgs != "" {
+			instructions = slingArgs
+		}
+		if instructions == "" {
+			instructions = "Execute work on hook"
+		}
+
+		// Get base branch from bead labels
+		base := GetBeadBase(beadID)
+
+		dispatchInfo, dispatchErr := dispatchToOj(deferredRigName, deferredSpawnOpts, beadID, instructions, base, townRoot)
+		if dispatchErr != nil {
+			return fmt.Errorf("OJ dispatch: %w", dispatchErr)
+		}
+		ojDispatch = dispatchInfo
+		targetAgent = dispatchInfo.AgentID
+		targetPane = ""             // No tmux pane — OJ owns the session
+		hookWorkDir = townRoot      // Use town root for bd commands
+		hookSetAtomically = false   // OJ runbook handles hook via provision step
+
+		// Store OJ job ID in the bead for daemon health checks
+		if dispatchInfo.JobID != "" {
+			if err := storeOjJobIDInBead(beadID, dispatchInfo.JobID); err != nil {
+				fmt.Printf("%s Could not store OJ job ID: %v\n", style.Dim.Render("Warning:"), err)
+			} else {
+				fmt.Printf("%s OJ job dispatched: %s\n", style.Bold.Render("✓"), dispatchInfo.JobID)
+			}
+		}
+
+		// Wake witness and refinery to monitor the new polecat
+		wakeRigAgents(deferredRigName)
+	} else if deferredRigName != "" {
+		// Legacy tmux spawn path
 		// Set HookBead atomically at spawn time to prevent race condition (GH #hq-3d01de).
 		// Without this, the polecat might start before bd update sets the hook.
 		deferredSpawnOpts.HookBead = beadID
@@ -778,10 +825,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
 	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Skip for OJ-dispatched polecats - OJ daemon owns the session lifecycle.
 	// Note: In deferred spawn mode (GH #gt-e9o), the polecat session was started
 	// in the deferred spawn block above after formula instantiation succeeded.
 	freshlySpawned := deferredRigName != ""
-	if freshlySpawned {
+	if ojDispatch != nil {
+		// OJ dispatch: daemon owns session lifecycle, no tmux nudge needed
+		fmt.Printf("%s OJ daemon managing polecat %s\n", style.Bold.Render("✓"), ojDispatch.PolecatName)
+	} else if freshlySpawned {
 		// Fresh polecat already got StartupNudge from SessionManager.Start()
 	} else if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
