@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -428,6 +429,11 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
+	}
+
+	// Sync hooks for the new rig's targets
+	if err := syncRigHooks(townRoot, name); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
 	}
 
 	elapsed := time.Since(startTime)
@@ -1634,6 +1640,31 @@ func getRigOperationalState(townRoot, rigName string) (state string, source stri
 
 	// Default: operational
 	return "OPERATIONAL", "default"
+}
+
+// syncRigHooks syncs hooks for a specific rig's targets after rig creation.
+func syncRigHooks(townRoot, rigName string) error {
+	targets, err := hooks.DiscoverTargets(townRoot)
+	if err != nil {
+		return err
+	}
+
+	synced := 0
+	for _, target := range targets {
+		if target.Rig != rigName {
+			continue
+		}
+		if _, err := syncTarget(target, false); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: failed to sync hooks for %s: %v\n", target.DisplayKey(), err)
+			continue
+		}
+		synced++
+	}
+
+	if synced > 0 {
+		fmt.Printf("  Synced hooks for %d target(s)\n", synced)
+	}
+	return nil
 }
 
 // isGitRemoteURL returns true if s looks like a remote git URL

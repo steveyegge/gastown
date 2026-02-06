@@ -210,6 +210,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
 
+	// Hooks sync check
+	d.Register(doctor.NewHooksSyncCheck())
+
 	// Migration readiness checks
 	d.Register(doctor.NewMigrationReadinessCheck())
 	d.Register(doctor.NewUnmigratedRigCheck())
