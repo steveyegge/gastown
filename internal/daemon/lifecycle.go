@@ -15,6 +15,7 @@ import (
 	gtconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -399,11 +400,6 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	// GUPP: Gas Town Universal Propulsion Principle
 	// Send startup nudge for predecessor discovery via /resume
 	recipient := identityToBDActor(identity)
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: recipient,
-		Sender:    "daemon",
-		Topic:     "lifecycle-restart",
-	})
 
 	// For OpenCode: send [GT_AGENT_INIT] first for plugin to inject gt prime context.
 	// This ensures agents have full context BEFORE being told to run gt hook.
@@ -412,6 +408,17 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 	}
 	runtimeCfg := gtconfig.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+
+	// OpenCode agents need explicit gt prime instruction since plugin-based hooks
+	// don't execute shell commands like Claude's SessionStart hooks
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeCfg)
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+		Recipient:               recipient,
+		Sender:                  "daemon",
+		Topic:                   "lifecycle-restart",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+	})
+
 	if runtimeCfg.Provider == "opencode" {
 		_ = d.tmux.NudgeSession(sessionName, "[GT_AGENT_INIT]")
 		time.Sleep(3 * time.Second) // Wait for plugin to process and inject context

@@ -81,10 +81,14 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)
 	// This ensures the agent has clear context immediately, not after nudges arrive
+	// OpenCode agents need explicit gt prime instruction since plugin-based hooks
+	// don't execute shell commands like Claude's SessionStart hooks
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
+		Recipient:               "mayor",
+		Sender:                  "human",
+		Topic:                   "cold-start",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
 	})
 
 	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically

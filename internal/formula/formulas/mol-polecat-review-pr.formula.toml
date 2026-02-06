@@ -281,7 +281,3 @@ required = true
 [vars.issue]
 description = "The tracking issue for this review task"
 required = true
-
-[vars.rig]
-description = "Target rig for escalation notifications"
-required = true

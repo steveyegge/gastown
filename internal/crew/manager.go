@@ -493,10 +493,14 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if topic == "" {
 		topic = "start"
 	}
+	// OpenCode agents need explicit gt prime instruction since plugin-based hooks
+	// don't execute shell commands like Claude's SessionStart hooks
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     topic,
+		Recipient:               address,
+		Sender:                  "human",
+		Topic:                   topic,
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
 	})
 
 	// Build startup command first
@@ -580,4 +584,3 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
-

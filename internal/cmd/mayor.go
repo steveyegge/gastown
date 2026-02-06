@@ -188,10 +188,14 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build startup beacon for context (like gt handoff does)
+			// OpenCode agents need explicit gt prime instruction since plugin-based hooks
+			// don't execute shell commands like Claude's SessionStart hooks
+			needsPrime := agentCfg != nil && agentCfg.Provider == "opencode"
 			beacon := session.FormatStartupBeacon(session.BeaconConfig{
-				Recipient: "mayor",
-				Sender:    "human",
-				Topic:     "attach",
+				Recipient:               "mayor",
+				Sender:                  "human",
+				Topic:                   "attach",
+				IncludePrimeInstruction: needsPrime,
 			})
 
 			// Build startup command with beacon

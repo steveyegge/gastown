@@ -191,11 +191,15 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 
 	hasHooks := rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none"
 	hasPrompt := rc.PromptMode != "none"
+	// OpenCode has plugin-based "hooks" but they don't execute shell commands like Claude's SessionStart hooks.
+	// The OpenCode plugin transforms messages but doesn't run gt prime as a command.
+	hasCommandHooks := hasHooks && rc.Hooks.Provider != "opencode"
 
 	info := &StartupFallbackInfo{}
 
-	if !hasHooks {
-		// Non-hook agents need to be told to run gt prime
+	if !hasCommandHooks {
+		// Agents without command-executing hooks need to be told to run gt prime
+		// This includes OpenCode (has plugin hooks but no shell command hooks)
 		info.IncludePrimeInBeacon = true
 		info.SendStartupNudge = true
 		info.StartupNudgeDelayMs = DefaultPrimeWaitMs
@@ -205,7 +209,7 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 			info.SendBeaconNudge = true
 		}
 	} else if !hasPrompt {
-		// Has hooks but no prompt - need to nudge beacon + work instructions together
+		// Has command hooks but no prompt - need to nudge beacon + work instructions together
 		// Hook runs gt prime synchronously, so no wait needed
 		info.SendBeaconNudge = true
 		info.SendStartupNudge = true
