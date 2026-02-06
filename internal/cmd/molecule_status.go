@@ -362,8 +362,17 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	var hookBead *beads.Issue
 
 	if agentBeadID != "" {
+		// Resolve the correct beads directory for the agent bead using prefix-based
+		// routing. This matches how updateAgentHookBead resolves the directory when
+		// setting the hook (via beads.ResolveHookDir).
+		agentBeadPath := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
+		agentB := b
+		if agentBeadPath != workDir {
+			agentB = beads.New(agentBeadPath)
+		}
+
 		// Try to fetch the agent bead
-		agentBead, err := b.Show(agentBeadID)
+		agentBead, err := agentB.Show(agentBeadID)
 		if err == nil && agentBead != nil && agentBead.Type == "agent" {
 			status.AgentBeadID = agentBeadID
 
@@ -372,8 +381,14 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			// IMPORTANT: Don't use ParseAgentFieldsFromDescription - the description
 			// field may contain stale data, causing the wrong issue to be hooked.
 			if agentBead.HookBead != "" {
-				// Fetch the bead on the hook
-				hookBead, err = b.Show(agentBead.HookBead)
+				// The hooked bead may be in a different database than the agent bead.
+				// Resolve its path using prefix-based routing.
+				hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
+				hookB := b
+				if hookBeadPath != workDir {
+					hookB = beads.New(hookBeadPath)
+				}
+				hookBead, err = hookB.Show(agentBead.HookBead)
 				if err != nil {
 					// Hook bead referenced but not found - report error but continue
 					hookBead = nil

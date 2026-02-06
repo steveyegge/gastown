@@ -334,6 +334,8 @@ type PolecatListItem struct {
 	State          polecat.State `json:"state"`
 	Issue          string        `json:"issue,omitempty"`
 	SessionRunning bool          `json:"session_running"`
+	Zombie         bool          `json:"zombie,omitempty"`
+	SessionName    string        `json:"session_name,omitempty"`
 }
 
 // getPolecatManager creates a polecat manager for the given rig.
@@ -387,6 +389,8 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Track known polecat names from filesystem for zombie detection
+		knownNames := make(map[string]bool)
 		for _, p := range polecats {
 			running, _ := polecatMgr.IsRunning(p.Name)
 			allPolecats = append(allPolecats, PolecatListItem{
@@ -396,6 +400,28 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 				Issue:          p.Issue,
 				SessionRunning: running,
 			})
+			knownNames[p.Name] = true
+		}
+
+		// Discover zombie tmux sessions: sessions without matching worktree directories.
+		// These occur when a worktree is deleted but the tmux session persists
+		// (incomplete nuke or session naming mismatch).
+		zombieSessions, _ := findRigPolecatSessions(r.Name)
+		for _, sessionName := range zombieSessions {
+			_, polecatName, ok := parsePolecatSessionName(sessionName)
+			if !ok {
+				continue
+			}
+			if !knownNames[polecatName] {
+				allPolecats = append(allPolecats, PolecatListItem{
+					Rig:            r.Name,
+					Name:           polecatName,
+					State:          polecat.StateZombie,
+					SessionRunning: true,
+					Zombie:         true,
+					SessionName:    sessionName,
+				})
+			}
 		}
 	}
 
@@ -431,6 +457,8 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			stateStr = style.Warning.Render(stateStr)
 		case polecat.StateDone:
 			stateStr = style.Success.Render(stateStr)
+		case polecat.StateZombie:
+			stateStr = style.Error.Render(stateStr)
 		default:
 			stateStr = style.Dim.Render(stateStr)
 		}
@@ -438,6 +466,9 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s %s/%s  %s\n", sessionStatus, p.Rig, p.Name, stateStr)
 		if p.Issue != "" {
 			fmt.Printf("    %s\n", style.Dim.Render(p.Issue))
+		}
+		if p.Zombie && p.SessionName != "" {
+			fmt.Printf("    %s\n", style.Dim.Render("session: "+p.SessionName+" (no worktree)"))
 		}
 	}
 

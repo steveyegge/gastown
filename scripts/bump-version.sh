@@ -222,30 +222,24 @@ main() {
     # Auto-install if requested
     if [ "$AUTO_INSTALL" = true ]; then
         echo "Rebuilding and installing gt..."
-        GOPATH_BIN="$(go env GOPATH)/bin"
 
-        if ! go build -o /tmp/gt-new ./cmd/gt; then
-            echo -e "${RED}✗ go build failed${NC}"
+        # Use make install which properly sets ldflags (BuiltProperly, version, etc)
+        # and handles codesigning on macOS
+        if ! make install; then
+            echo -e "${RED}✗ make install failed${NC}"
             exit 1
         fi
 
-        # Codesign on macOS
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            xattr -cr /tmp/gt-new 2>/dev/null
-            codesign -f -s - /tmp/gt-new 2>/dev/null
-            echo -e "${GREEN}✓ gt codesigned for macOS${NC}"
+        echo -e "${GREEN}✓ gt installed${NC}"
+
+        # Verify - check both GOPATH/bin and ~/.local/bin (Makefile default)
+        INSTALL_DIR="${HOME}/.local/bin"
+        if [ -x "$INSTALL_DIR/gt" ]; then
+            INSTALLED_VERSION=$("$INSTALL_DIR/gt" version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        else
+            INSTALLED_VERSION=$(gt version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         fi
 
-        cp /tmp/gt-new "$GOPATH_BIN/gt"
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            codesign -f -s - "$GOPATH_BIN/gt" 2>/dev/null
-        fi
-        rm -f /tmp/gt-new
-
-        echo -e "${GREEN}✓ gt installed to $GOPATH_BIN/gt${NC}"
-
-        # Verify
-        INSTALLED_VERSION=$("$GOPATH_BIN/gt" version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         if [ "$INSTALLED_VERSION" = "$NEW_VERSION" ]; then
             echo -e "${GREEN}✓ Verified: gt version $INSTALLED_VERSION${NC}"
         else

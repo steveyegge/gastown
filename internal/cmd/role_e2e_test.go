@@ -65,12 +65,12 @@ func TestRoleHomeE2E(t *testing.T) {
 		{
 			name:     "polecat",
 			args:     []string{"role", "home", "polecat", "--rig", rigName, "--polecat", "Toast"},
-			expected: filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			expected: filepath.Join(hqPath, rigName, "polecats", "Toast"),
 		},
 		{
 			name:     "crew",
 			args:     []string{"role", "home", "crew", "--rig", rigName, "--polecat", "worker1"},
-			expected: filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+			expected: filepath.Join(hqPath, rigName, "crew", "worker1"),
 		},
 	}
 
@@ -170,8 +170,8 @@ func TestRoleHomeCwdDetection(t *testing.T) {
 	dirs := []string{
 		filepath.Join(hqPath, rigName, "witness"),
 		filepath.Join(hqPath, rigName, "refinery", "rig"),
-		filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
-		filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+		filepath.Join(hqPath, rigName, "polecats", "Toast"),
+		filepath.Join(hqPath, rigName, "crew", "worker1"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -205,14 +205,14 @@ func TestRoleHomeCwdDetection(t *testing.T) {
 			expected: filepath.Join(hqPath, rigName, "refinery", "rig"),
 		},
 		{
-			name:     "polecat from polecats/Toast/rig dir",
-			cwd:      filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
-			expected: filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			name:     "polecat from polecats/Toast dir",
+			cwd:      filepath.Join(hqPath, rigName, "polecats", "Toast"),
+			expected: filepath.Join(hqPath, rigName, "polecats", "Toast"),
 		},
 		{
-			name:     "crew from crew/worker1/rig dir",
-			cwd:      filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
-			expected: filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+			name:     "crew from crew/worker1 dir",
+			cwd:      filepath.Join(hqPath, rigName, "crew", "worker1"),
+			expected: filepath.Join(hqPath, rigName, "crew", "worker1"),
 		},
 	}
 
@@ -253,8 +253,8 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 	dirs := []string{
 		filepath.Join(hqPath, rigName, "witness"),
 		filepath.Join(hqPath, rigName, "refinery", "rig"),
-		filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
-		filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+		filepath.Join(hqPath, rigName, "polecats", "Toast"),
+		filepath.Join(hqPath, rigName, "crew", "worker1"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -304,25 +304,25 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			},
 		},
 		{
-			name: "polecat from polecats/Toast/rig dir",
-			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			name: "polecat from polecats/Toast dir",
+			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast"),
 			want: []string{
 				"export GT_ROLE=polecat",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
-				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "polecats", "Toast"),
 			},
 		},
 		{
-			name: "crew from crew/worker1/rig dir",
-			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+			name: "crew from crew/worker1 dir",
+			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1"),
 			want: []string{
 				"export GT_ROLE=crew",
 				"export GT_RIG=" + rigName,
 				"export GT_CREW=worker1",
 				"export BD_ACTOR=" + rigName + "/crew/worker1",
-				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "crew", "worker1"),
 			},
 		},
 	}

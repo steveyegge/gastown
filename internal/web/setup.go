@@ -203,18 +203,14 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		port = 8080
 	}
 
-	// Find the gt binary (use the one that's currently running)
-	gtBin, err := os.Executable()
-	if err != nil {
-		h.sendError(w, "Cannot find gt binary: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
+	// tests it returns the test binary, causing fork bombs when executed.
 
 	// Start new dashboard on a DIFFERENT port first, then we'll tell the browser to go there
 	newPort := port + 1
 
 	// Start new dashboard process from the workspace directory
-	cmd := exec.Command(gtBin, "dashboard", "--port", fmt.Sprintf("%d", newPort))
+	cmd := exec.Command("gt", "dashboard", "--port", fmt.Sprintf("%d", newPort))
 	cmd.Dir = path
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -677,7 +673,25 @@ const setupHTML = `<!DOCTYPE html>
 <body>
     <div class="setup-container">
         <div class="setup-header">
-            <h1>🚚 Gas Town</h1>
+            <pre style="font-size:10px;line-height:1.1;color:#58a6ff;margin:0 0 16px 0;white-space:pre;font-family:monospace;"> __       __  ________  __        ______    ______   __       __  ________                        
+|  \  _  |  \|        \|  \      /      \  /      \ |  \     /  \|        \                       
+| $$ / \ | $$| $$$$$$$$| $$     |  $$$$$$\|  $$$$$$\| $$\   /  $$| $$$$$$$$                       
+| $$/  $\| $$| $$__    | $$     | $$   \$$| $$  | $$| $$$\ /  $$$| $$__                           
+| $$  $$$\ $$| $$  \   | $$     | $$      | $$  | $$| $$$$\  $$$$| $$  \                          
+| $$ $$\$$\$$| $$$$$   | $$     | $$   __ | $$  | $$| $$\$$ $$ $$| $$$$$                          
+| $$$$  \$$$$| $$_____ | $$_____| $$__/  \| $$__/ $$| $$ \$$$| $$| $$_____                        
+| $$$    \$$$| $$     \| $$     \\$$    $$ \$$    $$| $$  \$ | $$| $$     \                       
+ \$$      \$$ \$$$$$$$$ \$$$$$$$$ \$$$$$$   \$$$$$$  \$$      \$$ \$$$$$$$$                       
+                                                                                                  
+ ________   ______          ______    ______    ______   ________   ______   __       __  __    __ 
+|        \ /      \        /      \  /      \  /      \ |        \ /      \ |  \  _  |  \|  \  |  \
+ \$$$$$$$$|  $$$$$$\      |  $$$$$$\|  $$$$$$\|  $$$$$$\ \$$$$$$$$|  $$$$$$\| $$ / \ | $$| $$\ | $$
+   | $$   | $$  | $$      | $$ __\$$| $$__| $$| $$___\$$   | $$   | $$  | $$| $$/  $\| $$| $$$\| $$
+   | $$   | $$  | $$      | $$|    \| $$    $$ \$$    \    | $$   | $$  | $$| $$  $$$\ $$| $$$$\ $$
+   | $$   | $$  | $$      | $$ \$$$$| $$$$$$$$ _\$$$$$$\   | $$   | $$  | $$| $$ $$\$$\$$| $$\$$ $$
+   | $$   | $$__/ $$      | $$__| $$| $$  | $$|  \__| $$   | $$   | $$__/ $$| $$$$  \$$$$| $$ \$$$$
+   | $$    \$$    $$       \$$    $$| $$  | $$ \$$    $$   | $$    \$$    $$| $$$    \$$$| $$  \$$$
+    \$$     \$$$$$$         \$$$$$$  \$$   \$$  \$$$$$$     \$$     \$$$$$$  \$$      \$$ \$$   \$$</pre>
             <p>Let's set up your workspace</p>
         </div>
 
@@ -831,11 +845,10 @@ const setupHTML = `<!DOCTYPE html>
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.success) {
-                    // Show launching message
-                    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;">' +
-                        '<div style="font-size:2rem;margin-bottom:16px;">🚚</div>' +
-                        '<div style="font-size:1.2rem;margin-bottom:8px;">Launching Dashboard...</div>' +
-                        '<div style="color:#8b949e;">Redirecting...</div>' +
+                    // Show loading message
+                    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#e6edf3;font-family:monospace;background:#0d1117;">' +
+                        '<div style="font-size:1.5rem;color:#58a6ff;margin-bottom:16px;">🚚</div>' +
+                        '<div style="font-size:1rem;color:#8b949e;">loading control center...</div>' +
                         '</div>';
                     // Redirect to the new dashboard
                     if (data.redirect) {

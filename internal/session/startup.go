@@ -2,6 +2,7 @@
 package session
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"fmt"
 	"time"
 )
@@ -69,7 +70,7 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	// SessionStart hook to do it automatically. Work instructions will
 	// come as a separate nudge after gt prime completes.
 	if cfg.IncludePrimeInstruction {
-		beacon += "\n\nRun `gt prime` to initialize your context."
+		beacon += "\n\nRun `" + cli.Name() + " prime` to initialize your context."
 		// Don't add work instructions here - they come as a delayed nudge after gt prime
 		return beacon
 	}
@@ -78,8 +79,8 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	// what to do even if hooks haven't loaded CLAUDE.md yet
 	if cfg.Topic == "handoff" || cfg.Topic == "cold-start" || cfg.Topic == "attach" {
 		beacon += "\n\nCheck your hook and mail, then act on the hook if present:\n" +
-			"1. `gt hook` - shows hooked work (if any)\n" +
-			"2. `gt mail inbox` - check for messages\n" +
+			"1. `" + cli.Name() + " hook` - shows hooked work (if any)\n" +
+			"2. `" + cli.Name() + " mail inbox` - check for messages\n" +
 			"3. If work is hooked → execute it immediately\n" +
 			"4. If nothing hooked → wait for instructions"
 	}
@@ -88,7 +89,7 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	// This prevents the "helpful assistant" exploration pattern (see PRIMING.md)
 	// Exclude work instructions only if explicitly set (non-hook agents get them via delayed nudge)
 	if cfg.Topic == "assigned" && !cfg.ExcludeWorkInstructions {
-		beacon += "\n\nWork is on your hook. Run `gt hook` now and begin immediately."
+		beacon += "\n\nWork is on your hook. Run `" + cli.Name() + " hook` now and begin immediately."
 	}
 
 	return beacon

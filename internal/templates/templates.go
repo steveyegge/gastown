@@ -7,10 +7,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"text/template"
 
 	"github.com/steveyegge/gastown/internal/templates/commands"
 )
+
+var (
+	cmdName     string
+	cmdNameOnce sync.Once
+)
+
+// CmdName returns the Gas Town CLI command name.
+// Defaults to "gt", but can be overridden with GT_COMMAND env var.
+// This allows coexistence with other tools that use "gt" (e.g., Graphite).
+func CmdName() string {
+	cmdNameOnce.Do(func() {
+		cmdName = os.Getenv("GT_COMMAND")
+		if cmdName == "" {
+			cmdName = "gt"
+		}
+	})
+	return cmdName
+}
+
+// templateFuncs provides custom functions for templates.
+var templateFuncs = template.FuncMap{
+	"cmd": CmdName, // {{ cmd }} returns the CLI command name
+}
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
@@ -84,15 +108,15 @@ type HandoffData struct {
 func New() (*Templates, error) {
 	t := &Templates{}
 
-	// Parse role templates
-	roleTempl, err := template.ParseFS(templateFS, "roles/*.md.tmpl")
+	// Parse role templates with custom functions
+	roleTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "roles/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing role templates: %w", err)
 	}
 	t.roleTemplates = roleTempl
 
-	// Parse message templates
-	msgTempl, err := template.ParseFS(templateFS, "messages/*.md.tmpl")
+	// Parse message templates with custom functions
+	msgTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "messages/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing message templates: %w", err)
 	}
@@ -138,10 +162,22 @@ func (t *Templates) MessageNames() []string {
 // CreateMayorCLAUDEmd creates the Mayor's CLAUDE.md file at the specified directory.
 // Also creates AGENTS.md with identical content for compatibility with OpenCode/Codex.
 // This is used by both gt install and gt doctor --fix.
-func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations.
+func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) (bool, error) {
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	tmpl, err := New()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	data := RoleData{
@@ -155,17 +191,10 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 
 	content, err := tmpl.RenderRole("mayor", data)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	if err := os.WriteFile(claudePath, []byte(content), 0644); err != nil {
-		return err
-	}
-
-	// Create AGENTS.md with identical content for compatibility with OpenCode/Codex
-	agentsPath := filepath.Join(mayorDir, "AGENTS.md")
-	return os.WriteFile(agentsPath, []byte(content), 0644)
+	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
 // GetAllRoleTemplates returns all role templates as a map of filename to content.

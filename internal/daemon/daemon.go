@@ -508,10 +508,11 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 }
 
-// ensureWitnessesRunning ensures witnesses are running for all rigs.
+// ensureWitnessesRunning ensures witnesses are running for configured rigs.
 // Called on each heartbeat to maintain witness patrol loops.
+// Respects the rigs filter in daemon.json patrol config.
 func (d *Daemon) ensureWitnessesRunning() {
-	rigs := d.getKnownRigs()
+	rigs := d.getPatrolRigs("witness")
 	for _, rigName := range rigs {
 		d.ensureWitnessRunning(rigName)
 	}
@@ -548,10 +549,11 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	d.logger.Printf("Witness session for %s started successfully", rigName)
 }
 
-// ensureRefineriesRunning ensures refineries are running for all rigs.
+// ensureRefineriesRunning ensures refineries are running for configured rigs.
 // Called on each heartbeat to maintain refinery merge queue processing.
+// Respects the rigs filter in daemon.json patrol config.
 func (d *Daemon) ensureRefineriesRunning() {
-	rigs := d.getKnownRigs()
+	rigs := d.getPatrolRigs("refinery")
 	for _, rigName := range rigs {
 		d.ensureRefineryRunning(rigName)
 	}
@@ -653,6 +655,17 @@ func (d *Daemon) getKnownRigs() []string {
 		rigs = append(rigs, name)
 	}
 	return rigs
+}
+
+// getPatrolRigs returns the list of rigs for a patrol.
+// If the patrol config specifies a rigs filter, only those rigs are returned.
+// Otherwise, all known rigs are returned.
+func (d *Daemon) getPatrolRigs(patrol string) []string {
+	configRigs := GetPatrolRigs(d.patrolConfig, patrol)
+	if len(configRigs) > 0 {
+		return configRigs
+	}
+	return d.getKnownRigs()
 }
 
 // isRigOperational checks if a rig is in an operational state.

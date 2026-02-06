@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -92,6 +93,7 @@ func runSlingFormula(args []string) error {
 	var targetPane string
 	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
 	var formulaWorkDir string            // Working directory for bd cook/wisp (routes to correct rig beads)
+	var isSelfSling bool                 // True if slinging to self (skip nudge - agent already knows)
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
@@ -100,6 +102,7 @@ func runSlingFormula(args []string) error {
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
+			isSelfSling = true
 		} else if dogName, isDog := IsDogTarget(target); isDog {
 			if slingDryRun {
 				if dogName == "" {
@@ -152,7 +155,6 @@ func runSlingFormula(args []string) error {
 				targetPane = spawnInfo.Pane
 				formulaWorkDir = spawnInfo.ClonePath // Route bd commands to rig beads
 
-				// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
 				if !slingNoBoot {
 					wakeRigAgents(rigName)
 				}
@@ -170,6 +172,7 @@ func runSlingFormula(args []string) error {
 		if err != nil {
 			return err
 		}
+		isSelfSling = true
 	}
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
@@ -279,6 +282,12 @@ func runSlingFormula(args []string) error {
 	}
 
 	// Step 4: Nudge to start (graceful if no tmux)
+	// Skip for self-sling - agent is currently processing the sling command and will see
+	// the hooked work on next turn. Nudging would inject text while agent is busy.
+	if isSelfSling {
+		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
+		return nil
+	}
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 		return nil
@@ -291,9 +300,9 @@ func runSlingFormula(args []string) error {
 
 	var prompt string
 	if slingArgs != "" {
-		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `gt hook` to see your hook, then execute using these args.", formulaName, slingArgs)
+		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `" + cli.Name() + " hook` to see your hook, then execute using these args.", formulaName, slingArgs)
 	} else {
-		prompt = fmt.Sprintf("Formula %s slung. Run `gt hook` to see your hook, then execute the steps.", formulaName)
+		prompt = fmt.Sprintf("Formula %s slung. Run `" + cli.Name() + " hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
 	if err := t.NudgePane(targetPane, prompt); err != nil {

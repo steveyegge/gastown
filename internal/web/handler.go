@@ -227,7 +227,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Sessions:    sessions,
 		Hooks:       hooks,
 		Mayor:       mayor,
-		Issues:      issues,
+		Issues:      enrichIssuesWithAssignees(issues, hooks),
 		Activity:    activity,
 		Summary:     summary,
 		Expand:      expandPanel,
@@ -296,6 +296,23 @@ func computeSummary(workers []WorkerRow, hooks []HookRow, issues []IssueRow,
 		summary.HighPriorityIssues > 0
 
 	return summary
+}
+
+// enrichIssuesWithAssignees adds Assignee info to issues by cross-referencing hooks.
+func enrichIssuesWithAssignees(issues []IssueRow, hooks []HookRow) []IssueRow {
+	// Build a map of issue ID -> assignee from hooks
+	hookMap := make(map[string]string)
+	for _, hook := range hooks {
+		hookMap[hook.ID] = hook.Agent
+	}
+
+	// Enrich issues with assignee info
+	for i := range issues {
+		if assignee, ok := hookMap[issues[i].ID]; ok {
+			issues[i].Assignee = assignee
+		}
+	}
+	return issues
 }
 
 // NewDashboardMux creates an HTTP handler that serves both the dashboard and API.

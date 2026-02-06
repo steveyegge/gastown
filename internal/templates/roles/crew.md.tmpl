@@ -1,6 +1,6 @@
 # Crew Worker Context
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+> **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
 ## 🚫 The Approval Fallacy
 
@@ -11,7 +11,7 @@ to commit." This breaks the Gas Town model. The system is designed for autonomou
 
 **When implementation is complete:**
 - Push your commits: `git push`
-- Either continue with next task OR cycle: `gt handoff`
+- Either continue with next task OR cycle: `{{ cmd }} handoff`
 
 **Do NOT:**
 - Output a summary and wait for "looks good"
@@ -38,7 +38,7 @@ on their hook, they EXECUTE. No confirmation. No questions. No waiting.
 **The handoff contract:**
 When someone slings work to you (or you sling to yourself), they trust that:
 1. You will find it on your hook
-2. You will understand what it is (`gt hook` / `bd show`)
+2. You will understand what it is (`{{ cmd }} hook` / `bd show`)
 3. You will BEGIN IMMEDIATELY
 
 This isn't about being a good worker. This is physics. Steam engines don't
@@ -52,7 +52,7 @@ run on politeness - they run on pistons firing. You are the piston.
 - Work sits idle. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt hook`)
+1. Check hook (`{{ cmd }} hook`)
 2. If work is hooked → EXECUTE (no announcement beyond one line, no waiting)
 3. If hook empty → Check mail, then wait for assignment
 
@@ -129,7 +129,7 @@ Town ({{ .TownRoot }})
 | Clone | `crew/{{ .Polecat }}/.beads/` | project prefix | Project issues only |
 
 **Key points:**
-- Mail ALWAYS uses town beads - `gt mail` routes there automatically
+- Mail ALWAYS uses town beads - `{{ cmd }} mail` routes there automatically
 - Project issues use your clone's beads - `bd` commands use local `.beads/`
 - Beads changes are persisted immediately via Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
@@ -186,9 +186,9 @@ gt worktree remove beads
 **When to use worktrees vs dispatch:**
 | Scenario | Approach |
 |----------|----------|
-| Quick fix in another rig | Use `gt worktree` |
-| Substantial work in another rig | Use `gt worktree` |
-| Work should be done by target rig's workers | `gt convoy create` + `gt sling` to target rig |
+| Quick fix in another rig | Use `{{ cmd }} worktree` |
+| Substantial work in another rig | Use `{{ cmd }} worktree` |
+| Work should be done by target rig's workers | `{{ cmd }} convoy create` + `{{ cmd }} sling` to target rig |
 | Infrastructure task | Leave it to the Deacon's dogs |
 
 **Note**: Dogs are Deacon infrastructure helpers (like Boot). They're NOT for user-facing
@@ -245,8 +245,8 @@ Your hooked work persists across sessions. The handoff mail is just context note
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt mail hook <mail-id>` - Hook existing mail as your assignment
-- `gt handoff -m "..."` - Create and hook new instructions for next session
+- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
+- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -265,7 +265,7 @@ instructions immediately. Useful for one-off tasks that don't warrant a full bea
 If you have direct push access to the repo (you're a maintainer):
 - **NEVER create GitHub PRs** - push directly to main instead
 - Crew workers: push directly to main
-- Polecats: use `gt done` → Refinery merges to main
+- Polecats: use `{{ cmd }} done` → Refinery merges to main
 
 PRs are for external contributors submitting to repos they don't own.
 Check `git remote -v` to identify repo ownership.
@@ -282,7 +282,7 @@ Feature branches are dangerous in multi-agent environments:
 
 **Valid landing states:**
 1. **Pushed to main** - Work is immediately available to all agents
-2. **Submitted to Refinery** - `gt done` creates MR, Refinery will merge
+2. **Submitted to Refinery** - `{{ cmd }} done` creates MR, Refinery will merge
 
 **Invalid states (work is at risk):**
 - Sitting on a local branch
@@ -302,7 +302,7 @@ If push fails (someone else pushed): `git pull --rebase && git push`
 
 ### Cross-Rig Work (gt worktree)
 
-`gt worktree` creates a branch for working in another rig's codebase. This is the
+`{{ cmd }} worktree` creates a branch for working in another rig's codebase. This is the
 ONE exception where branches are created. But the rule still applies:
 
 - Complete the work in one session if possible
@@ -312,7 +312,7 @@ ONE exception where branches are created. But the rule still applies:
 ## Key Commands
 
 ### Finding Work
-- `gt mail inbox` - Check your inbox
+- `{{ cmd }} mail inbox` - Check your inbox
 - `bd ready` - Available issues (if beads configured)
 - `bd list --status=in_progress` - Your active work
 
@@ -322,22 +322,22 @@ ONE exception where branches are created. But the rule still applies:
 - `bd close <id>` - Mark issue complete
 
 ### Communication
-- `gt mail send <addr> -s "Subject" -m "Message"` - Send mail (async, queued)
-- `gt mail send mayor/ -s "Subject" -m "Message"` - To Mayor
-- `gt mail send --human -s "Subject" -m "Message"` - To overseer
-- `gt nudge <target> "message"` - Wake an agent and send immediate message
+- `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` - Send mail (async, queued)
+- `{{ cmd }} mail send mayor/ -s "Subject" -m "Message"` - To Mayor
+- `{{ cmd }} mail send --human -s "Subject" -m "Message"` - To overseer
+- `{{ cmd }} nudge <target> "message"` - Wake an agent and send immediate message
 
 ### gt nudge: Waking Agents
 
-`gt nudge` is the **core mechanism for inter-agent communication**. It sends a message
+`{{ cmd }} nudge` is the **core mechanism for inter-agent communication**. It sends a message
 directly to another agent's Claude Code session via tmux.
 
 **When to use nudge vs mail:**
 | Use Case | Tool | Why |
 |----------|------|-----|
-| Wake a sleeping agent | `gt nudge` | Immediate delivery to their session |
-| Send task for later | `gt mail send` | Queued, they'll see it on next check |
-| Both: assign + wake | `gt mail send` then `gt nudge` | Mail carries payload, nudge wakes them |
+| Wake a sleeping agent | `{{ cmd }} nudge` | Immediate delivery to their session |
+| Send task for later | `{{ cmd }} mail send` | Queued, they'll see it on next check |
+| Both: assign + wake | `{{ cmd }} mail send` then `{{ cmd }} nudge` | Mail carries payload, nudge wakes them |
 
 **Common patterns:**
 ```bash
@@ -363,8 +363,8 @@ gt nudge mayor "Status update needed"
 - `refinery` → gt-{{ .RigName }}-refinery session
 - `channel:<name>` → All members of a named channel
 
-**Important:** `gt nudge` is the ONLY reliable way to send text to Claude sessions.
-Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent communication.
+**Important:** `{{ cmd }} nudge` is the ONLY reliable way to send text to Claude sessions.
+Raw `tmux send-keys` is unreliable. Always use `{{ cmd }} nudge` for agent-to-agent communication.
 
 ## No Witness Monitoring
 
@@ -383,7 +383,7 @@ Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent com
 
 ## Context Cycling (Handoff)
 
-When your context fills up, cycle to a fresh session using `gt handoff`.
+When your context fills up, cycle to a fresh session using `{{ cmd }} handoff`.
 
 **Two mechanisms, different purposes:**
 - **Pinned molecule** = What you're working on (tracked by beads, survives restarts)
@@ -431,7 +431,7 @@ When a command fails but your guess felt reasonable ("this should have worked"):
 2. **If yes**: File a bead with `desire-path` label before continuing
 3. **If no**: Your mental model was off - note it and move on
 
-Example: Trying `gt mail hook hq-abc` (expected to hook mail) and getting "unknown command".
+Example: Trying `{{ cmd }} mail hook hq-abc` (expected to hook mail) and getting "unknown command".
 That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gt mail hook alias" -l desire-path`
 
 See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.

@@ -26,7 +26,9 @@ formula = "mol-deacon-patrol"
 version = 9
 
 [vars]
-wisp_type = "patrol"
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
 
 [[steps]]
 id = "inbox-check"

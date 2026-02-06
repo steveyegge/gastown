@@ -147,11 +147,11 @@ func (c *AgentSettingsCheck) findSettingsFiles(townRoot string) []staleSettingsI
 	}
 
 	// Check for STALE CLAUDE.md at town root (~/gt/CLAUDE.md)
-	// This is WRONG - CLAUDE.md here is inherited by ALL agents via directory traversal,
-	// causing crew/polecat/etc to receive Mayor-specific instructions.
-	// Mayor's CLAUDE.md should be at ~/gt/mayor/CLAUDE.md instead.
+	// This is WRONG if it contains Mayor-specific instructions that would be inherited
+	// by ALL agents via directory traversal. However, a short identity anchor file
+	// (created by priming) that just says "run gt prime" is intentional and safe.
 	staleTownRootCLAUDEmd := filepath.Join(townRoot, "CLAUDE.md")
-	if fileExists(staleTownRootCLAUDEmd) {
+	if fileExists(staleTownRootCLAUDEmd) && !isIdentityAnchor(staleTownRootCLAUDEmd) {
 		files = append(files, staleSettingsInfo{
 			path:          staleTownRootCLAUDEmd,
 			agentType:     "mayor",
@@ -505,7 +505,7 @@ func (c *AgentSettingsCheck) Fix(ctx *CheckContext) error {
 			// Note: Mayor settings.json at town root are now CORRECT (Mayor runs from townRoot)
 			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
 				townName, _ := workspace.GetTownName(ctx.TownRoot)
-				if err := templates.CreateMayorCLAUDEmd(
+				if _, err := templates.CreateMayorCLAUDEmd(
 					mayorDir,
 					ctx.TownRoot,
 					townName,
@@ -565,4 +565,23 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// isIdentityAnchor checks if a CLAUDE.md file is the short identity anchor
+// created by the priming system. These files are intentional - they contain
+// a brief message telling agents to run "gt prime" for their role-specific context.
+// They should NOT be flagged as "wrong location" since they don't contain
+// Mayor-specific instructions that would pollute other agents.
+//
+// An identity anchor is identified by:
+// - Being small (<20 lines)
+// - Containing "gt prime" (the recovery instruction)
+func isIdentityAnchor(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	lines := strings.Count(content, "\n") + 1
+	return lines < 20 && strings.Contains(content, "gt prime")
 }

@@ -273,7 +273,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 						return fmt.Errorf("stale session persists after cleanup: %w", err)
 					}
 					fmt.Printf("Stale session detected, recreating...\n")
-					if killErr := t.KillSession(sessionID); killErr != nil {
+					if killErr := t.KillSession(sessionID); killErr != nil && killErr != tmux.ErrSessionNotFound {
 						return fmt.Errorf("failed to kill stale session: %w", killErr)
 					}
 					crewAtRetried = true

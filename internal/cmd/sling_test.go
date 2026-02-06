@@ -385,15 +385,15 @@ exit /b 0
 		args := parts[1]
 
 		switch {
-		case strings.Contains(args, " cook "):
+		case strings.Contains(args, "cook "):
 			gotCook = true
 			// cook doesn't need database context, runs from cwd
-		case strings.Contains(args, " mol wisp "):
+		case strings.Contains(args, "mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
 				t.Fatalf("bd mol wisp ran in %q, want %q (args: %q)", dir, wantDir, args)
 			}
-		case strings.Contains(args, " mol bond "):
+		case strings.Contains(args, "mol bond "):
 			gotBond = true
 			if dir != wantDir {
 				t.Fatalf("bd mol bond ran in %q, want %q (args: %q)", dir, wantDir, args)

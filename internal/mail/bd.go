@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // bdError represents an error from running a bd command.
@@ -53,10 +51,7 @@ func runBdCommand(args []string, workDir, beadsDir string, extraEnv ...string) (
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Limit concurrent bd processes to prevent dolt embedded lock contention.
-	beads.AcquireBd()
 	runErr := cmd.Run()
-	beads.ReleaseBd()
 
 	if runErr != nil {
 		return nil, &bdError{

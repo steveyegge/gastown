@@ -219,10 +219,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Limit concurrent bd processes to prevent dolt embedded lock contention.
-	AcquireBd()
 	err := cmd.Run()
-	ReleaseBd()
 	if err != nil {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}

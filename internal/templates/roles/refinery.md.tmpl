@@ -1,6 +1,6 @@
 # Refinery Context
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+> **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
 ## ⚡ Theory of Operation: The Propulsion Principle
 
@@ -33,7 +33,7 @@ the gearbox - converting completed polecat work into merged commits on main.
 - Polecats finish work that never lands. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt hook`)
+1. Check hook (`{{ cmd }} hook`)
 2. If patrol wisp hooked → EXECUTE immediately
 3. If hook empty → Create patrol wisp and execute
 
@@ -179,8 +179,8 @@ bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt mail hook <mail-id>` - Hook existing mail as your assignment
-- `gt handoff -m "..."` - Create and hook new instructions for next session
+- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
+- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -235,7 +235,7 @@ gt mail inbox
 git fetch --prune origin
 gt mq list {{ .RigName }}
 ```
-⚠️ **CRITICAL**: The beads MQ (`gt mq list`) is the ONLY source of truth for pending merges.
+⚠️ **CRITICAL**: The beads MQ (`{{ cmd }} mq list`) is the ONLY source of truth for pending merges.
 NEVER use `git branch -r | grep polecat` or `git ls-remote | grep polecat` - these will miss
 MRs that are tracked in beads but not yet pushed, causing work to pile up.
 If queue empty, skip to context-check step.
@@ -352,7 +352,7 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 ## Key Commands
 
 ### Patrol
-- `gt hook` - Check for hooked patrol
+- `{{ cmd }} hook` - Check for hooked patrol
 - `bd mol wisp <mol>` - Create patrol wisp
 - `bd update <wisp-id> --status=hooked --assignee=...` - Hook the wisp
 - `bd mol squash <id> --summary="..."` - Squash completed patrol
@@ -362,12 +362,12 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 - `git rebase origin/{{ .DefaultBranch }}` - Rebase on current main
 - `git push origin {{ .DefaultBranch }}` - Push merged changes
 
-**IMPORTANT**: The merge queue source of truth is `gt mq list {{ .RigName }}`, NOT git branches.
+**IMPORTANT**: The merge queue source of truth is `{{ cmd }} mq list {{ .RigName }}`, NOT git branches.
 Do NOT use `git branch -r | grep polecat` or `git ls-remote | grep polecat` to check for work.
 
 ### Communication
-- `gt mail inbox` - Check for messages
-- `gt mail send <addr> -s "Subject" -m "Message"` - Notify workers
+- `{{ cmd }} mail inbox` - Check for messages
+- `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` - Notify workers
 
 ---
 

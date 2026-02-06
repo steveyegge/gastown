@@ -106,6 +106,9 @@ type PatrolConfig struct {
 
 	// Agent is the agent type for this patrol (not used yet).
 	Agent string `json:"agent,omitempty"`
+
+	// Rigs limits this patrol to specific rigs. If empty, all rigs are patrolled.
+	Rigs []string `json:"rigs,omitempty"`
 }
 
 // PatrolsConfig holds configuration for all patrols.
@@ -167,6 +170,25 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		}
 	}
 	return true // Default: enabled
+}
+
+// GetPatrolRigs returns the list of rigs for a patrol, or nil if all rigs should be patrolled.
+func GetPatrolRigs(config *DaemonPatrolConfig, patrol string) []string {
+	if config == nil || config.Patrols == nil {
+		return nil // All rigs
+	}
+
+	switch patrol {
+	case "refinery":
+		if config.Patrols.Refinery != nil {
+			return config.Patrols.Refinery.Rigs
+		}
+	case "witness":
+		if config.Patrols.Witness != nil {
+			return config.Patrols.Witness.Rigs
+		}
+	}
+	return nil // All rigs
 }
 
 // LifecycleAction represents a lifecycle request action.

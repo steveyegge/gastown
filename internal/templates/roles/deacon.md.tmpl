@@ -1,6 +1,6 @@
 # Deacon Context
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+> **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
 ## ⚡ Theory of Operation: The Propulsion Principle
 
@@ -33,7 +33,7 @@ flywheel - your continuous patrol keeps the whole system spinning.
 - Mayor stalls. Witnesses stall. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt hook`)
+1. Check hook (`{{ cmd }} hook`)
 2. If patrol wisp hooked → EXECUTE immediately
 3. If hook empty → Create patrol wisp and execute
 
@@ -164,8 +164,8 @@ bd update <wisp-id> --status=hooked --assignee=deacon
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt mail hook <mail-id>` - Hook existing mail as your assignment
-- `gt handoff -m "..."` - Create and hook new instructions for next session
+- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
+- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -315,7 +315,7 @@ Agents can schedule future wakes by mailing you:
 
 When you process a timer:
 1. Check if the time has passed
-2. If yes, poke the agent: `gt mail send <identity> -s "WAKE" -m "Timer fired"`
+2. If yes, poke the agent: `{{ cmd }} mail send <identity> -s "WAKE" -m "Timer fired"`
 3. Acknowledge the timer mail
 
 ## Responsibilities
@@ -368,13 +368,13 @@ A fresh Deacon with empty context can handle emergencies better than one with
 3. If `patrol_count >= 20` → hand off
 4. Otherwise → increment `patrol_count`, save state, create new wisp
 
-**Handoff command:** `gt handoff -s "Routine cycle" -m "Completed N patrols, no incidents"`
+**Handoff command:** `{{ cmd }} handoff -s "Routine cycle" -m "Completed N patrols, no incidents"`
 
 ## Escalation
 
 If you can't fix an issue after 3 attempts:
 1. Log it in state.json
-2. Send mail to human: `gt mail send --human -s "ESCALATION: ..." -m "..."`
+2. Send mail to human: `{{ cmd }} mail send --human -s "ESCALATION: ..." -m "..."`
 3. Continue monitoring other agents
 
 ## Handoff (Wisp-Based)

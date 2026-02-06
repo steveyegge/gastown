@@ -15,6 +15,8 @@
         if (panel.classList.contains('expanded')) {
             panel.classList.remove('expanded');
             btn.textContent = 'Expand';
+            // Resume refresh when panel is collapsed
+            window.pauseRefresh = false;
         } else {
             document.querySelectorAll('.panel.expanded').forEach(function(p) {
                 p.classList.remove('expanded');
@@ -23,14 +25,30 @@
             });
             panel.classList.add('expanded');
             btn.textContent = '✕ Close';
+            // Pause refresh while panel is expanded
+            window.pauseRefresh = true;
         }
     });
 
-    // After HTMX swap, close any expanded panels
+    // After HTMX swap - morph preserves most state, but we need to re-init some things
     document.body.addEventListener('htmx:afterSwap', function() {
-        document.querySelectorAll('.panel.expanded').forEach(function(p) {
-            p.classList.remove('expanded');
-        });
+        // Morph preserves expanded class, so we don't need to close panels anymore
+        // Just check if we should resume refresh
+        var hasExpanded = document.querySelector('.panel.expanded');
+        var mailDetail = document.getElementById('mail-detail');
+        var mailCompose = document.getElementById('mail-compose');
+        var issueDetail = document.getElementById('issue-detail');
+        var prDetail = document.getElementById('pr-detail');
+        var inDetailView = (mailDetail && mailDetail.style.display !== 'none') ||
+                          (mailCompose && mailCompose.style.display !== 'none') ||
+                          (issueDetail && issueDetail.style.display !== 'none') ||
+                          (prDetail && prDetail.style.display !== 'none');
+        if (!inDetailView && !hasExpanded) {
+            window.pauseRefresh = false;
+        }
+        // Reload dynamic panels after swap (handled via window functions)
+        if (window.refreshCrewPanel) window.refreshCrewPanel();
+        if (window.refreshReadyPanel) window.refreshReadyPanel();
     });
 
     // ============================================
@@ -612,15 +630,400 @@
         var now = new Date();
         var diff = now - d;
 
-        if (diff < 60000) return 'just now';
-        if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-        if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-        if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
-        return d.toLocaleDateString();
+        // Format: "Jan 26, 3:45 PM" or "Jan 26 2025, 3:45 PM" if different year
+        var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var month = months[d.getMonth()];
+        var day = d.getDate();
+        var hours = d.getHours();
+        var minutes = d.getMinutes();
+        var ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12 || 12;
+        var minStr = minutes < 10 ? '0' + minutes : minutes;
+        var yearPart = d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() + ',' : '';
+        var dateStr = month + ' ' + day + yearPart + ', ' + hours + ':' + minStr + ' ' + ampm;
+
+        // Add relative time in parentheses for recent messages
+        var relative = '';
+        if (diff < 60000) relative = ' (just now)';
+        else if (diff < 3600000) relative = ' (' + Math.floor(diff / 60000) + 'm ago)';
+        else if (diff < 86400000) relative = ' (' + Math.floor(diff / 3600000) + 'h ago)';
+        else if (diff < 604800000) relative = ' (' + Math.floor(diff / 86400000) + 'd ago)';
+
+        return dateStr + relative;
     }
 
     // Load mail on page load
     loadMailInbox();
+
+    // ============================================
+    // CREW PANEL
+    // ============================================
+    function loadCrew() {
+        var loading = document.getElementById('crew-loading');
+        var table = document.getElementById('crew-table');
+        var tbody = document.getElementById('crew-tbody');
+        var empty = document.getElementById('crew-empty');
+        var count = document.getElementById('crew-count');
+
+        if (!loading || !table || !tbody) return;
+
+        fetch('/api/crew')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                loading.style.display = 'none';
+
+                if (data.crew && data.crew.length > 0) {
+                    table.style.display = 'table';
+                    empty.style.display = 'none';
+                    tbody.innerHTML = '';
+
+                    // Check for state changes and notify
+                    checkCrewNotifications(data.crew);
+
+                    data.crew.forEach(function(member) {
+                        var tr = document.createElement('tr');
+                        var rowClass = 'crew-' + member.state;
+                        tr.className = rowClass;
+
+                        var stateClass = 'crew-state-' + member.state;
+                        var stateText = member.state.charAt(0).toUpperCase() + member.state.slice(1);
+                        var stateIcon = '';
+                        if (member.state === 'spinning') stateIcon = '🔄 ';
+                        else if (member.state === 'finished') stateIcon = '✅ ';
+                        else if (member.state === 'questions') stateIcon = '❓ ';
+                        else if (member.state === 'ready') stateIcon = '⏸️ ';
+
+                        var sessionBadge = '';
+                        if (member.session === 'attached') {
+                            sessionBadge = '<span class="badge badge-green">Attached</span>';
+                        } else if (member.session === 'detached') {
+                            sessionBadge = '<span class="badge badge-muted">Detached</span>';
+                        } else {
+                            sessionBadge = '<span class="badge badge-muted">None</span>';
+                        }
+
+                        // Build the attach command based on the crew member's role
+                        var attachCmd = 'gt crew at ' + member.name;
+                        if (member.name === 'mayor') {
+                            attachCmd = 'gt mayor attach';
+                        } else if (member.name === 'deacon') {
+                            attachCmd = 'gt deacon attach';
+                        } else if (member.name === 'witness' || member.name.startsWith('witness-')) {
+                            attachCmd = 'gt witness attach';
+                        }
+
+                        tr.innerHTML =
+                            '<td><span class="crew-name">' + escapeHtml(member.name) + '</span></td>' +
+                            '<td><span class="crew-rig">' + escapeHtml(member.rig) + '</span></td>' +
+                            '<td><span class="' + stateClass + '">' + stateIcon + stateText + '</span></td>' +
+                            '<td><span class="crew-hook">' + (member.hook ? escapeHtml(member.hook) : '—') + '</span></td>' +
+                            '<td class="crew-activity">' + (member.last_active || '—') + '</td>' +
+                            '<td>' + sessionBadge + '</td>' +
+                            '<td><button class="attach-btn" data-cmd="' + escapeHtml(attachCmd) + '" title="Copy attach command">📎 Attach</button></td>';
+                        tbody.appendChild(tr);
+                    });
+
+                    if (count) count.textContent = data.total;
+                } else {
+                    table.style.display = 'none';
+                    empty.style.display = 'block';
+                    if (count) count.textContent = '0';
+                }
+            })
+            .catch(function(err) {
+                loading.textContent = 'Failed to load crew';
+                console.error('Crew load error:', err);
+            });
+    }
+
+    // Track previous crew states for notifications
+    var previousCrewStates = {};
+    var crewNeedsAttention = 0;
+
+    // Load crew on page load
+    loadCrew();
+    // Expose for refresh after HTMX swaps
+    window.refreshCrewPanel = loadCrew;
+
+    // Crew notification system - check for state changes
+    function checkCrewNotifications(crewList) {
+        var newNeedsAttention = 0;
+
+        crewList.forEach(function(member) {
+            var key = member.rig + '/' + member.name;
+            var prevState = previousCrewStates[key];
+            var newState = member.state;
+
+            // Count crew needing attention
+            if (newState === 'finished' || newState === 'questions') {
+                newNeedsAttention++;
+            }
+
+            // Notify on state transitions to finished/questions
+            if (prevState && prevState !== newState) {
+                if (newState === 'finished') {
+                    showToast('success', 'Crew Finished', member.name + ' finished their work!');
+                    playNotificationSound();
+                } else if (newState === 'questions') {
+                    showToast('info', 'Needs Attention', member.name + ' has questions for you');
+                    playNotificationSound();
+                }
+            }
+
+            // Update stored state
+            previousCrewStates[key] = newState;
+        });
+
+        // Update badge on crew panel
+        crewNeedsAttention = newNeedsAttention;
+        updateCrewBadge();
+    }
+
+    function updateCrewBadge() {
+        var countEl = document.getElementById('crew-count');
+        if (!countEl) return;
+
+        // Add attention indicator if crew needs attention
+        if (crewNeedsAttention > 0) {
+            countEl.classList.add('needs-attention');
+            countEl.setAttribute('data-attention', crewNeedsAttention);
+        } else {
+            countEl.classList.remove('needs-attention');
+            countEl.removeAttribute('data-attention');
+        }
+    }
+
+    function playNotificationSound() {
+        // Simple beep using Web Audio API (optional, non-blocking)
+        try {
+            var ctx = new (window.AudioContext || window.webkitAudioContext)();
+            var oscillator = ctx.createOscillator();
+            var gain = ctx.createGain();
+            oscillator.connect(gain);
+            gain.connect(ctx.destination);
+            oscillator.frequency.value = 800;
+            gain.gain.value = 0.1;
+            oscillator.start();
+            oscillator.stop(ctx.currentTime + 0.1);
+        } catch (e) {
+            // Audio not available, ignore
+        }
+    }
+
+    // Handle attach button clicks - copy command to clipboard
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.attach-btn');
+        if (!btn) return;
+        
+        e.preventDefault();
+        var cmd = btn.getAttribute('data-cmd');
+        if (!cmd) return;
+
+        navigator.clipboard.writeText(cmd).then(function() {
+            showToast('success', 'Copied', cmd);
+        }).catch(function() {
+            // Fallback for older browsers
+            showToast('info', 'Run in terminal', cmd);
+        });
+    });
+
+
+    // ============================================
+    // ISSUE CREATION MODAL
+    // ============================================
+    function openIssueModal() {
+        var modal = document.getElementById('issue-modal');
+        if (modal) {
+            modal.style.display = 'flex';
+            window.pauseRefresh = true;
+            // Focus the title input
+            var titleInput = document.getElementById('issue-title');
+            if (titleInput) {
+                setTimeout(function() { titleInput.focus(); }, 100);
+            }
+        }
+    }
+    window.openIssueModal = openIssueModal;
+
+    function closeIssueModal() {
+        var modal = document.getElementById('issue-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            window.pauseRefresh = false;
+            // Reset form
+            var form = document.getElementById('issue-form');
+            if (form) form.reset();
+        }
+    }
+    window.closeIssueModal = closeIssueModal;
+
+    function submitIssue(e) {
+        e.preventDefault();
+        
+        var title = document.getElementById('issue-title').value.trim();
+        var priority = document.getElementById('issue-priority').value;
+        var description = document.getElementById('issue-description').value.trim();
+        var submitBtn = document.getElementById('issue-submit-btn');
+
+        if (!title) {
+            showToast('error', 'Missing', 'Title is required');
+            return;
+        }
+
+        // Disable button while submitting
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating...';
+
+        var payload = {
+            title: title,
+            priority: parseInt(priority, 10)
+        };
+        if (description) {
+            payload.description = description;
+        }
+
+        fetch('/api/issues/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Created', 'Issue ' + (data.id || '') + ' created');
+                closeIssueModal();
+                // Trigger a page refresh to show the new issue
+                if (typeof htmx !== 'undefined') {
+                    htmx.trigger(document.body, 'htmx:load');
+                }
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        })
+        .finally(function() {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Issue';
+        });
+    }
+    window.submitIssue = submitIssue;
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var modal = document.getElementById('issue-modal');
+            if (modal && modal.style.display !== 'none') {
+                closeIssueModal();
+            }
+        }
+    });
+
+    // ============================================
+    // WORK PANEL TABS
+    // ============================================
+    function switchWorkTab(tab) {
+        // Update active tab button
+        document.querySelectorAll('.panel-tabs .tab-btn').forEach(function(btn) {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-tab') === tab) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Filter rows based on tab
+        var rows = document.querySelectorAll('#work-table tbody tr');
+        rows.forEach(function(row) {
+            var status = row.getAttribute('data-status') || 'ready';
+            if (tab === 'all') {
+                row.style.display = '';
+            } else if (tab === 'ready' && status === 'ready') {
+                row.style.display = '';
+            } else if (tab === 'progress' && status === 'progress') {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        // Update count
+        var visibleCount = 0;
+        rows.forEach(function(row) {
+            if (row.style.display !== 'none') visibleCount++;
+        });
+        var countEl = document.querySelector('#work-panel .count');
+        if (countEl) countEl.textContent = visibleCount;
+    }
+    window.switchWorkTab = switchWorkTab;
+
+    // Initialize work panel to "Ready" tab on load
+    setTimeout(function() {
+        switchWorkTab('ready');
+    }, 100);
+
+    // ============================================
+    // READY WORK PANEL
+    // ============================================
+    function loadReady() {
+        var loading = document.getElementById('ready-loading');
+        var table = document.getElementById('ready-table');
+        var tbody = document.getElementById('ready-tbody');
+        var empty = document.getElementById('ready-empty');
+        var count = document.getElementById('ready-count');
+
+        if (!loading || !table || !tbody) return;
+
+        fetch('/api/ready')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                loading.style.display = 'none';
+
+                if (data.items && data.items.length > 0) {
+                    table.style.display = 'table';
+                    empty.style.display = 'none';
+                    tbody.innerHTML = '';
+
+                    data.items.forEach(function(item) {
+                        var tr = document.createElement('tr');
+                        var rowClass = '';
+                        if (item.priority === 1) rowClass = 'ready-p1';
+                        else if (item.priority === 2) rowClass = 'ready-p2';
+                        tr.className = rowClass;
+
+                        var priBadge = '';
+                        if (item.priority === 1) priBadge = '<span class="badge badge-red">P1</span>';
+                        else if (item.priority === 2) priBadge = '<span class="badge badge-orange">P2</span>';
+                        else if (item.priority === 3) priBadge = '<span class="badge badge-yellow">P3</span>';
+                        else priBadge = '<span class="badge badge-muted">P4</span>';
+
+                        var sourceClass = item.source === 'town' ? 'ready-source ready-source-town' : 'ready-source';
+
+                        tr.innerHTML =
+                            '<td>' + priBadge + '</td>' +
+                            '<td><span class="ready-id">' + escapeHtml(item.id) + '</span></td>' +
+                            '<td><span class="ready-title">' + escapeHtml(item.title || '') + '</span></td>' +
+                            '<td><span class="' + sourceClass + '">' + escapeHtml(item.source) + '</span></td>';
+                        tbody.appendChild(tr);
+                    });
+
+                    if (count) count.textContent = data.summary.total;
+                } else {
+                    table.style.display = 'none';
+                    empty.style.display = 'block';
+                    if (count) count.textContent = '0';
+                }
+            })
+            .catch(function(err) {
+                loading.textContent = 'Failed to load ready work';
+                console.error('Ready work load error:', err);
+            });
+    }
+
+    // Load ready work on page load
+    loadReady();
+    // Expose for refresh after HTMX swaps
+    window.refreshReadyPanel = loadReady;
 
     // Click on mail row to read message
     document.addEventListener('click', function(e) {
@@ -719,7 +1122,9 @@
         // Populate To dropdown
         populateToDropdown(null);
 
+        // Hide all mail views, show compose
         mailList.style.display = 'none';
+        if (mailAll) mailAll.style.display = 'none';
         mailDetail.style.display = 'none';
         mailCompose.style.display = 'block';
         document.getElementById('compose-to').focus();
@@ -730,6 +1135,8 @@
         mailCompose.style.display = 'none';
         if (currentMessageId) {
             mailDetail.style.display = 'block';
+        } else if (currentMailTab === 'all' && mailAll) {
+            mailAll.style.display = 'block';
         } else {
             mailList.style.display = 'block';
         }
@@ -799,7 +1206,10 @@
     // Returns a Promise so callers can wait for it
     function populateToDropdown(selectedValue) {
         var select = document.getElementById('compose-to');
-        select.innerHTML = '<option value="">Select recipient...</option>';
+        
+        // Show loading state
+        select.innerHTML = '<option value="">⏳ Loading recipients...</option>';
+        select.disabled = true;
 
         // If we have a selected value for reply, add it immediately so it's available
         if (selectedValue) {
@@ -809,12 +1219,26 @@
             opt.textContent = cleanValue + ' (replying to)';
             opt.selected = true;
             select.appendChild(opt);
+            select.disabled = false;
         }
 
         // Fetch agents from options API
         return fetch('/api/options')
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                // Clear loading state, rebuild options
+                select.innerHTML = '<option value="">Select recipient...</option>';
+                
+                // Re-add reply-to if present
+                if (selectedValue) {
+                    var cleanVal = selectedValue.replace(/\/$/, '').trim();
+                    var replyOpt = document.createElement('option');
+                    replyOpt.value = cleanVal;
+                    replyOpt.textContent = cleanVal + ' (replying to)';
+                    replyOpt.selected = true;
+                    select.appendChild(replyOpt);
+                }
+                
                 var agents = data.agents || [];
                 var addedValues = selectedValue ? [selectedValue.replace(/\/$/, '').toLowerCase()] : [];
 
@@ -833,9 +1257,13 @@
                     if (!running) opt.disabled = true;
                     select.appendChild(opt);
                 });
+                
+                select.disabled = false;
             })
             .catch(function(err) {
                 console.error('Failed to load agents for To dropdown:', err);
+                select.innerHTML = '<option value="">⚠ Failed to load recipients</option>';
+                select.disabled = false;
             });
     }
 

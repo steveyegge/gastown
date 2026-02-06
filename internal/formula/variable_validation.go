@@ -44,7 +44,8 @@ func ExtractTemplateVariables(text string) []string {
 // that look like variables but aren't (e.g., "else", "this").
 func isHandlebarsKeyword(name string) bool {
 	switch name {
-	case "else", "this", "root", "index", "key", "first", "last":
+	case "else", "this", "root", "index", "key", "first", "last",
+		"end", "range", "with", "block", "define", "template", "nil":
 		return true
 	default:
 		return false

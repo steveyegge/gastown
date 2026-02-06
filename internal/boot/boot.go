@@ -4,6 +4,7 @@
 package boot
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -182,7 +183,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		Recipient: "boot",
 		Sender:    "daemon",
 		Topic:     "triage",
-	}, "Run `gt boot triage` now.")
+	}, "Run `" + cli.Name() + " boot triage` now.")
 
 	var startCmd string
 	if agentOverride != "" {

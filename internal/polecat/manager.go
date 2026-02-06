@@ -214,6 +214,11 @@ func (m *Manager) clonePath(name string) string {
 	return newPath
 }
 
+// ClonePath returns the path to a polecat's git worktree.
+func (m *Manager) ClonePath(name string) string {
+	return m.clonePath(name)
+}
+
 // exists checks if a polecat exists.
 func (m *Manager) exists(name string) bool {
 	_, err := os.Stat(m.polecatDir(name))
@@ -540,7 +545,21 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 		}
 	}
 
-// Close agent bead FIRST, before any filesystem operations.
+	// Even nuclear mode must not delete worktrees with unmerged MRs.
+	// The nuclear flag bypasses git-status checks (needed for self-nuke)
+	// but MR status is a higher-level concern that should always be checked.
+	if !force {
+		agentID := m.agentBeadID(name)
+		_, fields, aErr := m.beads.GetAgentBead(agentID)
+		if aErr == nil && fields != nil && fields.ActiveMR != "" {
+			mrBead, mrErr := m.beads.Show(fields.ActiveMR)
+			if mrErr == nil && mrBead != nil && mrBead.Status == "open" {
+				return fmt.Errorf("cannot remove polecat %s: MR %s is still open in merge queue\nRefinery will process the MR and clean up after merge\nUse --force to override (risks data loss)", name, fields.ActiveMR)
+			}
+		}
+	}
+
+	// Close agent bead FIRST, before any filesystem operations.
 	// This prevents a race where a concurrent sling allocates the same name,
 	// sets hook_bead, and then has it cleared by this cleanup. By closing
 	// the agent bead first, concurrent slings see a CLOSED bead and

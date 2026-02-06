@@ -49,19 +49,21 @@ type APIHandler struct {
 	gtPath string
 	// workDir is the working directory for command execution.
 	workDir string
+	// Options cache
+	optionsCache     *OptionsResponse
+	optionsCacheTime time.Time
+	optionsCacheMu   sync.RWMutex
 }
+
+const optionsCacheTTL = 30 * time.Second
 
 // NewAPIHandler creates a new API handler.
 func NewAPIHandler() *APIHandler {
-	// Use the current executable as the gt binary (we ARE gt)
-	gtPath := "gt"
-	if exe, err := os.Executable(); err == nil {
-		gtPath = exe
-	}
-	// Capture the current working directory for command execution
+	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
+	// tests it returns the test binary, causing fork bombs when executed.
 	workDir, _ := os.Getwd()
 	return &APIHandler{
-		gtPath:  gtPath,
+		gtPath:  "gt",
 		workDir: workDir,
 	}
 }
@@ -94,8 +96,14 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleMailSend(w, r)
 	case path == "/issues/show" && r.Method == http.MethodGet:
 		h.handleIssueShow(w, r)
+	case path == "/issues/create" && r.Method == http.MethodPost:
+		h.handleIssueCreate(w, r)
 	case path == "/pr/show" && r.Method == http.MethodGet:
 		h.handlePRShow(w, r)
+	case path == "/crew" && r.Method == http.MethodGet:
+		h.handleCrew(w, r)
+	case path == "/ready" && r.Method == http.MethodGet:
+		h.handleReady(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -452,89 +460,108 @@ type OptionsResponse struct {
 }
 
 // handleOptions returns dynamic options for command arguments.
-// All commands are run in parallel to minimize response time.
+// Results are cached for 30 seconds to avoid slow repeated fetches.
 func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
-	resp := OptionsResponse{}
+	// Check cache first
+	h.optionsCacheMu.RLock()
+	if h.optionsCache != nil && time.Since(h.optionsCacheTime) < optionsCacheTTL {
+		cached := h.optionsCache
+		h.optionsCacheMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cache", "HIT")
+		_ = json.NewEncoder(w).Encode(cached)
+		return
+	}
+	h.optionsCacheMu.RUnlock()
+
+	// Cache miss - fetch fresh data
+	resp := &OptionsResponse{}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	// Run all fetches in parallel
+	// Run all fetches in parallel with shorter timeouts
 	wg.Add(7)
 
-	// Fetch rigs (parse text output - no JSON support)
+	// Fetch rigs
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"rig", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
 			mu.Lock()
 			resp.Rigs = parseRigListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch polecats (has JSON support)
+	// Fetch polecats
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
 			mu.Lock()
-			resp.Polecats = parseJSONPaths(output) // rig/name format
+			resp.Polecats = parseJSONPaths(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch convoys (parse text output)
+	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
 			mu.Lock()
 			resp.Convoys = parseConvoyListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch hooks (parse text output)
+	// Fetch hooks
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"hooks", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
 			mu.Lock()
 			resp.Hooks = parseHooksListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch mail messages (parse text output)
+	// Fetch mail messages
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"mail", "inbox"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
 			mu.Lock()
 			resp.Messages = parseMailInboxOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch crew members (parse text output)
+	// Fetch crew members
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"crew", "list", "--all"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
 			mu.Lock()
 			resp.Crew = parseCrewListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch agents with status from status --json (needs longer timeout - can take 20+ seconds)
+	// Fetch agents - shorter timeout, skip if slow
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 30*time.Second, []string{"status", "--json"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"status", "--json"}); err == nil {
 			mu.Lock()
 			resp.Agents = parseAgentsFromStatus(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Wait for all commands to complete
 	wg.Wait()
 
+	// Update cache
+	h.optionsCacheMu.Lock()
+	h.optionsCache = resp
+	h.optionsCacheTime = time.Now()
+	h.optionsCacheMu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
@@ -759,6 +786,92 @@ func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 
 	// Parse the output
 	resp := parseIssueShowOutput(output, issueID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// IssueCreateRequest is the request body for creating an issue.
+type IssueCreateRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Priority    int    `json:"priority,omitempty"` // 1-4, default 2
+}
+
+// IssueCreateResponse is the response from creating an issue.
+type IssueCreateResponse struct {
+	Success bool   `json:"success"`
+	ID      string `json:"id,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleIssueCreate creates a new issue via bd create.
+func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
+	var req IssueCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Title == "" {
+		h.sendError(w, "Title is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate title doesn't contain control characters or newlines
+	if strings.ContainsAny(req.Title, "\n\r\x00") {
+		h.sendError(w, "Title cannot contain newlines or control characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate description if provided
+	if req.Description != "" && strings.Contains(req.Description, "\x00") {
+		h.sendError(w, "Description cannot contain null characters", http.StatusBadRequest)
+		return
+	}
+
+	// Build bd create command
+	args := []string{"create", req.Title}
+
+	// Add priority if specified (default is P2)
+	if req.Priority >= 1 && req.Priority <= 4 {
+		args = append(args, fmt.Sprintf("--priority=%d", req.Priority))
+	}
+
+	// Add description if provided
+	if req.Description != "" {
+		args = append(args, "--body", req.Description)
+	}
+
+	// Run bd create
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	output, err := h.runBdCommand(ctx, 12*time.Second, args)
+
+	resp := IssueCreateResponse{}
+	if err != nil {
+		resp.Success = false
+		resp.Error = "Failed to create issue: " + err.Error()
+		if output != "" {
+			resp.Message = output
+		}
+	} else {
+		resp.Success = true
+		resp.Message = output
+
+		// Try to extract issue ID from output (e.g., "Created issue: abc123")
+		if strings.Contains(output, "Created") {
+			parts := strings.Fields(output)
+			for i, p := range parts {
+				if strings.HasSuffix(p, ":") && i+1 < len(parts) {
+					resp.ID = strings.TrimSpace(parts[i+1])
+					break
+				}
+			}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -1058,6 +1171,322 @@ func parsePRShowOutput(jsonStr string) PRShowResponse {
 	resp.RawOutput = ""
 
 	return resp
+}
+
+// CrewMember represents a crew member's status for the dashboard.
+type CrewMember struct {
+	Name       string `json:"name"`
+	Rig        string `json:"rig"`
+	State      string `json:"state"`       // spinning, finished, ready, questions
+	Hook       string `json:"hook,omitempty"`
+	HookTitle  string `json:"hook_title,omitempty"`
+	Session    string `json:"session"`     // attached, detached, none
+	LastActive string `json:"last_active"`
+}
+
+// CrewResponse is the response for /api/crew.
+type CrewResponse struct {
+	Crew    []CrewMember `json:"crew"`
+	ByRig   map[string][]CrewMember `json:"by_rig"`
+	Total   int          `json:"total"`
+}
+
+// ReadyItem represents a ready work item.
+type ReadyItem struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
+	Source   string `json:"source"` // "town" or rig name
+	Type     string `json:"type"`   // issue, mr, etc.
+}
+
+// ReadyResponse is the response for /api/ready.
+type ReadyResponse struct {
+	Items   []ReadyItem         `json:"items"`
+	BySource map[string][]ReadyItem `json:"by_source"`
+	Summary struct {
+		Total   int `json:"total"`
+		P1Count int `json:"p1_count"`
+		P2Count int `json:"p2_count"`
+		P3Count int `json:"p3_count"`
+	} `json:"summary"`
+}
+
+// handleCrew returns crew status across all rigs with proper state detection.
+func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// Run gt crew list --all --json to get crew across all rigs
+	output, err := h.runGtCommand(ctx, 10*time.Second, []string{"crew", "list", "--all", "--json"})
+	
+	resp := CrewResponse{
+		Crew:  make([]CrewMember, 0),
+		ByRig: make(map[string][]CrewMember),
+	}
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Parse the JSON output
+	var crewData []struct {
+		Name    string `json:"name"`
+		Rig     string `json:"rig"`
+		Branch  string `json:"branch"`
+		Session string `json:"session,omitempty"`
+		Hook    string `json:"hook,omitempty"`
+	}
+	
+	if err := json.Unmarshal([]byte(output), &crewData); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Convert to CrewMember format with state detection
+	for _, c := range crewData {
+		sessionName := fmt.Sprintf("gt-%s-crew-%s", c.Rig, c.Name)
+		state, lastActive, sessionStatus := h.detectCrewState(ctx, sessionName, c.Hook)
+
+		member := CrewMember{
+			Name:       c.Name,
+			Rig:        c.Rig,
+			State:      state,
+			Hook:       c.Hook,
+			Session:    sessionStatus,
+			LastActive: lastActive,
+		}
+		resp.Crew = append(resp.Crew, member)
+		resp.ByRig[c.Rig] = append(resp.ByRig[c.Rig], member)
+	}
+	resp.Total = len(resp.Crew)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// detectCrewState determines crew member state from tmux session.
+// Returns: state (spinning/finished/questions/ready), lastActive string, session status
+func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook string) (string, string, string) {
+	// Check if tmux session exists and get activity
+	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_attached}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		// tmux not running - crew is ready (no session)
+		return "ready", "", "none"
+	}
+
+	// Find our session
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 || parts[0] != sessionName {
+			continue
+		}
+
+		// Found session
+		var activityUnix int64
+		fmt.Sscanf(parts[1], "%d", &activityUnix)
+		attached := parts[2] == "1"
+
+		sessionStatus := "detached"
+		if attached {
+			sessionStatus = "attached"
+		}
+
+		// Calculate activity age
+		activityAge := time.Since(time.Unix(activityUnix, 0))
+		lastActive := formatCrewActivityAge(activityAge)
+
+		// Check if Claude is running in the session
+		isClaudeRunning := h.isClaudeRunningInSession(ctx, sessionName)
+
+		// Determine state based on activity and Claude status
+		state := determineCrewState(activityAge, isClaudeRunning, hook)
+
+		// Check for questions if state is potentially finished
+		if state == "finished" || (state == "ready" && hook != "") {
+			if h.hasQuestionInPane(ctx, sessionName) {
+				state = "questions"
+			}
+		}
+
+		return state, lastActive, sessionStatus
+	}
+
+	// Session not found
+	return "ready", "", "none"
+}
+
+// isClaudeRunningInSession checks if Claude/agent is actively running.
+func (h *APIHandler) isClaudeRunningInSession(ctx context.Context, sessionName string) bool {
+	// Check for claude, codex, or other agent processes in the pane
+	cmd := exec.CommandContext(ctx, "tmux", "list-panes", "-t", sessionName, "-F", "#{pane_current_command}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	
+	output := strings.ToLower(stdout.String())
+	// Check for common agent commands
+	return strings.Contains(output, "claude") || 
+	       strings.Contains(output, "node") || 
+	       strings.Contains(output, "codex") ||
+	       strings.Contains(output, "opencode")
+}
+
+// hasQuestionInPane checks the last output for question indicators.
+func (h *APIHandler) hasQuestionInPane(ctx context.Context, sessionName string) bool {
+	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	// Get last few lines
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	lastLines := ""
+	if len(lines) > 10 {
+		lastLines = strings.Join(lines[len(lines)-10:], "\n")
+	} else {
+		lastLines = strings.Join(lines, "\n")
+	}
+	lastLines = strings.ToLower(lastLines)
+
+	// Look for question indicators
+	questionIndicators := []string{
+		"?",
+		"what do you think",
+		"should i",
+		"would you like",
+		"please confirm",
+		"waiting for",
+		"need your input",
+		"your thoughts",
+		"let me know",
+	}
+
+	for _, indicator := range questionIndicators {
+		if strings.Contains(lastLines, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// determineCrewState determines state from activity and Claude status.
+func determineCrewState(activityAge time.Duration, isClaudeRunning bool, hook string) string {
+	if !isClaudeRunning {
+		// Claude not running
+		if hook != "" {
+			return "finished" // Had work, Claude stopped = finished
+		}
+		return "ready" // No work, Claude stopped = ready for work
+	}
+
+	// Claude is running
+	switch {
+	case activityAge < 2*time.Minute:
+		return "spinning" // Active recently
+	case activityAge < 10*time.Minute:
+		return "spinning" // Still probably working
+	default:
+		return "questions" // Running but no activity = likely waiting for input
+	}
+}
+
+// formatCrewActivityAge formats activity age for display.
+func formatCrewActivityAge(age time.Duration) string {
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	}
+}
+
+// handleReady returns ready work items across town.
+func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// Run gt ready --json to get ready work
+	output, err := h.runGtCommand(ctx, 12*time.Second, []string{"ready", "--json"})
+	
+	resp := ReadyResponse{
+		Items:    make([]ReadyItem, 0),
+		BySource: make(map[string][]ReadyItem),
+	}
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Parse the JSON output from gt ready
+	var readyData struct {
+		Sources []struct {
+			Name   string `json:"name"`
+			Issues []struct {
+				ID       string `json:"id"`
+				Title    string `json:"title"`
+				Priority int    `json:"priority"`
+				Type     string `json:"type"`
+			} `json:"issues"`
+		} `json:"sources"`
+		Summary struct {
+			Total   int `json:"total"`
+			P1Count int `json:"p1_count"`
+			P2Count int `json:"p2_count"`
+			P3Count int `json:"p3_count"`
+		} `json:"summary"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &readyData); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Convert to ReadyItem format
+	for _, src := range readyData.Sources {
+		for _, issue := range src.Issues {
+			item := ReadyItem{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Source:   src.Name,
+				Type:     issue.Type,
+			}
+			resp.Items = append(resp.Items, item)
+			resp.BySource[src.Name] = append(resp.BySource[src.Name], item)
+
+			// Count priorities
+			switch issue.Priority {
+			case 1:
+				resp.Summary.P1Count++
+			case 2:
+				resp.Summary.P2Count++
+			case 3:
+				resp.Summary.P3Count++
+			}
+		}
+	}
+	resp.Summary.Total = len(resp.Items)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // parseCommandArgs splits a command string into args, respecting quotes.

@@ -2,14 +2,15 @@
 package dog
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -78,7 +79,7 @@ func (m *SessionManager) kennelPath(dogName string) string {
 }
 
 // Start creates and starts a new session for a dog.
-// Dogs run Claude sessions that check mail for work and execute formulas.
+// Dogs run agent sessions that check mail for work and execute formulas.
 func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	kennelDir := m.kennelPath(dogName)
 	if _, err := os.Stat(kennelDir); os.IsNotExist(err) {
@@ -93,19 +94,20 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if running {
-		// Session exists - check if Claude is actually running
-		if m.tmux.IsAgentRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if m.tmux.IsAgentAlive(sessionID) {
 			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 		}
-		// Zombie session - kill and recreate
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
 
-	// Ensure Claude settings exist for dogs
-	if err := claude.EnsureSettingsForRole(kennelDir, "dog"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist for dogs
+	runtimeConfig := config.ResolveRoleAgentConfig("dog", m.townRoot, kennelDir)
+	if err := runtime.EnsureSettingsForRole(kennelDir, "dog", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup prompt - dogs check mail for work
@@ -119,7 +121,7 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		Sender:    "deacon",
 		Topic:     "assigned",
 	})
-	initialPrompt := fmt.Sprintf("I am Dog %s.%s Check mail for work: `gt mail inbox`. Execute assigned formula/bead. When done, send DOG_DONE mail to deacon/ and return to idle.", dogName, workInfo)
+	initialPrompt := fmt.Sprintf("I am Dog %s.%s Check mail for work: `" + cli.Name() + " mail inbox`. Execute assigned formula/bead. When done, send DOG_DONE mail to deacon/ and return to idle.", dogName, workInfo)
 
 	// Build startup command
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("dog", "", m.townRoot, "", beacon+"\n"+initialPrompt, opts.AgentOverride)
@@ -145,7 +147,7 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	theme := tmux.DogTheme()
 	_ = m.tmux.ConfigureGasTownSession(sessionID, theme, "", dogName, "dog")
 
-	// Wait for Claude to start
+	// Wait for agent to start
 	if err := m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		_ = m.tmux.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for dog to start: %w", err)

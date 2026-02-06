@@ -376,3 +376,135 @@ func TestGetCommandList(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIHandler_Crew(t *testing.T) {
+	handler := NewAPIHandler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/crew", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /api/crew status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp CrewResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Response should have the expected structure (even if empty)
+	if resp.Crew == nil {
+		t.Error("Expected Crew field to be initialized")
+	}
+	if resp.ByRig == nil {
+		t.Error("Expected ByRig field to be initialized")
+	}
+}
+
+func TestAPIHandler_Ready(t *testing.T) {
+	handler := NewAPIHandler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /api/ready status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Response should have the expected structure (even if empty)
+	if resp.Items == nil {
+		t.Error("Expected Items field to be initialized")
+	}
+	if resp.BySource == nil {
+		t.Error("Expected BySource field to be initialized")
+	}
+}
+
+func TestAPIHandler_IssueCreate_MissingTitle(t *testing.T) {
+	handler := NewAPIHandler()
+
+	body := `{"title": ""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("POST /api/issues/create empty title status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAPIHandler_IssueCreate_InvalidTitle(t *testing.T) {
+	handler := NewAPIHandler()
+
+	tests := []struct {
+		name  string
+		title string
+	}{
+		{"newline in title", "foo\nbar"},
+		{"carriage return in title", "foo\rbar"},
+		{"null byte in title", "foo\x00bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]interface{}{
+				"title": tt.title,
+			}
+			body, _ := json.Marshal(payload)
+			req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("POST /api/issues/create with %s: status = %d, want %d", tt.name, w.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestAPIHandler_IssueCreate_InvalidDescription(t *testing.T) {
+	handler := NewAPIHandler()
+
+	payload := map[string]interface{}{
+		"title":       "Valid title",
+		"description": "desc with null\x00byte",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("POST /api/issues/create with null in description: status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAPIHandler_IssueCreate_InvalidJSON(t *testing.T) {
+	handler := NewAPIHandler()
+
+	body := `{not valid json}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("POST /api/issues/create invalid JSON status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}

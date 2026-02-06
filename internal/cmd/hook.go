@@ -87,6 +87,28 @@ Output format (one line):
 	RunE: runHookShow,
 }
 
+// hookClearCmd clears the hook (alias for 'gt unhook')
+var hookClearCmd = &cobra.Command{
+	Use:   "clear [bead-id] [target]",
+	Short: "Clear your hook (alias for 'gt unhook')",
+	Long: `Remove work from your hook (alias for 'gt unhook').
+
+With no arguments, clears your own hook. With a bead ID, only clears
+if that specific bead is currently hooked. With a target, operates on
+another agent's hook.
+
+Examples:
+  gt hook clear                       # Clear my hook (whatever's there)
+  gt hook clear gt-abc                # Only clear if gt-abc is hooked
+  gt hook clear greenplace/joe        # Clear joe's hook
+
+Related commands:
+  gt unhook           # Same as 'gt hook clear'
+  gt unsling          # Same as 'gt hook clear'`,
+	Args: cobra.MaximumNArgs(2),
+	RunE: runHookClear,
+}
+
 var (
 	hookSubject string
 	hookMessage string
@@ -107,8 +129,14 @@ func init() {
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
 	hookStatusCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 	hookShowCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+
+	// Flags for clear subcommand (mirror unsling flags)
+	hookClearCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
+	hookClearCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Clear even if work is incomplete")
+
 	hookCmd.AddCommand(hookStatusCmd)
 	hookCmd.AddCommand(hookShowCmd)
+	hookCmd.AddCommand(hookClearCmd)
 
 	rootCmd.AddCommand(hookCmd)
 }
@@ -128,6 +156,14 @@ func runHookOrStatus(cmd *cobra.Command, args []string) error {
 	}
 	// Has arg - attach work
 	return runHook(cmd, args)
+}
+
+// runHookClear handles 'gt hook clear' - delegates to runUnsling
+func runHookClear(cmd *cobra.Command, args []string) error {
+	// Pass through dry-run and force flags from hookClearCmd to unsling
+	unslingDryRun = hookDryRun
+	unslingForce = hookForce
+	return runUnsling(cmd, args)
 }
 
 func runHook(_ *cobra.Command, args []string) error {

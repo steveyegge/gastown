@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -108,87 +107,68 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 	return messages, nil
 }
 
-// queryResult holds the result of a single query.
-type queryResult struct {
-	messages []*Message
-	err      error
-}
-
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
 // Includes both open and hooked messages (hooked = auto-assigned handoff mail).
-// If all queries fail, returns the last error encountered.
-// Queries are parallelized for performance (~6x speedup).
+// Uses a single bd list call and filters client-side, replacing the previous
+// approach of N parallel queries (2-3 per identity variant).
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
-	// Get all identity variants to query (handles legacy vs normalized formats)
 	identities := m.identityVariants()
 
-	// Build list of queries to run in parallel
-	type querySpec struct {
-		filterFlag  string
-		filterValue string
-		status      string
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return nil, fmt.Errorf("ensuring custom types: %w", err)
 	}
-	var queries []querySpec
 
-	// Assignee queries for each identity variant in both open and hooked statuses
-	for _, identity := range identities {
-		for _, status := range []string{"open", "hooked"} {
-			queries = append(queries, querySpec{
-				filterFlag:  "--assignee",
-				filterValue: identity,
-				status:      status,
-			})
+	// Single bd query: fetch all non-closed messages of type "message",
+	// then filter client-side for assignee/CC match. Process-spawn overhead
+	// dominates query time, so 1 broad call beats N narrow calls.
+	args := []string{"list",
+		"--type", "message",
+		"--json",
+		"--limit", "0",
+	}
+
+	stdout, err := runBdCommand(args, m.workDir, beadsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var allMsgs []BeadsMessage
+	if err := json.Unmarshal(stdout, &allMsgs); err != nil {
+		if len(stdout) == 0 || string(stdout) == "null" {
+			return nil, nil
 		}
+		return nil, err
 	}
 
-	// CC queries for each identity variant (open only)
-	for _, identity := range identities {
-		queries = append(queries, querySpec{
-			filterFlag:  "--label",
-			filterValue: "cc:" + identity,
-			status:      "open",
-		})
+	// Build identity lookup sets for O(1) matching
+	identitySet := make(map[string]bool, len(identities))
+	ccLabelSet := make(map[string]bool, len(identities))
+	for _, id := range identities {
+		identitySet[id] = true
+		ccLabelSet["cc:"+id] = true
 	}
 
-	// Execute all queries in parallel
-	results := make([]queryResult, len(queries))
-	var wg sync.WaitGroup
-	wg.Add(len(queries))
-
-	for i, q := range queries {
-		go func(idx int, spec querySpec) {
-			defer wg.Done()
-			msgs, err := m.queryMessages(beadsDir, spec.filterFlag, spec.filterValue, spec.status)
-			results[idx] = queryResult{messages: msgs, err: err}
-		}(i, q)
-	}
-
-	wg.Wait()
-
-	// Collect results
-	seen := make(map[string]bool)
+	// Filter: assignee match (open/hooked) OR CC match (open only)
 	var messages []*Message
-	var lastErr error
-	anySucceeded := false
+	for i := range allMsgs {
+		bm := &allMsgs[i]
 
-	for _, r := range results {
-		if r.err != nil {
-			lastErr = r.err
-		} else {
-			anySucceeded = true
-			for _, msg := range r.messages {
-				if !seen[msg.ID] {
-					seen[msg.ID] = true
-					messages = append(messages, msg)
+		// Assignee match: open or hooked status
+		if identitySet[bm.Assignee] && (bm.Status == "open" || bm.Status == "hooked") {
+			messages = append(messages, bm.ToMessage())
+			continue
+		}
+
+		// CC match: open status only
+		if bm.Status == "open" {
+			for _, label := range bm.Labels {
+				if ccLabelSet[label] {
+					messages = append(messages, bm.ToMessage())
+					break
 				}
 			}
 		}
-	}
-
-	// If ALL queries failed, return the last error
-	if !anySucceeded && lastErr != nil {
-		return nil, fmt.Errorf("all mailbox queries failed: %w", lastErr)
 	}
 
 	return messages, nil
@@ -210,42 +190,6 @@ func (m *Mailbox) identityVariants() []string {
 	return variants
 }
 
-// queryMessages runs a bd list query with the given filter flag and value.
-func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue, status string) ([]*Message, error) {
-	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
-		return nil, fmt.Errorf("ensuring custom types: %w", err)
-	}
-
-	args := []string{"list",
-		"--type", "message",
-		filterFlag, filterValue,
-		"--status", status,
-		"--json",
-	}
-
-	stdout, err := runBdCommand(args, m.workDir, beadsDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON output
-	var beadsMsgs []BeadsMessage
-	if err := json.Unmarshal(stdout, &beadsMsgs); err != nil {
-		// Empty inbox returns empty array or nothing
-		if len(stdout) == 0 || string(stdout) == "null" {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	// Convert to GGT messages - wisp status comes from beads issue.wisp field
-	var messages []*Message
-	for _, bm := range beadsMsgs {
-		messages = append(messages, bm.ToMessage())
-	}
-
-	return messages, nil
-}
 
 func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)

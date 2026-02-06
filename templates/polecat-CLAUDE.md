@@ -126,6 +126,9 @@ bd close <step-id>
 4. If molecule attached, find current step: `bd ready`
 5. Execute the step, close it, repeat
 
+**If NO work on hook and NO mail:** run `gt done` immediately and exit.
+Polecats are ephemeral - no work means terminate, not wait.
+
 ---
 
 ## Key Commands

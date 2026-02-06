@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -885,6 +886,32 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// processMatchesNames checks if a process's binary name matches any of the given names.
+// Uses ps to get the actual command name from the process's executable path.
+// This handles cases where argv[0] is modified (e.g., Claude showing version "2.1.30").
+func processMatchesNames(pid string, names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	// Use ps to get the command name (COMM column gives the executable name)
+	cmd := exec.Command("ps", "-p", pid, "-o", "comm=")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// Get just the base name (in case it's a full path like /Users/.../claude)
+	commPath := strings.TrimSpace(string(out))
+	comm := filepath.Base(commPath)
+
+	// Check if any name matches
+	for _, name := range names {
+		if comm == name {
+			return true
+		}
+	}
+	return false
+}
+
 // hasDescendantWithNames checks if a process has any descendant (child, grandchild, etc.)
 // matching any of the given names. Recursively traverses the process tree up to maxDepth.
 // Used when the pane command is a shell (bash, zsh) that launched an agent.
@@ -1161,7 +1188,12 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 		}
 	}
 	// If pane command is unrecognized (not in processNames, not a shell),
-	// still check descendants as fallback. This handles version-as-argv[0].
+	// check if the process ITSELF matches (handles version-as-argv[0] like "2.1.30")
+	// before checking descendants.
+	if processMatchesNames(pid, processNames) {
+		return true
+	}
+	// Finally check descendants as fallback
 	return hasDescendantWithNames(pid, processNames, 0)
 }
 
@@ -1286,7 +1318,7 @@ func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, tim
 
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
-	format := "#{session_name}|#{session_windows}|#{session_created_string}|#{session_attached}|#{session_activity}|#{session_last_attached}"
+	format := "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}|#{session_activity}|#{session_last_attached}"
 	out, err := t.run("list-sessions", "-F", format, "-f", fmt.Sprintf("#{==:#{session_name},%s}", name))
 	if err != nil {
 		return nil, err
@@ -1303,10 +1335,17 @@ func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	windows := 0
 	_, _ = fmt.Sscanf(parts[1], "%d", &windows) // non-fatal: defaults to 0 on parse error
 
+	// Convert unix timestamp to formatted string for consumers.
+	created := parts[2]
+	var createdUnix int64
+	if _, err := fmt.Sscanf(created, "%d", &createdUnix); err == nil && createdUnix > 0 {
+		created = time.Unix(createdUnix, 0).Format("2006-01-02 15:04:05")
+	}
+
 	info := &SessionInfo{
 		Name:     parts[0],
 		Windows:  windows,
-		Created:  parts[2],
+		Created:  created,
 		Attached: parts[3] == "1",
 	}
 

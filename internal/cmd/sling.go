@@ -98,7 +98,7 @@ var (
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
-	slingNoBoot   bool   // --no-boot: skip waking witness+refinery after dispatch (G11)
+	slingNoBoot   bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 )
 
 func init() {
@@ -117,7 +117,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
-	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip waking witness+refinery after polecat dispatch (avoids dolt lock contention)")
+	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -204,6 +204,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var targetProvider string              // Agent provider for OpenCode-specific nudge handling
 	var delayedDogInfo *DogDispatchInfo    // For delayed dog session start after hook is set
 	var newPolecatInfo *SpawnedPolecatInfo // Spawned polecat info (session started after bead setup)
+	var isSelfSling bool                   // True if slinging to self (skip nudge - agent already knows)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -214,6 +215,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
+			isSelfSling = true
 		} else if dogName, isDog := IsDogTarget(target); isDog {
 			if slingDryRun {
 				if dogName == "" {
@@ -269,7 +271,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
 				targetProvider = spawnInfo.Provider
 
-				// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
 				if !slingNoBoot {
 					wakeRigAgents(rigName)
 				}
@@ -304,7 +305,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
 						targetProvider = spawnInfo.Provider
 
-						// Wake witness and refinery to monitor the new polecat (G11: skip if --no-boot)
 						if !slingNoBoot {
 							wakeRigAgents(rigName)
 						}
@@ -327,6 +327,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		isSelfSling = true
 		// Use self's working directory for bd commands
 		if selfWorkDir != "" {
 			hookWorkDir = selfWorkDir
@@ -614,8 +615,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
 	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Skip for self-sling - agent is currently processing the sling command and will see
+	// the hooked work on next turn. Nudging would inject text while agent is busy.
 	if freshlySpawned {
 		// Fresh polecat already got StartupNudge from SessionManager.Start()
+	} else if isSelfSling {
+		// Self-sling: agent already knows about the work (just slung it)
+		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
 	} else if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
