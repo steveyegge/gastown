@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -99,10 +100,11 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 
 		// Get expected env vars based on role
 		expected := config.AgentEnv(config.AgentEnvConfig{
-			Role:      string(identity.Role),
-			Rig:       identity.Rig,
-			AgentName: identity.Name,
-			TownRoot:  ctx.TownRoot,
+			Role:         string(identity.Role),
+			Rig:          identity.Rig,
+			AgentName:    identity.Name,
+			TownRoot:     ctx.TownRoot,
+			BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 		})
 
 		// Get actual tmux env vars

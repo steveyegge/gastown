@@ -684,6 +684,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
+		BDDaemonHost:     os.Getenv("BD_DAEMON_HOST"),
 		AuthToken:        opts.AuthToken,
 		BaseURL:          opts.BaseURL,
 	})

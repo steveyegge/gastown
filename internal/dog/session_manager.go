@@ -134,8 +134,9 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 
 	// Set environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "dog",
-		TownRoot: m.townRoot,
+		Role:         "dog",
+		TownRoot:     m.townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
 		_ = m.tmux.SetEnvironment(sessionID, k, v)

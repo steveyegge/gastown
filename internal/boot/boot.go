@@ -231,8 +231,9 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 
 	// Set environment using centralized AgentEnv for consistency
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "boot",
-		TownRoot: b.townRoot,
+		Role:         "boot",
+		TownRoot:     b.townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
@@ -251,8 +252,9 @@ func (b *Boot) spawnDegraded() error {
 
 	// Use centralized AgentEnv for consistency with tmux mode
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "boot",
-		TownRoot: b.townRoot,
+		Role:         "boot",
+		TownRoot:     b.townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)
 	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")

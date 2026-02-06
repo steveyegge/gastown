@@ -181,6 +181,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Rig:           m.rig.Name,
 		TownRoot:      townRoot,
 		BeadsNoDaemon: true,
+		BDDaemonHost:  os.Getenv("BD_DAEMON_HOST"),
 	})
 
 	// Add refinery-specific flag

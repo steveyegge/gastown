@@ -502,6 +502,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			AgentName:    parsed.AgentName,
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
+			BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -517,6 +518,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			AgentName:    parsed.AgentName,
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
+			BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -529,10 +531,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
 	// Use centralized AgentEnv for base environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      parsed.RoleType,
-		Rig:       parsed.RigName,
-		AgentName: parsed.AgentName,
-		TownRoot:  d.config.TownRoot,
+		Role:         parsed.RoleType,
+		Rig:          parsed.RigName,
+		AgentName:    parsed.AgentName,
+		TownRoot:     d.config.TownRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)

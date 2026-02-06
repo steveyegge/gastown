@@ -100,8 +100,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "deacon",
-		TownRoot: m.townRoot,
+		Role:         "deacon",
+		TownRoot:     m.townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

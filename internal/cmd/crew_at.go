@@ -187,6 +187,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			TownRoot:         townRoot,
 			RuntimeConfigDir: claudeConfigDir,
 			BeadsNoDaemon:    true,
+			BDDaemonHost:     os.Getenv("BD_DAEMON_HOST"),
 			AuthToken:        authToken,
 			BaseURL:          baseURL,
 		})

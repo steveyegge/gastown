@@ -1251,6 +1251,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		AgentName:     polecatName,
 		TownRoot:      d.config.TownRoot,
 		BeadsNoDaemon: true,
+		BDDaemonHost:  os.Getenv("BD_DAEMON_HOST"),
 	})
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude

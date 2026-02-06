@@ -527,10 +527,11 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 
 	// Get canonical env vars from shared source of truth
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      string(info.Role),
-		Rig:       info.Rig,
-		AgentName: info.Polecat,
-		TownRoot:  townRoot,
+		Role:         string(info.Role),
+		Rig:          info.Rig,
+		AgentName:    info.Polecat,
+		TownRoot:     townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	envVars[EnvGTRoleHome] = home
 
