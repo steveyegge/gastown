@@ -1,0 +1,78 @@
+# Example polecat pod with SSH+tmux for remote terminal access.
+# Phase 5: This is a template - Phase 4's K8s pod manager will generate these dynamically.
+#
+# Usage: kubectl apply -f polecat-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gt-gastown-toast
+  namespace: gastown
+  labels:
+    app: gastown
+    component: polecat
+    rig: gastown
+    polecat: toast
+spec:
+  containers:
+    - name: polecat
+      image: gastown-polecat:latest
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 22
+          name: ssh
+          protocol: TCP
+      env:
+        - name: GT_POLECAT
+          value: "toast"
+        - name: GT_RIG
+          value: "gastown"
+        - name: GT_ROLE
+          value: "polecat"
+        - name: GT_SESSION
+          value: "claude"
+        - name: ANTHROPIC_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-credentials
+              key: auth-token
+      volumeMounts:
+        - name: ssh-keys
+          mountPath: /home/gt/.ssh
+          readOnly: true
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+  volumes:
+    - name: ssh-keys
+      secret:
+        secretName: polecat-ssh-keys
+        defaultMode: 0600
+  restartPolicy: Never
+---
+# Service for SSH access to this polecat pod.
+# gt peek/nudge resolves the pod via this service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gt-gastown-toast
+  namespace: gastown
+  labels:
+    app: gastown
+    component: polecat
+    rig: gastown
+    polecat: toast
+spec:
+  type: ClusterIP
+  ports:
+    - port: 22
+      targetPort: 22
+      protocol: TCP
+      name: ssh
+  selector:
+    app: gastown
+    component: polecat
+    polecat: toast

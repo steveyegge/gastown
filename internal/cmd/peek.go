@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 )
 
 // Peek command flags
@@ -73,21 +73,8 @@ func runPeek(cmd *cobra.Command, args []string) error {
 	}
 
 	if sessionName != "" {
-		// Town-level agent - capture directly via tmux
-		t := tmux.NewTmux()
-		exists, err := t.HasSession(sessionName)
-		if err != nil {
-			return fmt.Errorf("checking %s session: %w", address, err)
-		}
-		if !exists {
-			return fmt.Errorf("%s session not running (expected %s)", address, sessionName)
-		}
-		output, err := t.CapturePane(sessionName, lines)
-		if err != nil {
-			return fmt.Errorf("capturing %s output: %w", address, err)
-		}
-		fmt.Print(output)
-		return nil
+		// Town-level agent - always local tmux
+		return peekViaBackend(terminal.LocalBackend(), sessionName, lines)
 	}
 
 	// Standard rig/polecat format
@@ -96,6 +83,15 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Try remote backend first (K8s-hosted agents).
+	// ResolveBackend checks agent bead metadata for backend=k8s.
+	backend := terminal.ResolveBackend(address)
+	if _, isSSH := backend.(*terminal.SSHBackend); isSSH {
+		// Remote pod: tmux session is always named "claude"
+		return peekViaBackend(backend, "claude", lines)
+	}
+
+	// Local agent: use SessionManager (resolves session names, validates state)
 	mgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
@@ -117,6 +113,23 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("capturing output: %w", err)
 	}
 
+	fmt.Print(output)
+	return nil
+}
+
+// peekViaBackend captures terminal output using a terminal.Backend.
+func peekViaBackend(backend terminal.Backend, sessionName string, lines int) error {
+	exists, err := backend.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session %q not running on remote host", sessionName)
+	}
+	output, err := backend.CapturePane(sessionName, lines)
+	if err != nil {
+		return fmt.Errorf("capturing output: %w", err)
+	}
 	fmt.Print(output)
 	return nil
 }

@@ -1,0 +1,26 @@
+# SSH authorized keys for polecat pod access.
+# Phase 5: Mounted into polecat containers at /home/gt/.ssh/authorized_keys.
+#
+# To create this secret:
+#   kubectl create secret generic polecat-ssh-keys \
+#     --from-file=authorized_keys=$HOME/.ssh/id_ed25519.pub \
+#     -n gastown
+#
+# To add multiple keys:
+#   cat key1.pub key2.pub > /tmp/authorized_keys
+#   kubectl create secret generic polecat-ssh-keys \
+#     --from-file=authorized_keys=/tmp/authorized_keys \
+#     -n gastown
+apiVersion: v1
+kind: Secret
+metadata:
+  name: polecat-ssh-keys
+  namespace: gastown
+  labels:
+    app: gastown
+    component: polecat
+type: Opaque
+data:
+  # Base64-encoded authorized_keys content
+  # Replace with: cat ~/.ssh/id_ed25519.pub | base64 -w0
+  authorized_keys: ""
