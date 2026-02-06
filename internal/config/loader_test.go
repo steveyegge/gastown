@@ -2548,7 +2548,7 @@ func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
 }
 
 // TestMultipleAgentTypes tests that various built-in agent presets work correctly.
-// NOTE: Only these are actual built-in presets: claude, gemini, codex, cursor, auggie, amp, opencode.
+// NOTE: Only these are actual built-in presets: kimi, claude, gemini, codex, cursor, auggie, amp, opencode.
 // Variants like "claude-opus", "claude-haiku", "claude-sonnet" are NOT built-in - they need
 // to be defined as custom agents in TownSettings.Agents if specific model selection is needed.
 func TestMultipleAgentTypes(t *testing.T) {
@@ -2560,6 +2560,12 @@ func TestMultipleAgentTypes(t *testing.T) {
 		expectCommand string
 		isBuiltIn     bool // true if this is an actual built-in preset
 	}{
+		{
+			name:          "kimi built-in preset",
+			agentName:     "kimi",
+			expectCommand: "opencode",
+			isBuiltIn:     true,
+		},
 		{
 			name:          "claude built-in preset",
 			agentName:     "claude",

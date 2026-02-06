@@ -1072,7 +1072,7 @@ func (m *Manager) ListRigNames() []string {
 }
 
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
-// Also creates AGENTS.md as a pointer to CLAUDE.md for compatibility with other agents.
+// Also creates AGENTS.md with identical content for compatibility with OpenCode/Codex.
 // Full context is injected ephemerally by `gt prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
 func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) error {
@@ -1144,19 +1144,9 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		return err
 	}
 
-	// Create AGENTS.md as pointer to CLAUDE.md for compatibility with OpenCode/Codex
-	agentsContent := `# Agent Instructions
-
-See **CLAUDE.md** for complete agent context and instructions.
-
-This file exists for compatibility with tools that look for AGENTS.md.
-
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
-
-Full context is injected by ` + "`gt prime`" + ` at session start.
-`
+	// Create AGENTS.md with identical content for compatibility with OpenCode/Codex
 	agentsPath := filepath.Join(workspacePath, "AGENTS.md")
-	return os.WriteFile(agentsPath, []byte(agentsContent), 0644)
+	return os.WriteFile(agentsPath, []byte(bootstrap), 0644)
 }
 
 // createPatrolHooks creates .claude/settings.json with hooks for patrol roles.

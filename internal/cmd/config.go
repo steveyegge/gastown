@@ -40,7 +40,7 @@ var configAgentListCmd = &cobra.Command{
 	Short: "List all agents",
 	Long: `List all available agents (built-in and custom).
 
-Shows all built-in agent presets (claude, gemini, codex) and any
+Shows all built-in agent presets (kimi, claude, gemini, codex) and any
 custom agents defined in your town settings.
 
 Examples:
@@ -90,7 +90,7 @@ var configAgentRemoveCmd = &cobra.Command{
 	Long: `Remove a custom agent definition from town settings.
 
 This removes a custom agent from your town settings. Built-in agents
-(claude, gemini, codex) cannot be removed.
+(kimi, claude, gemini, codex) cannot be removed.
 
 Examples:
   gt config agent remove claude-glm`,
@@ -109,11 +109,12 @@ With no arguments, shows the current default agent.
 With an argument, sets the default agent to the specified name.
 
 The default agent is used when a rig doesn't specify its own agent
-setting. Can be a built-in preset (claude, gemini, codex) or a
+setting. Can be a built-in preset (kimi, claude, gemini, codex) or a
 custom agent name.
 
 Examples:
   gt config default-agent           # Show current default
+  gt config default-agent kimi      # Set to kimi (default)
   gt config default-agent claude    # Set to claude
   gt config default-agent gemini    # Set to gemini
   gt config default-agent my-custom # Set to custom agent`,

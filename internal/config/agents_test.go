@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
+	presets := []AgentPreset{AgentKimi, AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -130,8 +130,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
-		{"opencode", true},  // Built-in multi-model CLI agent
-		{"aider", false},    // Not built-in, can be added via config
+		{"opencode", true}, // Built-in multi-model CLI agent
+		{"aider", false},   // Not built-in, can be added via config
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -414,7 +414,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
+	allConstants := []AgentPreset{AgentKimi, AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -682,9 +682,10 @@ func TestOpenCodeAgentPresetEnv(t *testing.T) {
 		t.Errorf("opencode command = %q, want opencode", info.Command)
 	}
 
-	// Check Args (should be empty - YOLO via Env)
-	if len(info.Args) != 0 {
-		t.Errorf("opencode args = %v, want empty (uses Env for YOLO)", info.Args)
+	// Check Args (should include Kimi K2.5 Free model)
+	wantArgs := []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"}
+	if len(info.Args) != len(wantArgs) || (len(info.Args) > 0 && info.Args[0] != wantArgs[0]) {
+		t.Errorf("opencode args = %v, want %v", info.Args, wantArgs)
 	}
 
 	// Check Env for OPENCODE_PERMISSION

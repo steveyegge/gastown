@@ -789,7 +789,7 @@ func SaveTownSettings(path string, settings *TownSettings) error {
 //  1. If rig has Runtime set directly, use it (backwards compatibility)
 //  2. If rig has Agent set, look it up in:
 //     a. Town's custom agents (from TownSettings.Agents)
-//     b. Built-in presets (claude, gemini, codex)
+//     b. Built-in presets (kimi, claude, gemini, codex)
 //  3. If rig has no Agent set, use town's default_agent
 //  4. Fall back to claude defaults
 //
@@ -827,7 +827,7 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	return lookupAgentConfig(agentName, townSettings, rigSettings)
@@ -871,7 +871,7 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	// If an override is requested, validate it exists
@@ -1172,7 +1172,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 
 	// Apply defaults for required fields
 	if result.Command == "" {
-		result.Command = "claude"
+		result.Command = string(DefaultAgentPreset())
 	}
 	if result.Args == nil {
 		result.Args = []string{"--dangerously-skip-permissions"}
@@ -1478,7 +1478,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
-// Record agent override so handoff can preserve it
+	// Record agent override so handoff can preserve it
 	if agentOverride != "" {
 		resolvedEnv["GT_AGENT"] = agentOverride
 	}

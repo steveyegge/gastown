@@ -46,9 +46,9 @@ type TownSettings struct {
 	CLITheme string `json:"cli_theme,omitempty"`
 
 	// DefaultAgent is the name of the agent preset to use by default.
-	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("kimi", "claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent name defined in settings/agents.json.
-	// Default: "claude"
+	// Default: "kimi"
 	DefaultAgent string `json:"default_agent,omitempty"`
 
 	// Agents defines custom agent configurations or overrides.
@@ -75,7 +75,7 @@ func NewTownSettings() *TownSettings {
 	return &TownSettings{
 		Type:         "town-settings",
 		Version:      CurrentTownSettingsVersion,
-		DefaultAgent: "claude",
+		DefaultAgent: "kimi",
 		Agents:       make(map[string]*RuntimeConfig),
 		RoleAgents:   make(map[string]string),
 	}
@@ -219,7 +219,7 @@ type RigSettings struct {
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
-	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("kimi", "claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent defined in settings/agents.json.
 	// If empty, uses the town's default_agent setting.
 	// Takes precedence over Runtime if both are set.
@@ -424,7 +424,7 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 		rc.Provider = inferProviderFromCommand(rc.Command)
 	}
 	if rc.Provider == "" {
-		rc.Provider = "claude"
+		rc.Provider = string(DefaultAgentPreset())
 	}
 
 	if rc.Command == "" {
@@ -510,7 +510,7 @@ func inferProviderFromCommand(command string) string {
 	}
 	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
 	switch base {
-	case "claude", "codex", "gemini", "cursor", "auggie", "amp", "opencode":
+	case "kimi", "claude", "codex", "gemini", "cursor", "auggie", "amp", "opencode":
 		return base
 	default:
 		return ""
@@ -519,6 +519,8 @@ func inferProviderFromCommand(command string) string {
 
 func defaultRuntimeCommand(provider string) string {
 	switch provider {
+	case "kimi":
+		return "opencode"
 	case "codex":
 		return "codex"
 	case "opencode":

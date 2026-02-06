@@ -5,6 +5,34 @@
   "models_api": "https://models.dev/api.json",
   "models_api_note": "LLMs should fetch current model list from models_api. The 'models' below are fallback examples with gastown-specific delay recommendations.",
   "models": {
+    "openrouter": {
+      "openrouter/moonshotai/kimi-k2.5": {
+        "description": "Kimi K2.5 via OpenRouter (default agent)",
+        "ready_delay_ms": 1000
+      }
+    },
+    "opencode": {
+      "openrouter/moonshotai/kimi-k2.5": {
+        "description": "Kimi K2.5 via OpenRouter (default)",
+        "ready_delay_ms": 1000
+      },
+      "kimi-k2.5-free": {
+        "description": "Kimi K2.5 Free via OpenRouter", 
+        "ready_delay_ms": 1000
+      },
+      "glm-4.7-free": {
+        "description": "GLM 4.7 Free tier (may timeout, needs longer delay)",
+        "ready_delay_ms": 15000
+      },
+      "minimax-m2.1-free": {
+        "description": "MiniMax M2.1 Free tier",
+        "ready_delay_ms": 10000
+      },
+      "big-pickle": {
+        "description": "Big Pickle experimental",
+        "ready_delay_ms": 12000
+      }
+    },
     "openai": {
       "gpt-5.2": {
         "description": "GPT-5.2 chat model",
@@ -37,20 +65,6 @@
         "ready_delay_ms": 8000
       }
     },
-    "opencode": {
-      "glm-4.7-free": {
-        "description": "GLM 4.7 Free tier (may timeout, needs longer delay)",
-        "ready_delay_ms": 15000
-      },
-      "minimax-m2.1-free": {
-        "description": "MiniMax M2.1 Free tier",
-        "ready_delay_ms": 10000
-      },
-      "big-pickle": {
-        "description": "Big Pickle experimental",
-        "ready_delay_ms": 12000
-      }
-    }
   },
   "notes": {
     "why_delay_based": "OpenCode TUI uses box-drawing characters that break prompt prefix matching. Delay-based detection is required.",

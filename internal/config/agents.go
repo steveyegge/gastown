@@ -15,7 +15,9 @@ type AgentPreset string
 
 // Supported agent presets (built-in, E2E tested).
 const (
-	// AgentClaude is Claude Code (default).
+	// AgentKimi is Kimi K2.5 Free via OpenRouter (default).
+	AgentKimi AgentPreset = "kimi"
+	// AgentClaude is Claude Code.
 	AgentClaude AgentPreset = "claude"
 	// AgentGemini is Gemini CLI.
 	AgentGemini AgentPreset = "gemini"
@@ -34,7 +36,7 @@ const (
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
 type AgentPresetInfo struct {
-	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor", "auggie", "amp").
+	// Name is the preset identifier (e.g., "kimi", "claude", "gemini", "codex", "cursor", "auggie", "amp").
 	Name AgentPreset `json:"name"`
 
 	// Command is the CLI binary to invoke.
@@ -105,6 +107,24 @@ const CurrentAgentRegistryVersion = 1
 
 // builtinPresets contains the default presets for supported agents.
 var builtinPresets = map[AgentPreset]*AgentPresetInfo{
+	AgentKimi: {
+		Name:    AgentKimi,
+		Command: "opencode",
+		Args:    []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"},
+		Env: map[string]string{
+			"OPENCODE_PERMISSION": `{"*":"allow"}`,
+		},
+		ProcessNames:        []string{"opencode", "node", "bun"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "",
+		ResumeStyle:         "",
+		SupportsHooks:       true,
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run",
+			OutputFlag: "--format json",
+		},
+	},
 	AgentClaude: {
 		Name:                AgentClaude,
 		Command:             "claude",
@@ -187,16 +207,16 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentOpenCode: {
 		Name:    AgentOpenCode,
 		Command: "opencode",
-		Args:    []string{}, // No CLI flags needed, YOLO via OPENCODE_PERMISSION env
+		Args:    []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"}, // Default to Kimi K2.5 Free
 		Env: map[string]string{
 			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
 		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
-		SessionIDEnv:        "",                           // OpenCode manages sessions internally
-		ResumeFlag:          "",                           // No resume support yet
+		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
+		ResumeFlag:          "",                                  // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -338,9 +358,9 @@ func ListAgentPresets() []string {
 	return names
 }
 
-// DefaultAgentPreset returns the default agent preset (Claude).
+// DefaultAgentPreset returns the default agent preset (Kimi K2.5 Free).
 func DefaultAgentPreset() AgentPreset {
-	return AgentClaude
+	return AgentKimi
 }
 
 // RuntimeConfigFromPreset creates a RuntimeConfig from an agent preset.
@@ -364,9 +384,9 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 
 	rc := &RuntimeConfig{
 		Provider: string(info.Name),
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Command:  info.Command,
+		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:      envCopy,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)

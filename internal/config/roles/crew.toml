@@ -10,7 +10,7 @@ prompt_template = "crew.md.tmpl"
 pattern = "gt-{rig}-crew-{name}"
 work_dir = "{town}/{rig}/crew/{name}"
 needs_pre_sync = true
-start_command = "exec claude --dangerously-skip-permissions"
+start_command = "exec opencode -m openrouter/moonshot-ai/kimi-k2.5-free"
 
 [env]
 GT_ROLE = "crew"

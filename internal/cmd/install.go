@@ -411,19 +411,9 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		return err
 	}
 
-	// Create AGENTS.md as pointer to CLAUDE.md for compatibility with OpenCode/Codex
-	agentsContent := `# Agent Instructions
-
-See **CLAUDE.md** for complete agent context and instructions.
-
-This file exists for compatibility with tools that look for AGENTS.md.
-
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
-
-Full context is injected by ` + "`gt prime`" + ` at session start.
-`
+	// Create AGENTS.md with identical content for compatibility with OpenCode/Codex
 	agentsPath := filepath.Join(mayorDir, "AGENTS.md")
-	return os.WriteFile(agentsPath, []byte(agentsContent), 0644)
+	return os.WriteFile(agentsPath, []byte(bootstrap), 0644)
 }
 
 func writeJSON(path string, data interface{}) error {

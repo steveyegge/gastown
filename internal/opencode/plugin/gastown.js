@@ -118,6 +118,21 @@ export const GasTown = async ({ client, $ }) => {
   }
 
   /**
+   * Fetch mail injection payload for prompt-time updates.
+   */
+  async function fetchMailInject() {
+    try {
+      const mailOutput = await $`gt mail check --inject`.text();
+      if (mailOutput?.trim()) {
+        return `\n\n<gastown-mail>\n${mailOutput.trim()}\n</gastown-mail>`;
+      }
+    } catch {
+      // Silent skip
+    }
+    return "";
+  }
+
+  /**
    * Inject context string into session via API.
    * @param sessionID - Session to inject into
    * @param contextText - The context string to inject
@@ -165,20 +180,30 @@ export const GasTown = async ({ client, $ }) => {
   return {
     // Transform messages BEFORE LLM processing
     "experimental.chat.messages.transform": async (input, output) => {
-      if (!autoInit || transformedSessions.has("done")) return;
+      if (!autoInit) return;
+
+      const triggerHandled = transformedSessions.has("done");
 
       for (const msg of output.messages || []) {
         if (msg.info?.role === "user") {
           const text = msg.parts?.map(p => p.text || "").join("") || "";
 
           if (text.trim() === TRIGGER_MESSAGE) {
-            transformedSessions.add("done");
+            if (!triggerHandled) {
+              transformedSessions.add("done");
 
-            const context = await buildContext();
-            if (context) {
-              msg.parts = [{ type: "text", text: context }];
+              const context = await buildContext();
+              if (context) {
+                msg.parts = [{ type: "text", text: context }];
+              }
             }
             break;
+          }
+
+          // Inject mail on user prompts (Claude UserPromptSubmit equivalent)
+          const mailInject = await fetchMailInject();
+          if (mailInject) {
+            msg.parts = [{ type: "text", text: text + mailInject }];
           }
         }
       }

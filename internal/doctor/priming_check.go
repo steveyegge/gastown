@@ -399,20 +399,26 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 			}
 
 		case "missing_agents_md":
-			// Create AGENTS.md pointer file for OpenCode/Codex compatibility
+			// Create AGENTS.md with same content as CLAUDE.md for OpenCode/Codex compatibility
 			agentPath := filepath.Join(ctx.TownRoot, issue.location)
+			claudeMdPath := filepath.Join(agentPath, "CLAUDE.md")
 			agentsMdPath := filepath.Join(agentPath, "AGENTS.md")
-			agentsContent := `# Agent Instructions
 
-See **CLAUDE.md** for complete agent context and instructions.
-
-This file exists for compatibility with tools that look for AGENTS.md.
+			// Read CLAUDE.md content if it exists
+			var agentsContent []byte
+			if data, err := os.ReadFile(claudeMdPath); err == nil {
+				agentsContent = data
+			} else {
+				// Fallback to basic content if CLAUDE.md doesn't exist
+				agentsContent = []byte(`# Agent Context
 
 > **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
 
 Full context is injected by ` + "`gt prime`" + ` at session start.
-`
-			if err := os.WriteFile(agentsMdPath, []byte(agentsContent), 0644); err != nil {
+`)
+			}
+
+			if err := os.WriteFile(agentsMdPath, agentsContent, 0644); err != nil {
 				errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
 			}
 		}
