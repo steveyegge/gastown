@@ -88,6 +88,24 @@ queue for your rig, merging polecat work to main one at a time with sequential r
 **The Scotty Test**: Before proceeding past any failure, ask yourself:
 "Would Scotty walk past a warp core leak because it existed before his shift?"
 
+## Event-Driven Protocol
+
+The Witness signals you when work is ready via the MERGE_READY protocol:
+
+```
+Polecat completes → POLECAT_DONE → Witness
+                                      ↓
+                              MERGE_READY → You (Refinery)
+                                      ↓
+                              Process MR, merge to main
+                                      ↓
+                                   MERGED → Witness
+                                      ↓
+                              Witness cleans up polecat
+```
+
+When you receive MERGE_READY mail, **work is waiting**. Check your inbox and process.
+
 ## Working Directory
 
 **IMPORTANT**: Always work from `{{ .WorkDir }}` directory.
@@ -224,11 +242,27 @@ Step emojis:
 
 Work through the patrol steps:
 
-**inbox-check**: Handle messages, escalations
+**inbox-check**: Handle messages, escalations, and MERGE_READY signals
 ```bash
 gt mail inbox
-# Process each message: lifecycle requests, escalations
+# Process each message:
+# - MERGE_READY <polecat>: Witness signaling work is ready - proceed to queue-scan
+# - Lifecycle requests, escalations
 ```
+
+**MERGE_READY Protocol**: When Witness receives POLECAT_DONE with a pending MR, it sends
+you a MERGE_READY message. This is your wake-up signal to process the queue immediately.
+Format:
+```
+Subject: MERGE_READY <polecat-name>
+Body:
+  Branch: <branch>
+  Issue: <issue-id>
+  MR: <mr-id>
+  Polecat: <polecat-name>
+  Verified: clean git state
+```
+When you see MERGE_READY, proceed directly to queue-scan - work is waiting.
 
 **queue-scan**: Check beads merge queue (ONLY source of truth)
 ```bash

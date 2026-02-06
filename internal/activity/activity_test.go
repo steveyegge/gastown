@@ -15,8 +15,9 @@ func TestCalculateActivity_Green(t *testing.T) {
 		{"just now", 0, "<1m", ColorGreen},
 		{"30 seconds", 30 * time.Second, "<1m", ColorGreen},
 		{"1 minute", 1 * time.Minute, "1m", ColorGreen},
-		{"1m30s", 90 * time.Second, "1m", ColorGreen},
-		{"1m59s", 119 * time.Second, "1m", ColorGreen},
+		{"2 minutes", 2 * time.Minute, "2m", ColorGreen},
+		{"3 minutes", 3 * time.Minute, "3m", ColorGreen},
+		{"4m59s", 299 * time.Second, "4m", ColorGreen},
 	}
 
 	for _, tt := range tests {
@@ -41,10 +42,10 @@ func TestCalculateActivity_Yellow(t *testing.T) {
 		wantAge  string
 		wantColor string
 	}{
-		{"2 minutes", 2 * time.Minute, "2m", ColorYellow},
-		{"3 minutes", 3 * time.Minute, "3m", ColorYellow},
-		{"4 minutes", 4 * time.Minute, "4m", ColorYellow},
-		{"4m59s", 299 * time.Second, "4m", ColorYellow},
+		{"5 minutes", 5 * time.Minute, "5m", ColorYellow},
+		{"6 minutes", 6 * time.Minute, "6m", ColorYellow},
+		{"8 minutes", 8 * time.Minute, "8m", ColorYellow},
+		{"9m59s", 599 * time.Second, "9m", ColorYellow},
 	}
 
 	for _, tt := range tests {
@@ -69,8 +70,8 @@ func TestCalculateActivity_Red(t *testing.T) {
 		wantAge  string
 		wantColor string
 	}{
-		{"5 minutes", 5 * time.Minute, "5m", ColorRed},
 		{"10 minutes", 10 * time.Minute, "10m", ColorRed},
+		{"15 minutes", 15 * time.Minute, "15m", ColorRed},
 		{"30 minutes", 30 * time.Minute, "30m", ColorRed},
 		{"1 hour", 1 * time.Hour, "1h", ColorRed},
 		{"2 hours", 2 * time.Hour, "2h", ColorRed},

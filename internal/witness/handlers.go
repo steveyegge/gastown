@@ -36,12 +36,16 @@ type HandlerResult struct {
 // For COMPLETED exits with MR and clean state, auto-nukes immediately (ephemeral model).
 // For exits with pending MR but dirty state, creates cleanup wisp for manual intervention.
 //
+// When a pending MR exists, sends MERGE_READY to the Refinery to trigger
+// immediate merge queue processing. This ensures work flows through the system
+// without waiting for the daemon's heartbeat cycle.
+//
 // Ephemeral Polecat Model:
 // Polecats are truly ephemeral - done at MR submission, recyclable immediately.
 // Once the branch is pushed (cleanup_status=clean), the polecat can be nuked.
 // The MR lifecycle continues independently in the Refinery.
 // If conflicts arise, Refinery creates a NEW conflict-resolution task for a NEW polecat.
-func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResult {
+func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.Router) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
 		ProtocolType: ProtoPolecatDone,
@@ -93,9 +97,33 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 			result.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
+		// Send MERGE_READY to Refinery to trigger immediate processing.
+		// This is the key signal that keeps work flowing through the system
+		// without waiting for the daemon's 3-minute heartbeat cycle.
+		if router != nil {
+			mailID, err := sendMergeReady(router, rigName, payload)
+			if err != nil {
+				// Non-fatal - log but don't fail the handler
+				// Refinery will still pick up work on next patrol cycle
+				result.Error = fmt.Errorf("sending MERGE_READY: %w (non-fatal)", err)
+			} else {
+				result.MailSent = mailID
+
+				// Nudge the refinery to check its inbox immediately.
+				// This ensures minimal latency between polecat completion and merge.
+				if nudgeErr := nudgeRefinery(rigName); nudgeErr != nil {
+					// Non-fatal - refinery will still pick up on next cycle
+					// Just log via error field (existing error takes precedence)
+					if result.Error == nil {
+						result.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
+					}
+				}
+			}
+		}
+
 		result.Handled = true
 		result.WispCreated = wispID
-		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, local branch preserved for conflict resolution)", payload.PolecatName, payload.MRID)
+		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, MERGE_READY sent to refinery)", payload.PolecatName, payload.MRID)
 		return result
 	}
 
@@ -568,6 +596,58 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	}
 
 	return ""
+}
+
+// sendMergeReady sends a MERGE_READY notification to the Refinery.
+// This signals that a polecat's work is ready for merge queue processing.
+func sendMergeReady(router *mail.Router, rigName string, payload *PolecatDonePayload) (string, error) {
+	msg := &mail.Message{
+		From:     fmt.Sprintf("%s/witness", rigName),
+		To:       fmt.Sprintf("%s/refinery", rigName),
+		Subject:  fmt.Sprintf("MERGE_READY %s", payload.PolecatName),
+		Priority: mail.PriorityHigh,
+		Type:     mail.TypeTask,
+		Body: fmt.Sprintf(`Branch: %s
+Issue: %s
+MR: %s
+Polecat: %s
+Verified: clean git state`,
+			payload.Branch,
+			payload.IssueID,
+			payload.MRID,
+			payload.PolecatName,
+		),
+	}
+
+	if err := router.Send(msg); err != nil {
+		return "", err
+	}
+
+	return msg.ID, nil
+}
+
+// nudgeRefinery sends a nudge to the refinery session to wake it up.
+// This ensures the refinery processes MERGE_READY mail immediately
+// rather than waiting for its next patrol cycle or daemon heartbeat.
+func nudgeRefinery(rigName string) error {
+	t := tmux.NewTmux()
+	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Check if refinery is running
+	running, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking refinery session: %w", err)
+	}
+
+	if !running {
+		// Refinery not running - daemon will start it on next heartbeat
+		// The MERGE_READY mail will be waiting in its inbox
+		return nil
+	}
+
+	// Nudge the running refinery to check its inbox
+	nudgeMsg := "MERGE_READY received - check inbox for pending work"
+	return t.NudgeSession(sessionName, nudgeMsg)
 }
 
 // escalateToMayor sends an escalation mail to the Mayor.
