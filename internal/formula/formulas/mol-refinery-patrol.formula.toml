@@ -72,9 +72,7 @@ formula = "mol-refinery-patrol"
 version = 6
 
 [vars]
-[vars.wisp_type]
-description = "Type of wisp created for this molecule"
-default = "patrol"
+wisp_type = "patrol"
 
 [vars.integration_branch_refinery_enabled]
 description = "Whether the refinery merges to integration branches (true) or always to target_branch (false)"
