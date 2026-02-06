@@ -19,6 +19,11 @@ service TerminalService {
 
   // WatchSession streams terminal output updates in real-time
   rpc WatchSession(WatchSessionRequest) returns (stream TerminalUpdate);
+
+  // SendInput sends text input to a terminal session (Phase 5: remote nudging).
+  // For local agents, routes to tmux send-keys.
+  // For K8s-hosted agents, routes via SSH to the pod's tmux session.
+  rpc SendInput(SendInputRequest) returns (SendInputResponse);
 }
 
 // PeekSessionRequest captures terminal output from a session
@@ -94,4 +99,26 @@ message TerminalUpdate {
 
   // Timestamp of the capture
   string timestamp = 4;
+}
+
+// SendInputRequest sends text input to a terminal session.
+message SendInputRequest {
+  // Session name to send input to (e.g., "gt-gastown-toast" or "claude" for remote)
+  string session = 1;
+
+  // The text to send. Delivered via tmux send-keys -l (literal mode).
+  string input = 2;
+
+  // If true, send as a nudge (with Enter key and serialization).
+  // If false, send as raw keystrokes.
+  bool nudge = 3;
+}
+
+// SendInputResponse confirms input delivery.
+message SendInputResponse {
+  // Whether the input was delivered successfully
+  bool delivered = 1;
+
+  // Error message if delivery failed
+  string error = 2;
 }

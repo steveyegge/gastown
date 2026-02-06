@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/inject"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -219,6 +220,21 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		rigName, polecatName, err := parseAddress(target)
 		if err != nil {
 			return err
+		}
+
+		// Try remote backend first (K8s-hosted agents).
+		backend := terminal.ResolveBackend(target)
+		if _, isSSH := backend.(*terminal.SSHBackend); isSSH {
+			// Remote pod: tmux session is always named "claude"
+			if err := backend.NudgeSession("claude", message); err != nil {
+				return fmt.Errorf("nudging remote session: %w", err)
+			}
+			fmt.Printf("%s Nudged %s/%s (remote)\n", style.Bold.Render("✓"), rigName, polecatName)
+			if townRoot != "" {
+				_ = LogNudge(townRoot, target, message)
+			}
+			_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
+			return nil
 		}
 
 		var sessionName string
