@@ -259,7 +259,27 @@ git merge --ff-only temp
 git push origin main
 ```
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 2-3 COMPLETE**
+**Step 1.5: VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
+
+Push can fail silently (network, auth, hooks). IMMEDIATELY verify:
+```bash
+git fetch origin
+LOCAL_SHA=$(git rev-parse main)
+REMOTE_SHA=$(git rev-parse origin/main)
+echo "Local:  $LOCAL_SHA"
+echo "Remote: $REMOTE_SHA"
+```
+
+**If SHAs match**: Push succeeded. Continue to Step 2.
+
+**If SHAs differ**: STOP. Push failed silently.
+- DO NOT send MERGED notification
+- DO NOT close MR bead
+- DO NOT delete branch
+- Debug the push failure (check `git push` output, network, auth)
+- Retry push and verify again before proceeding
+
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 

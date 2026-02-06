@@ -42,8 +42,12 @@ func NewTmux() *Tmux {
 }
 
 // run executes a tmux command and returns stdout.
+// All commands include -u flag for UTF-8 support regardless of locale settings.
+// See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	// Prepend -u flag for UTF-8 mode (PATCH-004)
+	allArgs := append([]string{"-u"}, args...)
+	cmd := exec.Command("tmux", allArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
