@@ -60,7 +60,7 @@ var polecatListCmd = &cobra.Command{
 	Long: `List polecats in a rig or all rigs.
 
 In the transient model, polecats exist only while working. The list shows
-all currently active polecats with their states:
+all polecats with their states:
   - working: Actively working on an issue
   - done: Completed work, waiting for cleanup
   - stuck: Needs assistance
@@ -433,11 +433,11 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(allPolecats) == 0 {
-		fmt.Println("No active polecats found.")
+		fmt.Println("No polecats found.")
 		return nil
 	}
 
-	fmt.Printf("%s\n\n", style.Bold.Render("Active Polecats"))
+	fmt.Printf("%s\n\n", style.Bold.Render("Polecats"))
 	for _, p := range allPolecats {
 		// Session indicator
 		sessionStatus := style.Dim.Render("○")

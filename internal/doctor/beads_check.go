@@ -592,7 +592,6 @@ type DatabasePrefixCheck struct {
 
 type databasePrefixMismatch struct {
 	rigPath      string
-	beadsDir     string
 	routesPrefix string // From routes.jsonl (without trailing hyphen)
 	dbPrefix     string // From database config
 }
@@ -653,7 +652,7 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Resolve the rig's beads directory (follows redirects)
+		// Resolve the rig path and check beads directory exists
 		rigPath := filepath.Join(ctx.TownRoot, route.Path)
 		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
 
@@ -662,8 +661,8 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 			continue // No beads dir for this rig
 		}
 
-		// Query database for issue_prefix using bd config get
-		dbPrefix, err := c.getDBPrefix(rigBeadsDir)
+		// Query database for issue_prefix by running bd from the rig directory
+		dbPrefix, err := c.getDBPrefix(rigPath)
 		if err != nil {
 			// No issue_prefix configured - that's OK
 			continue
@@ -678,7 +677,6 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 				route.Path, routesPrefix, dbPrefix))
 			c.mismatches = append(c.mismatches, databasePrefixMismatch{
 				rigPath:      route.Path,
-				beadsDir:     rigBeadsDir,
 				routesPrefix: routesPrefix,
 				dbPrefix:     dbPrefix,
 			})
@@ -705,8 +703,10 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // getDBPrefix queries the database for issue_prefix config value.
-func (c *DatabasePrefixCheck) getDBPrefix(beadsDir string) (string, error) {
-	cmd := exec.Command("bd", "config", "get", "issue_prefix", "--db", beadsDir)
+// Runs bd from the rig directory so it discovers the correct database.
+func (c *DatabasePrefixCheck) getDBPrefix(rigPath string) (string, error) {
+	cmd := exec.Command("bd", "config", "get", "issue_prefix")
+	cmd.Dir = rigPath
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -725,7 +725,8 @@ func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	}
 
 	for _, m := range c.mismatches {
-		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix, "--db", m.beadsDir)
+		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix)
+		cmd.Dir = filepath.Join(ctx.TownRoot, m.rigPath)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("updating %s: %s", m.rigPath, strings.TrimSpace(string(output)))
 		}

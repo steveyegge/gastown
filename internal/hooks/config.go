@@ -523,7 +523,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt prime --hook", pathSetup),
+						Command: fmt.Sprintf("%s && gt prime --hook && gt nudge deacon session-started", pathSetup),
 					},
 				},
 			},
