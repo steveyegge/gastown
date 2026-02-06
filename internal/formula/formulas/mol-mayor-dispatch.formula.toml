@@ -1,0 +1,380 @@
+description = """
+Mayor continuous work dispatch patrol loop.
+
+The Mayor is the orchestrator of Gas Town. You dispatch work to polecats, monitor
+capacity across rigs, and ensure work flows continuously without human intervention.
+
+**You do NOT do implementation work.** Your job is coordination, not coding.
+
+## Autonomous Operation Model
+
+Mayor must operate continuously without waiting for human input:
+
+```
+Patrol cycle: check-mail → survey-rigs → find-ready-work → dispatch-work →
+              check-stale → update-metrics → loop-or-handoff
+```
+
+## Design Philosophy
+
+This patrol follows Gas Town principles:
+- **Discovery over tracking**: Check rig capacity each cycle, don't maintain state
+- **Events over state**: POLECAT_AVAILABLE triggers immediate dispatch check
+- **Feedback loops**: Witness/Refinery signal capacity changes to Mayor
+- **Never sleep forever**: Always loop or handoff, never wait for user instructions
+
+## Key Signals
+
+| Signal | From | Action |
+|--------|------|--------|
+| POLECAT_AVAILABLE | Witness | Immediate dispatch check |
+| MERGED | Refinery | Work complete, may free capacity |
+| CAPACITY_UPDATE | Witness | Aggregate capacity status |
+| WORK_RECOVERED | Witness | Stale hook recovered, work ready again |
+"""
+formula = "mol-mayor-dispatch"
+version = 1
+
+[[steps]]
+id = "check-mail"
+title = "Process Mayor inbox"
+description = """
+Check inbox and handle signals from Witness/Refinery.
+
+```bash
+gt mail inbox
+```
+
+For each message, process in priority order:
+
+**POLECAT_AVAILABLE**:
+Capacity freed! A polecat was nuked and slot is available.
+```bash
+# Parse: Rig, Polecat, Freed-At from mail body
+# This is high priority - immediately check for ready work
+gt mail archive <message-id>
+```
+Flag: Dispatch check needed for this rig.
+
+**MERGED**:
+Work cycle complete. Branch merged to main.
+```bash
+# Parse: Rig, Task, Branch, Merged-At from mail body
+# Informational - work is done
+gt mail archive <message-id>
+```
+
+**CAPACITY_UPDATE**:
+Aggregate capacity report from Witness patrol.
+```bash
+# Parse: Rig, Active-Polecats, Total-Slots, Available from mail body
+# Update capacity understanding for dispatch decisions
+gt mail archive <message-id>
+```
+
+**WORK_RECOVERED**:
+Witness recovered stale hooked work from dead polecat.
+```bash
+# Parse: Rig, Bead-ID, Previous-Polecat from mail body
+# The bead is now ready again - add to dispatch queue
+gt mail archive <message-id>
+```
+
+**ESCALATION** (CRASHED_POLECAT, MR_STUCK, etc.):
+Something needs attention. Assess and handle or log for later.
+```bash
+# Log the escalation
+# Attempt auto-resolution if possible
+# Otherwise note for human attention
+gt mail archive <message-id>
+```
+
+**HANDOFF**:
+Read predecessor context. Continue from where they left off.
+```bash
+gt mail archive <message-id>
+```
+
+**Hygiene**: Archive messages after processing. Inbox should be near-empty.
+"""
+
+[[steps]]
+id = "survey-rigs"
+title = "Check rig capacity"
+needs = ["check-mail"]
+description = """
+Survey all rigs for current polecat capacity.
+
+**Step 1: List registered rigs**
+```bash
+gt rig list --json
+```
+
+**Step 2: For each operational rig, get capacity**
+
+Check how many polecats are working vs available:
+```bash
+# Count active polecats (those with work-on-hook)
+bd list --type=agent --json | jq '[.[] | select(.description | contains("role_type: polecat")) | select(.description | contains("hook_bead:"))] | length'
+
+# Get max polecat slots from rig config (default: 4)
+gt rig config <rig> max_polecats
+```
+
+**Step 3: Build capacity map**
+
+Track for dispatch decisions:
+```
+{
+  "gastown": { "active": 2, "max": 4, "available": 2 },
+  "opencode": { "active": 3, "max": 4, "available": 1 },
+  ...
+}
+```
+
+If no available capacity across all rigs, note this and proceed to check-stale
+(stale recovery may free capacity).
+"""
+
+[[steps]]
+id = "find-ready-work"
+title = "Query ready work"
+needs = ["survey-rigs"]
+description = """
+Find work that is ready to be dispatched.
+
+**Step 1: Query ready tasks**
+```bash
+bd list --status=ready --type=task --json
+```
+
+**Step 2: Filter for dispatchable work**
+
+For each ready task:
+1. Check rig assignment (some tasks are rig-specific)
+2. Check priority (P1 > P2 > P3)
+3. Check dependencies (any blockers?)
+4. Check age (older = more urgent)
+
+**Step 3: Sort by dispatch priority**
+
+```
+1. Priority (P1 first)
+2. Age (oldest first, FIFO within priority)
+3. Blockers (fewer blockers preferred)
+```
+
+**Step 4: Match work to capacity**
+
+For each dispatchable task:
+- If task has rig assignment, check that rig's capacity
+- If no assignment, pick rig with most available capacity
+- Build dispatch queue: [(task, rig, polecat-name), ...]
+
+If no ready work, proceed to check-stale (nothing to dispatch this cycle).
+"""
+
+[[steps]]
+id = "dispatch-work"
+title = "Sling work to polecats"
+needs = ["find-ready-work"]
+description = """
+Dispatch ready work to available polecats.
+
+**For each (task, rig) pair in dispatch queue:**
+
+**Step 1: Allocate polecat name**
+Use `gt polecat name` to get available polecat name for the rig:
+```bash
+POLECAT_NAME=$(gt polecat name <rig>)
+```
+
+**Step 2: Dispatch work**
+```bash
+gt sling <task-id> <rig>/$POLECAT_NAME
+```
+
+This will:
+- Create polecat worktree
+- Hook the task to the polecat
+- Start polecat session
+- Polecat begins working
+
+**Step 3: Update capacity tracking**
+Decrement available capacity for this rig.
+
+**Step 4: Log dispatch**
+```bash
+gt activity log DISPATCH --data '{
+  "task": "<task-id>",
+  "rig": "<rig>",
+  "polecat": "<polecat-name>",
+  "timestamp": "<now>"
+}'
+```
+
+**Continue until:**
+- No more available capacity, OR
+- No more ready work
+
+If work remains but no capacity:
+```
+Log: "Work queued, waiting for capacity"
+```
+The next POLECAT_AVAILABLE signal will trigger another dispatch cycle.
+"""
+
+[[steps]]
+id = "check-stale-assignments"
+title = "Detect orphaned work"
+needs = ["dispatch-work"]
+description = """
+Find work assigned to dead or stuck polecats.
+
+**Step 1: Find hooked work**
+```bash
+bd list --status=hooked --json
+```
+
+**Step 2: For each hooked bead, check polecat health**
+
+Get the assigned polecat from hook_bead field:
+```bash
+# Parse hook_bead to get polecat agent bead ID
+# Check if polecat session is alive
+gt polecat status <rig>/<polecat-name>
+```
+
+**Step 3: Categorize**
+
+| Polecat Status | Hooked Age | Action |
+|----------------|------------|--------|
+| Session alive, working | <30min | Normal - let work |
+| Session alive, working | >30min | Monitor - may need nudge |
+| Session alive, idle | any | Suspicious - investigate |
+| Session dead | any | ORPHANED - recover work |
+
+**Step 4: Handle orphaned work**
+
+If polecat session is dead but work is hooked:
+```bash
+# The work is orphaned! This shouldn't happen often if Witness
+# is doing its job, but daemon crash detection may have missed it.
+
+# Option 1: Notify Witness to clean up (preferred)
+gt mail send <rig>/witness -s "ORPHANED_WORK: <bead-id>" -m "
+Bead: <bead-id>
+Polecat: <polecat-name>
+Status: Session dead, work still hooked
+
+Please verify and recover this work."
+
+# Option 2: If urgent (P1 work), escalate immediately
+# bd unhook <bead-id>
+# This requires careful handling to avoid duplicate work
+```
+
+**Note**: Witness patrol should normally catch dead polecats. This is a
+belt-and-suspenders check for edge cases.
+"""
+
+[[steps]]
+id = "update-metrics"
+title = "Log dispatch metrics"
+needs = ["check-stale-assignments"]
+description = """
+Update activity log with dispatch cycle metrics.
+
+```bash
+gt activity log DISPATCH_CYCLE --data '{
+  "timestamp": "<now>",
+  "dispatched_count": <N>,
+  "dispatched_tasks": ["<task-1>", "<task-2>", ...],
+  "queued_count": <M>,
+  "capacity": {
+    "<rig-1>": { "active": X, "available": Y },
+    ...
+  },
+  "stale_detected": <K>,
+  "stale_recovered": <L>
+}'
+```
+
+This enables:
+- External monitoring of dispatch health
+- Debugging slow dispatch or stuck work
+- Capacity planning (are we polecat-starved?)
+"""
+
+[[steps]]
+id = "context-check"
+title = "Check own context limit"
+needs = ["update-metrics"]
+description = """
+Check own context usage to decide loop vs handoff.
+
+If context is HIGH (>70%):
+- Prepare handoff summary
+- Will handoff in next step
+
+If context is LOW:
+- Can continue patrolling
+- Will loop in next step
+
+**Estimate context usage:**
+Ask yourself:
+- Have I processed many signals this cycle?
+- How much dispatch activity occurred?
+- Is the conversation getting long?
+
+Rule of thumb: After 5+ dispatches or significant mail processing,
+consider a fresh session for reliability.
+"""
+
+[[steps]]
+id = "loop-or-handoff"
+title = "Loop or handoff"
+needs = ["context-check"]
+description = """
+End of patrol cycle decision.
+
+**If context LOW (can continue patrolling):**
+
+1. Sleep briefly to avoid tight polling:
+```bash
+sleep 30  # Configurable via MAYOR_DISPATCH_INTERVAL
+```
+
+2. Squash this patrol cycle:
+```bash
+bd mol squash <mol-id> --summary "<dispatch-summary>"
+```
+
+3. Create fresh patrol wisp:
+```bash
+bd mol wisp mol-mayor-dispatch
+```
+
+4. Continue from check-mail step of new wisp.
+
+**If context HIGH (approaching limit):**
+
+1. Write handoff mail with notable observations:
+```bash
+gt handoff -s "Mayor dispatch patrol handoff" -m "
+Dispatched: <N> tasks
+Queued: <M> waiting
+Capacity: <summary>
+Notes: <any observations for successor>
+"
+```
+
+2. Exit cleanly - daemon will respawn Mayor session.
+
+**IMPORTANT**: You must either:
+- Create a new wisp (context LOW), OR
+- Use gt handoff (context HIGH)
+
+Never leave the session idle without work on your hook.
+Never "wait for user instructions" - this is autonomous operation.
+"""
