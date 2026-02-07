@@ -40,7 +40,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	watcher := beadswatcher.NewStubWatcher(logger)
+	watcher := beadswatcher.NewActivityWatcher(beadswatcher.Config{
+		TownRoot:     cfg.TownRoot,
+		BdBinary:     cfg.BdBinary,
+		Namespace:    cfg.Namespace,
+		DefaultImage: cfg.DefaultImage,
+		DaemonHost:   cfg.DaemonHost,
+		DaemonPort:   fmt.Sprintf("%d", cfg.DaemonPort),
+	}, logger)
 	pods := podmanager.New(k8sClient, logger)
 	status := statusreporter.NewStubReporter(logger)
 
