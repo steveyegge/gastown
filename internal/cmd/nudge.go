@@ -17,11 +17,13 @@ import (
 
 var nudgeMessageFlag string
 var nudgeForceFlag bool
+var nudgeIfFreshFlag bool
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
 	nudgeCmd.Flags().StringVarP(&nudgeMessageFlag, "message", "m", "", "Message to send")
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
+	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -68,7 +70,28 @@ Examples:
 	RunE: runNudge,
 }
 
+// ifFreshMaxAge is the maximum session age for --if-fresh to allow a nudge.
+// Sessions older than this are considered compaction/clear restarts, not new sessions.
+const ifFreshMaxAge = 60 * time.Second
+
 func runNudge(cmd *cobra.Command, args []string) error {
+	// --if-fresh: skip nudge if the caller's tmux session is older than 60s.
+	// This prevents compaction/clear SessionStart hooks from spamming the deacon.
+	if nudgeIfFreshFlag {
+		sessionName := tmux.CurrentSessionName()
+		if sessionName != "" {
+			t := tmux.NewTmux()
+			created, err := t.GetSessionCreatedUnix(sessionName)
+			if err == nil && created > 0 {
+				age := time.Since(time.Unix(created, 0))
+				if age > ifFreshMaxAge {
+					// Session is old — this is a compaction/clear, not a new session
+					return nil
+				}
+			}
+		}
+	}
+
 	target := args[0]
 
 	// Get message from -m flag or positional arg
