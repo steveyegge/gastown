@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,6 +63,22 @@ func dispatchToOj(rigName string, opts SlingSpawnOptions, beadID, instructions, 
 
 	agentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
 
+	// Build full agent env map for the polecat being spawned.
+	// This is the single source of truth — OJ consumes it instead of
+	// hardcoding GT env var names in sling.hcl.
+	agentEnvMap := config.AgentEnv(config.AgentEnvConfig{
+		Role:         "polecat",
+		Rig:          rigName,
+		AgentName:    polecatName,
+		TownRoot:     townRoot,
+		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
+	})
+	envJSON, err := json.Marshal(agentEnvMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling agent env: %w", err)
+	}
+	envJSONB64 := base64.StdEncoding.EncodeToString(envJSON)
+
 	// Dispatch to OJ daemon via oj run
 	ojArgs := []string{
 		"run", "gt-sling",
@@ -71,6 +88,7 @@ func dispatchToOj(rigName string, opts SlingSpawnOptions, beadID, instructions, 
 		"--var", fmt.Sprintf("rig=%s", rigName),
 		"--var", fmt.Sprintf("polecat_name=%s", polecatName),
 		"--var", fmt.Sprintf("town_root=%s", townRoot),
+		"--var", fmt.Sprintf("env_json=%s", envJSONB64),
 	}
 
 	cmd := exec.Command("oj", ojArgs...)
