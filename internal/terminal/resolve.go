@@ -55,7 +55,13 @@ func resolveSSHConfig(agentID string) (*SSHConfig, error) {
 		return nil, fmt.Errorf("agent bead lookup failed: %w", err)
 	}
 
-	outStr := strings.TrimSpace(string(output))
+	return parseSSHConfig(string(output))
+}
+
+// parseSSHConfig parses SSH connection config from bd show output.
+// Returns nil if the output doesn't indicate a K8s agent.
+func parseSSHConfig(output string) (*SSHConfig, error) {
+	outStr := strings.TrimSpace(output)
 	if outStr == "" || !strings.Contains(outStr, "k8s") {
 		return nil, nil // Not a K8s agent
 	}

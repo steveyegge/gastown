@@ -10,6 +10,18 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
+// tmuxClient is the subset of tmux.Tmux methods used by PodConnection.
+// This interface enables testing with mock tmux implementations.
+type tmuxClient interface {
+	HasSession(name string) (bool, error)
+	KillSessionWithProcesses(name string) error
+	NewSessionWithCommand(name, workDir, command string) error
+	SetRemainOnExit(pane string, on bool) error
+	IsPaneDead(session string) (bool, error)
+	SendKeys(session, keys string) error
+	CapturePane(session string, lines int) (string, error)
+}
+
 // PodConnection manages a local tmux session that bridges to a K8s pod's
 // screen session via kubectl exec.
 //
@@ -39,7 +51,7 @@ type PodConnection struct {
 	KubeConfig string
 
 	// tmux wraps local tmux operations.
-	tmux *tmux.Tmux
+	tmux tmuxClient
 
 	// connected tracks whether the kubectl exec pipe is established.
 	connected bool
@@ -62,6 +74,7 @@ type PodConnectionConfig struct {
 	SessionName   string
 	ScreenSession string
 	KubeConfig    string
+	Tmux          tmuxClient // Optional, for testing. If nil, uses real tmux.
 }
 
 // DefaultScreenSession is the default screen session name inside pods.
@@ -77,6 +90,10 @@ func NewPodConnection(cfg PodConnectionConfig) *PodConnection {
 	if screenSession == "" {
 		screenSession = DefaultScreenSession
 	}
+	t := cfg.Tmux
+	if t == nil {
+		t = tmux.NewTmux()
+	}
 	return &PodConnection{
 		AgentID:       cfg.AgentID,
 		PodName:       cfg.PodName,
@@ -84,7 +101,7 @@ func NewPodConnection(cfg PodConnectionConfig) *PodConnection {
 		SessionName:   cfg.SessionName,
 		ScreenSession: screenSession,
 		KubeConfig:    cfg.KubeConfig,
-		tmux:          tmux.NewTmux(),
+		tmux:          t,
 	}
 }
 

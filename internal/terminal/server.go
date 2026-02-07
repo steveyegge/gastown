@@ -32,6 +32,10 @@ type ServerConfig struct {
 
 	// PodSource provides pod information. If nil, CLIPodSource is used.
 	PodSource PodSource
+
+	// TmuxClient provides tmux operations for PodConnections. If nil, uses real tmux.
+	// This field is intended for testing.
+	TmuxClient tmuxClient
 }
 
 // DefaultHealthInterval is the default health check interval.
@@ -54,6 +58,7 @@ type Server struct {
 	connections map[string]*PodConnection // agentID → connection
 	mu          sync.RWMutex
 	tmux        *tmux.Tmux
+	tmuxClient  tmuxClient // for PodConnections (nil = real tmux)
 }
 
 // NewServer creates a terminal server with the given configuration.
@@ -75,6 +80,7 @@ func NewServer(cfg ServerConfig) *Server {
 		healthInterval: healthInterval,
 		connections:    make(map[string]*PodConnection),
 		tmux:           tmux.NewTmux(),
+		tmuxClient:     cfg.TmuxClient,
 	}
 
 	// Set up pod source
@@ -170,6 +176,7 @@ func (s *Server) connectPod(pod *PodInfo) {
 		SessionName:   sessionName,
 		ScreenSession: s.screenSession,
 		KubeConfig:    s.kubeconfig,
+		Tmux:          s.tmuxClient,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

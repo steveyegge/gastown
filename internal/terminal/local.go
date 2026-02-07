@@ -4,10 +4,18 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// TmuxBackend wraps a local tmux.Tmux instance to implement Backend.
+// localTmux is the subset of tmux.Tmux methods used by TmuxBackend.
+type localTmux interface {
+	HasSession(name string) (bool, error)
+	CapturePane(session string, lines int) (string, error)
+	NudgeSession(session, message string) error
+	SendKeysRaw(session, keys string) error
+}
+
+// TmuxBackend wraps a local tmux instance to implement Backend.
 // This is the default backend for locally-running agents.
 type TmuxBackend struct {
-	tmux *tmux.Tmux
+	tmux localTmux
 }
 
 // NewTmuxBackend creates a Backend backed by local tmux.
