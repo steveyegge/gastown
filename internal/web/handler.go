@@ -231,6 +231,10 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := h.template.ExecuteTemplate(w, "convoy.html", data); err != nil {
+		// Security: intentionally returns a generic error message to the client.
+		// Internal error details (err) are not exposed in the HTTP response to
+		// prevent information leakage. The error is logged server-side only.
+		log.Printf("dashboard: template execution failed: %v", err)
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 		return
 	}
