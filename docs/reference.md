@@ -145,7 +145,7 @@ When `polecat_branch_template` is empty or not set:
 
 ```toml
 formula = "name"
-type = "workflow"           # workflow | expansion | aspect
+type = "workflow"           # workflow | convoy | expansion | aspect
 version = 1
 description = "..."
 
@@ -193,6 +193,18 @@ persisted to JSONL. They exist only in memory during execution.
 ## Molecule Commands
 
 **Principle**: `bd` = beads data operations, `gt` = agent operations.
+
+### Formula Management (gt)
+
+```bash
+gt formula list              # List formulas with override status
+gt formula show <name>       # Formula details
+gt formula modify <name>     # Copy embedded for customization
+gt formula diff [name]       # Override map or detailed diff
+gt formula reset <name>      # Remove override
+gt formula update <name>     # Agent-assisted merge
+gt formula run <name>        # Execute formula
+```
 
 ### Beads Operations (bd)
 

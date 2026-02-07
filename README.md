@@ -216,9 +216,9 @@ gt convoy list                         # Check progress
 
 **Best for:** Predefined, repeatable processes
 
-Formulas are TOML-defined workflows stored in `.beads/formulas/`.
+Formulas are TOML-defined workflows embedded in the `gt` binary. Over 30 built-in formulas ship with Gas Town. You can override any formula at the rig or town level using `gt formula modify`, with resolution order: rig → town → embedded.
 
-**Example Formula** (`.beads/formulas/release.formula.toml`):
+**Example Formula** (`release.formula.toml`):
 
 ```toml
 description = "Standard release process"
@@ -263,13 +263,20 @@ needs = ["create-tag"]
 
 ```bash
 # List available formulas
-bd formula list
+gt formula list
 
-# Run a formula with variables
-bd cook release --var version=1.2.0
+# Customize a formula
+gt formula modify release              # Copy to local for editing
 
-# Create formula instance for tracking
-bd mol pour release --var version=1.2.0
+# See override status
+gt formula diff                        # Summary of all overrides
+gt formula diff release                # Detailed diff for one formula
+
+# Reset to embedded default
+gt formula reset release
+
+# Run a formula (convoy type)
+gt formula run code-review --pr=123
 ```
 
 ### Manual Convoy Workflow
@@ -364,15 +371,18 @@ gt config show
 ### Beads Integration
 
 ```bash
-bd formula list             # List formulas
-bd cook <formula>           # Execute formula
-bd mol pour <formula>       # Create trackable instance
-bd mol list                 # List active instances
+gt formula list                 # List formulas (with override status)
+gt formula show <name>          # Show formula details
+gt formula modify <name>        # Copy embedded formula for customization
+gt formula diff [name]          # View override map or detailed diff
+gt formula reset <name>         # Remove override, restore embedded
+gt formula update <name>        # Agent-assisted merge after upgrade
+gt formula run <name>           # Execute a formula
 ```
 
 ## Cooking Formulas
 
-Gas Town includes built-in formulas for common workflows. See `.beads/formulas/` for available recipes.
+Gas Town includes 30+ built-in formulas embedded in the binary. Run `gt formula list` to see available formulas. Use `gt formula modify <name>` to customize any formula.
 
 ## Dashboard
 

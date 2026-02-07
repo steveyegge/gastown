@@ -31,12 +31,14 @@ Protomolecule (frozen template) ─── Solid
 
 **WRONG:**
 ```bash
-# Reading a formula file and manually creating beads for each step
-cat .beads/formulas/mol-polecat-work.formula.toml
+# Reading a formula override file and manually creating beads for each step
+cat ~/gt/.beads/formulas/mol-polecat-work.formula.toml
 bd create --title "Step 1: Load context" --type task
 bd create --title "Step 2: Branch setup" --type task
 # ... creating beads from formula prose
 ```
+
+Note: Formulas are embedded in the `gt` binary by default, not stored in `.beads/formulas/`. Override files only exist in `.beads/formulas/` if you've run `gt formula modify <name>` to customize a formula.
 
 **RIGHT:**
 ```bash

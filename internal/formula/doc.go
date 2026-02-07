@@ -116,9 +116,10 @@
 //
 // # Embedded Formulas
 //
-// The package includes embedded formula files that can be provisioned
-// to a beads workspace. Use ProvisionFormulas for initial setup and
-// UpdateFormulas for safe updates that preserve user modifications.
+// The package includes embedded formula files that are compiled into the binary.
+// Formulas resolve from embedded as a fallback when no local override exists.
+// Use GetEmbeddedFormula to read a formula by name, GetEmbeddedFormulaNames
+// to list all available formulas, and CopyFormulaTo to create a local override.
 //
 // # Thread Safety
 //

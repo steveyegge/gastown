@@ -156,9 +156,10 @@ func TestInstallIdempotent(t *testing.T) {
 	}
 }
 
-// TestInstallFormulasProvisioned validates that embedded formulas are copied
-// to .beads/formulas/ during installation.
-func TestInstallFormulasProvisioned(t *testing.T) {
+// TestInstallNoFormulasProvisioned validates that gt install does NOT
+// copy formulas to .beads/formulas/ anymore (US-004). Formulas now resolve
+// from embedded as a fallback, eliminating the need for bulk provisioning.
+func TestInstallNoFormulasProvisioned(t *testing.T) {
 	// Skip if bd is not available
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping formulas test")
@@ -169,7 +170,7 @@ func TestInstallFormulasProvisioned(t *testing.T) {
 
 	gtBinary := buildGT(t)
 
-	// Run gt install (includes beads and formula provisioning)
+	// Run gt install (should NOT provision formulas)
 	cmd := exec.Command(gtBinary, "install", hqPath)
 	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
@@ -177,36 +178,29 @@ func TestInstallFormulasProvisioned(t *testing.T) {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
 
-	// Verify .beads/formulas/ directory exists
+	// Verify output does NOT mention "Provisioned N formulas"
+	if strings.Contains(string(output), "Provisioned") && strings.Contains(string(output), "formula") {
+		t.Errorf("gt install should not provision formulas, but output mentions: %s", output)
+	}
+
+	// Verify .beads/formulas/ directory does NOT exist
 	formulasDir := filepath.Join(hqPath, ".beads", "formulas")
-	assertDirExists(t, formulasDir, ".beads/formulas/")
-
-	// Verify at least some expected formulas exist
-	expectedFormulas := []string{
-		"mol-deacon-patrol.formula.toml",
-		"mol-refinery-patrol.formula.toml",
-		"code-review.formula.toml",
-	}
-	for _, f := range expectedFormulas {
-		formulaPath := filepath.Join(formulasDir, f)
-		assertFileExists(t, formulaPath, f)
-	}
-
-	// Verify the count matches embedded formulas
-	entries, err := os.ReadDir(formulasDir)
-	if err != nil {
-		t.Fatalf("failed to read formulas dir: %v", err)
-	}
-	// Count only formula files (not directories)
-	var fileCount int
-	for _, e := range entries {
-		if !e.IsDir() {
-			fileCount++
+	if _, err := os.Stat(formulasDir); !os.IsNotExist(err) {
+		// If directory exists, it should be empty (no formula files)
+		entries, readErr := os.ReadDir(formulasDir)
+		if readErr != nil {
+			t.Fatalf("failed to read formulas dir: %v", readErr)
 		}
-	}
-	// Should have at least 20 formulas (allows for some variation)
-	if fileCount < 20 {
-		t.Errorf("expected at least 20 formulas, got %d", fileCount)
+		// Filter for .formula.toml files only
+		var formulaFiles []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".formula.toml") {
+				formulaFiles = append(formulaFiles, e.Name())
+			}
+		}
+		if len(formulaFiles) > 0 {
+			t.Errorf(".beads/formulas/ should not contain formula files after gt install, found: %v", formulaFiles)
+		}
 	}
 }
 

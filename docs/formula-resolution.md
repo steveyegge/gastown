@@ -2,14 +2,16 @@
 
 > Where formulas live, how they're found, and how they'll scale to Mol Mall
 
-## The Problem
+## The Problem (Solved)
 
-Formulas currently exist in multiple locations with no clear precedence:
-- `.beads/formulas/` (source of truth for a project)
+Previously, formulas existed in multiple locations with no clear precedence:
+- `.beads/formulas/` (was source of truth, synced via `go:generate`)
 - `internal/formula/formulas/` (embedded copy for `go install`)
-- Crew directories have their own `.beads/formulas/` (diverging copies)
+- Crew directories had their own `.beads/formulas/` (diverging copies)
 
-When an agent runs `bd cook mol-polecat-work`, which version do they get?
+This caused sync bugs where PRs edited `internal/` directly but `go generate` overwrote with old `.beads/` versions.
+
+**The solution**: `internal/formula/formulas/` is now the single source of truth. Formulas are embedded in the binary and users override them on demand via `gt formula modify`. There is no more `go:generate` from `.beads/formulas/`, and no provisioning during `gt install`.
 
 ## Design Goals
 
@@ -41,7 +43,7 @@ TIER 2: TOWN (user-level)
 
 TIER 3: SYSTEM (embedded)
   Location: Compiled into gt binary
-  Source:   gastown/mayor/rig/.beads/formulas/ at build time
+  Source:   internal/formula/formulas/ (single source of truth in gastown repo)
   Use case: Defaults, blessed patterns, fallback
   Example:  mol-polecat-work.formula.toml (factory default)
 ```
@@ -163,38 +165,39 @@ Exclude `.beads/formulas/` from crew sparse checkouts entirely.
 
 ## Commands
 
-### Existing
+### Formula Management (gt)
 
 ```bash
-bd formula list              # Available formulas (should show tier)
-bd formula show <name>       # Formula details
-bd cook <formula>            # Formula → Proto
+gt formula list                  # Available formulas (with override indicators)
+gt formula show <name>           # Formula details
+gt formula modify <name>         # Copy embedded formula for customization
+gt formula diff                  # Visual map of all overrides
+gt formula diff <name>           # Detailed side-by-side diff
+gt formula reset <name>          # Remove override, restore embedded
+gt formula update <name>         # Agent-assisted merge after upgrade
+gt formula run <name>            # Execute a formula
 ```
 
-### Enhanced
+### Formula Data Operations (bd)
 
 ```bash
-# List with tier information
-bd formula list
-  mol-polecat-work          v4    [project]
-  mol-polecat-code-review   v1    [town]
+bd formula list                  # Available formulas
+bd formula show <name>           # Formula details
+bd cook <formula>                # Formula → Proto
+```
+
+### Enhanced List Output
+
+```bash
+gt formula list
+  mol-polecat-work          v4    [project]  (override)
+  mol-polecat-code-review   v1    [town]     (override)
   mol-witness-patrol        v2    [system]
 
-# Show resolution path
-bd formula show mol-polecat-work --resolve
-  Resolving: mol-polecat-work
-  ✓ Found at: ~/gt/gastown/.beads/formulas/mol-polecat-work.formula.toml
-  Tier: project
-  Version: 4
-
-  Resolution path checked:
-  1. [project] ~/gt/gastown/.beads/formulas/ ← FOUND
-  2. [town]    ~/gt/.beads/formulas/
-  3. [system]  <embedded>
-
-# Override tier for testing
-bd cook mol-polecat-work --tier=system    # Force embedded version
-bd cook mol-polecat-work --tier=town      # Force town version
+gt formula diff
+  mol-polecat-work          MODIFIED  (rig override)
+  mol-polecat-code-review   MODIFIED  (town override)
+  ... 28 formulas unchanged
 ```
 
 ### Future (Mol Mall)
@@ -214,18 +217,22 @@ gt formula uninstall mol-code-review-strict
 
 ## Migration Path
 
-### Phase 1: Resolution Order (Now)
+### Phase 1: Resolution Order (DONE)
 
-1. Implement three-tier resolution in `bd cook`
-2. Add `--resolve` flag to show resolution path
-3. Update `bd formula list` to show tiers
-4. Fix crew directories (Option B)
+1. ~~Implement three-tier resolution in `bd cook`~~ ✓
+2. ~~Add `--resolve` flag to show resolution path~~ ✓
+3. ~~Update `bd formula list` to show tiers~~ ✓
+4. ~~Fix crew directories (Option B)~~ ✓
 
-### Phase 2: Town-Level Formulas
+### Phase 2: Formula Override System (DONE)
 
-1. Establish `~/gt/.beads/formulas/` as town formula location
-2. Add `gt formula` commands for managing town formulas
-3. Support manual installation (copy file, track in `.installed.json`)
+1. ~~`internal/formula/formulas/` is now the single source of truth~~ ✓
+2. ~~Removed `go:generate` from `.beads/formulas/`~~ ✓
+3. ~~Added `gt formula` commands: `modify`, `diff`, `reset`, `update`, enhanced `list`~~ ✓
+4. ~~Removed formula provisioning during `gt install`~~ ✓
+5. ~~`gt doctor` detects legacy provisioned formulas~~ ✓
+
+> **Current state**: Formulas are embedded in the `gt` binary from `internal/formula/formulas/`. Users customize via `gt formula modify`, view overrides via `gt formula diff`, and reset via `gt formula reset`. No sync or provisioning required.
 
 ### Phase 3: Mol Mall Integration
 

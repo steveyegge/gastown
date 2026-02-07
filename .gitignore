@@ -49,11 +49,14 @@ state.json
 # Clone-specific CLAUDE.md (regenerated locally per clone)
 CLAUDE.md
 
-# Embedded formulas are committed so `go install @latest` works
-# Run `go generate ./...` after modifying .beads/formulas/
+# Embedded formulas are in internal/formula/formulas/ (source of truth)
+# The .beads/formulas/ directory is for user overrides only, not tracked in gastown repo
+# Users CAN track .beads/formulas/ in their own projects - this gitignore only affects gastown
 
-# Gas Town (added by gt)
-.beads/
+# Gas Town runtime (added by gt install)
+# Note: .beads/formulas/ is explicitly ignored below - it was tracked before but is now
+# redundant since internal/formula/formulas/ is the source of truth for embedded formulas
+.beads/formulas/
 .logs/
 logs/
 settings/

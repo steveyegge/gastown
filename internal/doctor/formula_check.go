@@ -1,130 +1,225 @@
 package doctor
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/formula"
 )
 
-// FormulaCheck verifies that embedded formulas are up-to-date.
-// It detects outdated formulas (binary updated), missing formulas (user deleted),
-// and modified formulas (user customized). Can auto-fix outdated and missing.
+// FormulaCheck verifies that embedded formulas are accessible.
+// Since formulas now resolve from embedded as a fallback, this check
+// simply verifies the embedded formulas are available.
 type FormulaCheck struct {
-	FixableCheck
+	BaseCheck
 }
 
 // NewFormulaCheck creates a new formula check.
 func NewFormulaCheck() *FormulaCheck {
 	return &FormulaCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "formulas",
+			CheckDescription: "Check embedded formulas are accessible",
+			CheckCategory:    CategoryConfig,
+		},
+	}
+}
+
+// Run checks if embedded formulas are accessible.
+func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
+	names, err := formula.GetEmbeddedFormulaNames()
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not read embedded formulas: %v", err),
+		}
+	}
+
+	if len(names) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "No embedded formulas found",
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusOK,
+		Message: fmt.Sprintf("%d embedded formulas available", len(names)),
+	}
+}
+
+// LegacyProvisionedFormulasCheck detects and offers to clean up legacy
+// provisioned formulas that match their embedded versions exactly.
+// These were created by old versions of `gt install` and are now redundant.
+type LegacyProvisionedFormulasCheck struct {
+	FixableCheck
+	legacyFormulas []string // paths to formulas that can be cleaned up
+}
+
+// NewLegacyProvisionedFormulasCheck creates a new legacy formula check.
+func NewLegacyProvisionedFormulasCheck() *LegacyProvisionedFormulasCheck {
+	return &LegacyProvisionedFormulasCheck{
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
-				CheckName:        "formulas",
-				CheckDescription: "Check embedded formulas are up-to-date",
+				CheckName:        "legacy-formulas",
+				CheckDescription: "Check for legacy provisioned formulas that match embedded",
 				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
 }
 
-// Run checks if formulas need updating.
-func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
-	report, err := formula.CheckFormulaHealth(ctx.TownRoot)
-	if err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not check formulas: %v", err),
-		}
+// Run scans for legacy provisioned formulas that can be cleaned up.
+func (c *LegacyProvisionedFormulasCheck) Run(ctx *CheckContext) *CheckResult {
+	c.legacyFormulas = nil
+
+	// Scan town-level formulas
+	townFormulasDir := filepath.Join(ctx.TownRoot, ".beads", "formulas")
+	c.scanForLegacyFormulas(townFormulasDir)
+
+	// Scan rig-level formulas
+	rigDirs := c.discoverRigDirs(ctx.TownRoot)
+	for _, rigDir := range rigDirs {
+		rigFormulasDir := filepath.Join(rigDir, ".beads", "formulas")
+		c.scanForLegacyFormulas(rigFormulasDir)
 	}
 
-	// All good
-	if report.Outdated == 0 && report.Missing == 0 && report.Modified == 0 && report.New == 0 && report.Untracked == 0 {
+	if len(c.legacyFormulas) == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("%d formulas up-to-date", report.OK),
+			Message: "No legacy provisioned formulas found",
 		}
 	}
 
-	// Build details
-	var details []string
-	var needsFix bool
-
-	for _, f := range report.Formulas {
-		switch f.Status {
-		case "outdated":
-			details = append(details, fmt.Sprintf("  %s: update available", f.Name))
-			needsFix = true
-		case "missing":
-			details = append(details, fmt.Sprintf("  %s: missing (will reinstall)", f.Name))
-			needsFix = true
-		case "modified":
-			details = append(details, fmt.Sprintf("  %s: locally modified (skipping)", f.Name))
-		case "new":
-			details = append(details, fmt.Sprintf("  %s: new formula available", f.Name))
-			needsFix = true
-		case "untracked":
-			details = append(details, fmt.Sprintf("  %s: untracked (will update)", f.Name))
-			needsFix = true
-		}
-	}
-
-	// Determine status
-	status := StatusOK
-	if needsFix {
-		status = StatusWarning
-	}
-
-	// Build message
-	var parts []string
-	if report.Outdated > 0 {
-		parts = append(parts, fmt.Sprintf("%d outdated", report.Outdated))
-	}
-	if report.Missing > 0 {
-		parts = append(parts, fmt.Sprintf("%d missing", report.Missing))
-	}
-	if report.New > 0 {
-		parts = append(parts, fmt.Sprintf("%d new", report.New))
-	}
-	if report.Untracked > 0 {
-		parts = append(parts, fmt.Sprintf("%d untracked", report.Untracked))
-	}
-	if report.Modified > 0 {
-		parts = append(parts, fmt.Sprintf("%d modified", report.Modified))
-	}
-
-	message := fmt.Sprintf("Formulas: %s", strings.Join(parts, ", "))
-
-	result := &CheckResult{
+	return &CheckResult{
 		Name:    c.Name(),
-		Status:  status,
-		Message: message,
-		Details: details,
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("Found %d legacy provisioned formulas that match embedded versions", len(c.legacyFormulas)),
+		Details: c.legacyFormulas,
 	}
-
-	if needsFix {
-		result.FixHint = "Run 'gt doctor --fix' to update formulas"
-	}
-
-	return result
 }
 
-// Fix updates outdated and missing formulas.
-func (c *FormulaCheck) Fix(ctx *CheckContext) error {
-	updated, skipped, reinstalled, err := formula.UpdateFormulas(ctx.TownRoot)
-	if err != nil {
-		return err
+// Fix removes the legacy provisioned formulas that match embedded exactly.
+func (c *LegacyProvisionedFormulasCheck) Fix(ctx *CheckContext) error {
+	if len(c.legacyFormulas) == 0 {
+		return nil
 	}
 
-	// Log what was done (caller will re-run check to show new status)
-	if updated > 0 || reinstalled > 0 || skipped > 0 {
-		// The doctor framework will re-run the check after fix
-		// so we don't need to log here
-		_ = updated
-		_ = reinstalled
-		_ = skipped
+	var removed []string
+	var errors []string
+
+	for _, path := range c.legacyFormulas {
+		if err := os.Remove(path); err != nil {
+			errors = append(errors, fmt.Sprintf("  %s: %v", path, err))
+		} else {
+			removed = append(removed, path)
+		}
+	}
+
+	if len(removed) > 0 {
+		fmt.Printf("Removed %d legacy provisioned formulas:\n", len(removed))
+		for _, p := range removed {
+			fmt.Printf("  - %s\n", p)
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to remove some formulas:\n%s", strings.Join(errors, "\n"))
 	}
 
 	return nil
+}
+
+// scanForLegacyFormulas scans a directory for formulas that match embedded exactly
+func (c *LegacyProvisionedFormulasCheck) scanForLegacyFormulas(formulasDir string) {
+	entries, err := os.ReadDir(formulasDir)
+	if err != nil {
+		return // Directory doesn't exist, nothing to scan
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".formula.toml") {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".formula.toml")
+
+		// Check if this formula exists in embedded
+		if !formula.EmbeddedFormulaExists(name) {
+			continue // Custom formula, not legacy
+		}
+
+		// Compare content
+		path := filepath.Join(formulasDir, entry.Name())
+		localContent, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		embeddedContent, err := formula.GetEmbeddedFormula(name)
+		if err != nil {
+			continue
+		}
+
+		// If content matches exactly, it's a legacy provisioned formula
+		if bytes.Equal(localContent, embeddedContent) {
+			c.legacyFormulas = append(c.legacyFormulas, path)
+		}
+	}
+}
+
+// discoverRigDirs returns paths to all rig directories in the town
+func (c *LegacyProvisionedFormulasCheck) discoverRigDirs(townRoot string) []string {
+	var rigDirs []string
+
+	// Read rigs.json to get registered rigs
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	content, err := os.ReadFile(rigsConfigPath)
+	if err != nil {
+		return rigDirs
+	}
+
+	// Simple JSON parsing for rig names
+	lines := strings.Split(string(content), "\n")
+	inRigs := false
+	braceDepth := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, `"rigs"`) {
+			inRigs = true
+			continue
+		}
+		if inRigs {
+			if strings.Contains(trimmed, "{") {
+				braceDepth++
+			}
+			if strings.Contains(trimmed, "}") {
+				braceDepth--
+				if braceDepth <= 0 {
+					inRigs = false
+				}
+			}
+			if braceDepth == 1 && strings.Contains(trimmed, `":`) {
+				parts := strings.Split(trimmed, `"`)
+				if len(parts) >= 2 {
+					rigName := parts[1]
+					if rigName != "" && rigName != "rigs" {
+						rigPath := filepath.Join(townRoot, rigName)
+						if info, err := os.Stat(rigPath); err == nil && info.IsDir() {
+							rigDirs = append(rigDirs, rigPath)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return rigDirs
 }

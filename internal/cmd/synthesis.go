@@ -18,9 +18,9 @@ import (
 
 // Synthesis command flags
 var (
-	synthesisRig     string
-	synthesisDryRun  bool
-	synthesisForce   bool
+	synthesisRig      string
+	synthesisDryRun   bool
+	synthesisForce    bool
 	synthesisReviewID string
 )
 
@@ -120,7 +120,7 @@ type ConvoyMeta struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Status      string   `json:"status"`
-	Formula     string   `json:"formula,omitempty"`     // Formula name
+	Formula     string   `json:"formula,omitempty"`      // Formula name
 	FormulaPath string   `json:"formula_path,omitempty"` // Path to formula file
 	ReviewID    string   `json:"review_id,omitempty"`    // Review ID for output paths
 	LegIssues   []string `json:"leg_issues,omitempty"`   // Tracked leg issue IDs
@@ -582,6 +582,7 @@ func slingSynthesis(beadID, targetRig string) error {
 }
 
 // findFormula searches for a formula file by name.
+// Resolution order: rig .beads/formulas/ → town $GT_ROOT/.beads/formulas/ → embedded
 func findFormula(name string) (string, error) {
 	// Search paths
 	searchPaths := []string{
@@ -611,6 +612,11 @@ func findFormula(name string) (string, error) {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
+	}
+
+	// Check embedded formulas as fallback
+	if formula.EmbeddedFormulaExists(name) {
+		return "embedded:" + name, nil
 	}
 
 	return "", fmt.Errorf("formula '%s' not found", name)

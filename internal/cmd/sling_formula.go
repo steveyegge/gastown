@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -49,9 +50,9 @@ func trimJSONForError(jsonOutput []byte) string {
 	return s
 }
 
-// verifyFormulaExists checks that the formula exists using bd formula show.
+// verifyFormulaExists checks that the formula exists using bd formula show or embedded check.
 // Formulas are TOML files (.formula.toml).
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Resolution order: disk (via bd) → embedded fallback
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
 	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
@@ -67,7 +68,15 @@ func verifyFormulaExists(formulaName string) error {
 		return nil
 	}
 
-	return fmt.Errorf("formula '%s' not found (check 'bd formula list')", formulaName)
+	// Check embedded formulas as fallback
+	if formula.EmbeddedFormulaExists(formulaName) {
+		return nil
+	}
+	if formula.EmbeddedFormulaExists("mol-" + formulaName) {
+		return nil
+	}
+
+	return fmt.Errorf("formula '%s' not found (check 'bd formula list' or embedded formulas)", formulaName)
 }
 
 // runSlingFormula handles standalone formula slinging.
@@ -92,8 +101,8 @@ func runSlingFormula(args []string) error {
 	var targetAgent string
 	var targetPane string
 	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
-	var formulaWorkDir string            // Working directory for bd cook/wisp (routes to correct rig beads)
-	var isSelfSling bool                 // True if slinging to self (skip nudge - agent already knows)
+	var formulaWorkDir string           // Working directory for bd cook/wisp (routes to correct rig beads)
+	var isSelfSling bool                // True if slinging to self (skip nudge - agent already knows)
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
@@ -300,9 +309,9 @@ func runSlingFormula(args []string) error {
 
 	var prompt string
 	if slingArgs != "" {
-		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `" + cli.Name() + " hook` to see your hook, then execute using these args.", formulaName, slingArgs)
+		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `"+cli.Name()+" hook` to see your hook, then execute using these args.", formulaName, slingArgs)
 	} else {
-		prompt = fmt.Sprintf("Formula %s slung. Run `" + cli.Name() + " hook` to see your hook, then execute the steps.", formulaName)
+		prompt = fmt.Sprintf("Formula %s slung. Run `"+cli.Name()+" hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
 	if err := t.NudgePane(targetPane, prompt); err != nil {

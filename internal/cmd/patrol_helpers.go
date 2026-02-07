@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"bytes"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,14 +15,14 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName      string   // "deacon", "witness", "refinery"
-	PatrolMolName string   // "mol-deacon-patrol", etc.
-	BeadsDir      string   // where to look for beads
-	Assignee      string   // agent identity for pinning
-	HeaderEmoji   string   // display emoji
-	HeaderTitle   string   // "Patrol Status", etc.
-	WorkLoopSteps []string // role-specific instructions
-	CheckInProgress bool   // whether to check in_progress status first (witness/refinery do, deacon doesn't)
+	RoleName        string   // "deacon", "witness", "refinery"
+	PatrolMolName   string   // "mol-deacon-patrol", etc.
+	BeadsDir        string   // where to look for beads
+	Assignee        string   // agent identity for pinning
+	HeaderEmoji     string   // display emoji
+	HeaderTitle     string   // "Patrol Status", etc.
+	WorkLoopSteps   []string // role-specific instructions
+	CheckInProgress bool     // whether to check in_progress status first (witness/refinery do, deacon doesn't)
 }
 
 // findActivePatrol finds an active patrol molecule for the role.

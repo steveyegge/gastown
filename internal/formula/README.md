@@ -203,17 +203,26 @@ deps := f.GetDependencies("build")  // Returns ["test"]
 
 ## Embedded Formulas
 
-The package embeds common formulas for Gas Town workflows:
+The package embeds 30+ common formulas for Gas Town workflows from `internal/formula/formulas/` (the single source of truth). Formulas are compiled into the `gt` binary and resolved at runtime: rig → town → embedded.
 
 ```go
-// Provision embedded formulas to a beads workspace
-count, err := formula.ProvisionFormulas("/path/to/workspace")
+// Read an embedded formula by name
+content, err := formula.GetEmbeddedFormula("shiny")
 
-// Check formula health (outdated, modified, etc.)
-report, err := formula.CheckFormulaHealth("/path/to/workspace")
+// List all embedded formula names
+names, err := formula.GetEmbeddedFormulaNames()
 
-// Update formulas safely (preserves user modifications)
-updated, skipped, reinstalled, err := formula.UpdateFormulas("/path/to/workspace")
+// Check if an embedded formula exists
+exists := formula.EmbeddedFormulaExists("shiny")
+
+// Get SHA-256 hash of an embedded formula
+hash, err := formula.GetEmbeddedFormulaHash("shiny")
+
+// Copy an embedded formula to a local path (for gt formula modify)
+path, err := formula.CopyFormulaTo("shiny", "/path/to/.beads/formulas/")
+
+// Extract base version hash from an override file's header comment
+baseHash := formula.ExtractBaseHash(overrideContent)
 ```
 
 ## Testing

@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +13,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
-	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -288,14 +287,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
-
-			// Provision embedded formulas to .beads/formulas/
-			if count, err := formula.ProvisionFormulas(absPath); err != nil {
-				// Non-fatal: formulas are optional, just convenience
-				fmt.Printf("   %s Could not provision formulas: %v\n", style.Dim.Render("⚠"), err)
-			} else if count > 0 {
-				fmt.Printf("   ✓ Provisioned %d formulas\n", count)
-			}
+			// Note: Formulas are no longer provisioned during install.
+			// They resolve from embedded as fallback. Use 'gt formula modify' to customize.
 		}
 
 		// Create town-level agent beads (Mayor, Deacon).

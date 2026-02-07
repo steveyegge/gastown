@@ -49,19 +49,8 @@ jobs:
       - name: Build without go:generate
         run: |
           # This must succeed with committed formulas only
-          # If this fails, run: go generate ./... && git add -A && git commit
+          # internal/formula/formulas/ is the single source of truth (no go:generate needed)
           go build -v ./cmd/gt
-
-      - name: Verify formulas are in sync
-        run: |
-          # Regenerate and check for differences
-          go generate ./internal/formula/...
-          if ! git diff --exit-code internal/formula/formulas/; then
-            echo ""
-            echo "ERROR: Committed formulas are out of sync with .beads/formulas/"
-            echo "Run: go generate ./... && git add -A && git commit"
-            exit 1
-          fi
 
   test:
     name: Test

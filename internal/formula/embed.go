@@ -4,331 +4,142 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Generate formulas directory from canonical source at .beads/formulas/
-//go:generate sh -c "rm -rf formulas && mkdir -p formulas && cp ../../.beads/formulas/*.formula.toml formulas/"
+// Embedded formulas - this directory (internal/formula/formulas/) is the source of truth.
+//
+// To add or modify formulas, edit files directly in internal/formula/formulas/
+// Do NOT edit .beads/formulas/ - that directory is for user overrides only.
+//
+// Formula resolution order (most specific wins):
+//   1. Rig:      <rig>/.beads/formulas/     (project-specific)
+//   2. Town:     $GT_ROOT/.beads/formulas/  (user customizations)
+//   3. Embedded: (compiled in binary)        (defaults, this directory)
 
 //go:embed formulas/*.formula.toml
 var formulasFS embed.FS
 
-// InstalledRecord tracks which formulas were installed and their checksums.
-// Stored in .beads/formulas/.installed.json
-type InstalledRecord struct {
-	Formulas map[string]string `json:"formulas"` // filename -> sha256 at install time
+// formulaNameToFilename converts a formula name to its filename.
+// If the name already has the .formula.toml suffix, returns it as-is.
+// Otherwise, appends .formula.toml.
+func formulaNameToFilename(name string) string {
+	const suffix = ".formula.toml"
+	if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
+		return name
+	}
+	return name + suffix
 }
 
-// FormulaStatus represents the status of a single formula during health check.
-type FormulaStatus struct {
-	Name          string
-	Status        string // "ok", "outdated", "modified", "missing", "new", "untracked"
-	EmbeddedHash  string // hash computed from embedded content
-	InstalledHash string // hash we installed (from .installed.json)
-	CurrentHash   string // hash of current file on disk
+// filenameToFormulaName converts a filename to a formula name by removing the .formula.toml suffix.
+func filenameToFormulaName(filename string) string {
+	const suffix = ".formula.toml"
+	if len(filename) > len(suffix) && filename[len(filename)-len(suffix):] == suffix {
+		return filename[:len(filename)-len(suffix)]
+	}
+	return filename
 }
 
-// HealthReport contains the results of checking formula health.
-type HealthReport struct {
-	Formulas []FormulaStatus
-	// Counts
-	OK        int
-	Outdated  int // embedded changed, user hasn't modified
-	Modified  int // user modified the file (tracked in .installed.json)
-	Missing   int // file was deleted
-	New       int // new formula not yet installed
-	Untracked int // file exists but not in .installed.json (safe to update)
+// GetEmbeddedFormula returns the content of an embedded formula by name.
+// The name can be provided with or without the .formula.toml suffix.
+// Returns an error if the formula does not exist.
+func GetEmbeddedFormula(name string) ([]byte, error) {
+	filename := formulaNameToFilename(name)
+	content, err := formulasFS.ReadFile("formulas/" + filename)
+	if err != nil {
+		return nil, fmt.Errorf("embedded formula %q not found: %w", name, err)
+	}
+	return content, nil
 }
 
-// computeHash computes SHA256 hash of data.
-func computeHash(data []byte) string {
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
-}
-
-// getEmbeddedFormulas returns a map of filename -> sha256 for all embedded formulas.
-func getEmbeddedFormulas() (map[string]string, error) {
+// GetEmbeddedFormulaNames returns a list of all embedded formula names.
+// The names are returned without the .formula.toml suffix.
+func GetEmbeddedFormulaNames() ([]string, error) {
 	entries, err := formulasFS.ReadDir("formulas")
 	if err != nil {
 		return nil, fmt.Errorf("reading formulas directory: %w", err)
 	}
 
-	result := make(map[string]string)
+	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		content, err := formulasFS.ReadFile("formulas/" + entry.Name())
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
-		result[entry.Name()] = computeHash(content)
+		names = append(names, filenameToFormulaName(entry.Name()))
 	}
-	return result, nil
+	return names, nil
 }
 
-// loadInstalledRecord loads the installed record from disk.
-func loadInstalledRecord(formulasDir string) (*InstalledRecord, error) {
-	path := filepath.Join(formulasDir, ".installed.json")
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return &InstalledRecord{Formulas: make(map[string]string)}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading installed record: %w", err)
-	}
-	var r InstalledRecord
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("parsing installed record: %w", err)
-	}
-	if r.Formulas == nil {
-		r.Formulas = make(map[string]string)
-	}
-	return &r, nil
+// EmbeddedFormulaExists returns true if an embedded formula with the given name exists.
+// The name can be provided with or without the .formula.toml suffix.
+func EmbeddedFormulaExists(name string) bool {
+	filename := formulaNameToFilename(name)
+	_, err := formulasFS.ReadFile("formulas/" + filename)
+	return err == nil
 }
 
-// saveInstalledRecord saves the installed record to disk.
-func saveInstalledRecord(formulasDir string, record *InstalledRecord) error {
-	path := filepath.Join(formulasDir, ".installed.json")
-	data, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encoding installed record: %w", err)
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-// computeFileHash computes SHA256 hash of a file.
-func computeFileHash(path string) (string, error) {
-	data, err := os.ReadFile(path)
+// GetEmbeddedFormulaHash computes and returns the SHA-256 hash of an embedded formula.
+// The name can be provided with or without the .formula.toml suffix.
+func GetEmbeddedFormulaHash(name string) (string, error) {
+	content, err := GetEmbeddedFormula(name)
 	if err != nil {
 		return "", err
 	}
-	return computeHash(data), nil
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:]), nil
 }
 
-// ProvisionFormulas creates the .beads/formulas/ directory with embedded formulas.
-// This is called during gt install for fresh installations.
-// If a formula already exists, it is skipped (no overwrite).
-// Returns the number of formulas provisioned.
-func ProvisionFormulas(beadsPath string) (int, error) {
-	embedded, err := getEmbeddedFormulas()
-	if err != nil {
-		return 0, err
-	}
-
-	entries, err := formulasFS.ReadDir("formulas")
-	if err != nil {
-		return 0, fmt.Errorf("reading formulas directory: %w", err)
-	}
-
-	// Create .beads/formulas/ directory
-	formulasDir := filepath.Join(beadsPath, ".beads", "formulas")
-	if err := os.MkdirAll(formulasDir, 0755); err != nil {
-		return 0, fmt.Errorf("creating formulas directory: %w", err)
-	}
-
-	// Load existing installed record (or create new)
-	installed, err := loadInstalledRecord(formulasDir)
-	if err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+// ExtractBaseHash extracts the hash from the "# Based on embedded version: sha256:XXXX"
+// line in a formula file's content. Returns empty string if not found.
+func ExtractBaseHash(content []byte) string {
+	const prefix = "# Based on embedded version: sha256:"
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(line[len(prefix):])
 		}
-
-		destPath := filepath.Join(formulasDir, entry.Name())
-
-		// Skip if formula already exists (don't overwrite user customizations)
-		if _, err := os.Stat(destPath); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			// Log unexpected errors but continue
-			continue
-		}
-
-		content, err := formulasFS.ReadFile("formulas/" + entry.Name())
-		if err != nil {
-			return count, fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
-
-		if err := os.WriteFile(destPath, content, 0644); err != nil {
-			return count, fmt.Errorf("writing %s: %w", entry.Name(), err)
-		}
-
-		// Record the hash we installed
-		if hash, ok := embedded[entry.Name()]; ok {
-			installed.Formulas[entry.Name()] = hash
-		}
-		count++
 	}
-
-	// Save updated installed record
-	if err := saveInstalledRecord(formulasDir, installed); err != nil {
-		return count, fmt.Errorf("saving installed record: %w", err)
-	}
-
-	return count, nil
+	return ""
 }
 
-// CheckFormulaHealth checks the status of all formulas.
-// Returns a report of which formulas are ok, outdated, modified, or missing.
-func CheckFormulaHealth(beadsPath string) (*HealthReport, error) {
-	embedded, err := getEmbeddedFormulas()
+// CopyFormulaTo copies an embedded formula to the specified destination path.
+// This is used by `gt formula modify` to create a local override.
+// The destination path should be a directory (e.g., ~/.beads/formulas/).
+// A hash comment header is prepended to track which embedded version the override is based on.
+// Returns the full path to the copied file.
+func CopyFormulaTo(name, destDir string) (string, error) {
+	content, err := GetEmbeddedFormula(name)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	formulasDir := filepath.Join(beadsPath, ".beads", "formulas")
-	installed, err := loadInstalledRecord(formulasDir)
-	if err != nil {
-		return nil, err
+	// Compute hash of the embedded content
+	hash := sha256.Sum256(content)
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Prepend hash header
+	header := fmt.Sprintf("# Formula override created by gt formula modify\n# Based on embedded version: sha256:%s\n# To update: gt formula update %s\n\n", hashStr, name)
+	contentWithHeader := append([]byte(header), content...)
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", fmt.Errorf("creating destination directory: %w", err)
 	}
 
-	report := &HealthReport{}
+	filename := formulaNameToFilename(name)
+	destPath := filepath.Join(destDir, filename)
 
-	for filename, embeddedHash := range embedded {
-		status := FormulaStatus{
-			Name:         filename,
-			EmbeddedHash: embeddedHash,
-		}
-
-		installedHash, wasInstalled := installed.Formulas[filename]
-		status.InstalledHash = installedHash
-
-		destPath := filepath.Join(formulasDir, filename)
-		currentHash, err := computeFileHash(destPath)
-
-		if os.IsNotExist(err) {
-			// File doesn't exist
-			if wasInstalled {
-				// We installed it before, user deleted it
-				status.Status = "missing"
-				report.Missing++
-			} else {
-				// New formula, never installed
-				status.Status = "new"
-				report.New++
-			}
-		} else if err != nil {
-			// Some other error reading file
-			status.Status = "error"
-		} else {
-			status.CurrentHash = currentHash
-
-			if currentHash == embeddedHash {
-				// File matches embedded - all good
-				status.Status = "ok"
-				report.OK++
-			} else if wasInstalled && currentHash == installedHash {
-				// File matches what we installed, but embedded has changed
-				// User hasn't modified, safe to update
-				status.Status = "outdated"
-				report.Outdated++
-			} else if wasInstalled {
-				// File was tracked and user modified it - don't overwrite
-				status.Status = "modified"
-				report.Modified++
-			} else {
-				// File exists but not tracked (e.g., from older gt version)
-				// Safe to update since we have no record of user modification
-				status.Status = "untracked"
-				report.Untracked++
-			}
-		}
-
-		report.Formulas = append(report.Formulas, status)
+	// Check if file already exists
+	if _, err := os.Stat(destPath); err == nil {
+		return "", fmt.Errorf("formula override already exists at %s", destPath)
 	}
 
-	return report, nil
-}
-
-// UpdateFormulas updates formulas that are safe to update (outdated, missing, or untracked).
-// Skips user-modified formulas (tracked files that user changed).
-// Returns counts of updated, skipped (modified), and reinstalled (missing).
-func UpdateFormulas(beadsPath string) (updated, skipped, reinstalled int, err error) {
-	embedded, err := getEmbeddedFormulas()
-	if err != nil {
-		return 0, 0, 0, err
+	if err := os.WriteFile(destPath, contentWithHeader, 0644); err != nil {
+		return "", fmt.Errorf("writing formula: %w", err)
 	}
 
-	formulasDir := filepath.Join(beadsPath, ".beads", "formulas")
-	if err := os.MkdirAll(formulasDir, 0755); err != nil {
-		return 0, 0, 0, fmt.Errorf("creating formulas directory: %w", err)
-	}
-
-	installed, err := loadInstalledRecord(formulasDir)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	for filename, embeddedHash := range embedded {
-		installedHash, wasInstalled := installed.Formulas[filename]
-		destPath := filepath.Join(formulasDir, filename)
-		currentHash, fileErr := computeFileHash(destPath)
-
-		shouldInstall := false
-		isMissing := false
-		isModified := false
-
-		if os.IsNotExist(fileErr) {
-			// File doesn't exist - install it
-			shouldInstall = true
-			if wasInstalled {
-				isMissing = true
-			}
-		} else if fileErr != nil {
-			// Error reading file, skip
-			continue
-		} else if currentHash == embeddedHash {
-			// Already up to date
-			continue
-		} else if wasInstalled && currentHash == installedHash {
-			// User hasn't modified, safe to update
-			shouldInstall = true
-		} else if wasInstalled {
-			// Tracked file was modified by user - skip
-			isModified = true
-		} else {
-			// Untracked file (e.g., from older gt version) - safe to update
-			shouldInstall = true
-		}
-
-		if isModified {
-			skipped++
-			continue
-		}
-
-		if shouldInstall {
-			content, err := formulasFS.ReadFile("formulas/" + filename)
-			if err != nil {
-				return updated, skipped, reinstalled, fmt.Errorf("reading %s: %w", filename, err)
-			}
-
-			if err := os.WriteFile(destPath, content, 0644); err != nil {
-				return updated, skipped, reinstalled, fmt.Errorf("writing %s: %w", filename, err)
-			}
-
-			// Update installed record
-			installed.Formulas[filename] = embeddedHash
-
-			if isMissing {
-				reinstalled++
-			} else {
-				updated++
-			}
-		}
-	}
-
-	// Save updated installed record
-	if err := saveInstalledRecord(formulasDir, installed); err != nil {
-		return updated, skipped, reinstalled, fmt.Errorf("saving installed record: %w", err)
-	}
-
-	return updated, skipped, reinstalled, nil
+	return destPath, nil
 }
