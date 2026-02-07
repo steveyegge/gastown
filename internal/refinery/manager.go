@@ -178,9 +178,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Must be before WaitForRuntimeReady to avoid race where dialog blocks prompt detection.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
-	// WaitForRuntimeReady waits for the runtime to be ready
-	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start - fatal if agent fails to launch
+	// WaitForAgent polls until the agent is detected as running in the session
+	if err := t.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for refinery to start: %w", err)
@@ -188,6 +188,13 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// If the agent doesn't support initial prompts via command line arguments,
+	// send the beacon as a nudge after the agent has started.
+	if runtimeConfig.PromptMode == "none" {
+		_ = t.NudgeSession(sessionID, initialPrompt)
+	}
+
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
 
 	return nil

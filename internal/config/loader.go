@@ -1389,7 +1389,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	var cmd string
 	if len(exports) > 0 {
 		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
+		// replaces the shell. This allows WaitForAgent to detect the
 		// running agent via pane_current_command (which shows the direct
 		// process, not child processes).
 		cmd = "exec env " + strings.Join(exports, " ") + " "
@@ -1501,7 +1501,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	var cmd string
 	if len(exports) > 0 {
 		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
+		// replaces the shell. This allows WaitForAgent to detect the
 		// running agent via pane_current_command (which shows the direct
 		// process, not child processes).
 		cmd = "exec env " + strings.Join(exports, " ") + " "
@@ -1608,6 +1608,12 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
+
+	// Use configured process names if available
+	if rc.Tmux != nil && len(rc.Tmux.ProcessNames) > 0 {
+		return rc.Tmux.ProcessNames
+	}
+
 	if filepath.Base(rc.Command) == "claude" {
 		return []string{"node", "claude"}
 	}

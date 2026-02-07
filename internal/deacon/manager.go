@@ -111,8 +111,8 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Deacon", "health-check")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start - fatal if agent fails to launch
+	if err := t.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for deacon to start: %w", err)

@@ -170,8 +170,8 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start - fatal if agent fails to launch
+	if err := t.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for witness to start: %w", err)

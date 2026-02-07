@@ -246,8 +246,8 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	agentID := fmt.Sprintf("%s/%s", m.rig.Name, polecat)
 	debugSession("SetPaneDiedHook", m.tmux.SetPaneDiedHook(sessionID, agentID))
 
-	// Wait for Claude to start (non-fatal)
-	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
+	// Wait for agent to start (non-fatal)
+	debugSession("WaitForAgent", m.tmux.WaitForAgent(sessionID, constants.ClaudeStartTimeout))
 
 	// Accept bypass permissions warning dialog if it appears
 	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))

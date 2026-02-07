@@ -382,7 +382,7 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	if err := t.WaitForAgent(sessionName, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for agent to start: %w", err)
 	}
 

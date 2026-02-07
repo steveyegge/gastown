@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -216,6 +218,21 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			// Note: respawn-pane automatically resets remain-on-exit to off
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
+			}
+
+			// If the agent doesn't support initial prompts via command line arguments,
+			// send the beacon as a nudge after the agent has started.
+			if agentCfg.PromptMode == "none" {
+				// Wait for it to start
+				if err := t.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
+					style.PrintWarning("timeout waiting for agent to restart: %v", err)
+				} else {
+					// Use a delay if configured to ensure the TUI is ready
+					if agentCfg.Tmux != nil && agentCfg.Tmux.ReadyDelayMs > 0 {
+						time.Sleep(time.Duration(agentCfg.Tmux.ReadyDelayMs) * time.Millisecond)
+					}
+					_ = t.NudgeSession(sessionID, beacon)
+				}
 			}
 
 			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))

@@ -115,8 +115,8 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start - fatal if agent fails to launch
+	if err := t.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for mayor to start: %w", err)
@@ -127,8 +127,15 @@ func (m *Manager) Start(agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
+	// If the agent doesn't support initial prompts via command line arguments,
+	// send the beacon as a nudge after the agent has started.
+	if runtimeConfig.PromptMode == "none" {
+		// Use a delay if configured to ensure the TUI is ready
+		if runtimeConfig.Tmux != nil && runtimeConfig.Tmux.ReadyDelayMs > 0 {
+			time.Sleep(time.Duration(runtimeConfig.Tmux.ReadyDelayMs) * time.Millisecond)
+		}
+		_ = t.NudgeSession(sessionID, beacon)
+	}
 
 	return nil
 }

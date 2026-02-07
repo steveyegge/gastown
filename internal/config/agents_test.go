@@ -206,7 +206,7 @@ func TestAgentPresetYOLOFlags(t *testing.T) {
 		wantArg string // At least this arg should be present
 	}{
 		{AgentClaude, "--dangerously-skip-permissions"},
-		{AgentGemini, "yolo"}, // Part of "--approval-mode yolo"
+		{AgentGemini, "--yolo"},
 		{AgentCodex, "--yolo"},
 	}
 
@@ -219,7 +219,7 @@ func TestAgentPresetYOLOFlags(t *testing.T) {
 
 			found := false
 			for _, arg := range info.Args {
-				if arg == tt.wantArg || (tt.preset == AgentGemini && arg == "yolo") {
+				if arg == tt.wantArg {
 					found = true
 					break
 				}
@@ -287,7 +287,7 @@ func TestBuildResumeCommand(t *testing.T) {
 			agentName: "gemini",
 			sessionID: "gemini-sess-456",
 			wantEmpty: false,
-			contains:  []string{"gemini", "--approval-mode", "yolo", "--resume", "gemini-sess-456"},
+			contains:  []string{"gemini", "--yolo", "--resume", "gemini-sess-456"},
 		},
 		{
 			name:      "codex subcommand style",
@@ -385,7 +385,7 @@ func TestGetProcessNames(t *testing.T) {
 		want      []string
 	}{
 		{"claude", []string{"node", "claude"}},
-		{"gemini", []string{"gemini"}},
+		{"gemini", []string{"gemini", "node", "python"}},
 		{"codex", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
@@ -453,7 +453,7 @@ func TestAgentCommandGeneration(t *testing.T) {
 		{
 			preset:       AgentGemini,
 			wantCommand:  "gemini",
-			wantContains: []string{"--approval-mode", "yolo"},
+			wantContains: []string{"--yolo"},
 		},
 		{
 			preset:       AgentCodex,

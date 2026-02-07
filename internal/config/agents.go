@@ -74,6 +74,12 @@ type AgentPresetInfo struct {
 	// Claude-only feature for seance command.
 	SupportsForkSession bool `json:"supports_fork_session,omitempty"`
 
+	// PromptMode controls how prompts are passed to the runtime ("arg", "none").
+	PromptMode string `json:"prompt_mode,omitempty"`
+
+	// ReadyDelayMs is a fixed delay used when prompt detection is unavailable.
+	ReadyDelayMs int `json:"ready_delay_ms,omitempty"`
+
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
 }
@@ -120,13 +126,15 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentGemini: {
 		Name:                AgentGemini,
 		Command:             "gemini",
-		Args:                []string{"--approval-mode", "yolo"},
-		ProcessNames:        []string{"gemini"}, // Gemini CLI binary
+		Args:                []string{"--yolo"},
+		ProcessNames:        []string{"gemini", "node", "python"}, // Handle potential wrappers
 		SessionIDEnv:        "GEMINI_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,
 		SupportsForkSession: false,
+		PromptMode:          "none", // Force nudge approach for interactive sessions
+		ReadyDelayMs:        2000,   // Give Gemini TUI time to stabilize before nudge
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
@@ -363,10 +371,18 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	rc := &RuntimeConfig{
-		Provider: string(info.Name),
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Provider:   string(info.Name),
+		Command:    info.Command,
+		Args:       append([]string(nil), info.Args...), // Copy to avoid mutation
+		PromptMode: info.PromptMode,
+		Env:        envCopy,
+	}
+
+	if info.ReadyDelayMs > 0 {
+		if rc.Tmux == nil {
+			rc.Tmux = &RuntimeTmuxConfig{}
+		}
+		rc.Tmux.ReadyDelayMs = info.ReadyDelayMs
 	}
 
 	// Resolve command path for claude preset (handles alias installations)
@@ -453,6 +469,7 @@ func (rc *RuntimeConfig) MergeWithPreset(preset AgentPreset) *RuntimeConfig {
 		Command:       rc.Command,
 		Args:          append([]string(nil), rc.Args...),
 		InitialPrompt: rc.InitialPrompt,
+		PromptMode:    rc.PromptMode,
 	}
 
 	// Apply preset defaults only if not overridden

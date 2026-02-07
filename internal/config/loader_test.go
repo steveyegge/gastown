@@ -1138,7 +1138,7 @@ func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
 	if !strings.Contains(cmd, "GT_POLECAT=toast") {
 		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
 	}
-	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+	if !strings.Contains(cmd, "gemini --yolo") {
 		t.Fatalf("expected gemini command in output: %q", cmd)
 	}
 }
@@ -1177,7 +1177,7 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 		if !strings.Contains(cmd, "BD_ACTOR=mayor") {
 			t.Fatalf("expected BD_ACTOR export in command: %q", cmd)
 		}
-		if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+		if !strings.Contains(cmd, "gemini --yolo") {
 			t.Fatalf("expected gemini command in output: %q", cmd)
 		}
 	})
@@ -1224,7 +1224,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	if !strings.Contains(cmd, "BD_ACTOR=testrig/crew/max") {
 		t.Fatalf("expected BD_ACTOR export in command: %q", cmd)
 	}
-	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+	if !strings.Contains(cmd, "gemini --yolo") {
 		t.Fatalf("expected gemini command in output: %q", cmd)
 	}
 }
@@ -1250,7 +1250,7 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected rig agent (codex) in command: %q", cmd)
 	}
-	if strings.Contains(cmd, "gemini --approval-mode yolo") {
+	if strings.Contains(cmd, "gemini --yolo") {
 		t.Fatalf("did not expect town default agent in command: %q", cmd)
 	}
 }

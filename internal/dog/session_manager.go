@@ -148,7 +148,7 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	_ = m.tmux.ConfigureGasTownSession(sessionID, theme, "", dogName, "dog")
 
 	// Wait for agent to start
-	if err := m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	if err := m.tmux.WaitForAgent(sessionID, constants.ClaudeStartTimeout); err != nil {
 		_ = m.tmux.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for dog to start: %w", err)
 	}

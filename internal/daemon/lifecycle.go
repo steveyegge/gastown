@@ -389,7 +389,7 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 
 	// Wait for Claude to start, then accept bypass permissions warning if it appears.
 	// This ensures automated role starts aren't blocked by the warning dialog.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	if err := d.tmux.WaitForAgent(sessionName, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - Claude might still start
 	}
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)

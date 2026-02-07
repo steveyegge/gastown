@@ -538,10 +538,15 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Note: We intentionally don't wait for the agent to start here.
-	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when the agent is ready,
-	// they can check with IsAgentAlive().
+	// If the agent doesn't support initial prompts via command line arguments,
+	// send the beacon as a nudge after the agent has started.
+	if runtimeConfig.PromptMode == "none" {
+		// Use a delay if configured to ensure the TUI is ready
+		if runtimeConfig.Tmux != nil && runtimeConfig.Tmux.ReadyDelayMs > 0 {
+			time.Sleep(time.Duration(runtimeConfig.Tmux.ReadyDelayMs) * time.Millisecond)
+		}
+		_ = t.NudgeSession(sessionID, beacon)
+	}
 
 	return nil
 }

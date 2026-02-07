@@ -77,7 +77,7 @@ arguments contain spaces.
 
 Examples:
   gt config agent set claude-glm \"claude-glm --model glm-4\"
-  gt config agent set gemini-custom gemini --approval-mode yolo
+  gt config agent set gemini-custom gemini --yolo
   gt config agent set claude \"claude-glm\"  # Override built-in claude`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigAgentSet,

@@ -445,8 +445,8 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
 
-	// Wait for Claude to start
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start
+	if err := t.WaitForAgent(sessionName, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 

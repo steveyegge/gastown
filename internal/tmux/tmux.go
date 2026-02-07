@@ -894,18 +894,36 @@ func processMatchesNames(pid string, names []string) bool {
 		return false
 	}
 	// Use ps to get the command name (COMM column gives the executable name)
-	cmd := exec.Command("ps", "-p", pid, "-o", "comm=")
+	// Also get args to match against full command line
+	cmd := exec.Command("ps", "-p", pid, "-o", "comm=,args=")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	// Get just the base name (in case it's a full path like /Users/.../claude)
-	commPath := strings.TrimSpace(string(out))
-	comm := filepath.Base(commPath)
+	output := strings.TrimSpace(string(out))
+	if output == "" {
+		return false
+	}
 
-	// Check if any name matches
+	// Output format: "COMMAND ARGS..."
+	// Split into comm and args parts isn't reliable with spaces, so we check both strategies
+	// 1. Check if COMM matches (exact name)
+	// 2. Check if ARGS contains name (full line match)
+
+	parts := strings.Fields(output)
+	if len(parts) == 0 {
+		return false
+	}
+	comm := filepath.Base(parts[0])
+
+	// Check matches
 	for _, name := range names {
+		// Exact binary name match
 		if comm == name {
+			return true
+		}
+		// Full command line containment match (handles "bash /path/to/gemini")
+		if strings.Contains(output, name) {
 			return true
 		}
 	}
@@ -920,8 +938,8 @@ func hasDescendantWithNames(pid string, names []string, depth int) bool {
 	if len(names) == 0 || depth > maxDepth {
 		return false
 	}
-	// Use pgrep to find child processes
-	cmd := exec.Command("pgrep", "-P", pid, "-l")
+	// Use pgrep to find child processes with full command line
+	cmd := exec.Command("pgrep", "-P", pid, "-a")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -938,19 +956,33 @@ func hasDescendantWithNames(pid string, names []string, depth int) bool {
 		if line == "" {
 			continue
 		}
-		// Format: "PID name" e.g., "29677 node"
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			childPid := parts[0]
-			childName := parts[1]
-			// Direct match
-			if nameSet[childName] {
-				return true
+		// Format: "PID command args..." e.g., "29677 node index.js"
+		// We want to check if any of our target names appear in the command line
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) < 1 {
+			continue
+		}
+		childPid := parts[0]
+		cmdLine := ""
+		if len(parts) > 1 {
+			cmdLine = parts[1]
+		}
+
+		// Check full command line for match
+		matched := false
+		for _, name := range names {
+			if strings.Contains(cmdLine, name) {
+				matched = true
+				break
 			}
-			// Recursive check of descendants
-			if hasDescendantWithNames(childPid, names, depth+1) {
-				return true
-			}
+		}
+		if matched {
+			return true
+		}
+
+		// Recursive check of descendants
+		if hasDescendantWithNames(childPid, names, depth+1) {
+			return true
 		}
 	}
 	return false
@@ -1232,6 +1264,19 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 		time.Sleep(constants.PollInterval)
 	}
 	return fmt.Errorf("timeout waiting for command (still running excluded command)")
+}
+
+// WaitForAgent polls until the agent is detected as running in the session.
+// Uses agent-agnostic zombie detection (descendant process check).
+func (t *Tmux) WaitForAgent(session string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if t.IsAgentAlive(session) {
+			return nil
+		}
+		time.Sleep(constants.PollInterval)
+	}
+	return fmt.Errorf("timeout waiting for agent")
 }
 
 // WaitForShellReady polls until the pane is running a shell command.
