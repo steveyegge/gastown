@@ -24,27 +24,43 @@ import (
 
 // Session command flags
 var (
-	sessionIssue     string
-	sessionForce     bool
-	sessionLines     int
-	sessionMessage   string
-	sessionFile      string
-	sessionRigFilter string
-	sessionListJSON  bool
+	sessionIssue        string
+	sessionForce        bool
+	sessionLines        int
+	sessionMessage      string
+	sessionFile         string
+	sessionRigFilter    string
+	sessionListJSON     bool
+	sessionCommand      string
+	sessionNewDirectory string
 )
 
 var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"sess"},
 	GroupID: GroupAgents,
-	Short:   "Manage polecat sessions",
+	Short:   "Manage tmux sessions",
 	RunE:    requireSubcommand,
-	Long: `Manage tmux sessions for polecats.
+	Long: `Manage tmux sessions for polecats and arbitrary tmux sessions.
 
-Sessions are tmux sessions running Claude for each polecat.
-Use the subcommands to start, stop, attach, and monitor sessions.
+Polecat sessions run Claude for each Gas Town polecat worker.
+You can also create and manage arbitrary tmux sessions with generic commands.
 
-TIP: To send messages to a running session, use 'gt nudge' (not 'session inject').
+For polecat sessions, use:
+  gt session start/stop/restart <rig>/<polecat>
+  gt session status <rig>/<polecat>
+  gt session check [rig]
+
+For arbitrary tmux sessions, use:
+  gt session new <name>              # Create a session
+  gt session at <name>               # Attach to a session
+  gt session send <name> -c "cmd"    # Send a command
+  gt session show <name>             # Show session details
+  gt session rm <name>               # Remove a session
+  gt session list                    # List all sessions
+  gt session capture <name> [lines]  # Capture output
+
+TIP: To send messages to a running Claude session, use 'gt nudge' (not 'session inject').
 The nudge command uses reliable delivery that works correctly with Claude Code.`,
 }
 
@@ -75,12 +91,17 @@ Use --force to skip graceful shutdown.`,
 }
 
 var sessionAtCmd = &cobra.Command{
-	Use:     "at <rig>/<polecat>",
+	Use:     "at <session>",
 	Aliases: []string{"attach"},
 	Short:   "Attach to a running session",
-	Long: `Attach to a running polecat session.
+	Long: `Attach to a running tmux session.
 
-Attaches the current terminal to the tmux session. Detach with Ctrl-B D.`,
+Works with polecat sessions (rig/polecat format) or any tmux session name.
+Detach with Ctrl-B D.
+
+Examples:
+  gt session at gastown_ui/Toast    # Attach to a polecat
+  gt session at mysession            # Attach to arbitrary session`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSessionAttach,
 }
@@ -167,6 +188,65 @@ Examples:
 	RunE: runSessionCheck,
 }
 
+var sessionNewCmd = &cobra.Command{
+	Use:   "new <name>",
+	Short: "Create a new tmux session",
+	Long: `Create a new tmux session with the given name.
+
+The session starts detached. Use 'gt session at' to attach to it.
+
+Examples:
+  gt session new mysession
+  gt session new work -c /tmp    # With working directory`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSessionNew,
+}
+
+var sessionSendCmd = &cobra.Command{
+	Use:   "send <session> -c \"command\"",
+	Short: "Send a command to a tmux session",
+	Long: `Send keystrokes to a running tmux session.
+
+The command is sent exactly as provided. Use this to interact with
+any tmux session (not just Gas Town polecats).
+
+Examples:
+  gt session send mysession -c "ls -la"
+  gt session send work -c "make test"`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSessionSend,
+}
+
+var sessionRmCmd = &cobra.Command{
+	Use:     "rm <session>",
+	Aliases: []string{"remove", "kill"},
+	Short:   "Remove a tmux session",
+	Long: `Kill and remove a tmux session.
+
+This forcefully terminates the session and all processes in it.
+
+Examples:
+  gt session rm mysession
+  gt session rm work`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSessionRm,
+}
+
+var sessionShowCmd = &cobra.Command{
+	Use:   "show <session>",
+	Short: "Show detailed session information",
+	Long: `Show detailed information about a tmux session.
+
+Displays session name, state, window count, and activity information.
+Works with any tmux session, not just Gas Town polecats.
+
+Examples:
+  gt session show mysession
+  gt session show work`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSessionShow,
+}
+
 func init() {
 	// Start flags
 	sessionStartCmd.Flags().StringVar(&sessionIssue, "issue", "", "Issue ID to work on")
@@ -188,6 +268,13 @@ func init() {
 	// Restart flags
 	sessionRestartCmd.Flags().BoolVarP(&sessionForce, "force", "f", false, "Force immediate shutdown")
 
+	// New flags
+	sessionNewCmd.Flags().StringVarP(&sessionNewDirectory, "chdir", "c", "", "Working directory for the session")
+
+	// Send flags
+	sessionSendCmd.Flags().StringVarP(&sessionCommand, "command", "c", "", "Command to send")
+	sessionSendCmd.MarkFlagRequired("command")
+
 	// Add subcommands
 	sessionCmd.AddCommand(sessionStartCmd)
 	sessionCmd.AddCommand(sessionStopCmd)
@@ -198,6 +285,10 @@ func init() {
 	sessionCmd.AddCommand(sessionRestartCmd)
 	sessionCmd.AddCommand(sessionStatusCmd)
 	sessionCmd.AddCommand(sessionCheckCmd)
+	sessionCmd.AddCommand(sessionNewCmd)
+	sessionCmd.AddCommand(sessionSendCmd)
+	sessionCmd.AddCommand(sessionRmCmd)
+	sessionCmd.AddCommand(sessionShowCmd)
 
 	rootCmd.AddCommand(sessionCmd)
 }
@@ -322,18 +413,35 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionAttach(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
+	sessionName := args[0]
+
+	// Try parsing as rig/polecat format first
+	rigName, polecatName, err := parseAddress(sessionName)
+	if err == nil && strings.Contains(sessionName, "/") {
+		// It's a rig/polecat format - use the polecat manager
+		polecatMgr, _, err := getSessionManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		// Attach (this replaces the process)
+		return polecatMgr.Attach(polecatName)
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	// Otherwise treat it as a generic tmux session name
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionName)
 	}
 
-	// Attach (this replaces the process)
-	return polecatMgr.Attach(polecatName)
+	// Attach to the session (this replaces the process)
+	return t.AttachSession(sessionName)
 }
 
 // SessionListItem represents a session in list output.
@@ -424,15 +532,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionCapture(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
-
-	polecatMgr, _, err := getSessionManager(rigName)
-	if err != nil {
-		return err
-	}
+	sessionName := args[0]
 
 	// Use positional count if provided, otherwise use flag value
 	lines := sessionLines
@@ -447,7 +547,38 @@ func runSessionCapture(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
-	output, err := polecatMgr.Capture(polecatName, lines)
+	// Try parsing as rig/polecat format first
+	rigName, polecatName, err := parseAddress(sessionName)
+	if err == nil && strings.Contains(sessionName, "/") {
+		// It's a rig/polecat format - use the polecat manager
+		polecatMgr, _, err := getSessionManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		output, err := polecatMgr.Capture(polecatName, lines)
+		if err != nil {
+			return fmt.Errorf("capturing output: %w", err)
+		}
+
+		fmt.Print(output)
+		return nil
+	}
+
+	// Otherwise treat it as a generic tmux session name
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionName)
+	}
+
+	// Capture the output
+	output, err := t.CapturePane(sessionName, lines)
 	if err != nil {
 		return fmt.Errorf("capturing output: %w", err)
 	}
@@ -457,10 +588,7 @@ func runSessionCapture(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionInject(cmd *cobra.Command, args []string) error {
-	rigName, polecatName, err := parseAddress(args[0])
-	if err != nil {
-		return err
-	}
+	sessionName := args[0]
 
 	// Get message
 	message := sessionMessage
@@ -476,17 +604,42 @@ func runSessionInject(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no message provided (use -m or -f)")
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	// Try parsing as rig/polecat format first
+	rigName, polecatName, err := parseAddress(sessionName)
+	if err == nil && strings.Contains(sessionName, "/") {
+		// It's a rig/polecat format - use the polecat manager
+		polecatMgr, _, err := getSessionManager(rigName)
+		if err != nil {
+			return err
+		}
+
+		if err := polecatMgr.Inject(polecatName, message); err != nil {
+			return fmt.Errorf("injecting message: %w", err)
+		}
+
+		fmt.Printf("%s Message sent to %s/%s\n",
+			style.Bold.Render("✓"), rigName, polecatName)
+		return nil
+	}
+
+	// Otherwise treat it as a generic tmux session name
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionName)
 	}
 
-	if err := polecatMgr.Inject(polecatName, message); err != nil {
-		return fmt.Errorf("injecting message: %w", err)
+	// Send the message
+	if err := t.SendKeys(sessionName, message); err != nil {
+		return fmt.Errorf("sending message: %w", err)
 	}
 
-	fmt.Printf("%s Message sent to %s/%s\n",
-		style.Bold.Render("✓"), rigName, polecatName)
+	fmt.Printf("%s Message sent to '%s'\n", style.Bold.Render("✓"), sessionName)
 	return nil
 }
 
@@ -693,6 +846,131 @@ func runSessionCheck(cmd *cobra.Command, args []string) error {
 	if totalCrashed > 0 {
 		fmt.Printf("\n%s To restart crashed polecats: gt session restart <rig>/<polecat>\n",
 			style.Dim.Render("Tip:"))
+	}
+
+	return nil
+}
+
+// runSessionNew creates a new tmux session.
+func runSessionNew(cmd *cobra.Command, args []string) error {
+	sessionName := args[0]
+
+	t := tmux.NewTmux()
+	if err := t.NewSession(sessionName, sessionNewDirectory); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	fmt.Printf("%s Session '%s' created.\n", style.Bold.Render("✓"), sessionName)
+	if sessionNewDirectory != "" {
+		fmt.Printf("  Working directory: %s\n", sessionNewDirectory)
+	}
+	fmt.Printf("  Attach with: %s\n", style.Dim.Render(fmt.Sprintf("gt session at %s", sessionName)))
+	return nil
+}
+
+// runSessionSend sends a command to a tmux session.
+func runSessionSend(cmd *cobra.Command, args []string) error {
+	sessionName := args[0]
+
+	if sessionCommand == "" {
+		return fmt.Errorf("no command provided (use -c or --command)")
+	}
+
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionName)
+	}
+
+	// Send the command
+	if err := t.SendKeys(sessionName, sessionCommand); err != nil {
+		return fmt.Errorf("sending command: %w", err)
+	}
+
+	fmt.Printf("%s Command sent to session '%s'\n", style.Bold.Render("✓"), sessionName)
+	return nil
+}
+
+// runSessionRm removes a tmux session.
+func runSessionRm(cmd *cobra.Command, args []string) error {
+	sessionName := args[0]
+
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		fmt.Printf("%s Session '%s' not found\n", style.Dim.Render("○"), sessionName)
+		return nil
+	}
+
+	// Kill the session
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
+		return fmt.Errorf("removing session: %w", err)
+	}
+
+	fmt.Printf("%s Session '%s' removed\n", style.Bold.Render("✓"), sessionName)
+	return nil
+}
+
+// runSessionShow displays detailed information about a session.
+func runSessionShow(cmd *cobra.Command, args []string) error {
+	sessionName := args[0]
+
+	t := tmux.NewTmux()
+
+	// Check if session exists
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionName)
+	}
+
+	// Get session info
+	info, err := t.GetSessionInfo(sessionName)
+	if err != nil {
+		return fmt.Errorf("getting session info: %w", err)
+	}
+
+	// Get pane info
+	cmd_, _ := t.GetPaneCommand(sessionName)
+	workDir, _ := t.GetPaneWorkDir(sessionName)
+
+	// Display the information
+	fmt.Printf("%s Session: %s\n\n", style.Bold.Render("📺"), info.Name)
+	fmt.Printf("  Windows: %d\n", info.Windows)
+	fmt.Printf("  Created: %s\n", info.Created)
+
+	if info.Attached {
+		fmt.Printf("  Attached: %s\n", style.Bold.Render("yes"))
+	} else {
+		fmt.Printf("  Attached: no\n")
+	}
+
+	if info.Activity != "" {
+		fmt.Printf("  Activity: %s\n", info.Activity)
+	}
+
+	if cmd_ != "" {
+		fmt.Printf("  Pane command: %s\n", cmd_)
+	}
+
+	if workDir != "" {
+		fmt.Printf("  Working directory: %s\n", workDir)
+	}
+
+	if !info.Attached {
+		fmt.Printf("\nAttach with: %s\n", style.Dim.Render(fmt.Sprintf("gt session at %s", sessionName)))
 	}
 
 	return nil
