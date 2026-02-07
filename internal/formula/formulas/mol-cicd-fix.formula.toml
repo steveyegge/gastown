@@ -305,12 +305,7 @@ Close the bug and sync beads.
 bd close {{issue}} --reason="Fixed: <brief summary>"
 ```
 
-**2. Sync beads:**
-```bash
-bd sync
-```
-
-**3. Clean up (if you created a worktree):**
+**2. Clean up (if you created a worktree):**
 ```bash
 gt worktree remove <rig>
 ```

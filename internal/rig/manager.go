@@ -86,7 +86,7 @@ type RigConfig struct {
 // BeadsConfig represents beads configuration for the rig.
 type BeadsConfig struct {
 	Prefix     string `json:"prefix"`                // issue prefix (e.g., "gt")
-	SyncRemote string `json:"sync_remote,omitempty"` // git remote for bd sync
+	SyncRemote string `json:"sync_remote,omitempty"` // git remote (legacy, Dolt handles sync)
 }
 
 // CurrentRigConfigVersion is the current schema version.
@@ -765,8 +765,8 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	_, _ = configCmd.CombinedOutput()
 
 	// Trigger JSONL import now that custom types are configured.
-	// bd sync will import from issues.jsonl and validate types correctly.
-	syncCmd := exec.Command("bd", "sync")
+	// bd import will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "import")
 	syncCmd.Dir = rigPath
 	syncCmd.Env = filteredEnv
 	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet

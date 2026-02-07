@@ -767,23 +767,10 @@ func (b *Beads) SyncFromMain() error {
 	return err
 }
 
-// GetSyncStatus returns the sync status without performing a sync.
+// GetSyncStatus is deprecated. Dolt handles sync automatically.
+// Returns empty status since bd sync has been removed.
 func (b *Beads) GetSyncStatus() (*SyncStatus, error) {
-	out, err := b.run("sync", "--status", "--json")
-	if err != nil {
-		// If sync branch doesn't exist, return empty status
-		if strings.Contains(err.Error(), "does not exist") {
-			return &SyncStatus{}, nil
-		}
-		return nil, err
-	}
-
-	var status SyncStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return nil, fmt.Errorf("parsing bd sync status output: %w", err)
-	}
-
-	return &status, nil
+	return &SyncStatus{}, nil
 }
 
 // Stats returns repository statistics.

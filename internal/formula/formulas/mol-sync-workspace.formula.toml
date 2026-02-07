@@ -67,12 +67,7 @@ git stash list
 git branch --show-current
 ```
 
-**2. Check beads state:**
-```bash
-bd sync --status
-```
-
-**3. Document starting state:**
+**2. Document starting state:**
 - Branch name
 - Uncommitted changes (staged/unstaged)
 - Untracked files (list them)
@@ -244,33 +239,18 @@ id = "sync-beads"
 title = "Sync beads state"
 needs = ["sync-git"]
 description = """
-Sync the beads database with remote.
+Verify the beads database is healthy.
+
+Beads now syncs automatically via Dolt, so manual sync is no longer needed.
+Run a health check to confirm state is consistent:
 
 ```bash
-bd sync
+bd doctor
 ```
 
-**If conflicts:**
-Beads uses JSONL append-only format, so true conflicts are rare.
-If they occur:
-```bash
-bd sync --status  # Diagnose
-```
+**If issues found:** Escalate to mayor.
 
-Likely causes:
-- Two agents edited same bead simultaneously
-- Corrupted beads-sync branch
-
-Resolution:
-```bash
-# Try pulling fresh
-git fetch origin beads-sync
-bd sync
-```
-
-If still failing, escalate to mayor.
-
-**Exit criteria:** Beads synced successfully."""
+**Exit criteria:** Beads state verified healthy."""
 
 [[steps]]
 id = "run-doctor"

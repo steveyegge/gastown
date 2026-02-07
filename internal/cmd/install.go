@@ -491,8 +491,8 @@ func initTownBeads(townPath string) error {
 	}
 
 	// Trigger JSONL import now that custom types are configured.
-	// bd sync will import from issues.jsonl and validate types correctly.
-	syncCmd := exec.Command("bd", "sync")
+	// bd import will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "import")
 	syncCmd.Dir = townPath
 	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 

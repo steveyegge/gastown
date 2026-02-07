@@ -270,11 +270,6 @@ Overall assessment:
 <brief summary - healthy, needs attention, significant issues, etc.>"
 ```
 
-**2. Sync beads:**
-```bash
-bd sync
-```
-
 **Exit criteria:** Tracking issue updated with summary."""
 
 [[steps]]

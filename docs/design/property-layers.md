@@ -229,12 +229,10 @@ gt rig unpark gastown
 # Major refactor in progress, all clones should pause
 gt rig dock gastown
 
-# Syncs via git - other towns see the rig as docked
-bd sync
+# Dolt syncs automatically - other towns see the rig as docked
 
 # When done:
 gt rig undock gastown
-bd sync
 ```
 
 ### Block Auto-Restart Locally

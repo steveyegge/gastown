@@ -300,7 +300,7 @@ bd diff <commit1> <commit2>
 1. **Export current data**:
    ```bash
    cd /path/to/beads
-   bd sync  # Ensure JSONL is up to date
+   bd export  # Ensure JSONL is up to date
    ```
 
 2. **Initialize Dolt backend**:
@@ -343,7 +343,7 @@ bd diff <commit1> <commit2>
 1. **Export current data**:
    ```bash
    cd /path/to/beads
-   bd sync  # Export Dolt to JSONL
+   bd export  # Export Dolt to JSONL
    ```
 
 2. **Update configuration**:
@@ -369,7 +369,7 @@ bd diff <commit1> <commit2>
    rm -f .beads/beads.db .beads/issues.db
 
    # Import from JSONL
-   bd sync --from-main
+   bd import
    ```
 
 4. **Verify migration**:
@@ -412,7 +412,7 @@ PRAGMA commands that Dolt (MySQL-compatible) cannot process. Always use daemon m
 **Solution:**
 ```bash
 rm .beads/issues.db
-bd sync --from-main
+bd import
 ```
 
 Or run: `gt doctor --fix`

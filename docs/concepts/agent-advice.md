@@ -303,12 +303,12 @@ bd advice add "Account configuration for gastown" \
 
 ### Scenario: Agent Coaching
 
-A specific crew member keeps forgetting to sync beads:
+A specific crew member keeps forgetting to update beads:
 
 ```bash
-bd advice add "Remember to sync beads" \
+bd advice add "Remember to update beads status" \
   --agent gastown/crew/analyst \
-  -d "Run 'bd sync' after creating or updating beads to persist changes."
+  -d "Update bead status after completing work. Dolt persists changes automatically."
 ```
 
 ## Related Concepts

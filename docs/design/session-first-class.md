@@ -164,7 +164,7 @@ Session data is **operational state**, not **work items**:
 | .beads/ | .sessions/ |
 |---------|------------|
 | Issues, molecules, work tracking | Runtime session state |
-| Synced via `bd sync` | Local to machine |
+| Synced via Dolt automatically | Local to machine |
 | Cross-agent visible | Per-agent history |
 | Semantic (bugs, tasks) | Observational (what happened) |
 

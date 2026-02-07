@@ -1079,8 +1079,8 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 
 			// Trigger JSONL import now that custom types are configured.
-			// bd sync will import from issues.jsonl and validate types correctly.
-			syncCmd := exec.Command("bd", "sync")
+			// bd import will import from issues.jsonl and validate types correctly.
+			syncCmd := exec.Command("bd", "import")
 			syncCmd.Dir = rigPath
 			_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 		}
