@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -239,12 +238,14 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 
 		var sessionName string
+		isCrewTarget := false
 
 		// Check if this is a crew address (polecatName starts with "crew/")
 		if strings.HasPrefix(polecatName, "crew/") {
 			// Extract crew name and use crew session naming
 			crewName := strings.TrimPrefix(polecatName, "crew/")
 			sessionName = crewSessionName(rigName, crewName)
+			isCrewTarget = true
 		} else {
 			// Short address (e.g., "gastown/holden") - could be crew or polecat.
 			// Try crew first (matches mail system's addressToSessionIDs pattern),
@@ -252,12 +253,29 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			crewSession := crewSessionName(rigName, polecatName)
 			if exists, _ := t.HasSession(crewSession); exists {
 				sessionName = crewSession
+				isCrewTarget = true
 			} else {
 				mgr, _, err := getSessionManager(rigName)
 				if err != nil {
 					return err
 				}
 				sessionName = mgr.SessionName(polecatName)
+			}
+		}
+
+		// Check if target polecat is OJ-managed (od-ki9.4: use oj agent send as canonical nudge).
+		// Only polecats can be OJ-managed; crew, witness, refinery use tmux.
+		if !isCrewTarget && townRoot != "" {
+			if ojJobID := getOjJobIDForPolecat(townRoot, rigName, polecatName); ojJobID != "" {
+				if err := sendViaOj(ojJobID, message); err == nil {
+					fmt.Printf("%s Nudged %s/%s (via OJ)\n", style.Bold.Render("✓"), rigName, polecatName)
+					if townRoot != "" {
+						_ = LogNudge(townRoot, target, message)
+					}
+					_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
+					return nil
+				}
+				// OJ send failed, fall through to tmux
 			}
 		}
 
@@ -594,15 +612,6 @@ func sendOrQueueNudge(t *tmux.Tmux, townRoot, sessionName, message, targetAddres
 		time.Sleep(time.Duration(nudgeDelayFlag) * time.Millisecond)
 	}
 
-	// Check if target is OJ-managed — if so, use oj agent send instead of tmux (od-ki9.4).
-	// This deduplicates the GT nudge (tmux) and OJ nudge (daemon RPC) paths by routing
-	// OJ-managed polecats through the OJ send protocol which handles clear/literal/wait/enter.
-	if townRoot != "" && targetAddress != "" {
-		if ojJobID := getOjJobIDForTarget(townRoot, targetAddress); ojJobID != "" {
-			return nudgeViaOj(ojJobID, message)
-		}
-	}
-
 	// Default: send directly via tmux to wake up the target immediately
 	return t.NudgeSession(sessionName, message)
 }
@@ -676,49 +685,3 @@ func runNudgeDrain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getOjJobIDForTarget looks up the oj_job_id for an agent's hooked work bead.
-// Returns empty string if the agent is not OJ-managed or on any error.
-// This enables the nudge command to route OJ-managed polecats through "oj agent send"
-// instead of tmux send-keys (od-ki9.4).
-func getOjJobIDForTarget(townRoot, targetAddress string) string {
-	// Convert target address to agent bead ID
-	agentBeadID := addressToAgentBeadID(targetAddress)
-	if agentBeadID == "" {
-		return ""
-	}
-
-	// Read the agent bead to get its hook_bead (the work bead)
-	bd := beads.New(townRoot)
-	agentIssue, err := bd.Show(agentBeadID)
-	if err != nil || agentIssue == nil {
-		return ""
-	}
-	hookBeadID := agentIssue.HookBead
-	if hookBeadID == "" {
-		return ""
-	}
-
-	// Read the hook bead and check for oj_job_id in attachment fields
-	hookIssue, err := bd.Show(hookBeadID)
-	if err != nil || hookIssue == nil {
-		return ""
-	}
-
-	fields := beads.ParseAttachmentFields(hookIssue)
-	if fields == nil {
-		return ""
-	}
-	return fields.OjJobID
-}
-
-// nudgeViaOj sends a message to an OJ-managed agent via "oj agent send".
-// This uses OJ's send protocol which handles clear (2x Escape) + send_literal +
-// dynamic wait + Enter, providing reliable delivery to OJ-managed sessions (od-ki9.4).
-func nudgeViaOj(ojJobID, message string) error {
-	cmd := exec.Command("oj", "agent", "send", ojJobID, message)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("oj agent send failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}

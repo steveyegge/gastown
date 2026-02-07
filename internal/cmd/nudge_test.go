@@ -111,54 +111,39 @@ func TestResolveNudgePattern(t *testing.T) {
 	}
 }
 
-// TestGetOjJobIDForTargetEdgeCases tests edge cases of OJ job ID lookup (od-ki9.4).
+// TestGetOjJobIDForPolecatEdgeCases tests edge cases of OJ job ID lookup (od-ki9.4).
 // The function should gracefully return "" for all error paths without panicking.
-func TestGetOjJobIDForTargetEdgeCases(t *testing.T) {
-	t.Run("returns empty for empty target address", func(t *testing.T) {
-		got := getOjJobIDForTarget("/tmp", "")
+func TestGetOjJobIDForPolecatEdgeCases(t *testing.T) {
+	t.Run("returns empty for empty polecat name", func(t *testing.T) {
+		got := getOjJobIDForPolecat("/tmp", "testrig", "")
 		if got != "" {
-			t.Errorf("getOjJobIDForTarget() = %q, want empty", got)
-		}
-	})
-
-	t.Run("returns empty for invalid target address format", func(t *testing.T) {
-		got := getOjJobIDForTarget("/tmp", "no-slash")
-		if got != "" {
-			t.Errorf("getOjJobIDForTarget() = %q, want empty", got)
+			t.Errorf("getOjJobIDForPolecat() = %q, want empty", got)
 		}
 	})
 
 	t.Run("returns empty for non-existent town root", func(t *testing.T) {
-		got := getOjJobIDForTarget("/nonexistent/path", "testrig/furiosa")
+		got := getOjJobIDForPolecat("/nonexistent/path", "testrig", "furiosa")
 		if got != "" {
-			t.Errorf("getOjJobIDForTarget() = %q, want empty", got)
+			t.Errorf("getOjJobIDForPolecat() = %q, want empty", got)
 		}
 	})
 
 	t.Run("returns empty for empty town root", func(t *testing.T) {
-		got := getOjJobIDForTarget("", "testrig/furiosa")
+		got := getOjJobIDForPolecat("", "testrig", "furiosa")
 		if got != "" {
-			t.Errorf("getOjJobIDForTarget() = %q, want empty", got)
-		}
-	})
-
-	t.Run("returns empty for non-existent agent bead", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		got := getOjJobIDForTarget(tmpDir, "testrig/nonexistent")
-		if got != "" {
-			t.Errorf("getOjJobIDForTarget() = %q, want empty", got)
+			t.Errorf("getOjJobIDForPolecat() = %q, want empty", got)
 		}
 	})
 }
 
-// TestNudgeViaOjReturnsErrorWhenOjNotInstalled verifies that nudgeViaOj
+// TestSendViaOjReturnsErrorWhenOjNotInstalled verifies that sendViaOj
 // returns an error when the oj binary is not available (od-ki9.4).
-func TestNudgeViaOjReturnsErrorWhenOjNotInstalled(t *testing.T) {
+func TestSendViaOjReturnsErrorWhenOjNotInstalled(t *testing.T) {
 	// Set PATH to empty to ensure oj is not found
 	t.Setenv("PATH", t.TempDir())
 
-	err := nudgeViaOj("fake-job-id", "test message")
+	err := sendViaOj("fake-job-id", "test message")
 	if err == nil {
-		t.Error("nudgeViaOj() should return error when oj is not installed")
+		t.Error("sendViaOj() should return error when oj is not installed")
 	}
 }
