@@ -94,7 +94,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("cannot proceed: %w", err)
 		}
-		defer func() { _ = lock.Unlock() }()
+		defer func() {
+			_ = lock.Unlock()
+			// Clean up lock file after releasing (defense in depth)
+			_ = os.Remove(filepath.Join(townRoot, shutdownLockFile))
+		}()
 
 		// Prevent tmux server from exiting when all sessions are killed.
 		// By default, tmux exits when there are no sessions (exit-empty on).

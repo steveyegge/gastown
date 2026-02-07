@@ -44,3 +44,4 @@ jobs:
 
       - name: Run integration tests
         run: go test -v -tags=integration -timeout=4m ./internal/cmd/...
+

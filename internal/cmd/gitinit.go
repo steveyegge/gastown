@@ -62,6 +62,17 @@ const HQGitignore = `# Gas Town HQ .gitignore
 **/state.json
 **/*.lock
 **/registry.json
+**/*.pid
+**/heartbeat.json
+**/activity.json
+.events.jsonl
+.feed.jsonl
+
+# =============================================================================
+# Runtime state directories
+# =============================================================================
+daemon/
+logs/
 
 # =============================================================================
 # Rig git worktrees (recreate with 'gt sling' or 'gt rig add')

@@ -225,3 +225,18 @@ Dog returns to available state in the pool.
 description = "The digest period type (daily, weekly, custom)"
 required = true
 default = "daily"
+[vars.since]
+description = "Start timestamp for data collection"
+default = ""
+[vars.until]
+description = "End timestamp for data collection"
+default = ""
+[vars.date]
+description = "Digest date for title"
+default = ""
+[vars.formatted_digest]
+description = "Formatted digest content"
+default = ""
+[vars.polecat]
+description = "Polecat name in highlights"
+default = ""

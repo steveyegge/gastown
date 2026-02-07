@@ -310,3 +310,54 @@ Dog returns to available state in the pool.
 description = "Scan scope: 'town' or specific rig name"
 required = true
 default = "town"
+[vars.timestamp]
+description = "Scan timestamp"
+default = ""
+[vars.total_count]
+description = "Total orphans found"
+default = ""
+[vars.issue_count]
+description = "Orphaned issues count"
+default = ""
+[vars.mol_count]
+description = "Orphaned molecules count"
+default = ""
+[vars.wisp_count]
+description = "Orphaned wisps count"
+default = ""
+[vars.reset_count]
+description = "Issues reset to open"
+default = ""
+[vars.reassign_count]
+description = "Issues reassigned"
+default = ""
+[vars.recover_count]
+description = "Issues recovered"
+default = ""
+[vars.escalate_count]
+description = "Issues escalated"
+default = ""
+[vars.burn_count]
+description = "Items burned/deleted"
+default = ""
+[vars.type]
+description = "Orphan type in report template"
+default = ""
+[vars.id]
+description = "Orphan identifier in report template"
+default = ""
+[vars.action]
+description = "Action taken in report template"
+default = ""
+[vars.reason]
+description = "Reason for action in report template"
+default = ""
+[vars.report]
+description = "Full report text"
+default = ""
+[vars.escalations_section]
+description = "Escalations section of report"
+default = ""
+[vars.action_summary]
+description = "Summary of actions taken"
+default = ""

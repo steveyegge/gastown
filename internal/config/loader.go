@@ -981,6 +981,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check rig's RoleAgents first
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
 		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -992,6 +995,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check town's RoleAgents
 	if townSettings.RoleAgents != nil {
 		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -1072,6 +1078,25 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 
 	// Fallback to claude defaults
 	return DefaultRuntimeConfig()
+}
+
+// lookupCustomAgentConfig looks up custom agents only (rig or town).
+// It skips binary validation so tests and config resolution can proceed
+// even if the command isn't on PATH yet.
+func lookupCustomAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	if rigSettings != nil && rigSettings.Agents != nil {
+		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	if townSettings != nil && townSettings.Agents != nil {
+		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	return nil
 }
 
 // fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.

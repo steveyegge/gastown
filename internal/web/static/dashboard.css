@@ -47,6 +47,16 @@
             border-bottom: 1px solid var(--border);
         }
 
+        .ascii-title {
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 10px;
+            line-height: 1.1;
+            color: var(--cyan);
+            margin: 0;
+            white-space: pre;
+            text-shadow: 0 0 10px var(--cyan);
+        }
+
         h1 {
             font-size: 1.25rem;
             font-weight: 600;
@@ -297,6 +307,379 @@
         /* Polecat status row highlights */
         tr.polecat-working { }
         tr.polecat-stale { background: rgba(255, 180, 84, 0.05); }
+
+        /* Crew styles */
+        .crew-name {
+            font-weight: 600;
+            color: var(--green);
+        }
+
+        .crew-rig {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .crew-hook {
+            color: var(--blue);
+            font-size: 0.8rem;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .crew-state-spinning {
+            color: var(--green);
+        }
+
+        .crew-state-finished {
+            color: var(--cyan);
+        }
+
+        .crew-state-questions {
+            color: var(--orange);
+        }
+
+        .crew-state-ready {
+            color: var(--text-muted);
+        }
+
+        tr.crew-finished { background: rgba(137, 221, 255, 0.08); }
+        tr.crew-questions { background: rgba(255, 180, 84, 0.15); }
+        tr.crew-spinning { background: rgba(194, 217, 76, 0.08); }
+
+        .crew-activity {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* Crew attention badge */
+        .count.needs-attention {
+            background: var(--orange);
+            color: #000;
+            animation: pulse-attention 1.5s ease-in-out infinite;
+        }
+
+        .count.needs-attention::after {
+            content: attr(data-attention) ' need you';
+            font-size: 0.65rem;
+            margin-left: 4px;
+            opacity: 0.8;
+        }
+
+        @keyframes pulse-attention {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .attach-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--cyan);
+            cursor: pointer;
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            transition: all 0.15s ease;
+        }
+
+        .attach-btn:hover {
+            background: var(--cyan);
+            border-color: var(--cyan);
+            color: var(--bg-primary);
+        }
+
+        /* Toast notifications */
+        #toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            padding: 12px 16px;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast-success {
+            border-color: var(--green);
+            background: rgba(194, 217, 76, 0.1);
+        }
+
+        .toast-info {
+            border-color: var(--cyan);
+            background: rgba(137, 221, 255, 0.1);
+        }
+
+        .toast-error {
+            border-color: var(--red);
+            background: rgba(240, 113, 120, 0.1);
+        }
+
+        /* New Issue Button */
+        .new-issue-btn {
+            background: var(--green);
+            border: none;
+            border-radius: 4px;
+            color: #000;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            margin-right: 8px;
+            transition: all 0.15s ease;
+        }
+
+        .new-issue-btn:hover {
+            background: var(--cyan);
+            color: #000;
+            transform: scale(1.05);
+        }
+
+        /* Modal styles */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-backdrop {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-content {
+            position: relative;
+            background: #1a1f2e;
+            border: 1px solid var(--cyan);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(137, 221, 255, 0.1);
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: var(--text-primary);
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 4px 8px;
+            transition: color 0.15s;
+        }
+
+        .modal-close:hover {
+            color: var(--red);
+        }
+
+        #issue-form {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            padding: 10px 12px;
+            box-sizing: border-box;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--cyan);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .btn-primary,
+        .btn-secondary {
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 10px 20px;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary {
+            background: var(--green);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--cyan);
+        }
+
+        .btn-primary:disabled {
+            background: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+            color: var(--text-primary);
+        }
+
+        /* Panel Tabs */
+        .panel-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            transition: all 0.15s ease;
+        }
+
+        .tab-btn:hover {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+        }
+
+        .tab-btn.active {
+            background: var(--cyan);
+            color: #000;
+            font-weight: 600;
+        }
+
+        /* Issue status badges */
+        .issue-status .badge-green {
+            background: rgba(194, 217, 76, 0.2);
+            color: var(--green);
+        }
+
+        .issue-status .badge-blue {
+            background: rgba(130, 170, 255, 0.2);
+            color: var(--blue);
+        }
+
+        /* Health stat in summary bar */
+        .health-stat.healthy {
+            border-left: 3px solid var(--green);
+        }
+
+        .health-stat.unhealthy {
+            border-left: 3px solid var(--red);
+            background: rgba(240, 113, 120, 0.1);
+        }
+
+        .health-stat .stat-value {
+            font-size: 1rem;
+        }
+
+        /* Ready work styles */
+        .ready-id {
+            color: var(--blue);
+            font-weight: 600;
+        }
+
+        .ready-title {
+            color: var(--text-secondary);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .ready-source {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .ready-source-town {
+            color: var(--purple);
+        }
+
+        tr.ready-p1 { background: rgba(240, 113, 120, 0.08); }
+        tr.ready-p2 { background: rgba(255, 180, 84, 0.08); }
         tr.polecat-stuck { background: rgba(240, 113, 120, 0.08); }
         tr.polecat-idle { opacity: 0.7; }
 
@@ -346,6 +729,7 @@
         .mail-time {
             color: var(--text-muted);
             font-size: 0.75rem;
+            white-space: nowrap;
         }
 
         .priority-urgent { color: var(--red); font-weight: bold; }
@@ -1104,8 +1488,9 @@
                 text-align: center;
             }
 
-            header h1 {
-                font-size: 1.2rem;
+            .ascii-title {
+                font-size: 6px;
+                display: none; /* Hide on mobile, too wide */
             }
 
             .mayor-banner {

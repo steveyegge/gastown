@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -941,9 +942,14 @@ func fetchPRInfo(prNumber int) (string, []map[string]interface{}) {
 			}
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
-				var additions, deletions int
-				fmt.Sscanf(parts[1], "%d", &additions)
-				fmt.Sscanf(parts[2], "%d", &deletions)
+				additions, err := strconv.Atoi(parts[1])
+				if err != nil {
+					continue
+				}
+				deletions, err := strconv.Atoi(parts[2])
+				if err != nil {
+					continue
+				}
 				changedFiles = append(changedFiles, map[string]interface{}{
 					"path":      parts[0],
 					"additions": additions,

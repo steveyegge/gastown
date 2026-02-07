@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -356,6 +357,7 @@ func (m *SessionManager) Status(polecat string) (*SessionInfo, error) {
 
 	if tmuxInfo.Created != "" {
 		formats := []string{
+			"2006-01-02 15:04:05",
 			"Mon Jan 2 15:04:05 2006",
 			"Mon Jan _2 15:04:05 2006",
 			time.ANSIC,
@@ -486,12 +488,22 @@ func (m *SessionManager) StopAll(force bool) error {
 	return lastErr
 }
 
+// resolveBeadsDir determines the correct working directory for bd commands
+// on a given issue. This enables cross-rig beads resolution via routes.jsonl.
+// This is the core fix for GitHub issue #1056.
+func (m *SessionManager) resolveBeadsDir(issueID, fallbackDir string) string {
+	townRoot := filepath.Dir(m.rig.Path)
+	return beads.ResolveHookDir(townRoot, issueID, fallbackDir)
+}
+
 // validateIssue checks that an issue exists and is not tombstoned.
 // This must be called before starting a session to avoid CPU spin loops
 // from agents retrying work on invalid issues.
 func (m *SessionManager) validateIssue(issueID, workDir string) error {
+	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
+
 	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
-	cmd.Dir = workDir
+	cmd.Dir = bdWorkDir
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
@@ -514,8 +526,10 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 
 // hookIssue pins an issue to a polecat's hook using bd update.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
+	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
+
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
-	cmd.Dir = workDir
+	cmd.Dir = bdWorkDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bd update failed: %w", err)

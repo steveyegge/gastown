@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -16,6 +17,8 @@ var (
 	doctorRig             string
 	doctorRestartSessions bool
 	doctorSlow            string
+	doctorMigrate         bool
+	doctorJSON            bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -83,9 +86,15 @@ Patrol checks:
   - patrol-plugins-accessible Verify plugin directories
   - patrol-roles-have-prompts Verify role prompts exist
 
+Migration readiness checks (--migrate):
+  - migration-readiness      Overall migration readiness status
+  - unmigrated-rigs          Detect rigs still using SQLite backend
+
 Use --fix to attempt automatic fixes for issues that support it.
 Use --rig to check a specific rig instead of the entire workspace.
-Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`,
+Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).
+Use --migrate to check migration readiness (SQLite to Dolt).
+Use --json with --migrate for machine-parseable output.`,
 	RunE: runDoctor,
 }
 
@@ -95,6 +104,8 @@ func init() {
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
+	doctorCmd.Flags().BoolVar(&doctorMigrate, "migrate", false, "Check migration readiness (SQLite to Dolt)")
+	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output as JSON (use with --migrate)")
 	// Allow --slow without a value (uses default 1s)
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
 	rootCmd.AddCommand(doctorCmd)
@@ -113,6 +124,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		RigName:         doctorRig,
 		Verbose:         doctorVerbose,
 		RestartSessions: doctorRestartSessions,
+	}
+
+	// Handle --migrate mode (focused migration readiness check)
+	if doctorMigrate {
+		return runMigrationCheck(ctx)
 	}
 
 	// Create doctor and register checks
@@ -137,6 +153,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
+	d.Register(doctor.NewRigNameMismatchCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
 	d.Register(doctor.NewDatabasePrefixCheck())
 	d.Register(doctor.NewRoutesCheck())
@@ -193,6 +210,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
 
+	// Hooks sync check
+	d.Register(doctor.NewHooksSyncCheck())
+
+	// Migration readiness checks
+	d.Register(doctor.NewMigrationReadinessCheck())
+	d.Register(doctor.NewUnmigratedRigCheck())
+	d.Register(doctor.NewDoltMetadataCheck())
+
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {
 		d.RegisterAll(doctor.RigChecks()...)
@@ -225,5 +250,75 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("doctor found %d error(s)", report.Summary.Errors)
 	}
 
+	return nil
+}
+
+// runMigrationCheck runs focused migration readiness checks.
+// With --json, outputs machine-parseable JSON for Claude to consume.
+func runMigrationCheck(ctx *doctor.CheckContext) error {
+	check := doctor.NewMigrationReadinessCheck()
+	result := check.Run(ctx)
+	readiness := check.Readiness()
+
+	if doctorJSON {
+		// Machine-parseable JSON output
+		output, err := json.MarshalIndent(readiness, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(output))
+		return nil
+	}
+
+	// Human-readable output
+	fmt.Println()
+	fmt.Println("Migration Readiness Check")
+	fmt.Println("=========================")
+	fmt.Println()
+
+	// Version info
+	fmt.Printf("Versions:\n")
+	fmt.Printf("  gt: %s\n", readiness.Version.GT)
+	fmt.Printf("  bd: %s\n", readiness.Version.BD)
+	if readiness.Version.BDSupportsDolt {
+		fmt.Printf("  Dolt support: YES\n")
+	} else {
+		fmt.Printf("  Dolt support: NO (requires bd 0.40.0+)\n")
+	}
+	fmt.Println()
+
+	// Per-rig status
+	fmt.Printf("Rig Status:\n")
+	for _, rig := range readiness.Rigs {
+		status := "OK"
+		if rig.NeedsMigration {
+			status = "NEEDS MIGRATION"
+		}
+		gitStatus := ""
+		if !rig.GitClean {
+			gitStatus = " (uncommitted changes)"
+		}
+		fmt.Printf("  %s: %s (backend: %s)%s\n", rig.Name, status, rig.Backend, gitStatus)
+	}
+	fmt.Println()
+
+	// Overall verdict
+	if readiness.Ready {
+		fmt.Println("Ready to migrate: YES")
+		fmt.Println("All rigs are already on Dolt backend.")
+	} else {
+		fmt.Println("Ready to migrate: NO")
+		fmt.Println()
+		fmt.Println("Blockers:")
+		for i, blocker := range readiness.Blockers {
+			fmt.Printf("  %d. %s\n", i+1, blocker)
+		}
+		fmt.Println()
+		fmt.Println("Fix: Run 'bd migrate' in each rig that needs migration.")
+	}
+
+	if result.Status != doctor.StatusOK {
+		return fmt.Errorf("migration readiness check failed")
+	}
 	return nil
 }

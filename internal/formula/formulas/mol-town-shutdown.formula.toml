@@ -16,6 +16,11 @@ formula = "mol-town-shutdown"
 type = "workflow"
 version = 2
 
+[vars]
+[vars.shutdown_reason]
+description = "Reason for the shutdown"
+default = ""
+
 [[steps]]
 id = "preflight-check"
 title = "Preflight safety check"

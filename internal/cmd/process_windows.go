@@ -2,13 +2,17 @@
 
 package cmd
 
-import "golang.org/x/sys/windows"
+import (
+	"math"
+
+	"golang.org/x/sys/windows"
+)
 
 const processStillActive = 259
 
 // isProcessRunning checks if a process with the given PID exists.
 func isProcessRunning(pid int) bool {
-	if pid <= 0 {
+	if pid <= 0 || pid > math.MaxUint32 {
 		return false
 	}
 
@@ -16,7 +20,9 @@ func isProcessRunning(pid int) bool {
 	if err != nil {
 		return false
 	}
-	defer windows.CloseHandle(handle)
+	defer func() {
+		_ = windows.CloseHandle(handle)
+	}()
 
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(handle, &exitCode); err != nil {

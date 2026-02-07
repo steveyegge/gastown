@@ -37,10 +37,10 @@ graph TB
     Hooks1 -.git worktree.-> GitRepo1[Git Repository]
     Hooks2 -.git worktree.-> GitRepo2[Git Repository]
 
-    style Mayor fill:#e1f5ff
-    style Town fill:#f0f0f0
-    style Rig1 fill:#fff4e1
-    style Rig2 fill:#fff4e1
+    style Mayor fill:#e1f5ff,color:#000000
+    style Town fill:#f0f0f0,color:#000000
+    style Rig1 fill:#fff4e1,color:#000000
+    style Rig2 fill:#fff4e1,color:#000000
 ```
 
 ## Core Concepts

@@ -767,3 +767,46 @@ func TestConvertToSSH(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectBeadsPrefixFromConfig_TrailingDash(t *testing.T) {
+	tests := []struct {
+		name       string
+		configYAML string
+		want       string
+	}{
+		{
+			name:       "prefix without trailing dash is unchanged",
+			configYAML: "prefix: baseball-v3\n",
+			want:       "baseball-v3",
+		},
+		{
+			name:       "prefix with trailing dash is stripped",
+			configYAML: "prefix: baseball-v3-\n",
+			want:       "baseball-v3",
+		},
+		{
+			name:       "issue-prefix with trailing dash is stripped",
+			configYAML: "issue-prefix: baseball-v3-\n",
+			want:       "baseball-v3",
+		},
+		{
+			name:       "quoted prefix with trailing dash is stripped",
+			configYAML: "prefix: \"baseball-v3-\"\n",
+			want:       "baseball-v3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.configYAML), 0644); err != nil {
+				t.Fatalf("writing config: %v", err)
+			}
+			got := detectBeadsPrefixFromConfig(configPath)
+			if got != tt.want {
+				t.Errorf("detectBeadsPrefixFromConfig() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -1,0 +1,319 @@
+description = """
+Gas Town v0.5.0 → v0.6.0 migration workflow.
+
+This molecule guides the migration of a Gas Town installation from SQLite-based
+beads (v0.5.0) to Dolt-based beads (v0.6.0). Each step has clear entry/exit
+criteria and can be resumed after interruption.
+
+## Migration Overview
+
+1. Detect current state and identify what needs migrating
+2. Backup everything before making changes
+3. Upgrade binaries to versions with Dolt support
+4. Migrate the town-level beads
+5. Migrate each rig's beads
+6. Verify the migration succeeded
+
+## Prerequisites
+
+- A running Gas Town v0.5.0 installation
+- Sufficient disk space for backups (~2x current .beads size)
+- Network access for binary downloads (homebrew or GitHub releases)
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| town_root | user | Path to the Gas Town root directory (e.g., ~/gt) |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Binary upgrade fails | Check network, try manual download |
+| Migration fails mid-rig | Re-run bd migrate dolt for that rig |
+| Verification fails | Check logs, re-run failed migration |
+| Backup restore needed | Copy from backup dir back to .beads/ |"""
+formula = "mol-migration"
+version = 1
+
+[[steps]]
+id = "detect"
+title = "Detect current state and migration needs"
+description = """
+Identify what needs migrating in the Gas Town installation.
+
+**1. Check Gas Town version and doctor status:**
+```bash
+gt version
+gt doctor --migrate --json 2>/dev/null
+```
+
+**Important: v0.5.0 fallback detection**
+
+If `gt doctor --migrate --json` fails or is not recognized (v0.5.0 binaries
+don't have this flag), fall back to manual inspection:
+
+```bash
+# Check each rig's beads metadata
+for dir in {{town_root}}/*/; do
+  if [ -f "$dir/.beads/metadata.json" ]; then
+    echo "=== $(basename $dir) ==="
+    cat "$dir/.beads/metadata.json"
+  fi
+done
+```
+
+All v0.5.0 installations use SQLite by definition. If the `--migrate` flag
+is not available, **assume all rigs need migration**.
+
+**2. List all rigs:**
+```bash
+ls -d {{town_root}}/*/
+```
+
+**3. For each rig, check beads backend:**
+```bash
+# Look for SQLite databases (need migration)
+find {{town_root}} -name "*.db" -path "*/.beads/*" 2>/dev/null
+
+# Look for existing Dolt repos (already migrated)
+find {{town_root}} -name ".dolt" -path "*/.beads/*" 2>/dev/null
+```
+
+**4. Record findings:**
+Document which rigs need migration and which (if any) are already on Dolt.
+
+**Exit criteria:** You know exactly which rigs need migration and have recorded the current state."""
+
+[[steps]]
+id = "backup"
+title = "Backup all beads data"
+needs = ["detect"]
+description = """
+Create comprehensive backups before making any changes.
+
+**1. Create backup directory:**
+```bash
+backup_dir="{{town_root}}/migration-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$backup_dir"
+echo "Backup location: $backup_dir"
+```
+
+**2. Backup town-level beads:**
+```bash
+if [ -d "{{town_root}}/.beads" ]; then
+  cp -r "{{town_root}}/.beads" "$backup_dir/town-beads"
+fi
+```
+
+**3. Backup each rig's beads:**
+```bash
+for dir in {{town_root}}/*/; do
+  rig_name=$(basename "$dir")
+  if [ -d "$dir/.beads" ]; then
+    cp -r "$dir/.beads" "$backup_dir/$rig_name-beads"
+    echo "Backed up: $rig_name"
+  fi
+done
+```
+
+**4. Verify backups:**
+```bash
+ls -la "$backup_dir/"
+du -sh "$backup_dir/"
+```
+
+**Exit criteria:** All .beads directories are backed up, backup sizes look reasonable."""
+
+[[steps]]
+id = "upgrade-binaries"
+title = "Upgrade binaries for Dolt support"
+needs = ["backup"]
+description = """
+Upgrade gt, bd, and install dolt. v0.5.0 binaries have NO Dolt support,
+so this step is mandatory before any migration can proceed.
+
+**1. Record current versions:**
+```bash
+echo "Current gt version:"
+gt version
+echo "Current bd version:"
+bd version
+```
+
+**2. Upgrade gt via homebrew:**
+```bash
+brew upgrade gt
+```
+
+If homebrew is not available, download the binary directly:
+```bash
+# Check latest release
+curl -sL https://api.github.com/repos/steveyegge/gastown/releases/latest | jq -r '.tag_name'
+# Download and install the appropriate binary for your platform
+```
+
+**3. Upgrade bd via binary download from GitHub releases:**
+```bash
+# Check latest release
+curl -sL https://api.github.com/repos/steveyegge/beads/releases/latest | jq -r '.tag_name'
+# Download and install the appropriate binary
+```
+
+Or via homebrew if available:
+```bash
+brew upgrade bd
+```
+
+**4. Install dolt if not present:**
+```bash
+which dolt || brew install dolt
+```
+
+**5. Verify new versions and Dolt support:**
+```bash
+echo "New gt version:"
+gt version
+echo "New bd version:"
+bd version
+echo "Dolt version:"
+dolt version
+
+# Critical verification: these commands must exist
+gt dolt --help
+bd migrate dolt --help
+```
+
+Both `gt dolt --help` and `bd migrate dolt --help` MUST succeed.
+If either fails, the binaries were not upgraded correctly.
+
+**Exit criteria:** gt, bd, and dolt are all upgraded. `gt dolt --help` and `bd migrate dolt --help` both work."""
+
+[[steps]]
+id = "migrate-town"
+title = "Migrate town-level beads to Dolt"
+needs = ["upgrade-binaries"]
+description = """
+Migrate the town-level .beads from SQLite to Dolt.
+
+**1. Navigate to town root:**
+```bash
+cd {{town_root}}
+```
+
+**2. Run the migration:**
+```bash
+bd migrate dolt
+```
+
+**3. Verify migration:**
+```bash
+# Check that Dolt repo was created
+ls -la {{town_root}}/.beads/dolt/
+```
+
+**Exit criteria:** Town-level beads are migrated to Dolt format."""
+
+[[steps]]
+id = "migrate-rigs"
+title = "Migrate each rig's beads to Dolt"
+needs = ["migrate-town"]
+description = """
+Migrate each rig's .beads from SQLite to Dolt.
+
+**1. For each rig that needs migration:**
+```bash
+for dir in {{town_root}}/*/; do
+  rig_name=$(basename "$dir")
+  if [ -d "$dir/.beads" ] && [ ! -d "$dir/.beads/dolt" ]; then
+    echo "Migrating: $rig_name"
+    (cd "$dir" && bd migrate dolt)
+    echo "Done: $rig_name"
+  else
+    echo "Skipping $rig_name (already migrated or no beads)"
+  fi
+done
+```
+
+**2. Consolidate Dolt data:**
+
+After all `bd migrate dolt` runs, consolidate the per-rig Dolt repos into
+the centralized data directory:
+```bash
+gt dolt migrate
+```
+
+This moves `.beads/dolt/` directories into the centralized `.dolt-data/` location.
+
+**3. Configure the Dolt daemon:**
+
+Update the mayor's daemon configuration to enable the Dolt server:
+```bash
+# Edit mayor/daemon.json to enable dolt_server
+# The key setting is:
+#   "dolt_server": { "enabled": true }
+cat {{town_root}}/mayor/daemon.json
+# Add or update the dolt_server configuration
+```
+
+**4. Start the Dolt server:**
+```bash
+gt dolt start
+```
+
+**5. Verify each rig:**
+```bash
+for dir in {{town_root}}/*/; do
+  rig_name=$(basename "$dir")
+  if [ -d "$dir/.beads" ]; then
+    echo "=== $rig_name ==="
+    (cd "$dir" && bd status 2>&1 | head -5)
+  fi
+done
+```
+
+**Exit criteria:** All rigs migrated, Dolt data consolidated, daemon configured, server started."""
+
+[[steps]]
+id = "verify"
+title = "Verify migration success"
+needs = ["migrate-rigs"]
+description = """
+Comprehensive verification that the migration succeeded.
+
+**1. Run gt doctor:**
+```bash
+gt doctor
+```
+
+All checks should pass. Any beads-related warnings should be investigated.
+
+**2. Verify Dolt server is running:**
+```bash
+gt dolt status
+```
+
+**3. Test beads operations on each rig:**
+```bash
+for dir in {{town_root}}/*/; do
+  rig_name=$(basename "$dir")
+  if [ -d "$dir/.beads" ]; then
+    echo "=== $rig_name ==="
+    (cd "$dir" && bd list --limit 5 2>&1)
+  fi
+done
+```
+
+**4. Verify no SQLite remnants are in active use:**
+```bash
+# Old SQLite databases should still exist (as backup) but not be actively used
+find {{town_root}} -name "beads.db" -path "*/.beads/*" 2>/dev/null
+```
+
+**Exit criteria:** gt doctor passes, Dolt server running, all rigs accessible via bd commands."""
+
+[vars]
+[vars.town_root]
+description = "Path to the Gas Town root directory (e.g., ~/gt)"
+required = true

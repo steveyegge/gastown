@@ -109,6 +109,21 @@ After migration, start the server with 'gt dolt start'.`,
 	RunE: runDoltMigrate,
 }
 
+var doltFixMetadataCmd = &cobra.Command{
+	Use:   "fix-metadata",
+	Short: "Update metadata.json in all rig .beads directories",
+	Long: `Ensure all rig .beads/metadata.json files have correct Dolt server configuration.
+
+This fixes the split-brain problem where bd falls back to local embedded databases
+instead of connecting to the centralized Dolt server. It updates metadata.json with:
+  - backend: "dolt"
+  - dolt_mode: "server"
+  - dolt_database: "<rigname>"
+
+Safe to run multiple times (idempotent). Preserves any existing fields in metadata.json.`,
+	RunE: runDoltFixMetadata,
+}
+
 var (
 	doltLogLines  int
 	doltLogFollow bool
@@ -123,6 +138,7 @@ func init() {
 	doltCmd.AddCommand(doltInitRigCmd)
 	doltCmd.AddCommand(doltListCmd)
 	doltCmd.AddCommand(doltMigrateCmd)
+	doltCmd.AddCommand(doltFixMetadataCmd)
 
 	doltLogsCmd.Flags().IntVarP(&doltLogLines, "lines", "n", 50, "Number of lines to show")
 	doltLogsCmd.Flags().BoolVarP(&doltLogFollow, "follow", "f", false, "Follow log output")
@@ -387,8 +403,46 @@ func runDoltMigrate(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Migrated to %s\n", style.Bold.Render("✓"), m.TargetPath)
 	}
 
+	// Update metadata.json for all migrated rigs
+	updated, metaErrs := doltserver.EnsureAllMetadata(townRoot)
+	if len(updated) > 0 {
+		fmt.Printf("\nUpdated metadata.json for: %s\n", strings.Join(updated, ", "))
+	}
+	for _, err := range metaErrs {
+		fmt.Printf("  %s metadata.json update failed: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	fmt.Printf("\n%s Migration complete.\n", style.Bold.Render("✓"))
 	fmt.Printf("\nStart server with: %s\n", style.Dim.Render("gt dolt start"))
+
+	return nil
+}
+
+func runDoltFixMetadata(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	updated, errs := doltserver.EnsureAllMetadata(townRoot)
+
+	if len(updated) > 0 {
+		fmt.Printf("%s Updated metadata.json for %d rig(s):\n", style.Bold.Render("✓"), len(updated))
+		for _, name := range updated {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+
+	if len(errs) > 0 {
+		fmt.Println()
+		for _, err := range errs {
+			fmt.Printf("  %s %v\n", style.Dim.Render("⚠"), err)
+		}
+	}
+
+	if len(updated) == 0 && len(errs) == 0 {
+		fmt.Println("No rig databases found. Nothing to update.")
+	}
 
 	return nil
 }

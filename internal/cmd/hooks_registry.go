@@ -29,11 +29,12 @@ type HookDefinition struct {
 }
 
 var (
-	hooksListAll bool
+	hooksRegistryAll     bool
+	hooksRegistryVerbose bool
 )
 
-var hooksListCmd = &cobra.Command{
-	Use:   "list",
+var hooksRegistryCmd = &cobra.Command{
+	Use:   "registry",
 	Short: "List available hooks from the registry",
 	Long: `List all hooks defined in the hook registry.
 
@@ -41,15 +42,15 @@ The registry is at ~/gt/hooks/registry.toml and defines hooks that can be
 installed for different roles (crew, polecat, witness, etc.).
 
 Examples:
-  gt hooks list           # Show enabled hooks
-  gt hooks list --all     # Show all hooks including disabled`,
-	RunE: runHooksList,
+  gt hooks registry           # Show enabled hooks
+  gt hooks registry --all     # Show all hooks including disabled`,
+	RunE: runHooksRegistry,
 }
 
 func init() {
-	hooksCmd.AddCommand(hooksListCmd)
-	hooksListCmd.Flags().BoolVarP(&hooksListAll, "all", "a", false, "Show all hooks including disabled")
-	hooksListCmd.Flags().BoolVarP(&hooksVerbose, "verbose", "v", false, "Show hook commands and matchers")
+	hooksCmd.AddCommand(hooksRegistryCmd)
+	hooksRegistryCmd.Flags().BoolVarP(&hooksRegistryAll, "all", "a", false, "Show all hooks including disabled")
+	hooksRegistryCmd.Flags().BoolVarP(&hooksRegistryVerbose, "verbose", "v", false, "Show hook commands and matchers")
 }
 
 // LoadRegistry loads the hook registry from the town's hooks directory.
@@ -72,7 +73,7 @@ func LoadRegistry(townRoot string) (*HookRegistry, error) {
 	return &registry, nil
 }
 
-func runHooksList(cmd *cobra.Command, args []string) error {
+func runHooksRegistry(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
@@ -99,7 +100,7 @@ func runHooksList(cmd *cobra.Command, args []string) error {
 	eventOrder := []string{"PreToolUse", "PostToolUse", "SessionStart", "PreCompact", "UserPromptSubmit", "Stop"}
 
 	for name, def := range registry.Hooks {
-		if !hooksListAll && !def.Enabled {
+		if !hooksRegistryAll && !def.Enabled {
 			continue
 		}
 		byEvent[def.Event] = append(byEvent[def.Event], struct {
@@ -149,7 +150,7 @@ func runHooksList(cmd *cobra.Command, args []string) error {
 				style.Dim.Render("roles:"), rolesStr,
 				style.Dim.Render("scope:"), scopeStr)
 
-			if hooksVerbose {
+			if hooksRegistryVerbose {
 				fmt.Printf("    %s %s\n", style.Dim.Render("command:"), h.def.Command)
 				for _, m := range h.def.Matchers {
 					fmt.Printf("    %s %s\n", style.Dim.Render("matcher:"), m)

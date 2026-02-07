@@ -1462,6 +1462,193 @@ func TestRoleConfigRoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseRoleConfigWispTTLs tests parsing wisp_ttl_* fields from role config.
+func TestParseRoleConfigWispTTLs(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		wantNil     bool
+		wantTTLs    map[string]string
+	}{
+		{
+			name: "single wisp TTL",
+			description: `session_pattern: gt-{rig}-{name}
+wisp_ttl_patrol: 48h`,
+			wantTTLs: map[string]string{"patrol": "48h"},
+		},
+		{
+			name: "multiple wisp TTLs",
+			description: `wisp_ttl_patrol: 48h
+wisp_ttl_error: 336h
+wisp_ttl_gc_report: 24h`,
+			wantTTLs: map[string]string{
+				"patrol":    "48h",
+				"error":     "336h",
+				"gc_report": "24h",
+			},
+		},
+		{
+			name: "hyphenated key format",
+			description: `wisp-ttl-patrol: 48h
+wisp-ttl-error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "mixed with other role config fields",
+			description: `session_pattern: gt-{rig}-{name}
+work_dir_pattern: {town}/{rig}
+wisp_ttl_patrol: 48h
+ping_timeout: 30s
+wisp_ttl_error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "wisp TTL only (no other fields)",
+			description: `wisp_ttl_patrol: 24h`,
+			wantTTLs:    map[string]string{"patrol": "24h"},
+		},
+		{
+			name:        "no wisp TTLs present",
+			description: `session_pattern: gt-{rig}-{name}`,
+			wantTTLs:    map[string]string{},
+		},
+		{
+			name: "case insensitive keys",
+			description: `WISP_TTL_PATROL: 48h
+Wisp_TTL_Error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "wisp TTL with default type",
+			description: `wisp_ttl_default: 168h`,
+			wantTTLs:    map[string]string{"default": "168h"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ParseRoleConfig(tt.description)
+
+			if tt.wantNil {
+				if config != nil {
+					t.Errorf("ParseRoleConfig() = %+v, want nil", config)
+				}
+				return
+			}
+
+			if config == nil {
+				t.Fatal("ParseRoleConfig() = nil, want non-nil")
+			}
+
+			if len(config.WispTTLs) != len(tt.wantTTLs) {
+				t.Errorf("WispTTLs len = %d, want %d\ngot: %v\nwant: %v",
+					len(config.WispTTLs), len(tt.wantTTLs), config.WispTTLs, tt.wantTTLs)
+			}
+			for k, v := range tt.wantTTLs {
+				if config.WispTTLs[k] != v {
+					t.Errorf("WispTTLs[%q] = %q, want %q", k, config.WispTTLs[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatRoleConfigWispTTLs tests that wisp TTLs are included in format output.
+func TestFormatRoleConfigWispTTLs(t *testing.T) {
+	config := &RoleConfig{
+		SessionPattern: "gt-{rig}-{name}",
+		EnvVars:        map[string]string{},
+		WispTTLs: map[string]string{
+			"patrol": "48h",
+			"error":  "336h",
+		},
+	}
+
+	formatted := FormatRoleConfig(config)
+
+	if !strings.Contains(formatted, "wisp_ttl_error: 336h") {
+		t.Errorf("formatted output missing wisp_ttl_error, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "wisp_ttl_patrol: 48h") {
+		t.Errorf("formatted output missing wisp_ttl_patrol, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "session_pattern: gt-{rig}-{name}") {
+		t.Errorf("formatted output missing session_pattern, got:\n%s", formatted)
+	}
+}
+
+// TestRoleConfigWispTTLRoundTrip tests that wisp TTLs survive parse/format round-trip.
+func TestRoleConfigWispTTLRoundTrip(t *testing.T) {
+	original := &RoleConfig{
+		SessionPattern: "gt-{rig}-{name}",
+		EnvVars:        map[string]string{},
+		WispTTLs: map[string]string{
+			"patrol":    "48h",
+			"error":     "336h",
+			"gc_report": "24h",
+		},
+	}
+
+	formatted := FormatRoleConfig(original)
+	parsed := ParseRoleConfig(formatted)
+
+	if parsed == nil {
+		t.Fatal("round-trip parse returned nil")
+	}
+
+	if len(parsed.WispTTLs) != len(original.WispTTLs) {
+		t.Fatalf("round-trip WispTTLs len = %d, want %d", len(parsed.WispTTLs), len(original.WispTTLs))
+	}
+	for k, v := range original.WispTTLs {
+		if parsed.WispTTLs[k] != v {
+			t.Errorf("round-trip WispTTLs[%q] = %q, want %q", k, parsed.WispTTLs[k], v)
+		}
+	}
+}
+
+// TestParseWispTTLKey tests the wisp TTL key parser directly.
+func TestParseWispTTLKey(t *testing.T) {
+	tests := []struct {
+		key      string
+		wantType string
+		wantOK   bool
+	}{
+		{"wisp_ttl_patrol", "patrol", true},
+		{"wisp_ttl_error", "error", true},
+		{"wisp_ttl_gc_report", "gc_report", true},
+		{"wisp-ttl-patrol", "patrol", true},
+		{"wisp-ttl-error", "error", true},
+		{"wispttlpatrol", "patrol", true},
+		{"wisp_ttl_", "", false},   // empty type
+		{"wisp-ttl-", "", false},   // empty type
+		{"session_pattern", "", false},
+		{"wisp_patrol", "", false},
+		{"ttl_patrol", "", false},
+		{"", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			gotType, gotOK := ParseWispTTLKey(tt.key)
+			if gotOK != tt.wantOK {
+				t.Errorf("ParseWispTTLKey(%q) ok = %v, want %v", tt.key, gotOK, tt.wantOK)
+			}
+			if gotType != tt.wantType {
+				t.Errorf("ParseWispTTLKey(%q) type = %q, want %q", tt.key, gotType, tt.wantType)
+			}
+		})
+	}
+}
+
 // TestRoleBeadID tests role bead ID generation.
 func TestRoleBeadID(t *testing.T) {
 	tests := []struct {
@@ -1834,6 +2021,58 @@ func TestSetupRedirect(t *testing.T) {
 		}
 	})
 
+	t.Run("crew worktree with rig beads but no database", func(t *testing.T) {
+		// Setup: rig/.beads exists (has metadata.json) but no actual database.
+		// This is the dolt architecture where rig/.beads has metadata only and
+		// the actual dolt DB lives at mayor/rig/.beads/dolt/.
+		// The redirect should point to mayor/rig/.beads, not rig/.beads.
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		mayorRigBeads := filepath.Join(rigRoot, "mayor", "rig", ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create rig/.beads with metadata but NO database (no dolt/ or beads.db)
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"),
+			[]byte(`{"database":"dolt","backend":"dolt","dolt_mode":"embedded"}`), 0644); err != nil {
+			t.Fatalf("write metadata: %v", err)
+		}
+		// Create mayor/rig/.beads with dolt DB marker
+		doltDir := filepath.Join(mayorRigBeads, "dolt")
+		if err := os.MkdirAll(doltDir, 0755); err != nil {
+			t.Fatalf("mkdir mayor dolt: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Run SetupRedirect - should detect no DB at rig/.beads and fall back to mayor/rig/.beads
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify redirect points to mayor/rig/.beads (not rig/.beads)
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := "../../mayor/rig/.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves correctly
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != mayorRigBeads {
+			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
+		}
+	})
+
 	t.Run("crew worktree with mayor/rig beads only", func(t *testing.T) {
 		// Setup: no rig/.beads, only mayor/rig/.beads exists
 		// This is the tracked beads architecture where rig root has no .beads directory
@@ -1871,6 +2110,55 @@ func TestSetupRedirect(t *testing.T) {
 		resolved := ResolveBeadsDir(crewPath)
 		if resolved != mayorRigBeads {
 			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
+		}
+	})
+
+	t.Run("handles stale .beads file (not directory)", func(t *testing.T) {
+		// Edge case: .beads exists as a file instead of directory
+		// This can happen with unusual clone state or failed operations
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create rig structure
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Create .beads as a FILE (not directory) - simulating stale state
+		staleBeadsFile := filepath.Join(crewPath, ".beads")
+		if err := os.WriteFile(staleBeadsFile, []byte("stale content"), 0644); err != nil {
+			t.Fatalf("write stale .beads file: %v", err)
+		}
+
+		// SetupRedirect should remove the file and create the directory
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify .beads is now a directory
+		info, err := os.Stat(staleBeadsFile)
+		if err != nil {
+			t.Fatalf("stat .beads: %v", err)
+		}
+		if !info.IsDir() {
+			t.Errorf(".beads should be a directory, but is a file")
+		}
+
+		// Verify redirect was created
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := "../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
 		}
 	})
 }

@@ -326,12 +326,12 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "polecats", polecat, "rig")
+		return filepath.Join(townRoot, rig, "polecats", polecat)
 	case RoleCrew:
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "crew", polecat, "rig")
+		return filepath.Join(townRoot, rig, "crew", polecat)
 	default:
 		return ""
 	}
@@ -530,6 +530,7 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 		AgentName: info.Polecat,
 		TownRoot:  townRoot,
 	})
+	envVars[EnvGTRole] = string(info.Role)
 	envVars[EnvGTRoleHome] = home
 
 	// Output in sorted order for consistent output

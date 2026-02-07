@@ -477,10 +477,7 @@ func (r *Router) resolveOverseer() ([]string, error) {
 // resolveTownAgents resolves @town to all town-level agents (mayor, deacon).
 func (r *Router) resolveTownAgents() ([]string, error) {
 	// Town-level agents have rig=null in their description
-	agents, err := r.queryAgents("rig: null")
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents("rig: null")
 
 	var addresses []string
 	for _, agent := range agents {
@@ -497,10 +494,7 @@ func (r *Router) resolveTownAgents() ([]string, error) {
 func (r *Router) resolveAgentsByRole(roleType, rig string) ([]string, error) {
 	// Build query filter
 	query := "role_type: " + roleType
-	agents, err := r.queryAgents(query)
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents(query)
 
 	var addresses []string
 	for _, agent := range agents {
@@ -523,10 +517,7 @@ func (r *Router) resolveAgentsByRole(roleType, rig string) ([]string, error) {
 func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 	// Query for agents with matching rig in description
 	query := "rig: " + rig
-	agents, err := r.queryAgents(query)
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents(query)
 
 	var addresses []string
 	for _, agent := range agents {
@@ -539,8 +530,54 @@ func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 }
 
 // queryAgents queries agent beads using bd list with description filtering.
-func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
-	beadsDir := r.resolveBeadsDir("")
+// Searches both town-level and rig-level beads to find all agents.
+func (r *Router) queryAgents(descContains string) []*agentBead {
+	var allAgents []*agentBead
+
+	// Query town-level beads
+	townBeadsDir := r.resolveBeadsDir("")
+	townAgents, err := r.queryAgentsInDir(townBeadsDir, descContains)
+	if err != nil {
+		// Don't fail yet - rig beads might still have results
+		townAgents = nil
+	}
+	allAgents = append(allAgents, townAgents...)
+
+	// Also query rig-level beads via routes.jsonl
+	if r.townRoot != "" {
+		routesDir := filepath.Join(r.townRoot, ".beads")
+		routes, routeErr := beads.LoadRoutes(routesDir)
+		if routeErr == nil {
+			for _, route := range routes {
+				// Skip hq- routes (town-level, already queried)
+				if strings.HasPrefix(route.Prefix, "hq-") {
+					continue
+				}
+				rigBeadsDir := filepath.Join(r.townRoot, route.Path, ".beads")
+				rigAgents, rigErr := r.queryAgentsInDir(rigBeadsDir, descContains)
+				if rigErr != nil {
+					continue // Skip rigs with errors
+				}
+				allAgents = append(allAgents, rigAgents...)
+			}
+		}
+	}
+
+	// Deduplicate by ID
+	seen := make(map[string]bool)
+	var unique []*agentBead
+	for _, agent := range allAgents {
+		if !seen[agent.ID] {
+			seen[agent.ID] = true
+			unique = append(unique, agent)
+		}
+	}
+
+	return unique
+}
+
+// queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
+func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
 	args := []string{"list", "--type=agent", "--json", "--limit=0"}
 
 	if descContains != "" {
@@ -549,7 +586,7 @@ func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
 
 	stdout, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
-		return nil, fmt.Errorf("querying agents: %w", err)
+		return nil, fmt.Errorf("querying agents in %s: %w", beadsDir, err)
 	}
 
 	var agents []*agentBead
@@ -570,27 +607,7 @@ func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
 
 // queryAgentsFromDir queries agent beads from a specific beads directory.
 func (r *Router) queryAgentsFromDir(beadsDir string) ([]*agentBead, error) {
-	args := []string{"list", "--type=agent", "--json", "--limit=0"}
-
-	stdout, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
-	if err != nil {
-		return nil, fmt.Errorf("querying agents from %s: %w", beadsDir, err)
-	}
-
-	var agents []*agentBead
-	if err := json.Unmarshal(stdout, &agents); err != nil {
-		return nil, fmt.Errorf("parsing agent query result: %w", err)
-	}
-
-	// Filter for open agents only (closed agents are inactive)
-	var active []*agentBead
-	for _, agent := range agents {
-		if agent.Status == "open" || agent.Status == "in_progress" {
-			active = append(active, agent)
-		}
-	}
-
-	return active, nil
+	return r.queryAgentsInDir(beadsDir, "")
 }
 
 // shouldBeWisp determines if a message should be stored as a wisp.
@@ -700,10 +717,7 @@ func (r *Router) validateRecipient(identity string) error {
 	}
 
 	// Query agents from town-level beads
-	agents, err := r.queryAgents("")
-	if err != nil {
-		return fmt.Errorf("failed to query town agents: %w", err)
-	}
+	agents := r.queryAgents("")
 
 	for _, agent := range agents {
 		if agentBeadToAddress(agent) == identity {

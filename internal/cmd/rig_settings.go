@@ -144,10 +144,7 @@ func runRigSettingsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse the value
-	value, err := parseValue(valueStr)
-	if err != nil {
-		return fmt.Errorf("parsing value: %w", err)
-	}
+	value := parseValue(valueStr)
 
 	// Set the value using dot notation
 	if err := setNestedValue(settings, keyPath, value); err != nil {
@@ -201,33 +198,33 @@ func runRigSettingsUnset(cmd *cobra.Command, args []string) error {
 
 // parseValue attempts to parse a string value into the appropriate type.
 // Tries: bool → number → JSON → string
-func parseValue(s string) (interface{}, error) {
+func parseValue(s string) interface{} {
 	// Try boolean
 	if s == "true" {
-		return true, nil
+		return true
 	}
 	if s == "false" {
-		return false, nil
+		return false
 	}
 
 	// Try integer
 	if i, err := strconv.Atoi(s); err == nil {
-		return i, nil
+		return i
 	}
 
 	// Try float
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f, nil
+		return f
 	}
 
 	// Try JSON
 	var jsonValue interface{}
 	if err := json.Unmarshal([]byte(s), &jsonValue); err == nil {
-		return jsonValue, nil
+		return jsonValue
 	}
 
 	// Default to string
-	return s, nil
+	return s
 }
 
 // setNestedValue sets a value in a nested structure using dot notation.

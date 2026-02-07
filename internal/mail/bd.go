@@ -51,9 +51,11 @@ func runBdCommand(args []string, workDir, beadsDir string, extraEnv ...string) (
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+
+	if runErr != nil {
 		return nil, &bdError{
-			Err:    err,
+			Err:    runErr,
 			Stderr: strings.TrimSpace(stderr.String()),
 		}
 	}

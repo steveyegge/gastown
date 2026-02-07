@@ -15,6 +15,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "mayor")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
 	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
@@ -169,6 +170,7 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 
 	// Key should be absent, not empty string
 	assertNotSet(t, env, "GT_ROOT")
+	assertNotSet(t, env, "GIT_CEILING_DIRECTORIES") // also not set when TownRoot empty
 
 	// Other keys should still be set
 	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format

@@ -12,9 +12,7 @@ export const GasTown = async ({ $, directory }) => {
     }
   };
 
-  const onSessionCreated = async () => {
-    if (didInit) return;
-    didInit = true;
+  const injectContext = async () => {
     await run("gt prime");
     if (autonomousRoles.has(role)) {
       await run("gt mail check --inject");
@@ -25,8 +23,29 @@ export const GasTown = async ({ $, directory }) => {
   return {
     event: async ({ event }) => {
       if (event?.type === "session.created") {
-        await onSessionCreated();
+        if (didInit) return;
+        didInit = true;
+        await injectContext();
       }
+      if (event?.type === "session.compacted") {
+        await injectContext();
+      }
+      if (event?.type === "session.deleted") {
+        const sessionID = event.properties?.info?.id;
+        if (sessionID) {
+          await $`gt costs record --session ${sessionID}`.catch(() => {});
+        }
+      }
+    },
+    "experimental.session.compacting": async ({ sessionID }, output) => {
+      const roleDisplay = role || "unknown";
+      output.context.push(`
+## Gas Town Multi-Agent System
+
+**After Compaction:** Run \`gt prime\` to restore full context.
+**Check Hook:** \`gt hook\` - if work present, execute immediately (GUPP).
+**Role:** ${roleDisplay}
+`);
     },
   };
 };

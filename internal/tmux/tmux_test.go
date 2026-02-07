@@ -548,6 +548,7 @@ func TestKillSessionWithProcesses(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Verify session exists
 	has, err := tm.HasSession(sessionName)
@@ -603,6 +604,7 @@ func TestKillSessionWithProcessesExcluding(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Verify session exists
 	has, err := tm.HasSession(sessionName)
@@ -745,6 +747,7 @@ func TestKillSessionWithProcesses_KillsProcessGroup(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Give processes time to start
 	time.Sleep(200 * time.Millisecond)
@@ -828,11 +831,27 @@ func TestSessionSet(t *testing.T) {
 }
 
 func TestCleanupOrphanedSessions(t *testing.T) {
+	// CRITICAL SAFETY: This test calls CleanupOrphanedSessions() which kills ALL
+	// gt-*/hq-* sessions that appear orphaned. This is EXTREMELY DANGEROUS in any
+	// environment with running agents. Require explicit opt-in via environment variable.
+	if os.Getenv("GT_TEST_ALLOW_CLEANUP_TEST") != "1" {
+		t.Skip("Skipping: GT_TEST_ALLOW_CLEANUP_TEST=1 required (this test kills sessions)")
+	}
+
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
 
 	tm := NewTmux()
+
+	// Additional safety check: Skip if production GT sessions exist.
+	sessions, _ := tm.ListSessions()
+	for _, sess := range sessions {
+		if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) &&
+			sess != "gt-test-cleanup-rig" && sess != "hq-test-cleanup" {
+			t.Skip("Skipping: production GT sessions exist (would be killed by CleanupOrphanedSessions)")
+		}
+	}
 
 	// Create test sessions with gt- and hq- prefixes (zombie sessions - no Claude running)
 	gtSession := "gt-test-cleanup-rig"
@@ -905,11 +924,25 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 }
 
 func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
+	// CRITICAL SAFETY: This test calls CleanupOrphanedSessions() which kills ALL
+	// gt-*/hq-* sessions that appear orphaned. Require explicit opt-in.
+	if os.Getenv("GT_TEST_ALLOW_CLEANUP_TEST") != "1" {
+		t.Skip("Skipping: GT_TEST_ALLOW_CLEANUP_TEST=1 required (this test kills sessions)")
+	}
+
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
 
 	tm := NewTmux()
+
+	// Additional safety check: Skip if production GT sessions exist.
+	sessions, _ := tm.ListSessions()
+	for _, sess := range sessions {
+		if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
+			t.Skip("Skipping: GT sessions exist (CleanupOrphanedSessions would kill them)")
+		}
+	}
 
 	// Running cleanup with no orphaned GT sessions should return 0, no error
 	cleaned, err := tm.CleanupOrphanedSessions()

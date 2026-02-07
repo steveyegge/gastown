@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -189,9 +189,7 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
 			// syscall.Kill with negative PID targets the process group (POSIX).
 			pgidInt, _ := strconv.Atoi(pgid)
-			_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
-			time.Sleep(100 * time.Millisecond)
-			_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+			killProcessGroup(pgidInt)
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -329,37 +327,6 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
-// getProcessGroupID returns the process group ID (PGID) for a given PID.
-// Returns empty string if the process doesn't exist or PGID can't be determined.
-func getProcessGroupID(pid string) string {
-	out, err := exec.Command("ps", "-o", "pgid=", "-p", pid).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// getProcessGroupMembers returns all PIDs in a process group.
-// This finds processes that share the same PGID, including those that reparented to init.
-func getProcessGroupMembers(pgid string) []string {
-	// Use ps to find all processes with this PGID
-	// On macOS: ps -axo pid,pgid
-	// On Linux: ps -eo pid,pgid
-	out, err := exec.Command("ps", "-axo", "pid,pgid").Output()
-	if err != nil {
-		return nil
-	}
-
-	var members []string
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.TrimSpace(fields[1]) == pgid {
-			members = append(members, strings.TrimSpace(fields[0]))
-		}
-	}
-	return members
-}
-
 // KillPaneProcesses explicitly kills all processes associated with a tmux pane.
 // This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
 //
@@ -391,9 +358,7 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		// Kill process group using syscall.Kill() directly.
 		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
 		pgidInt, _ := strconv.Atoi(pgid)
-		_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
-		time.Sleep(100 * time.Millisecond)
-		_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+		killProcessGroup(pgidInt)
 	}
 
 	// Also walk the process tree for any descendants that might have called setsid()
@@ -921,10 +886,38 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasChildWithNames checks if a process has a child matching any of the given names.
-// Used when the pane command is a shell (bash, zsh) that launched an agent.
-func hasChildWithNames(pid string, names []string) bool {
+// processMatchesNames checks if a process's binary name matches any of the given names.
+// Uses ps to get the actual command name from the process's executable path.
+// This handles cases where argv[0] is modified (e.g., Claude showing version "2.1.30").
+func processMatchesNames(pid string, names []string) bool {
 	if len(names) == 0 {
+		return false
+	}
+	// Use ps to get the command name (COMM column gives the executable name)
+	cmd := exec.Command("ps", "-p", pid, "-o", "comm=")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// Get just the base name (in case it's a full path like /Users/.../claude)
+	commPath := strings.TrimSpace(string(out))
+	comm := filepath.Base(commPath)
+
+	// Check if any name matches
+	for _, name := range names {
+		if comm == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDescendantWithNames checks if a process has any descendant (child, grandchild, etc.)
+// matching any of the given names. Recursively traverses the process tree up to maxDepth.
+// Used when the pane command is a shell (bash, zsh) that launched an agent.
+func hasDescendantWithNames(pid string, names []string, depth int) bool {
+	const maxDepth = 10 // Prevent infinite loops in case of circular references
+	if len(names) == 0 || depth > maxDepth {
 		return false
 	}
 	// Use pgrep to find child processes
@@ -938,7 +931,7 @@ func hasChildWithNames(pid string, names []string) bool {
 	for _, n := range names {
 		nameSet[n] = true
 	}
-	// Check if any child matches
+	// Check if any child matches, or recursively check grandchildren
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -948,12 +941,25 @@ func hasChildWithNames(pid string, names []string) bool {
 		// Format: "PID name" e.g., "29677 node"
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			if nameSet[parts[1]] {
+			childPid := parts[0]
+			childName := parts[1]
+			// Direct match
+			if nameSet[childName] {
+				return true
+			}
+			// Recursive check of descendants
+			if hasDescendantWithNames(childPid, names, depth+1) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasChildWithNames checks if a process has a child matching any of the given names.
+// Deprecated: Use hasDescendantWithNames for more robust detection.
+func hasChildWithNames(pid string, names []string) bool {
+	return hasDescendantWithNames(pid, names, 0)
 }
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
@@ -1167,18 +1173,28 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 			return true
 		}
 	}
-	// If pane command is a shell, check for child processes.
-	// This handles agents started with "bash -c 'export ... && agent ...'"
+	// Check for child processes if pane command is a shell or unrecognized.
+	// This handles:
+	// - Agents started with "bash -c 'export ... && agent ...'"
+	// - Claude Code showing version as argv[0] (e.g., "2.1.29")
+	pid, err := t.GetPanePID(session)
+	if err != nil || pid == "" {
+		return false
+	}
+	// If pane command is a shell, check descendants
 	for _, shell := range constants.SupportedShells {
 		if cmd == shell {
-			pid, err := t.GetPanePID(session)
-			if err == nil && pid != "" {
-				return hasChildWithNames(pid, processNames)
-			}
-			break
+			return hasDescendantWithNames(pid, processNames, 0)
 		}
 	}
-	return false
+	// If pane command is unrecognized (not in processNames, not a shell),
+	// check if the process ITSELF matches (handles version-as-argv[0] like "2.1.30")
+	// before checking descendants.
+	if processMatchesNames(pid, processNames) {
+		return true
+	}
+	// Finally check descendants as fallback
+	return hasDescendantWithNames(pid, processNames, 0)
 }
 
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
@@ -1302,7 +1318,7 @@ func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, tim
 
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
-	format := "#{session_name}|#{session_windows}|#{session_created_string}|#{session_attached}|#{session_activity}|#{session_last_attached}"
+	format := "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}|#{session_activity}|#{session_last_attached}"
 	out, err := t.run("list-sessions", "-F", format, "-f", fmt.Sprintf("#{==:#{session_name},%s}", name))
 	if err != nil {
 		return nil, err
@@ -1319,10 +1335,17 @@ func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	windows := 0
 	_, _ = fmt.Sscanf(parts[1], "%d", &windows) // non-fatal: defaults to 0 on parse error
 
+	// Convert unix timestamp to formatted string for consumers.
+	created := parts[2]
+	var createdUnix int64
+	if _, err := fmt.Sscanf(created, "%d", &createdUnix); err == nil && createdUnix > 0 {
+		created = time.Unix(createdUnix, 0).Format("2006-01-02 15:04:05")
+	}
+
 	info := &SessionInfo{
 		Name:     parts[0],
 		Windows:  windows,
-		Created:  parts[2],
+		Created:  created,
 		Attached: parts[3] == "1",
 	}
 
@@ -1428,6 +1451,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	}
 	if err := t.SetFeedBinding(session); err != nil {
 		return fmt.Errorf("setting feed binding: %w", err)
+	}
+	if err := t.SetAgentsBinding(session); err != nil {
+		return fmt.Errorf("setting agents binding: %w", err)
 	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
@@ -1581,6 +1607,20 @@ func (t *Tmux) SetFeedBinding(session string) error {
 		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
+	return err
+}
+
+// SetAgentsBinding configures C-b g to open the agent switcher popup menu.
+// This runs `gt agents` which displays a tmux popup with all Gas Town agents.
+//
+// IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+func (t *Tmux) SetAgentsBinding(session string) error {
+	// C-b g → gt agents for GT sessions, help message otherwise
+	_, err := t.run("bind-key", "-T", "prefix", "g",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"run-shell 'gt agents'",
+		"display-message 'C-b g is for Gas Town sessions only'")
 	return err
 }
 

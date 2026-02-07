@@ -35,6 +35,11 @@ complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
 version = 4
 
+[vars]
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
+
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
@@ -227,13 +232,16 @@ If tests FAILED:
    - Notify polecat: "Tests failing. Please fix and resubmit."
    - Skip to loop-check
 3. If pre-existing on main:
-   - Option A: Fix it yourself (you're the Engineer!)
-   - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
+   - File a bead: bd create --type=bug --priority=1 --title="..."
+   - FORBIDDEN: Writing code to fix test failures. You merge branches, you do not develop.
+   - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - Tests passing, OR
-- Fix committed, OR
-- Bead filed for the failure
+- Bead filed for the pre-existing failure
+
+FORBIDDEN: Writing application code, exploring polecat implementations, or
+re-implementing fixes. You are a mechanical merge processor.
 
 This is non-negotiable. Never disavow. Never "note and proceed." """
 

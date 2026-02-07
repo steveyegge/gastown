@@ -141,7 +141,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 
 		// Add rig WITHOUT specifying --prefix - should detect "existing-prefix" from issues.jsonl
-		cmd = exec.Command(gtBinary, "rig", "add", "myrig", existingRepo)
+		// Use --adopt since we're adding a local directory (not a remote URL)
+		cmd = exec.Command(gtBinary, "rig", "add", "myrig", existingRepo, "--adopt")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -201,7 +202,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 
 		// Add rig WITH --prefix since we can't detect from empty issues.jsonl
-		cmd = exec.Command(gtBinary, "rig", "add", "emptyrig", emptyRepo, "--prefix", "empty-prefix")
+		// Use --adopt since we're adding a local directory (not a remote URL)
+		cmd = exec.Command(gtBinary, "rig", "add", "emptyrig", emptyRepo, "--adopt", "--prefix", "empty-prefix")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -260,7 +262,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 
 		// Add rig with WRONG --prefix - should fail
-		cmd = exec.Command(gtBinary, "rig", "add", "mismatchrig", mismatchRepo, "--prefix", "wrong-prefix")
+		// Use --adopt since we're adding a local directory (not a remote URL)
+		cmd = exec.Command(gtBinary, "rig", "add", "mismatchrig", mismatchRepo, "--adopt", "--prefix", "wrong-prefix")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 		output, err := cmd.CombinedOutput()
@@ -304,7 +307,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 
 		// Add rig WITHOUT --prefix - should derive from rig name "testrig"
 		// deriveBeadsPrefix("testrig") should produce some abbreviation
-		cmd = exec.Command(gtBinary, "rig", "add", "testrig", derivedRepo)
+		// Use --adopt since we're adding a local directory (not a remote URL)
+		cmd = exec.Command(gtBinary, "rig", "add", "testrig", derivedRepo, "--adopt")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 		output, err := cmd.CombinedOutput()

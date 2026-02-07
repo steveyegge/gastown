@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gas Town Dashboard</title>
+    <title>Gas Town Control Center</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="every 10s [!window.pauseRefresh]" hx-swap="outerHTML">
+    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="every 10s [!window.pauseRefresh]" hx-swap="morph:outerHTML" hx-ext="morph">
         <header>
-            <h1>🚚 Gas Town Control Center</h1>
+            <pre class="ascii-title">  __  __    __   _____ __  _   _  __  _    ___ __  __  _ _____ ___  __  _      ______ __  _ _____ ___ ___ 
+ / _]/  \ /' _| |_   _/__\| | | ||  \| |  / _//__\|  \| |_   _| _ \/__\| |    / _/ __|  \| |_   _| __| _ \
+| [/\ /\ |`._`.   | || \/ | 'V' || | ' | | \_| \/ | | ' | | | | v / \/ | |_  | \_| _|| | ' | | | | _|| v /
+ \__/_||_||___/   |_| \__/!_/ \_!|_|\__|  \__/\__/|_|\__| |_| |_|_\\__/|___|  \__/___|_|\__| |_| |___|_|_\</pre>
             <div style="display: flex; align-items: center; gap: 12px;">
                 <button class="cmd-btn" id="open-palette-btn">
                     <span>⌘</span> Commands <kbd>⌘K</kbd>
@@ -57,9 +61,15 @@
         {{if .Summary}}
         <div class="summary-banner">
             <div class="summary-stats">
+                {{if .Health}}
+                <div class="stat health-stat {{if .Health.HeartbeatFresh}}healthy{{else}}unhealthy{{end}}">
+                    <span class="stat-value">{{if .Health.HeartbeatFresh}}✓{{else}}⚠{{end}}</span>
+                    <span class="stat-label">💓 {{.Health.DeaconHeartbeat}}</span>
+                </div>
+                {{end}}
                 <div class="stat">
                     <span class="stat-value">{{.Summary.PolecatCount}}</span>
-                    <span class="stat-label">🦨 Polecats</span>
+                    <span class="stat-label">⚙️ Workers</span>
                 </div>
                 <div class="stat">
                     <span class="stat-value">{{.Summary.HookCount}}</span>
@@ -67,7 +77,7 @@
                 </div>
                 <div class="stat">
                     <span class="stat-value">{{.Summary.IssueCount}}</span>
-                    <span class="stat-label">📿 Issues</span>
+                    <span class="stat-label">📋 Work</span>
                 </div>
                 <div class="stat">
                     <span class="stat-value">{{.Summary.ConvoyCount}}</span>
@@ -143,6 +153,7 @@
                                 </td>
                                 <td>
                                     <span class="convoy-id">{{.ID}}</span>
+                                    {{if .Title}}<div class="convoy-title">{{.Title}}</div>{{end}}
                                 </td>
                                 <td>
                                     {{.Progress}}
@@ -168,10 +179,40 @@
                 </div>
             </div>
 
-            <!-- Workers Panel (Polecats + Refinery) -->
+            <!-- Crew Panel (named, long-lived workers) -->
+            <div class="panel" id="crew-panel">
+                <div class="panel-header">
+                    <h2>👨‍💼 Crew</h2>
+                    <span class="count" id="crew-count">0</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <div class="loading-state" id="crew-loading">Loading crew...</div>
+                    <table id="crew-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Rig</th>
+                                <th>State</th>
+                                <th>Hook</th>
+                                <th>Activity</th>
+                                <th>Session</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="crew-tbody">
+                        </tbody>
+                    </table>
+                    <div class="empty-state" id="crew-empty" style="display: none;">
+                        <p>No crew configured</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workers Panel (polecats + refinery) -->
             <div class="panel">
                 <div class="panel-header">
-                    <h2>👷 Workers</h2>
+                    <h2>⚙️ Workers</h2>
                     <span class="count">{{len .Workers}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
@@ -192,13 +233,7 @@
                             {{range .Workers}}
                             <tr class="{{polecatStatusClass .WorkStatus}}">
                                 <td><span class="polecat-name">{{.Name}}</span></td>
-                                <td>
-                                    {{if eq .AgentType "refinery"}}
-                                    <span class="badge badge-blue">refinery</span>
-                                    {{else}}
-                                    <span class="badge badge-muted">polecat</span>
-                                    {{end}}
-                                </td>
+                                <td>{{if eq .AgentType "refinery"}}<span class="badge badge-blue">refinery</span>{{else}}<span class="badge badge-muted">polecat</span>{{end}}</td>
                                 <td><span class="polecat-rig">{{.Rig}}</span></td>
                                 <td class="polecat-issue">
                                     {{if .IssueID}}
@@ -229,7 +264,7 @@
                     </table>
                     {{else}}
                     <div class="empty-state">
-                        <p>No active workers</p>
+                        <p>No polecats</p>
                     </div>
                     {{end}}
                 </div>
@@ -623,50 +658,6 @@
                 </div>
             </div>
 
-            <!-- Health Panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <h2>💓 System Health</h2>
-                    <button class="expand-btn">Expand</button>
-                </div>
-                <div class="panel-body">
-                    {{if .Health}}
-                    <div class="health-grid">
-                        <div class="health-item">
-                            <div class="health-label">Deacon Heartbeat</div>
-                            <div class="health-value {{if .Health.HeartbeatFresh}}good{{else}}bad{{end}}">
-                                {{.Health.DeaconHeartbeat}}
-                            </div>
-                        </div>
-                        <div class="health-item">
-                            <div class="health-label">Cycle</div>
-                            <div class="health-value">{{.Health.DeaconCycle}}</div>
-                        </div>
-                        <div class="health-item">
-                            <div class="health-label">Healthy Agents</div>
-                            <div class="health-value good">{{.Health.HealthyAgents}}</div>
-                        </div>
-                        <div class="health-item">
-                            <div class="health-label">Unhealthy</div>
-                            <div class="health-value {{if .Health.UnhealthyAgents}}bad{{else}}good{{end}}">
-                                {{.Health.UnhealthyAgents}}
-                            </div>
-                        </div>
-                        {{if .Health.IsPaused}}
-                        <div class="health-item" style="grid-column: 1 / -1; background: rgba(240, 113, 120, 0.1);">
-                            <div class="health-label">⚠️ Deacon Paused</div>
-                            <div class="health-value bad">{{.Health.PauseReason}}</div>
-                        </div>
-                        {{end}}
-                    </div>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>Health data unavailable</p>
-                    </div>
-                    {{end}}
-                </div>
-            </div>
-
             <!-- Queues Panel (optional, only show if there are queues) -->
             {{if .Queues}}
             <div class="panel">
@@ -708,30 +699,36 @@
             </div>
             {{end}}
 
-            <!-- Open Issues Panel -->
-            <div class="panel" id="issues-panel">
+            <!-- Work Panel (Combined Issues + Ready Work) -->
+            <div class="panel" id="work-panel">
                 <div class="panel-header">
-                    <h2>📿 Open Issues</h2>
+                    <h2>📋 Work</h2>
                     <span class="count">{{len .Issues}}</span>
+                    <button class="new-issue-btn" onclick="openIssueModal()">+ New</button>
                     <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-tabs">
+                    <button class="tab-btn active" data-tab="ready" onclick="switchWorkTab('ready')">Ready</button>
+                    <button class="tab-btn" data-tab="progress" onclick="switchWorkTab('progress')">In Progress</button>
+                    <button class="tab-btn" data-tab="all" onclick="switchWorkTab('all')">All</button>
                 </div>
                 <div class="panel-body">
                     <!-- Issues List View -->
                     <div id="issues-list">
                         {{if .Issues}}
-                        <table>
+                        <table id="work-table">
                             <thead>
                                 <tr>
                                     <th>Pri</th>
                                     <th>ID</th>
                                     <th>Title</th>
-                                    <th>Type</th>
+                                    <th>Status</th>
                                     <th>Age</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {{range .Issues}}
-                                <tr class="issue-row priority-{{.Priority}}" data-issue-id="{{.ID}}">
+                                <tr class="issue-row priority-{{.Priority}}" data-issue-id="{{.ID}}" data-status="{{if .Assignee}}progress{{else}}ready{{end}}">
                                     <td>
                                         {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
                                         {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
@@ -740,7 +737,9 @@
                                     </td>
                                     <td><span class="issue-id">{{.ID}}</span></td>
                                     <td class="issue-title">{{.Title}}</td>
-                                    <td class="issue-type">{{.Type}}</td>
+                                    <td class="issue-status">
+                                        {{if .Assignee}}<span class="badge badge-blue" title="{{.Assignee}}">{{.Assignee}}</span>{{else}}<span class="badge badge-green">Ready</span>{{end}}
+                                    </td>
                                     <td>{{.Age}}</td>
                                 </tr>
                                 {{end}}
@@ -748,7 +747,7 @@
                         </table>
                         {{else}}
                         <div class="empty-state">
-                            <p>No open issues</p>
+                            <p>No work items</p>
                         </div>
                         {{end}}
                     </div>
@@ -847,6 +846,40 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Output Panel -->
+    <!-- Issue Creation Modal -->
+    <div id="issue-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closeIssueModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📿 Create New Issue</h3>
+                <button class="modal-close" onclick="closeIssueModal()">✕</button>
+            </div>
+            <form id="issue-form" onsubmit="submitIssue(event)">
+                <div class="form-group">
+                    <label for="issue-title">Title *</label>
+                    <input type="text" id="issue-title" placeholder="What needs to be done?" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="issue-priority">Priority</label>
+                    <select id="issue-priority">
+                        <option value="1">🔴 P1 - Critical</option>
+                        <option value="2" selected>🟠 P2 - High (default)</option>
+                        <option value="3">🟡 P3 - Medium</option>
+                        <option value="4">⚪ P4 - Low</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="issue-description">Description (optional)</label>
+                    <textarea id="issue-description" rows="3" placeholder="Additional context or details..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeIssueModal()">Cancel</button>
+                    <button type="submit" class="btn-primary" id="issue-submit-btn">Create Issue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="output-panel" class="output-panel">
         <div class="output-panel-header">
             <span class="output-panel-title">

@@ -30,30 +30,58 @@ func isTrackedByConvoy(beadID string) string {
 		return ""
 	}
 
-	// Use bd dep list to find what tracks this issue (direction=up)
-	// Filter for open convoys in the results
+	// Primary: Use bd dep list to find what tracks this issue (direction=up)
+	// This is authoritative when cross-rig routing works
 	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
 	depCmd.Dir = townRoot
 
 	out, err := depCmd.Output()
+	if err == nil {
+		var trackers []struct {
+			ID        string `json:"id"`
+			IssueType string `json:"issue_type"`
+			Status    string `json:"status"`
+		}
+		if err := json.Unmarshal(out, &trackers); err == nil {
+			for _, tracker := range trackers {
+				if tracker.IssueType == "convoy" && tracker.Status == "open" {
+					return tracker.ID
+				}
+			}
+		}
+	}
+
+	// Fallback: Query convoys directly by description pattern
+	// This is more robust when cross-rig routing has issues (G19, G21)
+	// Auto-convoys have description "Auto-created convoy tracking <beadID>"
+	return findConvoyByDescription(townRoot, beadID)
+}
+
+// findConvoyByDescription searches open convoys for one tracking the given beadID.
+// Returns convoy ID if found, empty string otherwise.
+func findConvoyByDescription(townRoot, beadID string) string {
+	// Query all open convoys from HQ
+	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=convoy", "--status=open", "--json")
+	listCmd.Dir = filepath.Join(townRoot, ".beads")
+
+	out, err := listCmd.Output()
 	if err != nil {
 		return ""
 	}
 
-	// Parse results and find an open convoy
-	var trackers []struct {
-		ID        string `json:"id"`
-		IssueType string `json:"issue_type"`
-		Status    string `json:"status"`
+	var convoys []struct {
+		ID          string `json:"id"`
+		Description string `json:"description"`
 	}
-	if err := json.Unmarshal(out, &trackers); err != nil {
+	if err := json.Unmarshal(out, &convoys); err != nil {
 		return ""
 	}
 
-	// Return the first open convoy that tracks this issue
-	for _, tracker := range trackers {
-		if tracker.IssueType == "convoy" && tracker.Status == "open" {
-			return tracker.ID
+	// Check if any convoy's description mentions tracking this beadID
+	trackingPattern := fmt.Sprintf("tracking %s", beadID)
+	for _, convoy := range convoys {
+		if strings.Contains(convoy.Description, trackingPattern) {
+			return convoy.ID
 		}
 	}
 

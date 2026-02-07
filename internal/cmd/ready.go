@@ -136,7 +136,9 @@ func runReady(cmd *cobra.Command, args []string) error {
 				filtered := filterFormulaScaffolds(issues, formulaNames)
 				// Defense-in-depth: also filter wisps that shouldn't appear in ready work
 				wispIDs := getWispIDs(townBeadsPath)
-				src.Issues = filterWisps(filtered, wispIDs)
+				filtered = filterWisps(filtered, wispIDs)
+				// Filter identity beads (agents, roles, rigs) - not actionable work
+				src.Issues = filterIdentityBeads(filtered)
 			}
 			sources = append(sources, src)
 		}()
@@ -163,7 +165,9 @@ func runReady(cmd *cobra.Command, args []string) error {
 				filtered := filterFormulaScaffolds(issues, formulaNames)
 				// Defense-in-depth: also filter wisps that shouldn't appear in ready work
 				wispIDs := getWispIDs(r.BeadsPath())
-				src.Issues = filterWisps(filtered, wispIDs)
+				filtered = filterWisps(filtered, wispIDs)
+				// Filter identity beads (agents, roles, rigs) - not actionable work
+				src.Issues = filterIdentityBeads(filtered)
 			}
 			sources = append(sources, src)
 		}(r)
@@ -389,6 +393,55 @@ func getWispIDs(beadsPath string) map[string]bool {
 	}
 
 	return wispIDs
+}
+
+// filterIdentityBeads removes agent, role, and rig identity beads from the list.
+// These are status trackers, not actionable work items.
+//
+// Since bd ready --json doesn't include labels, we filter by:
+//   - issue_type "agent" (agent lifecycle beads)
+//   - Labels if present (gt:agent, gt:role, gt:rig)
+//   - ID suffix "-role" (role definition beads like hq-crew-role)
+//   - ID prefix matching "<prefix>-rig-" (rig identity beads like gt-rig-gastown)
+func filterIdentityBeads(issues []*beads.Issue) []*beads.Issue {
+	identityLabels := map[string]bool{
+		"gt:agent": true,
+		"gt:role":  true,
+		"gt:rig":   true,
+	}
+
+	filtered := make([]*beads.Issue, 0, len(issues))
+	for _, issue := range issues {
+		// Filter by issue_type
+		if issue.Type == "agent" {
+			continue
+		}
+
+		// Filter by labels (when available)
+		skip := false
+		for _, label := range issue.Labels {
+			if identityLabels[label] {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		// Filter role definition beads (IDs ending in "-role")
+		if strings.HasSuffix(issue.ID, "-role") {
+			continue
+		}
+
+		// Filter rig identity beads (IDs containing "-rig-")
+		if strings.Contains(issue.ID, "-rig-") {
+			continue
+		}
+
+		filtered = append(filtered, issue)
+	}
+	return filtered
 }
 
 // filterWisps removes wisp issues from the list.

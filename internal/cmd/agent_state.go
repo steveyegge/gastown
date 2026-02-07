@@ -279,13 +279,29 @@ func getAllAgentLabels(agentBead, beadsDir string) ([]string, error) {
 		return nil, fmt.Errorf("querying agent bead: %w", err)
 	}
 
+	return parseAgentBeadLabels(stdout.Bytes(), stderr.Bytes(), agentBead)
+}
+
+// parseAgentBeadLabels parses the JSON output from bd show --json and extracts labels.
+// This is separated from getAllAgentLabels to enable unit testing.
+func parseAgentBeadLabels(stdout, stderr []byte, agentBead string) ([]string, error) {
+	// Check for empty stdout before parsing - can happen with daemon mismatch
+	// or other errors that don't set exit code
+	if len(stdout) == 0 {
+		errMsg := strings.TrimSpace(string(stderr))
+		if errMsg != "" {
+			return nil, fmt.Errorf("%s", errMsg)
+		}
+		return nil, fmt.Errorf("agent bead query returned no output: %s", agentBead)
+	}
+
 	// Parse JSON output - bd show --json returns an array
 	var issues []struct {
 		Labels []string `json:"labels"`
 	}
 
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
-		return nil, fmt.Errorf("parsing agent bead: %w", err)
+	if err := json.Unmarshal(stdout, &issues); err != nil {
+		return nil, fmt.Errorf("parsing agent bead response: %w", err)
 	}
 
 	if len(issues) == 0 {
