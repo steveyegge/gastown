@@ -1442,12 +1442,44 @@ func (g *Git) submoduleURL(ref, submodulePath string) (string, error) {
 // The commit must exist in the submodule's object store (shared via .repo.git/modules/).
 func (g *Git) PushSubmoduleCommit(submodulePath, sha, remote string) error {
 	absPath := filepath.Join(g.workDir, submodulePath)
-	// Push the specific SHA to the remote's default branch
-	cmd := exec.Command("git", "-C", absPath, "push", remote, sha+":refs/heads/main")
+	// Detect the remote's default branch (don't assume main)
+	defaultBranch, err := submoduleDefaultBranch(absPath, remote)
+	if err != nil {
+		return fmt.Errorf("detecting default branch for submodule %s: %w", submodulePath, err)
+	}
+	cmd := exec.Command("git", "-C", absPath, "push", remote, sha+":refs/heads/"+defaultBranch)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("pushing submodule %s commit %s: %s", submodulePath, sha[:8], strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// submoduleDefaultBranch detects the default branch of a submodule's remote.
+func submoduleDefaultBranch(submodulePath, remote string) (string, error) {
+	// Try symbolic-ref on remote HEAD (works if remote has HEAD set)
+	cmd := exec.Command("git", "-C", submodulePath, "remote", "show", remote)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "HEAD branch:") {
+				branch := strings.TrimSpace(strings.TrimPrefix(line, "HEAD branch:"))
+				if branch != "" && branch != "(unknown)" {
+					return branch, nil
+				}
+			}
+		}
+	}
+	// Fallback: check if origin/main or origin/master exists
+	for _, candidate := range []string{"main", "master"} {
+		check := exec.Command("git", "-C", submodulePath, "ls-remote", "--exit-code", remote, "refs/heads/"+candidate)
+		if check.Run() == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("could not determine default branch for remote %s", remote)
 }

@@ -551,8 +551,9 @@ func initTestRepoWithSubmodule(t *testing.T) (string, string) {
 	tmp := t.TempDir()
 
 	// Create a "remote" bare repo for the submodule
+	// Use --initial-branch main for deterministic branch names across environments
 	subRemote := filepath.Join(tmp, "sub-remote.git")
-	runGit(t, tmp, "init", "--bare", subRemote)
+	runGit(t, tmp, "init", "--bare", "--initial-branch", "main", subRemote)
 
 	// Create a working clone of the submodule to add content
 	subWork := filepath.Join(tmp, "sub-work")
@@ -568,7 +569,7 @@ func initTestRepoWithSubmodule(t *testing.T) (string, string) {
 
 	// Create the parent repo
 	parent := filepath.Join(tmp, "parent")
-	runGit(t, tmp, "init", parent)
+	runGit(t, tmp, "init", "--initial-branch", "main", parent)
 	runGit(t, parent, "config", "user.email", "test@test.com")
 	runGit(t, parent, "config", "user.name", "Test User")
 	if err := os.WriteFile(filepath.Join(parent, "README.md"), []byte("# Parent\n"), 0644); err != nil {
