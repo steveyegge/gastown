@@ -470,6 +470,126 @@ func (x *TerminalUpdate) GetTimestamp() string {
 	return ""
 }
 
+// SendInputRequest sends text input to a terminal session.
+type SendInputRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Session name to send input to (e.g., "gt-gastown-toast" or "claude" for remote)
+	Session string `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	// The text to send. Delivered via tmux send-keys -l (literal mode).
+	Input string `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	// If true, send as a nudge (with Enter key and serialization).
+	// If false, send as raw keystrokes.
+	Nudge         bool `protobuf:"varint,3,opt,name=nudge,proto3" json:"nudge,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendInputRequest) Reset() {
+	*x = SendInputRequest{}
+	mi := &file_gastown_v1_terminal_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendInputRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendInputRequest) ProtoMessage() {}
+
+func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_terminal_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendInputRequest.ProtoReflect.Descriptor instead.
+func (*SendInputRequest) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_terminal_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SendInputRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+func (x *SendInputRequest) GetInput() string {
+	if x != nil {
+		return x.Input
+	}
+	return ""
+}
+
+func (x *SendInputRequest) GetNudge() bool {
+	if x != nil {
+		return x.Nudge
+	}
+	return false
+}
+
+// SendInputResponse confirms input delivery.
+type SendInputResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether the input was delivered successfully
+	Delivered bool `protobuf:"varint,1,opt,name=delivered,proto3" json:"delivered,omitempty"`
+	// Error message if delivery failed
+	Error         string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendInputResponse) Reset() {
+	*x = SendInputResponse{}
+	mi := &file_gastown_v1_terminal_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendInputResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendInputResponse) ProtoMessage() {}
+
+func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_terminal_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendInputResponse.ProtoReflect.Descriptor instead.
+func (*SendInputResponse) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_terminal_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SendInputResponse) GetDelivered() bool {
+	if x != nil {
+		return x.Delivered
+	}
+	return false
+}
+
+func (x *SendInputResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_gastown_v1_terminal_proto protoreflect.FileDescriptor
 
 const file_gastown_v1_terminal_proto_rawDesc = "" +
@@ -501,13 +621,21 @@ const file_gastown_v1_terminal_proto_rawDesc = "" +
 	"\x06output\x18\x01 \x01(\tR\x06output\x12\x14\n" +
 	"\x05lines\x18\x02 \x03(\tR\x05lines\x12\x16\n" +
 	"\x06exists\x18\x03 \x01(\bR\x06exists\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp2\xd0\x02\n" +
+	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\"X\n" +
+	"\x10SendInputRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\x12\x14\n" +
+	"\x05input\x18\x02 \x01(\tR\x05input\x12\x14\n" +
+	"\x05nudge\x18\x03 \x01(\bR\x05nudge\"G\n" +
+	"\x11SendInputResponse\x12\x1c\n" +
+	"\tdelivered\x18\x01 \x01(\bR\tdelivered\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error2\x9a\x03\n" +
 	"\x0fTerminalService\x12N\n" +
 	"\vPeekSession\x12\x1e.gastown.v1.PeekSessionRequest\x1a\x1f.gastown.v1.PeekSessionResponse\x12Q\n" +
 	"\fListSessions\x12\x1f.gastown.v1.ListSessionsRequest\x1a .gastown.v1.ListSessionsResponse\x12K\n" +
 	"\n" +
 	"HasSession\x12\x1d.gastown.v1.HasSessionRequest\x1a\x1e.gastown.v1.HasSessionResponse\x12M\n" +
-	"\fWatchSession\x12\x1f.gastown.v1.WatchSessionRequest\x1a\x1a.gastown.v1.TerminalUpdate0\x01B\xa0\x01\n" +
+	"\fWatchSession\x12\x1f.gastown.v1.WatchSessionRequest\x1a\x1a.gastown.v1.TerminalUpdate0\x01\x12H\n" +
+	"\tSendInput\x12\x1c.gastown.v1.SendInputRequest\x1a\x1d.gastown.v1.SendInputResponseB\xa0\x01\n" +
 	"\x0ecom.gastown.v1B\rTerminalProtoP\x01Z6github.com/steveyegge/gastown/gen/gastown/v1;gastownv1\xa2\x02\x03GXX\xaa\x02\n" +
 	"Gastown.V1\xca\x02\n" +
 	"Gastown\\V1\xe2\x02\x16Gastown\\V1\\GPBMetadata\xea\x02\vGastown::V1b\x06proto3"
@@ -524,7 +652,7 @@ func file_gastown_v1_terminal_proto_rawDescGZIP() []byte {
 	return file_gastown_v1_terminal_proto_rawDescData
 }
 
-var file_gastown_v1_terminal_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_gastown_v1_terminal_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_gastown_v1_terminal_proto_goTypes = []any{
 	(*PeekSessionRequest)(nil),   // 0: gastown.v1.PeekSessionRequest
 	(*PeekSessionResponse)(nil),  // 1: gastown.v1.PeekSessionResponse
@@ -534,18 +662,22 @@ var file_gastown_v1_terminal_proto_goTypes = []any{
 	(*HasSessionResponse)(nil),   // 5: gastown.v1.HasSessionResponse
 	(*WatchSessionRequest)(nil),  // 6: gastown.v1.WatchSessionRequest
 	(*TerminalUpdate)(nil),       // 7: gastown.v1.TerminalUpdate
+	(*SendInputRequest)(nil),     // 8: gastown.v1.SendInputRequest
+	(*SendInputResponse)(nil),    // 9: gastown.v1.SendInputResponse
 }
 var file_gastown_v1_terminal_proto_depIdxs = []int32{
 	0, // 0: gastown.v1.TerminalService.PeekSession:input_type -> gastown.v1.PeekSessionRequest
 	2, // 1: gastown.v1.TerminalService.ListSessions:input_type -> gastown.v1.ListSessionsRequest
 	4, // 2: gastown.v1.TerminalService.HasSession:input_type -> gastown.v1.HasSessionRequest
 	6, // 3: gastown.v1.TerminalService.WatchSession:input_type -> gastown.v1.WatchSessionRequest
-	1, // 4: gastown.v1.TerminalService.PeekSession:output_type -> gastown.v1.PeekSessionResponse
-	3, // 5: gastown.v1.TerminalService.ListSessions:output_type -> gastown.v1.ListSessionsResponse
-	5, // 6: gastown.v1.TerminalService.HasSession:output_type -> gastown.v1.HasSessionResponse
-	7, // 7: gastown.v1.TerminalService.WatchSession:output_type -> gastown.v1.TerminalUpdate
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	8, // 4: gastown.v1.TerminalService.SendInput:input_type -> gastown.v1.SendInputRequest
+	1, // 5: gastown.v1.TerminalService.PeekSession:output_type -> gastown.v1.PeekSessionResponse
+	3, // 6: gastown.v1.TerminalService.ListSessions:output_type -> gastown.v1.ListSessionsResponse
+	5, // 7: gastown.v1.TerminalService.HasSession:output_type -> gastown.v1.HasSessionResponse
+	7, // 8: gastown.v1.TerminalService.WatchSession:output_type -> gastown.v1.TerminalUpdate
+	9, // 9: gastown.v1.TerminalService.SendInput:output_type -> gastown.v1.SendInputResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -563,7 +695,7 @@ func file_gastown_v1_terminal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastown_v1_terminal_proto_rawDesc), len(file_gastown_v1_terminal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

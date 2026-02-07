@@ -110,6 +110,7 @@ func (s *StatusServer) GetAgentStatus(
 	if addr.Rig == "" && addr.Name != "" {
 		for _, agent := range status.GlobalAgents {
 			if agent.Name == addr.Name {
+				s.enrichAgentRuntime(agent)
 				return connect.NewResponse(&gastownv1.GetAgentStatusResponse{Agent: agent}), nil
 			}
 		}
@@ -124,6 +125,7 @@ func (s *StatusServer) GetAgentStatus(
 
 		for _, agent := range rig.Agents {
 			if matchesAgentAddress(agent.Address, addr) {
+				s.enrichAgentRuntime(agent)
 				return connect.NewResponse(&gastownv1.GetAgentStatusResponse{Agent: agent}), nil
 			}
 		}
@@ -340,6 +342,140 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 	}
 
 	return status, nil
+}
+
+// enrichAgentRuntime populates the detailed fields of an AgentRuntime:
+// has_work, work_title, hook_bead, state, unread_mail, first_subject.
+// It queries the agent bead for hook info and the mail system for unread messages.
+func (s *StatusServer) enrichAgentRuntime(agent *gastownv1.AgentRuntime) {
+	addr := agent.Address
+	if addr == nil {
+		return
+	}
+
+	// Build agent bead ID based on role
+	agentBeadID := agentAddressToBeadID(addr)
+	if agentBeadID == "" {
+		return
+	}
+
+	// Build mail address for this agent
+	mailAddr := agentAddressToMailAddress(addr)
+
+	// Query agent bead for hook info
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	townClient := beads.New(townBeadsPath)
+	if agentBead, err := townClient.Show(agentBeadID); err == nil && agentBead != nil {
+		agent.State = agentBead.AgentState
+
+		if agentBead.HookBead != "" {
+			agent.HookBead = agentBead.HookBead
+			agent.HasWork = true
+			// Look up the hooked bead's title - try rig beads first, then town beads
+			if hookedBead, err := s.findBead(agentBead.HookBead, addr.Rig); err == nil && hookedBead != nil {
+				agent.WorkTitle = hookedBead.Title
+			}
+		}
+	}
+
+	// Query mail for unread count and first subject
+	if mailAddr != "" {
+		mailRouter := mail.NewRouterWithTownRoot(s.townRoot, s.townRoot)
+		if mb, err := mailRouter.GetMailbox(mailAddr); err == nil {
+			if unread, err := mb.ListUnread(); err == nil {
+				agent.UnreadMail = int32(len(unread))
+				if len(unread) > 0 {
+					agent.FirstSubject = unread[0].Subject
+				}
+			}
+		}
+	}
+}
+
+// findBead looks up a bead by ID, checking rig beads and town beads.
+func (s *StatusServer) findBead(beadID, rigName string) (*beads.Issue, error) {
+	// Try rig beads first if we have a rig name
+	if rigName != "" {
+		rigBeadsPath := filepath.Join(s.townRoot, rigName, ".beads")
+		rigClient := beads.New(rigBeadsPath)
+		if issue, err := rigClient.Show(beadID); err == nil && issue != nil {
+			return issue, nil
+		}
+	}
+
+	// Fall back to town beads
+	townClient := beads.New(beads.GetTownBeadsPath(s.townRoot))
+	return townClient.Show(beadID)
+}
+
+// agentAddressToBeadID converts an AgentAddress to the canonical agent bead ID.
+func agentAddressToBeadID(addr *gastownv1.AgentAddress) string {
+	if addr == nil {
+		return ""
+	}
+
+	// Town-level agents
+	if addr.Rig == "" {
+		switch addr.Name {
+		case "mayor":
+			return "hq-mayor"
+		case "deacon":
+			return "hq-deacon"
+		}
+		return ""
+	}
+
+	// Rig-level agents
+	switch addr.Role {
+	case "witness":
+		return fmt.Sprintf("gt-%s-witness", addr.Rig)
+	case "refinery":
+		return fmt.Sprintf("gt-%s-refinery", addr.Rig)
+	case "polecats", "polecat":
+		if addr.Name != "" {
+			return fmt.Sprintf("gt-%s-polecat-%s", addr.Rig, addr.Name)
+		}
+	case "crew":
+		if addr.Name != "" {
+			return fmt.Sprintf("gt-%s-crew-%s", addr.Rig, addr.Name)
+		}
+	}
+	return ""
+}
+
+// agentAddressToMailAddress converts an AgentAddress to a mail address string.
+func agentAddressToMailAddress(addr *gastownv1.AgentAddress) string {
+	if addr == nil {
+		return ""
+	}
+
+	// Town-level agents
+	if addr.Rig == "" {
+		switch addr.Name {
+		case "mayor":
+			return "mayor/"
+		case "deacon":
+			return "deacon/"
+		}
+		return ""
+	}
+
+	// Rig-level agents - mail uses normalized form: "rig/name"
+	switch addr.Role {
+	case "witness":
+		return fmt.Sprintf("%s/witness", addr.Rig)
+	case "refinery":
+		return fmt.Sprintf("%s/refinery", addr.Rig)
+	case "polecats", "polecat":
+		if addr.Name != "" {
+			return fmt.Sprintf("%s/%s", addr.Rig, addr.Name)
+		}
+	case "crew":
+		if addr.Name != "" {
+			return fmt.Sprintf("%s/%s", addr.Rig, addr.Name)
+		}
+	}
+	return ""
 }
 
 // DecisionServer implements the DecisionService.
@@ -2315,6 +2451,56 @@ func (s *TerminalServer) WatchSession(
 			}
 		}
 	}
+}
+
+func (s *TerminalServer) SendInput(
+	ctx context.Context,
+	req *connect.Request[gastownv1.SendInputRequest],
+) (*connect.Response[gastownv1.SendInputResponse], error) {
+	session := req.Msg.Session
+	if session == "" {
+		return nil, invalidArg("session", "session name is required")
+	}
+
+	// Validate session starts with "gt-" to prevent arbitrary tmux access
+	if !strings.HasPrefix(session, "gt-") {
+		return nil, invalidArg("session", "session must start with 'gt-'")
+	}
+
+	input := req.Msg.Input
+	if input == "" {
+		return nil, invalidArg("input", "input text is required")
+	}
+
+	// Check session exists
+	exists, err := s.tmuxClient.HasSession(session)
+	if err != nil {
+		return nil, internalErr("failed to check session existence", err)
+	}
+	if !exists {
+		return connect.NewResponse(&gastownv1.SendInputResponse{
+			Delivered: false,
+			Error:     fmt.Sprintf("session %q does not exist", session),
+		}), nil
+	}
+
+	// Send input using appropriate method
+	if req.Msg.Nudge {
+		// NudgeSession is serialized and more reliable for Claude sessions
+		err = s.tmuxClient.NudgeSession(session, input)
+	} else {
+		err = s.tmuxClient.SendKeys(session, input)
+	}
+	if err != nil {
+		return connect.NewResponse(&gastownv1.SendInputResponse{
+			Delivered: false,
+			Error:     fmt.Sprintf("failed to send input: %v", err),
+		}), nil
+	}
+
+	return connect.NewResponse(&gastownv1.SendInputResponse{
+		Delivered: true,
+	}), nil
 }
 
 // ServerConfig contains configuration for the RPC server.
