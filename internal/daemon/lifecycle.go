@@ -12,8 +12,10 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	gtconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -395,7 +397,60 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 	time.Sleep(constants.ShutdownNotifyDelay)
 
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send startup nudge for predecessor discovery via /resume
+	recipient := identityToBDActor(identity)
+
+	// For OpenCode: send [GT_AGENT_INIT] first for plugin to inject gt prime context.
+	// This ensures agents have full context BEFORE being told to run gt hook.
+	rigPath := ""
+	if parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+	runtimeCfg := gtconfig.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+
+	// OpenCode agents need explicit gt prime instruction since plugin-based hooks
+	// don't execute shell commands like Claude's SessionStart hooks
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeCfg)
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+		Recipient:               recipient,
+		Sender:                  "daemon",
+		Topic:                   "lifecycle-restart",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+	})
+
+	if runtimeCfg.Provider == "opencode" {
+		_ = d.tmux.NudgeSession(sessionName, "[GT_AGENT_INIT]")
+		time.Sleep(3 * time.Second) // Wait for plugin to process and inject context
+	}
+
+	// Send beacon + propulsion instructions
+	instructions := propulsionInstructions(parsed.RoleType)
+	_ = d.tmux.NudgeSession(sessionName, beacon+"\n\n"+instructions) // Non-fatal
+
 	return nil
+}
+
+// propulsionInstructions returns role-specific startup instructions.
+func propulsionInstructions(role string) string {
+	switch role {
+	case "polecat", "crew":
+		return "Check your hook and mail, then act on the hook if present:\n" +
+			"1. `gt hook` - shows hooked work (if any)\n" +
+			"2. `gt mail inbox` - check for messages\n" +
+			"3. If work is hooked → execute it immediately\n" +
+			"4. If nothing hooked → wait for instructions"
+	case "witness":
+		return "Run `gt prime` to check patrol status and begin work."
+	case "refinery":
+		return "Run `gt prime` to check MQ status and begin patrol."
+	case "deacon":
+		return "Run `gt prime` to check patrol status and begin heartbeat cycle."
+	case "mayor":
+		return "Run `gt prime` to check mail and begin coordination."
+	default:
+		return "Run `gt prime` to get context and check your hook."
+	}
 }
 
 // getWorkDir determines the working directory for an agent.
@@ -534,7 +589,17 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
 	}
 
-	// Set any custom env vars from role config
+	// Set provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode plugin)
+	rigPath := ""
+	if parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+	runtimeCfg := gtconfig.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+	if runtimeCfg.Provider == "opencode" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AUTO_INIT", "1")
+	}
+
+	// Set any custom env vars from role config (bead-defined overrides)
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)

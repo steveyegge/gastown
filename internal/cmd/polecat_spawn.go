@@ -27,6 +27,7 @@ type SpawnedPolecatInfo struct {
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
 	Pane        string // Tmux pane ID (empty until StartSession is called)
+	Provider    string // Agent provider (e.g., "claude", "opencode")
 
 	// Internal fields for deferred session start
 	account string
@@ -153,6 +154,17 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 	sessionName := polecatSessMgr.SessionName(polecatName)
 
+	provider := ""
+	runtimeConfig := config.ResolveRoleAgentConfig(constants.RolePolecat, townRoot, r.Path)
+	if runtimeConfig != nil {
+		provider = runtimeConfig.Provider
+	}
+	if opts.Agent != "" {
+		if overrideConfig, _, resolveErr := config.ResolveAgentConfigWithOverride(townRoot, r.Path, opts.Agent); resolveErr == nil && overrideConfig != nil {
+			provider = overrideConfig.Provider
+		}
+	}
+
 	fmt.Printf("%s Polecat %s spawned (session start deferred)\n", style.Bold.Render("✓"), polecatName)
 
 	// Log spawn event to activity feed
@@ -164,6 +176,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		ClonePath:   polecatObj.ClonePath,
 		SessionName: sessionName,
 		Pane:        "", // Empty until StartSession is called
+		Provider:    provider,
 		account:     opts.Account,
 		agent:       opts.Agent,
 	}, nil

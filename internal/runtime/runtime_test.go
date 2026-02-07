@@ -178,11 +178,11 @@ func TestStartupFallbackCommands_WithHooks(t *testing.T) {
 }
 
 func TestStartupFallbackCommands_NilConfig(t *testing.T) {
-	// Nil config defaults to claude provider, which has hooks
-	// So it returns nil (no fallback commands needed)
+	// Nil config defaults to provider="claude" with hooks.provider="claude"
+	// Since hooks are configured, it returns nil (no fallback needed)
 	commands := StartupFallbackCommands("polecat", nil)
 	if commands != nil {
-		t.Error("StartupFallbackCommands() with nil config should return nil (defaults to claude with hooks)")
+		t.Errorf("StartupFallbackCommands() with nil config should return nil (claude has hooks), got %v", commands)
 	}
 }
 

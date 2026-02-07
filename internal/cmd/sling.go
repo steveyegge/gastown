@@ -113,7 +113,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
-	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
+	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., kimi, claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
@@ -199,11 +199,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string                  // Working directory for running bd hook commands
-	var hookSetAtomically bool              // True if hook was set during polecat spawn (skip redundant update)
-	var delayedDogInfo *DogDispatchInfo     // For delayed dog session start after hook is set
-	var newPolecatInfo *SpawnedPolecatInfo  // Spawned polecat info (session started after bead setup)
-	var isSelfSling bool                    // True if slinging to self (skip nudge - agent already knows)
+	var hookWorkDir string                 // Working directory for running bd hook commands
+	var hookSetAtomically bool             // True if hook was set during polecat spawn (skip redundant update)
+	var targetProvider string              // Agent provider for OpenCode-specific nudge handling
+	var delayedDogInfo *DogDispatchInfo    // For delayed dog session start after hook is set
+	var newPolecatInfo *SpawnedPolecatInfo // Spawned polecat info (session started after bead setup)
+	var isSelfSling bool                   // True if slinging to self (skip nudge - agent already knows)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -265,9 +266,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				newPolecatInfo = spawnInfo      // Store for later session start
+				newPolecatInfo = spawnInfo        // Store for later session start
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
+				targetProvider = spawnInfo.Provider
 
 				if !slingNoBoot {
 					wakeRigAgents(rigName)
@@ -301,6 +303,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 						newPolecatInfo = spawnInfo // Store for later session start
 						hookWorkDir = spawnInfo.ClonePath
 						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
+						targetProvider = spawnInfo.Provider
 
 						if !slingNoBoot {
 							wakeRigAgents(rigName)
@@ -632,7 +635,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
+		// Use provider from spawn if available, otherwise resolve from session config
+		provider := targetProvider
+		if provider == "" {
+			provider = resolveProviderForSession(townRoot, sessionName)
+		}
+		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs, provider); err != nil {
 			// Graceful fallback for no-tmux mode
 			fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
 			fmt.Printf("  Agent will discover work via gt prime / bd show\n")

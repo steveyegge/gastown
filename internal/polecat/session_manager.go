@@ -172,7 +172,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	// Resolve agent config from town settings to get role-specific agent (e.g., role_agents["polecat"] = "glm")
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveAgentConfig(townRoot, m.rig.Path)
 
 	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
 	// This keeps settings out of the git worktree while allowing runtime to find them
@@ -217,7 +219,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Set environment (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "polecat",
 		Rig:              m.rig.Name,
@@ -225,6 +226,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		BeadsNoDaemon:    true,
+		Provider:         runtimeConfig.Provider,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))

@@ -841,6 +841,20 @@ func TestRuntimeConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigProviderInference(t *testing.T) {
+	t.Parallel()
+	rc := normalizeRuntimeConfig(&RuntimeConfig{Command: "opencode"})
+	if rc.Provider != "opencode" {
+		t.Errorf("Provider = %q, want %q", rc.Provider, "opencode")
+	}
+	if rc.Hooks == nil || rc.Hooks.Provider != "opencode" {
+		t.Errorf("Hooks.Provider = %q, want %q", rc.Hooks.Provider, "opencode")
+	}
+	if rc.PromptMode != "flag" {
+		t.Errorf("PromptMode = %q, want %q", rc.PromptMode, "flag")
+	}
+}
+
 func TestRuntimeConfigBuildCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -2534,7 +2548,7 @@ func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
 }
 
 // TestMultipleAgentTypes tests that various built-in agent presets work correctly.
-// NOTE: Only these are actual built-in presets: claude, gemini, codex, cursor, auggie, amp, opencode.
+// NOTE: Only these are actual built-in presets: kimi, claude, gemini, codex, cursor, auggie, amp, opencode.
 // Variants like "claude-opus", "claude-haiku", "claude-sonnet" are NOT built-in - they need
 // to be defined as custom agents in TownSettings.Agents if specific model selection is needed.
 func TestMultipleAgentTypes(t *testing.T) {
@@ -2546,6 +2560,12 @@ func TestMultipleAgentTypes(t *testing.T) {
 		expectCommand string
 		isBuiltIn     bool // true if this is an actual built-in preset
 	}{
+		{
+			name:          "kimi built-in preset",
+			agentName:     "kimi",
+			expectCommand: "opencode",
+			isBuiltIn:     true,
+		},
 		{
 			name:          "claude built-in preset",
 			agentName:     "claude",
@@ -3453,6 +3473,90 @@ func TestQuoteForShell(t *testing.T) {
 				t.Errorf("quoteForShell(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildStartupCommand_IncludesProviderEnvForOpenCode(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with opencode agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "opencode"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
+
+	// Should include OPENCODE_PERMISSION for OpenCode (YOLO mode)
+	if !strings.Contains(cmd, "OPENCODE_PERMISSION=") {
+		t.Errorf("expected OPENCODE_PERMISSION for opencode provider, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_NoProviderEnvForClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with claude agent (default)
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
+
+	// Should NOT include OPENCODE_PERMISSION for Claude
+	if strings.Contains(cmd, "OPENCODE_PERMISSION") {
+		t.Errorf("did not expect OPENCODE_PERMISSION for claude provider, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_IncludesProviderEnvForOpenCode(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with claude default, but we'll override to opencode
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "witness"},
+		rigPath, "", "opencode",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should include OPENCODE_PERMISSION for OpenCode override (YOLO mode)
+	if !strings.Contains(cmd, "OPENCODE_PERMISSION=") {
+		t.Errorf("expected OPENCODE_PERMISSION for opencode override, got: %q", cmd)
 	}
 }
 

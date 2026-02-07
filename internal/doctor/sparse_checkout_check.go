@@ -10,9 +10,9 @@ import (
 )
 
 // SparseCheckoutCheck verifies that git clones/worktrees have sparse checkout configured
-// to exclude Claude Code context files from source repos. This ensures source repo settings
+// to exclude agent context files from source repos. This ensures source repo settings
 // and instructions don't override Gas Town agent configuration.
-// Excluded files: .claude/, CLAUDE.md, CLAUDE.local.md
+// Excluded files: .claude/, .opencode/, CLAUDE.md, AGENTS.md, CLAUDE.local.md
 // Note: .mcp.json is NOT excluded so worktrees inherit MCP server config.
 type SparseCheckoutCheck struct {
 	FixableCheck
@@ -26,7 +26,7 @@ func NewSparseCheckoutCheck() *SparseCheckoutCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "sparse-checkout",
-				CheckDescription: "Verify sparse checkout excludes Claude context files (.claude/, CLAUDE.md, etc.)",
+				CheckDescription: "Verify sparse checkout excludes agent context files (.claude/, .opencode/, etc.)",
 				CheckCategory:    CategoryRig,
 			},
 		},
@@ -78,7 +78,7 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Check if sparse checkout is configured (not just if .claude/ exists)
+		// Check if sparse checkout is configured
 		if !git.IsSparseCheckoutConfigured(repoPath) {
 			c.affectedRepos = append(c.affectedRepos, repoPath)
 		}
@@ -88,7 +88,7 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "All repos have sparse checkout configured to exclude Claude context files",
+			Message: "All repos have sparse checkout configured to exclude agent context files",
 		}
 	}
 
@@ -111,7 +111,7 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix configures sparse checkout for affected repos to exclude Claude context files.
+// Fix configures sparse checkout for affected repos to exclude agent context files.
 func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) error {
 	for _, repoPath := range c.affectedRepos {
 		if err := git.ConfigureSparseCheckout(repoPath); err != nil {

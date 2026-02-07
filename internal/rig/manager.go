@@ -1,10 +1,10 @@
 package rig
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -541,8 +541,8 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 
 	// Install runtime settings for all agent directories.
-	// Settings are placed in parent directories (not inside git repos) so Claude
-	// finds them via directory traversal without polluting source repos.
+	// Settings are placed in parent directories (not inside git repos) so agents
+	// find them via directory traversal without polluting source repos.
 	fmt.Printf("  Installing runtime settings...\n")
 	settingsRoles := []struct {
 		dir  string
@@ -1077,6 +1077,7 @@ func (m *Manager) ListRigNames() []string {
 }
 
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
+// Also creates AGENTS.md with identical content for compatibility with OpenCode/Codex.
 // Full context is injected ephemerally by `gt prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
 //

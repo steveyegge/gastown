@@ -35,6 +35,10 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// Provider is the agent provider (e.g., "opencode", "claude").
+	// Provider-specific env vars like GT_AUTO_INIT are merged when set.
+	Provider string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -115,6 +119,13 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add session ID env var name if provided
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
+	}
+
+	// Merge provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode)
+	if cfg.Provider != "" {
+		for k, v := range providerEnv(cfg.Provider, cfg.Role) {
+			env[k] = v
+		}
 	}
 
 	return env
@@ -247,4 +258,25 @@ func EnvToSlice(env map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+// providerEnv returns provider-specific environment variables.
+// This keeps provider-specific logic separate from base agent env.
+func providerEnv(provider, role string) map[string]string {
+	switch provider {
+	case "opencode":
+		return openCodeEnv(role)
+	default:
+		return nil
+	}
+}
+
+// openCodeEnv returns OpenCode-specific environment variables.
+// GT_AUTO_INIT enables the plugin to replace [GT_AGENT_INIT] trigger with context.
+// This applies to ALL roles using OpenCode - the plugin internally handles
+// role-specific behavior (e.g., only autonomous roles get mail checked).
+func openCodeEnv(role string) map[string]string {
+	return map[string]string{
+		"GT_AUTO_INIT": "1",
+	}
 }

@@ -20,6 +20,9 @@ Thumbs.db
 # Claude Code local state
 .claude/
 
+# Ralph loop local state
+.ralph/
+
 # Test
 coverage.out
 *.test
