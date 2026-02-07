@@ -1680,3 +1680,35 @@ func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
 	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
 	return err
 }
+
+// SetAutoRespawnHook configures a session to automatically respawn when the pane dies.
+// This is used for persistent agents like Deacon that should never exit.
+// PATCH-010: Fixes Deacon crash loop by respawning at tmux level.
+//
+// The hook:
+// 1. Waits 3 seconds (debounce rapid crashes)
+// 2. Respawns the pane with its original command
+//
+// Requires remain-on-exit to be set first (called automatically by this function).
+func (t *Tmux) SetAutoRespawnHook(session string) error {
+	// First, enable remain-on-exit so the pane stays after process exit
+	if err := t.SetRemainOnExit(session, true); err != nil {
+		return fmt.Errorf("setting remain-on-exit: %w", err)
+	}
+
+	// Sanitize session name for shell safety
+	safeSession := strings.ReplaceAll(session, "'", "'\\''")
+
+	// Hook command: wait then respawn the pane
+	// respawn-pane -k without a command reuses the original command
+	// The sleep prevents rapid respawn loops if Claude crashes immediately
+	hookCmd := fmt.Sprintf(`run-shell "sleep 3 && tmux respawn-pane -k -t '%s'"`, safeSession)
+
+	// Set the hook on this specific session
+	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
+	if err != nil {
+		return fmt.Errorf("setting pane-died hook: %w", err)
+	}
+
+	return nil
+}
