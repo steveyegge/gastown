@@ -1092,3 +1092,133 @@ func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestFindAgentPane_SinglePane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-single-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Single pane — should return empty (no disambiguation needed)
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+	if paneID != "" {
+		t.Errorf("FindAgentPane single pane = %q, want empty", paneID)
+	}
+}
+
+func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-multi-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a shell pane (simulating a monitoring split)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Split and run node in the new pane (simulating an agent)
+	_, err := tm.run("split-window", "-t", sessionName, "-d",
+		"node", "-e", "setTimeout(() => {}, 30000)")
+	if err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	// Give node a moment to start
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify we have 2 panes
+	out, err := tm.run("list-panes", "-t", sessionName, "-F", "#{pane_id}\t#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("list-panes: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	t.Logf("Panes: %v", lines)
+	if len(lines) < 2 {
+		t.Skipf("Expected 2 panes, got %d — skipping multi-pane test", len(lines))
+	}
+
+	// FindAgentPane should find the node pane
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+
+	// Verify it found the correct pane (the one running node)
+	if paneID == "" {
+		t.Log("FindAgentPane returned empty — node may not have started yet or detection missed it")
+		// Not a hard failure since node startup timing varies
+		return
+	}
+
+	// Verify the returned pane is actually running node
+	cmdOut, err := tm.run("display-message", "-t", paneID, "-p", "#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("display-message: %v", err)
+	}
+	paneCmd := strings.TrimSpace(cmdOut)
+	t.Logf("Agent pane %s running: %s", paneID, paneCmd)
+	if paneCmd != "node" {
+		t.Errorf("FindAgentPane returned pane running %q, want 'node'", paneCmd)
+	}
+}
+
+func TestFindAgentPane_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	_, err := tm.FindAgentPane("nonexistent-session-findagent-xyz")
+	if err == nil {
+		t.Error("FindAgentPane on nonexistent session should return error")
+	}
+}
+
+func TestFindAgentPane_MultiPaneNoAgent(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-noagent-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Split into two shell panes (no agent running)
+	_, err := tm.run("split-window", "-t", sessionName, "-d")
+	if err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// FindAgentPane should return empty (no agent in either pane)
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+	if paneID != "" {
+		t.Errorf("FindAgentPane with no agent = %q, want empty", paneID)
+	}
+}

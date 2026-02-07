@@ -734,8 +734,15 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
+	// Resolve the correct target: in multi-pane sessions, find the pane
+	// running the agent rather than sending to the focused pane.
+	target := session
+	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
+		target = agentPane
+	}
+
 	// 1. Send text in literal mode (handles special characters)
-	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
+	if _, err := t.run("send-keys", "-t", target, "-l", message); err != nil {
 		return err
 	}
 
@@ -744,7 +751,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", session, "Escape")
+	_, _ = t.run("send-keys", "-t", target, "Escape")
 	time.Sleep(100 * time.Millisecond)
 
 	// 4. Send Enter with retry (critical for message submission)
@@ -753,7 +760,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 		if attempt > 0 {
 			time.Sleep(200 * time.Millisecond)
 		}
-		if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
 			lastErr = err
 			continue
 		}
@@ -852,6 +859,67 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// FindAgentPane finds the pane running an agent process within a session.
+// In multi-pane sessions, send-keys -t <session> targets the active/focused pane,
+// which may not be the agent pane. This method enumerates all panes and returns
+// the pane ID (e.g., "%5") of the one running the agent.
+//
+// Detection checks pane_current_command, then falls back to process tree inspection
+// (same logic as IsRuntimeRunning) to handle agents started via shell wrappers.
+//
+// Returns ("", nil) if the session has only one pane (no disambiguation needed),
+// or if no agent pane can be identified (caller should fall back to session targeting).
+func (t *Tmux) FindAgentPane(session string) (string, error) {
+	// List all panes with ID, command, and PID
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) <= 1 {
+		// Single pane - no disambiguation needed
+		return "", nil
+	}
+
+	// Get agent process names from session environment
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	processNames := config.GetProcessNames(agentName)
+
+	// Check each pane for agent process
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		paneID := parts[0]
+		paneCmd := parts[1]
+		panePID := parts[2]
+
+		// Direct command match
+		for _, name := range processNames {
+			if paneCmd == name {
+				return paneID, nil
+			}
+		}
+
+		// Shell with agent descendant
+		for _, shell := range constants.SupportedShells {
+			if paneCmd == shell && hasDescendantWithNames(panePID, processNames, 0) {
+				return paneID, nil
+			}
+		}
+
+		// Version-as-argv[0] (e.g., "2.1.30") — check real binary name
+		if processMatchesNames(panePID, processNames) {
+			return paneID, nil
+		}
+	}
+
+	// No agent pane found
+	return "", nil
 }
 
 // GetPaneID returns the pane identifier for a session's first pane.
