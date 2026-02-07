@@ -253,6 +253,115 @@ func TestFindRigBeadsDir(t *testing.T) {
 	}
 }
 
+func TestMoveDir_SameFilesystem(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src")
+	dest := filepath.Join(tmpDir, "dest")
+
+	// Create source with nested content
+	if err := os.MkdirAll(filepath.Join(src, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "file.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "subdir", "nested.txt"), []byte("world"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := moveDir(src, dest); err != nil {
+		t.Fatalf("moveDir failed: %v", err)
+	}
+
+	// Source should be gone
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("source directory still exists after move")
+	}
+
+	// Dest should have the content
+	data, err := os.ReadFile(filepath.Join(dest, "file.txt"))
+	if err != nil {
+		t.Fatalf("reading moved file: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("file content = %q, want %q", string(data), "hello")
+	}
+
+	data, err = os.ReadFile(filepath.Join(dest, "subdir", "nested.txt"))
+	if err != nil {
+		t.Fatalf("reading moved nested file: %v", err)
+	}
+	if string(data) != "world" {
+		t.Errorf("nested file content = %q, want %q", string(data), "world")
+	}
+}
+
+func TestMigrateRigFromBeads(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create source database
+	rigName := "testrig"
+	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourcePath, ".dolt", "config.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create beads dir for metadata
+	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateRigFromBeads(townRoot, rigName, sourcePath); err != nil {
+		t.Fatalf("MigrateRigFromBeads failed: %v", err)
+	}
+
+	// Source should be gone
+	if _, err := os.Stat(sourcePath); !os.IsNotExist(err) {
+		t.Errorf("source directory still exists after migration")
+	}
+
+	// Target should have .dolt
+	targetDir := filepath.Join(townRoot, ".dolt-data", rigName)
+	if _, err := os.Stat(filepath.Join(targetDir, ".dolt")); err != nil {
+		t.Errorf("target .dolt directory missing: %v", err)
+	}
+
+	// config.json should have been migrated
+	data, err := os.ReadFile(filepath.Join(targetDir, ".dolt", "config.json"))
+	if err != nil {
+		t.Fatalf("reading migrated config: %v", err)
+	}
+	if string(data) != `{}` {
+		t.Errorf("config content = %q, want %q", string(data), `{}`)
+	}
+}
+
+func TestMigrateRigFromBeads_AlreadyExists(t *testing.T) {
+	townRoot := t.TempDir()
+
+	rigName := "existing"
+	sourcePath := filepath.Join(townRoot, "src", ".beads", "dolt", "beads")
+	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Target already exists
+	targetDir := filepath.Join(townRoot, ".dolt-data", rigName, ".dolt")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := MigrateRigFromBeads(townRoot, rigName, sourcePath)
+	if err == nil {
+		t.Fatal("expected error for already-existing target, got nil")
+	}
+}
+
 func TestFindMigratableDatabases_SkipsAlreadyMigrated(t *testing.T) {
 	townRoot := t.TempDir()
 
