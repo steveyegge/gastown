@@ -97,6 +97,11 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
+	// PATCH-010: Set remain-on-exit IMMEDIATELY after session creation.
+	// This ensures the pane stays if Claude exits before hooks are fully set.
+	// The pane will show "[Exited]" status but remain available for respawn.
+	_ = t.SetRemainOnExit(sessionID, true)
+
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
@@ -118,9 +123,10 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 
-	// PATCH-010: Enable auto-respawn for Deacon resilience.
+	// PATCH-010: Set auto-respawn hook for Deacon resilience.
 	// When Claude exits (for any reason), tmux will automatically respawn it.
 	// This prevents the crash loop where daemon repeatedly restarts Deacon.
+	// Note: SetAutoRespawnHook calls SetRemainOnExit again (harmless, already set above).
 	if err := t.SetAutoRespawnHook(sessionID); err != nil {
 		// Non-fatal: Deacon still works, just won't auto-respawn on crash
 		// Daemon will still restart it, but with a delay

@@ -213,6 +213,15 @@ func (d *Daemon) Run() error {
 		}
 	}
 
+	// PATCH-010: Set up global respawn hook for Deacon resilience.
+	// This ensures the hook is in place before any Deacon session is created,
+	// so it will catch crashes even if Claude exits before per-session hooks are set.
+	if err := d.tmux.SetGlobalDeaconRespawnHook(); err != nil {
+		d.logger.Printf("Warning: failed to set global deacon respawn hook: %v", err)
+	} else {
+		d.logger.Println("PATCH-010: Global deacon respawn hook configured")
+	}
+
 	// Initial heartbeat
 	d.heartbeat(state)
 
