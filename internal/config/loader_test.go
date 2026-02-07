@@ -3486,6 +3486,56 @@ func TestBuildStartupCommandWithAgentOverride_SetsGTAgent(t *testing.T) {
 	}
 }
 
+// TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot tests that
+// agentOverride is respected even when findTownRootFromCwd fails.
+// This is a regression test for the bug where `gt deacon start --agent codex`
+// would still launch Claude if run from outside the town directory.
+func TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+
+	// Change to a directory that is definitely NOT in a Gas Town workspace
+	// by using a temp directory with no mayor/town.json
+	tmpDir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWd)
+	})
+
+	// Call with rigPath="" (like deacon does) and agentOverride="codex"
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "deacon"},
+		"",      // rigPath is empty for town-level roles
+		"",      // no prompt
+		"codex", // agent override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use codex, NOT claude (the default)
+	if !strings.Contains(cmd, "codex") {
+		t.Errorf("expected command to contain 'codex' but got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("expected command to NOT contain 'claude' but got: %q", cmd)
+	}
+	// Should have the codex YOLO flag
+	if !strings.Contains(cmd, "--yolo") {
+		t.Errorf("expected command to contain '--yolo' (codex flag) but got: %q", cmd)
+	}
+	// Should set GT_AGENT=codex
+	if !strings.Contains(cmd, "GT_AGENT=codex") {
+		t.Errorf("expected command to contain 'GT_AGENT=codex' but got: %q", cmd)
+	}
+}
+
 func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()
