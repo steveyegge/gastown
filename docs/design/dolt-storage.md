@@ -293,7 +293,7 @@ gt dolt migrate     # Migrate from old .beads/dolt/ layout
 │   ├── beads/                  ← Beads rig (bd-* prefix)
 │   └── wyvern/                 ← Wyvern rig (wy-* prefix)
 ├── daemon/
-│   ├── dolt-server.pid         ← Server PID file (daemon-managed)
+│   ├── dolt.pid                ← Server PID file (daemon-managed)
 │   ├── dolt-server.log         ← Server log
 │   └── dolt-state.json         ← Server state
 ├── mayor/

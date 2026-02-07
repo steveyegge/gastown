@@ -92,7 +92,7 @@ func NewDoltServerManager(townRoot string, config *DoltServerConfig, logger func
 
 // pidFile returns the path to the Dolt server PID file.
 func (m *DoltServerManager) pidFile() string {
-	return filepath.Join(m.townRoot, "daemon", "dolt-server.pid")
+	return filepath.Join(m.townRoot, "daemon", "dolt.pid")
 }
 
 // IsEnabled returns whether Dolt server management is enabled.

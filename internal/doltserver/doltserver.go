@@ -507,6 +507,12 @@ func InitRig(townRoot, rigName string) error {
 		return fmt.Errorf("initializing Dolt database: %w\n%s", err, output)
 	}
 
+	// Update metadata.json to point to the server
+	if err := EnsureMetadata(townRoot, rigName); err != nil {
+		// Non-fatal: init succeeded, metadata update failed
+		fmt.Fprintf(os.Stderr, "Warning: database initialized but metadata.json update failed: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -597,5 +603,105 @@ func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 		return fmt.Errorf("moving database: %w", err)
 	}
 
+	// Update metadata.json to point to the server
+	if err := EnsureMetadata(townRoot, rigName); err != nil {
+		// Non-fatal: migration succeeded, metadata update failed
+		fmt.Fprintf(os.Stderr, "Warning: database migrated but metadata.json update failed: %v\n", err)
+	}
+
 	return nil
+}
+
+// EnsureMetadata writes or updates the metadata.json for a rig's beads directory
+// to include proper Dolt server configuration. This prevents the split-brain problem
+// where bd falls back to local embedded databases instead of connecting to the
+// centralized Dolt server.
+//
+// For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
+// For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
+func EnsureMetadata(townRoot, rigName string) error {
+	beadsDir := findRigBeadsDir(townRoot, rigName)
+	if beadsDir == "" {
+		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
+	}
+
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+
+	// Load existing metadata if present (preserve any extra fields)
+	existing := make(map[string]interface{})
+	if data, err := os.ReadFile(metadataPath); err == nil {
+		_ = json.Unmarshal(data, &existing) // best effort
+	}
+
+	// Set/update the dolt server fields
+	existing["database"] = "dolt"
+	existing["backend"] = "dolt"
+	existing["dolt_mode"] = "server"
+	existing["dolt_database"] = rigName
+
+	// Ensure jsonl_export has a default
+	if _, ok := existing["jsonl_export"]; !ok {
+		existing["jsonl_export"] = "issues.jsonl"
+	}
+
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		return fmt.Errorf("creating beads directory: %w", err)
+	}
+
+	if err := os.WriteFile(metadataPath, append(data, '\n'), 0600); err != nil {
+		return fmt.Errorf("writing metadata.json: %w", err)
+	}
+
+	return nil
+}
+
+// EnsureAllMetadata updates metadata.json for all rig databases known to the
+// Dolt server. This is the fix for the split-brain problem where worktrees
+// each have their own isolated database.
+func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
+	databases, err := ListDatabases(townRoot)
+	if err != nil {
+		return nil, []error{fmt.Errorf("listing databases: %w", err)}
+	}
+
+	for _, dbName := range databases {
+		if err := EnsureMetadata(townRoot, dbName); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", dbName, err))
+		} else {
+			updated = append(updated, dbName)
+		}
+	}
+
+	return updated, errs
+}
+
+// findRigBeadsDir returns the canonical .beads directory path for a rig.
+// For "hq", returns <townRoot>/.beads.
+// For other rigs, returns <townRoot>/<rigName>/mayor/rig/.beads if it exists,
+// otherwise <townRoot>/<rigName>/.beads.
+func findRigBeadsDir(townRoot, rigName string) string {
+	if rigName == "hq" {
+		return filepath.Join(townRoot, ".beads")
+	}
+
+	// Prefer mayor/rig/.beads (canonical location for tracked beads)
+	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if _, err := os.Stat(mayorBeads); err == nil {
+		return mayorBeads
+	}
+
+	// Fall back to rig-root .beads
+	rigBeads := filepath.Join(townRoot, rigName, ".beads")
+	if _, err := os.Stat(rigBeads); err == nil {
+		return rigBeads
+	}
+
+	// Neither exists; return mayor path (caller will create it)
+	return mayorBeads
 }

@@ -244,6 +244,10 @@ Dog returns to available state in the pool.
 **Exit criteria:** Deacon notified, dog ready for next work."""
 
 [vars]
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "gc_report"
+
 [vars.mode]
 description = "GC mode: 'conservative' or 'aggressive'"
 default = "conservative"

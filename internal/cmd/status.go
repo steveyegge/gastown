@@ -38,7 +38,7 @@ var statusCmd = &cobra.Command{
 	Short:   "Show overall town status",
 	Long: `Display the current status of the Gas Town workspace.
 
-Shows town name, registered rigs, active polecats, and witness status.
+Shows town name, registered rigs, polecats, and witness status.
 
 Use --fast to skip mail lookups for faster execution.
 Use --watch to continuously refresh status at regular intervals.`,

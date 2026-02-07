@@ -425,7 +425,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
+			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix, "--backend", "dolt") // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
@@ -661,8 +661,8 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
-	// Run bd init if available
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+	// Run bd init if available (default to Dolt backend)
+	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix, "--backend", "dolt")
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()

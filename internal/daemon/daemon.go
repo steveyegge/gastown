@@ -136,6 +136,12 @@ func (d *Daemon) Run() error {
 	}
 	defer func() { _ = fileLock.Unlock() }()
 
+	// Pre-flight check: all rigs must be on Dolt backend.
+	// Refuse to start if any rig is still on SQLite.
+	if err := d.checkAllRigsDolt(); err != nil {
+		return err
+	}
+
 	// Write PID file
 	if err := os.WriteFile(d.config.PidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
 		return fmt.Errorf("writing PID file: %w", err)
@@ -344,6 +350,63 @@ func (d *Daemon) ensureDoltServerRunning() {
 	if err := d.doltServer.EnsureRunning(); err != nil {
 		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
 	}
+}
+
+// checkAllRigsDolt verifies all rigs are using the Dolt backend.
+// Returns an error if any rig is on SQLite, preventing daemon startup.
+func (d *Daemon) checkAllRigsDolt() error {
+	var problems []string
+
+	// Check town-level beads
+	townBeadsDir := filepath.Join(d.config.TownRoot, ".beads")
+	if backend := readBeadsBackend(townBeadsDir); backend != "" && backend != "dolt" {
+		problems = append(problems, fmt.Sprintf(
+			"Rig %q is using %s backend.\n  Gas Town requires Dolt. Run: cd %s && bd migrate dolt",
+			"town-root", backend, d.config.TownRoot))
+	}
+
+	// Check each registered rig
+	for _, rigName := range d.getKnownRigs() {
+		rigBeadsDir := filepath.Join(d.config.TownRoot, rigName, "mayor", "rig", ".beads")
+		if backend := readBeadsBackend(rigBeadsDir); backend != "" && backend != "dolt" {
+			rigPath := filepath.Join(d.config.TownRoot, rigName)
+			problems = append(problems, fmt.Sprintf(
+				"Rig %q is using %s backend.\n  Gas Town requires Dolt. Run: cd %s && bd migrate dolt",
+				rigName, backend, rigPath))
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("daemon startup blocked: %d rig(s) not on Dolt backend\n\n  %s",
+		len(problems), strings.Join(problems, "\n\n  "))
+}
+
+// readBeadsBackend reads the backend field from metadata.json in a beads directory.
+// Returns empty string if the directory or metadata doesn't exist.
+func readBeadsBackend(beadsDir string) string {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if _, statErr := os.Stat(filepath.Join(beadsDir, "beads.db")); statErr == nil {
+			return "sqlite"
+		}
+		return ""
+	}
+
+	var metadata struct {
+		Backend string `json:"backend"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return ""
+	}
+
+	if metadata.Backend == "" {
+		return "sqlite" // Default to SQLite if backend not specified
+	}
+	return metadata.Backend
 }
 
 // DeaconRole is the role name for the Deacon's handoff bead.

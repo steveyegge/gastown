@@ -106,7 +106,7 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 		// Pool doesn't exist yet, show defaults
 		fmt.Printf("Rig: %s\n", rigName)
 		fmt.Printf("Theme: %s (default)\n", polecat.DefaultTheme)
-		fmt.Printf("Active polecats: 0\n")
+		fmt.Printf("Polecats: 0\n")
 		fmt.Printf("Max pool size: %d\n", polecat.DefaultPoolSize)
 		return nil
 	}
@@ -114,7 +114,7 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 	// Show pool status
 	fmt.Printf("Rig: %s\n", rigName)
 	fmt.Printf("Theme: %s\n", pool.GetTheme())
-	fmt.Printf("Active polecats: %d\n", pool.ActiveCount())
+	fmt.Printf("Polecats: %d\n", pool.ActiveCount())
 	
 	activeNames := pool.ActiveNames()
 	if len(activeNames) > 0 {

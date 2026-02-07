@@ -9,6 +9,20 @@ import (
 	"strings"
 )
 
+// MigrationState represents the migration classification for a rig.
+type MigrationState string
+
+const (
+	// StateNeverMigrated means SQLite backend with no Dolt infrastructure.
+	StateNeverMigrated MigrationState = "never-migrated"
+	// StatePartiallyMigrated means some Dolt infrastructure exists but migration is incomplete.
+	StatePartiallyMigrated MigrationState = "partially-migrated"
+	// StateFullyMigrated means Dolt backend is active and healthy.
+	StateFullyMigrated MigrationState = "fully-migrated"
+	// StateNoBeads means no beads directory exists for this rig.
+	StateNoBeads MigrationState = "no-beads"
+)
+
 // MigrationReadiness represents the overall migration readiness status.
 // This struct is designed for machine-parseable JSON output.
 type MigrationReadiness struct {
@@ -20,18 +34,23 @@ type MigrationReadiness struct {
 
 // MigrationVersions captures version compatibility information.
 type MigrationVersions struct {
-	GT           string `json:"gt"`            // gt version
-	BD           string `json:"bd"`            // bd version
+	GT             string `json:"gt"`               // gt version
+	BD             string `json:"bd"`               // bd version
 	BDSupportsDolt bool   `json:"bd_supports_dolt"` // bd version supports Dolt
 }
 
 // RigMigration represents migration status for a single rig.
 type RigMigration struct {
-	Name           string `json:"name"`
-	Backend        string `json:"backend"`         // "sqlite", "dolt", or "unknown"
-	NeedsMigration bool   `json:"needs_migration"` // true if still on SQLite
-	GitClean       bool   `json:"git_clean"`       // true if git working tree is clean
-	BeadsDir       string `json:"beads_dir"`       // Path to .beads directory
+	Name           string         `json:"name"`
+	Backend        string         `json:"backend"`         // "sqlite", "dolt", "none", or "unknown"
+	State          MigrationState `json:"state"`           // Classification: never/partial/full/no-beads
+	NeedsMigration bool           `json:"needs_migration"` // true if not fully migrated
+	GitClean       bool           `json:"git_clean"`       // true if git working tree is clean
+	BeadsDir       string         `json:"beads_dir"`       // Path to .beads directory
+	HasDoltData    bool           `json:"has_dolt_data"`   // true if .dolt-data/<rig> exists
+	HasJSONL       bool           `json:"has_jsonl"`       // true if issues.jsonl exists
+	HasSQLite      bool           `json:"has_sqlite"`      // true if beads.db exists
+	HasDoltDir     bool           `json:"has_dolt_dir"`    // true if dolt/ dir exists in .beads
 }
 
 // MigrationReadinessCheck verifies that the workspace is ready for migration.
@@ -74,11 +93,18 @@ func (c *MigrationReadinessCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check town-level beads
 	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	if _, err := os.Stat(townBeadsDir); err == nil {
-		rigMigration := c.checkRigBeads("town-root", townBeadsDir, ctx.TownRoot)
+		rigMigration := classifyRigMigration("town-root", "hq", townBeadsDir, ctx.TownRoot)
+		// Check git cleanliness for town root
+		cmd := exec.Command("git", "status", "--porcelain")
+		cmd.Dir = ctx.TownRoot
+		output, err := cmd.Output()
+		if err == nil {
+			rigMigration.GitClean = len(strings.TrimSpace(string(output))) == 0
+		}
 		readiness.Rigs = append(readiness.Rigs, rigMigration)
 		if rigMigration.NeedsMigration {
 			readiness.Ready = false
-			readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Town root beads uses %s backend", rigMigration.Backend))
+			readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Town root beads: %s (backend: %s)", rigMigration.State, rigMigration.Backend))
 		}
 		if !rigMigration.GitClean {
 			readiness.Ready = false
@@ -88,23 +114,30 @@ func (c *MigrationReadinessCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Find all rigs and check their beads
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
-	rigs := c.loadRigs(rigsPath)
+	rigs := loadRigNames(rigsPath)
 	for rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 
 		// Check main rig beads (in mayor/rig/.beads)
 		rigBeadsDir := filepath.Join(rigPath, "mayor", "rig", ".beads")
-		if _, err := os.Stat(rigBeadsDir); err == nil {
-			rigMigration := c.checkRigBeads(rigName, rigBeadsDir, rigPath)
-			readiness.Rigs = append(readiness.Rigs, rigMigration)
-			if rigMigration.NeedsMigration {
-				readiness.Ready = false
-				readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Rig %s beads uses %s backend", rigName, rigMigration.Backend))
-			}
-			if !rigMigration.GitClean {
-				readiness.Ready = false
-				readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Rig %s has uncommitted changes", rigName))
-			}
+		rigMigration := classifyRigMigration(rigName, rigName, rigBeadsDir, ctx.TownRoot)
+
+		// Check git cleanliness
+		cmd := exec.Command("git", "status", "--porcelain")
+		cmd.Dir = rigPath
+		output, err := cmd.Output()
+		if err == nil {
+			rigMigration.GitClean = len(strings.TrimSpace(string(output))) == 0
+		}
+
+		readiness.Rigs = append(readiness.Rigs, rigMigration)
+		if rigMigration.NeedsMigration {
+			readiness.Ready = false
+			readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Rig %s: %s (backend: %s)", rigName, rigMigration.State, rigMigration.Backend))
+		}
+		if !rigMigration.GitClean {
+			readiness.Ready = false
+			readiness.Blockers = append(readiness.Blockers, fmt.Sprintf("Rig %s has uncommitted changes", rigName))
 		}
 	}
 
@@ -126,10 +159,10 @@ func (c *MigrationReadinessCheck) Run(ctx *CheckContext) *CheckResult {
 
 	return &CheckResult{
 		Name:    c.Name(),
-		Status:  StatusWarning,
+		Status:  StatusError,
 		Message: fmt.Sprintf("%d rig(s) need migration, %d blocker(s)", needsMigration, len(readiness.Blockers)),
 		Details: readiness.Blockers,
-		FixHint: "Run 'bd migrate' in each rig to migrate from SQLite to Dolt",
+		FixHint: "Run 'bd migrate dolt' in each rig to migrate from SQLite to Dolt",
 	}
 }
 
@@ -186,138 +219,90 @@ func (c *MigrationReadinessCheck) bdSupportsDolt(versionStr string) bool {
 	return major > 0 || (major == 0 && minor >= 40)
 }
 
-// checkRigBeads checks a single rig's beads directory for migration status.
-func (c *MigrationReadinessCheck) checkRigBeads(rigName, beadsDir, rigPath string) RigMigration {
+// classifyRigMigration determines the migration state of a single rig's beads.
+// rigName is the display name, doltDataName is the key in .dolt-data/ (e.g., "hq" for town root).
+func classifyRigMigration(rigName, doltDataName, beadsDir, townRoot string) RigMigration {
 	result := RigMigration{
-		Name:           rigName,
-		Backend:        "unknown",
-		NeedsMigration: false,
-		GitClean:       true,
-		BeadsDir:       beadsDir,
+		Name:     rigName,
+		Backend:  "none",
+		State:    StateNoBeads,
+		GitClean: true,
+		BeadsDir: beadsDir,
+	}
+
+	// Check if beads dir exists
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		return result
 	}
 
 	// Read metadata.json
-	metadataPath := filepath.Join(beadsDir, "metadata.json")
-	data, err := os.ReadFile(metadataPath)
-	if err != nil {
-		// No metadata.json likely means SQLite (pre-Dolt)
-		result.Backend = "sqlite"
+	backend := readBeadsBackend(beadsDir)
+	result.Backend = backend
+
+	// Check for dolt directory in .beads/
+	if _, err := os.Stat(filepath.Join(beadsDir, "dolt")); err == nil {
+		result.HasDoltDir = true
+	}
+
+	// Check for centralized dolt data in .dolt-data/<rig>/
+	doltDataDir := filepath.Join(townRoot, ".dolt-data", doltDataName)
+	if _, err := os.Stat(filepath.Join(doltDataDir, ".dolt")); err == nil {
+		result.HasDoltData = true
+	}
+
+	// Check for SQLite database
+	if _, err := os.Stat(filepath.Join(beadsDir, "beads.db")); err == nil {
+		result.HasSQLite = true
+	}
+
+	// Check for JSONL bead files
+	if _, err := os.Stat(filepath.Join(beadsDir, "issues.jsonl")); err == nil {
+		result.HasJSONL = true
+	}
+
+	// Classify migration state
+	hasDolt := result.HasDoltDir || result.HasDoltData
+
+	switch {
+	case backend == "dolt" && hasDolt:
+		// Metadata says dolt and dolt database exists — fully migrated
+		result.State = StateFullyMigrated
+		result.NeedsMigration = false
+
+	case backend == "dolt" && !hasDolt:
+		// Metadata says dolt but no dolt database found — broken/incomplete
+		result.State = StatePartiallyMigrated
 		result.NeedsMigration = true
-		return result
-	}
 
-	var metadata struct {
-		Backend string `json:"backend"`
-	}
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		result.Backend = "unknown"
+	case backend != "dolt" && hasDolt:
+		// Dolt infrastructure exists but metadata not updated — partial
+		result.State = StatePartiallyMigrated
 		result.NeedsMigration = true
-		return result
-	}
 
-	result.Backend = metadata.Backend
-	if result.Backend == "" {
-		result.Backend = "sqlite" // Default to SQLite if not specified
-	}
-	result.NeedsMigration = result.Backend != "dolt"
+	case (result.HasSQLite || result.HasJSONL) && !hasDolt:
+		// Data exists only in SQLite/JSONL, no dolt at all
+		result.State = StateNeverMigrated
+		result.NeedsMigration = true
 
-	// Check git status
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = rigPath
-	output, err := cmd.Output()
-	if err == nil {
-		result.GitClean = len(strings.TrimSpace(string(output))) == 0
+	default:
+		// Beads dir exists but no recognizable data
+		result.State = StateNeverMigrated
+		result.NeedsMigration = true
 	}
 
 	return result
 }
 
-// loadRigs loads the rigs configuration from rigs.json.
-func (c *MigrationReadinessCheck) loadRigs(rigsPath string) map[string]struct{} {
-	rigs := make(map[string]struct{})
-
-	data, err := os.ReadFile(rigsPath)
-	if err != nil {
-		return rigs
-	}
-
-	var config struct {
-		Rigs map[string]interface{} `json:"rigs"`
-	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return rigs
-	}
-
-	for name := range config.Rigs {
-		rigs[name] = struct{}{}
-	}
-	return rigs
-}
-
-// UnmigratedRigCheck specifically checks for rigs still on SQLite backend.
-// This is a simpler check that just reports which rigs need migration.
-type UnmigratedRigCheck struct {
-	BaseCheck
-}
-
-// NewUnmigratedRigCheck creates a check for unmigrated rigs.
-func NewUnmigratedRigCheck() *UnmigratedRigCheck {
-	return &UnmigratedRigCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "unmigrated-rigs",
-			CheckDescription: "Detect rigs still using SQLite backend",
-			CheckCategory:    CategoryConfig,
-		},
-	}
-}
-
-// Run checks for rigs using SQLite backend.
-func (c *UnmigratedRigCheck) Run(ctx *CheckContext) *CheckResult {
-	var unmigrated []string
-
-	// Check town-level beads
-	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
-	if backend := c.getBackend(townBeadsDir); backend == "sqlite" {
-		unmigrated = append(unmigrated, "town-root")
-	}
-
-	// Find all rigs and check their beads
-	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
-	rigs := c.loadRigs(rigsPath)
-	for rigName := range rigs {
-		rigBeadsDir := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig", ".beads")
-		if backend := c.getBackend(rigBeadsDir); backend == "sqlite" {
-			unmigrated = append(unmigrated, rigName)
-		}
-	}
-
-	if len(unmigrated) == 0 {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "All rigs using Dolt backend",
-		}
-	}
-
-	return &CheckResult{
-		Name:    c.Name(),
-		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d rig(s) still on SQLite backend", len(unmigrated)),
-		Details: unmigrated,
-		FixHint: "Run 'bd migrate' in each rig to migrate from SQLite to Dolt",
-	}
-}
-
-// getBackend returns the backend type from metadata.json.
-func (c *UnmigratedRigCheck) getBackend(beadsDir string) string {
+// readBeadsBackend reads the backend field from metadata.json in a beads directory.
+func readBeadsBackend(beadsDir string) string {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
-		// No metadata.json likely means SQLite or no beads
-		if _, statErr := os.Stat(beadsDir); statErr == nil {
-			return "sqlite" // Dir exists but no metadata = SQLite
+		// No metadata.json — check if dir has any content indicating sqlite
+		if _, statErr := os.Stat(filepath.Join(beadsDir, "beads.db")); statErr == nil {
+			return "sqlite"
 		}
-		return "" // No beads dir
+		return "unknown"
 	}
 
 	var metadata struct {
@@ -328,13 +313,13 @@ func (c *UnmigratedRigCheck) getBackend(beadsDir string) string {
 	}
 
 	if metadata.Backend == "" {
-		return "sqlite" // Default to SQLite if not specified
+		return "sqlite" // Default to SQLite if backend not specified
 	}
 	return metadata.Backend
 }
 
-// loadRigs loads the rigs configuration from rigs.json.
-func (c *UnmigratedRigCheck) loadRigs(rigsPath string) map[string]struct{} {
+// loadRigNames loads rig names from rigs.json.
+func loadRigNames(rigsPath string) map[string]struct{} {
 	rigs := make(map[string]struct{})
 
 	data, err := os.ReadFile(rigsPath)
@@ -353,4 +338,353 @@ func (c *UnmigratedRigCheck) loadRigs(rigsPath string) map[string]struct{} {
 		rigs[name] = struct{}{}
 	}
 	return rigs
+}
+
+// DoltMetadataCheck verifies that all rig .beads/metadata.json files have
+// proper Dolt server configuration (backend, dolt_mode, dolt_database).
+// Missing or incomplete metadata causes the split-brain problem where bd
+// opens isolated local databases instead of the centralized Dolt server.
+type DoltMetadataCheck struct {
+	FixableCheck
+	missingMetadata []string // Cached during Run for use in Fix
+}
+
+// NewDoltMetadataCheck creates a new dolt metadata check.
+func NewDoltMetadataCheck() *DoltMetadataCheck {
+	return &DoltMetadataCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "dolt-metadata",
+				CheckDescription: "Check that metadata.json has Dolt server config",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+	}
+}
+
+// Run checks if all rig metadata.json files have dolt server config.
+func (c *DoltMetadataCheck) Run(ctx *CheckContext) *CheckResult {
+	c.missingMetadata = nil
+
+	// Check if dolt data directory exists (no point checking if dolt isn't in use)
+	doltDataDir := filepath.Join(ctx.TownRoot, ".dolt-data")
+	if _, err := os.Stat(doltDataDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No Dolt data directory (dolt not in use)",
+			Category: c.CheckCategory,
+		}
+	}
+
+	var missing []string
+	var ok int
+
+	// Check town-level beads (hq database)
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(filepath.Join(doltDataDir, "hq")); err == nil {
+		if !c.hasDoltMetadata(townBeadsDir, "hq") {
+			missing = append(missing, "hq (town root .beads/)")
+			c.missingMetadata = append(c.missingMetadata, "hq")
+		} else {
+			ok++
+		}
+	}
+
+	// Check rig-level beads
+	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	rigs := c.loadRigs(rigsPath)
+	for rigName := range rigs {
+		// Only check rigs that have a dolt database
+		if _, err := os.Stat(filepath.Join(doltDataDir, rigName)); os.IsNotExist(err) {
+			continue
+		}
+
+		beadsDir := c.findRigBeadsDir(ctx.TownRoot, rigName)
+		if beadsDir == "" {
+			missing = append(missing, rigName+" (no .beads directory)")
+			c.missingMetadata = append(c.missingMetadata, rigName)
+			continue
+		}
+
+		if !c.hasDoltMetadata(beadsDir, rigName) {
+			relPath, _ := filepath.Rel(ctx.TownRoot, beadsDir)
+			missing = append(missing, rigName+" ("+relPath+")")
+			c.missingMetadata = append(c.missingMetadata, rigName)
+		} else {
+			ok++
+		}
+	}
+
+	if len(missing) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  fmt.Sprintf("All %d rig(s) have Dolt server metadata", ok),
+			Category: c.CheckCategory,
+		}
+	}
+
+	details := make([]string, len(missing))
+	for i, m := range missing {
+		details[i] = "Missing dolt config: " + m
+	}
+
+	return &CheckResult{
+		Name:     c.Name(),
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("%d rig(s) missing Dolt server metadata", len(missing)),
+		Details:  details,
+		FixHint:  "Run 'gt dolt fix-metadata' to update all metadata.json files",
+		Category: c.CheckCategory,
+	}
+}
+
+// Fix updates metadata.json for all rigs with missing dolt config.
+func (c *DoltMetadataCheck) Fix(ctx *CheckContext) error {
+	if len(c.missingMetadata) == 0 {
+		return nil
+	}
+
+	// Import doltserver package via the fix path
+	for _, rigName := range c.missingMetadata {
+		if err := c.writeDoltMetadata(ctx.TownRoot, rigName); err != nil {
+			return fmt.Errorf("fixing %s: %w", rigName, err)
+		}
+	}
+
+	return nil
+}
+
+// hasDoltMetadata checks if a beads directory has proper dolt server config.
+func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return false
+	}
+
+	var metadata struct {
+		Backend      string `json:"backend"`
+		DoltMode     string `json:"dolt_mode"`
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return false
+	}
+
+	return metadata.Backend == "dolt" &&
+		metadata.DoltMode == "server" &&
+		metadata.DoltDatabase == expectedDB
+}
+
+// writeDoltMetadata writes dolt server config to a rig's metadata.json.
+func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
+	beadsDir := c.findRigBeadsDir(townRoot, rigName)
+	if beadsDir == "" {
+		return fmt.Errorf("could not find .beads directory for rig %q", rigName)
+	}
+
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+
+	// Load existing metadata if present
+	existing := make(map[string]interface{})
+	if data, err := os.ReadFile(metadataPath); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+
+	// Set dolt server fields
+	existing["database"] = "dolt"
+	existing["backend"] = "dolt"
+	existing["dolt_mode"] = "server"
+	existing["dolt_database"] = rigName
+
+	if _, ok := existing["jsonl_export"]; !ok {
+		existing["jsonl_export"] = "issues.jsonl"
+	}
+
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
+
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		return fmt.Errorf("creating beads directory: %w", err)
+	}
+
+	if err := os.WriteFile(metadataPath, append(data, '\n'), 0600); err != nil {
+		return fmt.Errorf("writing metadata.json: %w", err)
+	}
+
+	return nil
+}
+
+// findRigBeadsDir returns the canonical .beads directory for a rig.
+func (c *DoltMetadataCheck) findRigBeadsDir(townRoot, rigName string) string {
+	if rigName == "hq" {
+		return filepath.Join(townRoot, ".beads")
+	}
+
+	// Prefer mayor/rig/.beads (canonical)
+	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if _, err := os.Stat(mayorBeads); err == nil {
+		return mayorBeads
+	}
+
+	// Fall back to rig-root .beads
+	rigBeads := filepath.Join(townRoot, rigName, ".beads")
+	if _, err := os.Stat(rigBeads); err == nil {
+		return rigBeads
+	}
+
+	return ""
+}
+
+// loadRigs loads the rigs configuration from rigs.json.
+func (c *DoltMetadataCheck) loadRigs(rigsPath string) map[string]struct{} {
+	rigs := make(map[string]struct{})
+
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return rigs
+	}
+
+	var config struct {
+		Rigs map[string]interface{} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return rigs
+	}
+
+	for name := range config.Rigs {
+		rigs[name] = struct{}{}
+	}
+	return rigs
+}
+
+// RigBackendStatusCheck detects rigs' backend status and classifies them as:
+// - fully-migrated: Dolt backend, healthy
+// - partially-migrated: some Dolt infrastructure but migration incomplete
+// - never-migrated: SQLite backend, no Dolt presence
+// Each non-OK finding includes actionable remediation steps.
+type RigBackendStatusCheck struct {
+	BaseCheck
+}
+
+// NewRigBackendStatusCheck creates a check that classifies rig backend status.
+func NewRigBackendStatusCheck() *RigBackendStatusCheck {
+	return &RigBackendStatusCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "rig-backend-status",
+			CheckDescription: "Classify rig storage backends and detect unmigrated rigs",
+			CheckCategory:    CategoryConfig,
+		},
+	}
+}
+
+// Run checks all rigs and classifies their migration state.
+func (c *RigBackendStatusCheck) Run(ctx *CheckContext) *CheckResult {
+	var neverMigrated []string
+	var partiallyMigrated []string
+	var fullyMigrated []string
+	var details []string
+
+	// Check town-level beads
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		rig := classifyRigMigration("town-root", "hq", townBeadsDir, ctx.TownRoot)
+		switch rig.State {
+		case StateNeverMigrated:
+			neverMigrated = append(neverMigrated, rig.Name)
+			details = append(details, formatRigFinding(rig))
+		case StatePartiallyMigrated:
+			partiallyMigrated = append(partiallyMigrated, rig.Name)
+			details = append(details, formatRigFinding(rig))
+		case StateFullyMigrated:
+			fullyMigrated = append(fullyMigrated, rig.Name)
+		}
+	}
+
+	// Find all rigs and check their beads
+	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	rigs := loadRigNames(rigsPath)
+	for rigName := range rigs {
+		rigBeadsDir := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig", ".beads")
+		rig := classifyRigMigration(rigName, rigName, rigBeadsDir, ctx.TownRoot)
+		switch rig.State {
+		case StateNeverMigrated:
+			neverMigrated = append(neverMigrated, rig.Name)
+			details = append(details, formatRigFinding(rig))
+		case StatePartiallyMigrated:
+			partiallyMigrated = append(partiallyMigrated, rig.Name)
+			details = append(details, formatRigFinding(rig))
+		case StateFullyMigrated:
+			fullyMigrated = append(fullyMigrated, rig.Name)
+		case StateNoBeads:
+			// Skip — no beads to migrate
+		}
+	}
+
+	totalIssues := len(neverMigrated) + len(partiallyMigrated)
+	if totalIssues == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: fmt.Sprintf("All %d rig(s) fully migrated to Dolt", len(fullyMigrated)),
+		}
+	}
+
+	// Build summary message
+	var parts []string
+	if len(neverMigrated) > 0 {
+		parts = append(parts, fmt.Sprintf("%d never-migrated", len(neverMigrated)))
+	}
+	if len(partiallyMigrated) > 0 {
+		parts = append(parts, fmt.Sprintf("%d partially-migrated", len(partiallyMigrated)))
+	}
+	if len(fullyMigrated) > 0 {
+		parts = append(parts, fmt.Sprintf("%d fully-migrated", len(fullyMigrated)))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: strings.Join(parts, ", "),
+		Details: details,
+		FixHint: "Run 'bd migrate dolt' in each rig to migrate from SQLite to Dolt",
+	}
+}
+
+// formatRigFinding formats a single rig's migration finding with actionable detail.
+func formatRigFinding(rig RigMigration) string {
+	switch rig.State {
+	case StateNeverMigrated:
+		evidence := rig.Backend
+		if rig.HasSQLite {
+			evidence = "sqlite (beads.db present)"
+		} else if rig.HasJSONL {
+			evidence = "JSONL only (no database backend)"
+		}
+		return fmt.Sprintf("%s: never migrated — %s → run 'bd migrate dolt' in rig", rig.Name, evidence)
+	case StatePartiallyMigrated:
+		var reason string
+		switch {
+		case rig.Backend == "dolt" && !rig.HasDoltDir && !rig.HasDoltData:
+			reason = "metadata says dolt but no dolt database found"
+		case rig.Backend != "dolt" && rig.HasDoltData:
+			reason = fmt.Sprintf("dolt-data exists but metadata says %s", rig.Backend)
+		case rig.Backend != "dolt" && rig.HasDoltDir:
+			reason = fmt.Sprintf("dolt/ dir exists but metadata says %s", rig.Backend)
+		default:
+			reason = "migration incomplete"
+		}
+		return fmt.Sprintf("%s: partially migrated — %s → run 'bd migrate dolt' to complete", rig.Name, reason)
+	default:
+		return fmt.Sprintf("%s: %s", rig.Name, rig.State)
+	}
+}
+
+// NewUnmigratedRigCheck is kept for backward compatibility. It delegates to RigBackendStatusCheck.
+func NewUnmigratedRigCheck() *RigBackendStatusCheck {
+	return NewRigBackendStatusCheck()
 }

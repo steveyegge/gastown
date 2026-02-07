@@ -36,9 +36,7 @@ formula = "mol-refinery-patrol"
 version = 4
 
 [vars]
-[vars.wisp_type]
-description = "Type of wisp created for this molecule"
-default = "patrol"
+wisp_type = "patrol"
 
 [[steps]]
 id = "inbox-check"
