@@ -106,6 +106,9 @@ var (
 	slackAutoInvite      string
 	slackDebug           bool
 	slackHealthPort      int
+	slackEventSource     string // "auto", "bus", "sse"
+	slackNatsURL         string // NATS server URL
+	slackNatsToken       string // NATS auth token
 )
 
 const slackLockFile = "/tmp/gtslack.lock"
@@ -118,6 +121,11 @@ var slackStartCmd = &cobra.Command{
 The bot connects to Slack via Socket Mode and to the RPC server to
 allow humans to view and resolve pending decisions from Slack.
 
+Event sources (--event-source):
+  auto - Try bd bus (NATS) first, fall back to SSE (default)
+  bus  - Use bd bus (NATS JetStream) only
+  sse  - Use SSE endpoint only (legacy)
+
 Environment variables can also be used:
   SLACK_BOT_TOKEN   - Bot OAuth token (xoxb-...)
   SLACK_APP_TOKEN   - App-level token for Socket Mode (xapp-...)
@@ -125,6 +133,8 @@ Environment variables can also be used:
   SLACK_CHANNEL     - Channel ID for decision notifications
   SLACK_AUTO_INVITE - Comma-separated Slack user IDs to auto-invite
   HEALTH_PORT       - HTTP health endpoint port (default: 8080)
+  BD_NATS_PORT      - NATS port (default: 4222)
+  BD_DAEMON_TOKEN   - NATS auth token
 
 Health endpoints for Kubernetes probes:
   /healthz - Liveness probe (checks Slack connection)
@@ -133,7 +143,7 @@ Health endpoints for Kubernetes probes:
 Examples:
   gt slack start -bot-token=xoxb-... -app-token=xapp-...
   gt slack start --channel=C12345 --dynamic-channels
-  gt slack start --health-port=8080`,
+  gt slack start --event-source=bus --nats-url=nats://localhost:4222`,
 	RunE: runSlackStart,
 }
 
@@ -253,6 +263,9 @@ func init() {
 	slackStartCmd.Flags().StringVar(&slackAutoInvite, "auto-invite", "", "Comma-separated Slack user IDs to auto-invite")
 	slackStartCmd.Flags().BoolVar(&slackDebug, "debug", false, "Enable debug logging")
 	slackStartCmd.Flags().IntVar(&slackHealthPort, "health-port", 8080, "HTTP health endpoint port for K8s probes")
+	slackStartCmd.Flags().StringVar(&slackEventSource, "event-source", "auto", "Event source: auto (bus with SSE fallback), bus (NATS only), sse (SSE only)")
+	slackStartCmd.Flags().StringVar(&slackNatsURL, "nats-url", "nats://localhost:4222", "NATS server URL for bus event subscription")
+	slackStartCmd.Flags().StringVar(&slackNatsToken, "nats-token", "", "NATS auth token (default: BD_DAEMON_TOKEN env)")
 }
 
 func runSlackStatus(cmd *cobra.Command, args []string) error {
@@ -600,6 +613,12 @@ func runSlackStart(cmd *cobra.Command, args []string) error {
 			slackHealthPort = port
 		}
 	}
+	if slackNatsToken == "" {
+		slackNatsToken = os.Getenv("BD_DAEMON_TOKEN")
+	}
+	if natsPort := os.Getenv("BD_NATS_PORT"); natsPort != "" && slackNatsURL == "nats://localhost:4222" {
+		slackNatsURL = "nats://localhost:" + natsPort
+	}
 
 	if slackBotToken == "" || slackAppToken == "" {
 		return fmt.Errorf("both --bot-token and --app-token are required (or set SLACK_BOT_TOKEN and SLACK_APP_TOKEN)")
@@ -673,16 +692,21 @@ func runSlackStart(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	// Start SSE listener for real-time decision notifications
+	// Start event listener for real-time decision notifications
 	if slackChannelID != "" {
-		sseURL := slackRPCURL + "/events/decisions"
-		sseListener := slackbot.NewSSEListener(sseURL, bot, bot.RPCClient())
-		go func() {
-			log.Printf("Starting SSE listener: %s", sseURL)
-			if err := sseListener.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("SSE listener error: %v", err)
-			}
-		}()
+		eventSource := slackEventSource
+		if eventSource == "" {
+			eventSource = "auto"
+		}
+
+		switch eventSource {
+		case "bus":
+			startBusListener(ctx, bot, false)
+		case "sse":
+			startSSEListener(ctx, bot)
+		default: // "auto"
+			startBusListener(ctx, bot, true)
+		}
 	}
 
 	if err := bot.Run(ctx); err != nil {
@@ -698,6 +722,39 @@ func runSlackStart(cmd *cobra.Command, args []string) error {
 }
 
 // isSystemdUnitEnabled checks if a systemd user unit is enabled.
+// startBusListener starts the NATS-based bus event listener.
+// If fallbackToSSE is true, falls back to SSE on NATS connection failure.
+func startBusListener(ctx context.Context, bot *slackbot.Bot, fallbackToSSE bool) {
+	busCfg := slackbot.BusListenerConfig{
+		NatsURL:   slackNatsURL,
+		AuthToken: slackNatsToken,
+	}
+	busListener := slackbot.NewBusListener(busCfg, bot, bot.RPCClient())
+
+	go func() {
+		log.Printf("Starting Bus listener (NATS): %s", slackNatsURL)
+		if err := busListener.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("Bus listener error: %v", err)
+			if fallbackToSSE {
+				log.Printf("Falling back to SSE listener")
+				startSSEListener(ctx, bot)
+			}
+		}
+	}()
+}
+
+// startSSEListener starts the SSE-based event listener (legacy).
+func startSSEListener(ctx context.Context, bot *slackbot.Bot) {
+	sseURL := slackRPCURL + "/events/decisions"
+	sseListener := slackbot.NewSSEListener(sseURL, bot, bot.RPCClient())
+	go func() {
+		log.Printf("Starting SSE listener: %s", sseURL)
+		if err := sseListener.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("SSE listener error: %v", err)
+		}
+	}()
+}
+
 func isSystemdUnitEnabled(unit string) bool {
 	cmd := exec.Command("systemctl", "--user", "is-enabled", unit)
 	err := cmd.Run()
