@@ -42,6 +42,9 @@ const (
 	// ActivityServiceEmitEventProcedure is the fully-qualified name of the ActivityService's EmitEvent
 	// RPC.
 	ActivityServiceEmitEventProcedure = "/gastown.v1.ActivityService/EmitEvent"
+	// ActivityServiceStreamLogsProcedure is the fully-qualified name of the ActivityService's
+	// StreamLogs RPC.
+	ActivityServiceStreamLogsProcedure = "/gastown.v1.ActivityService/StreamLogs"
 )
 
 // ActivityServiceClient is a client for the gastown.v1.ActivityService service.
@@ -52,6 +55,8 @@ type ActivityServiceClient interface {
 	WatchEvents(context.Context, *connect.Request[v1.WatchEventsRequest]) (*connect.ServerStreamForClient[v1.ActivityEvent], error)
 	// EmitEvent writes a new event to the activity log
 	EmitEvent(context.Context, *connect.Request[v1.EmitEventRequest]) (*connect.Response[v1.EmitEventResponse], error)
+	// StreamLogs streams log entries from agent log sources in real-time
+	StreamLogs(context.Context, *connect.Request[v1.StreamLogsRequest]) (*connect.ServerStreamForClient[v1.LogEntry], error)
 }
 
 // NewActivityServiceClient constructs a client for the gastown.v1.ActivityService service. By
@@ -83,6 +88,12 @@ func NewActivityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(activityServiceMethods.ByName("EmitEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		streamLogs: connect.NewClient[v1.StreamLogsRequest, v1.LogEntry](
+			httpClient,
+			baseURL+ActivityServiceStreamLogsProcedure,
+			connect.WithSchema(activityServiceMethods.ByName("StreamLogs")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -91,6 +102,7 @@ type activityServiceClient struct {
 	listEvents  *connect.Client[v1.ListEventsRequest, v1.ListEventsResponse]
 	watchEvents *connect.Client[v1.WatchEventsRequest, v1.ActivityEvent]
 	emitEvent   *connect.Client[v1.EmitEventRequest, v1.EmitEventResponse]
+	streamLogs  *connect.Client[v1.StreamLogsRequest, v1.LogEntry]
 }
 
 // ListEvents calls gastown.v1.ActivityService.ListEvents.
@@ -108,6 +120,11 @@ func (c *activityServiceClient) EmitEvent(ctx context.Context, req *connect.Requ
 	return c.emitEvent.CallUnary(ctx, req)
 }
 
+// StreamLogs calls gastown.v1.ActivityService.StreamLogs.
+func (c *activityServiceClient) StreamLogs(ctx context.Context, req *connect.Request[v1.StreamLogsRequest]) (*connect.ServerStreamForClient[v1.LogEntry], error) {
+	return c.streamLogs.CallServerStream(ctx, req)
+}
+
 // ActivityServiceHandler is an implementation of the gastown.v1.ActivityService service.
 type ActivityServiceHandler interface {
 	// ListEvents returns events from the activity feed
@@ -116,6 +133,8 @@ type ActivityServiceHandler interface {
 	WatchEvents(context.Context, *connect.Request[v1.WatchEventsRequest], *connect.ServerStream[v1.ActivityEvent]) error
 	// EmitEvent writes a new event to the activity log
 	EmitEvent(context.Context, *connect.Request[v1.EmitEventRequest]) (*connect.Response[v1.EmitEventResponse], error)
+	// StreamLogs streams log entries from agent log sources in real-time
+	StreamLogs(context.Context, *connect.Request[v1.StreamLogsRequest], *connect.ServerStream[v1.LogEntry]) error
 }
 
 // NewActivityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -143,6 +162,12 @@ func NewActivityServiceHandler(svc ActivityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(activityServiceMethods.ByName("EmitEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	activityServiceStreamLogsHandler := connect.NewServerStreamHandler(
+		ActivityServiceStreamLogsProcedure,
+		svc.StreamLogs,
+		connect.WithSchema(activityServiceMethods.ByName("StreamLogs")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastown.v1.ActivityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ActivityServiceListEventsProcedure:
@@ -151,6 +176,8 @@ func NewActivityServiceHandler(svc ActivityServiceHandler, opts ...connect.Handl
 			activityServiceWatchEventsHandler.ServeHTTP(w, r)
 		case ActivityServiceEmitEventProcedure:
 			activityServiceEmitEventHandler.ServeHTTP(w, r)
+		case ActivityServiceStreamLogsProcedure:
+			activityServiceStreamLogsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -170,4 +197,8 @@ func (UnimplementedActivityServiceHandler) WatchEvents(context.Context, *connect
 
 func (UnimplementedActivityServiceHandler) EmitEvent(context.Context, *connect.Request[v1.EmitEventRequest]) (*connect.Response[v1.EmitEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.ActivityService.EmitEvent is not implemented"))
+}
+
+func (UnimplementedActivityServiceHandler) StreamLogs(context.Context, *connect.Request[v1.StreamLogsRequest], *connect.ServerStream[v1.LogEntry]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.ActivityService.StreamLogs is not implemented"))
 }

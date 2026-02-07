@@ -726,6 +726,171 @@ func (x *EmitEventResponse) GetSuccess() bool {
 	return false
 }
 
+// StreamLogsRequest requests real-time log streaming for an agent
+type StreamLogsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Agent identifier (e.g., "gastown/crew/joe" or "gastown/polecats/slit")
+	Agent string `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	// Log type to stream: "activity" (events feed), "town" (lifecycle log), "daemon" (daemon log)
+	// Empty defaults to "activity"
+	LogType string `protobuf:"bytes,2,opt,name=log_type,json=logType,proto3" json:"log_type,omitempty"`
+	// Number of historical lines to include before streaming (default: 50, max: 500)
+	TailLines int32 `protobuf:"varint,3,opt,name=tail_lines,json=tailLines,proto3" json:"tail_lines,omitempty"`
+	// If true, continue streaming new entries as they appear; if false, return tail_lines and stop
+	Follow        bool `protobuf:"varint,4,opt,name=follow,proto3" json:"follow,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamLogsRequest) Reset() {
+	*x = StreamLogsRequest{}
+	mi := &file_gastown_v1_activity_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamLogsRequest) ProtoMessage() {}
+
+func (x *StreamLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_activity_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamLogsRequest.ProtoReflect.Descriptor instead.
+func (*StreamLogsRequest) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_activity_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *StreamLogsRequest) GetAgent() string {
+	if x != nil {
+		return x.Agent
+	}
+	return ""
+}
+
+func (x *StreamLogsRequest) GetLogType() string {
+	if x != nil {
+		return x.LogType
+	}
+	return ""
+}
+
+func (x *StreamLogsRequest) GetTailLines() int32 {
+	if x != nil {
+		return x.TailLines
+	}
+	return 0
+}
+
+func (x *StreamLogsRequest) GetFollow() bool {
+	if x != nil {
+		return x.Follow
+	}
+	return false
+}
+
+// LogEntry represents a single log entry from any log source
+type LogEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Timestamp in RFC3339 format
+	Timestamp string `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Log level: "info", "warn", "error", "debug"
+	Level string `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`
+	// The log message content
+	Message string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	// Source of the log entry: "activity", "town", "daemon"
+	Source string `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
+	// Agent that generated the entry (if applicable)
+	Agent string `protobuf:"bytes,5,opt,name=agent,proto3" json:"agent,omitempty"`
+	// Event type (for activity log entries)
+	EventType     string `protobuf:"bytes,6,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogEntry) Reset() {
+	*x = LogEntry{}
+	mi := &file_gastown_v1_activity_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogEntry) ProtoMessage() {}
+
+func (x *LogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_activity_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
+func (*LogEntry) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_activity_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *LogEntry) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *LogEntry) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
+}
+
+func (x *LogEntry) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *LogEntry) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *LogEntry) GetAgent() string {
+	if x != nil {
+		return x.Agent
+	}
+	return ""
+}
+
+func (x *LogEntry) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
 var File_gastown_v1_activity_proto protoreflect.FileDescriptor
 
 const file_gastown_v1_activity_proto_rawDesc = "" +
@@ -774,7 +939,21 @@ const file_gastown_v1_activity_proto_rawDesc = "" +
 	"visibility\"K\n" +
 	"\x11EmitEventResponse\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\tR\ttimestamp\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess*h\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"{\n" +
+	"\x11StreamLogsRequest\x12\x14\n" +
+	"\x05agent\x18\x01 \x01(\tR\x05agent\x12\x19\n" +
+	"\blog_type\x18\x02 \x01(\tR\alogType\x12\x1d\n" +
+	"\n" +
+	"tail_lines\x18\x03 \x01(\x05R\ttailLines\x12\x16\n" +
+	"\x06follow\x18\x04 \x01(\bR\x06follow\"\xa5\x01\n" +
+	"\bLogEntry\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\tR\ttimestamp\x12\x14\n" +
+	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x16\n" +
+	"\x06source\x18\x04 \x01(\tR\x06source\x12\x14\n" +
+	"\x05agent\x18\x05 \x01(\tR\x05agent\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x06 \x01(\tR\teventType*h\n" +
 	"\n" +
 	"Visibility\x12\x1a\n" +
 	"\x16VISIBILITY_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -812,12 +991,14 @@ const file_gastown_v1_activity_proto_rawDesc = "" +
 	"\x18EVENT_TYPE_MERGE_SKIPPED\x10\x1a\x12!\n" +
 	"\x1dEVENT_TYPE_DECISION_REQUESTED\x10\x1b\x12 \n" +
 	"\x1cEVENT_TYPE_DECISION_RESOLVED\x10\x1c\x12\x19\n" +
-	"\x15EVENT_TYPE_HOOK_ERROR\x10\x1d2\xf4\x01\n" +
+	"\x15EVENT_TYPE_HOOK_ERROR\x10\x1d2\xb9\x02\n" +
 	"\x0fActivityService\x12K\n" +
 	"\n" +
 	"ListEvents\x12\x1d.gastown.v1.ListEventsRequest\x1a\x1e.gastown.v1.ListEventsResponse\x12J\n" +
 	"\vWatchEvents\x12\x1e.gastown.v1.WatchEventsRequest\x1a\x19.gastown.v1.ActivityEvent0\x01\x12H\n" +
-	"\tEmitEvent\x12\x1c.gastown.v1.EmitEventRequest\x1a\x1d.gastown.v1.EmitEventResponseB\xa0\x01\n" +
+	"\tEmitEvent\x12\x1c.gastown.v1.EmitEventRequest\x1a\x1d.gastown.v1.EmitEventResponse\x12C\n" +
+	"\n" +
+	"StreamLogs\x12\x1d.gastown.v1.StreamLogsRequest\x1a\x14.gastown.v1.LogEntry0\x01B\xa0\x01\n" +
 	"\x0ecom.gastown.v1B\rActivityProtoP\x01Z6github.com/steveyegge/gastown/gen/gastown/v1;gastownv1\xa2\x02\x03GXX\xaa\x02\n" +
 	"Gastown.V1\xca\x02\n" +
 	"Gastown\\V1\xe2\x02\x16Gastown\\V1\\GPBMetadata\xea\x02\vGastown::V1b\x06proto3"
@@ -835,7 +1016,7 @@ func file_gastown_v1_activity_proto_rawDescGZIP() []byte {
 }
 
 var file_gastown_v1_activity_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_gastown_v1_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_gastown_v1_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gastown_v1_activity_proto_goTypes = []any{
 	(Visibility)(0),            // 0: gastown.v1.Visibility
 	(EventType)(0),             // 1: gastown.v1.EventType
@@ -846,25 +1027,29 @@ var file_gastown_v1_activity_proto_goTypes = []any{
 	(*WatchEventsRequest)(nil), // 6: gastown.v1.WatchEventsRequest
 	(*EmitEventRequest)(nil),   // 7: gastown.v1.EmitEventRequest
 	(*EmitEventResponse)(nil),  // 8: gastown.v1.EmitEventResponse
-	(*structpb.Struct)(nil),    // 9: google.protobuf.Struct
+	(*StreamLogsRequest)(nil),  // 9: gastown.v1.StreamLogsRequest
+	(*LogEntry)(nil),           // 10: gastown.v1.LogEntry
+	(*structpb.Struct)(nil),    // 11: google.protobuf.Struct
 }
 var file_gastown_v1_activity_proto_depIdxs = []int32{
-	9,  // 0: gastown.v1.ActivityEvent.payload:type_name -> google.protobuf.Struct
+	11, // 0: gastown.v1.ActivityEvent.payload:type_name -> google.protobuf.Struct
 	0,  // 1: gastown.v1.ActivityEvent.visibility:type_name -> gastown.v1.Visibility
 	0,  // 2: gastown.v1.EventFilter.visibility:type_name -> gastown.v1.Visibility
 	3,  // 3: gastown.v1.ListEventsRequest.filter:type_name -> gastown.v1.EventFilter
 	2,  // 4: gastown.v1.ListEventsResponse.events:type_name -> gastown.v1.ActivityEvent
 	3,  // 5: gastown.v1.WatchEventsRequest.filter:type_name -> gastown.v1.EventFilter
-	9,  // 6: gastown.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	11, // 6: gastown.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
 	0,  // 7: gastown.v1.EmitEventRequest.visibility:type_name -> gastown.v1.Visibility
 	4,  // 8: gastown.v1.ActivityService.ListEvents:input_type -> gastown.v1.ListEventsRequest
 	6,  // 9: gastown.v1.ActivityService.WatchEvents:input_type -> gastown.v1.WatchEventsRequest
 	7,  // 10: gastown.v1.ActivityService.EmitEvent:input_type -> gastown.v1.EmitEventRequest
-	5,  // 11: gastown.v1.ActivityService.ListEvents:output_type -> gastown.v1.ListEventsResponse
-	2,  // 12: gastown.v1.ActivityService.WatchEvents:output_type -> gastown.v1.ActivityEvent
-	8,  // 13: gastown.v1.ActivityService.EmitEvent:output_type -> gastown.v1.EmitEventResponse
-	11, // [11:14] is the sub-list for method output_type
-	8,  // [8:11] is the sub-list for method input_type
+	9,  // 11: gastown.v1.ActivityService.StreamLogs:input_type -> gastown.v1.StreamLogsRequest
+	5,  // 12: gastown.v1.ActivityService.ListEvents:output_type -> gastown.v1.ListEventsResponse
+	2,  // 13: gastown.v1.ActivityService.WatchEvents:output_type -> gastown.v1.ActivityEvent
+	8,  // 14: gastown.v1.ActivityService.EmitEvent:output_type -> gastown.v1.EmitEventResponse
+	10, // 15: gastown.v1.ActivityService.StreamLogs:output_type -> gastown.v1.LogEntry
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -881,7 +1066,7 @@ func file_gastown_v1_activity_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastown_v1_activity_proto_rawDesc), len(file_gastown_v1_activity_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

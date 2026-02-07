@@ -1963,6 +1963,280 @@ func (s *ActivityServer) EmitEvent(
 	}), nil
 }
 
+func (s *ActivityServer) StreamLogs(
+	ctx context.Context,
+	req *connect.Request[gastownv1.StreamLogsRequest],
+	stream *connect.ServerStream[gastownv1.LogEntry],
+) error {
+	agent := req.Msg.Agent
+	logType := req.Msg.LogType
+	if logType == "" {
+		logType = "activity"
+	}
+
+	tailLines := int(req.Msg.TailLines)
+	if tailLines <= 0 {
+		tailLines = 50
+	}
+	if tailLines > 500 {
+		tailLines = 500
+	}
+
+	// Resolve the log file path based on log type
+	logFile, err := s.resolveLogFile(logType)
+	if err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Send historical tail lines
+	if err := s.sendTailLines(logFile, agent, logType, tailLines, stream); err != nil {
+		if !os.IsNotExist(err) {
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf("reading log file: %w", err))
+		}
+	}
+
+	// If not following, we're done after the tail
+	if !req.Msg.Follow {
+		return nil
+	}
+
+	// Open file for tailing
+	file, err := os.Open(logFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			file, err = os.OpenFile(logFile, os.O_RDONLY|os.O_CREATE, 0644)
+			if err != nil {
+				return connect.NewError(connect.CodeUnavailable, fmt.Errorf("creating log file: %w", err))
+			}
+		} else {
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf("opening log file: %w", err))
+		}
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("seeking log file: %w", err))
+	}
+
+	reader := bufio.NewReader(file)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					break
+				}
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+
+				entry := s.parseLogLineEntry(line, logType)
+				if entry == nil {
+					continue
+				}
+
+				if agent != "" && entry.Agent != "" && !strings.Contains(entry.Agent, agent) {
+					continue
+				}
+
+				if err := stream.Send(entry); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+func (s *ActivityServer) resolveLogFile(logType string) (string, error) {
+	switch logType {
+	case "activity":
+		return filepath.Join(s.townRoot, ".events.jsonl"), nil
+	case "town":
+		return filepath.Join(s.townRoot, "logs", "town.log"), nil
+	case "daemon":
+		return filepath.Join(s.townRoot, "daemon", "daemon.log"), nil
+	default:
+		return "", fmt.Errorf("unknown log type %q: must be activity, town, or daemon", logType)
+	}
+}
+
+func (s *ActivityServer) sendTailLines(
+	logFile, agent, logType string,
+	tailLines int,
+	stream *connect.ServerStream[gastownv1.LogEntry],
+) error {
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	var entries []*gastownv1.LogEntry
+	for i := len(lines) - 1; i >= 0 && len(entries) < tailLines; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+
+		entry := s.parseLogLineEntry(line, logType)
+		if entry == nil {
+			continue
+		}
+
+		if agent != "" && entry.Agent != "" && !strings.Contains(entry.Agent, agent) {
+			continue
+		}
+
+		entries = append(entries, entry)
+	}
+
+	for i := len(entries) - 1; i >= 0; i-- {
+		if err := stream.Send(entries[i]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *ActivityServer) parseLogLineEntry(line, logType string) *gastownv1.LogEntry {
+	switch logType {
+	case "activity":
+		return s.parseActivityLogLine(line)
+	case "town":
+		return s.parseTownLogLine(line)
+	case "daemon":
+		return s.parseDaemonLogLine(line)
+	default:
+		return nil
+	}
+}
+
+func (s *ActivityServer) parseActivityLogLine(line string) *gastownv1.LogEntry {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil
+	}
+
+	entry := &gastownv1.LogEntry{
+		Source: "activity",
+		Level:  "info",
+	}
+
+	if ts, ok := raw["ts"].(string); ok {
+		entry.Timestamp = ts
+	}
+	if actor, ok := raw["actor"].(string); ok {
+		entry.Agent = actor
+	}
+	if typ, ok := raw["type"].(string); ok {
+		entry.EventType = typ
+	}
+
+	var parts []string
+	if typ, ok := raw["type"].(string); ok {
+		parts = append(parts, typ)
+	}
+	if actor, ok := raw["actor"].(string); ok {
+		parts = append(parts, "by", actor)
+	}
+	if payload, ok := raw["payload"].(map[string]interface{}); ok {
+		if summary, ok := payload["summary"].(string); ok {
+			parts = append(parts, "-", summary)
+		}
+	}
+	if summary, ok := raw["summary"].(string); ok && summary != "" {
+		parts = append(parts, "-", summary)
+	}
+	entry.Message = strings.Join(parts, " ")
+
+	return entry
+}
+
+func (s *ActivityServer) parseTownLogLine(line string) *gastownv1.LogEntry {
+	entry := &gastownv1.LogEntry{
+		Source: "town",
+		Level:  "info",
+	}
+
+	if len(line) < 19 {
+		entry.Message = line
+		return entry
+	}
+
+	ts, err := time.Parse("2006-01-02 15:04:05", line[:19])
+	if err != nil {
+		entry.Message = line
+		return entry
+	}
+	entry.Timestamp = ts.Format(time.RFC3339)
+
+	rest := line[20:]
+
+	if len(rest) > 2 && rest[0] == '[' {
+		closeBracket := strings.Index(rest, "]")
+		if closeBracket > 0 {
+			entry.EventType = rest[1:closeBracket]
+			rest = rest[closeBracket+1:]
+			if len(rest) > 0 && rest[0] == ' ' {
+				rest = rest[1:]
+			}
+		}
+	}
+
+	if spaceIdx := strings.Index(rest, " "); spaceIdx > 0 {
+		entry.Agent = rest[:spaceIdx]
+		entry.Message = rest[spaceIdx+1:]
+	} else {
+		entry.Agent = rest
+	}
+
+	switch entry.EventType {
+	case "crash", "session_death", "mass_death":
+		entry.Level = "error"
+	case "escalation_sent", "polecat_nudged":
+		entry.Level = "warn"
+	}
+
+	return entry
+}
+
+func (s *ActivityServer) parseDaemonLogLine(line string) *gastownv1.LogEntry {
+	entry := &gastownv1.LogEntry{
+		Source: "daemon",
+		Level:  "info",
+	}
+
+	if len(line) >= 19 {
+		ts, err := time.Parse("2006/01/02 15:04:05", line[:19])
+		if err == nil {
+			entry.Timestamp = ts.Format(time.RFC3339)
+			if len(line) > 20 {
+				entry.Message = line[20:]
+			}
+			msgLower := strings.ToLower(entry.Message)
+			if strings.Contains(msgLower, "error") || strings.Contains(msgLower, "fatal") {
+				entry.Level = "error"
+			} else if strings.Contains(msgLower, "warn") {
+				entry.Level = "warn"
+			}
+			return entry
+		}
+	}
+
+	entry.Message = line
+	entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	return entry
+}
+
 // readRawEvents reads events from the raw events file.
 func (s *ActivityServer) readRawEvents(filter *gastownv1.EventFilter, limit int) ([]*gastownv1.ActivityEvent, int) {
 	eventsPath := filepath.Join(s.townRoot, ".events.jsonl")
@@ -2353,4 +2627,45 @@ func (s *TerminalServer) WatchSession(
 			}
 		}
 	}
+}
+
+func (s *TerminalServer) SendInput(
+	ctx context.Context,
+	req *connect.Request[gastownv1.SendInputRequest],
+) (*connect.Response[gastownv1.SendInputResponse], error) {
+	session := req.Msg.Session
+	if session == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("session name is required"))
+	}
+
+	if !strings.HasPrefix(session, "gt-") {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("session must start with 'gt-'"))
+	}
+
+	input := req.Msg.Input
+	if input == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("input text is required"))
+	}
+
+	exists, err := s.tmux.HasSession(session)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check session existence: %w", err))
+	}
+	if !exists {
+		return connect.NewResponse(&gastownv1.SendInputResponse{
+			Delivered: false,
+			Error:     fmt.Sprintf("session %q does not exist", session),
+		}), nil
+	}
+
+	if err := s.tmux.SendKeys(session, input); err != nil {
+		return connect.NewResponse(&gastownv1.SendInputResponse{
+			Delivered: false,
+			Error:     fmt.Sprintf("failed to send input: %v", err),
+		}), nil
+	}
+
+	return connect.NewResponse(&gastownv1.SendInputResponse{
+		Delivered: true,
+	}), nil
 }

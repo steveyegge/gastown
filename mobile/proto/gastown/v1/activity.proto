@@ -16,6 +16,9 @@ service ActivityService {
 
   // EmitEvent writes a new event to the activity log
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+
+  // StreamLogs streams log entries from agent log sources in real-time
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogEntry);
 }
 
 // Visibility levels for events
@@ -166,4 +169,41 @@ message EmitEventResponse {
 
   // Success flag
   bool success = 2;
+}
+
+// StreamLogsRequest requests real-time log streaming for an agent
+message StreamLogsRequest {
+  // Agent identifier (e.g., "gastown/crew/joe" or "gastown/polecats/slit")
+  string agent = 1;
+
+  // Log type to stream: "activity" (events feed), "town" (lifecycle log), "daemon" (daemon log)
+  // Empty defaults to "activity"
+  string log_type = 2;
+
+  // Number of historical lines to include before streaming (default: 50, max: 500)
+  int32 tail_lines = 3;
+
+  // If true, continue streaming new entries as they appear; if false, return tail_lines and stop
+  bool follow = 4;
+}
+
+// LogEntry represents a single log entry from any log source
+message LogEntry {
+  // Timestamp in RFC3339 format
+  string timestamp = 1;
+
+  // Log level: "info", "warn", "error", "debug"
+  string level = 2;
+
+  // The log message content
+  string message = 3;
+
+  // Source of the log entry: "activity", "town", "daemon"
+  string source = 4;
+
+  // Agent that generated the entry (if applicable)
+  string agent = 5;
+
+  // Event type (for activity log entries)
+  string event_type = 6;
 }

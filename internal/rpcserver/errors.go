@@ -86,6 +86,16 @@ func cmdExecErr(operation string, err error, output []byte) *connect.Error {
 	return withRetryAfter(connErr, 5)
 }
 
+// invalidArg creates a CodeInvalidArgument error for missing/invalid request parameters.
+func invalidArg(field, msg string) *connect.Error {
+	return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("%s: %s", field, msg))
+}
+
+// internalErr creates a CodeInternal error for unexpected server failures.
+func internalErr(msg string, err error) *connect.Error {
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", msg, err))
+}
+
 // containsAny returns true if s contains any of the given substrings.
 func containsAny(s string, substrs ...string) bool {
 	for _, sub := range substrs {

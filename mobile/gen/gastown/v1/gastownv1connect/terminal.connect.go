@@ -45,6 +45,9 @@ const (
 	// TerminalServiceWatchSessionProcedure is the fully-qualified name of the TerminalService's
 	// WatchSession RPC.
 	TerminalServiceWatchSessionProcedure = "/gastown.v1.TerminalService/WatchSession"
+	// TerminalServiceSendInputProcedure is the fully-qualified name of the TerminalService's SendInput
+	// RPC.
+	TerminalServiceSendInputProcedure = "/gastown.v1.TerminalService/SendInput"
 )
 
 // TerminalServiceClient is a client for the gastown.v1.TerminalService service.
@@ -57,6 +60,10 @@ type TerminalServiceClient interface {
 	HasSession(context.Context, *connect.Request[v1.HasSessionRequest]) (*connect.Response[v1.HasSessionResponse], error)
 	// WatchSession streams terminal output updates in real-time
 	WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest]) (*connect.ServerStreamForClient[v1.TerminalUpdate], error)
+	// SendInput sends text input to a terminal session (Phase 5: remote nudging).
+	// For local agents, routes to tmux send-keys.
+	// For K8s-hosted agents, routes via SSH to the pod's tmux session.
+	SendInput(context.Context, *connect.Request[v1.SendInputRequest]) (*connect.Response[v1.SendInputResponse], error)
 }
 
 // NewTerminalServiceClient constructs a client for the gastown.v1.TerminalService service. By
@@ -94,6 +101,12 @@ func NewTerminalServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(terminalServiceMethods.ByName("WatchSession")),
 			connect.WithClientOptions(opts...),
 		),
+		sendInput: connect.NewClient[v1.SendInputRequest, v1.SendInputResponse](
+			httpClient,
+			baseURL+TerminalServiceSendInputProcedure,
+			connect.WithSchema(terminalServiceMethods.ByName("SendInput")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -103,6 +116,7 @@ type terminalServiceClient struct {
 	listSessions *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
 	hasSession   *connect.Client[v1.HasSessionRequest, v1.HasSessionResponse]
 	watchSession *connect.Client[v1.WatchSessionRequest, v1.TerminalUpdate]
+	sendInput    *connect.Client[v1.SendInputRequest, v1.SendInputResponse]
 }
 
 // PeekSession calls gastown.v1.TerminalService.PeekSession.
@@ -125,6 +139,11 @@ func (c *terminalServiceClient) WatchSession(ctx context.Context, req *connect.R
 	return c.watchSession.CallServerStream(ctx, req)
 }
 
+// SendInput calls gastown.v1.TerminalService.SendInput.
+func (c *terminalServiceClient) SendInput(ctx context.Context, req *connect.Request[v1.SendInputRequest]) (*connect.Response[v1.SendInputResponse], error) {
+	return c.sendInput.CallUnary(ctx, req)
+}
+
 // TerminalServiceHandler is an implementation of the gastown.v1.TerminalService service.
 type TerminalServiceHandler interface {
 	// PeekSession captures the last N lines from a tmux session's pane
@@ -135,6 +154,10 @@ type TerminalServiceHandler interface {
 	HasSession(context.Context, *connect.Request[v1.HasSessionRequest]) (*connect.Response[v1.HasSessionResponse], error)
 	// WatchSession streams terminal output updates in real-time
 	WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest], *connect.ServerStream[v1.TerminalUpdate]) error
+	// SendInput sends text input to a terminal session (Phase 5: remote nudging).
+	// For local agents, routes to tmux send-keys.
+	// For K8s-hosted agents, routes via SSH to the pod's tmux session.
+	SendInput(context.Context, *connect.Request[v1.SendInputRequest]) (*connect.Response[v1.SendInputResponse], error)
 }
 
 // NewTerminalServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -168,6 +191,12 @@ func NewTerminalServiceHandler(svc TerminalServiceHandler, opts ...connect.Handl
 		connect.WithSchema(terminalServiceMethods.ByName("WatchSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	terminalServiceSendInputHandler := connect.NewUnaryHandler(
+		TerminalServiceSendInputProcedure,
+		svc.SendInput,
+		connect.WithSchema(terminalServiceMethods.ByName("SendInput")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastown.v1.TerminalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TerminalServicePeekSessionProcedure:
@@ -178,6 +207,8 @@ func NewTerminalServiceHandler(svc TerminalServiceHandler, opts ...connect.Handl
 			terminalServiceHasSessionHandler.ServeHTTP(w, r)
 		case TerminalServiceWatchSessionProcedure:
 			terminalServiceWatchSessionHandler.ServeHTTP(w, r)
+		case TerminalServiceSendInputProcedure:
+			terminalServiceSendInputHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +232,8 @@ func (UnimplementedTerminalServiceHandler) HasSession(context.Context, *connect.
 
 func (UnimplementedTerminalServiceHandler) WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest], *connect.ServerStream[v1.TerminalUpdate]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.TerminalService.WatchSession is not implemented"))
+}
+
+func (UnimplementedTerminalServiceHandler) SendInput(context.Context, *connect.Request[v1.SendInputRequest]) (*connect.Response[v1.SendInputResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.TerminalService.SendInput is not implemented"))
 }
