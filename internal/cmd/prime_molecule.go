@@ -248,6 +248,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		RoleName:        "deacon",
 		PatrolMolName:   "mol-deacon-patrol",
 		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
+		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
 		HeaderTitle:     "Patrol Status (Wisp-based)",
@@ -270,6 +271,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		RoleName:        "witness",
 		PatrolMolName:   "mol-witness-patrol",
 		BeadsDir:        ctx.WorkDir,
+		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
@@ -293,6 +295,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		RoleName:        "refinery",
 		PatrolMolName:   "mol-refinery-patrol",
 		BeadsDir:        ctx.WorkDir,
+		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",

@@ -155,7 +155,7 @@ func storeArgsInBead(beadID, args string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -172,7 +172,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -201,7 +201,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -225,7 +225,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Get the bead to preserve existing description content
-		showCmd := exec.Command("bd", "show", beadID, "--json")
+		showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -261,7 +261,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -279,7 +279,7 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -308,7 +308,7 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -594,7 +594,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 1: Cook the formula (ensures proto exists)
 	if !skipCook {
-		cookCmd := exec.Command("bd", "cook", formulaName)
+		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
@@ -610,6 +610,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		wispArgs = append(wispArgs, "--var", variable)
 	}
 	wispArgs = append(wispArgs, "--json")
+	wispArgs = append([]string{"--no-daemon"}, wispArgs...)
 	wispCmd := exec.Command("bd", wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
@@ -626,7 +627,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	}
 
 	// Step 3: Bond wisp to original bead (creates compound)
-	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
+	bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
 	bondCmd := exec.Command("bd", bondArgs...)
 	bondCmd.Dir = formulaWorkDir
 	bondCmd.Stderr = os.Stderr
@@ -652,7 +653,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 // CookFormula cooks a formula to ensure its proto exists.
 // This is useful for batch mode where we cook once before processing multiple beads.
 func CookFormula(formulaName, workDir string) error {
-	cookCmd := exec.Command("bd", "cook", formulaName)
+	cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 	cookCmd.Dir = workDir
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()

@@ -174,12 +174,11 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
 
-	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
-	// This keeps settings out of the git worktree while allowing runtime to find them
-	// when walking up the tree from workDir (polecats/<name>/<rigname>/).
-	// Each polecat gets isolated settings rather than sharing a single settings file.
-	polecatHomeDir := m.polecatDir(polecat)
-	if err := runtime.EnsureSettingsForRole(polecatHomeDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in the polecat's git worktree (polecats/<name>/<rigname>/).
+	// Claude Code discovers project settings at the git root's .claude/settings.json,
+	// not at intermediate parent directories. The .claude/ directory is already in
+	// the worktree's .gitignore (via EnsureGitignorePatterns), so this is safe.
+	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

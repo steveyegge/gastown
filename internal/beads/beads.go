@@ -337,47 +337,27 @@ func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	})
 }
 
-// GetAssignedIssue returns the first open or hooked issue assigned to the given assignee.
-// Returns nil if no open or hooked issue is assigned.
+// GetAssignedIssue returns the first issue assigned to the given assignee.
+// Checks open, in_progress, and hooked statuses (hooked = work on agent's hook).
+// Returns nil if no matching issue is assigned.
 func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
-	issues, err := b.List(ListOptions{
-		Status:   "open",
-		Assignee: assignee,
-		Priority: -1,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Also check in_progress status explicitly
-	if len(issues) == 0 {
-		issues, err = b.List(ListOptions{
-			Status:   "in_progress",
+	// Check all active work statuses: open, in_progress, and hooked
+	// "hooked" status is set by gt sling when work is attached to an agent's hook
+	for _, status := range []string{"open", "in_progress", StatusHooked} {
+		issues, err := b.List(ListOptions{
+			Status:   status,
 			Assignee: assignee,
 			Priority: -1,
 		})
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Also check hooked status - polecat may have work attached but not yet started
-	if len(issues) == 0 {
-		issues, err = b.List(ListOptions{
-			Status:   "hooked",
-			Assignee: assignee,
-			Priority: -1,
-		})
-		if err != nil {
-			return nil, err
+		if len(issues) > 0 {
+			return issues[0], nil
 		}
 	}
 
-	if len(issues) == 0 {
-		return nil, nil
-	}
-
-	return issues[0], nil
+	return nil, nil
 }
 
 // Ready returns issues that are ready to work (not blocked).
