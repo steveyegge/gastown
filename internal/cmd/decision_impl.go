@@ -1795,7 +1795,7 @@ func containsString(slice []string, s string) bool {
 
 // emitDecisionBusEvent emits a decision lifecycle event on the bd bus.
 // This is best-effort: failures are logged but never block the caller.
-// Events flow through bd bus emit → daemon RPC → NATS JetStream (if enabled).
+// Events flow through bd bus emit --event → daemon RPC → NATS JetStream (if enabled).
 // Subscribers (Slack bot, Mayor, Deacon) can react to these events in real-time
 // instead of polling.
 func emitDecisionBusEvent(eventType string, payload map[string]interface{}) {
@@ -1804,12 +1804,17 @@ func emitDecisionBusEvent(eventType string, payload map[string]interface{}) {
 		return
 	}
 
-	// Pipe the payload as event JSON to bd bus emit.
-	// The --hook flag sets the EventType; despite the name it accepts any type string.
-	cmd := exec.Command("bd", "bus", "emit", "--hook", eventType) //nolint:gosec // trusted internal command
-	cmd.Stdin = strings.NewReader(string(payloadJSON))
+	// Use --event and --payload flags for decision events (od-k3o.15.1).
+	// Falls back to --hook for older bd versions that don't have --event yet.
+	cmd := exec.Command("bd", "bus", "emit", "--event", eventType, "--payload", string(payloadJSON)) //nolint:gosec // trusted internal command
 	cmd.Stderr = io.Discard // suppress daemon-unavailable warnings
-	_ = cmd.Run()           // fire-and-forget
+	if err := cmd.Run(); err != nil {
+		// Fallback: use --hook with stdin pipe (works with all bd versions)
+		fallback := exec.Command("bd", "bus", "emit", "--hook", eventType) //nolint:gosec // trusted internal command
+		fallback.Stdin = strings.NewReader(string(payloadJSON))
+		fallback.Stderr = io.Discard
+		_ = fallback.Run()
+	}
 }
 
 // --- Decision Chain Visualization ---
