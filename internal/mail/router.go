@@ -755,6 +755,11 @@ func (r *Router) validateRecipient(identity string) error {
 
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
+	// Ensure message has an ID (callers may omit it; bd create doesn't generate one)
+	if msg.ID == "" {
+		msg.ID = generateID()
+	}
+
 	// Validate message before sending
 	if err := msg.Validate(); err != nil {
 		return fmt.Errorf("invalid message: %w", err)
