@@ -1624,6 +1624,37 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	return err
 }
 
+// GetSessionCreatedUnix returns the Unix timestamp when a session was created.
+// Returns 0 if the session doesn't exist or can't be queried.
+func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{session_created}")
+	if err != nil {
+		return 0, err
+	}
+	ts, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing session_created %q: %w", out, err)
+	}
+	return ts, nil
+}
+
+// CurrentSessionName returns the tmux session name for the current process.
+// It parses the TMUX environment variable (format: socket,pid,session_index)
+// and queries tmux for the session name. Returns empty string if not in tmux.
+func CurrentSessionName() string {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return ""
+	}
+	// TMUX format: /path/to/socket,server_pid,session_index
+	// We can use display-message to get the session name directly
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // CleanupOrphanedSessions scans for zombie Gas Town sessions and kills them.
 // A zombie session is one where tmux is alive but the Claude process has died.
 // This runs at `gt start` time to prevent session name conflicts and resource accumulation.
