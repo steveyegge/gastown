@@ -223,7 +223,7 @@ func TestMergeHooksOverrideAddsNewType(t *testing.T) {
 
 func TestLoadAllOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	// Create some override files
 	crew := &HooksConfig{
@@ -263,7 +263,7 @@ func TestLoadAllOverrides(t *testing.T) {
 
 func TestLoadAllOverridesEmptyDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	overrides, err := LoadAllOverrides()
 	if err != nil {

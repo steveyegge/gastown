@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -984,6 +985,10 @@ func TestCollectReparentedGroupMembers(t *testing.T) {
 }
 
 func TestGetParentPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("getParentPID returns empty string on Windows (no /proc or ps)")
+	}
+
 	// Test with current process - should have a valid PPID
 	pid := fmt.Sprintf("%d", os.Getpid())
 	ppid := getParentPID(pid)

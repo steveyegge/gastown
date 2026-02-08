@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -14,4 +15,9 @@ func setMigrationProcAttr(c *exec.Cmd) {
 	c.Cancel = func() error {
 		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 	}
+}
+
+// migrationShellCmd returns an exec.Cmd that runs cmdStr in a shell.
+func migrationShellCmd(ctx context.Context, cmdStr string) *exec.Cmd {
+	return exec.CommandContext(ctx, "bash", "-c", cmdStr)
 }

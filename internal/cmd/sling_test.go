@@ -971,10 +971,10 @@ setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
 if "%cmd%"=="--no-daemon" set "cmd=%2"
-if "%cmd%"=="show" (
-  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
-  exit /b 0
-)
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
 if "%cmd%"=="update" exit /b 0
 exit /b 0
 `

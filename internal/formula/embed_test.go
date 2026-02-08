@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -716,6 +717,9 @@ func TestProvisionFormulas_StatError(t *testing.T) {
 // TestCheckFormulaHealth_ErrorCounter tests that CheckFormulaHealth increments
 // the Error counter for files that can't be read (e.g. permission denied).
 func TestCheckFormulaHealth_ErrorCounter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod(path, 0000) does not prevent reading on Windows")
+	}
 	tmpDir := t.TempDir()
 
 	// Provision fresh

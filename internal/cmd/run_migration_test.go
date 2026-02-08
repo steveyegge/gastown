@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -675,10 +676,16 @@ func TestExecuteMigrationStep_Timeout(t *testing.T) {
 		Steps:     make(map[string]StepRun),
 	}
 
+	// Use a platform-appropriate long-running command
+	slowCmd := "sleep 30"
+	if runtime.GOOS == "windows" {
+		slowCmd = "ping -n 31 127.0.0.1"
+	}
+
 	step := &formula.Step{
 		ID:    "slow-step",
 		Title: "Step that should time out",
-		Description: "Run a slow command.\n\n```bash\nsleep 30\n```\n",
+		Description: "Run a slow command.\n\n```bash\n" + slowCmd + "\n```\n",
 	}
 
 	start := time.Now()
@@ -839,11 +846,19 @@ func TestExecuteMigrationStep_SkipsCompletedCommandsOnRetry(t *testing.T) {
 	marker2 := filepath.Join(townRoot, "marker2.txt")
 	marker3 := filepath.Join(townRoot, "marker3.txt")
 
+	// Use platform-appropriate file-creation commands
+	touchCmd := func(path string) string {
+		if runtime.GOOS == "windows" {
+			return fmt.Sprintf("type nul > %q", path)
+		}
+		return fmt.Sprintf("touch %s", path)
+	}
+
 	step := &formula.Step{
 		ID:    "retry-step",
 		Title: "Retry step",
-		Description: fmt.Sprintf("Commands.\n\n```bash\ntouch %s\n```\n\n```bash\ntouch %s\n```\n\n```bash\ntouch %s\n```\n",
-			marker1, marker2, marker3),
+		Description: fmt.Sprintf("Commands.\n\n```bash\n%s\n```\n\n```bash\n%s\n```\n\n```bash\n%s\n```\n",
+			touchCmd(marker1), touchCmd(marker2), touchCmd(marker3)),
 	}
 
 	err := executeMigrationStep(nil, cp, step, townRoot)
@@ -873,6 +888,10 @@ func TestExecuteMigrationStep_SkipsCompletedCommandsOnRetry(t *testing.T) {
 }
 
 func TestExecuteMigrationStep_TimeoutKillsChildProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows: process group kill uses Unix-specific SIGKILL")
+	}
+
 	townRoot := t.TempDir()
 
 	origTimeout := runMigrationTimeout

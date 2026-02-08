@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -372,7 +371,7 @@ func executeMigrationStep(_ *formula.Formula, cp *MigrationCheckpoint, step *for
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), runMigrationTimeout)
-			c := exec.CommandContext(ctx, "bash", "-c", cmdStr)
+			c := migrationShellCmd(ctx, cmdStr)
 			c.Dir = townRoot
 			c.Env = append(os.Environ(), "GT_MIGRATION=1")
 			// Set platform-specific process group attributes so we can
