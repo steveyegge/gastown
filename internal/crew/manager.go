@@ -531,6 +531,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
 
+	// Persist agent override in tmux session env so handoff can read it back.
+	// The startup command sets GT_AGENT via exec env, but that only lives in the
+	// process tree. The tmux session env survives respawn-pane and is queryable.
+	if opts.AgentOverride != "" {
+		_ = t.SetEnvironment(sessionID, "GT_AGENT", opts.AgentOverride)
+	}
+
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, name, "crew")

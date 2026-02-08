@@ -429,7 +429,15 @@ func buildRestartCommand(sessionName string) (string, error) {
 	//
 	// Check if current session is using a non-default agent (GT_AGENT env var).
 	// If so, preserve it across handoff by using the override variant.
+	// Fall back to tmux session environment if process env doesn't have it,
+	// since exec env vars may not propagate through all agent runtimes.
 	currentAgent := os.Getenv("GT_AGENT")
+	if currentAgent == "" {
+		t := tmux.NewTmux()
+		if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
+			currentAgent = val
+		}
+	}
 	var runtimeCmd string
 	if currentAgent != "" {
 		var err error
