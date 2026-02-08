@@ -713,23 +713,6 @@ func LoadOrCreateMessagingConfig(path string) (*MessagingConfig, error) {
 	return config, nil
 }
 
-// LoadRuntimeConfig loads the RuntimeConfig from a rig's settings.
-// Falls back to defaults if settings don't exist or don't specify runtime config.
-// rigPath should be the path to the rig directory (e.g., ~/gt/gastown).
-//
-// Deprecated: Use ResolveAgentConfig for full agent resolution with town settings.
-func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
-	settingsPath := filepath.Join(rigPath, "settings", "config.json")
-	settings, err := LoadRigSettings(settingsPath)
-	if err != nil {
-		return DefaultRuntimeConfig()
-	}
-	if settings.Runtime == nil {
-		return DefaultRuntimeConfig()
-	}
-	return normalizeRuntimeConfig(settings.Runtime)
-}
-
 // TownSettingsPath returns the path to town settings file.
 func TownSettingsPath(townRoot string) string {
 	return filepath.Join(townRoot, "settings", "config.json")
@@ -1178,6 +1161,37 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
 
+	// Auto-fill Hooks defaults based on command for agents that support hooks.
+	// This ensures EnsureSettingsForRole creates the correct settings/plugin
+	// for custom agents defined in town/rig settings.
+	if result.Hooks == nil {
+		switch result.Command {
+		case "claude":
+			result.Hooks = &RuntimeHooksConfig{
+				Provider:     "claude",
+				Dir:          ".claude",
+				SettingsFile: "settings.json",
+			}
+		case "opencode":
+			result.Hooks = &RuntimeHooksConfig{
+				Provider:     "opencode",
+				Dir:          ".opencode/plugin",
+				SettingsFile: "gastown.js",
+			}
+		}
+	}
+
+	// Auto-fill Env defaults for opencode (YOLO mode).
+	// Custom opencode agents need OPENCODE_PERMISSION to run autonomously.
+	if result.Command == "opencode" {
+		if result.Env == nil {
+			result.Env = make(map[string]string)
+		}
+		if _, ok := result.Env["OPENCODE_PERMISSION"]; !ok {
+			result.Env["OPENCODE_PERMISSION"] = `{"*":"allow"}`
+		}
+	}
+
 	return result
 }
 
@@ -1287,14 +1301,14 @@ func findTownRootFromCwd() (string, error) {
 	}
 }
 
-// extractSimpleRole extracts the simple role name from a GT_ROLE value.
+// ExtractSimpleRole extracts the simple role name from a GT_ROLE value.
 // GT_ROLE can be:
 //   - Simple: "mayor", "deacon"
 //   - Compound: "rig/witness", "rig/refinery", "rig/crew/name", "rig/polecats/name"
 //
 // For compound format, returns the role segment (second part).
 // For simple format, returns the role as-is.
-func extractSimpleRole(gtRole string) string {
+func ExtractSimpleRole(gtRole string) string {
 	if gtRole == "" {
 		return ""
 	}
@@ -1333,7 +1347,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	// Extract role from envVars for role-based agent resolution.
 	// GT_ROLE may be compound format (e.g., "rig/refinery") so we extract
 	// the simple role name for role_agents lookup.
-	role := extractSimpleRole(envVars["GT_ROLE"])
+	role := ExtractSimpleRole(envVars["GT_ROLE"])
 
 	if rigPath != "" {
 		// Derive town root from rig path

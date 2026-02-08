@@ -491,7 +491,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
 	refineryPath := filepath.Dir(refineryRigPath)
-	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	runtimeConfig := config.ResolveRoleAgentConfig("refinery", m.townRoot, rigPath)
 	if err := m.createPatrolHooks(refineryPath, runtimeConfig); err != nil {
 		fmt.Printf("  Warning: Could not create refinery hooks: %v\n", err)
 	}

@@ -253,7 +253,8 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	}
 
 	// Wait for runtime to be fully ready before returning.
-	runtimeConfig := config.LoadRuntimeConfig(r.Path)
+	spawnTownRoot := filepath.Dir(r.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("polecat", spawnTownRoot, r.Path)
 	if err := t.WaitForRuntimeReady(s.SessionName, runtimeConfig, 30*time.Second); err != nil {
 		fmt.Printf("Warning: runtime may not be fully ready: %v\n", err)
 	}
