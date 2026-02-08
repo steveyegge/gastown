@@ -306,6 +306,36 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
+	// Step 3.5: Push submodule commits if the branch changes submodule pointers.
+	// The refinery owns all remote pushes — submodule commits must land before the
+	// parent pointer is merged, otherwise main gets dangling submodule references.
+	subChanges, err := e.git.SubmoduleChanges(target, branch)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not check submodule changes: %v\n", err)
+	}
+	if len(subChanges) > 0 {
+		// Ensure submodules are initialized in the refinery worktree
+		if initErr := git.InitSubmodules(e.git.WorkDir()); initErr != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to init submodules in refinery worktree: %v", initErr),
+			}
+		}
+		for _, sc := range subChanges {
+			if sc.NewSHA == "" {
+				continue // Submodule removed, nothing to push
+			}
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing submodule %s (commit %s)...\n", sc.Path, sc.NewSHA[:8])
+			if pushErr := e.git.PushSubmoduleCommit(sc.Path, sc.NewSHA, "origin"); pushErr != nil {
+				return ProcessResult{
+					Success: false,
+					Error:   fmt.Sprintf("failed to push submodule %s: %v", sc.Path, pushErr),
+				}
+			}
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Pushed %d submodule(s)\n", len(subChanges))
+	}
+
 	// Step 4: Run tests if configured
 	if e.config.RunTests && e.config.TestCommand != "" {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Running tests: %s\n", e.config.TestCommand)
