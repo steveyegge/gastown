@@ -104,9 +104,10 @@ type HeartbeatConfig struct {
 
 // PatrolConfig represents a single patrol configuration.
 type PatrolConfig struct {
-	Enabled  bool   `json:"enabled"`            // whether this patrol is enabled
-	Interval string `json:"interval,omitempty"` // e.g., "5m"
-	Agent    string `json:"agent,omitempty"`    // agent that runs this patrol
+	Enabled  bool     `json:"enabled"`            // whether this patrol is enabled
+	Interval string   `json:"interval,omitempty"` // e.g., "5m"
+	Agent    string   `json:"agent,omitempty"`    // agent that runs this patrol
+	Rigs     []string `json:"rigs,omitempty"`     // rigs this patrol manages (empty = all)
 }
 
 // CurrentDaemonPatrolConfigVersion is the current schema version for DaemonPatrolConfig.

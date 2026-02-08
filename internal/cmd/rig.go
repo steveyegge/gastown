@@ -390,6 +390,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Add new rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		// Non-fatal: daemon will still work, just won't auto-manage this rig
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
 	// Add route to town-level routes.jsonl for prefix-based routing.
 	// Route points to the canonical beads location:
 	// - If source repo has .beads/ tracked in git, route to mayor/rig
@@ -618,6 +624,11 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	// Save updated config
 	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
 		return fmt.Errorf("saving rigs config: %w", err)
+	}
+
+	// Add adopted rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
 	}
 
 	// Add route to town-level routes.jsonl for prefix-based routing
