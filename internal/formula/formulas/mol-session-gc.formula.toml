@@ -253,41 +253,41 @@ description = "GC mode: 'conservative' or 'aggressive'"
 default = "conservative"
 
 [vars.age]
-description = "Computed: age of item being cleaned"
+description = "Age of item being cleaned (computed during execution)"
 default = ""
 
 [vars.bytes_freed]
-description = "Computed: bytes freed by GC"
+description = "Approximate bytes recovered (computed during execution)"
 default = ""
 
 [vars.error]
-description = "Computed: error message if GC fails"
+description = "Error message for a failed cleanup (computed during execution)"
 default = ""
 
 [vars.identifier]
-description = "Computed: identifier of item being cleaned"
+description = "Identifier of item being cleaned (computed during execution)"
 default = ""
 
 [vars.item]
-description = "Computed: current item being processed"
+description = "Item that failed cleanup (computed during execution)"
 default = ""
 
 [vars.reason]
-description = "Computed: reason for cleaning this item"
+description = "Reason for cleanup (computed during execution)"
 default = ""
 
 [vars.report]
-description = "Computed: full GC report"
+description = "Full GC report text (computed during execution)"
 default = ""
 
 [vars.timestamp]
-description = "Computed: GC run timestamp"
+description = "Timestamp of the GC run (computed during execution)"
 default = ""
 
 [vars.total_cleaned]
-description = "Computed: total items cleaned"
+description = "Total number of items cleaned (computed during execution)"
 default = ""
 
 [vars.type]
-description = "Computed: type of item being cleaned"
+description = "Type of item being cleaned (computed during execution)"
 default = ""

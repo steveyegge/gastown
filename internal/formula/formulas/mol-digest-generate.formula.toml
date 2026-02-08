@@ -227,21 +227,21 @@ required = true
 default = "daily"
 
 [vars.date]
-description = "Computed: date for the digest"
+description = "The date for the digest header (computed during execution)"
 default = ""
 
 [vars.formatted_digest]
-description = "Computed: formatted digest content"
+description = "The formatted digest text (computed during execution)"
 default = ""
 
 [vars.polecat]
-description = "Computed: polecat generating the digest"
+description = "Polecat name for attribution (computed during execution)"
 default = ""
 
 [vars.since]
-description = "Computed: start timestamp for digest period"
+description = "Start timestamp for data collection (computed during execution)"
 default = ""
 
 [vars.until]
-description = "Computed: end timestamp for digest period"
+description = "End timestamp for data collection (computed during execution)"
 default = ""

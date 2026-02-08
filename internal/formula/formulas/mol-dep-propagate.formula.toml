@@ -208,9 +208,9 @@ description = "The issue ID that just closed and needs propagation"
 required = true
 
 [vars.dependent_count]
-description = "Computed: number of dependent issues found"
+description = "Number of cross-rig dependents found (computed during execution)"
 default = ""
 
 [vars.witness_list]
-description = "Computed: list of witnesses to notify"
+description = "List of Witnesses notified (computed during execution)"
 default = ""

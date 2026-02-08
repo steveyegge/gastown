@@ -318,5 +318,5 @@ description = "Optional focus area (security, performance, correctness, etc.)"
 required = false
 
 [vars.rig]
-description = "The rig this polecat belongs to"
+description = "The rig this review is for"
 required = true

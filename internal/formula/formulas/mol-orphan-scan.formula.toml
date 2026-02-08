@@ -312,69 +312,69 @@ required = true
 default = "town"
 
 [vars.action]
-description = "Computed: action taken on an orphan"
+description = "Recovery action taken for an orphan (computed during execution)"
 default = ""
 
 [vars.action_summary]
-description = "Computed: summary of all actions taken"
+description = "Summary of all actions taken (computed during execution)"
 default = ""
 
 [vars.burn_count]
-description = "Computed: number of orphans burned"
+description = "Number of orphans burned/deleted (computed during execution)"
 default = ""
 
 [vars.escalate_count]
-description = "Computed: number of escalations"
+description = "Number of orphans escalated (computed during execution)"
 default = ""
 
 [vars.escalations_section]
-description = "Computed: formatted escalations report section"
+description = "Formatted escalations section for Mayor report (computed during execution)"
 default = ""
 
 [vars.id]
-description = "Computed: ID of current orphan being processed"
+description = "Orphan identifier (computed during execution)"
 default = ""
 
 [vars.issue_count]
-description = "Computed: number of orphaned issues found"
+description = "Number of orphaned issues found (computed during execution)"
 default = ""
 
 [vars.mol_count]
-description = "Computed: number of orphaned molecules found"
+description = "Number of orphaned molecules found (computed during execution)"
 default = ""
 
 [vars.reason]
-description = "Computed: reason for orphan action"
+description = "Reason for orphan cleanup action (computed during execution)"
 default = ""
 
 [vars.reassign_count]
-description = "Computed: number of orphans reassigned"
+description = "Number of orphans reassigned (computed during execution)"
 default = ""
 
 [vars.recover_count]
-description = "Computed: number of orphans recovered"
+description = "Number of orphans recovered (computed during execution)"
 default = ""
 
 [vars.report]
-description = "Computed: full orphan scan report"
+description = "Full orphan scan report text (computed during execution)"
 default = ""
 
 [vars.reset_count]
-description = "Computed: number of orphans reset"
+description = "Number of orphans reset to open (computed during execution)"
 default = ""
 
 [vars.timestamp]
-description = "Computed: scan timestamp"
+description = "Timestamp of the scan (computed during execution)"
 default = ""
 
 [vars.total_count]
-description = "Computed: total orphans found"
+description = "Total number of orphans found (computed during execution)"
 default = ""
 
 [vars.type]
-description = "Computed: type of orphan (issue, molecule, wisp)"
+description = "Type of orphan (issue, molecule, wisp) (computed during execution)"
 default = ""
 
 [vars.wisp_count]
-description = "Computed: number of orphaned wisps found"
+description = "Number of orphaned wisps found (computed during execution)"
 default = ""

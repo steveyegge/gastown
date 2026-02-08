@@ -199,5 +199,5 @@ restart them based on their preserved hooks.
 
 [vars]
 [vars.shutdown_reason]
-description = "Reason for the town shutdown"
+description = "Reason for the shutdown (provided by caller)"
 default = ""
