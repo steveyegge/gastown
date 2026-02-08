@@ -789,7 +789,7 @@ func SaveTownSettings(path string, settings *TownSettings) error {
 //  1. If rig has Runtime set directly, use it (backwards compatibility)
 //  2. If rig has Agent set, look it up in:
 //     a. Town's custom agents (from TownSettings.Agents)
-//     b. Built-in presets (claude, gemini, codex)
+//     b. Built-in presets (claude, gemini, codex, cursor, auggie, amp, copilot, opencode)
 //  3. If rig has no Agent set, use town's default_agent
 //  4. Fall back to claude defaults
 //
@@ -1120,6 +1120,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Command:       rc.Command,
 		InitialPrompt: rc.InitialPrompt,
 		PromptMode:    rc.PromptMode,
+		InteractivePromptFlag: rc.InteractivePromptFlag,
 	}
 
 	// Deep copy Args slice to avoid sharing backing array

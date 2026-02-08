@@ -165,7 +165,11 @@ func execAgent(cfg *config.RuntimeConfig, prompt string) error {
 	// args[0] must be the command name (convention for exec)
 	args := append([]string{cfg.Command}, cfg.Args...)
 	if prompt != "" {
-		args = append(args, prompt)
+		if cfg.InteractivePromptFlag != "" && cfg.PromptMode != "none" {
+			args = append(args, cfg.InteractivePromptFlag, prompt)
+		} else {
+			args = append(args, prompt)
+		}
 	}
 	return syscall.Exec(agentPath, args, os.Environ())
 }

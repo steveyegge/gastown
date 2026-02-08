@@ -354,6 +354,72 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 	})
 }
 
+func TestCopilotTrustCheck_Run(t *testing.T) {
+	t.Run("missing config is ok", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", tmpDir)
+
+		check := NewCopilotTrustCheck()
+		result := check.Run(&CheckContext{TownRoot: filepath.Join(tmpDir, "hq")})
+		if result.Status != StatusOK {
+			t.Fatalf("expected StatusOK, got %v", result.Status)
+		}
+	})
+
+	t.Run("missing trusted_folders warns", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", tmpDir)
+
+		copilotDir := filepath.Join(tmpDir, ".copilot")
+		if err := os.MkdirAll(copilotDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(copilotDir, "config.json")
+		if err := os.WriteFile(configPath, []byte(`{"trusted_folders":[]}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewCopilotTrustCheck()
+		ctx := &CheckContext{TownRoot: filepath.Join(tmpDir, "hq")}
+		result := check.Run(ctx)
+		if result.Status != StatusWarning {
+			t.Fatalf("expected StatusWarning, got %v", result.Status)
+		}
+	})
+}
+
+func TestCopilotTrustCheck_Fix(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	copilotDir := filepath.Join(tmpDir, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(copilotDir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"trusted_folders":[]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hqPath := filepath.Join(tmpDir, "hq")
+	check := NewCopilotTrustCheck()
+	ctx := &CheckContext{TownRoot: hqPath}
+
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning before fix, got %v", result.Status)
+	}
+
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	result = check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Fatalf("expected StatusOK after fix, got %v", result.Status)
+	}
+}
+
 func TestParseConfigOutput(t *testing.T) {
 	tests := []struct {
 		name  string

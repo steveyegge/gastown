@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/copilot"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -36,6 +37,7 @@ var (
 	installPublic     bool
 	installShell      bool
 	installWrappers   bool
+	installTrustCopilot bool
 )
 
 var installCmd = &cobra.Command{
@@ -62,7 +64,8 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --trust-copilot              # Trust HQ for Copilot CLI (adds to ~/.copilot/config.json)`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -78,6 +81,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installTrustCopilot, "trust-copilot", false, "Add HQ path to Copilot trusted_folders when config exists")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -269,6 +273,25 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create daemon.json: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		fmt.Printf("   ✓ Created mayor/daemon.json\n")
+	}
+
+	if installTrustCopilot {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Printf("   %s Could not resolve home directory for Copilot trust: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			configPath := copilot.ConfigPath(homeDir)
+			updated, exists, err := copilot.EnsureTrustedFolder(configPath, absPath)
+			if err != nil {
+				fmt.Printf("   %s Could not update Copilot trusted_folders: %v\n", style.Dim.Render("⚠"), err)
+			} else if !exists {
+				fmt.Printf("   %s Copilot config not found, skipping trusted_folders update\n", style.Dim.Render("⚠"))
+			} else if updated {
+				fmt.Printf("   ✓ Added HQ to Copilot trusted_folders\n")
+			} else {
+				fmt.Printf("   ✓ Copilot trusted_folders already includes HQ\n")
+			}
+		}
 	}
 
 	// Initialize git BEFORE beads so that bd can compute repository fingerprint.
