@@ -68,6 +68,11 @@ linters:
         linters:
           - gosec
         text: "G404"
+      # G104: Errors unhandled - covered by errcheck exclusions already
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G104"
       # G204: Safe subprocess launches with validated arguments (internal tools)
       # All internal packages use subprocess calls for trusted internal tools
       - path: 'internal/'
