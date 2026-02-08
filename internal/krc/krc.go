@@ -349,6 +349,7 @@ func (p *Pruner) pruneFile(filePath string) (result *PruneResult, err error) {
 	result.BytesAfter = tmpInfo.Size()
 
 	// Close files before rename
+<<<<<<< HEAD
 	if err := tmpFile.Close(); err != nil {
 		tmpClosed = true
 		return nil, err
@@ -359,6 +360,10 @@ func (p *Pruner) pruneFile(filePath string) (result *PruneResult, err error) {
 		return nil, err
 	}
 	srcClosed = true
+=======
+	_ = srcFile.Close()
+	_ = tmpFile.Close()
+>>>>>>> d44c6764 (fix(lint): address errcheck, gosec, and unparam warnings)
 
 	// Atomic replace
 	if err := os.Rename(tmpPath, filePath); err != nil {
