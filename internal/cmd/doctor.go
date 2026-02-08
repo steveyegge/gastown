@@ -52,6 +52,7 @@ Cleanup checks (fixable):
   - orphan-sessions          Detect orphaned tmux sessions
   - orphan-processes         Detect orphaned Claude processes
   - wisp-gc                  Detect and clean abandoned wisps (>1h)
+  - stale-beads-redirect     Detect stale files in .beads directories with redirects
 
 Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
@@ -164,6 +165,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
+	d.Register(doctor.NewStaleBeadsRedirectCheck())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
 	d.Register(doctor.NewBeadsSyncWorktreeCheck())
