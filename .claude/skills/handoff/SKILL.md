@@ -27,15 +27,16 @@ Hand off your current session to a fresh Claude instance while preserving work c
 
 ## How It Works
 
-1. If you provide a message, it's sent as handoff mail to yourself
-2. `gt handoff` respawns your session with a fresh Claude
-3. New session auto-primes via SessionStart hook
-4. Work continues from your hook (pinned molecule persists)
+1. State is collected (your message, or auto-collected inbox/beads/hook status)
+2. Handoff mail is sent to yourself with context
+3. `gt handoff` respawns your session with a fresh Claude
+4. New session auto-primes via SessionStart hook
+5. Work continues from your hook (pinned molecule persists)
 
 ## Examples
 
 ```bash
-# Simple handoff (molecule persists, fresh context)
+# Simple handoff - auto-collects state (inbox, ready beads, hooked work)
 /handoff
 
 # Handoff with context notes
@@ -58,14 +59,14 @@ Hand off your current session to a fresh Claude instance while preserving work c
 
 When invoked, execute:
 
-1. If user provided a message, send handoff mail:
+1. If user provided a message:
    ```bash
-   gt mail send <your-address> -s "HANDOFF: Session cycling" -m "<message>"
+   gt handoff -m "<message>"
    ```
 
-2. Run the handoff command:
+2. If NO message provided, use `-c` to auto-collect state:
    ```bash
-   gt handoff
+   gt handoff -c
    ```
 
-The new session will find your handoff mail and hooked work automatically.
+**IMPORTANT**: Never run bare `gt handoff` - it sends no mail and the next session loses context. Always use `-c` or `-m`.
