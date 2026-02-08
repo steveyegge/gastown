@@ -164,6 +164,7 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 				// Update message to indicate fix was applied
 				if result.Status == StatusOK {
 					result.Message = result.Message + " (fixed)"
+					result.Fixed = true
 				}
 			} else {
 				// Fix failed, add error to details
@@ -177,17 +178,25 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 		// Stream: overwrite line with final result
 		if w != nil {
 			var statusIcon string
-			switch result.Status {
-			case StatusOK:
-				statusIcon = ui.RenderPassIcon()
-			case StatusWarning:
-				statusIcon = ui.RenderWarnIcon()
-			case StatusError:
-				statusIcon = ui.RenderFailIcon()
+			if result.Fixed {
+				statusIcon = ui.RenderFixIcon()
+			} else {
+				switch result.Status {
+				case StatusOK:
+					statusIcon = ui.RenderPassIcon()
+				case StatusWarning:
+					statusIcon = ui.RenderWarnIcon()
+				case StatusError:
+					statusIcon = ui.RenderFailIcon()
+				}
 			}
 			// Check if slow (hourglass replaces spaces to maintain alignment)
+			// Fix icon (🔧) is double-width, so use one less padding space
 			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
 			slowIndicator := "  "
+			if result.Fixed {
+				slowIndicator = " "
+			}
 			if isSlow {
 				report.Summary.Slow++
 				slowIndicator = "⏳"
