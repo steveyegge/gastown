@@ -184,15 +184,17 @@ func TestPolecatCommandFormat(t *testing.T) {
 	rigName := "gastown"
 	polecatName := "Toast"
 	expectedBdActor := "gastown/polecats/Toast"
+	// GT_ROLE uses compound format: rig/polecats/name
+	expectedGtRole := rigName + "/polecats/" + polecatName
 
 	// Build the expected command format (mirrors Start() logic)
-	expectedPrefix := "export GT_ROLE=polecat GT_RIG=" + rigName + " GT_POLECAT=" + polecatName + " BD_ACTOR=" + expectedBdActor + " GIT_AUTHOR_NAME=" + expectedBdActor
+	expectedPrefix := "export GT_ROLE=" + expectedGtRole + " GT_RIG=" + rigName + " GT_POLECAT=" + polecatName + " BD_ACTOR=" + expectedBdActor + " GIT_AUTHOR_NAME=" + expectedBdActor
 	expectedSuffix := "&& claude --dangerously-skip-permissions"
 
 	// The command must contain all required env exports
 	requiredParts := []string{
 		"export",
-		"GT_ROLE=polecat",
+		"GT_ROLE=" + expectedGtRole,
 		"GT_RIG=" + rigName,
 		"GT_POLECAT=" + polecatName,
 		"BD_ACTOR=" + expectedBdActor,
@@ -208,9 +210,9 @@ func TestPolecatCommandFormat(t *testing.T) {
 		}
 	}
 
-	// Verify GT_ROLE is specifically "polecat" (not "mayor" or "crew")
-	if !strings.Contains(fullCommand, "GT_ROLE=polecat") {
-		t.Error("GT_ROLE must be 'polecat', not 'mayor' or 'crew'")
+	// Verify GT_ROLE uses compound format with "polecats" (not "mayor", "crew", etc.)
+	if !strings.Contains(fullCommand, "GT_ROLE="+expectedGtRole) {
+		t.Errorf("GT_ROLE must be %q (compound format), not simple 'polecat'", expectedGtRole)
 	}
 }
 

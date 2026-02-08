@@ -287,7 +287,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "witness from witness dir",
 			cwd:  filepath.Join(hqPath, rigName, "witness"),
 			want: []string{
-				"export GT_ROLE=witness",
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "witness"),
@@ -297,7 +297,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "refinery from refinery/rig dir",
 			cwd:  filepath.Join(hqPath, rigName, "refinery", "rig"),
 			want: []string{
-				"export GT_ROLE=refinery",
+				"export GT_ROLE=" + rigName + "/refinery",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/refinery",
 				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "refinery", "rig"),
@@ -307,7 +307,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "polecat from polecats/Toast dir",
 			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast"),
 			want: []string{
-				"export GT_ROLE=polecat",
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -318,7 +318,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "crew from crew/worker1 dir",
 			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1"),
 			want: []string{
-				"export GT_ROLE=crew",
+				"export GT_ROLE=" + rigName + "/crew/worker1",
 				"export GT_RIG=" + rigName,
 				"export GT_CREW=worker1",
 				"export BD_ACTOR=" + rigName + "/crew/worker1",
@@ -812,7 +812,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "witness"),
 			envVars: []string{"GT_ROLE=witness"},
 			wantExport: []string{
-				"export GT_ROLE=witness",
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 			},
@@ -823,7 +823,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "refinery", "rig"),
 			envVars: []string{"GT_ROLE=refinery"},
 			wantExport: []string{
-				"export GT_ROLE=refinery",
+				"export GT_ROLE=" + rigName + "/refinery",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/refinery",
 			},
@@ -834,7 +834,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			envVars: []string{"GT_ROLE=polecat"},
 			wantExport: []string{
-				"export GT_ROLE=polecat",
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -846,7 +846,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			envVars: []string{"GT_ROLE=polecat", "GT_RIG=" + rigName},
 			wantExport: []string{
-				"export GT_ROLE=polecat",
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -858,7 +858,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
 			envVars: []string{"GT_ROLE=crew"},
 			wantExport: []string{
-				"export GT_ROLE=crew",
+				"export GT_ROLE=" + rigName + "/crew/worker1",
 				"export GT_RIG=" + rigName,
 				"export GT_CREW=worker1",
 				"export BD_ACTOR=" + rigName + "/crew/worker1",
@@ -870,7 +870,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			cwd:  filepath.Join(hqPath, rigName, "witness"),
 			envVars: []string{"GT_ROLE=witness", "GT_RIG=" + rigName},
 			wantExport: []string{
-				"export GT_ROLE=witness",
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 			},
