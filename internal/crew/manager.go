@@ -514,6 +514,9 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionExists) {
+			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
+		}
 		return fmt.Errorf("creating session: %w", err)
 	}
 

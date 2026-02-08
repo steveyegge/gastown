@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -24,8 +25,10 @@ import (
 )
 
 const (
-	shutdownLockFile    = "daemon/shutdown.lock"
-	shutdownLockTimeout = 5 * time.Second
+	shutdownLockFile         = "daemon/shutdown.lock"
+	shutdownLockTimeout      = 5 * time.Second
+	shutdownSaveGracePeriod  = 15 * time.Second
+	shutdownNudgeMessage     = "[SHUTDOWN] Gas Town is shutting down. You have ~15 seconds. Please: 1) git add and commit any uncommitted changes with a WIP message describing your progress and next steps, 2) run `gt checkpoint write` to save your checkpoint. Do this NOW — your session will be terminated shortly."
 )
 
 var downCmd = &cobra.Command{
@@ -65,6 +68,7 @@ var (
 	downNuke     bool
 	downDryRun   bool
 	downPolecats bool
+	downNoSave   bool
 )
 
 func init() {
@@ -74,10 +78,39 @@ func init() {
 	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Stop bd daemons/activity and verify shutdown")
 	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill entire tmux server (DESTRUCTIVE - kills non-GT sessions!)")
 	downCmd.Flags().BoolVar(&downDryRun, "dry-run", false, "Preview what would be stopped without taking action")
+	downCmd.Flags().BoolVar(&downNoSave, "no-save", false, "Skip notifying agents to save state before shutdown")
 	rootCmd.AddCommand(downCmd)
 }
 
+// DownOptions configures the behavior of runDownWithOptions.
+type DownOptions struct {
+	Quiet      bool
+	Force      bool
+	All        bool
+	Nuke       bool
+	DryRun     bool
+	Polecats   bool
+	NotifySave bool // Nudge agents to save state before killing
+}
+
+// downOptionsFromFlags creates DownOptions from the package-level flag variables.
+func downOptionsFromFlags() DownOptions {
+	return DownOptions{
+		Quiet:      downQuiet,
+		Force:      downForce,
+		All:        downAll,
+		Nuke:       downNuke,
+		DryRun:     downDryRun,
+		Polecats:   downPolecats,
+		NotifySave: !downNoSave,
+	}
+}
+
 func runDown(cmd *cobra.Command, args []string) error {
+	return runDownWithOptions(downOptionsFromFlags())
+}
+
+func runDownWithOptions(opts DownOptions) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
@@ -89,7 +122,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 0: Acquire shutdown lock (skip for dry-run)
-	if !downDryRun {
+	if !opts.DryRun {
 		lock, err := acquireShutdownLock(townRoot)
 		if err != nil {
 			return fmt.Errorf("cannot proceed: %w", err)
@@ -111,32 +144,48 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	allOK := true
 
-	if downDryRun {
+	if opts.DryRun {
 		fmt.Println("═══ DRY RUN: Preview of shutdown actions ═══")
 		fmt.Println()
 	}
 
 	rigs := discoverRigs(townRoot)
 
+	// Phase 0.1: Notify agents to save state before shutdown
+	if opts.NotifySave && !opts.Force {
+		if opts.DryRun {
+			fmt.Println("Would notify agents to save state before shutdown")
+		} else {
+			nudged := notifyAgentsOfShutdown(t, opts.Quiet)
+			if nudged > 0 {
+				if !opts.Quiet {
+					fmt.Printf("Notified %d agent(s) to save state, waiting %s...\n",
+						nudged, shutdownSaveGracePeriod)
+				}
+				time.Sleep(shutdownSaveGracePeriod)
+			}
+		}
+	}
+
 	// Phase 0.5: Stop polecats if --polecats
-	if downPolecats {
-		if downDryRun {
+	if opts.Polecats {
+		if opts.DryRun {
 			fmt.Println("Would stop polecats...")
 		} else {
 			fmt.Println("Stopping polecats...")
 		}
-		polecatsStopped := stopAllPolecats(t, townRoot, rigs, downForce, downDryRun)
-		if downDryRun {
+		polecatsStopped := stopAllPolecats(t, townRoot, rigs, opts.Force, opts.DryRun)
+		if opts.DryRun {
 			if polecatsStopped > 0 {
-				printDownStatus("Polecats", true, fmt.Sprintf("%d would stop", polecatsStopped))
+				printDownStatus("Polecats", true, fmt.Sprintf("%d would stop", polecatsStopped), opts.Quiet)
 			} else {
-				printDownStatus("Polecats", true, "none running")
+				printDownStatus("Polecats", true, "none running", opts.Quiet)
 			}
 		} else {
 			if polecatsStopped > 0 {
-				printDownStatus("Polecats", true, fmt.Sprintf("%d stopped", polecatsStopped))
+				printDownStatus("Polecats", true, fmt.Sprintf("%d stopped", polecatsStopped), opts.Quiet)
 			} else {
-				printDownStatus("Polecats", true, "none running")
+				printDownStatus("Polecats", true, "none running", opts.Quiet)
 			}
 		}
 		fmt.Println()
@@ -145,86 +194,86 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Phase 1: Stop refineries
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
-		if downDryRun {
+		if opts.DryRun {
 			if running, _ := t.HasSession(sessionName); running {
-				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop")
+				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop", opts.Quiet)
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSession(t, sessionName, opts.Force)
 		if err != nil {
-			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error(), opts.Quiet)
 			allOK = false
 		} else if wasRunning {
-			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped", opts.Quiet)
 		} else {
-			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "not running")
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "not running", opts.Quiet)
 		}
 	}
 
 	// Phase 2: Stop witnesses
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
-		if downDryRun {
+		if opts.DryRun {
 			if running, _ := t.HasSession(sessionName); running {
-				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop")
+				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop", opts.Quiet)
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSession(t, sessionName, opts.Force)
 		if err != nil {
-			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error(), opts.Quiet)
 			allOK = false
 		} else if wasRunning {
-			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped")
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped", opts.Quiet)
 		} else {
-			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "not running")
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "not running", opts.Quiet)
 		}
 	}
 
 	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
 	for _, ts := range session.TownSessions() {
-		if downDryRun {
+		if opts.DryRun {
 			if running, _ := t.HasSession(ts.SessionID); running {
-				printDownStatus(ts.Name, true, "would stop")
+				printDownStatus(ts.Name, true, "would stop", opts.Quiet)
 			}
 			continue
 		}
-		stopped, err := session.StopTownSession(t, ts, downForce)
+		stopped, err := session.StopTownSession(t, ts, opts.Force)
 		if err != nil {
-			printDownStatus(ts.Name, false, err.Error())
+			printDownStatus(ts.Name, false, err.Error(), opts.Quiet)
 			allOK = false
 		} else if stopped {
-			printDownStatus(ts.Name, true, "stopped")
+			printDownStatus(ts.Name, true, "stopped", opts.Quiet)
 		} else {
-			printDownStatus(ts.Name, true, "not running")
+			printDownStatus(ts.Name, true, "not running", opts.Quiet)
 		}
 	}
 
 	// Phase 4: Stop Daemon
 	running, pid, daemonErr := daemon.IsRunning(townRoot)
 	if daemonErr != nil {
-		printDownStatus("Daemon", false, fmt.Sprintf("status check failed: %v", daemonErr))
+		printDownStatus("Daemon", false, fmt.Sprintf("status check failed: %v", daemonErr), opts.Quiet)
 		allOK = false
-	} else if downDryRun {
+	} else if opts.DryRun {
 		if running {
-			printDownStatus("Daemon", true, fmt.Sprintf("would stop (PID %d)", pid))
+			printDownStatus("Daemon", true, fmt.Sprintf("would stop (PID %d)", pid), opts.Quiet)
 		}
 	} else {
 		if running {
 			if err := daemon.StopDaemon(townRoot); err != nil {
-				printDownStatus("Daemon", false, err.Error())
+				printDownStatus("Daemon", false, err.Error(), opts.Quiet)
 				allOK = false
 			} else {
-				printDownStatus("Daemon", true, fmt.Sprintf("stopped (was PID %d)", pid))
+				printDownStatus("Daemon", true, fmt.Sprintf("stopped (was PID %d)", pid), opts.Quiet)
 			}
 		} else {
-			printDownStatus("Daemon", true, "not running")
+			printDownStatus("Daemon", true, "not running", opts.Quiet)
 		}
 	}
 
 	// Phase 5: Verification (--all only)
-	if downAll && !downDryRun {
+	if opts.All && !opts.DryRun {
 		time.Sleep(500 * time.Millisecond)
 		respawned := verifyShutdown(t, townRoot)
 		if len(respawned) > 0 {
@@ -243,9 +292,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Nuke tmux server (--nuke only, DESTRUCTIVE)
-	if downNuke {
-		if downDryRun {
-			printDownStatus("Tmux server", true, "would kill (DESTRUCTIVE)")
+	if opts.Nuke {
+		if opts.DryRun {
+			printDownStatus("Tmux server", true, "would kill (DESTRUCTIVE)", opts.Quiet)
 		} else if os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
 			// Require explicit acknowledgement for destructive operation
 			fmt.Println()
@@ -257,17 +306,17 @@ func runDown(cmd *cobra.Command, args []string) error {
 			allOK = false
 		} else {
 			if err := t.KillServer(); err != nil {
-				printDownStatus("Tmux server", false, err.Error())
+				printDownStatus("Tmux server", false, err.Error(), opts.Quiet)
 				allOK = false
 			} else {
-				printDownStatus("Tmux server", true, "killed (all tmux sessions destroyed)")
+				printDownStatus("Tmux server", true, "killed (all tmux sessions destroyed)", opts.Quiet)
 			}
 		}
 	}
 
 	// Summary
 	fmt.Println()
-	if downDryRun {
+	if opts.DryRun {
 		fmt.Println("═══ DRY RUN COMPLETE (no changes made) ═══")
 		return nil
 	}
@@ -279,13 +328,13 @@ func runDown(cmd *cobra.Command, args []string) error {
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/refinery", rigName))
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))
 		}
-		if downPolecats {
+		if opts.Polecats {
 			stoppedServices = append(stoppedServices, "polecats")
 		}
-		if downAll {
+		if opts.All {
 			stoppedServices = append(stoppedServices, "bd-processes")
 		}
-		if downNuke {
+		if opts.Nuke {
 			stoppedServices = append(stoppedServices, "tmux-server")
 		}
 		_ = events.LogFeed(events.TypeHalt, "gt", events.HaltPayload(stoppedServices))
@@ -343,8 +392,8 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 	return stopped
 }
 
-func printDownStatus(name string, ok bool, detail string) {
-	if downQuiet && ok {
+func printDownStatus(name string, ok bool, detail string, quiet bool) {
+	if quiet && ok {
 		return
 	}
 	if ok {
@@ -356,7 +405,7 @@ func printDownStatus(name string, ok bool, detail string) {
 
 // stopSession gracefully stops a tmux session.
 // Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
-func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
+func stopSession(t *tmux.Tmux, sessionName string, force bool) (bool, error) {
 	running, err := t.HasSession(sessionName)
 	if err != nil {
 		return false, err
@@ -366,13 +415,42 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	}
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
-	if !downForce {
+	if !force {
 		_ = t.SendKeysRaw(sessionName, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Kill the session (with explicit process termination to prevent orphans)
 	return true, t.KillSessionWithProcesses(sessionName)
+}
+
+// notifyAgentsOfShutdown nudges all active agent sessions with a shutdown
+// message, giving them a chance to commit WIP and write checkpoints.
+// Nudges are sent in parallel. Returns the number of agents nudged.
+func notifyAgentsOfShutdown(t *tmux.Tmux, quiet bool) int {
+	agents, err := getAgentSessions(true)
+	if err != nil || len(agents) == 0 {
+		return 0
+	}
+
+	var wg sync.WaitGroup
+	nudged := 0
+	for _, agent := range agents {
+		// Verify session is actually alive before nudging
+		running, _ := t.HasSession(agent.Name)
+		if !running {
+			continue
+		}
+		nudged++
+		wg.Add(1)
+		go func(sessionName string) {
+			defer wg.Done()
+			_ = t.NudgeSession(sessionName, shutdownNudgeMessage)
+		}(agent.Name)
+	}
+	wg.Wait()
+
+	return nudged
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.

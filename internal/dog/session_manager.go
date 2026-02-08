@@ -131,6 +131,9 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 
 	// Create session with command
 	if err := m.tmux.NewSessionWithCommand(sessionID, kennelDir, startupCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionExists) {
+			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
+		}
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 

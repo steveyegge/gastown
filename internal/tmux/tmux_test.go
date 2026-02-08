@@ -582,10 +582,37 @@ func TestKillSessionWithProcesses_NonexistentSession(t *testing.T) {
 
 	tm := NewTmux()
 
-	// Killing nonexistent session should not panic, just return error or nil
+	// Killing nonexistent session should succeed (idempotent).
+	// GetPanePID fails → fallback calls KillSession → ErrSessionNotFound → nil.
 	err := tm.KillSessionWithProcesses("nonexistent-session-xyz-12345")
-	// We don't care about the error value, just that it doesn't panic
-	_ = err
+	if err != nil {
+		t.Errorf("KillSessionWithProcesses(nonexistent) = %v, want nil", err)
+	}
+}
+
+func TestKillSessionWithProcesses_SessionAlreadyGone(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-gone-" + t.Name()
+
+	// Create and immediately destroy a session to simulate the race:
+	// caller's HasSession returned true, but the session disappeared
+	// before KillSessionWithProcesses could act on it.
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := tm.KillSession(sessionName); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	// Should return nil, not "session not found"
+	err := tm.KillSessionWithProcesses(sessionName)
+	if err != nil {
+		t.Errorf("KillSessionWithProcesses(already-gone) = %v, want nil", err)
+	}
 }
 
 func TestKillSessionWithProcessesExcluding(t *testing.T) {
@@ -679,10 +706,34 @@ func TestKillSessionWithProcessesExcluding_NonexistentSession(t *testing.T) {
 
 	tm := NewTmux()
 
-	// Killing nonexistent session should not panic
+	// Killing nonexistent session should succeed (idempotent).
 	err := tm.KillSessionWithProcessesExcluding("nonexistent-session-xyz-12345", []string{"12345"})
-	// We don't care about the error value, just that it doesn't panic
-	_ = err
+	if err != nil {
+		t.Errorf("KillSessionWithProcessesExcluding(nonexistent) = %v, want nil", err)
+	}
+}
+
+func TestKillSessionWithProcessesExcluding_SessionAlreadyGone(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-exclgone-" + t.Name()
+
+	// Create and immediately destroy to simulate the race.
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := tm.KillSession(sessionName); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	// Should return nil, not "session not found"
+	err := tm.KillSessionWithProcessesExcluding(sessionName, nil)
+	if err != nil {
+		t.Errorf("KillSessionWithProcessesExcluding(already-gone) = %v, want nil", err)
+	}
 }
 
 func TestGetProcessGroupID(t *testing.T) {

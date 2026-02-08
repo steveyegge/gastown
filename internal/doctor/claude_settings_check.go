@@ -493,7 +493,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			// especially since deacon runs gt doctor automatically which would create a loop.
 			// Settings are only read at startup, so running agents already have config loaded.
 			fmt.Printf("\n  %s Town-root settings were moved. Restart agents to pick up new config:\n", style.Warning.Render("⚠"))
-			fmt.Printf("      gt up --restart\n\n")
+			fmt.Printf("      gt restart\n\n")
 			continue
 		}
 

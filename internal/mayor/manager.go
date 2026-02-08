@@ -98,6 +98,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
 	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
 	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionExists) {
+			return ErrAlreadyRunning
+		}
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 

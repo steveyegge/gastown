@@ -174,7 +174,11 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	pid, err := t.GetPanePID(name)
 	if err != nil {
 		// Session might not exist or be in bad state, try direct kill
-		return t.KillSession(name)
+		killErr := t.KillSession(name)
+		if killErr == ErrSessionNotFound {
+			return nil
+		}
+		return killErr
 	}
 
 	if pid != "" {
@@ -240,7 +244,11 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 	pid, err := t.GetPanePID(name)
 	if err != nil {
 		// Session might not exist or be in bad state, try direct kill
-		return t.KillSession(name)
+		killErr := t.KillSession(name)
+		if killErr == ErrSessionNotFound {
+			return nil
+		}
+		return killErr
 	}
 
 	if pid != "" {

@@ -94,6 +94,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionExists) {
+			return ErrAlreadyRunning
+		}
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
