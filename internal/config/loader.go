@@ -1453,7 +1453,18 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		var err error
 		townRoot, err = findTownRootFromCwd()
 		if err != nil {
-			rc = DefaultRuntimeConfig()
+			// Can't find town root from cwd - but if agentOverride is specified,
+			// try to use the preset directly. This allows `gt deacon start --agent codex`
+			// to work even when run from outside the town directory.
+			if agentOverride != "" {
+				if preset := GetAgentPresetByName(agentOverride); preset != nil {
+					rc = RuntimeConfigFromPreset(AgentPreset(agentOverride))
+				} else {
+					return "", fmt.Errorf("agent '%s' not found", agentOverride)
+				}
+			} else {
+				rc = DefaultRuntimeConfig()
+			}
 		} else {
 			if agentOverride != "" {
 				var resolveErr error
