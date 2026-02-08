@@ -461,6 +461,138 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 - **Monitor the dashboard** - Get real-time visibility
 - **Let the Mayor orchestrate** - It knows how to manage agents
 
+## Contributing & Local Development
+
+Gas Town welcomes contributions! The recommended workflow lets you use your
+fixes locally while waiting for PR approval.
+
+### Fork-Based Development Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Fork-Based Development Cycle                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   YOUR FORK                         UPSTREAM                     │
+│   github.com/you/gastown            steveyegge/gastown           │
+│                                                                  │
+│   ┌──────────┐                      ┌──────────┐                │
+│   │  main    │◄─────── sync ───────►│  main    │                │
+│   └────┬─────┘                      └──────────┘                │
+│        │                                  ▲                      │
+│        │ branch                           │                      │
+│        ▼                                  │ PR merged            │
+│   ┌──────────┐        PR            ┌─────┴────┐                │
+│   │ fix-bug  │ ──────────────────►  │ Review   │                │
+│   └────┬─────┘                      └──────────┘                │
+│        │                                                         │
+│        │ merge to local main                                     │
+│        ▼                                                         │
+│   ┌──────────┐                                                  │
+│   │  LOCAL   │  make install → gt stabilize                     │
+│   │  BUILD   │  (use fix while waiting for PR approval)         │
+│   └──────────┘                                                  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Initial Setup
+
+```bash
+# Fork steveyegge/gastown on GitHub, then:
+git clone git@github.com:YOUR_USERNAME/gastown.git ~/gastown
+cd ~/gastown
+git remote add upstream https://github.com/steveyegge/gastown.git
+
+# Build and install (also configures gt for future updates)
+make install
+```
+
+### Making a Fix
+
+```bash
+cd ~/gastown
+git checkout main
+git pull upstream main              # Start from latest upstream
+
+git checkout -b fix-something
+# ... make your changes ...
+git commit -m "fix: describe the fix"
+git push origin fix-something       # Push to YOUR fork
+
+# Create PR on GitHub: your-fork → steveyegge/gastown
+```
+
+### Using Your Fix Locally (While Waiting for PR Approval)
+
+Don't wait for merge—use your fix immediately:
+
+```bash
+cd ~/gastown
+git checkout main
+git merge fix-something             # Merge your fix branch into local main
+make install                        # Build and install
+gt stabilize                        # Restart daemon, sync worktrees, run doctor
+```
+
+If you're debugging and want to test against the current (broken) state:
+
+```bash
+make install
+gt stabilize --no-restart           # Install but don't restart daemon
+# ... test your fix against the broken state ...
+gt daemon restart                   # When ready to validate
+```
+
+### When Your PR Gets Merged
+
+Sync your fork with upstream to pull in your merged changes plus any others:
+
+```bash
+cd ~/gastown
+git checkout main
+git fetch upstream
+git merge upstream/main             # Your fix + other merged PRs
+git push origin main                # Keep your fork in sync
+make install
+gt stabilize
+```
+
+### Testing Someone Else's PR
+
+Want to test a PR before it's merged?
+
+```bash
+cd ~/gastown
+git fetch upstream pull/1234/head:pr-1234
+git checkout main
+git cherry-pick pr-1234             # Or: git merge pr-1234
+make install
+gt stabilize --no-restart           # Test without restarting
+```
+
+### The `gt stabilize` Command
+
+After any source build, run `gt stabilize` to ensure consistency:
+
+| Command | What it does |
+|---------|--------------|
+| `gt stabilize` | Full stabilization: sync worktrees, restart daemon, run doctor |
+| `gt stabilize --no-restart` | Skip daemon restart (for testing hotfixes) |
+| `gt stabilize --crew` | Spawn crew agent for issues doctor can't auto-fix |
+
+For users who installed via `go install` (no source), use `gt doctor --fix` instead.
+
+### Quick Reference
+
+| Scenario | Commands |
+|----------|----------|
+| Update to latest release | `go install .../gt@latest && gt doctor --fix` |
+| Use your local fix | `make install && gt stabilize` |
+| Test fix without restart | `make install && gt stabilize --no-restart` |
+| Sync fork with upstream | `git merge upstream/main && make install && gt stabilize` |
+| Test someone's PR | `git cherry-pick pr-1234 && make install && gt stabilize --no-restart` |
+
 ## Troubleshooting
 
 ### Agents lose connection

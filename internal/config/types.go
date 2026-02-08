@@ -68,6 +68,12 @@ type TownSettings struct {
 	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
 	// Default: "gastown.local"
 	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
+
+	// GastownSrc is the path to the gastown source directory.
+	// Used by 'gt stabilize' for worktree sync operations after building from source.
+	// Automatically set by 'make install' when building gastown.
+	// Can be overridden by $GASTOWN_SRC environment variable.
+	GastownSrc string `json:"gastown_src,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

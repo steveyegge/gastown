@@ -50,6 +50,17 @@ install: check-up-to-date build
 		fi; \
 	done
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@# Auto-configure gastown-src for 'gt stabilize'
+	@# Only configure if GT_ROOT is set (indicates a Gas Town workspace exists)
+	@if [ -n "$$GT_ROOT" ] && [ -d "$$GT_ROOT" ]; then \
+		cd "$$GT_ROOT" && $(INSTALL_DIR)/$(BINARY) config gastown-src "$(CURDIR)" 2>/dev/null && \
+		echo "Configured gastown-src=$(CURDIR)"; \
+	elif [ -d "$(HOME)/gt/mayor" ]; then \
+		cd "$(HOME)/gt" && $(INSTALL_DIR)/$(BINARY) config gastown-src "$(CURDIR)" 2>/dev/null && \
+		echo "Configured gastown-src=$(CURDIR)"; \
+	else \
+		echo "Note: Run 'gt config gastown-src $(CURDIR)' from your Gas Town workspace to enable 'gt stabilize'"; \
+	fi
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -139,6 +140,25 @@ Examples:
   gt config agent-email-domain example.com     # Set custom domain`,
 	RunE: runConfigAgentEmailDomain,
 }
+
+var configGastownSrcCmd = &cobra.Command{
+	Use:   "gastown-src [path]",
+	Short: "Get or set gastown source directory",
+	Long: `Get or set the path to the gastown source directory.
+
+This is used by 'gt stabilize' to sync worktrees after building from source.
+Automatically set by 'make install' when building gastown.
+
+The $GASTOWN_SRC environment variable takes precedence if set.
+
+Examples:
+  gt config gastown-src                    # Show current value
+  gt config gastown-src ~/gastown          # Set the path
+  gt config gastown-src --unset            # Remove the setting`,
+	RunE: runConfigGastownSrc,
+}
+
+var unsetGastownSrc bool
 
 // Flags
 var (
@@ -513,9 +533,85 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runConfigGastownSrc(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	// Unset
+	if unsetGastownSrc {
+		townSettings.GastownSrc = ""
+		if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+			return fmt.Errorf("saving town settings: %w", err)
+		}
+		fmt.Println("Removed gastown-src setting")
+		return nil
+	}
+
+	// Set
+	if len(args) == 1 {
+		path := args[0]
+		// Expand ~ to home directory
+		if strings.HasPrefix(path, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("expanding home directory: %w", err)
+			}
+			path = home + path[1:]
+		}
+		// Make absolute
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return fmt.Errorf("invalid path: %w", err)
+		}
+		// Validate it looks like gastown source
+		if _, err := os.Stat(filepath.Join(absPath, "cmd", "gt", "main.go")); err != nil {
+			return fmt.Errorf("path does not appear to be gastown source (cmd/gt/main.go not found): %s", absPath)
+		}
+		townSettings.GastownSrc = absPath
+		if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+			return fmt.Errorf("saving town settings: %w", err)
+		}
+		fmt.Printf("Set gastown-src=%s\n", absPath)
+		return nil
+	}
+
+	// Get
+	envSrc := os.Getenv("GASTOWN_SRC")
+	configSrc := townSettings.GastownSrc
+
+	if envSrc == "" && configSrc == "" {
+		fmt.Println("gastown-src is not set")
+		fmt.Println("\nTo set it, run:")
+		fmt.Println("  gt config gastown-src /path/to/gastown")
+		fmt.Println("\nOr set the GASTOWN_SRC environment variable.")
+		fmt.Println("\nNote: 'make install' sets this automatically when building gastown.")
+		return nil
+	}
+
+	if envSrc != "" {
+		fmt.Printf("gastown-src=%s (from $GASTOWN_SRC)\n", envSrc)
+		if configSrc != "" && configSrc != envSrc {
+			fmt.Printf("  config value: %s (overridden by env)\n", configSrc)
+		}
+	} else {
+		fmt.Printf("gastown-src=%s\n", configSrc)
+	}
+	return nil
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configGastownSrcCmd.Flags().BoolVar(&unsetGastownSrc, "unset", false, "Remove the gastown-src setting")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
@@ -532,6 +628,7 @@ func init() {
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configGastownSrcCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)
