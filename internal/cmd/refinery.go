@@ -294,6 +294,10 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := checkRigNotParkedOrDocked(rigName); err != nil {
+		return err
+	}
+
 	fmt.Printf("Starting refinery for %s...\n", rigName)
 
 	if err := mgr.Start(refineryForeground, refineryAgentOverride); err != nil {
@@ -519,6 +523,10 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 
 	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
+		return err
+	}
+
+	if err := checkRigNotParkedOrDocked(rigName); err != nil {
 		return err
 	}
 

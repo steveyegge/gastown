@@ -156,6 +156,10 @@ func getWitnessManager(rigName string) (*witness.Manager, error) {
 func runWitnessStart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
+	if err := checkRigNotParkedOrDocked(rigName); err != nil {
+		return err
+	}
+
 	mgr, err := getWitnessManager(rigName)
 	if err != nil {
 		return err
@@ -338,6 +342,10 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 
 func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
+
+	if err := checkRigNotParkedOrDocked(rigName); err != nil {
+		return err
+	}
 
 	mgr, err := getWitnessManager(rigName)
 	if err != nil {
