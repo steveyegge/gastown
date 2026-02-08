@@ -477,6 +477,24 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Priority: P%d\n", priority)
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+
+		// Notify Refinery about new MR (event-driven, not polling-based)
+		// This ensures Refinery wakes up immediately instead of waiting for
+		// Witness patrol to detect stale queue.
+		refineryAddr := fmt.Sprintf("%s/refinery", rigName)
+		mrNotification := &mail.Message{
+			To:      refineryAddr,
+			From:    sender,
+			Subject: fmt.Sprintf("MERGE_READY %s", mrID),
+			Body: fmt.Sprintf("Branch: %s\nIssue: %s\nPolecat: %s\nMR: %s\nPriority: P%d",
+				branch, issueID, polecatName, mrID, priority),
+		}
+		mrRouter := mail.NewRouter(townRoot)
+		if err := mrRouter.Send(mrNotification); err != nil {
+			style.PrintWarning("could not notify refinery: %v", err)
+		} else {
+			fmt.Printf("%s Refinery notified\n", style.Bold.Render("✓"))
+		}
 	} else if exitType == ExitPhaseComplete {
 		// Phase complete - register as waiter on gate, then recycle
 		fmt.Printf("%s Phase complete, awaiting gate\n", style.Bold.Render("→"))
