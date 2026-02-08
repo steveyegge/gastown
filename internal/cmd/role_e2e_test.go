@@ -448,7 +448,7 @@ func TestRoleShowE2E(t *testing.T) {
 			cwd:        filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			wantRole:   "polecat",
 			wantSource: "cwd",
-			wantHome:   filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			wantHome:   filepath.Join(hqPath, rigName, "polecats", "Toast"),
 			wantRig:    rigName,
 			wantWorker: "Toast",
 		},
@@ -956,16 +956,16 @@ func TestRoleEnvCwdMismatchFromIncompleteDir(t *testing.T) {
 			wantStderr: "cwd",
 		},
 		{
-			name: "polecat without /rig shows cwd mismatch",
+			name: "polecat without /rig is valid (home is polecats/name)",
 			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast"),
 			envVars: []string{"GT_ROLE=polecat", "GT_RIG=" + rigName, "GT_POLECAT=Toast"},
-			wantStderr: "cwd",
+			wantStderr: "", // No mismatch: polecat home is polecats/<name>, not polecats/<name>/rig
 		},
 		{
-			name: "crew without /rig shows cwd mismatch",
+			name: "crew without /rig is valid (home is crew/name)",
 			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1"),
 			envVars: []string{"GT_ROLE=crew", "GT_RIG=" + rigName, "GT_CREW=worker1"},
-			wantStderr: "cwd",
+			wantStderr: "", // No mismatch: crew home is crew/<name>, not crew/<name>/rig
 		},
 	}
 
@@ -982,8 +982,14 @@ func TestRoleEnvCwdMismatchFromIncompleteDir(t *testing.T) {
 			}
 
 			// Check for cwd mismatch warning
-			if !strings.Contains(string(combined), tt.wantStderr) {
-				t.Errorf("output should contain %q warning\ngot: %s", tt.wantStderr, combined)
+			if tt.wantStderr != "" {
+				if !strings.Contains(string(combined), tt.wantStderr) {
+					t.Errorf("output should contain %q warning\ngot: %s", tt.wantStderr, combined)
+				}
+			} else {
+				if strings.Contains(string(combined), "mismatch") || strings.Contains(string(combined), "WARNING") {
+					t.Errorf("output should NOT contain mismatch warning\ngot: %s", combined)
+				}
 			}
 		})
 	}

@@ -674,7 +674,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 // slingBackoff calculates exponential backoff with ±25% jitter for a given attempt (1-indexed).
 // Formula: base * 2^(attempt-1) * (1 ± 25% random), capped at max.
-func slingBackoff(attempt int, base, max time.Duration) time.Duration {
+func slingBackoff(attempt int, base, max time.Duration) time.Duration { //nolint:unparam // base kept as parameter for clarity
 	backoff := base
 	for i := 1; i < attempt; i++ {
 		backoff *= 2

@@ -217,8 +217,12 @@ func (c *MigrationReadinessCheck) bdSupportsDolt(versionStr string) bool {
 	}
 
 	var major, minor int
-	fmt.Sscanf(vParts[0], "%d", &major)
-	fmt.Sscanf(vParts[1], "%d", &minor)
+	if _, err := fmt.Sscanf(vParts[0], "%d", &major); err != nil {
+		return false
+	}
+	if _, err := fmt.Sscanf(vParts[1], "%d", &minor); err != nil {
+		return false
+	}
 
 	// Dolt support added in 0.40.0
 	return major > 0 || (major == 0 && minor >= 40)
@@ -734,7 +738,7 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 			Category: c.CheckCategory,
 		}
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	return &CheckResult{
 		Name:     c.Name(),

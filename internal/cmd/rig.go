@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -645,6 +646,59 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		if err := beads.AppendRoute(townRoot, route); err != nil {
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
 		}
+	}
+
+	// Check for tracked beads and initialize beads.db if missing (Issue #72)
+	rigPath := filepath.Join(townRoot, name)
+	beadsDirCandidates := []string{
+		filepath.Join(rigPath, ".beads"),
+		filepath.Join(rigPath, "mayor", "rig", ".beads"),
+	}
+	for _, beadsDir := range beadsDirCandidates {
+		if _, err := os.Stat(beadsDir); err != nil {
+			continue
+		}
+
+		// Detect prefix from config.yaml for mismatch check
+		configPath := filepath.Join(beadsDir, "config.yaml")
+		if data, readErr := os.ReadFile(configPath); readErr == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				for _, key := range []string{"issue-prefix:", "prefix:"} {
+					if strings.HasPrefix(line, key) {
+						detected := strings.TrimSpace(strings.TrimPrefix(line, key))
+						detected = strings.Trim(detected, `"'`)
+						detected = strings.TrimSuffix(detected, "-")
+						if detected != "" && rigAddPrefix != "" {
+							if strings.TrimSuffix(rigAddPrefix, "-") != detected {
+								return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
+							}
+						}
+						if detected != "" && result.BeadsPrefix == "" {
+							result.BeadsPrefix = detected
+						}
+					}
+				}
+			}
+		}
+
+		// Init beads.db if missing
+		beadsDB := filepath.Join(beadsDir, "beads.db")
+		if _, err := os.Stat(beadsDB); os.IsNotExist(err) {
+			prefix := result.BeadsPrefix
+			if prefix == "" {
+				break
+			}
+			workDir := filepath.Dir(beadsDir) // directory containing .beads/
+			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+			initCmd.Dir = workDir
+			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
+				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
+			} else {
+				fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))
+			}
+		}
+		break
 	}
 
 	// Print results

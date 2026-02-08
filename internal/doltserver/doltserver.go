@@ -218,7 +218,7 @@ func CheckServerReachable(townRoot string) error {
 	if err != nil {
 		return fmt.Errorf("Dolt server not reachable at %s: %w\n\nStart with: gt dolt start", addr, err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	return nil
 }
 
