@@ -2,6 +2,8 @@
 package cmd
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -659,18 +661,21 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Detect prefix from config.yaml for mismatch check
-		configPath := filepath.Join(beadsDir, "config.yaml")
-		if data, readErr := os.ReadFile(configPath); readErr == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				for _, key := range []string{"issue-prefix:", "prefix:"} {
-					if strings.HasPrefix(line, key) {
-						detected := strings.TrimSpace(strings.TrimPrefix(line, key))
-						detected = strings.Trim(detected, `"'`)
-						detected = strings.TrimSuffix(detected, "-")
+		// Detect prefix from issues.jsonl (prefix is stored in DB, not config.yaml)
+		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+		if f, readErr := os.Open(jsonlPath); readErr == nil {
+			scanner := bufio.NewScanner(f)
+			if scanner.Scan() {
+				var issue struct {
+					ID string `json:"id"`
+				}
+				if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
+					// Extract prefix: everything before the last "-" segment
+					if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
+						detected := issue.ID[:lastDash]
 						if detected != "" && rigAddPrefix != "" {
 							if strings.TrimSuffix(rigAddPrefix, "-") != detected {
+								f.Close()
 								return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
 							}
 						}
@@ -680,6 +685,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 					}
 				}
 			}
+			f.Close()
 		}
 
 		// Init beads.db if missing
@@ -689,6 +695,9 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			if prefix == "" {
 				break
 			}
+			// Remove stale WAL/SHM files that could cause SQLite errors
+			os.Remove(filepath.Join(beadsDir, "beads.db-wal"))
+			os.Remove(filepath.Join(beadsDir, "beads.db-shm"))
 			workDir := filepath.Dir(beadsDir) // directory containing .beads/
 			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
 			initCmd.Dir = workDir

@@ -98,12 +98,14 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 		t.Fatalf("git commit beads: %v\n%s", err, out)
 	}
 
-	// Remove beads.db to simulate what a clone would look like
-	// (beads.db is gitignored, so cloned repos don't have it)
+	// Remove beads.db and WAL/SHM files to simulate what a clone would look like
+	// (beads.db and its WAL/SHM files are gitignored, so cloned repos don't have them)
 	dbPath := filepath.Join(beadsDir, "beads.db")
 	if err := os.Remove(dbPath); err != nil {
 		t.Fatalf("remove beads.db: %v", err)
 	}
+	os.Remove(filepath.Join(beadsDir, "beads.db-wal"))
+	os.Remove(filepath.Join(beadsDir, "beads.db-shm"))
 }
 
 // TestBeadsDbInitAfterClone tests that when a tracked beads repo is added as a rig,
@@ -392,9 +394,11 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 		t.Fatalf("git commit beads: %v\n%s", err, out)
 	}
 
-	// Remove beads.db to simulate what a clone would look like
+	// Remove beads.db and WAL/SHM files to simulate what a clone would look like
 	dbPath := filepath.Join(beadsDir, "beads.db")
 	if err := os.Remove(dbPath); err != nil {
 		t.Fatalf("remove beads.db: %v", err)
 	}
+	os.Remove(filepath.Join(beadsDir, "beads.db-wal"))
+	os.Remove(filepath.Join(beadsDir, "beads.db-shm"))
 }
