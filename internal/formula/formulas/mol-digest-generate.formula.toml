@@ -225,3 +225,23 @@ Dog returns to available state in the pool.
 description = "The digest period type (daily, weekly, custom)"
 required = true
 default = "daily"
+
+[vars.date]
+description = "The date for the digest header (computed during execution)"
+default = ""
+
+[vars.formatted_digest]
+description = "The formatted digest text (computed during execution)"
+default = ""
+
+[vars.polecat]
+description = "Polecat name for attribution (computed during execution)"
+default = ""
+
+[vars.since]
+description = "Start timestamp for data collection (computed during execution)"
+default = ""
+
+[vars.until]
+description = "End timestamp for data collection (computed during execution)"
+default = ""

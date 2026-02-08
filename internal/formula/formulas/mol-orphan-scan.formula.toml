@@ -310,3 +310,71 @@ Dog returns to available state in the pool.
 description = "Scan scope: 'town' or specific rig name"
 required = true
 default = "town"
+
+[vars.action]
+description = "Recovery action taken for an orphan (computed during execution)"
+default = ""
+
+[vars.action_summary]
+description = "Summary of all actions taken (computed during execution)"
+default = ""
+
+[vars.burn_count]
+description = "Number of orphans burned/deleted (computed during execution)"
+default = ""
+
+[vars.escalate_count]
+description = "Number of orphans escalated (computed during execution)"
+default = ""
+
+[vars.escalations_section]
+description = "Formatted escalations section for Mayor report (computed during execution)"
+default = ""
+
+[vars.id]
+description = "Orphan identifier (computed during execution)"
+default = ""
+
+[vars.issue_count]
+description = "Number of orphaned issues found (computed during execution)"
+default = ""
+
+[vars.mol_count]
+description = "Number of orphaned molecules found (computed during execution)"
+default = ""
+
+[vars.reason]
+description = "Reason for orphan cleanup action (computed during execution)"
+default = ""
+
+[vars.reassign_count]
+description = "Number of orphans reassigned (computed during execution)"
+default = ""
+
+[vars.recover_count]
+description = "Number of orphans recovered (computed during execution)"
+default = ""
+
+[vars.report]
+description = "Full orphan scan report text (computed during execution)"
+default = ""
+
+[vars.reset_count]
+description = "Number of orphans reset to open (computed during execution)"
+default = ""
+
+[vars.timestamp]
+description = "Timestamp of the scan (computed during execution)"
+default = ""
+
+[vars.total_count]
+description = "Total number of orphans found (computed during execution)"
+default = ""
+
+[vars.type]
+description = "Type of orphan (issue, molecule, wisp) (computed during execution)"
+default = ""
+
+[vars.wisp_count]
+description = "Number of orphaned wisps found (computed during execution)"
+default = ""
