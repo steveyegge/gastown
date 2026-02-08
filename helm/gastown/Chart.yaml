@@ -1,0 +1,18 @@
+apiVersion: v2
+name: gastown
+description: Gas Town deployment — wraps bd-daemon with environment-specific configuration
+type: application
+version: 0.1.0
+appVersion: "0.57.11"
+
+dependencies:
+  - name: bd-daemon
+    version: "~0.2.0"
+    # During development, use local path. For production, publish bd-daemon to
+    # an OCI registry and use: repository: oci://ghcr.io/groblegark/charts
+    repository: "file://../../beads-charts/bd-daemon"
+    # Adjust the path above to match your local checkout layout. The default
+    # assumes: gastown/helm/gastown/ and beads-charts/bd-daemon/ share a
+    # common parent (e.g., ~/projects/gastown and ~/projects/beads-charts).
+    # For local dev with beads repo directly, you can symlink:
+    #   ln -s ~/beads/helm/bd-daemon ~/gastown/beads-charts/bd-daemon

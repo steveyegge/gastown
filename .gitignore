@@ -65,3 +65,10 @@ settings/
 
 # Generated skill symlinks (populated by bd skill sync)
 .claude/skills/
+
+# Local Helm chart dev symlinks
+beads-charts/
+
+# Helm chart build artifacts
+helm/*/charts/
+helm/*/Chart.lock

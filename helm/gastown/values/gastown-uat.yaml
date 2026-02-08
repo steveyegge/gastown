@@ -1,0 +1,217 @@
+# Gastown UAT deployment for Slack Bot validation
+# Namespace: gastown-uat
+# Purpose: Isolated env with beads DB branched from gastown prod, for testing
+#          the Slack Decisions Bot without touching the gastown namespace.
+#
+# Deploy:
+#   cd helm/gastown/
+#   helm upgrade --install gastown-uat ./ -n gastown-uat --create-namespace \
+#     --values values.yaml --values values/gastown-uat.yaml
+
+bd-daemon:
+  # =========================================================================
+  # Dolt — branched from gastown prod
+  # =========================================================================
+  dolt:
+    image:
+      repository: dolthub/dolt-sql-server
+      tag: "1.81.6"
+      pullPolicy: IfNotPresent
+
+    database: "beads"
+    config:
+      host: "0.0.0.0"
+      port: 3306
+      max_connections: 50
+      read_timeout_millis: 60000
+      write_timeout_millis: 60000
+      log_level: "info"
+    user:
+      name: "root"
+
+    s3:
+      enabled: true
+      bucket: ""        # Set to your S3 bucket name
+      region: "us-east-1"
+      dynamoTable: ""   # Set to your DynamoDB table name
+      prefix: "gastown-uat"
+      sync:
+        pullOnStartup: true
+        pushOnShutdown: true
+        schedule:
+          enabled: true
+          intervalMinutes: 30
+      credentials:
+        enabled: true
+        secretName: "dolt-s3-credentials"
+
+    podIdentity:
+      enabled: false
+
+    persistence:
+      enabled: true
+      storageClass: "gp2"
+      accessMode: ReadWriteOnce
+      size: 30Gi
+      deleteClaim: false
+
+    service:
+      type: ClusterIP
+      port: 3306
+
+    serviceAccount:
+      create: true
+      name: "dolt"
+      annotations: {}
+
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+      requests:
+        cpu: 250m
+        memory: 1Gi
+
+    nodeSelector:
+      kubernetes.io/arch: amd64
+
+    terminationGracePeriodSeconds: 120
+
+  # =========================================================================
+  # Daemon
+  # =========================================================================
+  image:
+    repository: ghcr.io/groblegark/beads
+    tag: "0.57.11-430fd859"
+    pullPolicy: Always
+
+  daemon:
+    replicaCount: 1
+    deploymentStrategy: Recreate
+    priorityClassName: ""
+
+    tcp:
+      addr: ":9876"
+      port: 9876
+    http:
+      enabled: true
+      addr: ":9080"
+      port: 9080
+    logLevel: "debug"
+    logJSON: true
+
+    resources:
+      limits:
+        cpu: "1"
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+    startupProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 30
+
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 5
+
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 10
+      failureThreshold: 6
+
+    nodeSelector:
+      kubernetes.io/arch: amd64
+
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: karpenter.sh/capacity-type
+                  operator: In
+                  values:
+                    - on-demand
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: per-mr
+                  operator: DoesNotExist
+
+  # =========================================================================
+  # Redis
+  # =========================================================================
+  redis:
+    enabled: true
+    architecture: standalone
+    auth:
+      enabled: false
+    image:
+      tag: "latest"
+    master:
+      persistence:
+        enabled: false
+
+  # =========================================================================
+  # External Secrets
+  # =========================================================================
+  externalSecrets:
+    enabled: true
+    secretStoreKind: ClusterSecretStore
+    secretStoreName: "aws-secretsmanager"
+    refreshInterval: "15m"
+    doltRootPassword:
+      remoteRef: ""     # Set to your Secrets Manager key
+      property: "password"
+    doltS3Credentials:
+      enabled: true
+      remoteRef: ""     # Set to your Secrets Manager key
+      accessKeyIdProperty: "aws_access_key_id"
+      secretAccessKeyProperty: "aws_secret_access_key"
+    daemonToken:
+      remoteRef: ""     # Set to your Secrets Manager key
+      property: ""
+    slackBotCredentials:
+      enabled: true
+      remoteRef: ""     # Set to your Secrets Manager key
+      botTokenProperty: "bot-token"
+      appTokenProperty: "app-token"
+
+  # =========================================================================
+  # Ingress
+  # =========================================================================
+  ingress:
+    enabled: true
+    host: ""            # Set to your UAT hostname
+    rateLimit:
+      enabled: true
+      average: 50
+      burst: 100
+
+  # =========================================================================
+  # Slack Bot — sidecar in daemon pod for decisions notifications
+  # =========================================================================
+  slackBot:
+    enabled: true
+    image:
+      repository: ghcr.io/groblegark/beads
+      tag: "0.57.11-430fd859"
+      pullPolicy: Always
+    secretName: "slack-bot-credentials"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi

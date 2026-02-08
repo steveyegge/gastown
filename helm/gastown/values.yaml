@@ -1,0 +1,58 @@
+# Gastown Helm chart values
+# This chart wraps bd-daemon with Gas Town-specific configuration.
+# All values under bd-daemon: are passed to the subchart.
+
+bd-daemon:
+  image:
+    repository: ghcr.io/groblegark/beads
+    pullPolicy: IfNotPresent
+
+  daemon:
+    replicaCount: 1
+    logLevel: "info"
+    logJSON: true
+    http:
+      enabled: true
+
+    serviceAccount:
+      create: true
+
+    pdb:
+      enabled: true
+      maxUnavailable: 0
+
+  dolt:
+    statefulSet:
+      enabled: true
+    database: "beads"
+
+    s3:
+      enabled: true
+      region: "us-east-1"
+      sync:
+        pullOnStartup: true
+        pushOnShutdown: true
+
+    persistence:
+      enabled: true
+      storageClass: "gp3"
+      accessMode: ReadWriteOnce
+      size: 10Gi
+
+    pdb:
+      enabled: true
+      maxUnavailable: 0
+
+  slackBot:
+    enabled: false
+
+  externalSecrets:
+    enabled: true
+    secretStoreKind: ClusterSecretStore
+    secretStoreName: "aws-secretsmanager"
+
+  ingress:
+    enabled: false
+
+  redis:
+    enabled: false
