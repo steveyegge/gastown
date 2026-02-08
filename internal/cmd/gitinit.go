@@ -81,6 +81,9 @@ logs/
 # Polecats - worker worktrees
 **/polecats/
 
+# Deacon dogs - patrol worker worktrees
+**/deacon/dogs/
+
 # Mayor rig clones
 **/mayor/rig/
 
