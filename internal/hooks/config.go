@@ -468,6 +468,29 @@ func DefaultBase() *HooksConfig {
 	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
 
 	return &HooksConfig{
+		PreToolUse: []HookEntry{
+			{
+				Matcher: "Bash(gh pr create*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git checkout -b*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git switch -c*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+		},
 		SessionStart: []HookEntry{
 			{
 				Matcher: "",
