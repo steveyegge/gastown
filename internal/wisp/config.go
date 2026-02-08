@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // WispConfigDir is the directory for wisp config storage (never synced via git).
@@ -82,29 +84,11 @@ func (c *Config) load() (*ConfigFile, error) {
 }
 
 // save writes the config file to disk atomically.
+// Uses the shared util.EnsureDirAndWriteJSON for consistent behavior.
 func (c *Config) save(cfg *ConfigFile) error {
-	// Ensure directory exists
-	dir := filepath.Dir(c.filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	if err := util.EnsureDirAndWriteJSON(c.filePath, cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
 	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	// Write atomically via temp file
-	tmp := c.filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil { //nolint:gosec // G306: wisp config is non-sensitive operational data
-		return fmt.Errorf("write temp: %w", err)
-	}
-
-	if err := os.Rename(tmp, c.filePath); err != nil {
-		_ = os.Remove(tmp) // cleanup on failure
-		return fmt.Errorf("rename: %w", err)
-	}
-
 	return nil
 }
 
@@ -203,7 +187,7 @@ func (c *Config) Unset(key string) error {
 	delete(cfg.Values, key)
 
 	// Remove from blocked
-	cfg.Blocked = removeFromSlice(cfg.Blocked, key)
+	cfg.Blocked = util.RemoveFromSlice(cfg.Blocked, key)
 
 	return c.save(cfg)
 }
@@ -306,13 +290,3 @@ func (c *Config) Clear() error {
 	return c.save(cfg)
 }
 
-// removeFromSlice removes all occurrences of a string from a slice.
-func removeFromSlice(slice []string, item string) []string {
-	result := make([]string, 0, len(slice))
-	for _, s := range slice {
-		if s != item {
-			result = append(result, s)
-		}
-	}
-	return result
-}
