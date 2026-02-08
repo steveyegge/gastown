@@ -22,6 +22,10 @@ type ConvoyWatcher struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	logger   func(format string, args ...interface{})
+
+	// PATCH-006: Resolved binary paths to avoid PATH issues in subprocesses.
+	gtPath string
+	bdPath string
 }
 
 // bdActivityEvent represents an event from bd activity --json.
@@ -36,13 +40,16 @@ type bdActivityEvent struct {
 }
 
 // NewConvoyWatcher creates a new convoy watcher.
-func NewConvoyWatcher(townRoot string, logger func(format string, args ...interface{})) *ConvoyWatcher {
+// PATCH-006: Added gtPath and bdPath parameters.
+func NewConvoyWatcher(townRoot string, logger func(format string, args ...interface{}), gtPath, bdPath string) *ConvoyWatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConvoyWatcher{
 		townRoot: townRoot,
 		ctx:      ctx,
 		cancel:   cancel,
 		logger:   logger,
+		gtPath:   gtPath,
+		bdPath:   bdPath,
 	}
 }
 
@@ -85,7 +92,7 @@ func (w *ConvoyWatcher) run() {
 
 // watchActivity starts bd activity and processes events until error or context cancellation.
 func (w *ConvoyWatcher) watchActivity() error {
-	cmd := exec.CommandContext(w.ctx, "bd", "activity", "--follow", "--town", "--json")
+	cmd := exec.CommandContext(w.ctx, w.bdPath, "activity", "--follow", "--town", "--json")
 	cmd.Dir = w.townRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -155,7 +162,7 @@ func (w *ConvoyWatcher) processLine(line string) {
 // Uses bd dep list to query the dependency graph.
 func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 	// Query for convoys that track this issue (direction=up finds dependents)
-	cmd := exec.Command("bd", "dep", "list", issueID, "--direction=up", "-t", "tracks", "--json")
+	cmd := exec.Command(w.bdPath, "dep", "list", issueID, "--direction=up", "-t", "tracks", "--json")
 	cmd.Dir = w.townRoot
 	cmd.Env = os.Environ()
 	var stdout bytes.Buffer
@@ -183,7 +190,7 @@ func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 // If so, runs gt convoy check to close the convoy.
 func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
 	// First check if the convoy is still open
-	showCmd := exec.Command("bd", "show", convoyID, "--json")
+	showCmd := exec.Command(w.bdPath, "show", convoyID, "--json")
 	showCmd.Dir = w.townRoot
 	showCmd.Env = os.Environ()
 	var stdout bytes.Buffer
@@ -208,7 +215,7 @@ func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
 	// This reuses the existing logic which handles notifications, etc.
 	w.logger("convoy watcher: running completion check for %s", convoyID)
 
-	checkCmd := exec.Command("gt", "convoy", "check", convoyID)
+	checkCmd := exec.Command(w.gtPath, "convoy", "check", convoyID)
 	checkCmd.Dir = w.townRoot
 	checkCmd.Env = os.Environ() // Inherit PATH to find gt executable
 	var checkStdout, checkStderr bytes.Buffer

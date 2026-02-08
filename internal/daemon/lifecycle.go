@@ -38,7 +38,7 @@ const MaxLifecycleMessageAge = 6 * time.Hour
 // ProcessLifecycleRequests checks for and processes lifecycle requests from the deacon inbox.
 func (d *Daemon) ProcessLifecycleRequests() {
 	// Get mail for deacon identity (using gt mail, not bd mail)
-	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
+	cmd := exec.Command(d.gtPath, "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -613,7 +613,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 // doesn't mark messages as read (to preserve handoff messages).
 func (d *Daemon) closeMessage(id string) error {
 	// Use gt mail delete to actually remove the message
-	cmd := exec.Command("gt", "mail", "delete", id)
+	cmd := exec.Command(d.gtPath, "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -651,7 +651,7 @@ func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
 
 // getAgentBeadInfo fetches and parses an agent bead by ID.
 func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
-	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -789,7 +789,7 @@ func (d *Daemon) checkGUPPViolations() {
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// List polecat agent beads for this rig
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -865,7 +865,7 @@ stuck_duration: %v
 Action needed: Check if agent is alive and responsive. Consider restarting if stuck.`,
 		agentID, hookBead, stuckDuration.Round(time.Minute))
 
-	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -889,7 +889,7 @@ func (d *Daemon) checkOrphanedWork() {
 
 // checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -963,7 +963,7 @@ hook_bead: %s
 Action needed: Either restart the agent or reassign the work.`,
 		agentID, hookBead)
 
-	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 

@@ -85,7 +85,7 @@ func (m *Manager) Start(agentOverride string) error {
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -96,6 +96,11 @@ func (m *Manager) Start(agentOverride string) error {
 	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
+
+	// PATCH-010: Set remain-on-exit IMMEDIATELY after session creation.
+	// This ensures the pane stays if Claude exits before hooks are fully set.
+	// The pane will show "[Exited]" status but remain available for respawn.
+	_ = t.SetRemainOnExit(sessionID, true)
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
@@ -116,6 +121,16 @@ func (m *Manager) Start(agentOverride string) error {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for deacon to start: %w", err)
+	}
+
+	// PATCH-010: Set auto-respawn hook for Deacon resilience.
+	// When Claude exits (for any reason), tmux will automatically respawn it.
+	// This prevents the crash loop where daemon repeatedly restarts Deacon.
+	// Note: SetAutoRespawnHook calls SetRemainOnExit again (harmless, already set above).
+	if err := t.SetAutoRespawnHook(sessionID); err != nil {
+		// Non-fatal: Deacon still works, just won't auto-respawn on crash
+		// Daemon will still restart it, but with a delay
+		fmt.Printf("warning: failed to set auto-respawn hook for deacon: %v\n", err)
 	}
 
 	// Accept bypass permissions warning dialog if it appears.

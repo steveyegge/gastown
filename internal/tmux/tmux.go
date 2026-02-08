@@ -42,8 +42,12 @@ func NewTmux() *Tmux {
 }
 
 // run executes a tmux command and returns stdout.
+// All commands include -u flag for UTF-8 support regardless of locale settings.
+// See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	// Prepend -u flag for UTF-8 mode (PATCH-004)
+	allArgs := append([]string{"-u"}, args...)
+	cmd := exec.Command("tmux", allArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1675,4 +1679,63 @@ func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
 	// Set the hook on this specific session
 	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
 	return err
+}
+
+// SetAutoRespawnHook configures a session to automatically respawn when the pane dies.
+// This is used for persistent agents like Deacon that should never exit.
+// PATCH-010: Fixes Deacon crash loop by respawning at tmux level.
+//
+// The hook:
+// 1. Waits 3 seconds (debounce rapid crashes)
+// 2. Respawns the pane with its original command
+// 3. Re-enables remain-on-exit (respawn-pane resets it to off!)
+//
+// Requires remain-on-exit to be set first (called automatically by this function).
+func (t *Tmux) SetAutoRespawnHook(session string) error {
+	// First, enable remain-on-exit so the pane stays after process exit
+	if err := t.SetRemainOnExit(session, true); err != nil {
+		return fmt.Errorf("setting remain-on-exit: %w", err)
+	}
+
+	// Sanitize session name for shell safety
+	safeSession := strings.ReplaceAll(session, "'", "'\\''")
+
+	// Hook command: wait, respawn, then re-enable remain-on-exit
+	// IMPORTANT: respawn-pane automatically resets remain-on-exit to off!
+	// We must re-enable it after each respawn for continuous recovery.
+	// The sleep prevents rapid respawn loops if Claude crashes immediately.
+	hookCmd := fmt.Sprintf(`run-shell "sleep 3 && tmux respawn-pane -k -t '%s' && tmux set-option -t '%s' remain-on-exit on"`, safeSession, safeSession)
+
+	// Set the hook on this specific session
+	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
+	if err != nil {
+		return fmt.Errorf("setting pane-died hook: %w", err)
+	}
+
+	return nil
+}
+
+// SetGlobalDeaconRespawnHook sets up a global hook that respawns hq-deacon panes.
+// DEPRECATED: Global pane-died hooks don't fire reliably in tmux 3.2a.
+// Use SetAutoRespawnHook with per-session hooks instead (called by deacon manager).
+//
+// Keeping this function for reference in case tmux behavior changes in future versions.
+func (t *Tmux) SetGlobalDeaconRespawnHook() error {
+	// Hook command that only respawns hq-deacon sessions
+	// Uses #{session_name} to check if this is the deacon session
+	// #{pane_id} identifies the exact pane that died
+	// IMPORTANT: We must re-enable remain-on-exit after respawn-pane resets it!
+	//
+	// NOTE: Testing showed global pane-died hooks don't fire in tmux 3.2a,
+	// even though per-session hooks work correctly. The per-session approach
+	// in SetAutoRespawnHook is the reliable solution.
+	hookCmd := `run-shell "if [ '#{session_name}' = 'hq-deacon' ]; then sleep 3 && tmux respawn-pane -k -t #{pane_id} && tmux set-option -t #{session_name} remain-on-exit on; fi"`
+
+	// Set as a global hook so it applies to all sessions
+	_, err := t.run("set-hook", "-g", "pane-died", hookCmd)
+	if err != nil {
+		return fmt.Errorf("setting global pane-died hook: %w", err)
+	}
+
+	return nil
 }
