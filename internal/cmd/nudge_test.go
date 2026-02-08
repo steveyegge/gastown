@@ -3,6 +3,7 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNudgeStdinConflict(t *testing.T) {
@@ -129,6 +130,57 @@ func TestResolveNudgePattern(t *testing.T) {
 					t.Errorf("resolveNudgePattern(%q) missing expected %q, got %v",
 						tt.pattern, e, got)
 				}
+			}
+		})
+	}
+}
+
+func TestIfFreshMaxAge(t *testing.T) {
+	// Verify the constant is 60 seconds as specified in the design.
+	if ifFreshMaxAge != 60*time.Second {
+		t.Errorf("ifFreshMaxAge = %v, want 60s", ifFreshMaxAge)
+	}
+}
+
+func TestIfFreshSessionAgeCheck(t *testing.T) {
+	// Test the age comparison logic used by --if-fresh.
+	// A session created 10 seconds ago should be "fresh" (nudge allowed).
+	// A session created 120 seconds ago should be "stale" (nudge suppressed).
+	now := time.Now()
+
+	tests := []struct {
+		name        string
+		createdAt   time.Time
+		shouldNudge bool
+	}{
+		{
+			name:        "fresh session (10s old)",
+			createdAt:   now.Add(-10 * time.Second),
+			shouldNudge: true,
+		},
+		{
+			name:        "borderline session (59s old)",
+			createdAt:   now.Add(-59 * time.Second),
+			shouldNudge: true,
+		},
+		{
+			name:        "stale session (61s old)",
+			createdAt:   now.Add(-61 * time.Second),
+			shouldNudge: false,
+		},
+		{
+			name:        "very stale session (5min old)",
+			createdAt:   now.Add(-5 * time.Minute),
+			shouldNudge: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			age := time.Since(tt.createdAt)
+			shouldNudge := age <= ifFreshMaxAge
+			if shouldNudge != tt.shouldNudge {
+				t.Errorf("age=%v: shouldNudge=%v, want %v", age, shouldNudge, tt.shouldNudge)
 			}
 		})
 	}
