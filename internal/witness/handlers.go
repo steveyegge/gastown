@@ -939,8 +939,27 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 		cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
 
 		switch cleanupStatus {
-		case "clean", "":
-			// Clean or unknown — try auto-nuke
+		case "clean":
+			// Polecat ran gt done and confirmed clean state — safe to auto-nuke.
+			nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
+			if nukeResult.Nuked {
+				zombie.Action = "auto-nuked"
+			} else if nukeResult.Skipped {
+				wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
+				if wispErr != nil {
+					zombie.Error = wispErr
+				}
+				zombie.Action = fmt.Sprintf("cleanup-wisp-created:%s (skip reason: %s)", wispID, nukeResult.Reason)
+			} else if nukeResult.Error != nil {
+				zombie.Error = nukeResult.Error
+				zombie.Action = "nuke-failed"
+			}
+
+		case "":
+			// Empty cleanup_status means the agent bead has no cleanup info —
+			// the polecat likely crashed before running gt done. AutoNukeIfClean
+			// handles this via verifyCommitOnMain fallback: only nukes if the
+			// polecat's commit is already on main, otherwise skips.
 			nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
 			if nukeResult.Nuked {
 				zombie.Action = "auto-nuked"
