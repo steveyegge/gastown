@@ -1092,3 +1092,92 @@ func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestFindAgentPane_SinglePane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-single"
+	_ = tm.KillSession(sessionName)
+
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Single pane session should return empty (no disambiguation needed)
+	pane := tm.FindAgentPane(sessionName)
+	if pane != "" {
+		t.Errorf("FindAgentPane returned %q for single-pane session, want empty", pane)
+	}
+}
+
+func TestFindAgentPane_MultiPane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-multi"
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a non-shell command to simulate an agent.
+	// NewSessionWithCommand makes pane_current_command report "Python" (not the shell).
+	if err := tm.NewSessionWithCommand(sessionName, "", "python3 -c 'import time; time.sleep(300)'"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+	time.Sleep(500 * time.Millisecond)
+
+	// Split to create a second pane (runs a shell)
+	_, err := tm.run("split-window", "-t", sessionName)
+	if err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// FindAgentPane should return the pane running python (not the shell pane)
+	pane := tm.FindAgentPane(sessionName)
+	if pane == "" {
+		t.Fatal("FindAgentPane returned empty for multi-pane session with non-shell process")
+	}
+
+	// Verify the found pane is running a non-shell command
+	out, err := tm.run("display-message", "-t", pane, "-p", "#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("display-message: %v", err)
+	}
+	cmd := strings.TrimSpace(out)
+	if isShellCommand(cmd) {
+		t.Errorf("FindAgentPane returned shell pane (command=%s), expected non-shell", cmd)
+	}
+}
+
+func TestIsShellCommand(t *testing.T) {
+	shells := []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+	for _, s := range shells {
+		if !isShellCommand(s) {
+			t.Errorf("isShellCommand(%q) = false, want true", s)
+		}
+	}
+	nonShells := []string{"node", "claude", "sleep", "python", "codex", "gemini", ""}
+	for _, s := range nonShells {
+		if isShellCommand(s) {
+			t.Errorf("isShellCommand(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestFindAgentPane_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	pane := tm.FindAgentPane("gt-test-nonexistent-session-xyz")
+	if pane != "" {
+		t.Errorf("FindAgentPane returned %q for nonexistent session, want empty", pane)
+	}
+}

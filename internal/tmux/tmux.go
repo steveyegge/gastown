@@ -718,17 +718,65 @@ func (t *Tmux) WakePaneIfDetached(target string) {
 	t.WakePane(target)
 }
 
+// FindAgentPane finds the pane running an agent process in a multi-pane session.
+// Returns the pane ID (e.g., "%9") of the pane running a non-shell process,
+// or empty string if no agent pane is found or the session has only one pane.
+// In multi-pane sessions, the agent pane is identified as the one NOT running
+// a known shell (bash, zsh, fish, etc.).
+func (t *Tmux) FindAgentPane(session string) string {
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}")
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) <= 1 {
+		return "" // Single pane — no need to disambiguate
+	}
+
+	// Find the first pane running a non-shell command (likely the agent).
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		paneID, paneCmd := parts[0], parts[1]
+		if !isShellCommand(paneCmd) && paneCmd != "" {
+			return paneID
+		}
+	}
+	return ""
+}
+
+// isShellCommand returns true if the command is a known shell.
+func isShellCommand(cmd string) bool {
+	for _, shell := range constants.SupportedShells {
+		if cmd == shell {
+			return true
+		}
+	}
+	return false
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
 // After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Verification is the Witness's job (AI), not this function.
 //
+// In multi-pane sessions, FindAgentPane is used to target the pane running
+// the agent instead of the focused pane.
+//
 // IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
 // If multiple goroutines try to nudge the same session concurrently, they will
 // queue up and execute one at a time. This prevents garbled input when
 // SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
+	// In multi-pane sessions, find the agent pane and delegate to NudgePane.
+	if agentPane := t.FindAgentPane(session); agentPane != "" {
+		return t.NudgePane(agentPane, message)
+	}
+
+	// Single pane or no agent found — use session name (original behavior).
 	// Serialize nudges to this session to prevent interleaving
 	lock := getSessionNudgeLock(session)
 	lock.Lock()
