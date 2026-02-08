@@ -123,7 +123,7 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 }
 
 // extractIssueID strips the external:prefix:id wrapper from bead IDs.
-// formatTrackBeadID() wraps cross-rig IDs as "external:prefix:id" for routing,
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
 // but consumers need the raw bead ID for display and lookups.
 func extractIssueID(id string) string {
 	if strings.HasPrefix(id, "external:") {

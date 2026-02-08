@@ -125,11 +125,12 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 		return "", fmt.Errorf("creating convoy: %w", err)
 	}
 
-	// Add tracking relation: convoy tracks the issue
-	trackBeadID := formatTrackBeadID(beadID)
-	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
+	// Add tracking relation: convoy tracks the issue.
+	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
+	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
+	depArgs := []string{"--no-daemon", "dep", "add", convoyID, beadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = townBeads
+	depCmd.Dir = townRoot
 	depCmd.Stderr = os.Stderr
 
 	if err := depCmd.Run(); err != nil {
@@ -140,23 +141,3 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 	return convoyID, nil
 }
 
-// formatTrackBeadID formats a bead ID for use in convoy tracking dependencies.
-// Cross-rig beads (non-hq- prefixed) are formatted as external references
-// so the bd tool can resolve them when running from HQ context.
-//
-// Examples:
-//   - "hq-abc123" -> "hq-abc123" (HQ beads unchanged)
-//   - "gt-mol-xyz" -> "external:gt-mol:gt-mol-xyz"
-//   - "beads-task-123" -> "external:beads-task:beads-task-123"
-func formatTrackBeadID(beadID string) string {
-	if strings.HasPrefix(beadID, "hq-") {
-		return beadID
-	}
-	parts := strings.SplitN(beadID, "-", 3)
-	if len(parts) >= 2 {
-		rigPrefix := parts[0] + "-" + parts[1]
-		return fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
-	}
-	// Fallback for malformed IDs (single segment)
-	return beadID
-}
