@@ -337,8 +337,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// 1. enabledPlugins
 	// 2. PATH export in hooks
 	// 3. Stop hook with gt costs record (for autonomous)
-	// 4. gt nudge deacon session-started in SessionStart
-
 	// Check enabledPlugins
 	if _, ok := actual["enabledPlugins"]; !ok {
 		missing = append(missing, "enabledPlugins")
@@ -353,11 +351,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// Check SessionStart hook has PATH export
 	if !c.hookHasPattern(hooks, "SessionStart", "PATH=") {
 		missing = append(missing, "PATH export")
-	}
-
-	// Check SessionStart hook has deacon nudge
-	if !c.hookHasPattern(hooks, "SessionStart", "gt nudge deacon session-started") {
-		missing = append(missing, "deacon nudge")
 	}
 
 	// Check Stop hook exists with gt costs record (for all roles)

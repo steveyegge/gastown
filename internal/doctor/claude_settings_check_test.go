@@ -49,10 +49,6 @@ func createValidSettings(t *testing.T, path string) {
 							"type":    "command",
 							"command": "export PATH=/usr/local/bin:$PATH",
 						},
-						map[string]any{
-							"type":    "command",
-							"command": "gt nudge deacon session-started",
-						},
 					},
 				},
 			},
@@ -99,10 +95,6 @@ func createStaleSettings(t *testing.T, path string, missingElements ...string) {
 							"type":    "command",
 							"command": "export PATH=/usr/local/bin:$PATH",
 						},
-						map[string]any{
-							"type":    "command",
-							"command": "gt nudge deacon session-started",
-						},
 					},
 				},
 			},
@@ -137,21 +129,6 @@ func createStaleSettings(t *testing.T, path string, missingElements ...string) {
 			for _, h := range innerHooks {
 				hMap := h.(map[string]any)
 				if cmd, ok := hMap["command"].(string); ok && !strings.Contains(cmd, "PATH=") {
-					filtered = append(filtered, h)
-				}
-			}
-			hookObj["hooks"] = filtered
-		case "deacon-nudge":
-			// Remove deacon nudge from SessionStart hooks
-			hooks := settings["hooks"].(map[string]any)
-			sessionStart := hooks["SessionStart"].([]any)
-			hookObj := sessionStart[0].(map[string]any)
-			innerHooks := hookObj["hooks"].([]any)
-			// Filter out deacon nudge
-			var filtered []any
-			for _, h := range innerHooks {
-				hMap := h.(map[string]any)
-				if cmd, ok := hMap["command"].(string); ok && !strings.Contains(cmd, "gt nudge deacon") {
 					filtered = append(filtered, h)
 				}
 			}
@@ -344,33 +321,6 @@ func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected details to mention PATH export, got %v", result.Details)
-	}
-}
-
-func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create stale settings missing deacon nudge (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
-	createStaleSettings(t, mayorSettings, "deacon-nudge")
-
-	check := NewClaudeSettingsCheck()
-	ctx := &CheckContext{TownRoot: tmpDir}
-
-	result := check.Run(ctx)
-
-	if result.Status != StatusError {
-		t.Errorf("expected StatusError for missing deacon nudge, got %v", result.Status)
-	}
-	found := false
-	for _, d := range result.Details {
-		if strings.Contains(d, "deacon nudge") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected details to mention deacon nudge, got %v", result.Details)
 	}
 }
 
