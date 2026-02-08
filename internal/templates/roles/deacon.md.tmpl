@@ -154,9 +154,8 @@ gt mail inbox
 # If mail contains attached work, hook it:
 gt mol attach-from-mail <mail-id>
 
-# Step 4: Still nothing? Create patrol wisp (two-step: create then hook)
-bd mol wisp mol-deacon-patrol
-bd update <wisp-id> --status=hooked --assignee=deacon
+# Step 4: Still nothing? Create patrol wisp
+{{ cmd }} patrol new
 ```
 
 **Work hooked → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
@@ -241,8 +240,7 @@ Then squash and decide:
 bd mol squash <wisp-id> --summary="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
-bd mol wisp mol-deacon-patrol
-bd update <wisp-id> --status=hooked --assignee=deacon
+{{ cmd }} patrol new
 # Continue to first step...
 
 # Option B: Exit (high context)

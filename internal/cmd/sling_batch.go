@@ -73,11 +73,12 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 		// Spawn a fresh polecat
 		spawnOpts := SlingSpawnOptions{
-			Force:    slingForce,
-			Account:  slingAccount,
-			Create:   slingCreate,
-			HookBead: beadID, // Set atomically at spawn time
-			Agent:    slingAgent,
+			Force:      slingForce,
+			Account:    slingAccount,
+			Create:     slingCreate,
+			HookBead:   beadID, // Set atomically at spawn time
+			Agent:      slingAgent,
+			BaseBranch: slingBaseBranch,
 		}
 		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
@@ -119,7 +120,12 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		beadToHook := beadID
 		attachedMoleculeID := ""
 		if formulaCooked {
-			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true, slingVars)
+			// Build per-bead vars (copy slingVars to avoid mutating shared slice across iterations)
+			batchVars := slingVars
+			if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
+				batchVars = append(append([]string{}, slingVars...), fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
+			}
+			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true, batchVars)
 			if err != nil {
 				fmt.Printf("  %s Could not apply formula: %v (hooking raw bead)\n", style.Dim.Render("Warning:"), err)
 			} else {

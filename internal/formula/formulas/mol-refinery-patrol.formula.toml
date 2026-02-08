@@ -31,14 +31,52 @@ Witness                    Refinery                      Git
 ```
 
 After successful merge, Refinery sends MERGED mail back to Witness so it can
-complete cleanup (nuke the polecat worktree)."""
+complete cleanup (nuke the polecat worktree).
+
+## CRITICAL: Read Step Instructions Before Acting
+
+Before executing ANY step, you MUST run `bd show <step-id>` and read the full
+description. Steps contain **Config:** values that override default behavior.
+If a config says to skip, you skip. If it specifies a command, you use that
+exact command — not your own assumption. Do NOT guess what a step requires
+based on the step title or your role knowledge. The step description is the
+source of truth.
+
+## Step Execution Order
+
+You MUST process steps in strict DAG order. Walk through each step sequentially,
+unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
 
 [vars]
 [vars.wisp_type]
 description = "Type of wisp created for this molecule"
 default = "patrol"
+
+[vars.integration_branch_refinery_enabled]
+description = "Whether the refinery merges to integration branches (true) or always to target_branch (false)"
+default = "true"
+
+[vars.integration_branch_auto_land]
+description = "Whether to auto-land integration branches when epic children are all closed"
+default = "false"
+
+[vars.run_tests]
+description = "Whether to run tests before merging"
+default = "true"
+
+[vars.test_command]
+description = "Test command to run (if run_tests is true)"
+default = "go test ./..."
+
+[vars.target_branch]
+description = "Default target branch for merges"
+default = "main"
+
+[vars.delete_merged_branches]
+description = "Whether to delete source branches after merge"
+default = "true"
 
 [[steps]]
 id = "inbox-check"
@@ -114,7 +152,7 @@ gt mq list <rig>
 The beads MQ tracks all pending merge requests. Do NOT rely on `git branch -r | grep polecat`
 as branches may exist without MR beads, or MR beads may exist for already-merged work.
 
-If queue empty, skip to context-check step.
+If queue empty, skip to "check-integration-branches" step.
 
 For each MR in the queue, verify the branch still exists:
 ```bash
@@ -134,10 +172,12 @@ needs = ["queue-scan"]
 description = """
 Pick next branch from queue. Attempt mechanical rebase on current main.
 
+**Config: target_branch = {{target_branch}}**
+
 **Step 1: Checkout and attempt rebase**
 ```bash
 git checkout -b temp origin/<polecat-branch>
-git rebase origin/main
+git rebase origin/{{target_branch}}
 ```
 
 **Step 2: Check rebase result**
@@ -208,10 +248,16 @@ id = "run-tests"
 title = "Run test suite"
 needs = ["process-branch"]
 description = """
-Run the test suite.
+**Config: run_tests = {{run_tests}}**
+**Config: test_command = {{test_command}}**
+
+If run_tests = "false": Skip this step entirely. Proceed to handle-failures.
+
+If run_tests = "true":
+Run the test suite:
 
 ```bash
-go test ./...
+{{test_command}}
 ```
 
 Track results: pass count, fail count, specific failures."""
@@ -250,13 +296,22 @@ id = "merge-push"
 title = "Merge and push to main"
 needs = ["handle-failures"]
 description = """
-Merge to main and push. CRITICAL: Notifications come IMMEDIATELY after push.
+Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
+
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
+**Config: target_branch = {{target_branch}}**
+**Config: delete_merged_branches = {{delete_merged_branches}}**
+
+When integration_branch_refinery_enabled = "true", the MR's target branch
+may be an integration branch (not just {{target_branch}}). Check the MR's target field and use
+that as the merge destination. Only fall back to {{target_branch}} if no explicit target is set.
 
 **Step 1: Merge and Push**
+Determine the merge target: use the MR's target field if set, otherwise {{target_branch}}.
 ```bash
-git checkout main
+git checkout <merge-target>
 git merge --ff-only temp
-git push origin main
+git push origin <merge-target>
 ```
 
 ⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 2-3 COMPLETE**
@@ -307,8 +362,16 @@ The message ID was tracked when you processed inbox-check.
 **Step 5: Cleanup (only after Steps 2-4 confirmed)**
 ```bash
 git branch -d temp
+```
+
+delete_merged_branches (see config above) controls whether to delete the remote source branch.
+
+If delete_merged_branches is "true":
+```bash
 git push origin --delete <polecat-branch>
 ```
+
+If delete_merged_branches is "false": Leave the remote branch intact.
 
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
@@ -371,9 +434,28 @@ conflict, it may indicate main is moving too fast or branches are too stale.
 This becomes the digest when the patrol is squashed."""
 
 [[steps]]
+id = "check-integration-branches"
+title = "Check integration branches for landing"
+needs = ["generate-summary"]
+description = """
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
+**Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
+
+Read the two config values above, then:
+
+- If integration_branch_refinery_enabled = "false": Say "Integration branches disabled." Close step.
+- If integration_branch_auto_land = "false": Say "Auto-land disabled, nothing to do." Close step.
+- If BOTH are "true":
+  1. `bd list --type=epic --status=open` to find epics
+  2. `gt mq integration status <epic-id>` for each epic
+  3. If `ready_to_land: true`: run `gt mq integration land <epic-id>`
+  4. If `ready_to_land: false`: do nothing, epic work is incomplete
+  Never land partial epics — ALL children must be closed first."""
+
+[[steps]]
 id = "context-check"
 title = "Check own context limit"
-needs = ["generate-summary"]
+needs = ["check-integration-branches"]
 description = """
 Check own context usage.
 

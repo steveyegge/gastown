@@ -30,8 +30,13 @@ type MergeQueueConfig struct {
 	// TargetBranch is the default branch to merge to (e.g., "main").
 	TargetBranch string `json:"target_branch"`
 
-	// IntegrationBranches enables per-epic integration branches.
-	IntegrationBranches bool `json:"integration_branches"`
+	// IntegrationBranchPolecatEnabled controls whether polecats auto-source
+	// their worktrees from integration branches.
+	IntegrationBranchPolecatEnabled *bool `json:"integration_branch_polecat_enabled,omitempty"`
+
+	// IntegrationBranchRefineryEnabled controls whether mq submit and gt done
+	// auto-detect integration branches as MR targets.
+	IntegrationBranchRefineryEnabled *bool `json:"integration_branch_refinery_enabled,omitempty"`
 
 	// OnConflict is the strategy for handling conflicts: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
@@ -56,18 +61,24 @@ type MergeQueueConfig struct {
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:              true,
-		TargetBranch:         "main",
-		IntegrationBranches:  true,
-		OnConflict:           "assign_back",
-		RunTests:             true,
-		TestCommand:          "",
-		DeleteMergedBranches: true,
-		RetryFlakyTests:      1,
-		PollInterval:         30 * time.Second,
-		MaxConcurrent:        1,
+		Enabled:                          true,
+		TargetBranch:                     "main",
+		IntegrationBranchPolecatEnabled:  boolPtr(true),
+		IntegrationBranchRefineryEnabled: boolPtr(true),
+		OnConflict:                       "assign_back",
+		RunTests:                         true,
+		TestCommand:                      "",
+		DeleteMergedBranches:             true,
+		RetryFlakyTests:                  1,
+		PollInterval:                     30 * time.Second,
+		MaxConcurrent:                    1,
 	}
 }
 
@@ -165,16 +176,17 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled              *bool   `json:"enabled"`
-		TargetBranch         *string `json:"target_branch"`
-		IntegrationBranches  *bool   `json:"integration_branches"`
-		OnConflict           *string `json:"on_conflict"`
-		RunTests             *bool   `json:"run_tests"`
-		TestCommand          *string `json:"test_command"`
-		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
-		PollInterval         *string `json:"poll_interval"`
-		MaxConcurrent        *int    `json:"max_concurrent"`
+		Enabled                          *bool   `json:"enabled"`
+		TargetBranch                     *string `json:"target_branch"`
+		IntegrationBranchPolecatEnabled  *bool   `json:"integration_branch_polecat_enabled"`
+		IntegrationBranchRefineryEnabled *bool   `json:"integration_branch_refinery_enabled"`
+		OnConflict                       *string `json:"on_conflict"`
+		RunTests                         *bool   `json:"run_tests"`
+		TestCommand                      *string `json:"test_command"`
+		DeleteMergedBranches             *bool   `json:"delete_merged_branches"`
+		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
+		PollInterval                     *string `json:"poll_interval"`
+		MaxConcurrent                    *int    `json:"max_concurrent"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -188,8 +200,11 @@ func (e *Engineer) LoadConfig() error {
 	if mqRaw.TargetBranch != nil {
 		e.config.TargetBranch = *mqRaw.TargetBranch
 	}
-	if mqRaw.IntegrationBranches != nil {
-		e.config.IntegrationBranches = *mqRaw.IntegrationBranches
+	if mqRaw.IntegrationBranchPolecatEnabled != nil {
+		e.config.IntegrationBranchPolecatEnabled = mqRaw.IntegrationBranchPolecatEnabled
+	}
+	if mqRaw.IntegrationBranchRefineryEnabled != nil {
+		e.config.IntegrationBranchRefineryEnabled = mqRaw.IntegrationBranchRefineryEnabled
 	}
 	if mqRaw.OnConflict != nil {
 		e.config.OnConflict = *mqRaw.OnConflict

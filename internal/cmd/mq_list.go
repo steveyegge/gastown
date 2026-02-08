@@ -107,7 +107,8 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			if fields != nil {
 				target = fields.Target
 			}
-			expectedTarget := "integration/" + mqListEpic
+			template := getIntegrationBranchTemplate(r.Path, "")
+			expectedTarget := buildIntegrationBranchName(template, mqListEpic)
 			if target != expectedTarget {
 				continue
 			}

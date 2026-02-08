@@ -15,14 +15,15 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName      string   // "deacon", "witness", "refinery"
-	PatrolMolName string   // "mol-deacon-patrol", etc.
-	BeadsDir      string   // where to look for beads
-	Assignee      string   // agent identity for pinning
-	HeaderEmoji   string   // display emoji
-	HeaderTitle   string   // "Patrol Status", etc.
-	WorkLoopSteps []string // role-specific instructions
-	CheckInProgress bool   // whether to check in_progress status first (witness/refinery do, deacon doesn't)
+	RoleName        string   // "deacon", "witness", "refinery"
+	PatrolMolName   string   // "mol-deacon-patrol", etc.
+	BeadsDir        string   // where to look for beads
+	Assignee        string   // agent identity for pinning
+	HeaderEmoji     string   // display emoji
+	HeaderTitle     string   // "Patrol Status", etc.
+	WorkLoopSteps   []string // role-specific instructions
+	CheckInProgress bool     // whether to check in_progress status first (witness/refinery do, deacon doesn't)
+	ExtraVars       []string // additional --var key=value args for wisp creation
 }
 
 // findActivePatrol finds an active patrol molecule for the role.
@@ -137,7 +138,11 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	spawnArgs := []string{"--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName}
+	for _, v := range cfg.ExtraVars {
+		spawnArgs = append(spawnArgs, "--var", v)
+	}
+	cmdSpawn := exec.Command("bd", spawnArgs...)
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -148,16 +153,27 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Parse the created molecule ID from output
+	// Format: "Root issue: <rig>-wisp-<hash>" where rig prefix varies
 	var patrolID string
 	spawnOutput := stdoutSpawn.String()
 	for _, line := range strings.Split(spawnOutput, "\n") {
-		if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-			parts := strings.Fields(line)
-			for _, p := range parts {
-				if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Root issue:") {
+			patrolID = strings.TrimSpace(strings.TrimPrefix(line, "Root issue:"))
+			break
+		}
+	}
+	// Fallback: look for any token containing "-wisp-"
+	if patrolID == "" {
+		for _, line := range strings.Split(spawnOutput, "\n") {
+			for _, p := range strings.Fields(line) {
+				if strings.Contains(p, "-wisp-") {
 					patrolID = p
 					break
 				}
+			}
+			if patrolID != "" {
+				break
 			}
 		}
 	}

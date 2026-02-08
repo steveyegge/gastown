@@ -27,6 +27,7 @@ type SpawnedPolecatInfo struct {
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
 	Pane        string // Tmux pane ID (empty until StartSession is called)
+	BaseBranch  string // Effective base branch (e.g., "main", "integration/epic-id")
 
 	// Internal fields for deferred session start
 	account string
@@ -45,11 +46,12 @@ func (s *SpawnedPolecatInfo) SessionStarted() bool {
 
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
-	Force    bool   // Force spawn even if polecat has uncommitted work
-	Account  string // Claude Code account handle to use
-	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
-	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
-	Agent    string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	Force      bool   // Force spawn even if polecat has uncommitted work
+	Account    string // Claude Code account handle to use
+	Create     bool   // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -97,9 +99,35 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
 
+	// Determine base branch for polecat worktree
+	baseBranch := opts.BaseBranch
+	if baseBranch == "" && opts.HookBead != "" {
+		// Auto-detect: check if the hooked bead's parent epic has an integration branch
+		settingsPath := filepath.Join(r.Path, "settings", "config.json")
+		polecatIntegrationEnabled := true
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+			polecatIntegrationEnabled = settings.MergeQueue.IsPolecatIntegrationEnabled()
+		}
+		if polecatIntegrationEnabled {
+			repoGit, repoErr := getRigGit(r.Path)
+			if repoErr == nil {
+				bd := beads.New(r.Path)
+				detected, detectErr := beads.DetectIntegrationBranch(bd, repoGit, opts.HookBead)
+				if detectErr == nil && detected != "" {
+					baseBranch = "origin/" + detected
+					fmt.Printf("  Auto-detected integration branch: %s\n", detected)
+				}
+			}
+		}
+	}
+	if baseBranch != "" && !strings.HasPrefix(baseBranch, "origin/") {
+		baseBranch = "origin/" + baseBranch
+	}
+
 	// Build add options with hook_bead set atomically at spawn time
 	addOpts := polecat.AddOptions{
-		HookBead: opts.HookBead,
+		HookBead:   opts.HookBead,
+		BaseBranch: baseBranch,
 	}
 
 	if err == nil {
@@ -164,12 +192,19 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Log spawn event to activity feed
 	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 
+	// Compute effective base branch (strip origin/ prefix since formula prepends it)
+	effectiveBranch := strings.TrimPrefix(baseBranch, "origin/")
+	if effectiveBranch == "" {
+		effectiveBranch = "main"
+	}
+
 	return &SpawnedPolecatInfo{
 		RigName:     rigName,
 		PolecatName: polecatName,
 		ClonePath:   polecatObj.ClonePath,
 		SessionName: sessionName,
 		Pane:        "", // Empty until StartSession is called
+		BaseBranch:  effectiveBranch,
 		account:     opts.Account,
 		agent:       opts.Agent,
 	}, nil

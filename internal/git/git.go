@@ -795,6 +795,13 @@ func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 	return ConfigureSparseCheckout(path)
 }
 
+// WorktreeAddExistingForceNoSparse creates a new worktree without sparse checkout configuration.
+// Use this for temporary worktrees (like land operations) that don't need .claude/ exclusion.
+func (g *Git) WorktreeAddExistingForceNoSparse(path, branch string) error {
+	_, err := g.run("worktree", "add", "--force", path, branch)
+	return err
+}
+
 // ConfigureSparseCheckout sets up sparse checkout for a clone or worktree to exclude .claude/.
 // This ensures source repo settings don't override Gas Town agent settings.
 // Exported for use by doctor checks.

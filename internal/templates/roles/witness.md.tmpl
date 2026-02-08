@@ -178,8 +178,7 @@ gt mail inbox
 gt mol attach-from-mail <mail-id>
 
 # Step 4: Still nothing? Create patrol wisp
-bd mol wisp mol-witness-patrol
-bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/witness
+{{ cmd }} patrol new
 ```
 
 **Work hooked → Execute. No exceptions.**

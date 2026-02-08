@@ -30,6 +30,7 @@ beads created from it. Use `bd ready` to find them - do NOT read this file direc
 | Variable | Source | Description |
 |----------|--------|-------------|
 | issue | hook_bead | The issue ID you're assigned to work on |
+| base_branch | sling vars | The base branch to rebase on (default: main) |
 
 ## Failure Modes
 
@@ -40,7 +41,7 @@ beads created from it. Use `bd ready` to find them - do NOT read this file direc
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 4
+version = 5
 
 [[steps]]
 id = "load-context"
@@ -128,7 +129,7 @@ git checkout -- .
 **4. Sync with main:**
 ```bash
 git fetch origin
-git rebase origin/main      # Get latest, rebase your branch
+git rebase origin/{{base_branch}}      # Get latest, rebase your branch
 ```
 
 If rebase conflicts:
@@ -136,11 +137,11 @@ If rebase conflicts:
 - Test after resolution
 - If stuck, mail Witness
 
-**Exit criteria:** You're on a clean feature branch, rebased on latest main."""
+**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}."""
 
 [[steps]]
 id = "preflight-tests"
-title = "Verify tests pass on main"
+title = "Verify tests pass on base branch"
 needs = ["branch-setup"]
 description = """
 Check if the codebase is healthy BEFORE starting your work.
@@ -148,10 +149,10 @@ Check if the codebase is healthy BEFORE starting your work.
 **The Scotty Principle:** Don't walk past a broken warp core. But also don't
 let someone else's mess consume your entire mission.
 
-**1. Check tests on main:**
+**1. Check tests on {{base_branch}}:**
 ```bash
 git stash                   # Save your branch state
-git checkout origin/main
+git checkout origin/{{base_branch}}
 go test ./...               # Or appropriate test command
 ```
 
@@ -162,16 +163,16 @@ git stash pop               # Restore state
 ```
 Continue to implement step.
 
-**3. If tests FAIL on main:**
+**3. If tests FAIL on {{base_branch}}:**
 
 File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
-not your assignment. Your job is to fix the issue on your hook, not main.
+not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
 
 | Situation | Action |
 |-----------|--------|
 | Any pre-existing failure | File bead, proceed with your work |
 
-FORBIDDEN: Pushing to main. FORBIDDEN: Fixing pre-existing failures.
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
 You work on YOUR feature branch only. `gt done` handles push/MR.
 
 **File and proceed path:**
@@ -179,8 +180,8 @@ You work on YOUR feature branch only. `gt done` handles push/MR.
 bd create --title "Pre-existing test failure: <description>" \
   --type bug --priority 1
 
-gt mail send <rig>/witness -s "NOTICE: Main has failing tests" \
-  -m "Found pre-existing test failures on main.
+gt mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing tests" \
+  -m "Found pre-existing test failures on {{base_branch}}.
 Filed: <bead-id>
 Proceeding with my assigned work ({{issue}})."
 
@@ -198,7 +199,7 @@ Ready to start: implement step"
 ```
 Fresh session continues from implement.
 
-**Exit criteria:** Tests pass on main (or issue filed), ready to implement."""
+**Exit criteria:** Tests pass on {{base_branch}} (or issue filed), ready to implement."""
 
 [[steps]]
 id = "implement"
@@ -251,8 +252,8 @@ Review your own changes before running tests.
 
 **1. Review the diff:**
 ```bash
-git diff origin/main...HEAD     # All changes vs main
-git log --oneline origin/main..HEAD  # All commits
+git diff origin/{{base_branch}}...HEAD     # All changes vs {{base_branch}}
+git log --oneline origin/{{base_branch}}..HEAD  # All commits
 ```
 
 **2. Check for common issues:**
@@ -270,7 +271,7 @@ Don't just note them - fix them now. Amend or add commits as needed.
 
 **4. Verify no unintended changes:**
 ```bash
-git diff --stat origin/main...HEAD
+git diff --stat origin/{{base_branch}}...HEAD
 # Only files relevant to {{issue}} should appear
 ```
 
@@ -302,7 +303,7 @@ go test ./...               # For Go projects
 ```bash
 # Check if failure exists on main:
 git stash
-git checkout main
+git checkout origin/{{base_branch}}
 go test ./...
 git checkout -
 git stash pop
@@ -355,7 +356,7 @@ Must show "nothing to commit, working tree clean".
 
 **5. Verify you have commits:**
 ```bash
-git log origin/main..HEAD --oneline
+git log origin/{{base_branch}}..HEAD --oneline
 ```
 If you made changes during implementation, this MUST show at least 1 commit.
 
@@ -392,10 +393,10 @@ Should be empty. If not:
 ```bash
 git status                  # Must show "working tree clean"
 git stash list              # Must be empty
-git log origin/main..HEAD   # Your commits (should show your work)
+git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
 ```
 
-If `git log origin/main..HEAD` shows nothing but you DID make changes,
+If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
 something went wrong. Do NOT proceed — mail Witness for help.
 
 **Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gt done` handles that."""
@@ -452,7 +453,7 @@ You should see output like:
 ✓ Work submitted to merge queue
   MR ID: gt-xxxxx
   Source: polecat/<name>
-  Target: main
+  Target: {{base_branch}}
   Issue: {{issue}}
 ✓ Sandbox nuked
 ✓ Session exiting
@@ -460,7 +461,7 @@ You should see output like:
 
 **What happens next (not your concern):**
 - Refinery processes your MR from the queue
-- Refinery rebases and merges to main
+- Refinery rebases and merges to {{base_branch}}
 - Refinery closes the issue
 - If conflicts: Refinery spawns a FRESH polecat to re-implement
 
@@ -472,3 +473,7 @@ You are NOT involved in any of that. You're gone. Done means gone.
 [vars.issue]
 description = "The issue ID assigned to this polecat"
 required = true
+
+[vars.base_branch]
+description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
+default = "main"

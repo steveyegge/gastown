@@ -110,8 +110,9 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
-	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
-	slingNoBoot   bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
+	slingNoMerge    bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
+	slingNoBoot     bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
+	slingBaseBranch string // --base-branch: override base branch for polecat worktree
 )
 
 func init() {
@@ -132,6 +133,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
+	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -287,11 +289,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
 				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
+					Force:      slingForce,
+					Account:    slingAccount,
+					Create:     slingCreate,
+					HookBead:   beadID, // Set atomically at spawn time
+					Agent:      slingAgent,
+					BaseBranch: slingBaseBranch,
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
@@ -301,6 +304,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 				newPolecatInfo = spawnInfo      // Store for later session start
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
+
+				// Inject base_branch var for formula instantiation (non-main only; formula default handles main)
+				if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
+					slingVars = append(slingVars, fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
+				}
 
 				if !slingNoBoot {
 					wakeRigAgents(rigName)
@@ -320,11 +328,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 						rigName := parts[0]
 						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
 						spawnOpts := SlingSpawnOptions{
-							Force:    slingForce,
-							Account:  slingAccount,
-							Create:   slingCreate,
-							HookBead: beadID,
-							Agent:    slingAgent,
+							Force:      slingForce,
+							Account:    slingAccount,
+							Create:     slingCreate,
+							HookBead:   beadID,
+							Agent:      slingAgent,
+							BaseBranch: slingBaseBranch,
 						}
 						spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 						if spawnErr != nil {
@@ -334,6 +343,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 						newPolecatInfo = spawnInfo // Store for later session start
 						hookWorkDir = spawnInfo.ClonePath
 						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
+
+						// Inject base_branch var for formula instantiation (non-main only; formula default handles main)
+						if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
+							slingVars = append(slingVars, fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
+						}
 
 						if !slingNoBoot {
 							wakeRigAgents(rigName)

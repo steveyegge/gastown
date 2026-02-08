@@ -305,7 +305,8 @@ func (m *Manager) exists(name string) bool {
 
 // AddOptions configures polecat creation.
 type AddOptions struct {
-	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	BaseBranch string // Override base branch for worktree (e.g., "origin/integration/gt-epic")
 }
 
 // Add creates a new polecat as a git worktree from the repo base.
@@ -468,12 +469,16 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	}
 
 	// Determine the start point for the new worktree
-	// Use origin/<default-branch> to ensure we start from the rig's configured branch
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
+	var startPoint string
+	if opts.BaseBranch != "" {
+		startPoint = opts.BaseBranch
+	} else {
+		defaultBranch := "main"
+		if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+		startPoint = fmt.Sprintf("origin/%s", defaultBranch)
 	}
-	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
 	// Always create fresh branch - unique name guarantees no collision
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
@@ -864,12 +869,16 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}
 
 	// Determine the start point for the new worktree
-	// Use origin/<default-branch> to ensure we start from latest fetched commits
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
+	var startPoint string
+	if opts.BaseBranch != "" {
+		startPoint = opts.BaseBranch
+	} else {
+		defaultBranch := "main"
+		if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+		startPoint = fmt.Sprintf("origin/%s", defaultBranch)
 	}
-	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
 	// Create fresh worktree to a temporary path first, so we can roll back if it fails.
 	// This prevents destroying the old worktree before the new one is confirmed working.

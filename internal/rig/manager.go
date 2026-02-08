@@ -1320,10 +1320,13 @@ See docs/deacon-plugins.md for full documentation.
 		return fmt.Errorf("creating rig plugins directory: %w", err)
 	}
 
-	// Add plugins/ and .repo.git/ to rig .gitignore
+	// Add plugins/, .repo.git/, and .land-worktree/ to rig .gitignore
 	gitignorePath := filepath.Join(rigPath, ".gitignore")
 	if err := m.ensureGitignoreEntry(gitignorePath, "plugins/"); err != nil {
 		return err
 	}
-	return m.ensureGitignoreEntry(gitignorePath, ".repo.git/")
+	if err := m.ensureGitignoreEntry(gitignorePath, ".repo.git/"); err != nil {
+		return err
+	}
+	return m.ensureGitignoreEntry(gitignorePath, ".land-worktree/")
 }
