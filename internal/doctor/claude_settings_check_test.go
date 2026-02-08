@@ -951,6 +951,37 @@ func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 // It serves as an identity anchor for Mayor/Deacon who run from the town root.
 // See install.go createTownRootCLAUDEmd() for details.
 
+func TestClaudeSettingsCheck_GitIgnoredFilesNotFlagged(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize git repo at town root
+	initTestGitRepo(t, tmpDir)
+
+	// Create .gitignore with CLAUDE.md
+	gitignorePath := filepath.Join(tmpDir, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("CLAUDE.md\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitAddAndCommit(t, tmpDir, gitignorePath)
+
+	// Create CLAUDE.md at town root (wrong location but gitignored)
+	claudeMdPath := filepath.Join(tmpDir, "CLAUDE.md")
+	if err := os.WriteFile(claudeMdPath, []byte("# Mayor Context\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should pass because the file is properly gitignored
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for gitignored CLAUDE.md, got %v: %s\nDetails: %v",
+			result.Status, result.Message, result.Details)
+	}
+}
+
 func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T) {
 	tmpDir := t.TempDir()
 
