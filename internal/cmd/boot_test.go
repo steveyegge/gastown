@@ -75,6 +75,69 @@ func TestSlotShowJSONParsingNoHook(t *testing.T) {
 	}
 }
 
+// TestDeaconBackoffJSONParsing verifies the JSON schema for bd show hq-deacon output.
+// This catches schema changes that would break isDeaconInBackoff().
+func TestDeaconBackoffJSONParsing(t *testing.T) {
+	// Sample output from: bd show hq-deacon --json
+	sampleJSON := `[{
+		"id": "hq-deacon",
+		"title": "Deacon (daemon beacon)",
+		"labels": ["gt:agent", "idle:4"]
+	}]`
+
+	var result []struct {
+		Labels []string `json:"labels"`
+	}
+
+	if err := json.Unmarshal([]byte(sampleJSON), &result); err != nil {
+		t.Fatalf("failed to parse bd show JSON: %v", err)
+	}
+
+	if len(result) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Check for idle:N label
+	found := false
+	for _, label := range result[0].Labels {
+		if len(label) >= 5 && label[:5] == "idle:" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find idle:N label in labels")
+	}
+}
+
+// TestDeaconBackoffJSONParsingNoIdleLabel verifies parsing when no idle label is set.
+func TestDeaconBackoffJSONParsingNoIdleLabel(t *testing.T) {
+	sampleJSON := `[{
+		"id": "hq-deacon",
+		"title": "Deacon (daemon beacon)",
+		"labels": ["gt:agent"]
+	}]`
+
+	var result []struct {
+		Labels []string `json:"labels"`
+	}
+
+	if err := json.Unmarshal([]byte(sampleJSON), &result); err != nil {
+		t.Fatalf("failed to parse bd show JSON: %v", err)
+	}
+
+	if len(result) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Check that no idle:N label is found
+	for _, label := range result[0].Labels {
+		if len(label) >= 5 && label[:5] == "idle:" {
+			t.Errorf("expected no idle:N label, but found %q", label)
+		}
+	}
+}
+
 // TestMolCurrentJSONParsing verifies the JSON schema for bd mol current output.
 // This catches schema changes that would break getMoleculeLastActivity().
 func TestMolCurrentJSONParsing(t *testing.T) {

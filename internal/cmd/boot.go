@@ -321,6 +321,15 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 		} else {
 			// Heartbeat is fresh - but is Deacon actually working?
 			// Check for idle state (no work on hook, or work not progressing)
+
+			// If deacon is in backoff mode (await-signal), skip all idle checks.
+			// The idle:N label indicates the deacon is legitimately waiting for
+			// signals, not stuck. This covers both "no work on hook" and
+			// "work not progressing" paths.
+			if isDeaconInBackoff() {
+				return "nothing", "", nil
+			}
+
 			hookBead := getDeaconHookBead()
 			if hookBead == "" {
 				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
@@ -340,6 +349,34 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 	}
 
 	return "nothing", "", nil
+}
+
+// isDeaconInBackoff checks if the Deacon is in await-signal backoff mode.
+// When in backoff mode, the deacon bead has an "idle:N" label where N >= 0.
+// This indicates the deacon is legitimately waiting for beads activity signals
+// and should not be interrupted for "stale work" - it's supposed to be idle.
+func isDeaconInBackoff() bool {
+	cmd := exec.Command("bd", "show", "hq-deacon", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// Can't check - assume not in backoff (conservative)
+		return false
+	}
+
+	var result []struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil || len(result) == 0 {
+		return false
+	}
+
+	// Check for idle:N label (any value means await-signal is/was running)
+	for _, label := range result[0].Labels {
+		if len(label) >= 5 && label[:5] == "idle:" {
+			return true
+		}
+	}
+	return false
 }
 
 // getDeaconHookBead returns the bead ID hooked to Deacon, or "" if none.
