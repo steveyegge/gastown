@@ -61,6 +61,11 @@ func EnsurePluginAt(workDir, pluginDir, pluginFile string) error {
 	return nil
 }
 
+// GetPluginContent returns the embedded gastown.js plugin content.
+func GetPluginContent() ([]byte, error) {
+	return pluginFS.ReadFile("plugin/gastown.js")
+}
+
 // installDependencies runs npm/bun install in the given directory.
 func installDependencies(dir string) error {
 	// Check if node_modules already exists

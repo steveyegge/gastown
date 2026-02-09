@@ -9,14 +9,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/hooks"
+	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	installRole    string
-	installAllRigs bool
-	installDryRun  bool
+	installRole     string
+	installAllRigs  bool
+	installDryRun   bool
+	installProvider string
 )
 
 var hooksInstallCmd = &cobra.Command{
@@ -27,11 +29,15 @@ var hooksInstallCmd = &cobra.Command{
 By default, installs to the current worktree. Use --role to install
 to all worktrees of a specific role in the current rig.
 
+For Claude, installs hooks to .claude/settings.json.
+For OpenCode, installs the Gas Town plugin to .opencode/plugins/gastown.js.
+
 Examples:
-  gt hooks install pr-workflow-guard              # Install to current worktree
-  gt hooks install pr-workflow-guard --role crew  # Install to all crew in current rig
-  gt hooks install session-prime --role crew --all-rigs  # Install to all crew everywhere
-  gt hooks install pr-workflow-guard --dry-run    # Preview what would be installed`,
+  gt hooks install pr-workflow-guard                           # Install to current worktree
+  gt hooks install pr-workflow-guard --role crew               # Install to all crew in current rig
+  gt hooks install pr-workflow-guard --role crew --all-rigs    # Install to all crew everywhere
+  gt hooks install session-prime --provider opencode           # Install OpenCode plugin
+  gt hooks install pr-workflow-guard --dry-run                 # Preview what would be installed`,
 	Args: cobra.ExactArgs(1),
 	RunE: runHooksInstall,
 }
@@ -41,16 +47,97 @@ func init() {
 	hooksInstallCmd.Flags().StringVar(&installRole, "role", "", "Install to all worktrees of this role (crew, polecat, witness, refinery)")
 	hooksInstallCmd.Flags().BoolVar(&installAllRigs, "all-rigs", false, "Install across all rigs (requires --role)")
 	hooksInstallCmd.Flags().BoolVar(&installDryRun, "dry-run", false, "Preview changes without writing files")
+	hooksInstallCmd.Flags().StringVar(&installProvider, "provider", "claude", "Provider to install for (claude or opencode)")
 }
 
 func runHooksInstall(cmd *cobra.Command, args []string) error {
 	hookName := args[0]
+
+	// Validate provider
+	provider := strings.ToLower(installProvider)
+	if provider != "claude" && provider != "opencode" {
+		return fmt.Errorf("invalid provider %q: must be 'claude' or 'opencode'", installProvider)
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// For OpenCode, we install the entire plugin, not individual hooks
+	if provider == "opencode" {
+		return installOpenCodePlugin(townRoot, hookName)
+	}
+
+	// For Claude, use the registry-based installation
+	return installClaudeHook(townRoot, hookName)
+}
+
+// installOpenCodePlugin installs the Gas Town OpenCode plugin to targets.
+func installOpenCodePlugin(townRoot, hookName string) error {
+	// Determine targets
+	targets, err := determineTargets(townRoot, installRole, installAllRigs, []string{"crew", "polecat", "witness", "refinery", "mayor", "deacon"})
+	if err != nil {
+		return err
+	}
+
+	if len(targets) == 0 {
+		// No role specified, install to current worktree
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		targets = []string{cwd}
+	}
+
+	// Install to each target
+	installed := 0
+	for _, target := range targets {
+		if err := installOpenCodePluginTo(target, installDryRun); err != nil {
+			fmt.Printf("%s Failed to install to %s: %v\n", style.Error.Render("Error:"), target, err)
+			continue
+		}
+		installed++
+	}
+
+	if installDryRun {
+		fmt.Printf("\n%s Would install OpenCode plugin to %d worktree(s)\n", style.Dim.Render("Dry run:"), installed)
+	} else {
+		fmt.Printf("\n%s Installed OpenCode plugin to %d worktree(s)\n", style.Success.Render("Done:"), installed)
+	}
+
+	return nil
+}
+
+// installOpenCodePluginTo installs the OpenCode plugin to a specific worktree.
+func installOpenCodePluginTo(worktreePath string, dryRun bool) error {
+	// Pretty print relative path
+	relPath := worktreePath
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, worktreePath); err == nil && !strings.HasPrefix(rel, "..") {
+			relPath = "~/" + rel
+		}
+	}
+
+	if dryRun {
+		fmt.Printf("  %s %s\n", style.Dim.Render("Would install OpenCode plugin to:"), relPath)
+		return nil
+	}
+
+	// Use the opencode package to install the plugin
+	pluginDir := ".opencode/plugins"
+	pluginFile := "gastown.js"
+
+	if err := opencode.EnsurePluginAt(worktreePath, pluginDir, pluginFile); err != nil {
+		return fmt.Errorf("installing plugin: %w", err)
+	}
+
+	fmt.Printf("  %s %s\n", style.Success.Render("Installed OpenCode plugin to:"), relPath)
+	return nil
+}
+
+// installClaudeHook installs a hook from the registry to Claude settings.
+func installClaudeHook(townRoot, hookName string) error {
 	// Load registry
 	registry, err := LoadRegistry(townRoot)
 	if err != nil {
@@ -86,7 +173,7 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 	// Install to each target
 	installed := 0
 	for _, target := range targets {
-		if err := installHookTo(target, hookDef, installDryRun); err != nil {
+		if err := installClaudeHookTo(target, hookDef, installDryRun); err != nil {
 			fmt.Printf("%s Failed to install to %s: %v\n", style.Error.Render("Error:"), target, err)
 			continue
 		}
@@ -189,8 +276,8 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 	return targets, nil
 }
 
-// installHookTo installs a hook to a specific worktree.
-func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) error {
+// installClaudeHookTo installs a hook to a specific worktree's Claude settings.
+func installClaudeHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) error {
 	settingsPath := filepath.Join(worktreePath, ".claude", "settings.json")
 
 	// Load existing settings or create new
