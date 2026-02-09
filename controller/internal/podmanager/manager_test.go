@@ -1038,3 +1038,64 @@ func TestK8sManager_SingleContainerWithoutCoop(t *testing.T) {
 		t.Errorf("container name = %q, want %q", pod.Spec.Containers[0].Name, ContainerName)
 	}
 }
+
+func TestBuildPod_AgentLivenessProbe(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	mgr := New(client, slog.Default())
+
+	spec := AgentPodSpec{
+		Rig:       "gastown",
+		Role:      "polecat",
+		AgentName: "probe-test",
+		Image:     "agent:latest",
+		Namespace: "gastown",
+	}
+
+	pod := mgr.buildPod(spec)
+	agent := pod.Spec.Containers[0]
+
+	if agent.LivenessProbe == nil {
+		t.Fatal("expected liveness probe on agent container")
+	}
+	if agent.LivenessProbe.Exec == nil {
+		t.Fatal("expected exec-based liveness probe")
+	}
+	if agent.LivenessProbe.InitialDelaySeconds != 30 {
+		t.Errorf("liveness InitialDelaySeconds = %d, want 30", agent.LivenessProbe.InitialDelaySeconds)
+	}
+	if agent.LivenessProbe.PeriodSeconds != 15 {
+		t.Errorf("liveness PeriodSeconds = %d, want 15", agent.LivenessProbe.PeriodSeconds)
+	}
+	if agent.LivenessProbe.FailureThreshold != 3 {
+		t.Errorf("liveness FailureThreshold = %d, want 3", agent.LivenessProbe.FailureThreshold)
+	}
+}
+
+func TestBuildPod_AgentStartupProbe(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	mgr := New(client, slog.Default())
+
+	spec := AgentPodSpec{
+		Rig:       "gastown",
+		Role:      "crew",
+		AgentName: "startup-test",
+		Image:     "agent:latest",
+		Namespace: "gastown",
+	}
+
+	pod := mgr.buildPod(spec)
+	agent := pod.Spec.Containers[0]
+
+	if agent.StartupProbe == nil {
+		t.Fatal("expected startup probe on agent container")
+	}
+	if agent.StartupProbe.Exec == nil {
+		t.Fatal("expected exec-based startup probe")
+	}
+	if agent.StartupProbe.FailureThreshold != 60 {
+		t.Errorf("startup FailureThreshold = %d, want 60", agent.StartupProbe.FailureThreshold)
+	}
+	if agent.StartupProbe.PeriodSeconds != 5 {
+		t.Errorf("startup PeriodSeconds = %d, want 5", agent.StartupProbe.PeriodSeconds)
+	}
+}

@@ -52,14 +52,21 @@ type statusRecord struct {
 	Status    statusreporter.PodStatus
 }
 
+// backendRecord captures a single ReportBackendMetadata call.
+type backendRecord struct {
+	AgentName string
+	Meta      statusreporter.BackendMetadata
+}
+
 // recordingReporter implements statusreporter.Reporter and records all calls.
 type recordingReporter struct {
-	mu       sync.Mutex
-	reports  []statusRecord
-	syncRuns int
-	client   kubernetes.Interface
-	ns       string
-	logger   *slog.Logger
+	mu          sync.Mutex
+	reports     []statusRecord
+	backendMeta []backendRecord
+	syncRuns    int
+	client      kubernetes.Interface
+	ns          string
+	logger      *slog.Logger
 }
 
 func newRecordingReporter(client kubernetes.Interface, ns string, logger *slog.Logger) *recordingReporter {
@@ -74,6 +81,13 @@ func (r *recordingReporter) ReportPodStatus(_ context.Context, agentName string,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reports = append(r.reports, statusRecord{AgentName: agentName, Status: status})
+	return nil
+}
+
+func (r *recordingReporter) ReportBackendMetadata(_ context.Context, agentName string, meta statusreporter.BackendMetadata) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.backendMeta = append(r.backendMeta, backendRecord{AgentName: agentName, Meta: meta})
 	return nil
 }
 
@@ -123,6 +137,15 @@ func (r *recordingReporter) Reports() []statusRecord {
 	defer r.mu.Unlock()
 	out := make([]statusRecord, len(r.reports))
 	copy(out, r.reports)
+	return out
+}
+
+// BackendMeta returns a copy of all recorded backend metadata reports.
+func (r *recordingReporter) BackendMeta() []backendRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]backendRecord, len(r.backendMeta))
+	copy(out, r.backendMeta)
 	return out
 }
 

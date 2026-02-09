@@ -142,6 +142,19 @@ func handleEvent(ctx context.Context, logger *slog.Logger, cfg *config.Config, e
 		if err := pods.CreateAgentPod(ctx, spec); err != nil {
 			return err
 		}
+		// Report backend metadata so ResolveBackend() can find this agent.
+		if spec.CoopSidecar != nil {
+			coopPort := spec.CoopSidecar.Port
+			if coopPort == 0 {
+				coopPort = podmanager.CoopDefaultPort
+			}
+			_ = status.ReportBackendMetadata(ctx, agentBeadID, statusreporter.BackendMetadata{
+				PodName:   spec.PodName(),
+				Namespace: spec.Namespace,
+				Backend:   "coop",
+				CoopURL:   fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", spec.PodName(), spec.Namespace, coopPort),
+			})
+		}
 		// Report spawning status to beads.
 		_ = status.ReportPodStatus(ctx, agentBeadID, statusreporter.PodStatus{
 			PodName:   spec.PodName(),
@@ -155,6 +168,8 @@ func handleEvent(ctx context.Context, logger *slog.Logger, cfg *config.Config, e
 		podName := fmt.Sprintf("gt-%s-%s-%s", event.Rig, event.Role, event.AgentName)
 		ns := namespaceFromEvent(event, cfg.Namespace)
 		err := pods.DeleteAgentPod(ctx, podName, ns)
+		// Clear backend metadata so stale Coop URLs don't linger.
+		_ = status.ReportBackendMetadata(ctx, agentBeadID, statusreporter.BackendMetadata{})
 		// Report done status to beads regardless of delete error.
 		phase := "Succeeded"
 		if event.Type == beadswatcher.AgentKill {
@@ -233,6 +248,24 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 			SecretName: secretName,
 			SecretKey:  secretKey,
 		})
+	}
+
+	// Wire Coop sidecar when image is configured.
+	if cfg.CoopImage != "" {
+		spec.CoopSidecar = &podmanager.CoopSidecarSpec{
+			Image: cfg.CoopImage,
+		}
+		// Wire NATS integration from event metadata.
+		if natsURL := event.Metadata["nats_url"]; natsURL != "" {
+			spec.CoopSidecar.NatsURL = natsURL
+		}
+		// Wire auth token secret if provided in event metadata.
+		if authSecret := event.Metadata["coop_auth_secret"]; authSecret != "" {
+			spec.CoopSidecar.AuthTokenSecret = authSecret
+		}
+		if natsSecret := event.Metadata["nats_token_secret"]; natsSecret != "" {
+			spec.CoopSidecar.NatsTokenSecret = natsSecret
+		}
 	}
 
 	return spec

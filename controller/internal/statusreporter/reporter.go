@@ -26,11 +26,24 @@ type PodStatus struct {
 	Message   string
 }
 
+// BackendMetadata holds connection info written to agent bead notes
+// so that ResolveBackend() can discover how to connect to the agent.
+type BackendMetadata struct {
+	PodName   string // K8s pod name
+	Namespace string // K8s namespace
+	Backend   string // "coop" or "k8s"
+	CoopURL   string // e.g., "http://gt-gastown-polecat-furiosa.gastown.svc.cluster.local:8080"
+	CoopToken string // auth token (optional)
+}
+
 // Reporter syncs pod status back to beads.
 type Reporter interface {
 	// ReportPodStatus sends a single pod's status to beads.
 	// agentName is the agent bead ID (e.g., "gt-gastown-polecat-furiosa").
 	ReportPodStatus(ctx context.Context, agentName string, status PodStatus) error
+
+	// ReportBackendMetadata writes backend connection info to the agent bead's notes.
+	ReportBackendMetadata(ctx context.Context, agentName string, meta BackendMetadata) error
 
 	// SyncAll reconciles all agent pod statuses with beads.
 	SyncAll(ctx context.Context) error
@@ -114,6 +127,49 @@ func (r *BdReporter) ReportPodStatus(ctx context.Context, agentName string, stat
 		}
 	}
 
+	return nil
+}
+
+// ReportBackendMetadata writes backend connection info to the agent bead's
+// notes field. This structured data is parsed by ResolveBackend() to determine
+// how to connect to the agent (Coop, SSH, or local tmux).
+func (r *BdReporter) ReportBackendMetadata(ctx context.Context, agentName string, meta BackendMetadata) error {
+	r.reportsTotal.Add(1)
+
+	// Build structured notes content with key: value lines.
+	var lines []string
+	if meta.Backend != "" {
+		lines = append(lines, fmt.Sprintf("backend: %s", meta.Backend))
+	}
+	if meta.PodName != "" {
+		lines = append(lines, fmt.Sprintf("pod_name: %s", meta.PodName))
+	}
+	if meta.Namespace != "" {
+		lines = append(lines, fmt.Sprintf("pod_namespace: %s", meta.Namespace))
+	}
+	if meta.CoopURL != "" {
+		lines = append(lines, fmt.Sprintf("coop_url: %s", meta.CoopURL))
+	}
+	if meta.CoopToken != "" {
+		lines = append(lines, fmt.Sprintf("coop_token: %s", meta.CoopToken))
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+
+	notes := strings.Join(lines, "\n")
+	args := []string{"update", agentName, "--notes", notes}
+
+	r.logger.Info("reporting backend metadata to beads",
+		"agent", agentName, "backend", meta.Backend, "coop_url", meta.CoopURL)
+
+	if err := r.runBd(ctx, args...); err != nil {
+		r.reportErrors.Add(1)
+		r.logger.Warn("failed to report backend metadata",
+			"agent", agentName, "error", err)
+		return fmt.Errorf("reporting backend metadata for %s: %w", agentName, err)
+	}
 	return nil
 }
 
@@ -241,6 +297,13 @@ func NewStubReporter(logger *slog.Logger) *StubReporter {
 func (r *StubReporter) ReportPodStatus(_ context.Context, agentName string, status PodStatus) error {
 	r.logger.Debug("stub: would report pod status",
 		"agent", agentName, "pod", status.PodName, "phase", status.Phase, "ready", status.Ready)
+	return nil
+}
+
+// ReportBackendMetadata logs but does not send to beads.
+func (r *StubReporter) ReportBackendMetadata(_ context.Context, agentName string, meta BackendMetadata) error {
+	r.logger.Debug("stub: would report backend metadata",
+		"agent", agentName, "backend", meta.Backend, "coop_url", meta.CoopURL)
 	return nil
 }
 

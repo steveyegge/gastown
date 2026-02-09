@@ -280,6 +280,25 @@ func (m *K8sManager) buildContainer(spec AgentPodSpec) corev1.Container {
 		Resources:       resources,
 		VolumeMounts:    mounts,
 		ImagePullPolicy: corev1.PullAlways,
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
+				},
+			},
+			InitialDelaySeconds: 30,
+			PeriodSeconds:       15,
+			FailureThreshold:    3,
+		},
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
+				},
+			},
+			FailureThreshold: 60,
+			PeriodSeconds:    5,
+		},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			ReadOnlyRootFilesystem:   boolPtr(false),

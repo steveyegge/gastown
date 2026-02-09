@@ -363,6 +363,61 @@ func TestBdReporter_SyncAll_BdFailure(t *testing.T) {
 	}
 }
 
+// --- BackendMetadata tests ---
+
+func TestBdReporter_ReportBackendMetadata_Success(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	r := NewBdReporter(BdConfig{BdBinary: "true"}, client, slog.Default())
+
+	err := r.ReportBackendMetadata(context.Background(), "gt-gastown-polecat-test", BackendMetadata{
+		PodName:   "gt-gastown-polecat-test",
+		Namespace: "gastown",
+		Backend:   "coop",
+		CoopURL:   "http://gt-gastown-polecat-test.gastown.svc.cluster.local:8080",
+	})
+	if err != nil {
+		t.Errorf("ReportBackendMetadata() = %v, want nil", err)
+	}
+}
+
+func TestBdReporter_ReportBackendMetadata_BdFailure(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	r := NewBdReporter(BdConfig{BdBinary: "false"}, client, slog.Default())
+
+	err := r.ReportBackendMetadata(context.Background(), "gt-gastown-polecat-test", BackendMetadata{
+		Backend: "coop",
+		CoopURL: "http://example.com:8080",
+	})
+	if err == nil {
+		t.Error("ReportBackendMetadata() should return error when bd fails")
+	}
+	m := r.Metrics()
+	if m.StatusReportErrors != 1 {
+		t.Errorf("report errors = %d, want 1", m.StatusReportErrors)
+	}
+}
+
+func TestBdReporter_ReportBackendMetadata_EmptyMetadata(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	r := NewBdReporter(BdConfig{BdBinary: "false"}, client, slog.Default())
+
+	// Empty metadata should be a no-op (no bd call).
+	err := r.ReportBackendMetadata(context.Background(), "gt-gastown-polecat-test", BackendMetadata{})
+	if err != nil {
+		t.Errorf("ReportBackendMetadata(empty) = %v, want nil", err)
+	}
+}
+
+func TestStubReporter_ReportBackendMetadata(t *testing.T) {
+	r := NewStubReporter(slog.Default())
+	err := r.ReportBackendMetadata(context.Background(), "gt-test", BackendMetadata{
+		Backend: "coop",
+	})
+	if err != nil {
+		t.Errorf("stub ReportBackendMetadata() = %v, want nil", err)
+	}
+}
+
 // --- Context cancellation ---
 
 func TestBdReporter_ReportPodStatus_CancelledContext(t *testing.T) {
