@@ -257,3 +257,43 @@ or retire the dog if pool is oversized.
 [vars.convoy]
 description = "The convoy ID to feed"
 required = true
+
+[vars.ready_count]
+description = "Computed during execution"
+default = ""
+
+[vars.available_count]
+description = "Computed during execution"
+default = ""
+
+[vars.dispatch_count]
+description = "Computed during execution"
+default = ""
+
+[vars.issue_id]
+description = "Computed during execution"
+default = ""
+
+[vars.title]
+description = "Computed during execution"
+default = ""
+
+[vars.rig]
+description = "Computed during execution"
+default = ""
+
+[vars.polecat]
+description = "Computed during execution"
+default = ""
+
+[vars.error]
+description = "Computed during execution"
+default = ""
+
+[vars.error_count]
+description = "Computed during execution"
+default = ""
+
+[vars.report_summary]
+description = "Computed during execution"
+default = ""

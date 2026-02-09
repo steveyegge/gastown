@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -89,4 +92,55 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("No new mail")
 	return NewSilentExit(1)
+}
+
+// Mail check cache — avoids redundant beads lookups within a short window.
+
+var mailCheckCacheDir string
+
+const mailCheckCacheTTL = 30 * time.Second
+
+type mailCheckCacheEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Address   string    `json:"address"`
+	Unread    int       `json:"unread"`
+	Subjects  []string  `json:"subjects,omitempty"`
+}
+
+func mailCheckCachePath(address string) string {
+	safe := strings.ReplaceAll(address, "/", "_")
+	return filepath.Join(mailCheckCacheDir, safe+".json")
+}
+
+func loadMailCheckCache(address string) *mailCheckCacheEntry {
+	if mailCheckCacheDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(mailCheckCachePath(address))
+	if err != nil {
+		return nil
+	}
+	var entry mailCheckCacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return nil
+	}
+	if entry.Address != address {
+		return nil
+	}
+	if time.Since(entry.Timestamp) > mailCheckCacheTTL {
+		return nil
+	}
+	return &entry
+}
+
+func saveMailCheckCache(entry *mailCheckCacheEntry) {
+	if mailCheckCacheDir == "" {
+		return
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(mailCheckCacheDir, 0o755)
+	_ = os.WriteFile(mailCheckCachePath(entry.Address), data, 0o644)
 }

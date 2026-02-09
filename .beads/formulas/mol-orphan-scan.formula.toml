@@ -310,3 +310,71 @@ Dog returns to available state in the pool.
 description = "Scan scope: 'town' or specific rig name"
 required = true
 default = "town"
+
+[vars.action]
+description = "Computed during execution"
+default = ""
+
+[vars.action_summary]
+description = "Computed during execution"
+default = ""
+
+[vars.burn_count]
+description = "Computed during execution"
+default = ""
+
+[vars.escalate_count]
+description = "Computed during execution"
+default = ""
+
+[vars.escalations_section]
+description = "Computed during execution"
+default = ""
+
+[vars.id]
+description = "Computed during execution"
+default = ""
+
+[vars.issue_count]
+description = "Computed during execution"
+default = ""
+
+[vars.mol_count]
+description = "Computed during execution"
+default = ""
+
+[vars.reason]
+description = "Computed during execution"
+default = ""
+
+[vars.reassign_count]
+description = "Computed during execution"
+default = ""
+
+[vars.recover_count]
+description = "Computed during execution"
+default = ""
+
+[vars.report]
+description = "Computed during execution"
+default = ""
+
+[vars.reset_count]
+description = "Computed during execution"
+default = ""
+
+[vars.timestamp]
+description = "Computed during execution"
+default = ""
+
+[vars.total_count]
+description = "Computed during execution"
+default = ""
+
+[vars.type]
+description = "Computed during execution"
+default = ""
+
+[vars.wisp_count]
+description = "Computed during execution"
+default = ""

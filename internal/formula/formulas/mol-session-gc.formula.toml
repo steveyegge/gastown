@@ -247,3 +247,43 @@ Dog returns to available state in the pool.
 [vars.mode]
 description = "GC mode: 'conservative' or 'aggressive'"
 default = "conservative"
+
+[vars.age]
+description = "Computed during execution"
+default = ""
+
+[vars.bytes_freed]
+description = "Computed during execution"
+default = ""
+
+[vars.error]
+description = "Computed during execution"
+default = ""
+
+[vars.identifier]
+description = "Computed during execution"
+default = ""
+
+[vars.item]
+description = "Computed during execution"
+default = ""
+
+[vars.reason]
+description = "Computed during execution"
+default = ""
+
+[vars.report]
+description = "Computed during execution"
+default = ""
+
+[vars.timestamp]
+description = "Computed during execution"
+default = ""
+
+[vars.total_cleaned]
+description = "Computed during execution"
+default = ""
+
+[vars.type]
+description = "Computed during execution"
+default = ""

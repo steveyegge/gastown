@@ -385,15 +385,15 @@ exit /b 0
 		args := parts[1]
 
 		switch {
-		case strings.Contains(args, " cook "):
+		case strings.Contains(args, "cook ") || strings.Contains(args, " cook "):
 			gotCook = true
 			// cook doesn't need database context, runs from cwd
-		case strings.Contains(args, " mol wisp "):
+		case strings.Contains(args, "mol wisp ") || strings.Contains(args, " mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
 				t.Fatalf("bd mol wisp ran in %q, want %q (args: %q)", dir, wantDir, args)
 			}
-		case strings.Contains(args, " mol bond "):
+		case strings.Contains(args, "mol bond ") || strings.Contains(args, " mol bond "):
 			gotBond = true
 			if dir != wantDir {
 				t.Fatalf("bd mol bond ran in %q, want %q (args: %q)", dir, wantDir, args)
@@ -1073,16 +1073,21 @@ case "$cmd" in
 esac
 exit 0
 `
+	// Write a JSON response file for the Windows stub to output
+	jsonResponse := `[{"title":"Test issue","status":"open","assignee":"","description":""}]`
+	jsonPath := filepath.Join(townRoot, "bd_show_response.json")
+	if err := os.WriteFile(jsonPath, []byte(jsonResponse), 0644); err != nil {
+		t.Fatalf("write json response: %v", err)
+	}
 	bdScriptWindows := `@echo off
-setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
 if "%cmd%"=="--no-daemon" set "cmd=%2"
-if "%cmd%"=="show" (
-  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
-  exit /b 0
-)
+if "%cmd%"=="show" goto do_show
 if "%cmd%"=="update" exit /b 0
+exit /b 0
+:do_show
+type "` + jsonPath + `"
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)

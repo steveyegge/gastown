@@ -225,3 +225,23 @@ Dog returns to available state in the pool.
 description = "The digest period type (daily, weekly, custom)"
 required = true
 default = "daily"
+
+[vars.date]
+description = "Computed during execution"
+default = ""
+
+[vars.formatted_digest]
+description = "Computed during execution"
+default = ""
+
+[vars.polecat]
+description = "Computed during execution"
+default = ""
+
+[vars.since]
+description = "Computed during execution"
+default = ""
+
+[vars.until]
+description = "Computed during execution"
+default = ""
