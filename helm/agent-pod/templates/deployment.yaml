@@ -51,11 +51,25 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       {{- end }}
       containers:
         - name: agent
           image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          {{- if .Values.agent.credentialsSecret }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferredTheme":"dark"}\n' > "$HOME/.claude.json"
+              exec coop --agent=claude --port 8080 --health-port {{ .Values.agent.coop.healthPort }} --cols 200 --rows 50 -- claude --dangerously-skip-permissions
+          {{- end }}
           securityContext:
             {{- toYaml .Values.agent.securityContext | nindent 12 }}
           env:
