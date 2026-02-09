@@ -530,7 +530,7 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 		AgentName: info.Polecat,
 		TownRoot:  townRoot,
 	})
-	envVars[EnvGTRole] = string(info.Role)
+	envVars[EnvGTRole] = info.ActorString()
 	envVars[EnvGTRoleHome] = home
 
 	// Output in sorted order for consistent output
