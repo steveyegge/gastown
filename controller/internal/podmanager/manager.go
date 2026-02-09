@@ -563,7 +563,7 @@ func (m *K8sManager) buildCoopSidecar(spec AgentPodSpec) corev1.Container {
 	args := []string{
 		"--agent=claude",
 		fmt.Sprintf("--port=%d", port),
-		fmt.Sprintf("--health-port=%d", healthPort),
+		fmt.Sprintf("--port-health=%d", healthPort),
 		"--cols=200",
 		"--rows=50",
 		"--", "claude", "--dangerously-skip-permissions",

@@ -1,0 +1,43 @@
+suite: Service tests
+templates:
+  - templates/service.yaml
+tests:
+  - it: renders with default values
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].port
+          value: 9400
+      - equal:
+          path: spec.ports[0].name
+          value: screen
+      - equal:
+          path: spec.ports[0].targetPort
+          value: screen
+
+  - it: sets gastown labels
+    asserts:
+      - equal:
+          path: metadata.labels["gastown.io/role"]
+          value: polecat
+      - equal:
+          path: metadata.labels["gastown.io/rig"]
+          value: gastown
+
+  - it: uses correct selector labels
+    asserts:
+      - isNotNull:
+          path: spec.selector["app.kubernetes.io/name"]
+      - isNotNull:
+          path: spec.selector["app.kubernetes.io/instance"]
+
+  - it: renders with gastown-test values
+    values:
+      - ../values/gastown-test.yaml
+    asserts:
+      - isKind:
+          of: Service

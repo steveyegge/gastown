@@ -1,0 +1,175 @@
+# Agent Pod Helm Chart Configuration
+# Deploys Gas Town agent pods running Claude Code in screen sessions
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+# =============================================================================
+# Agent Configuration
+# =============================================================================
+agent:
+  image:
+    repository: ghcr.io/groblegark/gastown-agent
+    tag: latest
+    pullPolicy: Always
+
+  # Agent role: polecat, crew, witness, or refinery
+  role: polecat
+
+  # Rig this agent belongs to
+  rig: gastown
+
+  # Screen session configuration
+  screen:
+    scrollback: 10000
+
+  # Replica count (polecats: 1, crew: 1+)
+  replicaCount: 1
+
+  # Resources
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+  # Probes
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Persistence for git worktree
+  persistence:
+    enabled: true
+    storageClass: gp3
+    accessMode: ReadWriteOnce
+    size: 10Gi
+
+  # Pod scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: karpenter.sh/capacity-type
+                operator: In
+                values:
+                  - on-demand
+
+  # Security contexts
+  podSecurityContext:
+    fsGroup: 1000
+    runAsNonRoot: true
+
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Termination grace period (allow screen session cleanup)
+  terminationGracePeriodSeconds: 30
+
+  # Additional environment variables (merged into pod env)
+  extraEnv: []
+
+# =============================================================================
+# Service (ClusterIP for terminal server discovery)
+# =============================================================================
+service:
+  type: ClusterIP
+  # Screen attach port
+  port: 9400
+
+# =============================================================================
+# Service Account
+# =============================================================================
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # IRSA example:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::role/agent-pod-role
+
+# =============================================================================
+# External Secrets (Anthropic API key + git credentials from AWS Secrets Manager)
+# =============================================================================
+externalSecrets:
+  enabled: true
+  clusterSecretStore: "aws-secretsmanager"
+  refreshInterval: "15m"
+
+  # Anthropic API key
+  anthropicApiKey:
+    remoteRef: ""
+    property: ""
+
+  # Git credentials (for clone/push)
+  gitCredentials:
+    enabled: false
+    remoteRef: ""
+    usernameProperty: "username"
+    tokenProperty: "token"
+
+# =============================================================================
+# BD Daemon connection
+# =============================================================================
+bdDaemon:
+  # Service hostname (auto-wired from gastown chart release)
+  host: ""
+  port: 9876
+
+# =============================================================================
+# Pod Disruption Budget (for crew/persistent agents)
+# =============================================================================
+pdb:
+  enabled: false
+  maxUnavailable: 0
+
+# =============================================================================
+# Resource Quota (per-namespace limits)
+# =============================================================================
+resourceQuota:
+  enabled: false
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "10"
+    persistentvolumeclaims: "10"
+
+# =============================================================================
+# Network Policy (restrict agent communication)
+# =============================================================================
+networkPolicy:
+  enabled: false
+  # Additional egress CIDR blocks to allow
+  additionalEgressCidrs: []

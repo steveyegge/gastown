@@ -1,0 +1,8 @@
+Gas Town platform stack has been deployed!
+
+All components (Dolt, BD Daemon, Redis, Ingress) are managed by the
+bd-daemon subchart. Use `kubectl get pods -n {{ .Release.Namespace }}`
+to check status.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}

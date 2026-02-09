@@ -1,0 +1,67 @@
+# Gas Town UAT agent pod configuration
+# Namespace: gastown-uat
+# Purpose: Screen-based Claude Code agents running in K8s
+#
+# Deploy:
+#   cd charts/agent-pod/
+#   helm upgrade --install agent-pod ./ -n gastown-uat \
+#     --values values.yaml --values values/gastown-uat.yaml
+
+agent:
+  image:
+    repository: ghcr.io/groblegark/gastown-agent
+    tag: "latest"
+    pullPolicy: Always
+
+  role: polecat
+  rig: gastown-uat
+
+  replicaCount: 1
+
+  persistence:
+    enabled: true
+    storageClass: gp2    # e2e cluster only has gp2
+    size: 10Gi
+
+  nodeSelector:
+    kubernetes.io/arch: amd64
+
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: karpenter.sh/capacity-type
+                operator: In
+                values:
+                  - on-demand
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: per-mr
+                operator: DoesNotExist
+
+# BD daemon connection (in-cluster service)
+bdDaemon:
+  host: "gastown-uat-daemon.gastown-uat.svc.cluster.local"
+  port: 9876
+
+# No Anthropic API key — will use Claude Max session via coop later
+# See beads-da7 and alfredjeanlab/coop#36
+externalSecrets:
+  enabled: false
+
+# Network policy — allow DNS, daemon, HTTPS
+networkPolicy:
+  enabled: true
+
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "10"
+    persistentvolumeclaims: "5"

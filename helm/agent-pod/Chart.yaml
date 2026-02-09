@@ -1,0 +1,15 @@
+apiVersion: v2
+name: agent-pod
+description: Gas Town agent pod - runs Claude Code in a screen session for autonomous agent execution
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
+keywords:
+  - gastown
+  - agent
+  - polecat
+  - crew
+  - claude-code
+maintainers:
+  - name: Gas Town
+    email: devops@gastown.dev

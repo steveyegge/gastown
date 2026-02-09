@@ -1,0 +1,57 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-pod.fullname" . }}-network-policy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-pod.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-pod.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from terminal server (same namespace)
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow communication with bd-daemon
+    {{- if .Values.bdDaemon.host }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bdDaemon.port }}
+    {{- end }}
+    # Allow HTTPS for git operations and API calls
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Allow SSH for git operations
+    - ports:
+        - protocol: TCP
+          port: 22
+    {{- with .Values.networkPolicy.additionalEgressCidrs }}
+    # Additional allowed egress
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}

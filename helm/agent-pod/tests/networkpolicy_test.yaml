@@ -1,0 +1,90 @@
+suite: NetworkPolicy tests
+templates:
+  - templates/networkpolicy.yaml
+tests:
+  - it: does not create NetworkPolicy by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates NetworkPolicy when enabled
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.policyTypes[0]
+          value: Ingress
+      - equal:
+          path: spec.policyTypes[1]
+          value: Egress
+
+  - it: allows DNS egress
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - namespaceSelector: {}
+                podSelector:
+                  matchLabels:
+                    k8s-app: kube-dns
+            ports:
+              - protocol: UDP
+                port: 53
+
+  - it: allows HTTPS egress
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            ports:
+              - protocol: TCP
+                port: 443
+
+  - it: allows SSH egress for git
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            ports:
+              - protocol: TCP
+                port: 22
+
+  - it: includes bd-daemon egress when host is set
+    set:
+      networkPolicy.enabled: true
+      bdDaemon.host: "bd-daemon.gastown-test.svc.cluster.local"
+      bdDaemon.port: 9876
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - namespaceSelector: {}
+            ports:
+              - protocol: TCP
+                port: 9876
+
+  - it: allows additional egress CIDRs
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.additionalEgressCidrs:
+        - "10.0.0.0/8"
+    asserts:
+      - isNotNull:
+          path: spec.egress
+
+  - it: renders with gastown-test values
+    values:
+      - ../values/gastown-test.yaml
+    asserts:
+      - isKind:
+          of: NetworkPolicy

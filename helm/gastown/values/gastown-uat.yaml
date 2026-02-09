@@ -1,4 +1,4 @@
-# Gastown UAT deployment for Slack Bot validation
+# Gastown UAT deployment
 # Namespace: gastown-uat
 # Purpose: Isolated env with beads DB branched from gastown prod, for testing
 #          the Slack Decisions Bot without touching the gastown namespace.
@@ -9,10 +9,13 @@
 #     --values values.yaml --values values/gastown-uat.yaml
 
 bd-daemon:
-  # =========================================================================
+  # =============================================================================
   # Dolt — branched from gastown prod
-  # =========================================================================
+  # =============================================================================
   dolt:
+    statefulSet:
+      enabled: true
+
     image:
       repository: dolthub/dolt-sql-server
       tag: "1.81.6"
@@ -31,9 +34,9 @@ bd-daemon:
 
     s3:
       enabled: true
-      bucket: ""        # Set to your S3 bucket name
+      bucket: ""            # Set to your S3 bucket name
       region: "us-east-1"
-      dynamoTable: ""   # Set to your DynamoDB table name
+      dynamoTable: ""       # Set to your DynamoDB table name
       prefix: "gastown-uat"
       sync:
         pullOnStartup: true
@@ -77,12 +80,12 @@ bd-daemon:
 
     terminationGracePeriodSeconds: 120
 
-  # =========================================================================
+  # =============================================================================
   # Daemon
-  # =========================================================================
+  # =============================================================================
   image:
     repository: ghcr.io/groblegark/beads
-    tag: "0.57.11-430fd859"
+    tag: "latest"
     pullPolicy: Always
 
   daemon:
@@ -148,9 +151,9 @@ bd-daemon:
                 - key: per-mr
                   operator: DoesNotExist
 
-  # =========================================================================
+  # =============================================================================
   # Redis
-  # =========================================================================
+  # =============================================================================
   redis:
     enabled: true
     architecture: standalone
@@ -162,50 +165,50 @@ bd-daemon:
       persistence:
         enabled: false
 
-  # =========================================================================
+  # =============================================================================
   # External Secrets
-  # =========================================================================
+  # =============================================================================
   externalSecrets:
     enabled: true
     secretStoreKind: ClusterSecretStore
     secretStoreName: "aws-secretsmanager"
     refreshInterval: "15m"
     doltRootPassword:
-      remoteRef: ""     # Set to your Secrets Manager key
+      remoteRef: ""         # Set to your Secrets Manager key
       property: "password"
     doltS3Credentials:
       enabled: true
-      remoteRef: ""     # Set to your Secrets Manager key
+      remoteRef: ""         # Set to your Secrets Manager key
       accessKeyIdProperty: "aws_access_key_id"
       secretAccessKeyProperty: "aws_secret_access_key"
     daemonToken:
-      remoteRef: ""     # Set to your Secrets Manager key
+      remoteRef: ""         # Set to your Secrets Manager key
       property: ""
     slackBotCredentials:
       enabled: true
-      remoteRef: ""     # Set to your Secrets Manager key
+      remoteRef: ""         # Set to your Secrets Manager key
       botTokenProperty: "bot-token"
       appTokenProperty: "app-token"
 
-  # =========================================================================
+  # =============================================================================
   # Ingress
-  # =========================================================================
+  # =============================================================================
   ingress:
     enabled: true
-    host: ""            # Set to your UAT hostname
+    host: ""                # Set to your UAT hostname
     rateLimit:
       enabled: true
       average: 50
       burst: 100
 
-  # =========================================================================
+  # =============================================================================
   # Slack Bot — sidecar in daemon pod for decisions notifications
-  # =========================================================================
+  # =============================================================================
   slackBot:
     enabled: true
     image:
       repository: ghcr.io/groblegark/beads
-      tag: "0.57.11-430fd859"
+      tag: "latest"
       pullPolicy: Always
     secretName: "slack-bot-credentials"
     resources:
@@ -215,3 +218,40 @@ bd-daemon:
       requests:
         cpu: 100m
         memory: 128Mi
+
+# =============================================================================
+# Agent Controller — manages agent pods via beads events
+# =============================================================================
+agentController:
+  enabled: true
+
+  image:
+    repository: ""          # Set to your controller image repository
+    tag: "latest"
+    pullPolicy: Always
+
+  agentImage:
+    repository: ""          # Set to your agent image repository
+    tag: "latest"
+
+  credentialsSecret: "claude-credentials"
+  # coopImage: ""           # Set to enable coop sidecar
+
+  nodeSelector:
+    kubernetes.io/arch: amd64
+
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: karpenter.sh/capacity-type
+                operator: In
+                values:
+                  - on-demand
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: per-mr
+                operator: DoesNotExist

@@ -1,0 +1,46 @@
+suite: values override tests (gastown-test environment)
+templates:
+  - templates/deployment.yaml
+  - templates/configmap.yaml
+  - templates/external-secret.yaml
+  - templates/networkpolicy.yaml
+  - templates/resourcequota.yaml
+  - templates/pdb.yaml
+values:
+  - ../values.yaml
+  - ../values/gastown-test.yaml
+tests:
+  - it: should render deployment with test values
+    template: templates/deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BD_DAEMON_HOST
+            value: "gastown-daemon.gastown-test.svc.cluster.local"
+
+  - it: should render ExternalSecrets with test values
+    template: templates/external-secret.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should render NetworkPolicy with test values
+    template: templates/networkpolicy.yaml
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+
+  - it: should render ResourceQuota with test values
+    template: templates/resourcequota.yaml
+    asserts:
+      - isKind:
+          of: ResourceQuota
+
+  - it: should not render PDB (disabled in test)
+    template: templates/pdb.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

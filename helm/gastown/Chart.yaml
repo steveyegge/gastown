@@ -1,10 +1,17 @@
 apiVersion: v2
 name: gastown
-description: Gas Town deployment — wraps bd-daemon with environment-specific configuration
-type: application
-version: 0.1.0
+description: Gas Town platform stack - Dolt database, bd-daemon, and Redis
+version: 0.2.0
 appVersion: "0.57.11"
-
+type: application
+keywords:
+  - gastown
+  - dolt
+  - beads
+  - daemon
+maintainers:
+  - name: Gas Town
+    email: devops@gastown.dev
 dependencies:
   - name: bd-daemon
     version: "~0.2.0"

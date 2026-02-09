@@ -1,0 +1,16 @@
+{{- if .Values.agent.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-pod.fullname" . }}-workspace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-pod.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.agent.persistence.accessMode }}
+  storageClassName: {{ .Values.agent.persistence.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.agent.persistence.size }}
+{{- end }}

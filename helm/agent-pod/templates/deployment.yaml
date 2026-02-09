@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-pod.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-pod.labels" . | nindent 4 }}
+    gastown.io/role: {{ .Values.agent.role }}
+    gastown.io/rig: {{ .Values.agent.rig }}
+spec:
+  replicas: {{ .Values.agent.replicaCount }}
+  {{- if .Values.agent.persistence.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-pod.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agent-pod.selectorLabels" . | nindent 8 }}
+        gastown.io/role: {{ .Values.agent.role }}
+        gastown.io/rig: {{ .Values.agent.rig }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "agent-pod.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.agent.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.agent.terminationGracePeriodSeconds }}
+      containers:
+        - name: agent
+          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.agent.securityContext | nindent 12 }}
+          env:
+            # Agent identity
+            - name: GT_ROLE
+              value: {{ .Values.agent.role | quote }}
+            - name: GT_RIG
+              value: {{ .Values.agent.rig | quote }}
+            # Screen configuration
+            - name: SCREENRC_SCROLLBACK
+              value: {{ .Values.agent.screen.scrollback | quote }}
+            # BD daemon connection
+            {{- if .Values.bdDaemon.host }}
+            - name: BD_DAEMON_HOST
+              value: {{ .Values.bdDaemon.host | quote }}
+            - name: BD_DAEMON_PORT
+              value: {{ .Values.bdDaemon.port | quote }}
+            {{- end }}
+            # Anthropic API key from ExternalSecret
+            {{- if and .Values.externalSecrets.enabled .Values.externalSecrets.anthropicApiKey.remoteRef }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-pod.apiKeySecretName" . }}
+                  key: api-key
+            {{- end }}
+            # Git credentials from ExternalSecret
+            {{- if and .Values.externalSecrets.enabled .Values.externalSecrets.gitCredentials.enabled .Values.externalSecrets.gitCredentials.remoteRef }}
+            - name: GIT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-pod.gitCredentialsSecretName" . }}
+                  key: username
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-pod.gitCredentialsSecretName" . }}
+                  key: token
+            {{- end }}
+            - name: HOME
+              value: "/home/agent"
+            {{- with .Values.agent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/agent-pod
+              readOnly: true
+            - name: workspace
+              mountPath: /home/agent/gt
+            - name: tmp
+              mountPath: /tmp
+          {{- if .Values.agent.startupProbe.enabled }}
+          startupProbe:
+            exec:
+              command: ["test", "-f", "/tmp/health/alive"]
+            initialDelaySeconds: {{ .Values.agent.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.agent.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.agent.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.agent.startupProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.agent.livenessProbe.enabled }}
+          livenessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/health/alive"]
+            initialDelaySeconds: {{ .Values.agent.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.agent.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.agent.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.agent.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.agent.readinessProbe.enabled }}
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/health/alive"]
+            initialDelaySeconds: {{ .Values.agent.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.agent.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.agent.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.agent.readinessProbe.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "agent-pod.fullname" . }}-config
+        {{- if .Values.agent.persistence.enabled }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ include "agent-pod.fullname" . }}-workspace
+        {{- else }}
+        - name: workspace
+          emptyDir: {}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

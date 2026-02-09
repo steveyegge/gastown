@@ -1,0 +1,43 @@
+suite: ResourceQuota tests
+templates:
+  - templates/resourcequota.yaml
+tests:
+  - it: does not create ResourceQuota by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates ResourceQuota when enabled
+    set:
+      resourceQuota.enabled: true
+    asserts:
+      - isKind:
+          of: ResourceQuota
+
+  - it: sets correct resource limits
+    set:
+      resourceQuota.enabled: true
+      resourceQuota.hard:
+        requests.cpu: "8"
+        requests.memory: "16Gi"
+        limits.cpu: "16"
+        limits.memory: "32Gi"
+        pods: "10"
+        persistentvolumeclaims: "10"
+    asserts:
+      - equal:
+          path: spec.hard["requests.cpu"]
+          value: "8"
+      - equal:
+          path: spec.hard.pods
+          value: "10"
+
+  - it: renders with gastown-test values
+    values:
+      - ../values/gastown-test.yaml
+    asserts:
+      - isKind:
+          of: ResourceQuota
+      - equal:
+          path: spec.hard.pods
+          value: "10"

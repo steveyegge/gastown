@@ -1,0 +1,446 @@
+suite: Deployment tests
+# No templates: field — render all templates so deployment can reference configmap.
+# Use template: on each assertion to target the deployment document.
+tests:
+  - it: renders with default values
+    asserts:
+      - isKind:
+          of: Deployment
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.replicas
+          value: 1
+        template: templates/deployment.yaml
+
+  - it: sets agent role and rig labels
+    asserts:
+      - equal:
+          path: metadata.labels["gastown.io/role"]
+          value: polecat
+        template: templates/deployment.yaml
+      - equal:
+          path: metadata.labels["gastown.io/rig"]
+          value: gastown
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.metadata.labels["gastown.io/role"]
+          value: polecat
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.metadata.labels["gastown.io/rig"]
+          value: gastown
+        template: templates/deployment.yaml
+
+  - it: renders with crew role
+    set:
+      agent.role: crew
+    asserts:
+      - equal:
+          path: metadata.labels["gastown.io/role"]
+          value: crew
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.metadata.labels["gastown.io/role"]
+          value: crew
+        template: templates/deployment.yaml
+
+  - it: renders with witness role
+    set:
+      agent.role: witness
+    asserts:
+      - equal:
+          path: metadata.labels["gastown.io/role"]
+          value: witness
+        template: templates/deployment.yaml
+
+  - it: renders with refinery role
+    set:
+      agent.role: refinery
+    asserts:
+      - equal:
+          path: metadata.labels["gastown.io/role"]
+          value: refinery
+        template: templates/deployment.yaml
+
+  - it: sets security context - runAsNonRoot
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 1000
+        template: templates/deployment.yaml
+
+  - it: sets container security context
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+          value: 1000
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.runAsGroup
+          value: 1000
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop[0]
+          value: ALL
+        template: templates/deployment.yaml
+
+  - it: sets resource limits and requests
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 500m
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 1Gi
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 2
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 4Gi
+        template: templates/deployment.yaml
+
+  - it: allows custom resource limits
+    set:
+      agent.resources.requests.cpu: "1"
+      agent.resources.requests.memory: 2Gi
+      agent.resources.limits.cpu: "4"
+      agent.resources.limits.memory: 8Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: "1"
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 8Gi
+        template: templates/deployment.yaml
+
+  - it: sets GT_ROLE and GT_RIG environment variables
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GT_ROLE
+            value: "polecat"
+        template: templates/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GT_RIG
+            value: "gastown"
+        template: templates/deployment.yaml
+
+  - it: propagates environment variables for different roles
+    set:
+      agent.role: crew
+      agent.rig: fics_helm_chart
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GT_ROLE
+            value: "crew"
+        template: templates/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GT_RIG
+            value: "fics_helm_chart"
+        template: templates/deployment.yaml
+
+  - it: sets SCREENRC_SCROLLBACK environment variable
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SCREENRC_SCROLLBACK
+            value: "10000"
+        template: templates/deployment.yaml
+
+  - it: sets HOME environment variable
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HOME
+            value: "/home/agent"
+        template: templates/deployment.yaml
+
+  - it: includes BD daemon env when host is set
+    set:
+      bdDaemon.host: "bd-daemon.gastown-test.svc.cluster.local"
+      bdDaemon.port: 9876
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BD_DAEMON_HOST
+            value: "bd-daemon.gastown-test.svc.cluster.local"
+        template: templates/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BD_DAEMON_PORT
+            value: "9876"
+        template: templates/deployment.yaml
+
+  - it: excludes BD daemon env when host is not set
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BD_DAEMON_HOST
+          any: true
+        template: templates/deployment.yaml
+
+  - it: includes Anthropic API key from ExternalSecret
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.anthropicApiKey.remoteRef: "gastown/anthropic-api-key"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ANTHROPIC_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-agent-pod-api-key
+                key: api-key
+        template: templates/deployment.yaml
+
+  - it: excludes API key env when externalSecrets disabled
+    set:
+      externalSecrets.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ANTHROPIC_API_KEY
+          any: true
+        template: templates/deployment.yaml
+
+  - it: includes git credentials when enabled
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.gitCredentials.enabled: true
+      externalSecrets.gitCredentials.remoteRef: "gastown/git-credentials"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GIT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-agent-pod-git-credentials
+                key: username
+        template: templates/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GIT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-agent-pod-git-credentials
+                key: token
+        template: templates/deployment.yaml
+
+  - it: supports extra environment variables
+    set:
+      agent.extraEnv:
+        - name: CUSTOM_VAR
+          value: "custom-value"
+        - name: ANOTHER_VAR
+          value: "another-value"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_VAR
+            value: "custom-value"
+        template: templates/deployment.yaml
+
+  - it: enables startup probe by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.exec.command
+          value: ["test", "-f", "/tmp/health/alive"]
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.failureThreshold
+          value: 30
+        template: templates/deployment.yaml
+
+  - it: enables liveness probe by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          value: ["test", "-f", "/tmp/health/alive"]
+        template: templates/deployment.yaml
+
+  - it: enables readiness probe by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command
+          value: ["test", "-f", "/tmp/health/alive"]
+        template: templates/deployment.yaml
+
+  - it: disables probes when configured
+    set:
+      agent.startupProbe.enabled: false
+      agent.livenessProbe.enabled: false
+      agent.readinessProbe.enabled: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].startupProbe
+        template: templates/deployment.yaml
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe
+        template: templates/deployment.yaml
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe
+        template: templates/deployment.yaml
+
+  - it: uses PVC for workspace when persistence enabled
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: workspace
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-agent-pod-workspace
+        template: templates/deployment.yaml
+
+  - it: uses emptyDir when persistence disabled
+    set:
+      agent.persistence.enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: workspace
+            emptyDir: {}
+        template: templates/deployment.yaml
+
+  - it: mounts config volume read-only
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/agent-pod
+            readOnly: true
+        template: templates/deployment.yaml
+
+  - it: mounts workspace volume
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /home/agent/gt
+        template: templates/deployment.yaml
+
+  - it: mounts tmp volume
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+        template: templates/deployment.yaml
+
+  - it: sets termination grace period
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+        template: templates/deployment.yaml
+
+  - it: sets image pull secrets when provided
+    set:
+      imagePullSecrets:
+        - name: registry-secret
+    asserts:
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: registry-secret
+        template: templates/deployment.yaml
+
+  - it: sets node affinity for on-demand by default
+    asserts:
+      - isNotNull:
+          path: spec.template.spec.affinity
+        template: templates/deployment.yaml
+
+  - it: applies node selector when set
+    set:
+      agent.nodeSelector:
+        kubernetes.io/arch: amd64
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector["kubernetes.io/arch"]
+          value: amd64
+        template: templates/deployment.yaml
+
+  - it: applies tolerations when set
+    set:
+      agent.tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "agents"
+          effect: "NoSchedule"
+    asserts:
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: "dedicated"
+            operator: "Equal"
+            value: "agents"
+            effect: "NoSchedule"
+        template: templates/deployment.yaml
+
+  - it: renders with gastown-test values
+    values:
+      - ../values/gastown-test.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+        template: templates/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: BD_DAEMON_HOST
+            value: "gastown-daemon.gastown-test.svc.cluster.local"
+        template: templates/deployment.yaml
+
+  - it: includes configmap checksum annotation
+    asserts:
+      - isNotNull:
+          path: spec.template.metadata.annotations["checksum/config"]
+        template: templates/deployment.yaml
+
+  - it: sets correct image
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "ghcr.io/groblegark/gastown-agent:latest"
+        template: templates/deployment.yaml
+
+  - it: sets correct image pull policy
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+        template: templates/deployment.yaml

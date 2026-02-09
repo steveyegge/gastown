@@ -1,0 +1,15 @@
+{{- if .Values.pdb.enabled }}
+# PDB for persistent agents (crew) — prevents eviction
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agent-pod.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-pod.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "agent-pod.selectorLabels" . | nindent 6 }}
+{{- end }}

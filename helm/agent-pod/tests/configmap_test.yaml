@@ -1,0 +1,53 @@
+suite: ConfigMap tests
+templates:
+  - templates/configmap.yaml
+tests:
+  - it: renders with default values
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - isNotNull:
+          path: data["agent.yaml"]
+
+  - it: includes role in config data
+    asserts:
+      - matchRegex:
+          path: data["agent.yaml"]
+          pattern: "role: polecat"
+
+  - it: includes rig in config data
+    asserts:
+      - matchRegex:
+          path: data["agent.yaml"]
+          pattern: "rig: gastown"
+
+  - it: includes scrollback config
+    asserts:
+      - matchRegex:
+          path: data["agent.yaml"]
+          pattern: "scrollback: 10000"
+
+  - it: includes bdDaemon when host is set
+    set:
+      bdDaemon.host: "bd-daemon.gastown-test.svc.cluster.local"
+      bdDaemon.port: 9876
+    asserts:
+      - matchRegex:
+          path: data["agent.yaml"]
+          pattern: "host: bd-daemon.gastown-test.svc.cluster.local"
+
+  - it: excludes bdDaemon when host is empty
+    asserts:
+      - notMatchRegex:
+          path: data["agent.yaml"]
+          pattern: "bdDaemon:"
+
+  - it: renders with gastown-test values
+    values:
+      - ../values/gastown-test.yaml
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["agent.yaml"]
+          pattern: "host: gastown-daemon.gastown-test.svc.cluster.local"

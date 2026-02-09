@@ -1,0 +1,80 @@
+{{- if .Values.agentController.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gastown.agentController.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gastown.agentController.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.agentController.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gastown.agentController.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gastown.agentController.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "gastown.agentController.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: agent-controller
+          image: "{{ .Values.agentController.image.repository }}:{{ .Values.agentController.image.tag }}"
+          imagePullPolicy: {{ .Values.agentController.image.pullPolicy }}
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: BD_DAEMON_HOST
+              value: {{ include "gastown.daemon.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+            - name: BD_DAEMON_PORT
+              value: "{{ (index .Values "bd-daemon").daemon.tcp.port }}"
+            - name: BD_DAEMON_HTTP_PORT
+              value: "{{ (index .Values "bd-daemon").daemon.http.port }}"
+            - name: BD_DAEMON_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gastown.daemon.tokenSecretName" . }}
+                  key: token
+            - name: AGENT_IMAGE
+              value: "{{ .Values.agentController.agentImage.repository }}:{{ .Values.agentController.agentImage.tag }}"
+            {{- if .Values.agentController.apiKeySecret }}
+            - name: API_KEY_SECRET
+              value: {{ .Values.agentController.apiKeySecret }}
+            {{- end }}
+            {{- if .Values.agentController.coopImage }}
+            - name: COOP_IMAGE
+              value: {{ .Values.agentController.coopImage }}
+            {{- end }}
+            {{- if .Values.agentController.credentialsSecret }}
+            - name: CLAUDE_CREDENTIALS_SECRET
+              value: {{ .Values.agentController.credentialsSecret }}
+            {{- end }}
+            {{- if .Values.agentController.daemonTokenSecret }}
+            - name: DAEMON_TOKEN_SECRET
+              value: {{ .Values.agentController.daemonTokenSecret }}
+            {{- else }}
+            - name: DAEMON_TOKEN_SECRET
+              value: {{ include "gastown.daemon.tokenSecretName" . }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.agentController.resources | nindent 12 }}
+      {{- with .Values.agentController.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agentController.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agentController.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

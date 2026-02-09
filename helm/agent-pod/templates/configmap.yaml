@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-pod.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-pod.labels" . | nindent 4 }}
+data:
+  agent.yaml: |
+    role: {{ .Values.agent.role }}
+    rig: {{ .Values.agent.rig }}
+    screen:
+      scrollback: {{ .Values.agent.screen.scrollback }}
+    {{- if .Values.bdDaemon.host }}
+    bdDaemon:
+      host: {{ .Values.bdDaemon.host }}
+      port: {{ .Values.bdDaemon.port }}
+    {{- end }}

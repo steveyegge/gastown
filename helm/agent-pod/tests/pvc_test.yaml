@@ -1,0 +1,40 @@
+suite: PersistentVolumeClaim tests
+templates:
+  - templates/pvc.yaml
+tests:
+  - it: creates PVC when persistence enabled
+    asserts:
+      - isKind:
+          of: PersistentVolumeClaim
+      - equal:
+          path: spec.accessModes[0]
+          value: ReadWriteOnce
+      - equal:
+          path: spec.storageClassName
+          value: "gp3"
+      - equal:
+          path: spec.resources.requests.storage
+          value: 10Gi
+
+  - it: does not create PVC when persistence disabled
+    set:
+      agent.persistence.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: uses custom storage class
+    set:
+      agent.persistence.storageClass: "gp2"
+    asserts:
+      - equal:
+          path: spec.storageClassName
+          value: "gp2"
+
+  - it: uses custom size
+    set:
+      agent.persistence.size: 50Gi
+    asserts:
+      - equal:
+          path: spec.resources.requests.storage
+          value: 50Gi

@@ -1,0 +1,33 @@
+# Gas Town test environment overrides
+# Deploy to namespace: gastown-test
+
+bdDaemon:
+  host: "gastown-daemon.gastown-test.svc.cluster.local"
+  port: 9876
+
+externalSecrets:
+  enabled: true
+  anthropicApiKey:
+    remoteRef: "gastown/anthropic-api-key"
+    property: "ANTHROPIC_API_KEY"
+  gitCredentials:
+    enabled: true
+    remoteRef: "gastown/git-credentials"
+    usernameProperty: "username"
+    tokenProperty: "token"
+
+pdb:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "10"
+    persistentvolumeclaims: "10"

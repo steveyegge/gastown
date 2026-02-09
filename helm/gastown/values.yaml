@@ -1,58 +1,360 @@
-# Gastown Helm chart values
-# This chart wraps bd-daemon with Gas Town-specific configuration.
-# All values under bd-daemon: are passed to the subchart.
+# Gas Town Unified Helm Chart Configuration
+# Components: Dolt SQL Server + BD Daemon + Redis (optional)
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
 
 bd-daemon:
-  image:
-    repository: ghcr.io/groblegark/beads
-    pullPolicy: IfNotPresent
+  imagePullSecrets: []
 
-  daemon:
-    replicaCount: 1
-    logLevel: "info"
-    logJSON: true
-    http:
-      enabled: true
-
-    serviceAccount:
-      create: true
-
-    pdb:
-      enabled: true
-      maxUnavailable: 0
-
+  # =============================================================================
+  # Dolt SQL Server
+  # =============================================================================
   dolt:
     statefulSet:
       enabled: true
-    database: "beads"
 
+    image:
+      repository: dolthub/dolt-sql-server
+      tag: "1.80.2"
+      pullPolicy: IfNotPresent
+
+    # Database name
+    database: "dolt"
+
+    # SQL server configuration
+    config:
+      host: "0.0.0.0"
+      port: 3306
+      max_connections: 100
+      read_timeout_millis: 28800000
+      write_timeout_millis: 28800000
+      log_level: "info"
+
+    # User configuration (root password via ExternalSecret)
+    user:
+      name: "root"
+
+    # Init SQL to run on startup (optional)
+    initSql: ""
+
+    # S3 remote storage
     s3:
-      enabled: true
+      enabled: false
+      bucket: ""
       region: "us-east-1"
+      dynamoTable: ""
+      prefix: ""
       sync:
         pullOnStartup: true
         pushOnShutdown: true
+        schedule:
+          enabled: true
+          intervalMinutes: 5
+      credentials:
+        enabled: false
+        secretName: "dolt-s3-credentials"
 
+    # EKS Pod Identity for S3 access
+    podIdentity:
+      enabled: false
+      clusterName: ""
+      roleArn: ""
+
+    # Persistence
     persistence:
       enabled: true
       storageClass: "gp3"
       accessMode: ReadWriteOnce
       size: 10Gi
+      deleteClaim: false
 
-    pdb:
+    # Service
+    service:
+      type: ClusterIP
+      port: 3306
+
+    # Service Account
+    serviceAccount:
+      create: true
+      name: ""
+      annotations: {}
+
+    # Resources
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+    # Probes
+    livenessProbe:
       enabled: true
-      maxUnavailable: 0
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
 
-  slackBot:
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Pod scheduling
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+    # Security contexts
+    podSecurityContext:
+      fsGroup: 1000
+
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+
+    # Termination grace period (allow time for S3 push)
+    terminationGracePeriodSeconds: 60
+
+  # =============================================================================
+  # BD Daemon
+  # =============================================================================
+  image:
+    repository: ghcr.io/groblegark/beads
+    tag: "0.50.0-0ff2583c"
+    pullPolicy: Always
+
+  daemon:
+    replicaCount: 1
+    deploymentStrategy: Recreate
+    priorityClassName: "production"
+
+    # TCP server
+    tcp:
+      addr: ":9876"
+      port: 9876
+
+    # HTTP server (optional, enables public ingress)
+    http:
+      enabled: false
+      addr: ":9080"
+      port: 9080
+
+    # TLS
+    tls:
+      enabled: false
+      certManager:
+        enabled: false
+        issuerName: "letsencrypt-prod"
+        issuerKind: "ClusterIssuer"
+      existingSecret: ""
+
+    # Logging
+    logLevel: "info"
+    logJSON: true
+
+    # Service
+    service:
+      type: ClusterIP
+      port: 9876
+      httpPort: 9080
+
+    # Service Account
+    serviceAccount:
+      create: true
+      name: ""
+      annotations: {}
+
+    # Resources
+    resources:
+      limits:
+        cpu: "1"
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+    # Probes
+    startupProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 30
+
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 5
+
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 10
+      failureThreshold: 6
+
+    # Pod scheduling
+    nodeSelector: {}
+    tolerations: []
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: karpenter.sh/capacity-type
+                  operator: In
+                  values:
+                    - on-demand
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: per-mr
+                  operator: DoesNotExist
+
+    # Security contexts
+    podSecurityContext:
+      fsGroup: 1000
+
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+
+  # =============================================================================
+  # Redis (Bitnami subchart for ephemeral wisp storage)
+  # =============================================================================
+  redis:
     enabled: false
+    external:
+      url: ""
+    namespace: ""
+    wispTTL: ""
+    architecture: standalone
+    auth:
+      enabled: false
+    master:
+      persistence:
+        enabled: true
+        size: 1Gi
+    replica:
+      replicaCount: 0
 
+  # =============================================================================
+  # External Secrets (merged for all components)
+  # =============================================================================
   externalSecrets:
     enabled: true
     secretStoreKind: ClusterSecretStore
     secretStoreName: "aws-secretsmanager"
+    refreshInterval: "15m"
+    # Dolt root password
+    doltRootPassword:
+      remoteRef: ""
+      property: "password"
+    # S3 credentials for Dolt (legacy fallback, prefer Pod Identity)
+    doltS3Credentials:
+      enabled: false
+      remoteRef: ""
+      accessKeyIdProperty: "aws_access_key_id"
+      secretAccessKeyProperty: "aws_secret_access_key"
+    # BD daemon authentication token
+    daemonToken:
+      remoteRef: ""
+      property: ""
+    # Slack bot credentials (bot-token and app-token)
+    slackBotCredentials:
+      enabled: false
+      remoteRef: ""
+      botTokenProperty: "bot-token"
+      appTokenProperty: "app-token"
 
+  # =============================================================================
+  # Slack Bot (sidecar in daemon pod)
+  # =============================================================================
+  slackBot:
+    enabled: false
+    image:
+      repository: ghcr.io/groblegark/beads
+      tag: ""  # defaults to daemon image tag if empty
+      pullPolicy: Always
+    secretName: "slack-bot-credentials"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # =============================================================================
+  # Ingress (Traefik IngressRoute for daemon HTTP)
+  # =============================================================================
   ingress:
     enabled: false
+    host: ""
+    ipWhitelist:
+      enabled: false
+      sourceRange: []
+    rateLimit:
+      enabled: true
+      average: 100
+      burst: 200
 
-  redis:
-    enabled: false
+# =============================================================================
+# Agent Controller (manages agent pods for beads automation)
+# =============================================================================
+agentController:
+  enabled: false
+
+  image:
+    repository: ghcr.io/groblegark/agent-controller
+    tag: "latest"
+    pullPolicy: Always
+
+  # Image used for agent pods spawned by the controller
+  agentImage:
+    repository: ghcr.io/groblegark/gastown-agent
+    tag: "latest"
+
+  replicaCount: 1
+
+  # K8s secret name containing ANTHROPIC_API_KEY for agent pods
+  apiKeySecret: ""
+
+  # Coop sidecar image for agent pods (optional, enables PTY-based management)
+  coopImage: ""
+
+  # K8s secret with Claude OAuth credentials for agent pods (Max/Corp accounts)
+  # Mount as ~/.claude/.credentials.json. See scripts/sync-claude-credentials.sh
+  credentialsSecret: ""
+
+  # K8s secret with daemon auth token for agent pods (defaults to daemon token secret)
+  daemonTokenSecret: ""
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Pod scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

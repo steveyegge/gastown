@@ -1,0 +1,26 @@
+suite: PodDisruptionBudget tests
+templates:
+  - templates/pdb.yaml
+tests:
+  - it: does not create PDB by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates PDB when enabled
+    set:
+      pdb.enabled: true
+      pdb.maxUnavailable: 0
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.maxUnavailable
+          value: 0
+
+  - it: uses correct selector labels
+    set:
+      pdb.enabled: true
+    asserts:
+      - isNotNull:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
