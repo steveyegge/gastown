@@ -100,46 +100,56 @@ func extractHostFromMatch(match string) string {
 }
 
 // extractK8sToken retrieves the daemon auth token from a Kubernetes secret.
+// It first tries secrets with the daemon component label, then falls back to
+// searching all secrets by name pattern (ExternalSecrets may not have app labels).
 func extractK8sToken(namespace, kubeContext string) (string, error) {
 	if namespace == "" {
 		return "", fmt.Errorf("namespace is required for K8s token extraction")
 	}
 
-	args := []string{"get", "secrets", "-n", namespace, "-l", "app.kubernetes.io/component=daemon", "-o", "json"}
-	if kubeContext != "" {
-		args = append(args, "--context", kubeContext)
+	// Try labeled secrets first, then fall back to all secrets in namespace.
+	selectors := [][]string{
+		{"-l", "app.kubernetes.io/component=daemon"},
+		{},
 	}
-	out, err := exec.Command("kubectl", args...).Output()
-	if err != nil {
-		return "", fmt.Errorf("kubectl get secrets failed: %w", err)
-	}
-
-	var secretList struct {
-		Items []struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Data map[string]string `json:"data"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(out, &secretList); err != nil {
-		return "", fmt.Errorf("parsing secrets JSON: %w", err)
-	}
-
-	// Find the secret whose name ends with "-daemon-token".
-	for _, s := range secretList.Items {
-		if !strings.HasSuffix(s.Metadata.Name, "-daemon-token") {
+	for _, sel := range selectors {
+		args := []string{"get", "secrets", "-n", namespace}
+		args = append(args, sel...)
+		args = append(args, "-o", "json")
+		if kubeContext != "" {
+			args = append(args, "--context", kubeContext)
+		}
+		out, err := exec.Command("kubectl", args...).Output()
+		if err != nil {
 			continue
 		}
-		encoded, ok := s.Data["token"]
-		if !ok {
-			return "", fmt.Errorf("secret %s has no 'token' key", s.Metadata.Name)
+
+		var secretList struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Data map[string]string `json:"data"`
+			} `json:"items"`
 		}
-		decoded, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return "", fmt.Errorf("decoding token from secret %s: %w", s.Metadata.Name, err)
+		if err := json.Unmarshal(out, &secretList); err != nil {
+			continue
 		}
-		return string(decoded), nil
+
+		for _, s := range secretList.Items {
+			if !strings.HasSuffix(s.Metadata.Name, "-daemon-token") {
+				continue
+			}
+			encoded, ok := s.Data["token"]
+			if !ok {
+				return "", fmt.Errorf("secret %s has no 'token' key", s.Metadata.Name)
+			}
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				return "", fmt.Errorf("decoding token from secret %s: %w", s.Metadata.Name, err)
+			}
+			return string(decoded), nil
+		}
 	}
 
 	return "", fmt.Errorf("daemon token secret not found in namespace %s", namespace)
