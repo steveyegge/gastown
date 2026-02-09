@@ -245,3 +245,92 @@ func TestEnsureOjRunbook_MissingSource(t *testing.T) {
 		t.Fatal("expected error for missing source")
 	}
 }
+
+func TestOjSlingEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		envVal string
+		setEnv bool // whether to set GT_SLING_OJ at all
+		want   bool
+	}{
+		{
+			name:   "enabled with 1",
+			envVal: "1",
+			setEnv: true,
+			want:   true,
+		},
+		{
+			name:   "disabled with 0",
+			envVal: "0",
+			setEnv: true,
+			want:   false,
+		},
+		{
+			name:   "unset returns false",
+			setEnv: false,
+			want:   false,
+		},
+		{
+			name:   "true string returns false (only 1 works)",
+			envVal: "true",
+			setEnv: true,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setEnv {
+				t.Setenv("GT_SLING_OJ", tt.envVal)
+			} else {
+				// Ensure the env var is not set for this subtest.
+				// t.Setenv sets it and restores on cleanup, so set to empty
+				// then unset to guarantee absence.
+				t.Setenv("GT_SLING_OJ", "")
+				os.Unsetenv("GT_SLING_OJ")
+			}
+
+			got := ojSlingEnabled()
+			if got != tt.want {
+				t.Errorf("ojSlingEnabled() = %v, want %v (GT_SLING_OJ=%q, set=%v)",
+					got, tt.want, tt.envVal, tt.setEnv)
+			}
+		})
+	}
+}
+
+func TestGetBeadBase(t *testing.T) {
+	tests := []struct {
+		name   string
+		beadID string
+		want   string
+	}{
+		{
+			name:   "empty bead ID returns main",
+			beadID: "",
+			want:   "main",
+		},
+		{
+			name:   "non-existent bead returns main",
+			beadID: "nonexistent-bead-xyz-999",
+			want:   "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetBeadBase(tt.beadID)
+			if got != tt.want {
+				t.Errorf("GetBeadBase(%q) = %q, want %q", tt.beadID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStoreOjJobIDInBead_EmptyJobID(t *testing.T) {
+	// storeOjJobIDInBead should return nil immediately for empty jobID (no-op).
+	err := storeOjJobIDInBead("some-bead", "")
+	if err != nil {
+		t.Errorf("storeOjJobIDInBead(\"some-bead\", \"\") = %v, want nil", err)
+	}
+}
