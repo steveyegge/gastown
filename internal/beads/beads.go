@@ -190,6 +190,11 @@ func (b *Beads) Init(prefix string) error {
 
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
+	// Let bd auto-detect the backend mode instead of forcing --no-daemon.
+	// For embedded SQLite: bd detects single-process and goes direct automatically.
+	// For dolt-native rigs with a Dolt server: bd routes through the server.
+	// Forcing --no-daemon broke writes to dolt-native rigs because embedded mode
+	// can't acquire the lock held by the running Dolt server (gt-i5a).
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
 	fullArgs := append([]string{"--allow-stale"}, args...)
