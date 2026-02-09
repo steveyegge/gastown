@@ -36,7 +36,8 @@ spec:
       {{- if .Values.agent.credentialsSecret }}
       initContainers:
         - name: copy-credentials
-          image: busybox:1.36
+          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           command: ["sh", "-c"]
           args:
             - |
