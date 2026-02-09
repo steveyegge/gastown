@@ -1332,6 +1332,9 @@ func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
 		}
 
 		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 0 {
+			continue
+		}
 		name := parts[0]
 
 		// Only include gt-* sessions

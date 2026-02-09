@@ -661,14 +661,8 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 		return fmt.Errorf("getting wisp: %w", err)
 	}
 
-	// Extract polecat name from existing labels for the update
-	var polecatName string
-	if idx := strings.Index(output, `polecat:`); idx >= 0 {
-		rest := output[idx+8:]
-		if endIdx := strings.IndexAny(rest, `",]}`); endIdx > 0 {
-			polecatName = rest[:endIdx]
-		}
-	}
+	// Extract polecat name from existing labels via JSON parsing
+	polecatName := extractPolecatFromJSON(output)
 
 	if polecatName == "" {
 		polecatName = "unknown"
@@ -678,6 +672,23 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
 	return util.ExecRun(workDir, "bd", "update", wispID, "--labels", newLabels)
+}
+
+// extractPolecatFromJSON extracts the polecat name from bd show --json output.
+// Returns empty string if the output is malformed or no polecat label is found.
+func extractPolecatFromJSON(output string) string {
+	var items []struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil || len(items) == 0 {
+		return ""
+	}
+	for _, label := range items[0].Labels {
+		if name, ok := strings.CutPrefix(label, "polecat:"); ok {
+			return name
+		}
+	}
+	return ""
 }
 
 // NukePolecat executes the actual nuke operation for a polecat.

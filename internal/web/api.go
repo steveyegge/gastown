@@ -387,7 +387,7 @@ func parseMailInboxText(output string) []MailMessage {
 			rest := strings.TrimSpace(trimmed[2:])
 			if strings.HasPrefix(rest, "●") {
 				current.Read = false
-				current.Subject = strings.TrimSpace(rest[len("●"):])
+				current.Subject = strings.TrimSpace(strings.TrimPrefix(rest, "●"))
 			} else {
 				current.Read = true
 				current.Subject = rest
@@ -950,14 +950,13 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 
 				// Now parse the title from before the bracket
 				// Format: "○ id · title"
-				// Find the second · which separates id from title
-				if firstDot := strings.Index(beforeBracket, "·"); firstDot > 0 {
-					afterFirstDot := beforeBracket[firstDot+len("·"):]
-					if secondDot := strings.Index(afterFirstDot, "·"); secondDot > 0 {
-						resp.Title = strings.TrimSpace(afterFirstDot[secondDot+len("·"):])
+				// Use strings.Cut for safe splitting on multi-byte "·" separator
+				if _, afterFirst, ok := strings.Cut(beforeBracket, "·"); ok {
+					if _, afterSecond, ok := strings.Cut(afterFirst, "·"); ok {
+						resp.Title = strings.TrimSpace(afterSecond)
 					} else {
 						// Only one dot - id is embedded in icon part
-						resp.Title = strings.TrimSpace(afterFirstDot)
+						resp.Title = strings.TrimSpace(afterFirst)
 					}
 				}
 			}
@@ -968,8 +967,10 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
 		} else if strings.HasPrefix(line, "Created:") {
 			parts := strings.Split(line, "·")
-			resp.Created = strings.TrimSpace(strings.TrimPrefix(parts[0], "Created:"))
-			if len(parts) > 1 {
+			if len(parts) >= 1 {
+				resp.Created = strings.TrimSpace(strings.TrimPrefix(parts[0], "Created:"))
+			}
+			if len(parts) >= 2 {
 				resp.Updated = strings.TrimSpace(strings.TrimPrefix(parts[1], "Updated:"))
 			}
 		} else if line == "DESCRIPTION" {

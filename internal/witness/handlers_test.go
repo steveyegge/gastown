@@ -381,3 +381,58 @@ func TestGetAgentBeadLabels_NoBdAvailable(t *testing.T) {
 		t.Errorf("getAgentBeadLabels = %v, want nil when bd unavailable", labels)
 	}
 }
+
+// --- extractPolecatFromJSON tests (issue #1228: panic-safe JSON parsing) ---
+
+func TestExtractPolecatFromJSON_ValidOutput(t *testing.T) {
+	input := `[{"labels":["cleanup","polecat:nux","state:pending"]}]`
+	got := extractPolecatFromJSON(input)
+	if got != "nux" {
+		t.Errorf("extractPolecatFromJSON() = %q, want %q", got, "nux")
+	}
+}
+
+func TestExtractPolecatFromJSON_EmptyOutput(t *testing.T) {
+	got := extractPolecatFromJSON("")
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON(\"\") = %q, want empty", got)
+	}
+}
+
+func TestExtractPolecatFromJSON_MalformedJSON(t *testing.T) {
+	got := extractPolecatFromJSON("{not valid json")
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON(malformed) = %q, want empty", got)
+	}
+}
+
+func TestExtractPolecatFromJSON_EmptyArray(t *testing.T) {
+	got := extractPolecatFromJSON("[]")
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON([]) = %q, want empty", got)
+	}
+}
+
+func TestExtractPolecatFromJSON_NoPolecatLabel(t *testing.T) {
+	input := `[{"labels":["cleanup","state:pending"]}]`
+	got := extractPolecatFromJSON(input)
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON(no polecat label) = %q, want empty", got)
+	}
+}
+
+func TestExtractPolecatFromJSON_EmptyLabels(t *testing.T) {
+	input := `[{"labels":[]}]`
+	got := extractPolecatFromJSON(input)
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON(empty labels) = %q, want empty", got)
+	}
+}
+
+func TestExtractPolecatFromJSON_TruncatedJSON(t *testing.T) {
+	// Simulates truncated output that the old string-slicing code could panic on
+	got := extractPolecatFromJSON(`[{"labels":["polecat:`)
+	if got != "" {
+		t.Errorf("extractPolecatFromJSON(truncated) = %q, want empty", got)
+	}
+}

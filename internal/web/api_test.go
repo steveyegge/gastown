@@ -494,6 +494,92 @@ func TestAPIHandler_IssueCreate_InvalidDescription(t *testing.T) {
 	}
 }
 
+// --- parseIssueShowOutput edge-case tests (issue #1228: panic-safe string indexing) ---
+
+func TestParseIssueShowOutput_EmptyOutput(t *testing.T) {
+	resp := parseIssueShowOutput("", "gt-123")
+	if resp.ID != "gt-123" {
+		t.Errorf("ID = %q, want %q", resp.ID, "gt-123")
+	}
+	if resp.Title != "" {
+		t.Errorf("Title = %q, want empty", resp.Title)
+	}
+}
+
+func TestParseIssueShowOutput_NoBracket(t *testing.T) {
+	// First line without bracket section — should not panic
+	input := "○ gt-abc · My title without status\nType: issue\nCreated: 2025-01-01"
+	resp := parseIssueShowOutput(input, "gt-abc")
+	if resp.Type != "issue" {
+		t.Errorf("Type = %q, want %q", resp.Type, "issue")
+	}
+	if resp.Created != "2025-01-01" {
+		t.Errorf("Created = %q, want %q", resp.Created, "2025-01-01")
+	}
+}
+
+func TestParseIssueShowOutput_NoDotSeparator(t *testing.T) {
+	// Created line without "·" separator — should not panic on parts[0]
+	input := "○ gt-abc · My title   [● P2 · OPEN]\nCreated: 2025-01-01"
+	resp := parseIssueShowOutput(input, "gt-abc")
+	if resp.Created != "2025-01-01" {
+		t.Errorf("Created = %q, want %q", resp.Created, "2025-01-01")
+	}
+	if resp.Updated != "" {
+		t.Errorf("Updated = %q, want empty", resp.Updated)
+	}
+}
+
+func TestParseIssueShowOutput_CreatedAndUpdated(t *testing.T) {
+	// No space around "·" here so TrimPrefix strips "Updated:" cleanly.
+	// Real bd output may have spaces around "·", but this test validates
+	// the bounds-check safety of the split, not the TrimPrefix edge case.
+	input := "○ gt-abc · My title   [● P2 · OPEN]\nCreated: 2025-01-01·Updated: 2025-06-15"
+	resp := parseIssueShowOutput(input, "gt-abc")
+	if resp.Created != "2025-01-01" {
+		t.Errorf("Created = %q, want %q", resp.Created, "2025-01-01")
+	}
+	if resp.Updated != "2025-06-15" {
+		t.Errorf("Updated = %q, want %q", resp.Updated, "2025-06-15")
+	}
+}
+
+func TestParseIssueShowOutput_TitleAndStatus(t *testing.T) {
+	input := "○ gt-abc · Deploy widget   [● P1 · IN PROGRESS]\nType: convoy"
+	resp := parseIssueShowOutput(input, "gt-abc")
+	if resp.Title != "Deploy widget" {
+		t.Errorf("Title = %q, want %q", resp.Title, "Deploy widget")
+	}
+	if resp.Priority != "P1" {
+		t.Errorf("Priority = %q, want %q", resp.Priority, "P1")
+	}
+	if resp.Status != "IN PROGRESS" {
+		t.Errorf("Status = %q, want %q", resp.Status, "IN PROGRESS")
+	}
+}
+
+func TestParseMailInboxText_EmptyOutput(t *testing.T) {
+	msgs := parseMailInboxText("")
+	if len(msgs) != 0 {
+		t.Errorf("got %d messages from empty output, want 0", len(msgs))
+	}
+}
+
+func TestParseMailInboxText_UnreadMarker(t *testing.T) {
+	// Verifies the TrimPrefix fix for "●" marker — should not panic
+	input := "📬 Inbox:\n1. ● Test subject\n      msg-1 from alice\n      2025-01-01"
+	msgs := parseMailInboxText(input)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Subject != "Test subject" {
+		t.Errorf("Subject = %q, want %q", msgs[0].Subject, "Test subject")
+	}
+	if msgs[0].Read {
+		t.Error("expected unread message")
+	}
+}
+
 func TestAPIHandler_IssueCreate_InvalidJSON(t *testing.T) {
 	handler := NewAPIHandler()
 
