@@ -286,3 +286,20 @@ func listCrewWorkers(townRoot, rigName string) []string {
 	}
 	return workers
 }
+
+// listPolecats returns the names of polecat directories in a rig.
+func listPolecats(townRoot, rigName string) []string {
+	polecatDir := filepath.Join(townRoot, rigName, "polecats")
+	entries, err := os.ReadDir(polecatDir)
+	if err != nil {
+		return nil // No polecats directory or can't read it
+	}
+
+	var polecats []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			polecats = append(polecats, entry.Name())
+		}
+	}
+	return polecats
+}

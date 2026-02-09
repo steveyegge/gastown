@@ -57,13 +57,19 @@ func UnmarshalSettings(data []byte) (*SettingsJSON, error) {
 
 	// Extract known fields
 	if raw, ok := s.Extra["editorMode"]; ok {
-		json.Unmarshal(raw, &s.EditorMode)
+		if err := json.Unmarshal(raw, &s.EditorMode); err != nil {
+			return nil, fmt.Errorf("unmarshaling editorMode: %w", err)
+		}
 	}
 	if raw, ok := s.Extra["enabledPlugins"]; ok {
-		json.Unmarshal(raw, &s.EnabledPlugins)
+		if err := json.Unmarshal(raw, &s.EnabledPlugins); err != nil {
+			return nil, fmt.Errorf("unmarshaling enabledPlugins: %w", err)
+		}
 	}
 	if raw, ok := s.Extra["hooks"]; ok {
-		json.Unmarshal(raw, &s.Hooks)
+		if err := json.Unmarshal(raw, &s.Hooks); err != nil {
+			return nil, fmt.Errorf("unmarshaling hooks: %w", err)
+		}
 	}
 
 	return s, nil
@@ -147,66 +153,11 @@ func (t Target) DisplayKey() string {
 //
 // Hook types not present in the override are preserved from the base.
 func Merge(base, override *HooksConfig) *HooksConfig {
-	result := copyConfig(base)
-
-	for _, eventType := range EventTypes {
-		overrideEntries := override.GetEntries(eventType)
-		if len(overrideEntries) == 0 {
-			continue
-		}
-
-		baseEntries := result.GetEntries(eventType)
-		if baseEntries == nil {
-			baseEntries = []HookEntry{}
-		}
-
-		for _, oe := range overrideEntries {
-			replaced := false
-			for i, be := range baseEntries {
-				if be.Matcher == oe.Matcher {
-					replaced = true
-					if len(oe.Hooks) == 0 {
-						// Explicit disable: remove this entry
-						baseEntries = append(baseEntries[:i], baseEntries[i+1:]...)
-					} else {
-						baseEntries[i] = oe
-					}
-					break
-				}
-			}
-			if !replaced && len(oe.Hooks) > 0 {
-				baseEntries = append(baseEntries, oe)
-			}
-		}
-
-		result.SetEntries(eventType, baseEntries)
+	if base == nil {
+		base = &HooksConfig{}
 	}
-
-	return result
-}
-
-// copyConfig creates a deep copy of a HooksConfig.
-func copyConfig(c *HooksConfig) *HooksConfig {
-	if c == nil {
-		return &HooksConfig{}
-	}
-	result := &HooksConfig{}
-	for _, eventType := range EventTypes {
-		entries := c.GetEntries(eventType)
-		if entries == nil {
-			continue
-		}
-		copied := make([]HookEntry, len(entries))
-		for i, e := range entries {
-			copied[i] = HookEntry{
-				Matcher: e.Matcher,
-				Hooks:   make([]Hook, len(e.Hooks)),
-			}
-			copy(copied[i].Hooks, e.Hooks)
-		}
-		result.SetEntries(eventType, copied)
-	}
-	return result
+	result := cloneConfig(base)
+	return applyOverride(result, override)
 }
 
 // ComputeExpected computes the expected HooksConfig for a target by loading
@@ -517,13 +468,36 @@ func DefaultBase() *HooksConfig {
 	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
 
 	return &HooksConfig{
+		PreToolUse: []HookEntry{
+			{
+				Matcher: "Bash(gh pr create*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git checkout -b*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git switch -c*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+		},
 		SessionStart: []HookEntry{
 			{
 				Matcher: "",
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt prime --hook && gt nudge deacon session-started", pathSetup),
+						Command: fmt.Sprintf("%s && gt prime --hook", pathSetup),
 					},
 				},
 			},

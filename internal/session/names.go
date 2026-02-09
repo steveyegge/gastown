@@ -43,6 +43,12 @@ func PolecatSessionName(rig, name string) string {
 	return fmt.Sprintf("%s%s-%s", Prefix, rig, name)
 }
 
+// OverseerSessionName returns the session name for the human operator.
+// The overseer is the human who controls Gas Town, not an AI agent.
+func OverseerSessionName() string {
+	return HQPrefix + "overseer"
+}
+
 // BootSessionName returns the session name for the Boot watchdog.
 // Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
 // matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"

@@ -212,9 +212,21 @@ func (m *Message) IsClaimed() bool {
 	return m.ClaimedBy != ""
 }
 
-// Validate checks that the message has a valid routing configuration.
-// Returns an error if to, queue, and channel are not mutually exclusive.
+// Validate checks that the message has valid required fields and routing configuration.
+// Returns an error if required fields are missing or routing targets are not mutually exclusive.
 func (m *Message) Validate() error {
+	// Required fields
+	if m.ID == "" {
+		return fmt.Errorf("message must have an ID")
+	}
+	if m.From == "" {
+		return fmt.Errorf("message must have a From address")
+	}
+	if m.Subject == "" {
+		return fmt.Errorf("message must have a Subject")
+	}
+
+	// Routing: exactly one of To, Queue, or Channel
 	count := 0
 	if m.To != "" {
 		count++
@@ -293,7 +305,18 @@ type BeadsMessage struct {
 }
 
 // ParseLabels extracts metadata from the labels array.
+// Safe to call multiple times - resets parsed state before re-parsing.
 func (bm *BeadsMessage) ParseLabels() {
+	bm.sender = ""
+	bm.threadID = ""
+	bm.replyTo = ""
+	bm.msgType = ""
+	bm.cc = nil
+	bm.queue = ""
+	bm.channel = ""
+	bm.claimedBy = ""
+	bm.claimedAt = nil
+
 	for _, label := range bm.Labels {
 		if strings.HasPrefix(label, "from:") {
 			bm.sender = strings.TrimPrefix(label, "from:")

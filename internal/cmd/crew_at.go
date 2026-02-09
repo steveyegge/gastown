@@ -105,7 +105,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	runtimeConfig := config.LoadRuntimeConfig(r.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
 	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)

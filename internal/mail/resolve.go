@@ -51,10 +51,15 @@ func NewResolver(b *beads.Beads, townRoot string) *Resolver {
 // 3. Starts with explicit prefix → use that type (group:, queue:, channel:)
 // 4. Otherwise → lookup by name: group → queue → channel
 func (r *Resolver) Resolve(address string) ([]Recipient, error) {
+	return r.resolveWithVisited(address, make(map[string]bool))
+}
+
+// resolveWithVisited resolves an address while threading cycle detection state.
+func (r *Resolver) resolveWithVisited(address string, visited map[string]bool) ([]Recipient, error) {
 	// 1. Explicit prefix takes precedence
 	if strings.HasPrefix(address, "group:") {
 		name := strings.TrimPrefix(address, "group:")
-		return r.resolveBeadsGroup(name)
+		return r.resolveBeadsGroupWithVisited(name, visited)
 	}
 	if strings.HasPrefix(address, "queue:") {
 		name := strings.TrimPrefix(address, "queue:")
@@ -78,11 +83,11 @@ func (r *Resolver) Resolve(address string) ([]Recipient, error) {
 
 	// 3. Starts with '@' → special pattern
 	if strings.HasPrefix(address, "@") {
-		return r.resolveAtPattern(address)
+		return r.resolveAtPatternWithVisited(address, visited)
 	}
 
 	// 4. Name lookup: group → queue → channel
-	return r.resolveByName(address)
+	return r.resolveByNameWithVisited(address, visited)
 }
 
 // resolveAgentAddress handles addresses containing '/'.
@@ -135,6 +140,11 @@ func (r *Resolver) resolvePattern(pattern string) ([]Recipient, error) {
 // resolveAtPattern handles @-prefixed patterns.
 // These include @town, @crew, @rig/X, @role/X, @overseer.
 func (r *Resolver) resolveAtPattern(address string) ([]Recipient, error) {
+	return r.resolveAtPatternWithVisited(address, make(map[string]bool))
+}
+
+// resolveAtPatternWithVisited handles @-prefixed patterns with cycle detection.
+func (r *Resolver) resolveAtPatternWithVisited(address string, visited map[string]bool) ([]Recipient, error) {
 	// First check if this is a beads-native group (if beads available)
 	if r.beads != nil {
 		groupName := strings.TrimPrefix(address, "@")
@@ -144,7 +154,7 @@ func (r *Resolver) resolveAtPattern(address string) ([]Recipient, error) {
 		}
 		if issue != nil && fields != nil {
 			// Found a beads-native group - expand its members
-			return r.expandGroupMembers(fields)
+			return r.expandGroupMembersWithVisited(fields, visited)
 		}
 	}
 
@@ -156,6 +166,11 @@ func (r *Resolver) resolveAtPattern(address string) ([]Recipient, error) {
 // resolveByName looks up a name as group → queue → channel.
 // Returns error if name conflicts exist without explicit prefix.
 func (r *Resolver) resolveByName(name string) ([]Recipient, error) {
+	return r.resolveByNameWithVisited(name, make(map[string]bool))
+}
+
+// resolveByNameWithVisited looks up a name with cycle detection.
+func (r *Resolver) resolveByNameWithVisited(name string, visited map[string]bool) ([]Recipient, error) {
 	var foundGroup, foundQueue, foundChannel bool
 	var groupFields *beads.GroupFields
 
@@ -239,7 +254,7 @@ func (r *Resolver) resolveByName(name string) ([]Recipient, error) {
 
 	// Single match - resolve it
 	if foundGroup {
-		return r.expandGroupMembers(groupFields)
+		return r.expandGroupMembersWithVisited(groupFields, visited)
 	}
 	if foundQueue {
 		return r.resolveQueue(name)
@@ -249,6 +264,11 @@ func (r *Resolver) resolveByName(name string) ([]Recipient, error) {
 
 // resolveBeadsGroup resolves a beads-native group by name.
 func (r *Resolver) resolveBeadsGroup(name string) ([]Recipient, error) {
+	return r.resolveBeadsGroupWithVisited(name, make(map[string]bool))
+}
+
+// resolveBeadsGroupWithVisited resolves a beads-native group with cycle detection.
+func (r *Resolver) resolveBeadsGroupWithVisited(name string, visited map[string]bool) ([]Recipient, error) {
 	if r.beads == nil {
 		return nil, fmt.Errorf("beads not available")
 	}
@@ -261,7 +281,7 @@ func (r *Resolver) resolveBeadsGroup(name string) ([]Recipient, error) {
 		return nil, fmt.Errorf("group not found: %s", name)
 	}
 
-	return r.expandGroupMembers(fields)
+	return r.expandGroupMembersWithVisited(fields, visited)
 }
 
 // expandGroupMembers expands a group's members to recipients.
@@ -318,8 +338,8 @@ func (r *Resolver) resolveMemberWithVisited(member string, visited map[string]bo
 		}
 	}
 
-	// Otherwise resolve normally
-	return r.Resolve(member)
+	// Otherwise resolve with the same visited map to maintain cycle detection
+	return r.resolveWithVisited(member, visited)
 }
 
 // resolveQueue returns a queue recipient.

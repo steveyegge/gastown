@@ -104,9 +104,10 @@ type HeartbeatConfig struct {
 
 // PatrolConfig represents a single patrol configuration.
 type PatrolConfig struct {
-	Enabled  bool   `json:"enabled"`            // whether this patrol is enabled
-	Interval string `json:"interval,omitempty"` // e.g., "5m"
-	Agent    string `json:"agent,omitempty"`    // agent that runs this patrol
+	Enabled  bool     `json:"enabled"`            // whether this patrol is enabled
+	Interval string   `json:"interval,omitempty"` // e.g., "5m"
+	Agent    string   `json:"agent,omitempty"`    // agent that runs this patrol
+	Rigs     []string `json:"rigs,omitempty"`     // rigs this patrol manages (empty = all)
 }
 
 // CurrentDaemonPatrolConfigVersion is the current schema version for DaemonPatrolConfig.
@@ -361,6 +362,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
+// For opencode, uses --prompt flag; for other agents, uses positional argument.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -375,7 +377,13 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// Quote the prompt for shell safety
+	// OpenCode requires --prompt flag for initial prompt in interactive mode.
+	// Positional argument causes opencode to exit immediately.
+	if resolved.Command == "opencode" {
+		return base + " --prompt " + quoteForShell(p)
+	}
+
+	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
 
@@ -399,6 +407,28 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		rc = &RuntimeConfig{}
+	}
+
+	// Shallow copy to avoid mutating the input
+	copy := *rc
+	rc = &copy
+
+	// Deep copy nested structs to avoid shared references
+	if rc.Session != nil {
+		s := *rc.Session
+		rc.Session = &s
+	}
+	if rc.Hooks != nil {
+		h := *rc.Hooks
+		rc.Hooks = &h
+	}
+	if rc.Tmux != nil {
+		t := *rc.Tmux
+		rc.Tmux = &t
+	}
+	if rc.Instructions != nil {
+		i := *rc.Instructions
+		rc.Instructions = &i
 	}
 
 	if rc.Provider == "" {

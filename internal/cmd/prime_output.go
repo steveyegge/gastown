@@ -4,6 +4,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -227,6 +228,21 @@ func outputUnknownContext(ctx RoleContext) {
 	fmt.Printf("Town root: %s\n", style.Dim.Render(ctx.TownRoot))
 }
 
+// outputContextFile reads and displays the CONTEXT.md file from the town root.
+// This provides a simple plugin point for operators to inject custom instructions
+// that all agents (including polecats) will see during priming.
+func outputContextFile(ctx RoleContext) {
+	contextPath := filepath.Join(ctx.TownRoot, "CONTEXT.md")
+	data, err := os.ReadFile(contextPath)
+	if err != nil {
+		explain(true, "CONTEXT.md: not found at "+contextPath)
+		return
+	}
+	explain(true, "CONTEXT.md: found at "+contextPath+", injecting contents")
+	fmt.Println()
+	fmt.Print(string(data))
+}
+
 // outputHandoffContent reads and displays the pinned handoff bead for the role.
 func outputHandoffContent(ctx RoleContext) {
 	if ctx.Role == RoleUnknown {
@@ -264,9 +280,10 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Mayor. Please:")
-		fmt.Println("1. Announce: \"Mayor, checking in.\"")
-		fmt.Println("2. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached work: `" + cli.Name() + " hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Mayor, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached work: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no mol → await user instruction")
 	case RoleWitness:
@@ -274,9 +291,10 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Witness. Please:")
-		fmt.Println("1. Announce: \"Witness, checking in.\"")
-		fmt.Println("2. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached patrol: `" + cli.Name() + " hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Witness, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-witness-patrol`")
 	case RolePolecat:
@@ -285,11 +303,12 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are a polecat with NO WORK on your hook.")
 		fmt.Println()
-		fmt.Println("1. Check if any mail was injected above in this output")
-		fmt.Println("2. If you have mail with work instructions → execute that work")
-		fmt.Println("3. If NO mail → run `" + cli.Name() + " done` IMMEDIATELY")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Check if any mail was injected above in this output")
+		fmt.Println("3. If you have mail with work instructions → execute that work")
+		fmt.Println("4. If NO mail → run `" + cli.Name() + " done` IMMEDIATELY")
 		fmt.Println()
-		fmt.Println("Polecats are ephemeral workers. No work on hook + no mail = terminate.")
+		fmt.Println("Polecat sessions are ephemeral. No work on hook + no mail = terminate.")
 		fmt.Println("DO NOT wait. DO NOT escalate. DO NOT send idle alerts.")
 		fmt.Println("Just run `" + cli.Name() + " done` and exit.")
 	case RoleRefinery:
@@ -297,9 +316,10 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Refinery. Please:")
-		fmt.Println("1. Announce: \"Refinery, checking in.\"")
-		fmt.Println("2. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached patrol: `" + cli.Name() + " hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Refinery, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-refinery-patrol`")
 	case RoleCrew:
@@ -307,10 +327,11 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are a crew worker. Please:")
-		fmt.Printf("1. Announce: \"%s Crew %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
-		fmt.Println("2. Check mail: `" + cli.Name() + " mail inbox`")
-		fmt.Println("3. If there's a 🤝 HANDOFF message, read it and continue the work")
-		fmt.Println("4. Check for attached work: `" + cli.Name() + " hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Printf("2. Announce: \"%s Crew %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox`")
+		fmt.Println("4. If there's a 🤝 HANDOFF message, read it and continue the work")
+		fmt.Println("5. Check for attached work: `" + cli.Name() + " hook`")
 		fmt.Println("   - If attachment found → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no attachment → await user instruction")
 	case RoleDeacon:
@@ -323,10 +344,11 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Deacon. Please:")
-		fmt.Println("1. Announce: \"Deacon, checking in.\"")
-		fmt.Println("2. Signal awake: `" + cli.Name() + " deacon heartbeat \"starting patrol\"`")
-		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Deacon, checking in.\"")
+		fmt.Println("3. Signal awake: `" + cli.Name() + " deacon heartbeat \"starting patrol\"`")
+		fmt.Println("4. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("5. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-deacon-patrol`")
 	}

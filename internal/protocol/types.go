@@ -54,7 +54,8 @@ func ParseMessageType(subject string) MessageType {
 	}
 
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(subject, string(prefix)) {
+		p := string(prefix)
+		if subject == p || strings.HasPrefix(subject, p+" ") {
 			return prefix
 		}
 	}

@@ -23,10 +23,12 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 9
+version = 10
 
 [vars]
-wisp_type = "patrol"
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
 
 [[steps]]
 id = "inbox-check"
@@ -722,9 +724,44 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "wisp-compact"
+title = "Compact expired wisps"
+needs = ["session-gc"]
+description = """
+Run TTL-based wisp compaction to manage storage growth.
+
+**Step 1: Preview compaction scope**
+```bash
+gt compact --dry-run --json
+```
+
+Parse the JSON output:
+- If promoted + deleted == 0, skip (nothing to compact)
+- If errors present, log and continue
+
+**Step 2: Execute compaction (if needed)**
+```bash
+gt compact --verbose
+```
+
+This runs the compaction algorithm:
+- Closed wisps past TTL → deleted (Dolt AS OF preserves history)
+- Non-closed wisps past TTL → promoted (stuck detection)
+- Wisps with comments/references/keep labels → promoted (proven value)
+
+**Step 3: Log results**
+Note promoted/deleted/skipped counts for the patrol digest.
+
+**Performance:**
+Compaction runs every patrol cycle. The query is fast (single bd list + filter).
+If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
+
+**Exit criteria:** Wisps compacted (or nothing to compact)."""
+
+[[steps]]
 id = "costs-digest"
 title = "Aggregate daily costs [DISABLED]"
-needs = ["session-gc"]
+needs = ["wisp-compact"]
 description = """
 **⚠️ DISABLED** - Skip this step entirely.
 

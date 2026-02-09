@@ -161,18 +161,17 @@ func (m *Manager) auditWorkerGit(worker string) GitAuditResult {
 }
 
 // isBeadsOnlyChanges checks if all changes are in .beads/ directory.
+// Parses git status --porcelain output where format is "XY filename" (X=index, Y=worktree, col2=space).
+// Working-tree-only changes have a leading space (e.g., " M .beads/foo"), so TrimSpace must not be used.
 func isBeadsOnlyChanges(statusOutput string) bool {
 	for _, line := range strings.Split(statusOutput, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		if len(line) < 4 {
 			continue
 		}
-		// Status format: XY filename
-		if len(line) > 3 {
-			filename := strings.TrimSpace(line[3:])
-			if !strings.HasPrefix(filename, ".beads/") {
-				return false
-			}
+		// Porcelain format: columns 0-1 are XY status, column 2 is space, filename starts at column 3
+		filename := line[3:]
+		if !strings.HasPrefix(filename, ".beads/") {
+			return false
 		}
 	}
 	return true

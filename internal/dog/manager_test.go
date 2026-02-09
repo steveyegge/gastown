@@ -1,6 +1,7 @@
 package dog
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -100,5 +101,72 @@ func TestStateConstants(t *testing.T) {
 		if string(tc.state) != tc.expected {
 			t.Errorf("expected %q, got %q", tc.expected, string(tc.state))
 		}
+	}
+}
+
+// TestValidateDogName verifies name validation rejects dangerous names.
+func TestValidateDogName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"alpha", false},
+		{"dog-1", false},
+		{"my_dog", false},
+		{"", true},
+		{"/", true},
+		{"foo/bar", true},
+		{"foo\\bar", true},
+		{"..", true},
+		{".", true},
+		{"../../etc", true},
+		{"a..b", true},
+	}
+
+	for _, tc := range tests {
+		err := validateDogName(tc.name)
+		if tc.wantErr && err == nil {
+			t.Errorf("validateDogName(%q): expected error, got nil", tc.name)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("validateDogName(%q): unexpected error: %v", tc.name, err)
+		}
+		if tc.wantErr && err != nil && !errors.Is(err, ErrInvalidName) {
+			t.Errorf("validateDogName(%q): expected ErrInvalidName, got %v", tc.name, err)
+		}
+	}
+}
+
+// TestRemoveEmptyName verifies Remove("") returns ErrInvalidName, not ErrDogNotFound.
+func TestRemoveEmptyName(t *testing.T) {
+	rigsConfig := &config.RigsConfig{
+		Version: 1,
+		Rigs:    map[string]config.RigEntry{},
+	}
+	m := NewManager(t.TempDir(), rigsConfig)
+
+	err := m.Remove("")
+	if err == nil {
+		t.Fatal("Remove('') should return an error")
+	}
+	if !errors.Is(err, ErrInvalidName) {
+		t.Errorf("Remove(''): expected ErrInvalidName, got %v", err)
+	}
+}
+
+// TestAddTraversalName verifies Add rejects path traversal names.
+func TestAddTraversalName(t *testing.T) {
+	rigsConfig := &config.RigsConfig{
+		Version: 1,
+		Rigs:    map[string]config.RigEntry{},
+	}
+	m := NewManager(t.TempDir(), rigsConfig)
+
+	_, err := m.Add("../../etc")
+	if err == nil {
+		t.Fatal("Add('../../etc') should return an error")
+	}
+	if !errors.Is(err, ErrInvalidName) {
+		t.Errorf("Add('../../etc'): expected ErrInvalidName, got %v", err)
 	}
 }

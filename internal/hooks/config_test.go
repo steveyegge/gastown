@@ -4,12 +4,23 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
+// setTestHome sets HOME (and USERPROFILE on Windows) so that
+// os.UserHomeDir() returns tmpDir on all platforms.
+func setTestHome(t *testing.T, tmpDir string) {
+	t.Helper()
+	t.Setenv("HOME", tmpDir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmpDir)
+	}
+}
+
 func TestLoadSaveBase(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	cfg := DefaultBase()
 
@@ -42,7 +53,7 @@ func TestLoadSaveBase(t *testing.T) {
 
 func TestLoadSaveOverride(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	cfg := &HooksConfig{
 		PreToolUse: []HookEntry{
@@ -72,7 +83,7 @@ func TestLoadSaveOverride(t *testing.T) {
 
 func TestLoadSaveOverrideRigRole(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	cfg := &HooksConfig{
 		SessionStart: []HookEntry{
@@ -101,7 +112,7 @@ func TestLoadSaveOverrideRigRole(t *testing.T) {
 
 func TestLoadMissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	_, err := LoadBase()
 	if err == nil {
@@ -337,7 +348,7 @@ func TestMergeEmptyOverride(t *testing.T) {
 
 func TestComputeExpected(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	base := &HooksConfig{
 		SessionStart: []HookEntry{
@@ -381,7 +392,7 @@ func TestComputeExpected(t *testing.T) {
 
 func TestComputeExpectedNoBase(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	expected, err := ComputeExpected("mayor")
 	if err != nil {

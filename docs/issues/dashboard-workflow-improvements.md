@@ -9,10 +9,10 @@ The current dashboard doesn't fully reflect the key Gas Town workflows described
 ## Phase 1: Crew vs Polecat Distinction (High Priority)
 
 ### Problem
-The dashboard shows a unified "Workers" panel that combines **Crew** (named, long-lived design workers) and **Polecats** (ephemeral swarm workers). The article emphasizes these are fundamentally different:
+The dashboard shows a unified "Workers" panel that combines **Crew** (named, long-lived design workers) and **Polecats** (batch workers with persistent identity). The article emphasizes these are fundamentally different:
 
 - **Crew**: "Personal concierges" for thought-intensive work, design, PR review, implementation plans
-- **Polecats**: Ephemeral workers for well-defined, spec'd-out bulk work
+- **Polecats**: Batch workers for well-defined, spec'd-out bulk work (persistent identity, ephemeral sessions)
 
 ### Solution
 
@@ -33,7 +33,7 @@ The dashboard shows a unified "Workers" panel that combines **Crew** (named, lon
 **Polecats Panel** (`🦨 Polecats`)
 - Keep current polecat display
 - Add convoy association
-- Show ephemeral nature (auto-destruct after MR)
+- Show session lifecycle (session ends after MR, identity persists)
 
 #### 1.2 API Changes
 - Add `/api/crew` endpoint returning crew status per rig

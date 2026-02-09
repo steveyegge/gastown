@@ -143,6 +143,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		}
 	}
 
+	// Sync remotes from mayor/rig so crew clone matches the rig's remote config.
+	// This prevents origin pointing to upstream instead of the fork.
+	if err := m.syncRemotesFromRig(crewPath); err != nil {
+		fmt.Printf("Warning: could not sync remotes from rig: %v\n", err)
+	}
+
 	crewGit := git.NewGit(crewPath)
 	branchName := m.rig.DefaultBranch()
 
@@ -221,6 +227,51 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	return crew, nil
 }
 
+// syncRemotesFromRig copies remote configuration from the mayor/rig repo to a crew clone.
+// This ensures crew clones have the same origin (fork) and upstream as the rig,
+// preventing repo ID mismatches and broken formula slinging.
+func (m *Manager) syncRemotesFromRig(crewPath string) error {
+	rigRepoPath := filepath.Join(m.rig.Path, "mayor", "rig")
+	if _, err := os.Stat(rigRepoPath); err != nil {
+		return fmt.Errorf("mayor/rig not found at %s", rigRepoPath)
+	}
+
+	rigGit := git.NewGit(rigRepoPath)
+	crewGit := git.NewGit(crewPath)
+
+	remotes, err := rigGit.Remotes()
+	if err != nil {
+		return fmt.Errorf("reading rig remotes: %w", err)
+	}
+
+	for _, remote := range remotes {
+		if remote == "" || remote == "mayor" {
+			continue // Skip empty and local-only remotes
+		}
+
+		url, err := rigGit.RemoteURL(remote)
+		if err != nil {
+			continue
+		}
+
+		// Check if remote exists in crew clone
+		existingURL, existErr := crewGit.RemoteURL(remote)
+		if existErr != nil {
+			// Remote doesn't exist — add it
+			if _, addErr := crewGit.AddRemote(remote, url); addErr != nil {
+				fmt.Printf("Warning: could not add remote %s: %v\n", remote, addErr)
+			}
+		} else if existingURL != url {
+			// Remote exists but URL differs — update it
+			if _, setErr := crewGit.SetRemoteURL(remote, url); setErr != nil {
+				fmt.Printf("Warning: could not update remote %s: %v\n", remote, setErr)
+			}
+		}
+	}
+
+	return nil
+}
+
 // Remove deletes a crew worker.
 func (m *Manager) Remove(name string, force bool) error {
 	if err := validateCrewName(name); err != nil {
@@ -262,7 +313,7 @@ func (m *Manager) List() ([]*CrewWorker, error) {
 
 	var workers []*CrewWorker
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
@@ -335,6 +386,9 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 
 // Rename renames a crew worker from oldName to newName.
 func (m *Manager) Rename(oldName, newName string) error {
+	if err := validateCrewName(newName); err != nil {
+		return err
+	}
 	if !m.exists(oldName) {
 		return ErrCrewNotFound
 	}
@@ -529,6 +583,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
+	}
+
+	// Persist agent override in tmux session env so handoff can read it back.
+	// The startup command sets GT_AGENT via exec env, but that only lives in the
+	// process tree. The tmux session env survives respawn-pane and is queryable.
+	if opts.AgentOverride != "" {
+		_ = t.SetEnvironment(sessionID, "GT_AGENT", opts.AgentOverride)
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)

@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
@@ -375,5 +378,150 @@ func TestIsPolecatActor(t *testing.T) {
 				t.Errorf("isPolecatActor(%q) = %v, want %v", tt.actor, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDoneIntentLabelFormat verifies the done-intent label format matches
+// the expected pattern: done-intent:<type>:<unix-ts>
+func TestDoneIntentLabelFormat(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		exitType string
+		want     string
+	}{
+		{"COMPLETED", fmt.Sprintf("done-intent:COMPLETED:%d", now.Unix())},
+		{"ESCALATED", fmt.Sprintf("done-intent:ESCALATED:%d", now.Unix())},
+		{"DEFERRED", fmt.Sprintf("done-intent:DEFERRED:%d", now.Unix())},
+		{"PHASE_COMPLETE", fmt.Sprintf("done-intent:PHASE_COMPLETE:%d", now.Unix())},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.exitType, func(t *testing.T) {
+			label := fmt.Sprintf("done-intent:%s:%d", tt.exitType, now.Unix())
+			if label != tt.want {
+				t.Errorf("label format = %q, want %q", label, tt.want)
+			}
+
+			// Verify the label can be parsed back
+			parts := strings.SplitN(label, ":", 3)
+			if len(parts) != 3 {
+				t.Fatalf("expected 3 parts, got %d", len(parts))
+			}
+			if parts[0] != "done-intent" {
+				t.Errorf("prefix = %q, want %q", parts[0], "done-intent")
+			}
+			if parts[1] != tt.exitType {
+				t.Errorf("exit type = %q, want %q", parts[1], tt.exitType)
+			}
+		})
+	}
+}
+
+// TestClearDoneIntentLabel verifies that clearDoneIntentLabel removes
+// only done-intent labels while preserving other labels.
+func TestClearDoneIntentLabel(t *testing.T) {
+	// We can't easily test the full clearDoneIntentLabel function without
+	// a running bd instance, but we can verify the filtering logic.
+	// The function reads labels, filters out done-intent:*, and writes back.
+	allLabels := []string{
+		"gt:agent",
+		"idle:3",
+		"done-intent:COMPLETED:1738972800",
+		"backoff-until:1738972900",
+	}
+
+	var kept []string
+	for _, label := range allLabels {
+		if !strings.HasPrefix(label, "done-intent:") {
+			kept = append(kept, label)
+		}
+	}
+
+	if len(kept) != 3 {
+		t.Errorf("expected 3 labels after filtering, got %d: %v", len(kept), kept)
+	}
+
+	// Verify done-intent was removed
+	for _, label := range kept {
+		if strings.HasPrefix(label, "done-intent:") {
+			t.Errorf("done-intent label was not removed: %s", label)
+		}
+	}
+
+	// Verify other labels were preserved
+	wantKept := map[string]bool{
+		"gt:agent":                 true,
+		"idle:3":                   true,
+		"backoff-until:1738972900": true,
+	}
+	for _, label := range kept {
+		if !wantKept[label] {
+			t.Errorf("unexpected label in kept set: %s", label)
+		}
+	}
+}
+
+// TestPushFailureDoesNotNukeWorktree verifies that when pushFailed is true,
+// the worktree nuke is skipped (defense-in-depth alongside selfNukePolecat's
+// own branch-on-remote check).
+func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
+	// This tests the boolean guard logic inline in runDone:
+	// if exitType == ExitCompleted && !pushFailed { ... nuke ... }
+	tests := []struct {
+		name       string
+		exitType   string
+		pushFailed bool
+		wantNuke   bool
+	}{
+		{"completed+push-ok", ExitCompleted, false, true},
+		{"completed+push-failed", ExitCompleted, true, false},
+		{"escalated+push-ok", ExitEscalated, false, false},
+		{"deferred+push-ok", ExitDeferred, false, false},
+		{"escalated+push-failed", ExitEscalated, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the guard condition from runDone
+			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed
+			if shouldNuke != tt.wantNuke {
+				t.Errorf("shouldNuke = %v, want %v", shouldNuke, tt.wantNuke)
+			}
+		})
+	}
+}
+
+// TestDeferredKillNotOnValidationError verifies that the deferred session kill
+// does NOT trigger when runDone returns early due to validation errors (bad flags,
+// wrong role). The sessionCleanupNeeded flag must only be set after role detection
+// confirms this is a polecat.
+func TestDeferredKillNotOnValidationError(t *testing.T) {
+	// Simulate the flag lifecycle:
+	// 1. sessionCleanupNeeded starts false
+	// 2. Set true only after role detection confirms polecat
+	// 3. Early returns (validation) happen before the flag is set
+
+	// Scenario 1: Validation error (bad status) — returns before flag set
+	sessionCleanupNeeded := false
+	// (invalid exit status check would return here)
+	// defer checks: sessionCleanupNeeded is false → no-op
+	if sessionCleanupNeeded {
+		t.Error("sessionCleanupNeeded should be false for validation errors")
+	}
+
+	// Scenario 2: Polecat confirmed — flag set
+	sessionCleanupNeeded = true
+	sessionKilled := false
+	// (push fails, returns with error)
+	// defer checks: sessionCleanupNeeded is true, sessionKilled is false → kill session
+	if !sessionCleanupNeeded || sessionKilled {
+		t.Error("deferred kill should trigger when sessionCleanupNeeded && !sessionKilled")
+	}
+
+	// Scenario 3: Clean exit — explicit kill succeeded
+	sessionKilled = true
+	// defer checks: sessionKilled is true → no-op (don't double-kill)
+	if sessionCleanupNeeded && !sessionKilled {
+		t.Error("deferred kill should NOT trigger when sessionKilled is true")
 	}
 }

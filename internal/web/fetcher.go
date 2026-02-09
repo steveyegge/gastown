@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,7 +116,11 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		}
 
 		// Get tracked issues for progress and activity calculation
-		tracked := f.getTrackedIssues(c.ID)
+		tracked, err := f.getTrackedIssues(c.ID)
+		if err != nil {
+			log.Printf("warning: skipping convoy %s: %v", c.ID, err)
+			continue
+		}
 		row.Total = len(tracked)
 
 		var mostRecentActivity time.Time
@@ -200,25 +205,38 @@ type trackedIssueInfo struct {
 	UpdatedAt    time.Time // Fallback for activity when no assignee
 }
 
+// extractIssueID strips the external:prefix:id wrapper from bead IDs.
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
+// but consumers need the raw bead ID for bd show lookups.
+func extractIssueID(id string) string {
+	if strings.HasPrefix(id, "external:") {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return id
+}
+
 // getTrackedIssues fetches tracked issues for a convoy.
-func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo {
+func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) ([]trackedIssueInfo, error) {
 	// Query tracked dependencies using bd dep list
 	stdout, err := runBdCmd(f.townRoot, "dep", "list", convoyID, "-t", "tracks", "--json")
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
 	}
 
 	var deps []struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
-		return nil
+		return nil, fmt.Errorf("parsing tracked issues for %s: %w", convoyID, err)
 	}
 
-	// Collect resolved issue IDs
+	// Collect resolved issue IDs, unwrapping external:prefix:id format
 	issueIDs := make([]string, 0, len(deps))
 	for _, dep := range deps {
-		issueIDs = append(issueIDs, dep.ID)
+		issueIDs = append(issueIDs, extractIssueID(dep.ID))
 	}
 
 	// Batch fetch issue details
@@ -249,7 +267,7 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 		result = append(result, info)
 	}
 
-	return result
+	return result, nil
 }
 
 // issueDetail holds basic issue info.
@@ -869,17 +887,15 @@ func truncateStatusHint(line string) string {
 }
 
 // parsePolecatSessionName parses a tmux session name into rig and polecat components.
-// Format: gt-<rig>-<polecat> -> (rig, polecat, true)
-// Returns ("", "", false) if the format is invalid.
+// Delegates to session.ParseSessionName for consistent parsing of hyphenated
+// rig names (e.g., gt-my-rig-Toast correctly yields rig="my-rig", name="Toast").
+// Returns ("", "", false) if the format is invalid or not a polecat/crew/witness/refinery.
 func parsePolecatSessionName(sessionName string) (rig, polecat string, ok bool) {
-	if !strings.HasPrefix(sessionName, "gt-") {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
 		return "", "", false
 	}
-	parts := strings.SplitN(sessionName, "-", 3)
-	if len(parts) != 3 {
-		return "", "", false
-	}
-	return parts[1], parts[2], true
+	return identity.Rig, identity.Name, true
 }
 
 // isWorkerSession returns true if the polecat name represents a worker session.

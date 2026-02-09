@@ -251,33 +251,43 @@ default = "gc_report"
 [vars.mode]
 description = "GC mode: 'conservative' or 'aggressive'"
 default = "conservative"
-[vars.timestamp]
-description = "GC run timestamp"
-default = ""
-[vars.type]
-description = "Item type in report template"
-default = ""
-[vars.identifier]
-description = "Item identifier in report template"
-default = ""
+
 [vars.age]
-description = "Item age in report template"
+description = "Age of item being cleaned (computed during execution)"
 default = ""
-[vars.reason]
-description = "Cleanup reason in report template"
-default = ""
-[vars.item]
-description = "Error item in report template"
-default = ""
-[vars.error]
-description = "Error message in report template"
-default = ""
+
 [vars.bytes_freed]
-description = "Space recovered in bytes"
+description = "Approximate bytes recovered (computed during execution)"
 default = ""
-[vars.total_cleaned]
-description = "Total items cleaned"
+
+[vars.error]
+description = "Error message for a failed cleanup (computed during execution)"
 default = ""
+
+[vars.identifier]
+description = "Identifier of item being cleaned (computed during execution)"
+default = ""
+
+[vars.item]
+description = "Item that failed cleanup (computed during execution)"
+default = ""
+
+[vars.reason]
+description = "Reason for cleanup (computed during execution)"
+default = ""
+
 [vars.report]
-description = "Full GC report text"
+description = "Full GC report text (computed during execution)"
+default = ""
+
+[vars.timestamp]
+description = "Timestamp of the GC run (computed during execution)"
+default = ""
+
+[vars.total_cleaned]
+description = "Total number of items cleaned (computed during execution)"
+default = ""
+
+[vars.type]
+description = "Type of item being cleaned (computed during execution)"
 default = ""

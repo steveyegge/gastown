@@ -365,11 +365,11 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("✓ Removed dog %s\n", name)
 
-		// Delete agent bead for the dog
+		// Reset agent bead for the dog (preserves persistent identity)
 		if b != nil {
-			if err := b.DeleteDogAgentBead(name); err != nil {
+			if err := b.ResetDogAgentBead(name); err != nil {
 				// Non-fatal: warn but don't fail dog removal
-				fmt.Printf("  Warning: could not delete agent bead: %v\n", err)
+				fmt.Printf("  Warning: could not reset agent bead: %v\n", err)
 			}
 		}
 	}

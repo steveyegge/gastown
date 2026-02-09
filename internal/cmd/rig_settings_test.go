@@ -461,15 +461,80 @@ func TestRigSettingsSet(t *testing.T) {
 
 func TestRigSettingsUnset(t *testing.T) {
 	t.Run("unsets top-level keys", func(t *testing.T) {
-		t.Skip("Skipping due to bug in unsetNestedValue - keys are not properly removed. See issue for details.")
-		// TODO: Re-enable when unset bug is fixed
-		// Bug: unsetNestedValue deletes from map but struct field retains value after unmarshaling
+		townRoot, rigName := setupTestRigForSettings(t)
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// Create settings with agent set
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings := config.NewRigSettings()
+		settings.Agent = "claude"
+		if err := config.SaveRigSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Unset the agent key
+		cmd := rigSettingsUnsetCmd
+		err := runRigSettingsUnset(cmd, []string{rigName, "agent"})
+		if err != nil {
+			t.Fatalf("runRigSettingsUnset error: %v", err)
+		}
+
+		// Reload and verify agent is gone
+		loaded, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if loaded.Agent != "" {
+			t.Errorf("Agent should be empty after unset, got %q", loaded.Agent)
+		}
+
+		// Verify the key is absent from the raw JSON (not just zero-valued)
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatalf("read settings file: %v", err)
+		}
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("unmarshal raw JSON: %v", err)
+		}
+		if _, exists := raw["agent"]; exists {
+			t.Error("agent key should be absent from JSON after unset")
+		}
 	})
 
 	t.Run("unsets nested keys", func(t *testing.T) {
-		t.Skip("Skipping due to bug in unsetNestedValue - keys are not properly removed. See issue for details.")
-		// TODO: Re-enable when unset bug is fixed
-		// Bug: unsetNestedValue deletes from map but struct field retains value after unmarshaling
+		townRoot, rigName := setupTestRigForSettings(t)
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// Create settings with role_agents
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings := config.NewRigSettings()
+		settings.RoleAgents = map[string]string{
+			"witness":  "gemini",
+			"refinery": "claude-sonnet",
+		}
+		if err := config.SaveRigSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Unset just the witness key
+		cmd := rigSettingsUnsetCmd
+		err := runRigSettingsUnset(cmd, []string{rigName, "role_agents.witness"})
+		if err != nil {
+			t.Fatalf("runRigSettingsUnset error: %v", err)
+		}
+
+		// Reload and verify witness is gone but refinery remains
+		loaded, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if _, exists := loaded.RoleAgents["witness"]; exists {
+			t.Error("witness should be removed from role_agents after unset")
+		}
+		if loaded.RoleAgents["refinery"] != "claude-sonnet" {
+			t.Errorf("refinery should still be %q, got %q", "claude-sonnet", loaded.RoleAgents["refinery"])
+		}
 	})
 
 	t.Run("error case: key not found", func(t *testing.T) {

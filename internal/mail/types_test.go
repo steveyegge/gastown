@@ -467,6 +467,36 @@ func TestMessageValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "missing ID",
+			msg: &Message{
+				From:    "mayor/",
+				To:      "gastown/Toast",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "must have an ID",
+		},
+		{
+			name: "missing From",
+			msg: &Message{
+				ID:      "msg-001",
+				To:      "gastown/Toast",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "must have a From address",
+		},
+		{
+			name: "missing Subject",
+			msg: &Message{
+				ID:   "msg-001",
+				From: "mayor/",
+				To:   "gastown/Toast",
+			},
+			wantErr: true,
+			errMsg:  "must have a Subject",
+		},
+		{
 			name: "no routing target",
 			msg: &Message{
 				ID:      "msg-001",
@@ -710,5 +740,133 @@ func TestMessageIsClaimed(t *testing.T) {
 
 	if !claimed.IsClaimed() {
 		t.Error("Claimed message should be claimed")
+	}
+}
+
+func TestParseLabelsIdempotent(t *testing.T) {
+	bm := BeadsMessage{
+		ID:    "hq-test",
+		Title: "Test",
+		Labels: []string{
+			"from:mayor/",
+			"thread:t-001",
+			"reply-to:orig-001",
+			"msg-type:task",
+			"cc:gastown/Toast",
+			"cc:gastown/nux",
+			"queue:work-requests",
+			"channel:alerts",
+			"claimed-by:gastown/nux",
+		},
+	}
+
+	// Call ParseLabels multiple times
+	bm.ParseLabels()
+	bm.ParseLabels()
+	bm.ParseLabels()
+
+	// CC list should not accumulate duplicates
+	if len(bm.cc) != 2 {
+		t.Errorf("cc should have 2 entries after multiple ParseLabels calls, got %d: %v", len(bm.cc), bm.cc)
+	}
+
+	// Other fields should remain correct
+	if bm.sender != "mayor/" {
+		t.Errorf("sender = %q, want 'mayor/'", bm.sender)
+	}
+	if bm.threadID != "t-001" {
+		t.Errorf("threadID = %q, want 't-001'", bm.threadID)
+	}
+	if bm.replyTo != "orig-001" {
+		t.Errorf("replyTo = %q, want 'orig-001'", bm.replyTo)
+	}
+	if bm.msgType != "task" {
+		t.Errorf("msgType = %q, want 'task'", bm.msgType)
+	}
+	if bm.queue != "work-requests" {
+		t.Errorf("queue = %q, want 'work-requests'", bm.queue)
+	}
+	if bm.channel != "alerts" {
+		t.Errorf("channel = %q, want 'alerts'", bm.channel)
+	}
+	if bm.claimedBy != "gastown/nux" {
+		t.Errorf("claimedBy = %q, want 'gastown/nux'", bm.claimedBy)
+	}
+}
+
+func TestParseLabelsIdempotentViaPublicMethods(t *testing.T) {
+	bm := BeadsMessage{
+		ID:       "hq-test",
+		Title:    "Test",
+		Assignee: "gastown/Toast",
+		Labels: []string{
+			"from:mayor/",
+			"cc:gastown/nux",
+			"cc:gastown/slit",
+		},
+	}
+
+	// Simulate the bug: calling IsDirectMessage then ToMessage
+	// Both call ParseLabels internally
+	_ = bm.IsDirectMessage()
+	_ = bm.IsQueueMessage()
+	_ = bm.IsChannelMessage()
+	msg := bm.ToMessage()
+
+	if len(msg.CC) != 2 {
+		t.Errorf("CC should have 2 entries after multiple method calls, got %d: %v", len(msg.CC), msg.CC)
+	}
+}
+
+func TestNewMessageValidatesForCrossRigAddresses(t *testing.T) {
+	// Regression test: cross-rig addresses like "beads/crew/emma" must have
+	// auto-generated ID and pass validation (gt-rud3p).
+	crossRigAddresses := []string{
+		"beads/crew/emma",
+		"gastown/polecats/Toast",
+		"otherrig/witness",
+		"mayor/",
+	}
+
+	for _, addr := range crossRigAddresses {
+		t.Run(addr, func(t *testing.T) {
+			msg := NewMessage("gastown/dag", addr, "Test subject", "Test body")
+
+			if msg.ID == "" {
+				t.Error("NewMessage must generate a non-empty ID")
+			}
+			if msg.ThreadID == "" {
+				t.Error("NewMessage must generate a non-empty ThreadID")
+			}
+
+			if err := msg.Validate(); err != nil {
+				t.Errorf("NewMessage for %q should produce a valid message, got: %v", addr, err)
+			}
+		})
+	}
+}
+
+func TestNewMessageFanOutCopiesGetUniqueIDs(t *testing.T) {
+	// When fanning out to multiple recipients, copies with cleared IDs
+	// should get unique IDs from sendToSingle (gt-rud3p).
+	msg := NewMessage("gastown/dag", "beads/crew/emma", "Test", "Body")
+	originalID := msg.ID
+
+	if originalID == "" {
+		t.Fatal("original message must have an ID")
+	}
+
+	// Simulate fan-out: create a copy and clear its ID
+	msgCopy := *msg
+	msgCopy.To = "otherrig/crew/bob"
+	msgCopy.ID = ""
+
+	if msgCopy.ID == originalID {
+		t.Error("fan-out copy ID should be cleared, not match original")
+	}
+
+	// The cleared copy should fail validation (sendToSingle regenerates it)
+	if err := msgCopy.Validate(); err == nil {
+		t.Error("copy with empty ID should fail validation before sendToSingle regenerates it")
 	}
 }

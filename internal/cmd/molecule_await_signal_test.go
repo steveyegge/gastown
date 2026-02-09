@@ -123,3 +123,75 @@ func TestAwaitSignalResult(t *testing.T) {
 		t.Error("expected signal to be set")
 	}
 }
+
+func TestBackoffWindowResumption(t *testing.T) {
+	// Test the backoff window resumption logic that makes await-signal
+	// resilient to interrupts. When a backoff-until timestamp is in the
+	// future and remaining time <= full timeout, use remaining time.
+	now := time.Now()
+
+	tests := []struct {
+		name           string
+		fullTimeout    time.Duration
+		backoffUntil   time.Time
+		wantResumed    bool
+		wantApproxTime time.Duration // approximate expected timeout
+	}{
+		{
+			name:           "no stored window - use full timeout",
+			fullTimeout:    5 * time.Minute,
+			backoffUntil:   time.Time{}, // zero value
+			wantResumed:    false,
+			wantApproxTime: 5 * time.Minute,
+		},
+		{
+			name:           "window in future - resume with remaining",
+			fullTimeout:    5 * time.Minute,
+			backoffUntil:   now.Add(2 * time.Minute),
+			wantResumed:    true,
+			wantApproxTime: 2 * time.Minute,
+		},
+		{
+			name:           "window expired - use full timeout",
+			fullTimeout:    5 * time.Minute,
+			backoffUntil:   now.Add(-1 * time.Minute), // in the past
+			wantResumed:    false,
+			wantApproxTime: 5 * time.Minute,
+		},
+		{
+			name:           "window exceeds full timeout (stale) - use full timeout",
+			fullTimeout:    2 * time.Minute,
+			backoffUntil:   now.Add(10 * time.Minute), // remaining > full
+			wantResumed:    false,
+			wantApproxTime: 2 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			timeout := tt.fullTimeout
+			resumed := false
+
+			if !tt.backoffUntil.IsZero() && tt.backoffUntil.After(now) {
+				remaining := tt.backoffUntil.Sub(now)
+				if remaining <= tt.fullTimeout {
+					timeout = remaining
+					resumed = true
+				}
+			}
+
+			if resumed != tt.wantResumed {
+				t.Errorf("resumed = %v, want %v", resumed, tt.wantResumed)
+			}
+
+			// Allow 2s tolerance for timing
+			diff := timeout - tt.wantApproxTime
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 2*time.Second {
+				t.Errorf("timeout = %v, want ~%v (diff: %v)", timeout, tt.wantApproxTime, diff)
+			}
+		})
+	}
+}

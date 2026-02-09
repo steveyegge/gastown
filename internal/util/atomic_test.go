@@ -24,10 +24,12 @@ func TestAtomicWriteJSON(t *testing.T) {
 		t.Fatal("File was not created")
 	}
 
-	// Verify temp file was cleaned up
-	tmpFile := testFile + ".tmp"
-	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
-		t.Fatal("Temp file was not cleaned up")
+	// Verify no temp files left behind
+	entries, _ := os.ReadDir(tmpDir)
+	for _, e := range entries {
+		if e.Name() != "test.json" {
+			t.Fatalf("Temp file was not cleaned up: %s", e.Name())
+		}
 	}
 
 	// Read and verify content
@@ -59,10 +61,12 @@ func TestAtomicWriteFile(t *testing.T) {
 		t.Fatalf("Unexpected content: %s", content)
 	}
 
-	// Verify temp file was cleaned up
-	tmpFile := testFile + ".tmp"
-	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
-		t.Fatal("Temp file was not cleaned up")
+	// Verify no temp files left behind
+	entries, _ := os.ReadDir(tmpDir)
+	for _, e := range entries {
+		if e.Name() != "test.txt" {
+			t.Fatalf("Temp file was not cleaned up: %s", e.Name())
+		}
 	}
 }
 
@@ -182,10 +186,10 @@ func TestAtomicWriteJSONUnmarshallable(t *testing.T) {
 		t.Fatal("File should not exist after marshal error")
 	}
 
-	// Verify temp file was not left behind
-	tmpFile := testFile + ".tmp"
-	if _, statErr := os.Stat(tmpFile); !os.IsNotExist(statErr) {
-		t.Fatal("Temp file should not exist after marshal error")
+	// Verify no temp files left behind (marshal error happens before CreateTemp)
+	entries, _ := os.ReadDir(tmpDir)
+	for _, e := range entries {
+		t.Fatalf("Unexpected file after marshal error: %s", e.Name())
 	}
 }
 
@@ -253,19 +257,23 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 		t.Errorf("Expected single character, got %q", content)
 	}
 
-	// Verify no temp files left behind
+	// Verify no temp files left behind (only the target file should exist)
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatalf("ReadDir error: %v", err)
 	}
 	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".tmp" {
+		if e.Name() != "concurrent.txt" {
 			t.Errorf("Temp file left behind: %s", e.Name())
 		}
 	}
 }
 
 func TestAtomicWritePreservesOnFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only directories are not reliable on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "preserve.txt")
 
@@ -275,17 +283,20 @@ func TestAtomicWritePreservesOnFailure(t *testing.T) {
 		t.Fatalf("Initial write error: %v", err)
 	}
 
-	// Create a subdirectory with the .tmp name to cause rename to fail
-	tmpFile := testFile + ".tmp"
-	if err := os.Mkdir(tmpFile, 0755); err != nil {
-		t.Fatalf("Failed to create blocking dir: %v", err)
+	// Make directory read-only so CreateTemp fails, but original file persists
+	if err := os.Chmod(tmpDir, 0555); err != nil {
+		t.Fatalf("Failed to make dir read-only: %v", err)
 	}
+	defer os.Chmod(tmpDir, 0755) // Restore for cleanup
 
-	// Attempt write which should fail at rename
+	// Attempt write which should fail at CreateTemp
 	err := AtomicWriteFile(testFile, []byte("new content"), 0644)
 	if err == nil {
-		t.Fatal("Expected error when .tmp is a directory")
+		t.Fatal("Expected error when directory is read-only")
 	}
+
+	// Restore permissions to read the file
+	os.Chmod(tmpDir, 0755)
 
 	// Verify original content is preserved
 	content, err := os.ReadFile(testFile)
@@ -363,6 +374,62 @@ func TestAtomicWriteFileLargeData(t *testing.T) {
 		if content[i] != byte(i%256) {
 			t.Errorf("Content mismatch at byte %d", i)
 			break
+		}
+	}
+}
+
+func TestAtomicWriteFileConcurrentIntegrity(t *testing.T) {
+	// This test verifies the core fix: concurrent writers to the same path
+	// must each produce self-consistent content (no cross-writer corruption).
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "integrity.txt")
+
+	const numWriters = 20
+	const dataSize = 1024 // each writer writes 1KB of a repeated byte
+
+	var wg sync.WaitGroup
+	errs := make([]error, numWriters)
+	wg.Add(numWriters)
+
+	for i := 0; i < numWriters; i++ {
+		go func(n int) {
+			defer wg.Done()
+			// Each writer fills with a unique byte pattern
+			data := make([]byte, dataSize)
+			for j := range data {
+				data[j] = byte(n)
+			}
+			errs[n] = AtomicWriteFile(testFile, data, 0644)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// At least some writes should succeed
+	anySuccess := false
+	for _, err := range errs {
+		if err == nil {
+			anySuccess = true
+			break
+		}
+	}
+	if !anySuccess {
+		t.Fatal("All concurrent writes failed")
+	}
+
+	// The final file content must be self-consistent:
+	// all bytes must be the same value (from a single writer, not mixed)
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if len(content) != dataSize {
+		t.Fatalf("Expected %d bytes, got %d", dataSize, len(content))
+	}
+	expected := content[0]
+	for i, b := range content {
+		if b != expected {
+			t.Fatalf("Data corruption at byte %d: expected %d, got %d (cross-writer contamination)", i, expected, b)
 		}
 	}
 }

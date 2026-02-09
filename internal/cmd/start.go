@@ -29,6 +29,13 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// defaultOrphanGraceSecs is the grace period (in seconds) between SIGTERM and SIGKILL
+// when automatically cleaning up orphaned Claude processes during shutdown.
+// This is shorter than the --cleanup-orphans-grace-secs default (60s) because
+// automatic cleanup runs after sessions are already killed, so processes have
+// already had time to shut down.
+const defaultOrphanGraceSecs = 5
+
 var (
 	startAll                    bool
 	startAgentOverride          string
@@ -93,8 +100,12 @@ Shutdown levels (progressively more aggressive):
 Use --force or --yes to skip confirmation prompt.
 Use --graceful to allow agents time to save state before killing.
 Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).
-Use --cleanup-orphans to kill orphaned Claude processes (TTY-less, older than 60s).
-Use --cleanup-orphans-grace-secs to set the grace period (default 60s).`,
+Use --cleanup-orphans to use a longer grace period for orphan cleanup (default 60s).
+Use --cleanup-orphans-grace-secs to set that grace period.
+
+Orphaned Claude processes are always cleaned up after session termination.
+By default, a 5-second grace period is used. The --cleanup-orphans flag
+extends this to --cleanup-orphans-grace-secs (default 60s) for stubborn processes.`,
 	RunE: runShutdown,
 }
 
@@ -142,7 +153,7 @@ func init() {
 	shutdownCmd.Flags().BoolVar(&shutdownNuclear, "nuclear", false,
 		"Force cleanup even if polecats have uncommitted work (DANGER: may lose work)")
 	shutdownCmd.Flags().BoolVar(&shutdownCleanupOrphans, "cleanup-orphans", false,
-		"Clean up orphaned Claude processes (TTY-less processes older than 60s)")
+		"Use longer grace period (--cleanup-orphans-grace-secs) for orphan cleanup instead of default 5s")
 	shutdownCmd.Flags().IntVar(&shutdownCleanupOrphansGrace, "cleanup-orphans-grace-secs", 60,
 		"Grace period in seconds between SIGTERM and SIGKILL when cleaning orphans (default 60)")
 
@@ -588,11 +599,16 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
 
-	// Phase 5: Cleanup orphaned Claude processes if requested
+	// Phase 5: Always clean up orphaned Claude processes after killing sessions.
+	// Processes can survive session kills if they caught/ignored SIGHUP or called setsid().
+	// Use the user-specified grace period if --cleanup-orphans was explicitly set,
+	// otherwise use a short default (5s) for the automatic sweep.
+	graceSecs := defaultOrphanGraceSecs
 	if shutdownCleanupOrphans {
-		fmt.Printf("\nPhase 5: Cleaning up orphaned Claude processes...\n")
-		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+		graceSecs = shutdownCleanupOrphansGrace
 	}
+	fmt.Printf("\nPhase 5: Cleaning up orphaned Claude processes...\n")
+	cleanupOrphanedClaude(graceSecs)
 
 	// Phase 6: Cleanup polecat worktrees and branches
 	fmt.Printf("\nPhase 6: Cleaning up polecats...\n")
@@ -606,6 +622,10 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 		stopDaemonIfRunning(townRoot)
 	}
 
+	// Phase 8: Verify no Claude processes survived
+	fmt.Printf("\nPhase 8: Verifying shutdown...\n")
+	verifyNoOrphans()
+
 	fmt.Println()
 	fmt.Printf("%s Graceful shutdown complete (%d sessions stopped)\n", style.Bold.Render("✓"), stopped)
 	return nil
@@ -618,12 +638,17 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
 
-	// Cleanup orphaned Claude processes if requested
+	// Always clean up orphaned Claude processes after killing sessions.
+	// Processes can survive session kills if they caught/ignored SIGHUP or called setsid().
+	// Use the user-specified grace period if --cleanup-orphans was explicitly set,
+	// otherwise use a short default (5s) for the automatic sweep.
+	graceSecs := defaultOrphanGraceSecs
 	if shutdownCleanupOrphans {
-		fmt.Println()
-		fmt.Println("Cleaning up orphaned Claude processes...")
-		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+		graceSecs = shutdownCleanupOrphansGrace
 	}
+	fmt.Println()
+	fmt.Println("Cleaning up orphaned Claude processes...")
+	cleanupOrphanedClaude(graceSecs)
 
 	// Cleanup polecat worktrees and branches
 	if townRoot != "" {
@@ -639,31 +664,62 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 		stopDaemonIfRunning(townRoot)
 	}
 
+	// Verify no Claude processes survived
+	fmt.Println()
+	fmt.Println("Verifying shutdown...")
+	verifyNoOrphans()
+
 	fmt.Println()
 	fmt.Printf("%s Gas Town shutdown complete (%d sessions stopped)\n", style.Bold.Render("✓"), stopped)
 
 	return nil
 }
 
-// killSessionsInOrder stops sessions in the correct order:
-// 1. Deacon first (so it doesn't restart others)
-// 2. Everything except Mayor
-// 3. Mayor last
+// killSessionsInOrder stops sessions in the correct shutdown order, matching gt down:
+//  1. Polecats and crew (workers - stop before monitors can restart them)
+//  2. Refineries (work processors)
+//  3. Witnesses (monitors - stop before deacon so they can't restart workers)
+//  4. Town sessions: Mayor, Boot, Deacon
+//     Boot monitors Deacon, so must be stopped before Deacon.
+//
 // mayorSession and deaconSession are the dynamic session names for the current town.
 //
 // Returns the count of sessions that were successfully stopped (verified by checking
 // if the session no longer exists after the kill attempt).
 func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
 	stopped := 0
+	bootSession := session.BootSessionName()
 
-	// Helper to check if session is in our list
-	inList := func(sess string) bool {
-		for _, s := range sessions {
-			if s == sess {
-				return true
-			}
+	// Build a set for O(1) lookup of town-level sessions
+	sessionSet := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		sessionSet[s] = true
+	}
+
+	// Categorize sessions by type for ordered shutdown.
+	var polecats, refineries, witnesses []string
+	for _, sess := range sessions {
+		// Skip town-level sessions (handled explicitly below)
+		if sess == mayorSession || sess == deaconSession || sess == bootSession {
+			continue
 		}
-		return false
+
+		// Categorize by role (third component of gt-<rig>-<role> pattern)
+		parts := strings.Split(sess, "-")
+		if len(parts) >= 3 {
+			switch parts[2] {
+			case "witness":
+				witnesses = append(witnesses, sess)
+			case "refinery":
+				refineries = append(refineries, sess)
+			default:
+				// Polecats, crew, and any other rig-level sessions
+				polecats = append(polecats, sess)
+			}
+		} else {
+			// Unknown pattern, treat as worker (stop early)
+			polecats = append(polecats, sess)
+		}
 	}
 
 	// Helper to kill a session and verify it was stopped
@@ -688,26 +744,40 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		return false
 	}
 
-	// 1. Stop Deacon first
-	if inList(deaconSession) {
-		if killAndVerify(deaconSession) {
-			stopped++
-		}
-	}
-
-	// 2. Stop others (except Mayor)
-	for _, sess := range sessions {
-		if sess == deaconSession || sess == mayorSession {
-			continue
-		}
+	// 1. Stop polecats and crew first (workers)
+	for _, sess := range polecats {
 		if killAndVerify(sess) {
 			stopped++
 		}
 	}
 
-	// 3. Stop Mayor last
-	if inList(mayorSession) {
+	// 2. Stop refineries (work processors)
+	for _, sess := range refineries {
+		if killAndVerify(sess) {
+			stopped++
+		}
+	}
+
+	// 3. Stop witnesses (monitors)
+	for _, sess := range witnesses {
+		if killAndVerify(sess) {
+			stopped++
+		}
+	}
+
+	// 4. Stop town sessions: Mayor, Boot, Deacon (matching TownSessions() order)
+	if sessionSet[mayorSession] {
 		if killAndVerify(mayorSession) {
+			stopped++
+		}
+	}
+	if sessionSet[bootSession] {
+		if killAndVerify(bootSession) {
+			stopped++
+		}
+	}
+	if sessionSet[deaconSession] {
+		if killAndVerify(deaconSession) {
 			stopped++
 		}
 	}

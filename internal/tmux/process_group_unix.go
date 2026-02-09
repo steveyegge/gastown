@@ -15,6 +15,16 @@ func killProcessGroup(pgid int) {
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
+// getParentPID returns the parent process ID (PPID) for a given PID.
+// Returns empty string if the process doesn't exist or PPID can't be determined.
+func getParentPID(pid string) string {
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // getProcessGroupID returns the process group ID (PGID) for a given PID.
 // Returns empty string if the process doesn't exist or PGID can't be determined.
 func getProcessGroupID(pid string) string {

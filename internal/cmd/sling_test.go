@@ -88,131 +88,24 @@ func TestParseWispIDFromJSON(t *testing.T) {
 	}
 }
 
-func TestFormatTrackBeadID(t *testing.T) {
+func TestExtractIssueID(t *testing.T) {
 	tests := []struct {
-		name     string
-		beadID   string
-		expected string
+		name string
+		id   string
+		want string
 	}{
-		// HQ beads should remain unchanged
-		{
-			name:     "hq bead unchanged",
-			beadID:   "hq-abc123",
-			expected: "hq-abc123",
-		},
-		{
-			name:     "hq convoy unchanged",
-			beadID:   "hq-cv-xyz789",
-			expected: "hq-cv-xyz789",
-		},
-
-		// Cross-rig beads get external: prefix
-		{
-			name:     "gastown rig bead",
-			beadID:   "gt-mol-abc123",
-			expected: "external:gt-mol:gt-mol-abc123",
-		},
-		{
-			name:     "beads rig task",
-			beadID:   "beads-task-xyz",
-			expected: "external:beads-task:beads-task-xyz",
-		},
-		{
-			name:     "two segment ID",
-			beadID:   "foo-bar",
-			expected: "external:foo-bar:foo-bar",
-		},
-
-		// Edge cases
-		{
-			name:     "single segment fallback",
-			beadID:   "orphan",
-			expected: "orphan",
-		},
-		{
-			name:     "empty string fallback",
-			beadID:   "",
-			expected: "",
-		},
-		{
-			name:     "many segments",
-			beadID:   "a-b-c-d-e-f",
-			expected: "external:a-b:a-b-c-d-e-f",
-		},
+		{"unwraps external format", "external:gt-mol:gt-mol-abc123", "gt-mol-abc123"},
+		{"unwraps beads external", "external:beads-task:beads-task-xyz", "beads-task-xyz"},
+		{"passes through hq IDs", "hq-abc123", "hq-abc123"},
+		{"passes through plain IDs", "gt-abc123", "gt-abc123"},
+		{"handles malformed external (only 2 parts)", "external:gt-mol", "external:gt-mol"},
+		{"handles empty string", "", ""},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatTrackBeadID(tt.beadID)
-			if result != tt.expected {
-				t.Errorf("formatTrackBeadID(%q) = %q, want %q", tt.beadID, result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestFormatTrackBeadIDConsumerCompatibility verifies that the external ref format
-// produced by formatTrackBeadID can be correctly parsed by the consumer pattern
-// used in convoy.go, model.go, feed/convoy.go, and web/fetcher.go.
-func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
-	// Consumer pattern from convoy.go:1062-1068:
-	// if strings.HasPrefix(issueID, "external:") {
-	//     parts := strings.SplitN(issueID, ":", 3)
-	//     if len(parts) == 3 {
-	//         issueID = parts[2] // Extract the actual issue ID
-	//     }
-	// }
-
-	tests := []struct {
-		name           string
-		beadID         string
-		wantOriginalID string
-	}{
-		{
-			name:           "cross-rig bead round-trips",
-			beadID:         "gt-mol-abc123",
-			wantOriginalID: "gt-mol-abc123",
-		},
-		{
-			name:           "beads rig bead round-trips",
-			beadID:         "beads-task-xyz",
-			wantOriginalID: "beads-task-xyz",
-		},
-		{
-			name:           "hq bead unchanged",
-			beadID:         "hq-abc123",
-			wantOriginalID: "hq-abc123",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			formatted := formatTrackBeadID(tt.beadID)
-
-			// Simulate consumer parsing logic
-			parsed := formatted
-			if len(formatted) > 9 && formatted[:9] == "external:" {
-				parts := make([]string, 0, 3)
-				start := 0
-				count := 0
-				for i := 0; i < len(formatted) && count < 2; i++ {
-					if formatted[i] == ':' {
-						parts = append(parts, formatted[start:i])
-						start = i + 1
-						count++
-					}
-				}
-				if count == 2 {
-					parts = append(parts, formatted[start:])
-				}
-				if len(parts) == 3 {
-					parsed = parts[2]
-				}
-			}
-
-			if parsed != tt.wantOriginalID {
-				t.Errorf("round-trip failed: formatTrackBeadID(%q) = %q, parsed back to %q, want %q",
-					tt.beadID, formatted, parsed, tt.wantOriginalID)
+			got := extractIssueID(tt.id)
+			if got != tt.want {
+				t.Errorf("extractIssueID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
 		})
 	}
@@ -1078,14 +971,21 @@ setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
 if "%cmd%"=="--no-daemon" set "cmd=%2"
-if "%cmd%"=="show" (
-  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
-  exit /b 0
-)
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
 if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	// Use GT_TEST_ATTACHED_MOLECULE_LOG to capture the description content directly.
+	// On Windows, multi-line --description= args break batch script logging because
+	// newlines in command-line arguments cause cmd.exe to treat subsequent lines as
+	// separate commands.
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -1123,22 +1023,212 @@ exit /b 0
 		t.Fatalf("runSling: %v", err)
 	}
 
+	// Check the molecule log file written by storeFieldsInBead (via GT_TEST_ATTACHED_MOLECULE_LOG).
+	// This directly captures the description content without relying on batch stub logging.
+	molBytes, err := os.ReadFile(molLogPath)
+	if err != nil {
+		t.Fatalf("read molecule log: %v", err)
+	}
+	molContent := string(molBytes)
+	if !strings.Contains(molContent, "no_merge: true") {
+		t.Errorf("--no-merge flag not stored in bead description\nDescription:\n%s", molContent)
+	}
+}
+
+// TestSlingSetsDoltAutoCommitOff verifies that gt sling sets BD_DOLT_AUTO_COMMIT=off
+// for all child bd processes. Under concurrent load (batch slinging), auto-commits
+// from individual bd writes cause manifest contention and 'database is read only'
+// errors. The Dolt server handles commits — individual auto-commits are unnecessary.
+// Fixes: gt-u6n6a
+
+// TestCheckCrossRigGuard verifies that cross-rig sling is rejected when a bead's
+// prefix doesn't match the target rig. This prevents slinging beads-codebase issues
+// to gastown polecats, which cannot fix code in a different rig's repo.
+// Fixes: gt-myecw
+func TestCheckCrossRigGuard(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"hq-","path":"."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		beadID      string
+		targetAgent string
+		wantErr     bool
+	}{
+		{
+			name:        "same rig: gt bead to gastown polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "same rig: bd bead to beads polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     false,
+		},
+		{
+			name:        "cross-rig: bd bead to gastown polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     true,
+		},
+		{
+			name:        "cross-rig: gt bead to beads polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     true,
+		},
+		{
+			name:        "town-level: hq bead to any rig (allowed)",
+			beadID:      "hq-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "unknown prefix: allowed (no route to check)",
+			beadID:      "xx-unknown",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "empty bead prefix: allowed",
+			beadID:      "nohyphen",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCrossRigGuard(tc.beadID, tc.targetAgent, tmpDir)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("checkCrossRigGuard(%q, %q) error = %v, wantErr %v", tc.beadID, tc.targetAgent, err, tc.wantErr)
+			}
+			if err != nil && tc.wantErr {
+				if !strings.Contains(err.Error(), "cross-rig mismatch") {
+					t.Errorf("expected cross-rig mismatch error, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), "--force") {
+					t.Errorf("error should mention --force override, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs BD_DOLT_AUTO_COMMIT env var
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ENV:BD_DOLT_AUTO_COMMIT=${BD_DOLT_AUTO_COMMIT}|$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ENV:BD_DOLT_AUTO_COMMIT=%BD_DOLT_AUTO_COMMIT%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1")
+	// Ensure BD_DOLT_AUTO_COMMIT is NOT set before sling runs
+	t.Setenv("BD_DOLT_AUTO_COMMIT", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+
+	if err := runSling(nil, []string{"gt-test456"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read bd log: %v", err)
 	}
 
-	// Look for update command that includes no_merge in description
-	logLines := strings.Split(string(logBytes), "\n")
-	foundNoMerge := false
-	for _, line := range logLines {
-		if strings.Contains(line, "update") && strings.Contains(line, "no_merge") {
-			foundNoMerge = true
-			break
-		}
+	// Verify that ALL bd commands received BD_DOLT_AUTO_COMMIT=off
+	logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	if len(logLines) == 0 {
+		t.Fatal("no bd commands logged")
 	}
 
-	if !foundNoMerge {
-		t.Errorf("--no-merge flag not stored in bead description\nLog:\n%s", string(logBytes))
+	for _, line := range logLines {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {
+			t.Errorf("bd command missing BD_DOLT_AUTO_COMMIT=off: %s", line)
+		}
 	}
 }

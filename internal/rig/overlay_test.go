@@ -263,8 +263,8 @@ func TestEnsureGitignorePatterns_CreatesNewFile(t *testing.T) {
 		t.Fatalf("Failed to read .gitignore: %v", err)
 	}
 
-	// Check all required patterns are present
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	// Check all required patterns are present (.beads/ intentionally excluded — see overlay.go)
+	patterns := []string{".runtime/", ".claude/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -301,8 +301,8 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 		t.Error("Missing Gas Town header comment")
 	}
 
-	// Should add required patterns
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	// Should add required patterns (.beads/ intentionally excluded — see overlay.go)
+	patterns := []string{".runtime/", ".claude/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -336,11 +336,16 @@ func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 	}
 
 	// Should add missing patterns
-	if !containsLine(string(content), ".beads/") {
-		t.Error(".gitignore missing pattern .beads/")
-	}
 	if !containsLine(string(content), ".logs/") {
 		t.Error(".gitignore missing pattern .logs/")
+	}
+
+	// Regression guard: .beads/ must NOT be in required patterns.
+	// Beads manages its own .beads/.gitignore via bd init.
+	// Adding .beads/ here breaks bd sync. This has regressed twice
+	// (PR #753, #966). If this test fails, you're about to break polecats.
+	if containsLine(string(content), ".beads/") {
+		t.Error(".gitignore must NOT contain .beads/ - beads manages its own .gitignore (see overlay.go comment)")
 	}
 }
 

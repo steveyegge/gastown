@@ -243,6 +243,11 @@ bd update {{issue}} --notes "Review complete. Decision: <APPROVE|REQUEST_CHANGES
 Followups filed: <list of bead IDs if any>"
 ```
 
+**4. Sync beads:**
+```bash
+bd sync
+```
+
 **Exit criteria:** All followup work captured as beads."""
 
 [[steps]]
@@ -283,5 +288,5 @@ description = "The tracking issue for this review task"
 required = true
 
 [vars.rig]
-description = "Target rig for escalation notifications"
+description = "The rig this PR review is for"
 required = true

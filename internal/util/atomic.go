@@ -4,6 +4,7 @@ package util
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // AtomicWriteJSON writes JSON data to a file atomically.
@@ -23,17 +24,38 @@ func AtomicWriteJSON(path string, v interface{}) error {
 // This prevents data corruption if the process crashes during write.
 // The rename operation is atomic on POSIX systems.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	tmpFile := path + ".tmp"
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
 
-	// Write to temp file
-	if err := os.WriteFile(tmpFile, data, perm); err != nil {
+	// Create unique temp file in the same directory as the target.
+	// The "*" in the pattern is replaced with a random suffix by os.CreateTemp,
+	// preventing concurrent writers from colliding on the same temp file.
+	f, err := os.CreateTemp(dir, base+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpName := f.Name()
+
+	// Write data and close
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+
+	// Set desired permissions (CreateTemp uses 0600 by default)
+	if err := os.Chmod(tmpName, perm); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
 
 	// Atomic rename (on POSIX systems)
-	if err := os.Rename(tmpFile, path); err != nil {
-		// Clean up temp file on failure
-		_ = os.Remove(tmpFile)
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
 

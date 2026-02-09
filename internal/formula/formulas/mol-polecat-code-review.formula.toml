@@ -292,6 +292,7 @@ Once you run `gt done`, you're gone. The command:
 
 **Run gt done:**
 ```bash
+bd sync
 gt done
 ```
 
@@ -318,5 +319,5 @@ description = "Optional focus area (security, performance, correctness, etc.)"
 required = false
 
 [vars.rig]
-description = "Target rig for escalation notifications"
+description = "The rig this review is for"
 required = true

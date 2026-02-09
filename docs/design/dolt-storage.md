@@ -494,10 +494,13 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 
 ### Immediate
 
-1. **Remove embedded mode from bd** (see Part 11): Major code simplification.
-2. **Dolt-in-git integration**: Dolt team delivering soon.
+1. **Branch-per-polecat for write concurrency** (gt-twqgs): Each polecat gets a
+   Dolt branch at sling time. Zero contention at 50 concurrent writers (tested).
+   Merge to main at completion. See Part 12.
+2. **Remove embedded mode from bd** (see Part 11): Major code simplification.
+3. **Dolt-in-git integration**: Dolt team delivering soon.
    When ready, integrate into bd — replace JSONL with Dolt binary commits.
-3. **Gas Town pristine state**: Clean up old `.beads/dolt/` directories, stale
+4. **Gas Town pristine state**: Clean up old `.beads/dolt/` directories, stale
    SQLite, misrouted beads, stale JSONL.
 
 ### Next
@@ -534,6 +537,93 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 | dolt_diff() for export | No dirty_issues table; Dolt IS the tracker | 2026-01-16 |
 | Per-worktree export state | Prevent polecats exporting each other's work | 2026-01-16 |
 | Apache 2.0 compatible with MIT | Standard attribution, no architectural impact | 2026-01-13 |
+| **Branch-per-polecat** | Per-worker Dolt branches eliminate optimistic lock contention at 50+ concurrent writers. Tested 2026-02-08. | 2026-02-08 |
+
+---
+
+## Part 12: Branch-Per-Polecat (Write Concurrency Fix)
+
+> Added 2026-02-08 by Mayor. Stress test evidence in `~/gt/mayor/dolt-branch-test.go`.
+
+### The Problem
+
+Dolt's optimistic locking causes `Error 1105: optimistic lock failed on database Root
+update` when multiple agents commit to the same branch concurrently. At 20 concurrent
+writers on `main`, 50% fail. The Phase 0 band-aid (10 retries with exponential backoff)
+helps but doesn't solve the architectural ceiling.
+
+### The Fix
+
+Each polecat gets its own Dolt branch. Branches are independent Root pointers — no
+contention between branches. Merges are sequential (refinery or gt done).
+
+```
+gt sling <bead> <rig>
+  └─ CALL DOLT_BRANCH('polecat-furiosa-1707350000')
+     └─ Polecat env: BD_BRANCH=polecat-furiosa-1707350000
+        └─ bd connects, runs: CALL DOLT_CHECKOUT('polecat-furiosa-1707350000')
+           └─ All bd creates/updates/closes write to polecat branch
+              └─ Zero contention with other polecats
+
+gt done
+  └─ CALL DOLT_CHECKOUT('main')
+     └─ CALL DOLT_MERGE('polecat-furiosa-1707350000')
+        └─ CALL DOLT_BRANCH('-D', 'polecat-furiosa-1707350000')
+```
+
+### Stress Test Results
+
+| Concurrency | Single Branch (main) | Per-Worker Branches | Sequential Merge |
+|-------------|---------------------|--------------------|-----------------|
+| 10 | 10/10 (100%) | 10/10 (100%) | 10/10 (100%) |
+| 20 | 10/20 (50%) | **20/20 (100%)** | 20/20 (100%) |
+| 50 | 25/50 (50%) | **50/50 (100%)** | 50/50 (100%) |
+
+Each worker performed 5 insert+commit cycles. All workers launched simultaneously
+via barrier. 50 workers = 250 total Dolt commits, all successful, in 2 seconds.
+Sequential merge of all 50 branches completed in 312ms.
+
+### Why This Works
+
+Tim Sehn (Dolt CEO): "Branches are just pointers to commits, like Git. Millions of
+branches without issue." And: "We merge the Prolly Trees — much smarter/faster than
+sequential replay."
+
+Each branch has its own Root. DOLT_COMMIT on branch A doesn't touch branch B's Root.
+The optimistic lock only fires when two writers try to update the SAME Root. With
+per-polecat branches, this never happens.
+
+### Implementation (Gas Town side)
+
+1. `gt sling` (internal/polecat/spawn.go): After worktree creation, create Dolt branch
+   via SQL: `CALL DOLT_BRANCH('polecat-<name>-<timestamp>')`
+2. Set `BD_BRANCH` env var in the polecat's tmux session
+3. `gt done` flow: merge branch to main, delete branch
+4. `gt polecat nuke`: delete branch as part of cleanup (idempotent)
+
+### Implementation (Beads side)
+
+1. `store.go`: On connection open, check `BD_BRANCH` env var
+2. If set, run `CALL DOLT_CHECKOUT('<branch>')` on the connection
+3. All subsequent operations happen on that branch transparently
+4. No other bd code changes needed — SQL operations are branch-agnostic
+
+### Merge Conflicts
+
+Conflicts should be rare: each polecat works on different issues (different rows).
+If conflicts occur (e.g., two polecats update the same parent epic's child count):
+- Dolt's `dolt_conflicts` table captures them
+- `newest-wins` resolution applies (our default)
+- Worst case: retry the merge after resolving
+
+### Relationship to AT War Rigs
+
+Dolt branches and AT War Rigs are orthogonal solutions to different problems:
+- **Branches**: Solve write contention at the storage layer (launch-track)
+- **AT War Rigs**: Solve coordination overhead at the session layer (post-launch)
+
+Both could coexist. With branches, AT War Rigs become less urgent — the Dolt
+contention ceiling is removed regardless of how sessions are managed.
 
 ---
 

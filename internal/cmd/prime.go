@@ -209,6 +209,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Output custom context file if present
+	outputContextFile(ctx)
+
 	// Output handoff content if present
 	outputHandoffContent(ctx)
 

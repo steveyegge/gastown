@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,18 @@ import (
 )
 
 func runEscalate(cmd *cobra.Command, args []string) error {
+	// Handle --stdin: read reason from stdin (avoids shell quoting issues)
+	if escalateStdin {
+		if escalateReason != "" {
+			return fmt.Errorf("cannot use --stdin with --reason/-r")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		escalateReason = strings.TrimRight(string(data), "\n")
+	}
+
 	// Require at least a description when creating an escalation
 	if len(args) == 0 {
 		return cmd.Help()

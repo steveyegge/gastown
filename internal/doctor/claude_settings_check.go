@@ -24,6 +24,7 @@ const (
 	gitStatusUntracked       gitFileStatus = "untracked"        // File not tracked by git
 	gitStatusTrackedClean    gitFileStatus = "tracked-clean"    // Tracked, no local modifications
 	gitStatusTrackedModified gitFileStatus = "tracked-modified" // Tracked with local modifications
+	gitStatusIgnored         gitFileStatus = "ignored"          // File is gitignored
 	gitStatusUnknown         gitFileStatus = "unknown"          // Not in a git repo or error
 )
 
@@ -72,6 +73,12 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 		if sf.wrongLocation {
 			// Check git status to determine safe deletion strategy
 			sf.gitStatus = c.getGitFileStatus(sf.path)
+
+			// Skip files that are properly gitignored - they're safe to keep
+			if sf.gitStatus == gitStatusIgnored {
+				continue
+			}
+
 			c.staleSettings = append(c.staleSettings, sf)
 
 			// Provide detailed message based on git status
@@ -337,8 +344,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// 1. enabledPlugins
 	// 2. PATH export in hooks
 	// 3. Stop hook with gt costs record (for autonomous)
-	// 4. gt nudge deacon session-started in SessionStart
-
 	// Check enabledPlugins
 	if _, ok := actual["enabledPlugins"]; !ok {
 		missing = append(missing, "enabledPlugins")
@@ -355,11 +360,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 		missing = append(missing, "PATH export")
 	}
 
-	// Check SessionStart hook has deacon nudge
-	if !c.hookHasPattern(hooks, "SessionStart", "gt nudge deacon session-started") {
-		missing = append(missing, "deacon nudge")
-	}
-
 	// Check Stop hook exists with gt costs record (for all roles)
 	if !c.hookHasPattern(hooks, "Stop", "gt costs record") {
 		missing = append(missing, "Stop hook")
@@ -369,7 +369,7 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 }
 
 // getGitFileStatus determines the git status of a file.
-// Returns untracked, tracked-clean, tracked-modified, or unknown.
+// Returns untracked, tracked-clean, tracked-modified, ignored, or unknown.
 func (c *ClaudeSettingsCheck) getGitFileStatus(filePath string) gitFileStatus {
 	dir := filepath.Dir(filePath)
 	fileName := filepath.Base(filePath)
@@ -388,7 +388,13 @@ func (c *ClaudeSettingsCheck) getGitFileStatus(filePath string) gitFileStatus {
 	}
 
 	if len(strings.TrimSpace(string(output))) == 0 {
-		// File is not tracked
+		// File is not tracked - check if it's gitignored
+		cmd = exec.Command("git", "-C", dir, "check-ignore", "-q", fileName)
+		if err := cmd.Run(); err == nil {
+			// Exit code 0 means file is ignored
+			return gitStatusIgnored
+		}
+		// File is not tracked and not ignored
 		return gitStatusUntracked
 	}
 

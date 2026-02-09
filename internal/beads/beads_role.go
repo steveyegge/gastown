@@ -149,7 +149,7 @@ func AllRoleBeadDefs() []RoleBeadDef {
 		{
 			ID:    PolecatRoleBeadIDTown(),
 			Title: "Polecat Role",
-			Desc:  "Role definition for Polecat agents. Ephemeral workers for batch work dispatch.",
+			Desc:  "Role definition for Polecat agents. Persistent identity, ephemeral sessions. Batch work dispatch.",
 		},
 		{
 			ID:    CrewRoleBeadIDTown(),
