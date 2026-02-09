@@ -262,8 +262,13 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 		spec.DaemonTokenSecret = cfg.DaemonTokenSecret
 	}
 
-	// Wire Coop sidecar when image is configured.
-	if cfg.CoopImage != "" {
+	// Agent image has coop built-in: use HTTP probes on agent container.
+	if cfg.CoopBuiltin {
+		spec.CoopBuiltin = true
+	}
+
+	// Wire Coop sidecar when image is configured (mutually exclusive with CoopBuiltin).
+	if cfg.CoopImage != "" && !cfg.CoopBuiltin {
 		spec.CoopSidecar = &podmanager.CoopSidecarSpec{
 			Image: cfg.CoopImage,
 		}

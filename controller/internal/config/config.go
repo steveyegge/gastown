@@ -38,7 +38,13 @@ type Config struct {
 
 	// CoopImage is the Coop sidecar container image (env: COOP_IMAGE).
 	// When set, agent pods get a Coop sidecar for PTY-based management.
+	// Mutually exclusive with CoopBuiltin — do not set both.
 	CoopImage string
+
+	// CoopBuiltin indicates the agent image has coop built into its entrypoint
+	// (env: COOP_BUILTIN). When true, the agent container exposes coop HTTP
+	// ports and uses HTTP probes instead of exec probes. No sidecar is added.
+	CoopBuiltin bool
 
 	// APIKeySecret is the K8s secret name containing ANTHROPIC_API_KEY (env: API_KEY_SECRET).
 	APIKeySecret string
@@ -69,6 +75,7 @@ func Parse() *Config {
 		LogLevel:       envOr("LOG_LEVEL", "info"),
 		DefaultImage:   os.Getenv("AGENT_IMAGE"),
 		CoopImage:      os.Getenv("COOP_IMAGE"),
+		CoopBuiltin:    envBoolOr("COOP_BUILTIN", false),
 		APIKeySecret:      os.Getenv("API_KEY_SECRET"),
 		CredentialsSecret: os.Getenv("CLAUDE_CREDENTIALS_SECRET"),
 		DaemonTokenSecret: os.Getenv("DAEMON_TOKEN_SECRET"),
@@ -84,6 +91,7 @@ func Parse() *Config {
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.DefaultImage, "agent-image", cfg.DefaultImage, "Default container image for agent pods")
 	flag.StringVar(&cfg.CoopImage, "coop-image", cfg.CoopImage, "Coop sidecar container image")
+	flag.BoolVar(&cfg.CoopBuiltin, "coop-builtin", cfg.CoopBuiltin, "Agent image has coop built-in (HTTP probes, no sidecar)")
 	flag.StringVar(&cfg.APIKeySecret, "api-key-secret", cfg.APIKeySecret, "K8s secret name containing ANTHROPIC_API_KEY")
 	flag.StringVar(&cfg.CredentialsSecret, "credentials-secret", cfg.CredentialsSecret, "K8s secret with Claude OAuth credentials")
 	flag.StringVar(&cfg.DaemonTokenSecret, "daemon-token-secret", cfg.DaemonTokenSecret, "K8s secret with daemon auth token for agent pods")
@@ -104,6 +112,16 @@ func envIntOr(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func envBoolOr(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err == nil {
+			return b
 		}
 	}
 	return fallback

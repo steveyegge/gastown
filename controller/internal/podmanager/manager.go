@@ -112,6 +112,11 @@ type AgentPodSpec struct {
 	// The "token" key is injected as the BD_DAEMON_TOKEN env var.
 	DaemonTokenSecret string
 
+	// CoopBuiltin indicates the agent image has coop built into its entrypoint.
+	// When true, the agent container exposes coop HTTP ports (8080/9090) and
+	// uses HTTP probes. No sidecar is added. Mutually exclusive with CoopSidecar.
+	CoopBuiltin bool
+
 	// CoopSidecar configures a Coop sidecar container for PTY-based agent
 	// management. When set, the pod gets a coop container with health probes,
 	// shareProcessNamespace is enabled, and backend metadata is set to "coop".
@@ -342,32 +347,13 @@ func (m *K8sManager) buildContainer(spec AgentPodSpec) corev1.Container {
 	mounts := m.buildVolumeMounts(spec)
 	resources := m.buildResources(spec)
 
-	return corev1.Container{
+	c := corev1.Container{
 		Name:            ContainerName,
 		Image:           spec.Image,
 		Env:             envVars,
 		Resources:       resources,
 		VolumeMounts:    mounts,
 		ImagePullPolicy: corev1.PullAlways,
-		LivenessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				Exec: &corev1.ExecAction{
-					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
-				},
-			},
-			InitialDelaySeconds: 30,
-			PeriodSeconds:       15,
-			FailureThreshold:    3,
-		},
-		StartupProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				Exec: &corev1.ExecAction{
-					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
-				},
-			},
-			FailureThreshold: 60,
-			PeriodSeconds:    5,
-		},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			ReadOnlyRootFilesystem:   boolPtr(false),
@@ -376,6 +362,69 @@ func (m *K8sManager) buildContainer(spec AgentPodSpec) corev1.Container {
 			},
 		},
 	}
+
+	if spec.CoopBuiltin {
+		// Agent image has coop built-in (entrypoint starts coop as PID 1).
+		// Use HTTP probes against coop's health endpoint and expose ports.
+		c.Ports = []corev1.ContainerPort{
+			{Name: "api", ContainerPort: CoopDefaultPort},
+			{Name: "health", ContainerPort: CoopDefaultHealthPort},
+		}
+		c.LivenessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/api/v1/health",
+					Port: intstr.FromString("health"),
+				},
+			},
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       15,
+			FailureThreshold:    3,
+		}
+		c.ReadinessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/api/v1/health",
+					Port: intstr.FromString("health"),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       5,
+		}
+		c.StartupProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/api/v1/health",
+					Port: intstr.FromString("health"),
+				},
+			},
+			FailureThreshold: 60,
+			PeriodSeconds:    5,
+		}
+	} else {
+		// Fallback exec probes for images without coop.
+		c.LivenessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
+				},
+			},
+			InitialDelaySeconds: 30,
+			PeriodSeconds:       15,
+			FailureThreshold:    3,
+		}
+		c.StartupProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "pgrep -f 'claude|node' > /dev/null"},
+				},
+			},
+			FailureThreshold: 60,
+			PeriodSeconds:    5,
+		}
+	}
+
+	return c
 }
 
 // buildEnvVars constructs environment variables from plain values and secret references.
