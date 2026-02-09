@@ -705,30 +705,6 @@ func parseAgentsFromStatus(jsonStr string) []OptionItem {
 	return agents
 }
 
-// parseJSONNames extracts a field from a JSON array of objects.
-func parseJSONNames(jsonStr string, field string) []string {
-	var items []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &items); err != nil {
-		// Try parsing as object with array field
-		var wrapper map[string][]map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &wrapper); err != nil {
-			return nil
-		}
-		for _, v := range wrapper {
-			items = v
-			break
-		}
-	}
-
-	var names []string
-	for _, item := range items {
-		if name, ok := item[field].(string); ok && name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // parseJSONPaths extracts rig/name paths from polecat JSON output.
 func parseJSONPaths(jsonStr string) []string {
 	var items []map[string]interface{}

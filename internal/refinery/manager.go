@@ -13,13 +13,11 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -341,122 +339,6 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-// MergeResult contains the result of a merge attempt.
-type MergeResult struct {
-	Success     bool
-	MergeCommit string // SHA of merge commit on success
-	Error       string
-	Conflict    bool
-	TestsFailed bool
-}
-
-// ProcessMR is deprecated - the Refinery agent now handles all merge processing.
-//
-// ZFC #5: Move merge/conflict decisions from Go to Refinery agent
-//
-// The agent runs git commands directly and makes decisions based on output:
-//   - Agent attempts merge: git checkout -b temp origin/polecat/<worker>
-//   - Agent detects conflict and decides: retry, notify polecat, escalate
-//   - Agent runs tests and decides: proceed, rollback, retry
-//   - Agent pushes: git push origin main
-//
-// This function is kept for backwards compatibility but always returns an error
-// indicating that the agent should handle merge processing.
-//
-// Deprecated: Use the Refinery agent (Claude) for merge processing.
-func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
-	return MergeResult{
-		Error: "ProcessMR is deprecated - the Refinery agent handles merge processing (ZFC #5)",
-	}
-}
-
-// completeMR marks an MR as complete.
-// For success, pass closeReason (e.g., CloseReasonMerged).
-// For failures that should return to open, pass empty closeReason.
-// ZFC-compliant: no state file, just updates MR and emits events.
-// Deprecated: The Refinery agent handles merge processing (ZFC #5).
-func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg string) {
-	mr.Error = errMsg
-	actor := fmt.Sprintf("%s/refinery", m.rig.Name)
-
-	if closeReason != "" {
-		// Close the MR (in_progress → closed)
-		if err := mr.Close(closeReason); err != nil {
-			// Log error but continue - this shouldn't happen
-			_, _ = fmt.Fprintf(m.output, "Warning: failed to close MR: %v\n", err)
-		}
-		if closeReason == CloseReasonSuperseded {
-			// Emit merge_skipped event
-			_ = events.LogFeed(events.TypeMergeSkipped, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, "superseded"))
-		}
-	} else {
-		// Reopen the MR for rework (in_progress → open)
-		if err := mr.Reopen(); err != nil {
-			// Log error but continue
-			_, _ = fmt.Fprintf(m.output, "Warning: failed to reopen MR: %v\n", err)
-		}
-	}
-}
-
-// runTests executes the test command.
-// Deprecated: The Refinery agent runs tests directly via shell commands (ZFC #5).
-func (m *Manager) runTests(testCmd string) error {
-	parts := strings.Fields(testCmd)
-	if len(parts) == 0 {
-		return nil
-	}
-
-	return util.ExecRun(m.workDir, parts[0], parts[1:]...)
-}
-
-// getMergeConfig loads the merge configuration from disk.
-// Returns default config if not configured.
-// Deprecated: Configuration is read by the agent from settings (ZFC #5).
-func (m *Manager) getMergeConfig() MergeConfig {
-	mergeConfig := DefaultMergeConfig()
-
-	// Check settings/config.json for merge_queue settings
-	settingsPath := filepath.Join(m.rig.Path, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
-	if err != nil {
-		return mergeConfig
-	}
-
-	// Apply merge_queue config if present
-	if settings.MergeQueue != nil {
-		mq := settings.MergeQueue
-		mergeConfig.TestCommand = mq.TestCommand
-		mergeConfig.RunTests = mq.RunTests
-		mergeConfig.DeleteMergedBranches = mq.DeleteMergedBranches
-		// Note: PushRetryCount and PushRetryDelayMs use defaults if not explicitly set
-	}
-
-	return mergeConfig
-}
-
-// pushWithRetry pushes to the target branch with exponential backoff retry.
-// Deprecated: The Refinery agent decides retry strategy (ZFC #5).
-func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
-	var lastErr error
-	delay := time.Duration(config.PushRetryDelayMs) * time.Millisecond
-
-	for attempt := 0; attempt <= config.PushRetryCount; attempt++ {
-		if attempt > 0 {
-			_, _ = fmt.Fprintf(m.output, "Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
-			time.Sleep(delay)
-			delay *= 2 // Exponential backoff
-		}
-
-		err := util.ExecRun(m.workDir, "git", "push", "origin", targetBranch)
-		if err == nil {
-			return nil // Success
-		}
-		lastErr = err
-	}
-
-	return fmt.Errorf("push failed after %d retries: %v", config.PushRetryCount, lastErr)
-}
-
 // formatAge formats a duration since the given time.
 func formatAge(t time.Time) string {
 	d := time.Since(t)
@@ -471,43 +353,6 @@ func formatAge(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-}
-
-// notifyWorkerConflict sends a conflict notification to a polecat.
-func (m *Manager) notifyWorkerConflict(mr *MergeRequest) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Merge conflict - rebase required",
-		Body: fmt.Sprintf(`Your branch %s has conflicts with %s.
-
-Please rebase your changes:
-  git fetch origin
-  git rebase origin/%s
-  git push -f
-
-Then the Refinery will retry the merge.`,
-			mr.Branch, mr.TargetBranch, mr.TargetBranch),
-		Priority: mail.PriorityHigh,
-	}
-	_ = router.Send(msg) // best-effort notification
-}
-
-// notifyWorkerMerged sends a success notification to a polecat.
-func (m *Manager) notifyWorkerMerged(mr *MergeRequest) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Work merged successfully",
-		Body: fmt.Sprintf(`Your branch %s has been merged to %s.
-
-Issue: %s
-Thank you for your contribution!`,
-			mr.Branch, mr.TargetBranch, mr.IssueID),
-	}
-	_ = router.Send(msg) // best-effort notification
 }
 
 // Common errors for MR operations
