@@ -52,6 +52,9 @@ bd-daemon:
         schedule:
           enabled: true
           intervalMinutes: 5
+          gcEveryNCycles: 12
+          squashEveryNCycles: 48
+          squashThreshold: 100
       credentials:
         enabled: false
         secretName: "dolt-s3-credentials"
