@@ -252,6 +252,16 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 		})
 	}
 
+	// Wire Claude OAuth credentials (Max/Corp accounts) from config.
+	if cfg.CredentialsSecret != "" {
+		spec.CredentialsSecret = cfg.CredentialsSecret
+	}
+
+	// Wire daemon token so agent pods can authenticate to the daemon.
+	if cfg.DaemonTokenSecret != "" {
+		spec.DaemonTokenSecret = cfg.DaemonTokenSecret
+	}
+
 	// Wire Coop sidecar when image is configured.
 	if cfg.CoopImage != "" {
 		spec.CoopSidecar = &podmanager.CoopSidecarSpec{

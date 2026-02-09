@@ -43,6 +43,14 @@ type Config struct {
 	// APIKeySecret is the K8s secret name containing ANTHROPIC_API_KEY (env: API_KEY_SECRET).
 	APIKeySecret string
 
+	// CredentialsSecret is the K8s secret containing Claude OAuth credentials (env: CLAUDE_CREDENTIALS_SECRET).
+	// Mounted as ~/.claude/.credentials.json in agent pods for Max/Corp accounts.
+	CredentialsSecret string
+
+	// DaemonTokenSecret is the K8s secret containing the daemon auth token (env: DAEMON_TOKEN_SECRET).
+	// Injected as BD_DAEMON_TOKEN in agent pods.
+	DaemonTokenSecret string
+
 	// SyncInterval is how often to reconcile pod statuses with beads (env: SYNC_INTERVAL).
 	// Default: 60s.
 	SyncInterval time.Duration
@@ -61,8 +69,10 @@ func Parse() *Config {
 		LogLevel:       envOr("LOG_LEVEL", "info"),
 		DefaultImage:   os.Getenv("AGENT_IMAGE"),
 		CoopImage:      os.Getenv("COOP_IMAGE"),
-		APIKeySecret:   os.Getenv("API_KEY_SECRET"),
-		SyncInterval:   envDurationOr("SYNC_INTERVAL", 60*time.Second),
+		APIKeySecret:      os.Getenv("API_KEY_SECRET"),
+		CredentialsSecret: os.Getenv("CLAUDE_CREDENTIALS_SECRET"),
+		DaemonTokenSecret: os.Getenv("DAEMON_TOKEN_SECRET"),
+		SyncInterval:      envDurationOr("SYNC_INTERVAL", 60*time.Second),
 	}
 
 	flag.StringVar(&cfg.DaemonHost, "daemon-host", cfg.DaemonHost, "BD Daemon hostname")
@@ -75,6 +85,8 @@ func Parse() *Config {
 	flag.StringVar(&cfg.DefaultImage, "agent-image", cfg.DefaultImage, "Default container image for agent pods")
 	flag.StringVar(&cfg.CoopImage, "coop-image", cfg.CoopImage, "Coop sidecar container image")
 	flag.StringVar(&cfg.APIKeySecret, "api-key-secret", cfg.APIKeySecret, "K8s secret name containing ANTHROPIC_API_KEY")
+	flag.StringVar(&cfg.CredentialsSecret, "credentials-secret", cfg.CredentialsSecret, "K8s secret with Claude OAuth credentials")
+	flag.StringVar(&cfg.DaemonTokenSecret, "daemon-token-secret", cfg.DaemonTokenSecret, "K8s secret with daemon auth token for agent pods")
 	flag.DurationVar(&cfg.SyncInterval, "sync-interval", cfg.SyncInterval, "Interval for periodic pod status sync")
 	flag.Parse()
 

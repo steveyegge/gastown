@@ -33,14 +33,16 @@ const (
 	DefaultMemoryLimit   = "4Gi"
 
 	// Volume names.
-	VolumeWorkspace   = "workspace"
-	VolumeTmp         = "tmp"
-	VolumeBeadsConfig = "beads-config"
+	VolumeWorkspace    = "workspace"
+	VolumeTmp          = "tmp"
+	VolumeBeadsConfig  = "beads-config"
+	VolumeClaudeCreds  = "claude-creds"
 
 	// Mount paths.
 	MountWorkspace   = "/home/agent/gt"
 	MountTmp         = "/tmp"
 	MountBeadsConfig = "/etc/agent-pod"
+	MountClaudeCreds = "/home/agent/.claude/.credentials.json"
 
 	// Container constants.
 	ContainerName = "agent"
@@ -96,6 +98,15 @@ type AgentPodSpec struct {
 	// WorkspaceStorage configures a PVC for persistent workspace.
 	// Used by crew pods. If nil, an EmptyDir is used for polecat pods.
 	WorkspaceStorage *WorkspaceStorageSpec
+
+	// CredentialsSecret is the K8s Secret name containing Claude OAuth credentials.
+	// The "credentials.json" key is mounted at ~/.claude/.credentials.json.
+	// Used for Claude Max/Corp accounts (no API key needed).
+	CredentialsSecret string
+
+	// DaemonTokenSecret is the K8s Secret name containing BD_DAEMON_TOKEN.
+	// The "token" key is injected as the BD_DAEMON_TOKEN env var.
+	DaemonTokenSecret string
 
 	// CoopSidecar configures a Coop sidecar container for PTY-based agent
 	// management. When set, the pod gets a coop container with health probes,
@@ -356,6 +367,19 @@ func (m *K8sManager) buildEnvVars(spec AgentPodSpec) []corev1.EnvVar {
 		})
 	}
 
+	// Daemon token from secret for agent→daemon authentication.
+	if spec.DaemonTokenSecret != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "BD_DAEMON_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: spec.DaemonTokenSecret},
+					Key:                  "token",
+				},
+			},
+		})
+	}
+
 	return envVars
 }
 
@@ -424,6 +448,18 @@ func (m *K8sManager) buildVolumes(spec AgentPodSpec) []corev1.Volume {
 		})
 	}
 
+	// Claude credentials volume: Secret mount for OAuth token.
+	if spec.CredentialsSecret != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: VolumeClaudeCreds,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: spec.CredentialsSecret,
+				},
+			},
+		})
+	}
+
 	return volumes
 }
 
@@ -438,6 +474,16 @@ func (m *K8sManager) buildVolumeMounts(spec AgentPodSpec) []corev1.VolumeMount {
 		mounts = append(mounts, corev1.VolumeMount{
 			Name:      VolumeBeadsConfig,
 			MountPath: MountBeadsConfig,
+			ReadOnly:  true,
+		})
+	}
+
+	// Claude credentials: mount secret key as a single file.
+	if spec.CredentialsSecret != "" {
+		mounts = append(mounts, corev1.VolumeMount{
+			Name:      VolumeClaudeCreds,
+			MountPath: MountClaudeCreds,
+			SubPath:   "credentials.json",
 			ReadOnly:  true,
 		})
 	}
