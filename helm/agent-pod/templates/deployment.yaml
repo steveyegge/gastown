@@ -91,8 +91,14 @@ spec:
               mountPath: /tmp
           {{- if .Values.agent.startupProbe.enabled }}
           startupProbe:
+            {{- if .Values.agent.startupProbe.httpGet }}
+            httpGet:
+              path: {{ .Values.agent.startupProbe.httpGet.path }}
+              port: {{ .Values.agent.startupProbe.httpGet.port | default .Values.agent.coop.healthPort }}
+            {{- else }}
             exec:
               command: ["test", "-f", "/tmp/health/alive"]
+            {{- end }}
             initialDelaySeconds: {{ .Values.agent.startupProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.agent.startupProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.agent.startupProbe.timeoutSeconds }}
@@ -100,8 +106,14 @@ spec:
           {{- end }}
           {{- if .Values.agent.livenessProbe.enabled }}
           livenessProbe:
+            {{- if .Values.agent.livenessProbe.httpGet }}
+            httpGet:
+              path: {{ .Values.agent.livenessProbe.httpGet.path }}
+              port: {{ .Values.agent.livenessProbe.httpGet.port | default .Values.agent.coop.healthPort }}
+            {{- else }}
             exec:
               command: ["test", "-f", "/tmp/health/alive"]
+            {{- end }}
             initialDelaySeconds: {{ .Values.agent.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.agent.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.agent.livenessProbe.timeoutSeconds }}
@@ -109,8 +121,14 @@ spec:
           {{- end }}
           {{- if .Values.agent.readinessProbe.enabled }}
           readinessProbe:
+            {{- if .Values.agent.readinessProbe.httpGet }}
+            httpGet:
+              path: {{ .Values.agent.readinessProbe.httpGet.path }}
+              port: {{ .Values.agent.readinessProbe.httpGet.port | default .Values.agent.coop.healthPort }}
+            {{- else }}
             exec:
               command: ["test", "-f", "/tmp/health/alive"]
+            {{- end }}
             initialDelaySeconds: {{ .Values.agent.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.agent.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.agent.readinessProbe.timeoutSeconds }}

@@ -1,5 +1,5 @@
 # Agent Pod Helm Chart Configuration
-# Deploys Gas Town agent pods running Claude Code in screen sessions
+# Deploys Gas Town agent pods running Claude Code via coop terminal manager
 
 nameOverride: ""
 fullnameOverride: ""
@@ -20,7 +20,11 @@ agent:
   # Rig this agent belongs to
   rig: gastown
 
-  # Screen session configuration
+  # Coop terminal manager configuration
+  coop:
+    healthPort: 9090
+
+  # Screen session configuration (legacy, used for SCREENRC_SCROLLBACK env)
   screen:
     scrollback: 10000
 
@@ -36,9 +40,12 @@ agent:
       cpu: 2
       memory: 4Gi
 
-  # Probes
+  # Probes — use coop HTTP health endpoints by default
   startupProbe:
     enabled: true
+    httpGet:
+      path: /api/v1/health
+      port: 9090
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 5
@@ -46,6 +53,9 @@ agent:
 
   livenessProbe:
     enabled: true
+    httpGet:
+      path: /api/v1/health
+      port: 9090
     initialDelaySeconds: 10
     periodSeconds: 30
     timeoutSeconds: 5
@@ -53,6 +63,9 @@ agent:
 
   readinessProbe:
     enabled: true
+    httpGet:
+      path: /api/v1/ready
+      port: 9090
     initialDelaySeconds: 5
     periodSeconds: 10
     timeoutSeconds: 5

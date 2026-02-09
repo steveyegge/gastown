@@ -271,29 +271,41 @@ tests:
             value: "custom-value"
         template: templates/deployment.yaml
 
-  - it: enables startup probe by default
+  - it: enables startup probe with httpGet by default
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].startupProbe.exec.command
-          value: ["test", "-f", "/tmp/health/alive"]
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /api/v1/health
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.port
+          value: 9090
         template: templates/deployment.yaml
       - equal:
           path: spec.template.spec.containers[0].startupProbe.failureThreshold
           value: 30
         template: templates/deployment.yaml
 
-  - it: enables liveness probe by default
+  - it: enables liveness probe with httpGet by default
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].livenessProbe.exec.command
-          value: ["test", "-f", "/tmp/health/alive"]
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /api/v1/health
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: 9090
         template: templates/deployment.yaml
 
-  - it: enables readiness probe by default
+  - it: enables readiness probe with httpGet by default
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].readinessProbe.exec.command
-          value: ["test", "-f", "/tmp/health/alive"]
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /api/v1/ready
+        template: templates/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: 9090
         template: templates/deployment.yaml
 
   - it: disables probes when configured

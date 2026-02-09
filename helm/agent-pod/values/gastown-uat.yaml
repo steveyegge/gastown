@@ -1,6 +1,6 @@
 # Gas Town UAT agent pod configuration
 # Namespace: gastown-uat
-# Purpose: Screen-based Claude Code agents running in K8s
+# Purpose: Coop-managed Claude Code agents running in K8s
 #
 # Deploy:
 #   cd charts/agent-pod/
