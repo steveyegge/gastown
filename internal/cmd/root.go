@@ -54,6 +54,7 @@ var beadsExemptCommands = map[string]bool{
 	"tap":        true,
 	"dnd":        true,
 	"krc":        true, // KRC doesn't require beads
+	"connect":    true,
 }
 
 // Commands exempt from the town root branch warning.

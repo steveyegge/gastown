@@ -26,17 +26,19 @@ import (
 )
 
 var (
-	installForce      bool
-	installName       string
-	installOwner      string
-	installPublicName string
-	installNoBeads    bool
-	installGit        bool
-	installGitHub     string
-	installPublic     bool
-	installShell      bool
-	installWrappers   bool
-	installSymlinks   bool
+	installForce       bool
+	installName        string
+	installOwner       string
+	installPublicName  string
+	installNoBeads     bool
+	installGit         bool
+	installGitHub      string
+	installPublic      bool
+	installShell       bool
+	installWrappers    bool
+	installSymlinks    bool
+	installDaemonHost  string
+	installDaemonToken string
 )
 
 var installCmd = &cobra.Command{
@@ -64,7 +66,8 @@ Examples:
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
   gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
-  gt install ~/gt --symlink                    # Symlink gt and bd to /usr/local/bin`,
+  gt install ~/gt --symlink                    # Symlink gt and bd to /usr/local/bin
+  gt install ~/gt --daemon-host=https://daemon.example.com  # Connect to remote daemon`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -81,6 +84,8 @@ func init() {
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
 	installCmd.Flags().BoolVar(&installSymlinks, "symlink", false, "Create symlinks for gt and bd in /usr/local/bin (requires sudo)")
+	installCmd.Flags().StringVar(&installDaemonHost, "daemon-host", "", "Remote daemon URL (creates .beads/config.yaml instead of local DB)")
+	installCmd.Flags().StringVar(&installDaemonToken, "daemon-token", "", "Remote daemon auth token")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -139,6 +144,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			"  Town root: %s\n\n"+
 			"Did you mean to update the binary? Run 'make install' in the gastown repo.\n"+
 			"Use --force to override (not recommended).", absPath, existingRoot)
+	}
+
+	// If daemon-host is set, skip local beads initialization
+	if installDaemonHost != "" {
+		installNoBeads = true
 	}
 
 	// Ensure beads (bd) is available before proceeding
@@ -285,6 +295,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := InitGitForHarness(absPath, installGitHub, !installPublic); err != nil {
 			return fmt.Errorf("git initialization failed: %w", err)
 		}
+	}
+
+	// Connect to remote daemon instead of local beads DB
+	if installDaemonHost != "" {
+		beadsDir := filepath.Join(absPath, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			return fmt.Errorf("creating .beads directory: %w", err)
+		}
+		if err := writeBeadsConfig(installDaemonHost, installDaemonToken); err != nil {
+			return fmt.Errorf("writing daemon config: %w", err)
+		}
+		fmt.Printf("   ✓ Connected to remote daemon at %s\n", installDaemonHost)
 	}
 
 	// Initialize town-level beads database (optional)
