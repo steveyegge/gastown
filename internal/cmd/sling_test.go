@@ -980,6 +980,13 @@ exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
+	// Use GT_TEST_ATTACHED_MOLECULE_LOG to capture the description content directly.
+	// On Windows, multi-line --description= args break batch script logging because
+	// newlines in command-line arguments cause cmd.exe to treat subsequent lines as
+	// separate commands.
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
@@ -1016,20 +1023,14 @@ exit /b 0
 		t.Fatalf("runSling: %v", err)
 	}
 
-	logBytes, err := os.ReadFile(logPath)
+	// Check the molecule log file written by storeFieldsInBead (via GT_TEST_ATTACHED_MOLECULE_LOG).
+	// This directly captures the description content without relying on batch stub logging.
+	molBytes, err := os.ReadFile(molLogPath)
 	if err != nil {
-		t.Fatalf("read bd log: %v", err)
+		t.Fatalf("read molecule log: %v", err)
 	}
-
-	// Look for a bd update command whose --description= includes no_merge.
-	// The description value may contain newlines (e.g., "dispatched_by: mayor\nno_merge: true"),
-	// so the log entry spans multiple lines. We check that an update --description line
-	// is followed by (or contains) "no_merge" in the log output.
-	logContent := string(logBytes)
-	foundUpdateDesc := strings.Contains(logContent, "update") && strings.Contains(logContent, "--description=")
-	foundNoMerge := strings.Contains(logContent, "no_merge: true")
-
-	if !foundUpdateDesc || !foundNoMerge {
-		t.Errorf("--no-merge flag not stored in bead description\nLog:\n%s", logContent)
+	molContent := string(molBytes)
+	if !strings.Contains(molContent, "no_merge: true") {
+		t.Errorf("--no-merge flag not stored in bead description\nDescription:\n%s", molContent)
 	}
 }
