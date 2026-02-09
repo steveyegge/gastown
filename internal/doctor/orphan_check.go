@@ -418,17 +418,17 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 			cmd = cmd[idx+1:]
 		}
 
-		// Only match claude/codex processes, not tmux or other launchers
+		// Only match claude/codex/opencode processes, not tmux or other launchers
 		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
-		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
+		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" && cmd != "opencode" {
 			continue
 		}
 
 		// Get full args
 		args := strings.Join(fields[2:], " ")
 
-		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
-		// This excludes user's personal Claude sessions
+		// Only match Gas Town agent processes (have --dangerously-skip-permissions)
+		// This excludes user's personal agent sessions
 		if !strings.Contains(args, "--dangerously-skip-permissions") {
 			continue
 		}

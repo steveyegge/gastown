@@ -19,10 +19,10 @@ type CrashReportCheck struct {
 
 // crashReport represents a found crash report file.
 type crashReport struct {
-	path     string
-	name     string
-	modTime  time.Time
-	process  string // "tmux", "claude", "node", etc.
+	path    string
+	name    string
+	modTime time.Time
+	process string // "tmux", "claude", "node", etc.
 }
 
 // NewCrashReportCheck creates a new crash report check.
@@ -73,6 +73,7 @@ func (c *CrashReportCheck) Run(ctx *CheckContext) *CheckResult {
 		"claude",
 		"claude-code",
 		"node",
+		"opencode",
 	}
 
 	var reports []crashReport

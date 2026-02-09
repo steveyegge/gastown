@@ -244,14 +244,15 @@ This removes the pause file and allows the Deacon to work normally.`,
 
 var deaconCleanupOrphansCmd = &cobra.Command{
 	Use:   "cleanup-orphans",
-	Short: "Clean up orphaned claude subagent processes",
-	Long: `Clean up orphaned claude subagent processes.
+	Short: "Clean up orphaned agent subagent processes",
+	Long: `Clean up orphaned Claude and OpenCode subagent processes.
 
-Claude Code's Task tool spawns subagent processes that sometimes don't clean up
-properly after completion. These accumulate and consume significant memory.
+Claude Code's Task tool and OpenCode spawn subagent processes that sometimes
+don't clean up properly after completion. These accumulate and consume
+significant memory.
 
 Detection is based on TTY column: processes with TTY "?" have no controlling
-terminal. Legitimate claude instances in terminals have a TTY like "pts/0".
+terminal. Legitimate agent instances in terminals have a TTY like "pts/0".
 
 This is safe because:
 - Processes in terminals (your personal sessions) have a TTY - won't be touched
@@ -265,15 +266,15 @@ Example:
 
 var deaconZombieScanCmd = &cobra.Command{
 	Use:   "zombie-scan",
-	Short: "Find and clean zombie Claude processes not in active tmux sessions",
-	Long: `Find and clean zombie Claude processes not in active tmux sessions.
+	Short: "Find and clean zombie agent processes not in active tmux sessions",
+	Long: `Find and clean zombie Claude and OpenCode processes not in active tmux sessions.
 
 Unlike cleanup-orphans (which uses TTY detection), zombie-scan uses tmux
-verification: it checks if each Claude process is in an active tmux session
+verification: it checks if each agent process is in an active tmux session
 by comparing against actual pane PIDs.
 
 A process is a zombie if:
-- It's a Claude/codex process
+- It's a Claude, codex, or opencode process
 - It's NOT the pane PID of any active tmux session
 - It's NOT a child of any pane PID
 - It's older than 60 seconds
@@ -1166,20 +1167,20 @@ func runDeaconResume(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runDeaconCleanupOrphans cleans up orphaned claude subagent processes.
+// runDeaconCleanupOrphans cleans up orphaned agent subagent processes.
 func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
-	// First, find orphans
+	// First, find orphans (both Claude and OpenCode)
 	orphans, err := util.FindOrphanedClaudeProcesses()
 	if err != nil {
 		return fmt.Errorf("finding orphaned processes: %w", err)
 	}
 
 	if len(orphans) == 0 {
-		fmt.Printf("%s No orphaned claude processes found\n", style.Dim.Render("○"))
+		fmt.Printf("%s No orphaned agent processes found\n", style.Dim.Render("○"))
 		return nil
 	}
 
-	fmt.Printf("%s Found %d orphaned claude process(es)\n", style.Bold.Render("●"), len(orphans))
+	fmt.Printf("%s Found %d orphaned agent process(es)\n", style.Bold.Render("●"), len(orphans))
 
 	// Process them with signal escalation
 	results, err := util.CleanupOrphanedClaudeProcesses()
@@ -1217,7 +1218,7 @@ func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runDeaconZombieScan finds and cleans zombie Claude processes not in active tmux sessions.
+// runDeaconZombieScan finds and cleans zombie agent processes not in active tmux sessions.
 func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
 	// Find zombies using tmux verification
 	zombies, err := util.FindZombieClaudeProcesses()
@@ -1226,11 +1227,11 @@ func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(zombies) == 0 {
-		fmt.Printf("%s No zombie claude processes found\n", style.Dim.Render("○"))
+		fmt.Printf("%s No zombie agent processes found\n", style.Dim.Render("○"))
 		return nil
 	}
 
-	fmt.Printf("%s Found %d zombie claude process(es)\n", style.Bold.Render("●"), len(zombies))
+	fmt.Printf("%s Found %d zombie agent process(es)\n", style.Bold.Render("●"), len(zombies))
 
 	// In dry-run mode, just list them
 	if zombieScanDryRun {

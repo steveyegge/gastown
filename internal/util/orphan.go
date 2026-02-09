@@ -274,15 +274,15 @@ type OrphanedProcess struct {
 	Age int // Age in seconds
 }
 
-// FindOrphanedClaudeProcesses finds claude/codex processes without a controlling terminal.
-// These are typically subagent processes spawned by Claude Code's Task tool that didn't
+// FindOrphanedClaudeProcesses finds claude/codex/opencode processes without a controlling terminal.
+// These are typically subagent processes spawned by Claude Code's Task tool or OpenCode that didn't
 // clean up properly after completion.
 //
 // Detection is based on TTY column: processes with TTY "?" have no controlling terminal.
 // This is safer than process tree walking because:
 // - Legitimate terminal sessions always have a TTY (pts/*)
 // - Orphaned subagents have no TTY (?)
-// - Won't accidentally kill user's personal claude instances in terminals
+// - Won't accidentally kill user's personal agent instances in terminals
 //
 // Additionally, processes must be older than minOrphanAge seconds to be considered
 // orphaned. This prevents race conditions with newly spawned processes.
@@ -315,15 +315,15 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 		cmd := fields[2]
 		etimeStr := fields[3]
 
-		// Only look for claude/codex processes without a TTY
+		// Only look for claude/codex/opencode processes without a TTY
 		// Linux shows "?" for no TTY, macOS shows "??"
 		if tty != "?" && tty != "??" {
 			continue
 		}
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 
@@ -416,9 +416,9 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 		cmd := fields[2]
 		etimeStr := fields[3]
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 

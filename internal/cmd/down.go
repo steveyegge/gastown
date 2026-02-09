@@ -422,21 +422,34 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		}
 	}
 
-	// Check for orphaned Claude/node processes
+	// Check for orphaned agent processes (Claude/OpenCode)
 	// These can be left behind if tmux sessions were killed but child processes didn't terminate
-	if pids := findOrphanedClaudeProcesses(townRoot); len(pids) > 0 {
-		respawned = append(respawned, fmt.Sprintf("orphaned Claude processes (PIDs: %v)", pids))
+	if pids := findOrphanedAgentProcesses(townRoot); len(pids) > 0 {
+		respawned = append(respawned, fmt.Sprintf("orphaned agent processes (PIDs: %v)", pids))
 	}
 
 	return respawned
 }
 
-// findOrphanedClaudeProcesses finds Claude/node processes that are running in the
+// findOrphanedAgentProcesses finds Claude/OpenCode processes that are running in the
 // town directory but aren't associated with any active tmux session.
 // This can happen when tmux sessions are killed but child processes don't terminate.
-func findOrphanedClaudeProcesses(townRoot string) []int {
-	// Use pgrep to find all claude/node processes
-	cmd := exec.Command("pgrep", "-l", "node")
+func findOrphanedAgentProcesses(townRoot string) []int {
+	var orphaned []int
+
+	// Check for node processes (OpenCode runs on node)
+	orphaned = append(orphaned, findProcessesByPattern("node", townRoot)...)
+
+	// Check for opencode processes
+	orphaned = append(orphaned, findProcessesByPattern("opencode", townRoot)...)
+
+	return orphaned
+}
+
+// findProcessesByPattern finds processes matching a pattern that are running in the town directory.
+func findProcessesByPattern(pattern, townRoot string) []int {
+	// Use pgrep to find all matching processes
+	cmd := exec.Command("pgrep", "-l", pattern)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil // pgrep found no processes or failed
@@ -483,4 +496,3 @@ func isProcessInTown(pid int, townRoot string) bool {
 	command := string(output)
 	return strings.Contains(command, townRoot)
 }
-
