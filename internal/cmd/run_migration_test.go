@@ -846,11 +846,13 @@ func TestExecuteMigrationStep_SkipsCompletedCommandsOnRetry(t *testing.T) {
 	marker2 := filepath.Join(townRoot, "marker2.txt")
 	marker3 := filepath.Join(townRoot, "marker3.txt")
 
-	// Use platform-appropriate file-creation commands
+	// Use platform-appropriate file-creation commands.
+	// On Windows, use relative filenames since cmd /c mangles absolute paths
+	// with quotes. executeMigrationStep sets c.Dir = townRoot, so relative
+	// names land in the right directory.
 	touchCmd := func(path string) string {
 		if runtime.GOOS == "windows" {
-			// Use copy nul which handles Windows paths better than type nul >
-			return fmt.Sprintf(`copy nul "%s"`, path)
+			return fmt.Sprintf("echo.>%s", filepath.Base(path))
 		}
 		return fmt.Sprintf("touch %s", path)
 	}
