@@ -359,7 +359,6 @@ func TestKiroSessionBeacon(t *testing.T) {
 				"gastown/polecats/bravo",
 				"<- human",
 				"start",
-				"gt prime",
 			},
 		},
 	}

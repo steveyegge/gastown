@@ -105,7 +105,7 @@ Higher-level tests for Kiro session configuration and lifecycle.
 | `TestKiroSettingsNoClaudeReferences` | Neither template contains "claude" or ".claude" (case-insensitive) |
 | `TestKiroHookLifecycle` | Both templates define all required hook events: SessionStart, UserPromptSubmit, PreCompact, Stop |
 | `TestKiroSettingsFilePermissions` | Settings files are written with 0600 permissions |
-| `TestKiroSessionBeacon` | Startup beacon messages format correctly for assigned/cold-start/start topics |
+| `TestKiroSessionBeacon` | Startup beacon messages format correctly for assigned/cold-start/start topics; beacon omits "gt prime" for hook-equipped agents (hooks handle it) |
 | `TestKiroNonInteractiveConfig` | Non-interactive config has `-p` prompt flag and `--output json` output flag |
 
 **Why it matters:** Proves that Kiro operates independently of Claude. The `NoClaudeReferences` test is a guard rail preventing accidental coupling.
@@ -119,7 +119,7 @@ Tests the runtime layer's provider dispatch for Kiro.
 | `TestKiroHooksProviderSelection` | `EnsureSettingsForRole` with provider "kiro" creates `.kiro/settings.json` |
 | `TestKiroHooksProviderSelection_NotClaude` | Kiro provider does NOT create `.claude/` directory |
 | `TestKiroFallbackCommand` | When hooks provider is "kiro", `StartupFallbackCommands` returns nil (hooks handle it) |
-| `TestKiroFallbackCommand_NoHooks` | Without hooks, fallback commands include `gt prime`, `gt mail check --inject` (for autonomous roles), and `gt nudge deacon` |
+| `TestKiroFallbackCommand_NoHooks` | Without hooks, fallback commands include `gt prime` and `gt mail check --inject` (for autonomous roles); deacon nudge is not included (deacon wakes on beads activity) |
 | `TestKiroEnsureSettings` | Per-role settings: autonomous roles get mail inject in SessionStart; interactive roles do not |
 | `TestKiroSettingsDirectory` | Settings land in `.kiro/settings.json` with 0600 permissions |
 | `TestKiroSettingsDirectory_CustomDir` | Custom directory/filename (e.g. `.custom-kiro/custom-settings.json`) is respected |
@@ -315,7 +315,7 @@ case "kiro":
 }
 ```
 
-When the hooks provider is active (not "none"), `StartupFallbackCommands` returns nil because hooks handle the lifecycle. When hooks are unavailable, fallback commands approximate the same behavior by sending `gt prime`, `gt mail check --inject` (for autonomous roles), and `gt nudge deacon session-started` via tmux.
+When the hooks provider is active (not "none"), `StartupFallbackCommands` returns nil because hooks handle the lifecycle. When hooks are unavailable, fallback commands approximate the same behavior by sending `gt prime` and `gt mail check --inject` (for autonomous roles) via tmux. The deacon nudge is not included in fallback commands because the deacon wakes on beads activity via `bd activity --follow`.
 
 ### Key Source Files
 

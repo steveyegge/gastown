@@ -95,10 +95,10 @@ func TestKiroFallbackCommand_NoHooks(t *testing.T) {
 		wantMailCheck    bool
 		wantNudgeDeacon  bool
 	}{
-		{"polecat", true, true, true},
-		{"mayor", true, false, true},
-		{"crew", true, false, true},
-		{"witness", true, true, true},
+		{"polecat", true, true, false},
+		{"mayor", true, false, false},
+		{"crew", true, false, false},
+		{"witness", true, true, false},
 	}
 
 	for _, tt := range tests {

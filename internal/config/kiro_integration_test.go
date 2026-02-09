@@ -346,8 +346,8 @@ func TestKiroSessionIdentitiesAllRoles(t *testing.T) {
 				Rig:       tt.rig,
 				AgentName: tt.agentName,
 			})
-			if env["GT_ROLE"] != tt.role {
-				t.Errorf("GT_ROLE = %q, want %q", env["GT_ROLE"], tt.role)
+			if env["GT_ROLE"] != tt.wantAddress {
+				t.Errorf("GT_ROLE = %q, want %q", env["GT_ROLE"], tt.wantAddress)
 			}
 
 			// No Claude references
@@ -640,8 +640,8 @@ func TestKiroCustomAgentOverride(t *testing.T) {
 	}
 
 	// Env vars present
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
-		t.Errorf("startup command missing GT_ROLE=polecat: %s", cmd)
+	if !strings.Contains(cmd, "GT_ROLE="+rigName+"/polecats/speedy") {
+		t.Errorf("startup command missing GT_ROLE=%s/polecats/speedy: %s", rigName, cmd)
 	}
 	if !strings.Contains(cmd, "GT_POLECAT=speedy") {
 		t.Errorf("startup command missing GT_POLECAT=speedy: %s", cmd)
@@ -729,9 +729,10 @@ func TestKiroAgentEnvAllRoles(t *testing.T) {
 				t.Errorf("CLAUDE_CONFIG_DIR should not appear for Kiro role %s", tc.role)
 			}
 
-			// Role value
-			if env["GT_ROLE"] != tc.role {
-				t.Errorf("GT_ROLE = %q, want %q", env["GT_ROLE"], tc.role)
+			// Role value (compound format: rig/role or rig/polecats/name etc.)
+			wantRole := mailAddress(tc.role, rig, tc.agentName)
+			if env["GT_ROLE"] != wantRole {
+				t.Errorf("GT_ROLE = %q, want %q", env["GT_ROLE"], wantRole)
 			}
 		})
 	}
