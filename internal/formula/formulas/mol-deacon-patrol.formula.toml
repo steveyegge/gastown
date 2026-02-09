@@ -931,7 +931,7 @@ Use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 5m
+  --backoff-base 60s --backoff-mult 2 --backoff-max 10m
 ```
 
 This command:
@@ -941,7 +941,7 @@ This command:
    - First timeout: 60s
    - Second timeout: 120s
    - Third timeout: 240s
-   - ...capped at 5 minutes max (PATCH-002: reduced from 10m for faster recovery)
+   - ...capped at 10 minutes max
 4. Tracks `idle:N` label on hq-deacon bead for backoff state
 
 **On signal received** (activity detected):
@@ -957,7 +957,7 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 
 **Why this approach?**
 - Any `gt` or `bd` command triggers beads activity, waking the Deacon
-- Idle towns let the Deacon sleep longer (up to 5 min between patrols)
+- Idle towns let the Deacon sleep longer (up to 10 min between patrols)
 - Active work wakes the Deacon immediately via the feed
 - No polling or fixed sleep intervals
 
