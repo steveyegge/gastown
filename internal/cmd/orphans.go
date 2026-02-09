@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -32,7 +33,8 @@ This command uses 'git fsck --unreachable' to find dangling commits,
 filters to recent ones, and shows details to help recovery.
 
 Examples:
-  gt orphans              # Last 7 days (default)
+  gt orphans              # Last 7 days (default), infers rig from cwd
+  gt orphans --rig=gastown # Target a specific rig
   gt orphans --days=14    # Last 2 weeks
   gt orphans --all        # Show all orphans (no date filter)`,
 	RunE: runOrphans,
@@ -41,6 +43,7 @@ Examples:
 var (
 	orphansDays int
 	orphansAll  bool
+	orphansRig  string
 
 	// Kill commits command flags
 	orphansKillDryRun bool
@@ -145,6 +148,7 @@ Examples:
 func init() {
 	orphansCmd.Flags().IntVar(&orphansDays, "days", 7, "Show orphans from last N days")
 	orphansCmd.Flags().BoolVar(&orphansAll, "all", false, "Show all orphans (no date filter)")
+	orphansCmd.PersistentFlags().StringVar(&orphansRig, "rig", "", "Target rig name (required when not in a rig directory)")
 
 	// Kill commits command flags
 	orphansKillCmd.Flags().BoolVar(&orphansKillDryRun, "dry-run", false, "Preview without deleting")
@@ -183,10 +187,20 @@ func runOrphans(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Find current rig
-	rigName, r, err := findCurrentRig(townRoot)
-	if err != nil {
-		return fmt.Errorf("determining rig: %w", err)
+	// Find rig: use --rig flag if provided, otherwise infer from cwd
+	var rigName string
+	var r *rig.Rig
+	if orphansRig != "" {
+		_, r, err = getRig(orphansRig)
+		if err != nil {
+			return err
+		}
+		rigName = orphansRig
+	} else {
+		rigName, r, err = findCurrentRig(townRoot)
+		if err != nil {
+			return fmt.Errorf("not in a rig directory. Use --rig <name> to specify the target rig, or run from within a rig directory")
+		}
 	}
 
 	// We need to run from the mayor's clone (main git repo for the rig)
@@ -372,9 +386,20 @@ func runOrphansKill(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	rigName, r, err := findCurrentRig(townRoot)
-	if err != nil {
-		return fmt.Errorf("determining rig: %w", err)
+	// Find rig: use --rig flag if provided, otherwise infer from cwd
+	var rigName string
+	var r *rig.Rig
+	if orphansRig != "" {
+		_, r, err = getRig(orphansRig)
+		if err != nil {
+			return err
+		}
+		rigName = orphansRig
+	} else {
+		rigName, r, err = findCurrentRig(townRoot)
+		if err != nil {
+			return fmt.Errorf("not in a rig directory. Use --rig <name> to specify the target rig, or run from within a rig directory")
+		}
 	}
 
 	mayorPath := r.Path + "/mayor/rig"
