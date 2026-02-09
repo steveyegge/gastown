@@ -494,6 +494,16 @@ func (g *Git) RemoteURL(remote string) (string, error) {
 	return g.run("remote", "get-url", remote)
 }
 
+// AddRemote adds a new remote with the given name and URL.
+func (g *Git) AddRemote(name, url string) (string, error) {
+	return g.run("remote", "add", name, url)
+}
+
+// SetRemoteURL updates the URL for an existing remote.
+func (g *Git) SetRemoteURL(name, url string) (string, error) {
+	return g.run("remote", "set-url", name, url)
+}
+
 // Remotes returns the list of configured remote names.
 func (g *Git) Remotes() ([]string, error) {
 	out, err := g.run("remote")

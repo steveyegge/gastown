@@ -61,3 +61,4 @@ CLAUDE.md
 logs/
 settings/
 .events.jsonl
+.sqlhistory

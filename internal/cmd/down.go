@@ -12,6 +12,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -26,6 +27,11 @@ import (
 const (
 	shutdownLockFile    = "daemon/shutdown.lock"
 	shutdownLockTimeout = 5 * time.Second
+
+	// defaultDownOrphanGraceSecs is the grace period for orphan cleanup during gt down.
+	// Short because gt down is meant to be quick - processes already had SIGTERM via
+	// KillSessionWithProcesses.
+	defaultDownOrphanGraceSecs = 5
 )
 
 var downCmd = &cobra.Command{
@@ -96,8 +102,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 		defer func() {
 			_ = lock.Unlock()
-			// Clean up lock file after releasing (defense in depth)
-			_ = os.Remove(filepath.Join(townRoot, shutdownLockFile))
+			// Do NOT remove the lock file. Flock works on file descriptors,
+			// not paths. Removing the file while another process is waiting
+			// on the flock causes it to acquire a lock on the deleted inode,
+			// providing no mutual exclusion against a process that creates a
+			// new file at the same path.
 		}()
 
 		// Prevent tmux server from exiting when all sessions are killed.
@@ -220,8 +229,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 5: Verification (--all only)
-	if downAll && !downDryRun {
+	// Phase 5: Orphan cleanup and verification (--all or --force)
+	if (downAll || downForce) && !downDryRun {
+		fmt.Println()
+		fmt.Println("Cleaning up orphaned Claude processes...")
+		cleanupOrphanedClaude(defaultDownOrphanGraceSecs)
+
 		time.Sleep(500 * time.Millisecond)
 		respawned := verifyShutdown(t, townRoot)
 		if len(respawned) > 0 {
@@ -365,7 +378,9 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
 		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
+		if session.WaitForSessionExit(t, sessionName, constants.GracefulShutdownTimeout) {
+			return true, nil // Process exited gracefully
+		}
 	}
 
 	// Kill the session (with explicit process termination to prevent orphans)
@@ -422,77 +437,65 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		}
 	}
 
-	// Check for orphaned agent processes (Claude/OpenCode)
+	// Check for orphaned Claude/node processes
 	// These can be left behind if tmux sessions were killed but child processes didn't terminate
-	if pids := findOrphanedAgentProcesses(townRoot); len(pids) > 0 {
+	if pids := findOrphanedClaudeProcesses(townRoot); len(pids) > 0 {
 		respawned = append(respawned, fmt.Sprintf("orphaned agent processes (PIDs: %v)", pids))
 	}
 
 	return respawned
 }
 
-// findOrphanedAgentProcesses finds Claude/OpenCode processes that are running in the
+// findOrphanedClaudeProcesses finds Claude/OpenCode processes that are running in the
 // town directory but aren't associated with any active tmux session.
 // This can happen when tmux sessions are killed but child processes don't terminate.
-func findOrphanedAgentProcesses(townRoot string) []int {
-	var orphaned []int
-
-	// Check for node processes (OpenCode runs on node)
-	orphaned = append(orphaned, findProcessesByPattern("node", townRoot)...)
-
-	// Check for opencode processes
-	orphaned = append(orphaned, findProcessesByPattern("opencode", townRoot)...)
-
-	return orphaned
-}
-
-// findProcessesByPattern finds processes matching a pattern that are running in the town directory.
-func findProcessesByPattern(pattern, townRoot string) []int {
-	// Use pgrep to find all matching processes
-	cmd := exec.Command("pgrep", "-l", pattern)
-	output, err := cmd.Output()
+//
+// Only matches processes whose full command line references the town root path,
+// which avoids false positives on unrelated Node.js applications (VS Code
+// extensions, web servers, etc.).
+func findOrphanedClaudeProcesses(townRoot string) []int {
+	// Use ps to get PID, process name, and full command line in a single pass.
+	// Previous implementation used "pgrep -l node" which matched ALL node
+	// processes on the system regardless of whether they belonged to Gas Town.
+	out, err := exec.Command("ps", "-eo", "pid,comm,args").Output()
 	if err != nil {
-		return nil // pgrep found no processes or failed
+		return nil
 	}
 
 	var orphaned []int
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// Format: "PID command"
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		pidStr := parts[0]
-		var pid int
-		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil {
+
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
 			continue
 		}
 
-		// Check if this process is running in the town directory
-		if isProcessInTown(pid, townRoot) {
+		var pid int
+		if _, err := fmt.Sscanf(fields[0], "%d", &pid); err != nil {
+			continue
+		}
+
+		// Only consider known Gas Town process names (including OpenCode)
+		comm := strings.ToLower(fields[1])
+		switch comm {
+		case "claude", "claude-code", "codex", "node", "opencode":
+			// Potential Gas Town process
+		default:
+			continue
+		}
+
+		// Verify the process's command line references the town root.
+		// This filters out unrelated node processes (VS Code, web servers, etc.)
+		// whose command lines won't contain the Gas Town directory path.
+		args := strings.Join(fields[2:], " ")
+		if strings.Contains(args, townRoot) {
 			orphaned = append(orphaned, pid)
 		}
 	}
 
 	return orphaned
-}
-
-// isProcessInTown checks if a process is running in the given town directory.
-// Uses ps to check the process's working directory.
-func isProcessInTown(pid int, townRoot string) bool {
-	// Use ps to get the process's working directory
-	cmd := exec.Command("ps", "-o", "command=", "-p", fmt.Sprintf("%d", pid))
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	// Check if the command line includes the town path
-	command := string(output)
-	return strings.Contains(command, townRoot)
 }

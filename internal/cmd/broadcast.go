@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -102,13 +103,23 @@ func runBroadcast(cmd *cobra.Command, args []string) error {
 
 	// Send nudges
 	t := tmux.NewTmux()
-	var succeeded, failed int
+	townRoot, _ := workspace.FindFromCwd()
+	var succeeded, failed, skipped int
 	var failures []string
 
 	fmt.Printf("Broadcasting to %d agent(s)...\n\n", len(targets))
 
 	for i, agent := range targets {
 		agentName := formatAgentName(agent)
+
+		// Check DND status before nudging
+		if townRoot != "" {
+			if shouldSend, level, _ := shouldNudgeTarget(townRoot, agentName, false); !shouldSend {
+				skipped++
+				fmt.Printf("  %s %s %s (DND: %s)\n", style.Dim.Render("○"), AgentTypeIcons[agent.Type], agentName, level)
+				continue
+			}
+		}
 
 		if err := t.NudgeSession(agent.Name, message); err != nil {
 			failed++
@@ -127,15 +138,22 @@ func runBroadcast(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	if failed > 0 {
-		fmt.Printf("%s Broadcast complete: %d succeeded, %d failed\n",
-			style.WarningPrefix, succeeded, failed)
+		summary := fmt.Sprintf("Broadcast complete: %d succeeded, %d failed", succeeded, failed)
+		if skipped > 0 {
+			summary += fmt.Sprintf(", %d skipped (DND)", skipped)
+		}
+		fmt.Printf("%s %s\n", style.WarningPrefix, summary)
 		for _, f := range failures {
 			fmt.Printf("  %s\n", style.Dim.Render(f))
 		}
 		return fmt.Errorf("%d nudge(s) failed", failed)
 	}
 
-	fmt.Printf("%s Broadcast complete: %d agent(s) nudged\n", style.SuccessPrefix, succeeded)
+	summary := fmt.Sprintf("Broadcast complete: %d agent(s) nudged", succeeded)
+	if skipped > 0 {
+		summary += fmt.Sprintf(", %d skipped (DND)", skipped)
+	}
+	fmt.Printf("%s %s\n", style.SuccessPrefix, summary)
 	return nil
 }
 

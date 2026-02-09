@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -376,7 +377,13 @@ func unsetNestedValue(obj interface{}, keyPath string) error {
 		return fmt.Errorf("marshaling result: %w", err)
 	}
 
-	// Unmarshal back into the original struct
+	// Zero the struct before unmarshaling so that deleted keys don't persist.
+	// json.Unmarshal only sets fields present in the JSON; absent fields keep
+	// their prior values. Zeroing first ensures removed keys become zero-valued
+	// (and omitempty fields are truly absent on re-serialization).
+	reflect.ValueOf(obj).Elem().Set(reflect.Zero(reflect.ValueOf(obj).Elem().Type()))
+
+	// Unmarshal back into the zeroed struct
 	if err := json.Unmarshal(data, obj); err != nil {
 		return fmt.Errorf("unmarshaling result: %w", err)
 	}

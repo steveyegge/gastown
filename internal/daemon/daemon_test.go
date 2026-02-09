@@ -312,9 +312,10 @@ func TestIsShutdownInProgress_StaleLockFile(t *testing.T) {
 		t.Error("expected false when lock file exists but is not locked")
 	}
 
-	// Self-healing: stale file should have been removed
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Error("expected stale lock file to be removed")
+	// File should still exist - flock files are never removed to prevent
+	// a race where concurrent callers lock different inodes
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Error("expected lock file to be preserved (flock files should not be removed)")
 	}
 }
 

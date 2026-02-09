@@ -1290,7 +1290,9 @@ func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook stri
 
 		// Found session
 		var activityUnix int64
-		fmt.Sscanf(parts[1], "%d", &activityUnix)
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil {
+			continue
+		}
 		attached := parts[2] == "1"
 
 		sessionStatus := "detached"

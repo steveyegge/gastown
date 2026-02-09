@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -121,6 +122,19 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	return convoys, nil
 }
 
+// extractIssueID strips the external:prefix:id wrapper from bead IDs.
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
+// but consumers need the raw bead ID for display and lookups.
+func extractIssueID(id string) string {
+	if strings.HasPrefix(id, "external:") {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return id
+}
+
 // loadTrackedIssues loads issues tracked by a convoy.
 func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	// Validate convoy ID for safety
@@ -150,15 +164,27 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 		return nil, 0, 0
 	}
 
+	// Extract raw issue IDs and refresh status via cross-rig lookup.
+	// bd dep list returns status from the dependency record in HQ beads
+	// which is never updated when cross-rig issues are closed in their rig.
+	for i := range tracked {
+		tracked[i].ID = extractIssueID(tracked[i].ID)
+	}
+	freshStatus := refreshIssueStatus(ctx, tracked)
+
 	issues := make([]IssueItem, 0, len(tracked))
 	completed := 0
 	for _, t := range tracked {
+		status := t.Status
+		if fresh, ok := freshStatus[t.ID]; ok {
+			status = fresh
+		}
 		issues = append(issues, IssueItem{
 			ID:     t.ID,
 			Title:  t.Title,
-			Status: t.Status,
+			Status: status,
 		})
-		if t.Status == "closed" {
+		if status == "closed" {
 			completed++
 		}
 	}
@@ -172,6 +198,46 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	})
 
 	return issues, completed, len(issues)
+}
+
+// refreshIssueStatus does a batch bd show to get current status for tracked issues.
+// Returns a map from issue ID to current status.
+func refreshIssueStatus(ctx context.Context, tracked []struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}) map[string]string {
+	if len(tracked) == 0 {
+		return nil
+	}
+
+	args := []string{"--no-daemon", "show"}
+	for _, t := range tracked {
+		args = append(args, t.ID)
+	}
+	args = append(args, "--json")
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var issues []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(issues))
+	for _, issue := range issues {
+		result[issue.ID] = issue.Status
+	}
+	return result
 }
 
 // Update handles messages.

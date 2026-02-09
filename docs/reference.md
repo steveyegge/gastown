@@ -327,7 +327,7 @@ Understanding this hierarchy is essential for proper configuration.
 | **Witness** | `~/gt/<rig>/witness/` | No git clone, monitors polecats only |
 | **Refinery** | `~/gt/<rig>/refinery/rig/` | Worktree on main branch |
 | **Crew** | `~/gt/<rig>/crew/<name>/rig/` | Persistent human workspace clone |
-| **Polecat** | `~/gt/<rig>/polecats/<name>/rig/` | Ephemeral worker worktree |
+| **Polecat** | `~/gt/<rig>/polecats/<name>/rig/` | Polecat worktree (ephemeral sandbox) |
 
 Note: The per-rig `<rig>/mayor/rig/` directory is NOT a working directory—it's
 a git clone that holds the canonical `.beads/` database for that rig.
@@ -672,6 +672,47 @@ Patrol molecules bond plugins dynamically:
 ```bash
 bd mol bond mol-security-scan $PATROL_ID --var scope="$SCOPE"
 ```
+
+## Formula Invocation Patterns
+
+**CRITICAL**: Different formula types require different invocation methods.
+
+### Workflow Formulas (sequential steps, single polecat)
+
+Examples: `shiny`, `shiny-enterprise`, `mol-polecat-work`
+
+```bash
+gt sling <formula> --on <bead-id> <target>
+gt sling shiny-enterprise --on gt-abc123 gastown
+```
+
+### Convoy Formulas (parallel legs, multiple polecats)
+
+Examples: `code-review`
+
+**DO NOT use `gt sling` for convoy formulas!** It fails with "convoy type not supported".
+
+```bash
+# Correct invocation - use gt formula run:
+gt formula run code-review --pr=123
+gt formula run code-review --files="src/*.go"
+
+# Dry run to preview:
+gt formula run code-review --pr=123 --dry-run
+```
+
+### Identifying Formula Type
+
+```bash
+gt formula show <name>   # Shows "Type: convoy" or "Type: workflow"
+bd formula list          # Lists formulas by type
+```
+
+### Why This Matters
+
+- `gt sling` attempts to cook+pour the formula, which fails for convoy type
+- `gt formula run` handles convoy dispatch directly, spawning parallel polecats
+- Convoy formulas create multiple polecats (one per leg) + synthesis step
 
 ## Common Issues
 

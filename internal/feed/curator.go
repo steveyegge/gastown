@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/events"
 )
 
@@ -304,6 +305,14 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	data = append(data, '\n')
 
 	feedPath := filepath.Join(c.townRoot, FeedFile)
+
+	// Acquire cross-process file lock to prevent interleaved writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.Lock(); err != nil {
+		return
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
 	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: feed file is non-sensitive operational data
 	if err != nil {
 		return

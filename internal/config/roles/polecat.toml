@@ -1,5 +1,5 @@
 # Polecat role definition
-# Ephemeral workers for batch work dispatch. Multiple per rig.
+# Persistent identity, ephemeral sessions. Batch work dispatch. Multiple per rig.
 
 role = "polecat"
 scope = "rig"

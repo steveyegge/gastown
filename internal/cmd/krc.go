@@ -99,9 +99,36 @@ var krcConfigResetCmd = &cobra.Command{
 	RunE:  runKrcConfigReset,
 }
 
+var krcDecayCmd = &cobra.Command{
+	Use:   "decay",
+	Short: "Show forensic value decay report",
+	Long: `Display how forensic value is decaying across event types.
+
+Each event type has a decay curve that models how its value diminishes over time:
+  rapid   - value drops quickly (heartbeats, pings)
+  steady  - linear decay (session events, patrols)
+  slow    - value persists longer (errors, escalations)
+  flat    - full value until near TTL (audit events, deaths)
+
+Events with low forensic scores are candidates for aggressive pruning.`,
+	RunE: runKrcDecay,
+}
+
+var krcAutoPruneStatusCmd = &cobra.Command{
+	Use:   "auto-prune-status",
+	Short: "Show auto-prune scheduling state",
+	Long: `Display the auto-prune scheduling state including:
+  - Last prune time and result
+  - Total prunes and bytes freed
+  - Time until next scheduled prune`,
+	RunE: runKrcAutoPruneStatus,
+}
+
 var (
 	krcPruneDryRun bool
+	krcPruneAuto   bool
 	krcStatsJSON   bool
+	krcDecayJSON   bool
 )
 
 func init() {
@@ -109,11 +136,15 @@ func init() {
 	krcCmd.AddCommand(krcStatsCmd)
 	krcCmd.AddCommand(krcPruneCmd)
 	krcCmd.AddCommand(krcConfigCmd)
+	krcCmd.AddCommand(krcDecayCmd)
+	krcCmd.AddCommand(krcAutoPruneStatusCmd)
 	krcConfigCmd.AddCommand(krcConfigSetCmd)
 	krcConfigCmd.AddCommand(krcConfigResetCmd)
 
 	krcPruneCmd.Flags().BoolVar(&krcPruneDryRun, "dry-run", false, "Preview changes without modifying files")
+	krcPruneCmd.Flags().BoolVar(&krcPruneAuto, "auto", false, "Daemon mode: only prune if PruneInterval has elapsed")
 	krcStatsCmd.Flags().BoolVar(&krcStatsJSON, "json", false, "Output in JSON format")
+	krcDecayCmd.Flags().BoolVar(&krcDecayJSON, "json", false, "Output in JSON format")
 }
 
 func runKrcStats(cmd *cobra.Command, args []string) error {
@@ -207,6 +238,11 @@ func runKrcPrune(cmd *cobra.Command, args []string) error {
 	config, err := krc.LoadConfig(townRoot)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Auto mode: respect PruneInterval scheduling
+	if krcPruneAuto {
+		return runKrcAutoPrune(townRoot, config)
 	}
 
 	if krcPruneDryRun {
@@ -428,4 +464,167 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// runKrcAutoPrune runs pruning only if the PruneInterval has elapsed.
+// Designed for daemon/deacon integration: call frequently, only prunes when due.
+func runKrcAutoPrune(townRoot string, config *krc.Config) error {
+	result, ran, err := krc.AutoPrune(townRoot, config)
+	if err != nil {
+		return fmt.Errorf("auto-prune: %w", err)
+	}
+
+	if !ran {
+		state, _ := krc.LoadAutoPruneState(townRoot)
+		sinceLastPrune := state.TimeSinceLastPrune()
+		remaining := config.PruneInterval - sinceLastPrune
+		if remaining < 0 {
+			remaining = 0
+		}
+		fmt.Printf("%s Auto-prune skipped (next in %s)\n",
+			style.Dim.Render("○"), krcFormatDuration(remaining))
+		return nil
+	}
+
+	if result.EventsPruned == 0 {
+		fmt.Printf("%s Auto-prune ran: no expired events\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Auto-pruned %d events (%s freed)\n",
+		style.Bold.Render("✓"),
+		result.EventsPruned,
+		formatBytes(result.BytesBefore-result.BytesAfter))
+
+	return nil
+}
+
+func runKrcDecay(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	config, err := krc.LoadConfig(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	stats, err := krc.GetStats(townRoot, config)
+	if err != nil {
+		return fmt.Errorf("getting stats: %w", err)
+	}
+
+	report := krc.GenerateDecayReport(stats, config)
+
+	if krcDecayJSON {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	// Human-readable output
+	fmt.Println(style.Bold.Render("Forensic Value Decay Report"))
+	fmt.Println()
+
+	if len(report.Types) == 0 {
+		fmt.Printf("%s No events found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("Total events: %d   Avg score: %.0f%%   At risk: %d   Expired: %d\n",
+		report.TotalEvents, report.TotalScore*100, report.AtRisk, report.Expired)
+	fmt.Println()
+
+	// Table header
+	fmt.Printf("  %-20s %-7s %-6s %-8s %-8s %-8s %s\n",
+		"TYPE", "CURVE", "TTL", "COUNT", "AVG AGE", "SCORE", "STATUS")
+	fmt.Printf("  %-20s %-7s %-6s %-8s %-8s %-8s %s\n",
+		strings.Repeat("-", 20), "------", "-----", "-------", "-------", "-------", "------")
+
+	for _, di := range report.Types {
+		// Color-code the score
+		scoreStr := fmt.Sprintf("%.0f%%", di.AvgScore*100)
+		var statusStr string
+		switch {
+		case di.ExpiredCount > 0:
+			statusStr = style.Warning.Render(fmt.Sprintf("%d expired", di.ExpiredCount))
+		case di.AvgScore < 0.25:
+			statusStr = style.Warning.Render("low value")
+		case di.AvgScore < 0.5:
+			statusStr = style.Dim.Render("decaying")
+		default:
+			statusStr = style.Success.Render("healthy")
+		}
+
+		ageStr := ""
+		if di.AvgAge > 0 {
+			ageStr = krcFormatDuration(di.AvgAge)
+		}
+
+		fmt.Printf("  %-20s %-7s %-6s %-8d %-8s %-8s %s\n",
+			di.EventType, di.Curve, krcFormatDuration(di.TTL),
+			di.Count, ageStr, scoreStr, statusStr)
+	}
+
+	fmt.Println()
+	fmt.Println(style.Dim.Render("Decay curves: rapid (heartbeats), steady (sessions), slow (errors), flat (audit)"))
+
+	return nil
+}
+
+func runKrcAutoPruneStatus(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	config, err := krc.LoadConfig(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	state, err := krc.LoadAutoPruneState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading auto-prune state: %w", err)
+	}
+
+	fmt.Println(style.Bold.Render("Auto-Prune Status"))
+	fmt.Println()
+	fmt.Printf("Prune interval: %s\n", krcFormatDuration(config.PruneInterval))
+
+	if state.LastPruneTime.IsZero() {
+		fmt.Printf("Last prune:     %s\n", style.Dim.Render("never"))
+		fmt.Printf("Status:         %s\n", style.Warning.Render("prune pending"))
+	} else {
+		fmt.Printf("Last prune:     %s (%s ago)\n",
+			state.LastPruneTime.Format(time.RFC3339),
+			krcFormatDuration(time.Since(state.LastPruneTime)))
+
+		if state.ShouldPrune(config.PruneInterval) {
+			fmt.Printf("Status:         %s\n", style.Warning.Render("prune due"))
+		} else {
+			remaining := config.PruneInterval - time.Since(state.LastPruneTime)
+			fmt.Printf("Status:         next in %s\n", krcFormatDuration(remaining))
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("Total prunes:      %d\n", state.PruneCount)
+	fmt.Printf("Total pruned:      %d events\n", state.TotalPruned)
+	fmt.Printf("Total space freed: %s\n", formatBytes(state.TotalBytesFreed))
+
+	if state.LastResult != nil && state.LastResult.EventsPruned > 0 {
+		fmt.Println()
+		fmt.Println(style.Bold.Render("Last prune result:"))
+		fmt.Printf("  Processed: %d  Pruned: %d  Retained: %d\n",
+			state.LastResult.EventsProcessed,
+			state.LastResult.EventsPruned,
+			state.LastResult.EventsRetained)
+	}
+
+	return nil
 }

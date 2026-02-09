@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -56,6 +58,7 @@ var (
 	handoffSubject string
 	handoffMessage string
 	handoffCollect bool
+	handoffStdin   bool
 )
 
 func init() {
@@ -64,10 +67,23 @@ func init() {
 	handoffCmd.Flags().StringVarP(&handoffSubject, "subject", "s", "", "Subject for handoff mail (optional)")
 	handoffCmd.Flags().StringVarP(&handoffMessage, "message", "m", "", "Message body for handoff mail (optional)")
 	handoffCmd.Flags().BoolVarP(&handoffCollect, "collect", "c", false, "Auto-collect state (status, inbox, beads) into handoff message")
+	handoffCmd.Flags().BoolVar(&handoffStdin, "stdin", false, "Read message body from stdin (avoids shell quoting issues)")
 	rootCmd.AddCommand(handoffCmd)
 }
 
 func runHandoff(cmd *cobra.Command, args []string) error {
+	// Handle --stdin: read message body from stdin (avoids shell quoting issues)
+	if handoffStdin {
+		if handoffMessage != "" {
+			return fmt.Errorf("cannot use --stdin with --message/-m")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		handoffMessage = strings.TrimRight(string(data), "\n")
+	}
+
 	// Check if we're a polecat - polecats use gt done instead
 	// GT_POLECAT is set by the session manager when starting polecat sessions
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
@@ -404,34 +420,40 @@ func buildRestartCommand(sessionName string) (string, error) {
 		Topic:     "handoff",
 	})
 
-	// Determine rigPath for BuildAgentStartupCommand
-	var rigPath string
-	if identity.Rig != "" {
-		rigPath = filepath.Join(townRoot, identity.Rig)
-	}
-
-	// Build role-aware runtime command using BuildAgentStartupCommand
-	// This respects role_agents configuration for per-role model selection
-	// If GT_AGENT override is set, use that agent instead of default
+	// For respawn-pane, we:
+	// 1. cd to the right directory (role's canonical home)
+	// 2. export GT_ROLE and BD_ACTOR so role detection works correctly
+	// 3. export Claude-related env vars (not inherited by fresh shell)
+	// 4. run claude with the startup beacon (triggers immediate context loading)
+	// Use exec to ensure clean process replacement.
+	//
+	// Check if current session is using a non-default agent (GT_AGENT env var).
+	// If so, preserve it across handoff by using the override variant.
+	// Fall back to tmux session environment if process env doesn't have it,
+	// since exec env vars may not propagate through all agent runtimes.
 	currentAgent := os.Getenv("GT_AGENT")
+	if currentAgent == "" {
+		t := tmux.NewTmux()
+		if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
+			currentAgent = val
+		}
+	}
 	var runtimeCmd string
 	if currentAgent != "" {
 		var err error
-		runtimeCmd, err = config.BuildAgentStartupCommandWithAgentOverride(gtRole, identity.Rig, townRoot, rigPath, beacon, currentAgent)
+		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride("", beacon, currentAgent)
 		if err != nil {
-			return "", fmt.Errorf("building startup command with agent override: %w", err)
+			return "", fmt.Errorf("resolving agent config: %w", err)
 		}
 	} else {
-		runtimeCmd = config.BuildAgentStartupCommand(gtRole, identity.Rig, townRoot, rigPath, beacon)
+		runtimeCmd = config.GetRuntimeCommandWithPrompt("", beacon)
 	}
 
-	// For respawn-pane, we need to:
-	// 1. cd to the right directory (role's canonical home)
-	// 2. export Claude-related env vars (not inherited by fresh shell)
-	// 3. exec role-aware runtime command (includes GT_ROLE, BD_ACTOR, etc.)
+	// Build environment exports - role vars first, then Claude vars
 	var exports []string
 	if gtRole != "" {
-		runtimeConfig := config.LoadRuntimeConfig("")
+		simpleRole := config.ExtractSimpleRole(gtRole)
+		runtimeConfig := config.ResolveRoleAgentConfig(simpleRole, townRoot, "")
 		exports = append(exports, "GT_ROLE="+gtRole)
 		exports = append(exports, "BD_ACTOR="+gtRole)
 		exports = append(exports, "GIT_AUTHOR_NAME="+gtRole)
@@ -452,6 +474,7 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Add Claude-related env vars from current environment
 	for _, name := range claudeEnvVars {
 		if val := os.Getenv(name); val != "" {
+			// Shell-escape the value in case it contains special chars
 			exports = append(exports, fmt.Sprintf("%s=%q", name, val))
 		}
 	}
@@ -610,12 +633,6 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		style.PrintWarning("could not clear history: %v", err)
 	}
 
-	// Kill all processes in the pane before respawning to prevent process leaks
-	if err := t.KillPaneProcesses(targetPane); err != nil {
-		// Non-fatal - continue with respawn
-		style.PrintWarning("could not kill pane processes: %v", err)
-	}
-
 	// Respawn the remote session's pane, handling deleted working directories
 	respawnErr := func() error {
 		paneWorkDir, _ := t.GetPaneWorkDir(targetSession)
@@ -680,6 +697,9 @@ func sendHandoffMail(subject, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detecting agent identity: %w", err)
 	}
+
+	// Normalize identity to match mailbox query format
+	agentID = mail.AddressToIdentity(agentID)
 
 	// Detect town root for beads location
 	townRoot := detectTownRootFromCwd()

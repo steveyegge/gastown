@@ -337,9 +337,9 @@ func TestParsePolecatSessionName(t *testing.T) {
 		wantOk      bool
 	}{
 		{"valid polecat session", "gt-roxas-dag", "roxas", "dag", true},
-		{"valid polecat with hyphen", "gt-gas-town-nux", "gas", "town-nux", true},
-		{"refinery session", "gt-roxas-refinery", "roxas", "refinery", true},
-		{"witness session", "gt-gastown-witness", "gastown", "witness", true},
+		{"hyphenated rig name", "gt-gas-town-nux", "gas-town", "nux", true},
+		{"refinery session", "gt-roxas-refinery", "roxas", "", true},
+		{"witness session", "gt-gastown-witness", "gastown", "", true},
 		{"not gt prefix", "other-roxas-dag", "", "", false},
 		{"too few parts", "gt-roxas", "", "", false},
 		{"empty string", "", "", "", false},

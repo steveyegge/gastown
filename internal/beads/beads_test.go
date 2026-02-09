@@ -1462,6 +1462,193 @@ func TestRoleConfigRoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseRoleConfigWispTTLs tests parsing wisp_ttl_* fields from role config.
+func TestParseRoleConfigWispTTLs(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		wantNil     bool
+		wantTTLs    map[string]string
+	}{
+		{
+			name: "single wisp TTL",
+			description: `session_pattern: gt-{rig}-{name}
+wisp_ttl_patrol: 48h`,
+			wantTTLs: map[string]string{"patrol": "48h"},
+		},
+		{
+			name: "multiple wisp TTLs",
+			description: `wisp_ttl_patrol: 48h
+wisp_ttl_error: 336h
+wisp_ttl_gc_report: 24h`,
+			wantTTLs: map[string]string{
+				"patrol":    "48h",
+				"error":     "336h",
+				"gc_report": "24h",
+			},
+		},
+		{
+			name: "hyphenated key format",
+			description: `wisp-ttl-patrol: 48h
+wisp-ttl-error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "mixed with other role config fields",
+			description: `session_pattern: gt-{rig}-{name}
+work_dir_pattern: {town}/{rig}
+wisp_ttl_patrol: 48h
+ping_timeout: 30s
+wisp_ttl_error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "wisp TTL only (no other fields)",
+			description: `wisp_ttl_patrol: 24h`,
+			wantTTLs:    map[string]string{"patrol": "24h"},
+		},
+		{
+			name:        "no wisp TTLs present",
+			description: `session_pattern: gt-{rig}-{name}`,
+			wantTTLs:    map[string]string{},
+		},
+		{
+			name: "case insensitive keys",
+			description: `WISP_TTL_PATROL: 48h
+Wisp_TTL_Error: 336h`,
+			wantTTLs: map[string]string{
+				"patrol": "48h",
+				"error":  "336h",
+			},
+		},
+		{
+			name: "wisp TTL with default type",
+			description: `wisp_ttl_default: 168h`,
+			wantTTLs:    map[string]string{"default": "168h"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ParseRoleConfig(tt.description)
+
+			if tt.wantNil {
+				if config != nil {
+					t.Errorf("ParseRoleConfig() = %+v, want nil", config)
+				}
+				return
+			}
+
+			if config == nil {
+				t.Fatal("ParseRoleConfig() = nil, want non-nil")
+			}
+
+			if len(config.WispTTLs) != len(tt.wantTTLs) {
+				t.Errorf("WispTTLs len = %d, want %d\ngot: %v\nwant: %v",
+					len(config.WispTTLs), len(tt.wantTTLs), config.WispTTLs, tt.wantTTLs)
+			}
+			for k, v := range tt.wantTTLs {
+				if config.WispTTLs[k] != v {
+					t.Errorf("WispTTLs[%q] = %q, want %q", k, config.WispTTLs[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatRoleConfigWispTTLs tests that wisp TTLs are included in format output.
+func TestFormatRoleConfigWispTTLs(t *testing.T) {
+	config := &RoleConfig{
+		SessionPattern: "gt-{rig}-{name}",
+		EnvVars:        map[string]string{},
+		WispTTLs: map[string]string{
+			"patrol": "48h",
+			"error":  "336h",
+		},
+	}
+
+	formatted := FormatRoleConfig(config)
+
+	if !strings.Contains(formatted, "wisp_ttl_error: 336h") {
+		t.Errorf("formatted output missing wisp_ttl_error, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "wisp_ttl_patrol: 48h") {
+		t.Errorf("formatted output missing wisp_ttl_patrol, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "session_pattern: gt-{rig}-{name}") {
+		t.Errorf("formatted output missing session_pattern, got:\n%s", formatted)
+	}
+}
+
+// TestRoleConfigWispTTLRoundTrip tests that wisp TTLs survive parse/format round-trip.
+func TestRoleConfigWispTTLRoundTrip(t *testing.T) {
+	original := &RoleConfig{
+		SessionPattern: "gt-{rig}-{name}",
+		EnvVars:        map[string]string{},
+		WispTTLs: map[string]string{
+			"patrol":    "48h",
+			"error":     "336h",
+			"gc_report": "24h",
+		},
+	}
+
+	formatted := FormatRoleConfig(original)
+	parsed := ParseRoleConfig(formatted)
+
+	if parsed == nil {
+		t.Fatal("round-trip parse returned nil")
+	}
+
+	if len(parsed.WispTTLs) != len(original.WispTTLs) {
+		t.Fatalf("round-trip WispTTLs len = %d, want %d", len(parsed.WispTTLs), len(original.WispTTLs))
+	}
+	for k, v := range original.WispTTLs {
+		if parsed.WispTTLs[k] != v {
+			t.Errorf("round-trip WispTTLs[%q] = %q, want %q", k, parsed.WispTTLs[k], v)
+		}
+	}
+}
+
+// TestParseWispTTLKey tests the wisp TTL key parser directly.
+func TestParseWispTTLKey(t *testing.T) {
+	tests := []struct {
+		key      string
+		wantType string
+		wantOK   bool
+	}{
+		{"wisp_ttl_patrol", "patrol", true},
+		{"wisp_ttl_error", "error", true},
+		{"wisp_ttl_gc_report", "gc_report", true},
+		{"wisp-ttl-patrol", "patrol", true},
+		{"wisp-ttl-error", "error", true},
+		{"wispttlpatrol", "patrol", true},
+		{"wisp_ttl_", "", false},   // empty type
+		{"wisp-ttl-", "", false},   // empty type
+		{"session_pattern", "", false},
+		{"wisp_patrol", "", false},
+		{"ttl_patrol", "", false},
+		{"", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			gotType, gotOK := ParseWispTTLKey(tt.key)
+			if gotOK != tt.wantOK {
+				t.Errorf("ParseWispTTLKey(%q) ok = %v, want %v", tt.key, gotOK, tt.wantOK)
+			}
+			if gotType != tt.wantType {
+				t.Errorf("ParseWispTTLKey(%q) type = %q, want %q", tt.key, gotType, tt.wantType)
+			}
+		})
+	}
+}
+
 // TestRoleBeadID tests role bead ID generation.
 func TestRoleBeadID(t *testing.T) {
 	tests := []struct {
@@ -2155,7 +2342,7 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		t.Errorf("Spawn 1: status = %q, want 'open'", issue1.Status)
 	}
 
-	// Nuke 1: Close agent bead (workaround for tombstone bug)
+	// Nuke 1: Close agent bead (legacy path - CloseAndClearAgentBead)
 	err = bd.CloseAndClearAgentBead(agentID, "polecat nuked")
 	if err != nil {
 		t.Fatalf("Nuke 1 - CloseAndClearAgentBead: %v", err)
@@ -2204,6 +2391,102 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 	}
 
 	t.Log("LIFECYCLE TEST PASSED: spawn → nuke → respawn works with close/reopen")
+}
+
+// TestResetAgentBeadForReuse_NukeRespawnCycle tests the preferred nuke→respawn
+// lifecycle using ResetAgentBeadForReuse (gt-14b8o fix). Unlike CloseAndClearAgentBead,
+// this keeps the bead open with agent_state="nuked", avoiding the close/reopen cycle
+// that fails on Dolt backends.
+func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
+	t.Skip("bd CLI 0.47.2 bug: database writes don't commit")
+
+	tmpDir := t.TempDir()
+	bd := NewIsolated(tmpDir)
+	if err := bd.Init("test"); err != nil {
+		t.Fatalf("bd init: %v", err)
+	}
+
+	agentID := "test-testrig-polecat-reset"
+
+	// Spawn 1: Create agent bead
+	issue1, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-1",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 1: %v", err)
+	}
+	if issue1.Status != "open" {
+		t.Errorf("Spawn 1: status = %q, want 'open'", issue1.Status)
+	}
+
+	// Nuke 1: Reset for reuse (bead stays open with cleared fields)
+	err = bd.ResetAgentBeadForReuse(agentID, "polecat nuked")
+	if err != nil {
+		t.Fatalf("Nuke 1 - ResetAgentBeadForReuse: %v", err)
+	}
+
+	// Verify bead is still open with cleared fields
+	nukedIssue, err := bd.Show(agentID)
+	if err != nil {
+		t.Fatalf("Show after nuke: %v", err)
+	}
+	if nukedIssue.Status != "open" {
+		t.Errorf("After nuke: status = %q, want 'open' (bead should stay open)", nukedIssue.Status)
+	}
+	nukedFields := ParseAgentFields(nukedIssue.Description)
+	if nukedFields.AgentState != "nuked" {
+		t.Errorf("After nuke: agent_state = %q, want 'nuked'", nukedFields.AgentState)
+	}
+	if nukedFields.HookBead != "" {
+		t.Errorf("After nuke: hook_bead = %q, want empty", nukedFields.HookBead)
+	}
+
+	// Spawn 2: CreateOrReopenAgentBead should detect open bead and update it
+	issue2, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-2",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 2: %v", err)
+	}
+	if issue2.Status != "open" {
+		t.Errorf("Spawn 2: status = %q, want 'open'", issue2.Status)
+	}
+	fields := ParseAgentFields(issue2.Description)
+	if fields.HookBead != "test-task-2" {
+		t.Errorf("Spawn 2: hook_bead = %q, want 'test-task-2'", fields.HookBead)
+	}
+	if fields.AgentState != "spawning" {
+		t.Errorf("Spawn 2: agent_state = %q, want 'spawning'", fields.AgentState)
+	}
+
+	// Nuke 2: Reset again
+	err = bd.ResetAgentBeadForReuse(agentID, "polecat nuked again")
+	if err != nil {
+		t.Fatalf("Nuke 2: %v", err)
+	}
+
+	// Spawn 3: Should still work
+	issue3, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-3",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 3: %v", err)
+	}
+	fields = ParseAgentFields(issue3.Description)
+	if fields.HookBead != "test-task-3" {
+		t.Errorf("Spawn 3: hook_bead = %q, want 'test-task-3'", fields.HookBead)
+	}
+
+	t.Log("LIFECYCLE TEST PASSED: spawn → reset → respawn works without close/reopen")
 }
 
 // TestCloseAndClearAgentBead_FieldClearing tests that CloseAndClearAgentBead clears all mutable

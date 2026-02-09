@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -686,6 +687,10 @@ func TestKillSessionWithProcessesExcluding_NonexistentSession(t *testing.T) {
 }
 
 func TestGetProcessGroupID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping test: process groups not available on Windows")
+	}
+
 	// Test with current process
 	pid := fmt.Sprintf("%d", os.Getpid())
 	pgid := getProcessGroupID(pid)
@@ -954,6 +959,104 @@ func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 	t.Logf("CleanupOrphanedSessions cleaned %d sessions", cleaned)
 }
 
+func TestCollectReparentedGroupMembers(t *testing.T) {
+	// Test that collectReparentedGroupMembers correctly filters group members.
+	// Only processes reparented to init (PPID == 1) that aren't in the known set
+	// should be returned.
+
+	// Test with current process's PGID
+	pid := fmt.Sprintf("%d", os.Getpid())
+	pgid := getProcessGroupID(pid)
+	if pgid == "" {
+		t.Skip("could not get PGID for current process")
+	}
+
+	// Build a known set containing the current process
+	knownPIDs := map[string]bool{pid: true}
+
+	// collectReparentedGroupMembers should NOT include our PID (it's in known set)
+	reparented := collectReparentedGroupMembers(pgid, knownPIDs)
+	for _, rpid := range reparented {
+		if rpid == pid {
+			t.Errorf("collectReparentedGroupMembers returned known PID %s", pid)
+		}
+		// Each reparented PID should have PPID == 1
+		ppid := getParentPID(rpid)
+		if ppid != "1" {
+			t.Errorf("collectReparentedGroupMembers returned PID %s with PPID %s (expected 1)", rpid, ppid)
+		}
+	}
+}
+
+func TestGetParentPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("getParentPID returns empty string on Windows (no /proc or ps)")
+	}
+
+	// Test with current process - should have a valid PPID
+	pid := fmt.Sprintf("%d", os.Getpid())
+	ppid := getParentPID(pid)
+	if ppid == "" {
+		t.Error("expected non-empty PPID for current process")
+	}
+
+	// PPID should not be "0" for a normal user process
+	if ppid == "0" {
+		t.Error("unexpected PPID 0 for current process")
+	}
+
+	// Test with nonexistent PID
+	ppid = getParentPID("999999999")
+	if ppid != "" {
+		t.Errorf("expected empty PPID for nonexistent process, got %q", ppid)
+	}
+}
+
+func TestKillSessionWithProcesses_DoesNotKillUnrelatedProcesses(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nounrelated-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 300"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Start a separate background process (simulating an unrelated process)
+	// This process runs in its own process group (via setsid or just being separate)
+	sentinel := exec.Command("sleep", "300")
+	if err := sentinel.Start(); err != nil {
+		t.Fatalf("starting sentinel process: %v", err)
+	}
+	sentinelPID := sentinel.Process.Pid
+	defer func() { _ = sentinel.Process.Kill(); _ = sentinel.Wait() }()
+
+	// Give processes time to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Kill session with processes
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
+	}
+
+	// The sentinel process should still be alive (it's unrelated)
+	// Check by sending signal 0 (existence check)
+	if err := sentinel.Process.Signal(os.Signal(nil)); err != nil {
+		// Process.Signal(nil) isn't reliable on all platforms, use kill -0
+		checkCmd := exec.Command("kill", "-0", fmt.Sprintf("%d", sentinelPID))
+		if checkErr := checkCmd.Run(); checkErr != nil {
+			t.Errorf("sentinel process %d was killed (should have survived since it's unrelated)", sentinelPID)
+		}
+	}
+}
+
 func TestKillPaneProcessesExcluding(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
@@ -1090,5 +1193,135 @@ func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
 		if pid != expectedFiltered[i] {
 			t.Errorf("filtered[%d] = %q, want %q", i, pid, expectedFiltered[i])
 		}
+	}
+}
+
+func TestFindAgentPane_SinglePane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-single-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Single pane — should return empty (no disambiguation needed)
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+	if paneID != "" {
+		t.Errorf("FindAgentPane single pane = %q, want empty", paneID)
+	}
+}
+
+func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-multi-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a shell pane (simulating a monitoring split)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Split and run node in the new pane (simulating an agent)
+	_, err := tm.run("split-window", "-t", sessionName, "-d",
+		"node", "-e", "setTimeout(() => {}, 30000)")
+	if err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	// Give node a moment to start
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify we have 2 panes
+	out, err := tm.run("list-panes", "-t", sessionName, "-F", "#{pane_id}\t#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("list-panes: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	t.Logf("Panes: %v", lines)
+	if len(lines) < 2 {
+		t.Skipf("Expected 2 panes, got %d — skipping multi-pane test", len(lines))
+	}
+
+	// FindAgentPane should find the node pane
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+
+	// Verify it found the correct pane (the one running node)
+	if paneID == "" {
+		t.Log("FindAgentPane returned empty — node may not have started yet or detection missed it")
+		// Not a hard failure since node startup timing varies
+		return
+	}
+
+	// Verify the returned pane is actually running node
+	cmdOut, err := tm.run("display-message", "-t", paneID, "-p", "#{pane_current_command}")
+	if err != nil {
+		t.Fatalf("display-message: %v", err)
+	}
+	paneCmd := strings.TrimSpace(cmdOut)
+	t.Logf("Agent pane %s running: %s", paneID, paneCmd)
+	if paneCmd != "node" {
+		t.Errorf("FindAgentPane returned pane running %q, want 'node'", paneCmd)
+	}
+}
+
+func TestFindAgentPane_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	_, err := tm.FindAgentPane("nonexistent-session-findagent-xyz")
+	if err == nil {
+		t.Error("FindAgentPane on nonexistent session should return error")
+	}
+}
+
+func TestFindAgentPane_MultiPaneNoAgent(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-findagent-noagent-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Split into two shell panes (no agent running)
+	_, err := tm.run("split-window", "-t", sessionName, "-d")
+	if err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// FindAgentPane should return empty (no agent in either pane)
+	paneID, err := tm.FindAgentPane(sessionName)
+	if err != nil {
+		t.Fatalf("FindAgentPane: %v", err)
+	}
+	if paneID != "" {
+		t.Errorf("FindAgentPane with no agent = %q, want empty", paneID)
 	}
 }

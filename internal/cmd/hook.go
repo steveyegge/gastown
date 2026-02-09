@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -277,14 +278,30 @@ func runHook(_ *cobra.Command, args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// Hook the bead using bd update (discovery-based approach)
+	// Hook the bead using bd update with retry logic (discovery-based approach).
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	// This is essential for hooking convoys (hq-* prefix) stored in town beads.
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
-	hookCmd.Dir = townRoot
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking bead: %w", err)
+	// Dolt can fail with concurrency errors (HTTP 400) when multiple agents write
+	// simultaneously. We retry with exponential backoff, matching sling.go behavior.
+	const hookMaxRetries = 5
+	const hookBaseBackoff = 500 * time.Millisecond
+	const hookBackoffMax = 10 * time.Second
+	var lastHookErr error
+	for attempt := 1; attempt <= hookMaxRetries; attempt++ {
+		hookBdCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+agentID)
+		hookBdCmd.Dir = townRoot
+		hookBdCmd.Stderr = os.Stderr
+		if err := hookBdCmd.Run(); err != nil {
+			lastHookErr = err
+			if attempt < hookMaxRetries {
+				backoff := slingBackoff(attempt, hookBaseBackoff, hookBackoffMax)
+				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hooking bead after %d attempts: %w", hookMaxRetries, lastHookErr)
+		}
+		break
 	}
 
 	fmt.Printf("%s Work attached to hook (hooked bead)\n", style.Bold.Render("✓"))

@@ -476,7 +476,7 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		{RoleDeacon, "Background supervisor daemon"},
 		{RoleWitness, "Per-rig polecat lifecycle manager"},
 		{RoleRefinery, "Per-rig merge queue processor"},
-		{RolePolecat, "Ephemeral worker with own worktree"},
+		{RolePolecat, "Worker with persistent identity, ephemeral sessions"},
 		{RoleCrew, "Persistent worker with own worktree"},
 	}
 

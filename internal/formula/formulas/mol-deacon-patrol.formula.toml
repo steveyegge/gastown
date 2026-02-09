@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 9
+version = 10
 
 [vars]
 wisp_type = "patrol"
@@ -722,9 +722,44 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "wisp-compact"
+title = "Compact expired wisps"
+needs = ["session-gc"]
+description = """
+Run TTL-based wisp compaction to manage storage growth.
+
+**Step 1: Preview compaction scope**
+```bash
+gt compact --dry-run --json
+```
+
+Parse the JSON output:
+- If promoted + deleted == 0, skip (nothing to compact)
+- If errors present, log and continue
+
+**Step 2: Execute compaction (if needed)**
+```bash
+gt compact --verbose
+```
+
+This runs the compaction algorithm:
+- Closed wisps past TTL → deleted (Dolt AS OF preserves history)
+- Non-closed wisps past TTL → promoted (stuck detection)
+- Wisps with comments/references/keep labels → promoted (proven value)
+
+**Step 3: Log results**
+Note promoted/deleted/skipped counts for the patrol digest.
+
+**Performance:**
+Compaction runs every patrol cycle. The query is fast (single bd list + filter).
+If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
+
+**Exit criteria:** Wisps compacted (or nothing to compact)."""
+
+[[steps]]
 id = "costs-digest"
 title = "Aggregate daily costs [DISABLED]"
-needs = ["session-gc"]
+needs = ["wisp-compact"]
 description = """
 **⚠️ DISABLED** - Skip this step entirely.
 
@@ -894,7 +929,7 @@ Use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 10m
+  --backoff-base 60s --backoff-mult 2 --backoff-max 5m
 ```
 
 This command:
@@ -904,7 +939,7 @@ This command:
    - First timeout: 60s
    - Second timeout: 120s
    - Third timeout: 240s
-   - ...capped at 10 minutes max
+   - ...capped at 5 minutes max (PATCH-002: reduced from 10m for faster recovery)
 4. Tracks `idle:N` label on hq-deacon bead for backoff state
 
 **On signal received** (activity detected):
@@ -920,7 +955,7 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 
 **Why this approach?**
 - Any `gt` or `bd` command triggers beads activity, waking the Deacon
-- Idle towns let the Deacon sleep longer (up to 10 min between patrols)
+- Idle towns let the Deacon sleep longer (up to 5 min between patrols)
 - Active work wakes the Deacon immediately via the feed
 - No polling or fixed sleep intervals
 

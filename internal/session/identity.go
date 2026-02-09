@@ -114,6 +114,11 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 		return nil, fmt.Errorf("invalid session name %q: empty after prefix", session)
 	}
 
+	// Special case: gt-boot is the Boot watchdog (deacon infrastructure)
+	if suffix == "boot" {
+		return &AgentIdentity{Role: RoleDeacon, Name: "boot"}, nil
+	}
+
 	// Parse into parts for rig-level roles
 	parts := strings.Split(suffix, "-")
 	if len(parts) < 2 {

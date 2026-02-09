@@ -37,9 +37,9 @@ These roles do actual project work:
 
 | Role | Description | Lifecycle |
 |------|-------------|-----------|
-| **Polecat** | Ephemeral worker with own worktree | Transient, Witness-managed ([details](concepts/polecat-lifecycle.md)) |
+| **Polecat** | Worker with persistent identity, ephemeral sessions | Witness-managed ([details](concepts/polecat-lifecycle.md)) |
 | **Crew** | Persistent worker with own clone | Long-lived, user-managed |
-| **Dog** | Deacon helper for infrastructure tasks | Ephemeral, Deacon-managed |
+| **Dog** | Deacon helper for infrastructure tasks | Persistent identity, Deacon-managed |
 
 ## Convoys: Tracking Work
 
@@ -63,7 +63,7 @@ gt convoy list
 - Auto-notification when work lands
 - Historical record of completed work (`gt convoy list --all`)
 
-The "swarm" is ephemeral - just the workers currently assigned to a convoy's issues.
+The "swarm" is the set of workers currently assigned to a convoy's issues.
 When issues close, the convoy lands. See [Convoys](concepts/convoy.md) for details.
 
 ## Crew vs Polecats
@@ -172,7 +172,7 @@ gt sling bd-xyz beads
     ├── crew/                   Persistent human workspaces
     │   ├── joe/                Local crew member
     │   └── beads-wolf/         Cross-rig worktree (wolf from beads)
-    └── polecats/               Ephemeral worker worktrees
+    └── polecats/               Polecat worktrees (ephemeral sandboxes)
         └── Toast/              Individual polecat
 ```
 

@@ -2,6 +2,8 @@ package mail
 
 import (
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func TestMatchPattern(t *testing.T) {
@@ -163,4 +165,150 @@ func TestResolverResolve_UnknownName(t *testing.T) {
 	if err == nil {
 		t.Error("Resolve(\"unknown-name\") should return error for unknown name")
 	}
+}
+
+// Regression test for gt-64wh5: cycle detection bypassed through Resolve fallback.
+// Before the fix, resolveMemberWithVisited called r.Resolve() for @-prefixed and
+// /-containing members, which created a fresh visited map and lost cycle detection.
+// Now it calls resolveWithVisited to thread the visited map through all paths.
+
+func TestExpandGroupMembersWithVisited_CycleDetection(t *testing.T) {
+	resolver := NewResolver(nil, "")
+
+	t.Run("direct self-cycle is detected", func(t *testing.T) {
+		// Group "A" is already in the visited set — expanding it again should return nil
+		fields := &beads.GroupFields{
+			Name:    "A",
+			Members: []string{"gastown/witness"},
+		}
+		visited := map[string]bool{"A": true}
+		got, err := resolver.expandGroupMembersWithVisited(fields, visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected 0 recipients for cycle, got %d", len(got))
+		}
+	})
+
+	t.Run("non-cyclic group expands normally", func(t *testing.T) {
+		fields := &beads.GroupFields{
+			Name:    "ops",
+			Members: []string{"gastown/witness", "gastown/refinery"},
+		}
+		visited := make(map[string]bool)
+		got, err := resolver.expandGroupMembersWithVisited(fields, visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("expected 2 recipients, got %d", len(got))
+		}
+		// Verify visited map was updated
+		if !visited["ops"] {
+			t.Error("expected 'ops' to be marked as visited")
+		}
+	})
+
+	t.Run("visited map propagates to at-pattern members", func(t *testing.T) {
+		// Group with @-prefixed member. Without beads, @patterns pass through,
+		// but this verifies the visited map is threaded (not recreated).
+		fields := &beads.GroupFields{
+			Name:    "team",
+			Members: []string{"@town", "gastown/witness"},
+		}
+		visited := make(map[string]bool)
+		got, err := resolver.expandGroupMembersWithVisited(fields, visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("expected 2 recipients, got %d", len(got))
+		}
+		// Verify the group was marked as visited
+		if !visited["team"] {
+			t.Error("expected 'team' to be marked as visited")
+		}
+	})
+
+	t.Run("deduplication within group", func(t *testing.T) {
+		fields := &beads.GroupFields{
+			Name:    "dupes",
+			Members: []string{"gastown/witness", "gastown/witness", "gastown/refinery"},
+		}
+		visited := make(map[string]bool)
+		got, err := resolver.expandGroupMembersWithVisited(fields, visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("expected 2 deduplicated recipients, got %d", len(got))
+		}
+	})
+}
+
+func TestResolveMemberWithVisited_ThreadsVisitedMap(t *testing.T) {
+	resolver := NewResolver(nil, "")
+
+	t.Run("at-pattern member uses shared visited map", func(t *testing.T) {
+		// Before fix: r.Resolve("@town") would create fresh visited map.
+		// After fix: r.resolveWithVisited("@town", visited) threads the same map.
+		// With nil beads, @town passes through — but the visited map is preserved.
+		visited := map[string]bool{"some-group": true}
+		got, err := resolver.resolveMemberWithVisited("@town", visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0].Address != "@town" {
+			t.Errorf("expected [@town], got %v", got)
+		}
+		// The original visited map should still contain its entries
+		if !visited["some-group"] {
+			t.Error("visited map was replaced instead of threaded")
+		}
+	})
+
+	t.Run("slash-containing member uses shared visited map", func(t *testing.T) {
+		visited := map[string]bool{"some-group": true}
+		got, err := resolver.resolveMemberWithVisited("gastown/witness", visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0].Address != "gastown/witness" {
+			t.Errorf("expected [gastown/witness], got %v", got)
+		}
+		if !visited["some-group"] {
+			t.Error("visited map was replaced instead of threaded")
+		}
+	})
+}
+
+func TestResolveWithVisited_ThreadsCycleDetection(t *testing.T) {
+	resolver := NewResolver(nil, "")
+
+	t.Run("group prefix threads visited", func(t *testing.T) {
+		// group: prefix with nil beads returns error, but visited map is preserved
+		visited := map[string]bool{"existing": true}
+		_, err := resolver.resolveWithVisited("group:test", visited)
+		if err == nil {
+			t.Fatal("expected error for group: with nil beads")
+		}
+		if !visited["existing"] {
+			t.Error("visited map was replaced instead of threaded")
+		}
+	})
+
+	t.Run("at-pattern threads visited", func(t *testing.T) {
+		visited := map[string]bool{"existing": true}
+		got, err := resolver.resolveWithVisited("@town", visited)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("expected 1 recipient, got %d", len(got))
+		}
+		if !visited["existing"] {
+			t.Error("visited map was replaced instead of threaded")
+		}
+	})
 }

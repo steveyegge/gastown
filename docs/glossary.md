@@ -38,7 +38,7 @@ A special Dog that checks the Deacon every 5 minutes, ensuring the watchdog itse
 ## Rig-Level Roles
 
 ### Polecat
-Ephemeral worker agents that produce Merge Requests. Polecats are spawned for specific tasks, complete their work, and are then cleaned up. They work in isolated git worktrees to avoid conflicts.
+Worker agents with persistent identity but ephemeral sessions. Each polecat has a permanent agent bead, CV chain, and work history that accumulates across assignments. Sessions and sandboxes are ephemeral — spawned for specific tasks, cleaned up on completion — but the identity persists. They work in isolated git worktrees to avoid conflicts.
 
 ### Refinery
 Manages the Merge Queue for a Rig. The Refinery intelligently merges changes from Polecats, handling conflicts and ensuring code quality before changes reach the main branch.

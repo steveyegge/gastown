@@ -218,6 +218,42 @@ func TestResolveHookDir(t *testing.T) {
 	}
 }
 
+func TestGetRigNameForPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		prefix   string
+		expected string
+	}{
+		{"gt-", "gastown"},
+		{"bd-", "beads"},
+		{"hq-", ""},       // Town-level, no specific rig
+		{"unknown-", ""},  // Not in routes
+		{"", ""},          // Empty prefix
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.prefix, func(t *testing.T) {
+			result := GetRigNameForPrefix(tmpDir, tc.prefix)
+			if result != tc.expected {
+				t.Errorf("GetRigNameForPrefix(%q, %q) = %q, want %q", tmpDir, tc.prefix, result, tc.expected)
+			}
+		})
+	}
+}
+
 func TestAgentBeadIDsWithPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

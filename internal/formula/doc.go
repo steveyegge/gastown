@@ -92,7 +92,7 @@
 // using depth-first search. Cycles are reported with the offending step ID:
 //
 //	f, err := formula.Parse([]byte(tomlContent))
-//	// Returns: "cycle detected involving step: build"
+//	// Returns: "cycle detected involving: build"
 //
 // # Topological Sorting
 //

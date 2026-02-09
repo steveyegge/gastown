@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -250,5 +251,185 @@ func TestBeadsMessage_Serialization(t *testing.T) {
 	}
 	if msg.From != "test-sender" {
 		t.Errorf("From mismatch")
+	}
+}
+
+func TestSyncFailureTracking(t *testing.T) {
+	d := testDaemon()
+
+	workDir := "/tmp/test-workdir"
+
+	// Initially zero failures
+	if got := d.getSyncFailures(workDir); got != 0 {
+		t.Errorf("initial getSyncFailures() = %d, want 0", got)
+	}
+
+	// Record failures and check counting
+	d.recordSyncFailure(workDir)
+	if got := d.getSyncFailures(workDir); got != 1 {
+		t.Errorf("getSyncFailures() after 1 failure = %d, want 1", got)
+	}
+
+	d.recordSyncFailure(workDir)
+	d.recordSyncFailure(workDir)
+	if got := d.getSyncFailures(workDir); got != 3 {
+		t.Errorf("getSyncFailures() after 3 failures = %d, want 3", got)
+	}
+
+	// Reset clears the counter
+	d.resetSyncFailures(workDir)
+	if got := d.getSyncFailures(workDir); got != 0 {
+		t.Errorf("getSyncFailures() after reset = %d, want 0", got)
+	}
+
+	// Different workdirs are tracked independently
+	d.recordSyncFailure("/tmp/dir-a")
+	d.recordSyncFailure("/tmp/dir-a")
+	d.recordSyncFailure("/tmp/dir-b")
+	if got := d.getSyncFailures("/tmp/dir-a"); got != 2 {
+		t.Errorf("getSyncFailures(dir-a) = %d, want 2", got)
+	}
+	if got := d.getSyncFailures("/tmp/dir-b"); got != 1 {
+		t.Errorf("getSyncFailures(dir-b) = %d, want 1", got)
+	}
+}
+
+func TestSyncFailureEscalationThreshold(t *testing.T) {
+	// Verify the threshold constant is sensible
+	if syncFailureEscalationThreshold < 2 {
+		t.Errorf("syncFailureEscalationThreshold = %d, should be >= 2 to avoid premature escalation", syncFailureEscalationThreshold)
+	}
+	if syncFailureEscalationThreshold > 10 {
+		t.Errorf("syncFailureEscalationThreshold = %d, should be <= 10 to ensure timely escalation", syncFailureEscalationThreshold)
+	}
+}
+
+func TestIsWorkingTreeDirty(t *testing.T) {
+	d := testDaemon()
+
+	// Create a git repo in a temp dir
+	tmpDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init")
+	runGit("commit", "--allow-empty", "-m", "initial")
+
+	// Clean tree should not be dirty
+	if d.isWorkingTreeDirty(tmpDir) {
+		t.Error("clean repo reported as dirty")
+	}
+
+	// Create an untracked file
+	if err := os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !d.isWorkingTreeDirty(tmpDir) {
+		t.Error("repo with untracked file reported as clean")
+	}
+
+	// Stage the file
+	runGit("add", "dirty.txt")
+	if !d.isWorkingTreeDirty(tmpDir) {
+		t.Error("repo with staged file reported as clean")
+	}
+
+	// Commit it - should be clean again
+	runGit("commit", "-m", "add dirty.txt")
+	if d.isWorkingTreeDirty(tmpDir) {
+		t.Error("repo after commit reported as dirty")
+	}
+
+	// Modify the committed file (unstaged change)
+	if err := os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("modified"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !d.isWorkingTreeDirty(tmpDir) {
+		t.Error("repo with unstaged modification reported as clean")
+	}
+}
+
+func TestSyncWorkspace_DirtyTreeAutoStash(t *testing.T) {
+	d := testDaemon()
+
+	// Create a git repo with a remote to simulate real workspace
+	tmpDir := t.TempDir()
+	bareDir := filepath.Join(tmpDir, "bare.git")
+	workDir := filepath.Join(tmpDir, "work")
+
+	runGitIn := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s failed: %v\n%s", args, dir, err, out)
+		}
+	}
+
+	// Create bare repo with main as default branch
+	if err := os.MkdirAll(bareDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(bareDir, "init", "--bare", "--initial-branch=main")
+
+	// Clone it as work dir
+	cmd := exec.Command("git", "clone", bareDir, workDir)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone failed: %v\n%s", err, out)
+	}
+
+	// Create initial commit and push to set up main branch
+	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(workDir, "add", "README.md")
+	runGitIn(workDir, "commit", "-m", "initial")
+	runGitIn(workDir, "push", "-u", "origin", "main")
+
+	// Create a dirty file (simulating .beads/ changes)
+	if err := os.WriteFile(filepath.Join(workDir, "local-changes.txt"), []byte("dirty data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify tree is dirty
+	if !d.isWorkingTreeDirty(workDir) {
+		t.Fatal("expected dirty tree before sync")
+	}
+
+	// syncWorkspace should auto-stash, pull, and restore
+	d.syncWorkspace(workDir)
+
+	// Dirty file should still exist after sync (restored from stash)
+	if _, err := os.Stat(filepath.Join(workDir, "local-changes.txt")); os.IsNotExist(err) {
+		t.Error("dirty file was lost after syncWorkspace - stash pop failed")
+	}
+
+	// No sync failures should have been recorded (pull succeeded)
+	if got := d.getSyncFailures(workDir); got != 0 {
+		t.Errorf("expected 0 sync failures after successful sync, got %d", got)
 	}
 }

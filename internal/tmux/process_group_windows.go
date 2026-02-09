@@ -18,6 +18,12 @@ func killProcessGroup(pgid int) {
 	_ = proc.Kill()
 }
 
+// getParentPID returns the parent process ID (PPID) for a given PID.
+// On Windows, this is not used for PGID verification, so we return empty string.
+func getParentPID(pid string) string {
+	return ""
+}
+
 // getProcessGroupID returns the process group ID (PGID) for a given PID.
 // Windows doesn't expose POSIX process groups, so we treat the PID as the PGID.
 func getProcessGroupID(pid string) string {

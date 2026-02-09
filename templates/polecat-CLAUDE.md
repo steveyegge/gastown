@@ -127,7 +127,7 @@ bd close <step-id>
 5. Execute the step, close it, repeat
 
 **If NO work on hook and NO mail:** run `gt done` immediately and exit.
-Polecats are ephemeral - no work means terminate, not wait.
+Polecat sessions are ephemeral - no work means terminate, not wait.
 
 ---
 

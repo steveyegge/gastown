@@ -17,7 +17,7 @@ func TestNewStaleAgentBeadsCheck(t *testing.T) {
 		t.Error("expected CanFix to return true")
 	}
 
-	if check.Description() != "Detect agent beads for removed crew members" {
+	if check.Description() != "Detect agent beads for removed workers (crew and polecats)" {
 		t.Errorf("unexpected description: %q", check.Description())
 	}
 

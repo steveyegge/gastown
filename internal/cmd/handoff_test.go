@@ -3,10 +3,34 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+func TestHandoffStdinFlag(t *testing.T) {
+	t.Run("errors when both stdin and message provided", func(t *testing.T) {
+		// Save and restore flag state
+		origMessage := handoffMessage
+		origStdin := handoffStdin
+		defer func() {
+			handoffMessage = origMessage
+			handoffStdin = origStdin
+		}()
+
+		handoffMessage = "some message"
+		handoffStdin = true
+
+		err := runHandoff(handoffCmd, nil)
+		if err == nil {
+			t.Fatal("expected error when both --stdin and --message are set")
+		}
+		if !strings.Contains(err.Error(), "cannot use --stdin with --message/-m") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
 
 func TestSessionWorkDir(t *testing.T) {
 	townRoot := "/home/test/gt"

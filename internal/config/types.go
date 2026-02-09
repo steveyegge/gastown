@@ -46,9 +46,9 @@ type TownSettings struct {
 	CLITheme string `json:"cli_theme,omitempty"`
 
 	// DefaultAgent is the name of the agent preset to use by default.
-	// Can be a built-in preset ("kimi", "claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent name defined in settings/agents.json.
-	// Default: "kimi"
+	// Default: "claude"
 	DefaultAgent string `json:"default_agent,omitempty"`
 
 	// Agents defines custom agent configurations or overrides.
@@ -75,7 +75,7 @@ func NewTownSettings() *TownSettings {
 	return &TownSettings{
 		Type:         "town-settings",
 		Version:      CurrentTownSettingsVersion,
-		DefaultAgent: "kimi",
+		DefaultAgent: "claude",
 		Agents:       make(map[string]*RuntimeConfig),
 		RoleAgents:   make(map[string]string),
 	}
@@ -104,9 +104,10 @@ type HeartbeatConfig struct {
 
 // PatrolConfig represents a single patrol configuration.
 type PatrolConfig struct {
-	Enabled  bool   `json:"enabled"`            // whether this patrol is enabled
-	Interval string `json:"interval,omitempty"` // e.g., "5m"
-	Agent    string `json:"agent,omitempty"`    // agent that runs this patrol
+	Enabled  bool     `json:"enabled"`            // whether this patrol is enabled
+	Interval string   `json:"interval,omitempty"` // e.g., "5m"
+	Agent    string   `json:"agent,omitempty"`    // agent that runs this patrol
+	Rigs     []string `json:"rigs,omitempty"`     // rigs this patrol manages (empty = all)
 }
 
 // CurrentDaemonPatrolConfigVersion is the current schema version for DaemonPatrolConfig.
@@ -219,7 +220,7 @@ type RigSettings struct {
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
-	// Can be a built-in preset ("kimi", "claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent defined in settings/agents.json.
 	// If empty, uses the town's default_agent setting.
 	// Takes precedence over Runtime if both are set.
@@ -280,11 +281,8 @@ type RuntimeConfig struct {
 	InitialPrompt string `json:"initial_prompt,omitempty"`
 
 	// PromptMode controls how prompts are passed to the runtime.
-	// Supported values:
-	//   "arg"  - append prompt as positional argument (claude style)
-	//   "flag" - use --prompt "..." flag (opencode style)
-	//   "none" - ignore prompt entirely
-	// Default: "arg" for claude/generic, "flag" for opencode, "none" for codex.
+	// Supported values: "arg" (append prompt arg), "none" (ignore prompt).
+	// Default: "arg" for claude/generic, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
 	// Session config controls environment integration for runtime session IDs.
@@ -364,6 +362,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
+// For opencode, uses --prompt flag; for other agents, uses positional argument.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -378,17 +377,14 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// Quote the prompt for shell safety
-	quoted := quoteForShell(p)
-
-	switch resolved.PromptMode {
-	case "flag":
-		// OpenCode style: --prompt "message"
-		return base + " --prompt " + quoted
-	default:
-		// Claude style: positional argument
-		return base + " " + quoted
+	// OpenCode requires --prompt flag for initial prompt in interactive mode.
+	// Positional argument causes opencode to exit immediately.
+	if resolved.Command == "opencode" {
+		return base + " --prompt " + quoteForShell(p)
 	}
+
+	// Quote the prompt for shell safety (positional arg for claude and others)
+	return base + " " + quoteForShell(p)
 }
 
 // BuildArgsWithPrompt returns the runtime command and args suitable for exec.
@@ -402,14 +398,7 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		switch resolved.PromptMode {
-		case "flag":
-			// OpenCode style: --prompt "message"
-			args = append(args, "--prompt", p)
-		default:
-			// Claude style: positional argument
-			args = append(args, p)
-		}
+		args = append(args, p)
 	}
 
 	return args
@@ -420,21 +409,34 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 		rc = &RuntimeConfig{}
 	}
 
-	if rc.Provider == "" {
-		rc.Provider = inferProviderFromCommand(rc.Command)
+	// Shallow copy to avoid mutating the input
+	copy := *rc
+	rc = &copy
+
+	// Deep copy nested structs to avoid shared references
+	if rc.Session != nil {
+		s := *rc.Session
+		rc.Session = &s
 	}
+	if rc.Hooks != nil {
+		h := *rc.Hooks
+		rc.Hooks = &h
+	}
+	if rc.Tmux != nil {
+		t := *rc.Tmux
+		rc.Tmux = &t
+	}
+	if rc.Instructions != nil {
+		i := *rc.Instructions
+		rc.Instructions = &i
+	}
+
 	if rc.Provider == "" {
-		rc.Provider = string(DefaultAgentPreset())
+		rc.Provider = "claude"
 	}
 
 	if rc.Command == "" {
 		rc.Command = defaultRuntimeCommand(rc.Provider)
-	}
-
-	// Resolve claude path even when command is explicitly set to "claude"
-	// This handles alias installations where "claude" isn't in PATH for tmux shells
-	if rc.Provider == "claude" && rc.Command == "claude" {
-		rc.Command = resolveClaudePath()
 	}
 
 	if rc.Args == nil {
@@ -443,10 +445,6 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 
 	if rc.PromptMode == "" {
 		rc.PromptMode = defaultPromptMode(rc.Provider)
-	}
-
-	if rc.InitialPrompt == "" {
-		rc.InitialPrompt = defaultInitialPrompt(rc.Provider)
 	}
 
 	if rc.Session == nil {
@@ -504,23 +502,8 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	return rc
 }
 
-func inferProviderFromCommand(command string) string {
-	if command == "" {
-		return ""
-	}
-	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
-	switch base {
-	case "kimi", "claude", "codex", "gemini", "cursor", "auggie", "amp", "opencode":
-		return base
-	default:
-		return ""
-	}
-}
-
 func defaultRuntimeCommand(provider string) string {
 	switch provider {
-	case "kimi":
-		return "opencode"
 	case "codex":
 		return "codex"
 	case "opencode":
@@ -571,20 +554,9 @@ func defaultPromptMode(provider string) string {
 	case "codex":
 		return "none"
 	case "opencode":
-		return "flag"
+		return "none"
 	default:
 		return "arg"
-	}
-}
-
-func defaultInitialPrompt(provider string) string {
-	switch provider {
-	case "opencode":
-		// Trigger message for OpenCode plugin auto-init.
-		// The plugin replaces this with Gas Town context when GT_AUTO_INIT=1.
-		return "[GT_AGENT_INIT]"
-	default:
-		return ""
 	}
 }
 
@@ -618,7 +590,7 @@ func defaultHooksDir(provider string) string {
 	case "claude":
 		return ".claude"
 	case "opencode":
-		return ".opencode/plugins"
+		return ".opencode/plugin"
 	default:
 		return ""
 	}

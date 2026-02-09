@@ -68,6 +68,45 @@ func createTestGitRepo(t *testing.T, name string) string {
 	return repoDir
 }
 
+// createTestGitRepoAt creates a git repo at the specified path (for --adopt tests).
+func createTestGitRepoAt(t *testing.T, repoDir string) {
+	t.Helper()
+
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	readmePath := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test Repo\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	commitCmds := [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "Initial commit"},
+	}
+	for _, args := range commitCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 // setupTestTown creates a minimal Gas Town workspace for testing.
 // Returns townRoot and a cleanup function.
 func setupTestTown(t *testing.T) string {

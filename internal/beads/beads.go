@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/steveyegge/gastown/internal/runtime"
 )
@@ -119,7 +120,7 @@ type Beads struct {
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
 	townRoot     string
-	searchedRoot bool
+	townRootOnce sync.Once
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -153,11 +154,11 @@ func (b *Beads) getActor() string {
 // getTownRoot returns the Gas Town root directory, using lazy caching.
 // The town root is found by walking up from workDir looking for mayor/town.json.
 // Returns empty string if not in a Gas Town project.
+// Thread-safe: uses sync.Once to prevent races on concurrent access.
 func (b *Beads) getTownRoot() string {
-	if !b.searchedRoot {
+	b.townRootOnce.Do(func() {
 		b.townRoot = FindTownRoot(b.workDir)
-		b.searchedRoot = true
-	}
+	})
 	return b.townRoot
 }
 
@@ -443,8 +444,7 @@ func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
 	args := append([]string{"show", "--json"}, ids...)
 	out, err := b.run(args...)
 	if err != nil {
-		// If bd fails, return empty map (some IDs might not exist)
-		return make(map[string]*Issue), nil
+		return nil, fmt.Errorf("bd show: %w", err)
 	}
 
 	var issues []*Issue

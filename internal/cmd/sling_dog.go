@@ -64,6 +64,7 @@ type DogDispatchInfo struct {
 	sessionDelayed bool
 	townRoot       string
 	workDesc       string
+	rigsConfig     *config.RigsConfig
 }
 
 // DispatchToDog finds or spawns a dog for work dispatch.
@@ -146,12 +147,13 @@ func DispatchToDog(dogName string, opts DogDispatchOptions) (*DogDispatchInfo, e
 			sessionDelayed: true,
 			townRoot:       townRoot,
 			workDesc:       opts.WorkDesc,
+			rigsConfig:     rigsConfig,
 		}, nil
 	}
 
 	// Ensure dog session is running (start if needed)
 	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, townRoot)
+	sessMgr := dog.NewSessionManager(t, townRoot, mgr)
 
 	sessOpts := dog.SessionStartOptions{
 		WorkDesc: opts.WorkDesc,
@@ -179,7 +181,8 @@ func (d *DogDispatchInfo) StartDelayedSession() (string, error) {
 	}
 
 	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, d.townRoot)
+	mgr := dog.NewManager(d.townRoot, d.rigsConfig)
+	sessMgr := dog.NewSessionManager(t, d.townRoot, mgr)
 
 	opts := dog.SessionStartOptions{
 		WorkDesc: d.workDesc,

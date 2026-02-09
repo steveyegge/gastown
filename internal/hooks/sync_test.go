@@ -10,7 +10,7 @@ import (
 
 func TestSyncPreservesNonHooksFields(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	// Create a town with one crew member
 	crewDir := filepath.Join(tmpDir, "town", "rig1", "crew", "alice")
@@ -107,7 +107,7 @@ func TestSyncPreservesNonHooksFields(t *testing.T) {
 
 func TestSyncCreatesNewSettings(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	setTestHome(t, tmpDir)
 
 	// Save base config
 	base := &HooksConfig{

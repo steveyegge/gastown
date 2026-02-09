@@ -52,6 +52,7 @@ Cleanup checks (fixable):
   - orphan-sessions          Detect orphaned tmux sessions
   - orphan-processes         Detect orphaned Claude processes
   - wisp-gc                  Detect and clean abandoned wisps (>1h)
+  - stale-beads-redirect     Detect stale files in .beads directories with redirects
 
 Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
@@ -88,7 +89,7 @@ Patrol checks:
 
 Migration readiness checks (--migrate):
   - migration-readiness      Overall migration readiness status
-  - unmigrated-rigs          Detect rigs still using SQLite backend
+  - rig-backend-status       Classify rig backends (never/partially/fully migrated)
 
 Use --fix to attempt automatic fixes for issues that support it.
 Use --rig to check a specific rig instead of the entire workspace.
@@ -164,6 +165,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
+	d.Register(doctor.NewStaleBeadsRedirectCheck())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
 	d.Register(doctor.NewBeadsSyncWorktreeCheck())
@@ -188,7 +190,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// NOTE: StaleAttachmentsCheck removed - staleness detection belongs in Deacon molecule
 
 	// Config architecture checks
-	d.Register(doctor.NewAgentSettingsCheck())
+	d.Register(doctor.NewClaudeSettingsCheck())
 	d.Register(doctor.NewSessionHookCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
@@ -215,8 +217,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Migration readiness checks
 	d.Register(doctor.NewMigrationReadinessCheck())
-	d.Register(doctor.NewUnmigratedRigCheck())
+	d.Register(doctor.NewRigBackendStatusCheck())
 	d.Register(doctor.NewDoltMetadataCheck())
+	d.Register(doctor.NewDoltServerReachableCheck())
 
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {

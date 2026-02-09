@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParsePolecatSessionName(t *testing.T) {
 	tests := []struct {
@@ -33,10 +36,10 @@ func TestParsePolecatSessionName(t *testing.T) {
 			wantOk:      true,
 		},
 		{
-			name:        "polecat with hyphen in name",
-			sessionName: "gt-greenplace-Max-01",
-			wantRig:     "greenplace",
-			wantPolecat: "Max-01",
+			name:        "hyphenated rig name",
+			sessionName: "gt-my-rig-Toast",
+			wantRig:     "my-rig",
+			wantPolecat: "Toast",
 			wantOk:      true,
 		},
 
@@ -112,6 +115,54 @@ func TestParsePolecatSessionName(t *testing.T) {
 			if gotRig != tt.wantRig || gotPolecat != tt.wantPolecat || gotOk != tt.wantOk {
 				t.Errorf("parsePolecatSessionName(%q) = (%q, %q, %v), want (%q, %q, %v)",
 					tt.sessionName, gotRig, gotPolecat, gotOk, tt.wantRig, tt.wantPolecat, tt.wantOk)
+			}
+		})
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "simple lines",
+			input: "a\nb\nc",
+			want:  []string{"a", "b", "c"},
+		},
+		{
+			name:  "trailing newline filtered",
+			input: "a\nb\n",
+			want:  []string{"a", "b"},
+		},
+		{
+			name:  "multiple trailing newlines filtered",
+			input: "a\n\n\n",
+			want:  []string{"a"},
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  nil,
+		},
+		{
+			name:  "single line no newline",
+			input: "hello",
+			want:  []string{"hello"},
+		},
+		{
+			name:  "only newlines",
+			input: "\n\n\n",
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitLines(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("splitLines(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

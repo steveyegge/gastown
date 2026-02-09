@@ -400,7 +400,10 @@ func getConvoyMeta(convoyID string) (*ConvoyMeta, error) {
 	}
 
 	// Get tracked leg issues
-	tracked := getTrackedIssues(townBeads, convoyID)
+	tracked, err := getTrackedIssues(townBeads, convoyID)
+	if err != nil {
+		return nil, fmt.Errorf("getting tracked issues for convoy %s: %w", convoyID, err)
+	}
 	for _, t := range tracked {
 		meta.LegIssues = append(meta.LegIssues, t.ID)
 	}

@@ -26,6 +26,12 @@ const (
 
 	// PollInterval is the default polling interval for wait loops.
 	PollInterval = 100 * time.Millisecond
+
+	// GracefulShutdownTimeout is how long to wait after sending Ctrl-C before
+	// forcefully killing a session. 3 seconds gives processes time to perform
+	// meaningful graceful shutdown (saving files, committing, closing connections).
+	// The previous 100ms was effectively identical to a force-kill.
+	GracefulShutdownTimeout = 3 * time.Second
 )
 
 // Directory names within a Gas Town workspace.

@@ -70,7 +70,7 @@ Each agent bead references its role bead via the `role_bead` field.
 |-------|------|-------------|
 | **Witness** | Monitors polecat health, handles nudging and cleanup | Persistent |
 | **Refinery** | Processes merge queue, runs verification | Persistent |
-| **Polecats** | Ephemeral workers assigned to specific issues | Ephemeral |
+| **Polecats** | Workers with persistent identity, assigned to specific issues | Persistent identity, ephemeral sessions |
 
 ## Directory Structure
 

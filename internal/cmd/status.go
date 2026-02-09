@@ -212,12 +212,30 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	// Create tmux instance for runtime checks
 	t := tmux.NewTmux()
 
-	// Pre-fetch all tmux sessions for O(1) lookup
+	// Pre-fetch all tmux sessions and verify agent liveness for O(1) lookup.
+	// A Gas Town session is only considered "running" if the agent process is
+	// alive inside it, not merely if the tmux session exists. This prevents
+	// zombie sessions (tmux alive, agent dead) from showing as running.
+	// See: gt-bd6i3
 	allSessions := make(map[string]bool)
 	if sessions, err := t.ListSessions(); err == nil {
+		var sessionMu sync.Mutex
+		var sessionWg sync.WaitGroup
 		for _, s := range sessions {
-			allSessions[s] = true
+			if strings.HasPrefix(s, "gt-") || strings.HasPrefix(s, "hq-") {
+				sessionWg.Add(1)
+				go func(name string) {
+					defer sessionWg.Done()
+					alive := t.IsAgentAlive(name)
+					sessionMu.Lock()
+					allSessions[name] = alive
+					sessionMu.Unlock()
+				}(s)
+			} else {
+				allSessions[s] = true
+			}
 		}
+		sessionWg.Wait()
 	}
 
 	// Discover rigs

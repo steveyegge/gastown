@@ -14,13 +14,13 @@ import (
 
 // Category constants for grouping checks
 const (
-	CategoryCore          = "Core"
+	CategoryCore           = "Core"
 	CategoryInfrastructure = "Infrastructure"
-	CategoryRig           = "Rig"
-	CategoryPatrol        = "Patrol"
-	CategoryConfig        = "Configuration"
-	CategoryCleanup       = "Cleanup"
-	CategoryHooks         = "Hooks"
+	CategoryRig            = "Rig"
+	CategoryPatrol         = "Patrol"
+	CategoryConfig         = "Configuration"
+	CategoryCleanup        = "Cleanup"
+	CategoryHooks          = "Hooks"
 )
 
 // CategoryOrder defines the display order for categories
@@ -102,6 +102,7 @@ type CheckResult struct {
 	FixHint  string        // Suggestion if not auto-fixable
 	Category string        // Category for grouping (e.g., CategoryCore)
 	Elapsed  time.Duration // How long the check took to run
+	Fixed    bool          // True if this check was auto-fixed
 }
 
 // Check defines the interface for a health check.
