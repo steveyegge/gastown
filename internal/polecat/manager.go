@@ -424,6 +424,17 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("new branch is not based on %s; refusing to create polecat with invalid merge-base", startPoint)
 	}
 
+	// In K8s mode (no shared .repo.git), push the branch to origin immediately
+	// so the refinery can discover it via git fetch. In classical mode, all
+	// worktrees share .repo.git and branches are immediately visible.
+	bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+	if _, statErr := os.Stat(bareRepoPath); os.IsNotExist(statErr) {
+		if pushErr := worktreeGit.Push("origin", branchName, false); pushErr != nil {
+			// Non-fatal: refinery can still discover branch later via periodic fetch
+			fmt.Printf("Warning: could not push branch %s to origin: %v\n", branchName, pushErr)
+		}
+	}
+
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
 	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
 	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")

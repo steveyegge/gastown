@@ -144,6 +144,8 @@ type RigInfo struct {
 	GitURL         string // Repository URL
 	GitMirrorSvc   string // In-cluster git mirror service name (e.g., "git-mirror-beads")
 	DefaultBranch  string // Default branch (e.g., "main")
+	Image          string // Per-rig agent image override
+	StorageClass   string // Per-rig PVC storage class override
 }
 
 // ListRigBeads queries the daemon for rig beads (type=rig) and extracts
@@ -201,6 +203,10 @@ func (c *DaemonClient) ListRigBeads(ctx context.Context) (map[string]RigInfo, er
 				info.GitMirrorSvc = parts[1]
 			case "default_branch":
 				info.DefaultBranch = parts[1]
+			case "image":
+				info.Image = parts[1]
+			case "storage_class":
+				info.StorageClass = parts[1]
 			}
 		}
 		if info.Name != "" {

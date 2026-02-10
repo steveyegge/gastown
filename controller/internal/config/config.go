@@ -84,6 +84,10 @@ type RigCacheEntry struct {
 	GitMirrorSvc  string // e.g., "git-mirror-beads"
 	GitURL        string // e.g., "https://github.com/groblegark/beads.git"
 	DefaultBranch string // e.g., "main"
+
+	// Per-rig pod customization (from rig bead labels).
+	Image        string // Override agent image for this rig
+	StorageClass string // Override PVC storage class
 }
 
 // Parse reads configuration from flags and environment variables.

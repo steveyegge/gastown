@@ -425,10 +425,25 @@ func (e *Engineer) doDirectMerge(ctx context.Context, branch, target, sourceIssu
 		}
 	}
 	if !exists {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("branch %s not found locally", branch),
+		// K8s mode: branch may only exist on remote (polecat pushed to origin).
+		// Fetch and check remote refs before giving up.
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Branch %s not found locally, checking remote...\n", branch)
+		_ = e.git.Fetch("origin")
+		remoteExists, remoteErr := e.git.RemoteBranchExists("origin", branch)
+		if remoteErr != nil || !remoteExists {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("branch %s not found locally or on remote", branch),
+			}
 		}
+		// Create local tracking branch from remote
+		if checkoutErr := e.git.Checkout(branch); checkoutErr != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to checkout remote branch %s: %v", branch, checkoutErr),
+			}
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Checked out remote branch %s\n", branch)
 	}
 
 	// Step 2: Checkout the target branch

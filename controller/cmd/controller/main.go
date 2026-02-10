@@ -65,12 +65,15 @@ func main() {
 	cfg.RigCache = make(map[string]config.RigCacheEntry)
 	refreshRigCache(context.Background(), logger, daemon, cfg)
 
+	// Auto-provision git-mirror Deployments for rigs with GitURL.
+	provisionGitMirrors(context.Background(), logger, k8sClient, cfg)
+
 	rec := reconciler.New(daemon, pods, cfg, logger, BuildSpecFromBeadInfo)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if err := run(ctx, logger, cfg, watcher, pods, status, rec, daemon); err != nil {
+	if err := run(ctx, logger, cfg, k8sClient, watcher, pods, status, rec, daemon); err != nil {
 		logger.Error("controller stopped", "error", err)
 		os.Exit(1)
 	}
@@ -78,7 +81,7 @@ func main() {
 
 // run is the main controller loop. It reads beads events and dispatches
 // pod operations. Separated from main() for testability.
-func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient) error {
+func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, k8sClient kubernetes.Interface, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient) error {
 	// Run reconciler once at startup to catch beads created during downtime.
 	if rec != nil {
 		logger.Info("running startup reconciliation")
@@ -98,7 +101,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 	if cfg.SyncInterval > 0 {
 		syncInterval = cfg.SyncInterval
 	}
-	go runPeriodicSync(ctx, logger, status, rec, daemon, cfg, syncInterval)
+	go runPeriodicSync(ctx, logger, k8sClient, status, rec, daemon, cfg, syncInterval)
 
 	logger.Info("controller ready, waiting for beads events",
 		"sync_interval", syncInterval)
@@ -124,7 +127,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 }
 
 // runPeriodicSync runs SyncAll, rig cache refresh, and reconciliation at a regular interval.
-func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient, cfg *config.Config, interval time.Duration) {
+func runPeriodicSync(ctx context.Context, logger *slog.Logger, k8sClient kubernetes.Interface, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient, cfg *config.Config, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -136,6 +139,8 @@ func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusrepo
 			}
 			// Refresh rig cache from daemon.
 			refreshRigCache(ctx, logger, daemon, cfg)
+			// Auto-provision git-mirror Deployments for new rigs.
+			provisionGitMirrors(ctx, logger, k8sClient, cfg)
 			// Run reconciler to converge desired vs actual state.
 			if rec != nil {
 				if err := rec.Reconcile(ctx); err != nil {
@@ -261,6 +266,9 @@ func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string) podm
 	defaults := podmanager.DefaultPodDefaultsForRole(role)
 	podmanager.ApplyDefaults(&spec, defaults)
 
+	// Apply rig-level overrides from rig bead metadata.
+	applyRigDefaults(cfg, &spec)
+
 	applyCommonConfig(cfg, &spec)
 
 	return spec
@@ -291,6 +299,9 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 	// Apply role-specific defaults (workspace storage, resources).
 	defaults := podmanager.DefaultPodDefaultsForRole(event.Role)
 	podmanager.ApplyDefaults(&spec, defaults)
+
+	// Apply rig-level overrides from rig bead metadata.
+	applyRigDefaults(cfg, &spec)
 
 	// Overlay event metadata for optional fields.
 	if sa := event.Metadata["service_account"]; sa != "" {
@@ -331,6 +342,21 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 	}
 
 	return spec
+}
+
+// applyRigDefaults applies per-rig overrides from rig bead metadata.
+// Applied after role defaults, before controller common config.
+func applyRigDefaults(cfg *config.Config, spec *podmanager.AgentPodSpec) {
+	entry, ok := cfg.RigCache[spec.Rig]
+	if !ok {
+		return
+	}
+	if entry.Image != "" {
+		spec.Image = entry.Image
+	}
+	if entry.StorageClass != "" && spec.WorkspaceStorage != nil {
+		spec.WorkspaceStorage.StorageClassName = entry.StorageClass
+	}
 }
 
 // applyCommonConfig wires controller-level config into an AgentPodSpec.
@@ -445,6 +471,8 @@ func refreshRigCache(ctx context.Context, logger *slog.Logger, daemon *daemoncli
 			GitMirrorSvc:  info.GitMirrorSvc,
 			GitURL:        info.GitURL,
 			DefaultBranch: info.DefaultBranch,
+			Image:         info.Image,
+			StorageClass:  info.StorageClass,
 		}
 	}
 	logger.Info("refreshed rig cache", "count", len(rigs))
