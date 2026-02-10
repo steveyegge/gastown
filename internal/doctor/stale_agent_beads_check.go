@@ -96,6 +96,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		allBeads, err := bd.List(beads.ListOptions{
 			Status:   "all",
 			Priority: -1,
+			Label:    "gt:agent",
 		})
 		if err != nil {
 			continue

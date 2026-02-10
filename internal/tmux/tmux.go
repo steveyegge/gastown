@@ -21,7 +21,15 @@ import (
 // sessionNudgeLocks serializes nudges to the same session.
 // This prevents interleaving when multiple nudges arrive concurrently,
 // which can cause garbled input and missed Enter keys.
-var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
+// Uses channel-based semaphores instead of sync.Mutex to support
+// timed lock acquisition — preventing permanent lockout if a nudge hangs.
+var sessionNudgeLocks sync.Map // map[string]chan struct{}
+
+// nudgeLockTimeout is how long to wait to acquire the per-session nudge lock.
+// If a previous nudge is still holding the lock after this duration, we give up
+// rather than blocking forever. This prevents a hung tmux from permanently
+// blocking all future nudges to that session.
+const nudgeLockTimeout = 30 * time.Second
 
 // validSessionNameRe validates session names to prevent shell injection
 var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -727,11 +735,35 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
-// getSessionNudgeLock returns the mutex for serializing nudges to a session.
-// Creates a new mutex if one doesn't exist for this session.
-func getSessionNudgeLock(session string) *sync.Mutex {
-	actual, _ := sessionNudgeLocks.LoadOrStore(session, &sync.Mutex{})
-	return actual.(*sync.Mutex)
+// getSessionNudgeSem returns the channel semaphore for serializing nudges to a session.
+// Creates a new semaphore if one doesn't exist for this session.
+// The semaphore is a buffered channel of size 1 — send to acquire, receive to release.
+func getSessionNudgeSem(session string) chan struct{} {
+	sem := make(chan struct{}, 1)
+	actual, _ := sessionNudgeLocks.LoadOrStore(session, sem)
+	return actual.(chan struct{})
+}
+
+// acquireNudgeLock attempts to acquire the per-session nudge lock with a timeout.
+// Returns true if the lock was acquired, false if the timeout expired.
+func acquireNudgeLock(session string, timeout time.Duration) bool {
+	sem := getSessionNudgeSem(session)
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// releaseNudgeLock releases the per-session nudge lock.
+func releaseNudgeLock(session string) {
+	sem := getSessionNudgeSem(session)
+	select {
+	case <-sem:
+	default:
+		// Lock wasn't held — shouldn't happen, but don't block
+	}
 }
 
 // IsSessionAttached returns true if the session has any clients attached.
@@ -778,10 +810,12 @@ func (t *Tmux) WakePaneIfDetached(target string) {
 // queue up and execute one at a time. This prevents garbled input when
 // SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
-	// Serialize nudges to this session to prevent interleaving
-	lock := getSessionNudgeLock(session)
-	lock.Lock()
-	defer lock.Unlock()
+	// Serialize nudges to this session to prevent interleaving.
+	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	if !acquireNudgeLock(session, nudgeLockTimeout) {
+		return fmt.Errorf("nudge lock timeout for session %q: previous nudge may be hung", session)
+	}
+	defer releaseNudgeLock(session)
 
 	// Resolve the correct target: in multi-pane sessions, find the pane
 	// running the agent rather than sending to the focused pane.
@@ -825,10 +859,12 @@ func (t *Tmux) NudgeSession(session, message string) error {
 // After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
-	// Serialize nudges to this pane to prevent interleaving
-	lock := getSessionNudgeLock(pane)
-	lock.Lock()
-	defer lock.Unlock()
+	// Serialize nudges to this pane to prevent interleaving.
+	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	if !acquireNudgeLock(pane, nudgeLockTimeout) {
+		return fmt.Errorf("nudge lock timeout for pane %q: previous nudge may be hung", pane)
+	}
+	defer releaseNudgeLock(pane)
 
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {

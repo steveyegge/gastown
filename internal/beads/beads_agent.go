@@ -528,13 +528,13 @@ func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
 // DeleteAgentBead permanently deletes an agent bead.
 // Uses --hard --force for immediate permanent deletion (no tombstone).
 //
+// Deprecated: Agent beads represent persistent identity and should never be
+// hard-deleted. Use ResetAgentBeadForReuse instead, which preserves the CV
+// chain across assignments. This function remains only for test cleanup.
+//
 // WARNING: Due to a bd bug, --hard --force still creates tombstones instead of
 // truly deleting. This breaks CreateOrReopenAgentBead because tombstones are
 // invisible to bd show/reopen but still block bd create via UNIQUE constraint.
-//
-//
-// WORKAROUND: Use CloseAndClearAgentBead instead, which allows CreateOrReopenAgentBead
-// to reopen the bead on re-spawn.
 func (b *Beads) DeleteAgentBead(id string) error {
 	_, err := b.run("delete", id, "--hard", "--force")
 	return err

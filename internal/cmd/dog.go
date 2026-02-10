@@ -347,6 +347,9 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 		b = beads.New(townRoot)
 	}
 
+	var removeErrors []string
+	removed := 0
+
 	for _, name := range names {
 		d, err := mgr.Get(name)
 		if err != nil {
@@ -356,14 +359,17 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 
 		// Check if working
 		if d.State == dog.StateWorking && !dogForce {
-			return fmt.Errorf("dog %s is working (use --force to remove anyway)", name)
+			removeErrors = append(removeErrors, fmt.Sprintf("%s: is working (use --force to remove anyway)", name))
+			continue
 		}
 
 		if err := mgr.Remove(name); err != nil {
-			return fmt.Errorf("removing dog %s: %w", name, err)
+			removeErrors = append(removeErrors, fmt.Sprintf("%s: %v", name, err))
+			continue
 		}
 
 		fmt.Printf("✓ Removed dog %s\n", name)
+		removed++
 
 		// Reset agent bead for the dog (preserves persistent identity)
 		if b != nil {
@@ -372,6 +378,21 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  Warning: could not reset agent bead: %v\n", err)
 			}
 		}
+	}
+
+	if len(removeErrors) > 0 {
+		fmt.Printf("\nSome removals failed:\n")
+		for _, e := range removeErrors {
+			fmt.Printf("  - %s\n", e)
+		}
+	}
+
+	if removed > 0 {
+		fmt.Printf("\n✓ Removed %d dog(s).\n", removed)
+	}
+
+	if len(removeErrors) > 0 {
+		return fmt.Errorf("%d removal(s) failed", len(removeErrors))
 	}
 
 	return nil

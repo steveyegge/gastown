@@ -1282,6 +1282,105 @@ func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
 	}
 }
 
+func TestNudgeLockTimeout(t *testing.T) {
+	// Test that acquireNudgeLock returns false after timeout when lock is held.
+	session := "test-nudge-timeout-session"
+
+	// Acquire the lock
+	if !acquireNudgeLock(session, time.Second) {
+		t.Fatal("initial acquireNudgeLock should succeed")
+	}
+
+	// Try to acquire again — should timeout
+	start := time.Now()
+	got := acquireNudgeLock(session, 100*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if got {
+		t.Error("acquireNudgeLock should return false when lock is held")
+		releaseNudgeLock(session) // clean up the extra acquire
+	}
+	if elapsed < 90*time.Millisecond {
+		t.Errorf("timeout returned too fast: %v", elapsed)
+	}
+
+	// Release the lock
+	releaseNudgeLock(session)
+
+	// Now acquire should succeed again
+	if !acquireNudgeLock(session, time.Second) {
+		t.Error("acquireNudgeLock should succeed after release")
+	}
+	releaseNudgeLock(session)
+}
+
+func TestNudgeLockConcurrency(t *testing.T) {
+	// Test that concurrent nudges to the same session are serialized.
+	session := "test-nudge-concurrent-session"
+	const goroutines = 5
+
+	// Clean up any previous state for this session key
+	sessionNudgeLocks.Delete(session)
+
+	acquired := make(chan bool, goroutines)
+
+	// First goroutine holds the lock
+	if !acquireNudgeLock(session, time.Second) {
+		t.Fatal("initial acquire should succeed")
+	}
+
+	// Launch goroutines that try to acquire the lock
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			got := acquireNudgeLock(session, 200*time.Millisecond)
+			acquired <- got
+		}()
+	}
+
+	// Wait a bit, then release the lock
+	time.Sleep(50 * time.Millisecond)
+	releaseNudgeLock(session)
+
+	// At most one goroutine should succeed (it gets the lock after we release)
+	successes := 0
+	for i := 0; i < goroutines; i++ {
+		if <-acquired {
+			successes++
+			releaseNudgeLock(session)
+		}
+	}
+
+	// At least 1 should succeed (the first one to grab it after release),
+	// and the rest should timeout
+	if successes < 1 {
+		t.Error("expected at least 1 goroutine to acquire the lock after release")
+	}
+	t.Logf("%d/%d goroutines acquired the lock", successes, goroutines)
+}
+
+func TestNudgeLockDifferentSessions(t *testing.T) {
+	// Test that locks for different sessions are independent.
+	session1 := "test-nudge-session-a"
+	session2 := "test-nudge-session-b"
+
+	// Clean up any previous state
+	sessionNudgeLocks.Delete(session1)
+	sessionNudgeLocks.Delete(session2)
+
+	// Acquire lock for session1
+	if !acquireNudgeLock(session1, time.Second) {
+		t.Fatal("acquire session1 should succeed")
+	}
+	defer releaseNudgeLock(session1)
+
+	// Acquiring lock for session2 should succeed (independent)
+	if !acquireNudgeLock(session2, time.Second) {
+		t.Error("acquire session2 should succeed even when session1 is locked")
+	} else {
+		releaseNudgeLock(session2)
+	}
+}
+
 func TestFindAgentPane_NonexistentSession(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")

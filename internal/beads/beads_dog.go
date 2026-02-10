@@ -98,21 +98,3 @@ func (b *Beads) ResetDogAgentBead(name string) error {
 	return nil
 }
 
-// DeleteDogAgentBead finds and deletes the agent bead for a dog.
-// Deprecated: Use ResetDogAgentBead instead to preserve persistent identity.
-// Returns nil if the bead doesn't exist (idempotent).
-func (b *Beads) DeleteDogAgentBead(name string) error {
-	issue, err := b.FindDogAgentBead(name)
-	if err != nil {
-		return fmt.Errorf("finding dog bead: %w", err)
-	}
-	if issue == nil {
-		return nil // Already doesn't exist - idempotent
-	}
-
-	err = b.DeleteAgentBead(issue.ID)
-	if err != nil {
-		return fmt.Errorf("deleting bead %s: %w", issue.ID, err)
-	}
-	return nil
-}

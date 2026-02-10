@@ -1066,7 +1066,9 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 				"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
 				"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.", convoyID)}
 			mailCmd := exec.Command("gt", mailArgs...)
-			_ = mailCmd.Run() // Best effort, ignore errors
+			if err := mailCmd.Run(); err != nil {
+				style.PrintWarning("could not notify %s: %v", addr, err)
+			}
 			notified[addr] = true
 		}
 	}

@@ -199,7 +199,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		// This ensures polecat sees its work when gt prime runs on session start.
 		pane, err := spawnInfo.StartSession()
 		if err != nil {
-			fmt.Printf("  %s Could not start session: %v (agent will need manual start)\n", style.Dim.Render("✗"), err)
+			fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)
+			cleanupSpawnedPolecat(spawnInfo, rigName)
+			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
+			continue
 		} else {
 			fmt.Printf("  %s Session started for %s\n", style.Bold.Render("▶"), spawnInfo.PolecatName)
 			// Fresh polecats get StartupNudge from SessionManager.Start(),

@@ -544,14 +544,14 @@ func (m *SessionManager) StopAll(force bool) error {
 		return err
 	}
 
-	var lastErr error
+	var errs []error
 	for _, info := range infos {
 		if err := m.Stop(info.Polecat, force); err != nil {
-			lastErr = err
+			errs = append(errs, fmt.Errorf("stopping %s: %w", info.Polecat, err))
 		}
 	}
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // resolveBeadsDir determines the correct working directory for bd commands

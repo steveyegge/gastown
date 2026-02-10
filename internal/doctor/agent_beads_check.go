@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -70,7 +71,19 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var missing []string
+	var missingLabel []string
 	var checked int
+
+	// checkAgentBead verifies an agent bead exists and has the gt:agent label.
+	checkAgentBead := func(bd *beads.Beads, id string) {
+		issue, err := bd.Show(id)
+		if err != nil {
+			missing = append(missing, id)
+		} else if !beads.HasLabel(issue, "gt:agent") {
+			missingLabel = append(missingLabel, id)
+		}
+		checked++
+	}
 
 	// Check global agents (Mayor, Deacon) in town beads
 	// These use hq- prefix and are stored in ~/gt/.beads/
@@ -80,31 +93,25 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	deaconID := beads.DeaconBeadIDTown()
 	mayorID := beads.MayorBeadIDTown()
 
-	if _, err := townBd.Show(deaconID); err != nil {
-		missing = append(missing, deaconID)
-	}
-	checked++
-
-	if _, err := townBd.Show(mayorID); err != nil {
-		missing = append(missing, mayorID)
-	}
-	checked++
+	checkAgentBead(townBd, deaconID)
+	checkAgentBead(townBd, mayorID)
 
 	if len(prefixToRig) == 0 {
 		// No rigs to check, but we still checked global agents
-		if len(missing) == 0 {
+		if len(missing) == 0 && len(missingLabel) == 0 {
 			return &CheckResult{
 				Name:    c.Name(),
 				Status:  StatusOK,
-				Message: fmt.Sprintf("All %d agent beads exist", checked),
+				Message: fmt.Sprintf("All %d agent beads exist with gt:agent label", checked),
 			}
 		}
+		details := append(missing, missingLabel...)
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusError,
-			Message: fmt.Sprintf("%d agent bead(s) missing", len(missing)),
-			Details: missing,
-			FixHint: "Run 'gt doctor --fix' to create missing agent beads",
+			Message: fmt.Sprintf("%d agent bead(s) missing, %d missing gt:agent label", len(missing), len(missingLabel)),
+			Details: details,
+			FixHint: "Run 'gt doctor --fix' to create missing agent beads and add labels",
 		}
 	}
 
@@ -119,75 +126,83 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 
-		if _, err := bd.Show(witnessID); err != nil {
-			missing = append(missing, witnessID)
-		}
-		checked++
-
-		if _, err := bd.Show(refineryID); err != nil {
-			missing = append(missing, refineryID)
-		}
-		checked++
+		checkAgentBead(bd, witnessID)
+		checkAgentBead(bd, refineryID)
 
 		// Check crew worker agents
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if _, err := bd.Show(crewID); err != nil {
-				missing = append(missing, crewID)
-			}
-			checked++
+			checkAgentBead(bd, crewID)
 		}
 	}
 
-	if len(missing) == 0 {
+	if len(missing) == 0 && len(missingLabel) == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("All %d agent beads exist", checked),
+			Message: fmt.Sprintf("All %d agent beads exist with gt:agent label", checked),
+		}
+	}
+
+	if len(missing) > 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: fmt.Sprintf("%d agent bead(s) missing", len(missing)),
+			Details: missing,
+			FixHint: "Run 'gt doctor --fix' to create missing agent beads",
 		}
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
-		Status:  StatusError,
-		Message: fmt.Sprintf("%d agent bead(s) missing", len(missing)),
-		Details: missing,
-		FixHint: "Run 'gt doctor --fix' to create missing agent beads",
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d agent bead(s) missing gt:agent label", len(missingLabel)),
+		Details: missingLabel,
+		FixHint: "Run 'gt doctor --fix' to add missing labels",
 	}
 }
 
-// Fix creates missing agent beads.
+// Fix creates missing agent beads and adds gt:agent labels to beads missing them.
 func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
-	// Create global agents (Mayor, Deacon) in town beads
-	// These use hq- prefix and are stored in ~/gt/.beads/
+	// fixAgentBead creates the bead if missing, or adds gt:agent label if present but unlabeled.
+	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields) error {
+		issue, err := bd.Show(id)
+		if err != nil {
+			// Bead missing — create it (CreateAgentBead adds gt:agent label)
+			if _, err := bd.CreateAgentBead(id, desc, fields); err != nil {
+				return fmt.Errorf("creating %s: %w", id, err)
+			}
+			return nil
+		}
+		// Bead exists — ensure it has the gt:agent label
+		if !beads.HasLabel(issue, "gt:agent") {
+			if err := addLabelToBead(ctx.TownRoot, id, "gt:agent"); err != nil {
+				return fmt.Errorf("adding gt:agent label to %s: %w", id, err)
+			}
+		}
+		return nil
+	}
+
+	// Fix global agents (Mayor, Deacon) in town beads
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
 	townBd := beads.New(townBeadsPath)
 
 	deaconID := beads.DeaconBeadIDTown()
-	if _, err := townBd.Show(deaconID); err != nil {
-		fields := &beads.AgentFields{
-			RoleType:   "deacon",
-			Rig:        "",
-			AgentState: "idle",
-		}
-		desc := "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring."
-		if _, err := townBd.CreateAgentBead(deaconID, desc, fields); err != nil {
-			return fmt.Errorf("creating %s: %w", deaconID, err)
-		}
+	if err := fixAgentBead(townBd, deaconID,
+		"Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
+		&beads.AgentFields{RoleType: "deacon", AgentState: "idle"},
+	); err != nil {
+		return err
 	}
 
 	mayorID := beads.MayorBeadIDTown()
-	if _, err := townBd.Show(mayorID); err != nil {
-		fields := &beads.AgentFields{
-			RoleType:   "mayor",
-			Rig:        "",
-			AgentState: "idle",
-		}
-		desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
-		if _, err := townBd.CreateAgentBead(mayorID, desc, fields); err != nil {
-			return fmt.Errorf("creating %s: %w", mayorID, err)
-		}
+	if err := fixAgentBead(townBd, mayorID,
+		"Mayor - global coordinator, handles cross-rig communication and escalations.",
+		&beads.AgentFields{RoleType: "mayor", AgentState: "idle"},
+	); err != nil {
+		return err
 	}
 
 	// Load routes to get prefixes for rig-level agents
@@ -206,67 +221,59 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			prefix := strings.TrimSuffix(r.Prefix, "-")
 			prefixToRig[prefix] = rigInfo{
 				name:      rigName,
-				beadsPath: r.Path, // Use the full route path
+				beadsPath: r.Path,
 			}
 		}
 	}
 
 	if len(prefixToRig) == 0 {
-		return nil // No rigs to process
+		return nil
 	}
 
-	// Create missing agents for each rig
+	// Fix agents for each rig
 	for prefix, info := range prefixToRig {
-		// Use the route path directly instead of hardcoding /mayor/rig
 		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
 		bd := beads.New(rigBeadsPath)
 		rigName := info.name
 
-		// Create rig-specific agents if missing (using canonical naming: prefix-rig-role-name)
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-		if _, err := bd.Show(witnessID); err != nil {
-			fields := &beads.AgentFields{
-				RoleType:   "witness",
-				Rig:        rigName,
-				AgentState: "idle",
-			}
-			desc := fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
-			if _, err := bd.CreateAgentBead(witnessID, desc, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", witnessID, err)
-			}
+		if err := fixAgentBead(bd, witnessID,
+			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
+			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"},
+		); err != nil {
+			return err
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
-		if _, err := bd.Show(refineryID); err != nil {
-			fields := &beads.AgentFields{
-				RoleType:   "refinery",
-				Rig:        rigName,
-				AgentState: "idle",
-			}
-			desc := fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
-			if _, err := bd.CreateAgentBead(refineryID, desc, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", refineryID, err)
-			}
+		if err := fixAgentBead(bd, refineryID,
+			fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
+			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"},
+		); err != nil {
+			return err
 		}
 
-		// Create crew worker agents if missing
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if _, err := bd.Show(crewID); err != nil {
-				fields := &beads.AgentFields{
-					RoleType:   "crew",
-					Rig:        rigName,
-					AgentState: "idle",
-				}
-				desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName)
-				if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
-					return fmt.Errorf("creating %s: %w", crewID, err)
-				}
+			if err := fixAgentBead(bd, crewID,
+				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
+				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
+			); err != nil {
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+// addLabelToBead adds a label to an existing bead via bd update.
+func addLabelToBead(townRoot, id, label string) error {
+	cmd := exec.Command("bd", "update", id, "--add-labels="+label)
+	cmd.Dir = townRoot
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))
+	}
 	return nil
 }
 
