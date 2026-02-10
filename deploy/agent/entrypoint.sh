@@ -366,7 +366,7 @@ printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferr
 
 cd "${WORKSPACE}"
 
-COOP_CMD="coop --agent=claude --port 8080 --health-port 9090 --cols 200 --rows 50"
+COOP_CMD="coop --agent=claude --port 8080 --port-health 9090 --cols 200 --rows 50"
 
 # Coop log level (overridable via pod env).
 export COOP_LOG_LEVEL="${COOP_LOG_LEVEL:-info}"
