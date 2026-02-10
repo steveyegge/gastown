@@ -192,9 +192,23 @@ fi
 
 if [ "${MATERIALIZED}" = "0" ]; then
     echo "[entrypoint] No config beads found, writing static hooks"
-    # Write project-level settings with hooks to workspace .claude/settings.json
+    # Write project-level settings with hooks to workspace .claude/settings.json.
+    # These must match the canonical templates in internal/claude/config/.
+    # Interactive roles (mayor, crew) check mail on UserPromptSubmit.
+    # Autonomous roles (polecat, witness, refinery, deacon) check mail on SessionStart.
     mkdir -p "${WORKSPACE}/.claude"
-    cat > "${WORKSPACE}/.claude/settings.json" <<'HOOKS'
+
+    case "${ROLE}" in
+        polecat|witness|refinery|deacon|boot)
+            HOOK_TYPE="autonomous"
+            ;;
+        *)
+            HOOK_TYPE="interactive"
+            ;;
+    esac
+
+    if [ "${HOOK_TYPE}" = "autonomous" ]; then
+        cat > "${WORKSPACE}/.claude/settings.json" <<'HOOKS'
 {
   "hooks": {
     "SessionStart": [
@@ -203,16 +217,7 @@ if [ "${MATERIALIZED}" = "0" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime --hook"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bd prime"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && gt mail check --inject && gt nudge deacon session-started"
           }
         ]
       }
@@ -223,7 +228,29 @@ if [ "${MATERIALIZED}" = "0" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "bd prime"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && (gt decision auto-close --inject || true) && (gt mail check --inject || true) && (echo \"$_stdin\" | bd decision check --inject || true) && (echo \"$_stdin\" | gt decision turn-clear || true)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
           }
         ]
       }
@@ -234,7 +261,7 @@ if [ "${MATERIALIZED}" = "0" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "gt handoff --hook 2>/dev/null || true"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && echo \"$_stdin\" | gt decision turn-check --soft"
           }
         ]
       }
@@ -242,6 +269,69 @@ if [ "${MATERIALIZED}" = "0" ]; then
   }
 }
 HOOKS
+    else
+        cat > "${WORKSPACE}/.claude/settings.json" <<'HOOKS'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && gt nudge deacon session-started"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && (gt decision auto-close --inject || true) && (gt mail check --inject || true) && (echo \"$_stdin\" | bd decision check --inject || true) && (echo \"$_stdin\" | gt decision turn-clear || true)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && echo \"$_stdin\" | gt decision turn-check"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKS
+    fi
 fi
 
 # Write CLAUDE.md with role context if not already present
