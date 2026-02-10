@@ -439,6 +439,11 @@ func (m *K8sManager) buildEnvVars(spec AgentPodSpec) []corev1.EnvVar {
 		{Name: "XDG_STATE_HOME", Value: MountStateDir},
 	}
 
+	// Enable session resume for persistent roles (those with workspace PVC).
+	if spec.WorkspaceStorage != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "GT_SESSION_RESUME", Value: "1"})
+	}
+
 	// Add role-specific env vars.
 	switch spec.Role {
 	case "polecat":

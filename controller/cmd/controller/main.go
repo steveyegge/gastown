@@ -23,7 +23,9 @@ import (
 
 	"github.com/steveyegge/gastown/controller/internal/beadswatcher"
 	"github.com/steveyegge/gastown/controller/internal/config"
+	"github.com/steveyegge/gastown/controller/internal/daemonclient"
 	"github.com/steveyegge/gastown/controller/internal/podmanager"
+	"github.com/steveyegge/gastown/controller/internal/reconciler"
 	"github.com/steveyegge/gastown/controller/internal/statusreporter"
 )
 
@@ -54,10 +56,17 @@ func main() {
 	// directly (no bd binary needed in distroless container).
 	status := statusreporter.NewStubReporter(logger)
 
+	// Daemon client + reconciler for level-triggered correctness.
+	daemon := daemonclient.New(daemonclient.Config{
+		BaseURL: fmt.Sprintf("http://%s:%d", cfg.DaemonHost, cfg.DaemonHTTPPort),
+		Token:   cfg.DaemonToken,
+	})
+	rec := reconciler.New(daemon, pods, cfg, logger, BuildSpecFromBeadInfo)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if err := run(ctx, logger, cfg, watcher, pods, status); err != nil {
+	if err := run(ctx, logger, cfg, watcher, pods, status, rec); err != nil {
 		logger.Error("controller stopped", "error", err)
 		os.Exit(1)
 	}
@@ -65,7 +74,15 @@ func main() {
 
 // run is the main controller loop. It reads beads events and dispatches
 // pod operations. Separated from main() for testability.
-func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter) error {
+func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter, rec *reconciler.Reconciler) error {
+	// Run reconciler once at startup to catch beads created during downtime.
+	if rec != nil {
+		logger.Info("running startup reconciliation")
+		if err := rec.Reconcile(ctx); err != nil {
+			logger.Warn("startup reconciliation failed", "error", err)
+		}
+	}
+
 	// Start beads watcher in background.
 	watcherDone := make(chan error, 1)
 	go func() {
@@ -77,7 +94,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 	if cfg.SyncInterval > 0 {
 		syncInterval = cfg.SyncInterval
 	}
-	go runPeriodicSync(ctx, logger, status, syncInterval)
+	go runPeriodicSync(ctx, logger, status, rec, syncInterval)
 
 	logger.Info("controller ready, waiting for beads events",
 		"sync_interval", syncInterval)
@@ -102,8 +119,8 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 	}
 }
 
-// runPeriodicSync runs SyncAll at a regular interval to reconcile pod statuses.
-func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusreporter.Reporter, interval time.Duration) {
+// runPeriodicSync runs SyncAll and reconciliation at a regular interval.
+func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusreporter.Reporter, rec *reconciler.Reconciler, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -111,7 +128,13 @@ func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusrepo
 		select {
 		case <-ticker.C:
 			if err := status.SyncAll(ctx); err != nil {
-				logger.Warn("periodic sync failed", "error", err)
+				logger.Warn("periodic status sync failed", "error", err)
+			}
+			// Run reconciler to converge desired vs actual state.
+			if rec != nil {
+				if err := rec.Reconcile(ctx); err != nil {
+					logger.Warn("periodic reconciliation failed", "error", err)
+				}
 			}
 			// Log metrics snapshot after each sync.
 			m := status.Metrics()
@@ -206,6 +229,51 @@ func handleEvent(ctx context.Context, logger *slog.Logger, cfg *config.Config, e
 		logger.Warn("unknown event type", "type", event.Type)
 		return nil
 	}
+}
+
+// BuildSpecFromBeadInfo constructs an AgentPodSpec from config and bead identity,
+// without an SSE event. Used by the reconciler to produce specs identical to
+// those created by handleEvent, using controller config for all metadata.
+func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string) podmanager.AgentPodSpec {
+	spec := podmanager.AgentPodSpec{
+		Rig:       rig,
+		Role:      role,
+		AgentName: agentName,
+		Image:     cfg.DefaultImage,
+		Namespace: cfg.Namespace,
+		Env: map[string]string{
+			"BD_DAEMON_HOST":          cfg.DaemonHost,
+			"BD_DAEMON_PORT":          fmt.Sprintf("%d", cfg.DaemonPort),
+			"BEADS_AUTO_START_DAEMON": "false",
+		},
+	}
+
+	defaults := podmanager.DefaultPodDefaultsForRole(role)
+	podmanager.ApplyDefaults(&spec, defaults)
+
+	if cfg.APIKeySecret != "" {
+		spec.SecretEnv = append(spec.SecretEnv, podmanager.SecretEnvSource{
+			EnvName:    "ANTHROPIC_API_KEY",
+			SecretName: cfg.APIKeySecret,
+			SecretKey:  "ANTHROPIC_API_KEY",
+		})
+	}
+	if cfg.CredentialsSecret != "" {
+		spec.CredentialsSecret = cfg.CredentialsSecret
+	}
+	if cfg.DaemonTokenSecret != "" {
+		spec.DaemonTokenSecret = cfg.DaemonTokenSecret
+	}
+	if cfg.CoopBuiltin {
+		spec.CoopBuiltin = true
+	}
+	if cfg.CoopImage != "" && !cfg.CoopBuiltin {
+		spec.CoopSidecar = &podmanager.CoopSidecarSpec{
+			Image: cfg.CoopImage,
+		}
+	}
+
+	return spec
 }
 
 // buildAgentPodSpec constructs a full AgentPodSpec from an event and config.

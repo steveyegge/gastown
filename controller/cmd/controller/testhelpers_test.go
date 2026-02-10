@@ -163,8 +163,6 @@ func testConfig() *config.Config {
 		DaemonPort:   9876,
 		Namespace:    "gastown",
 		LogLevel:     "debug",
-		TownRoot:     "/tmp/test-town",
-		BdBinary:     "bd",
 		DefaultImage: "gastown-agent:test",
 		SyncInterval: 100 * time.Millisecond,
 	}

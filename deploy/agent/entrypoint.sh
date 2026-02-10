@@ -22,7 +22,6 @@ set -euo pipefail
 ROLE="${GT_ROLE:-unknown}"
 RIG="${GT_RIG:-}"
 AGENT="${GT_AGENT:-unknown}"
-COMMAND="${GT_COMMAND:-claude --dangerously-skip-permissions}"
 WORKSPACE="/home/agent/gt"
 SESSION_RESUME="${GT_SESSION_RESUME:-1}"
 
@@ -152,65 +151,46 @@ Run \`gt prime\` for full context.
 CLAUDEMD
 fi
 
+# ── Skip Claude onboarding wizard ─────────────────────────────────────────
+
+printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferredTheme":"dark"}\n' > "${HOME}/.claude.json"
+
 # ── Session resume detection ─────────────────────────────────────────────
 #
 # If this is a restart (PVC already has Claude session logs from a previous
-# run), discover the most recent session and add --resume/--continue flags.
+# run), use coop --resume to let coop discover and resume the session.
+# Coop handles extracting the conversation ID from the log and passing
+# --resume <id> or --continue to Claude (avoids --session-id conflict).
 
-RESUME_ARGS=""
+COOP_RESUME_FLAG=""
 if [ "${SESSION_RESUME}" = "1" ]; then
-    # Claude stores session logs at ~/.claude/projects/<hash>/*.jsonl
     LATEST_LOG=$(find "${CLAUDE_STATE}/projects" -name '*.jsonl' -type f 2>/dev/null \
         | xargs ls -t 2>/dev/null | head -1)
 
     if [ -n "${LATEST_LOG}" ]; then
-        # Extract conversation ID from the first line's sessionId field.
-        CONV_ID=$(head -1 "${LATEST_LOG}" 2>/dev/null \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sessionId',d.get('conversationId','')))" 2>/dev/null || true)
-
-        if [ -n "${CONV_ID}" ]; then
-            RESUME_ARGS="--resume ${CONV_ID}"
-            echo "[entrypoint] Resuming previous session: ${CONV_ID}"
-        else
-            RESUME_ARGS="--continue"
-            echo "[entrypoint] Resuming most recent session (no conversation ID found)"
-        fi
+        COOP_RESUME_FLAG="--resume ${LATEST_LOG}"
+        echo "[entrypoint] Will attempt to resume from: ${LATEST_LOG}"
     else
         echo "[entrypoint] No previous session logs found — starting fresh"
     fi
 fi
 
-# ── Start screen session with Claude ─────────────────────────────────────
+# ── Start coop + Claude ──────────────────────────────────────────────────
 
-SESSION_NAME="agent"
-
-echo "[entrypoint] Starting screen session '${SESSION_NAME}' in ${WORKSPACE}"
-
-# Build the full command with resume args and optional startup prompt.
-# Resume args are inserted before any startup prompt.
-if [ -n "${RESUME_ARGS}" ]; then
-    COMMAND="${COMMAND} ${RESUME_ARGS}"
-fi
-if [ -n "${STARTUP_PROMPT:-}" ]; then
-    FULL_COMMAND="${COMMAND} \"${STARTUP_PROMPT}\""
-else
-    FULL_COMMAND="${COMMAND}"
-fi
-
-# Start screen session as the agent user
 cd "${WORKSPACE}"
-screen -dmS "${SESSION_NAME}" bash -c "${FULL_COMMAND}"
 
-echo "[entrypoint] Agent ${ROLE}/${AGENT} ready. Screen session: ${SESSION_NAME}"
+COOP_CMD="coop --agent=claude --port 8080 --health-port 9090 --cols 200 --rows 50"
 
-# ── Wait for screen session to exit ──────────────────────────────────────
+echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
 
-while true; do
-    if ! screen -list "${SESSION_NAME}" 2>/dev/null | grep -q "${SESSION_NAME}"; then
-        echo "[entrypoint] Screen session '${SESSION_NAME}' ended"
-        break
+if [ -n "${COOP_RESUME_FLAG}" ]; then
+    echo "[entrypoint] Trying resume..."
+    ${COOP_CMD} ${COOP_RESUME_FLAG} -- claude --dangerously-skip-permissions
+    RC=$?
+    if [ $RC -ne 0 ]; then
+        echo "[entrypoint] Resume failed (exit $RC), starting fresh"
+        exec ${COOP_CMD} -- claude --dangerously-skip-permissions
     fi
-    sleep 10
-done
-
-echo "[entrypoint] Agent container exiting"
+else
+    exec ${COOP_CMD} -- claude --dangerously-skip-permissions
+fi
