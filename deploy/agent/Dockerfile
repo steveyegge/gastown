@@ -78,7 +78,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Create agent user (UID/GID 1000 to match pod security context)
-RUN groupadd -g 1000 agent \
+# Use -f to allow existing GID 1000 (ubuntu group in Ubuntu 24.04)
+RUN groupadd -f -g 1000 agent \
     && useradd -m -u 1000 -g 1000 -s /bin/bash agent \
     && mkdir -p /home/agent/gt \
     && chown -R agent:agent /home/agent
