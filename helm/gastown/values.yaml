@@ -373,3 +373,25 @@ agentController:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+# =============================================================================
+# Git Mirrors — in-cluster bare-repo mirrors for fast agent clones
+# One Deployment + Service + PVC per rig. Agents clone from git://git-mirror-<name>:9418/
+# =============================================================================
+# gitMirrors:
+#   beads:
+#     enabled: true
+#     url: "https://github.com/groblegark/beads.git"
+#     storage: "2Gi"                    # PVC size for bare repo
+#     storageClass: "gp2"               # Storage class
+#     fetchIntervalSeconds: 300          # How often to fetch from upstream (default: 5m)
+#     image: "alpine/git:latest"         # Git image (default: alpine/git:latest)
+#     credentials:                       # Optional: for private repos
+#       secretName: "git-creds-beads"    # K8s Secret name
+#       type: "https"                    # "https" (git-credentials file) or "ssh" (ssh-privatekey)
+#     resources:
+#       requestsCPU: "50m"
+#       requestsMemory: "64Mi"
+#       limitsCPU: "200m"
+#       limitsMemory: "256Mi"
+gitMirrors: {}

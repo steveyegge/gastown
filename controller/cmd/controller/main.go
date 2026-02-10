@@ -59,12 +59,17 @@ func main() {
 		Token:   cfg.DaemonToken,
 	})
 	status := statusreporter.NewHTTPReporter(daemon, k8sClient, cfg.Namespace, logger)
+
+	// Populate rig cache from daemon rig beads.
+	cfg.RigCache = make(map[string]config.RigCacheEntry)
+	refreshRigCache(context.Background(), logger, daemon, cfg)
+
 	rec := reconciler.New(daemon, pods, cfg, logger, BuildSpecFromBeadInfo)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if err := run(ctx, logger, cfg, watcher, pods, status, rec); err != nil {
+	if err := run(ctx, logger, cfg, watcher, pods, status, rec, daemon); err != nil {
 		logger.Error("controller stopped", "error", err)
 		os.Exit(1)
 	}
@@ -72,7 +77,7 @@ func main() {
 
 // run is the main controller loop. It reads beads events and dispatches
 // pod operations. Separated from main() for testability.
-func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter, rec *reconciler.Reconciler) error {
+func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher beadswatcher.Watcher, pods podmanager.Manager, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient) error {
 	// Run reconciler once at startup to catch beads created during downtime.
 	if rec != nil {
 		logger.Info("running startup reconciliation")
@@ -92,7 +97,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 	if cfg.SyncInterval > 0 {
 		syncInterval = cfg.SyncInterval
 	}
-	go runPeriodicSync(ctx, logger, status, rec, syncInterval)
+	go runPeriodicSync(ctx, logger, status, rec, daemon, cfg, syncInterval)
 
 	logger.Info("controller ready, waiting for beads events",
 		"sync_interval", syncInterval)
@@ -117,8 +122,8 @@ func run(ctx context.Context, logger *slog.Logger, cfg *config.Config, watcher b
 	}
 }
 
-// runPeriodicSync runs SyncAll and reconciliation at a regular interval.
-func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusreporter.Reporter, rec *reconciler.Reconciler, interval time.Duration) {
+// runPeriodicSync runs SyncAll, rig cache refresh, and reconciliation at a regular interval.
+func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusreporter.Reporter, rec *reconciler.Reconciler, daemon *daemonclient.DaemonClient, cfg *config.Config, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -128,6 +133,8 @@ func runPeriodicSync(ctx context.Context, logger *slog.Logger, status statusrepo
 			if err := status.SyncAll(ctx); err != nil {
 				logger.Warn("periodic status sync failed", "error", err)
 			}
+			// Refresh rig cache from daemon.
+			refreshRigCache(ctx, logger, daemon, cfg)
 			// Run reconciler to converge desired vs actual state.
 			if rec != nil {
 				if err := rec.Reconcile(ctx); err != nil {
@@ -345,6 +352,38 @@ func applyCommonConfig(cfg *config.Config, spec *podmanager.AgentPodSpec) {
 		}
 	}
 
+	// Wire git mirror info from rig cache.
+	if entry, ok := cfg.RigCache[spec.Rig]; ok {
+		if entry.GitMirrorSvc != "" {
+			spec.GitMirrorService = entry.GitMirrorSvc
+		}
+		if entry.GitURL != "" {
+			spec.GitURL = entry.GitURL
+		}
+		if entry.DefaultBranch != "" {
+			spec.GitDefaultBranch = entry.DefaultBranch
+		}
+	}
+
+	// Build GT_RIGS env var from rig cache for entrypoint rig registration.
+	if len(cfg.RigCache) > 0 {
+		var rigEntries []string
+		for name, entry := range cfg.RigCache {
+			if entry.GitURL != "" {
+				prefix := "hq" // default prefix
+				// Extract prefix from the entry if available
+				if p := entry.DefaultBranch; p != "" {
+					_ = p // branch, not prefix — ignore
+				}
+				// Use rig name as-is — entrypoint expects name=url:prefix
+				rigEntries = append(rigEntries, fmt.Sprintf("%s=%s:%s", name, entry.GitURL, prefix))
+			}
+		}
+		if len(rigEntries) > 0 {
+			spec.Env["GT_RIGS"] = strings.Join(rigEntries, ",")
+		}
+	}
+
 	// Wire NATS config: sidecar gets dedicated env vars, built-in gets plain env.
 	if cfg.NatsURL != "" {
 		if spec.CoopSidecar != nil {
@@ -396,6 +435,23 @@ func buildK8sClient(kubeconfig string) (kubernetes.Interface, error) {
 	}
 
 	return kubernetes.NewForConfig(cfg)
+}
+
+// refreshRigCache queries the daemon for rig beads and updates cfg.RigCache.
+func refreshRigCache(ctx context.Context, logger *slog.Logger, daemon *daemonclient.DaemonClient, cfg *config.Config) {
+	rigs, err := daemon.ListRigBeads(ctx)
+	if err != nil {
+		logger.Warn("failed to refresh rig cache", "error", err)
+		return
+	}
+	for name, info := range rigs {
+		cfg.RigCache[name] = config.RigCacheEntry{
+			GitMirrorSvc:  info.GitMirrorSvc,
+			GitURL:        info.GitURL,
+			DefaultBranch: info.DefaultBranch,
+		}
+	}
+	logger.Info("refreshed rig cache", "count", len(rigs))
 }
 
 func setupLogger(level string) *slog.Logger {

@@ -53,6 +53,11 @@ const (
 	AgentUID      = int64(1000)
 	AgentGID      = int64(1000)
 
+	// Init container constants.
+	InitCloneName    = "init-clone"
+	InitCloneImage   = "alpine/git:latest"
+	GitDaemonPort    = 9418
+
 	// Coop sidecar constants.
 	CoopContainerName       = "coop"
 	CoopDefaultPort         = 8080
@@ -121,6 +126,19 @@ type AgentPodSpec struct {
 	// management. When set, the pod gets a coop container with health probes,
 	// shareProcessNamespace is enabled, and backend metadata is set to "coop".
 	CoopSidecar *CoopSidecarSpec
+
+	// GitMirrorService is the in-cluster git mirror service name for this rig
+	// (e.g., "git-mirror-beads"). When set and the role needs code access
+	// (polecat, crew, refinery), an init container is added that clones from
+	// git://<service>:9418/<rig>.git into the workspace.
+	GitMirrorService string
+
+	// GitURL is the actual upstream repository URL (e.g., "https://github.com/...").
+	// Used to set the git remote origin after cloning from the mirror.
+	GitURL string
+
+	// GitDefaultBranch is the branch to checkout after cloning (default: "main").
+	GitDefaultBranch string
 }
 
 // CoopSidecarSpec configures the Coop sidecar container.
@@ -298,10 +316,16 @@ func (m *K8sManager) buildPod(spec AgentPodSpec) *corev1.Pod {
 		containers = append(containers, m.buildCoopSidecar(spec))
 	}
 
+	var initContainers []corev1.Container
+	if ic := m.buildInitCloneContainer(spec); ic != nil {
+		initContainers = append(initContainers, *ic)
+	}
+
 	podSpec := corev1.PodSpec{
-		Containers:    containers,
-		Volumes:       volumes,
-		RestartPolicy: restartPolicyForRole(spec.Role),
+		InitContainers: initContainers,
+		Containers:     containers,
+		Volumes:        volumes,
+		RestartPolicy:  restartPolicyForRole(spec.Role),
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsUser:    intPtr(AgentUID),
 			RunAsGroup:   intPtr(AgentGID),
@@ -771,6 +795,78 @@ func (m *K8sManager) buildCoopResources(coop *CoopSidecarSpec) corev1.ResourceRe
 
 // restartPolicyForRole returns the appropriate restart policy.
 // Polecats are one-shot (Never); all others restart on failure.
+// roleNeedsCode returns true for roles that need a working copy of the rig's repo.
+func roleNeedsCode(role string) bool {
+	switch role {
+	case "polecat", "crew", "refinery":
+		return true
+	default:
+		return false
+	}
+}
+
+// buildInitCloneContainer creates an init container that clones the rig's repo
+// from the in-cluster git mirror. Returns nil if the role doesn't need code
+// or no git mirror is configured.
+func (m *K8sManager) buildInitCloneContainer(spec AgentPodSpec) *corev1.Container {
+	if spec.GitMirrorService == "" || !roleNeedsCode(spec.Role) {
+		return nil
+	}
+
+	branch := spec.GitDefaultBranch
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Clone from git mirror into workspace/{rig}/work/, set origin to real URL.
+	script := fmt.Sprintf(`set -e
+WORK_DIR="%s/%s/work"
+if [ -d "$WORK_DIR/.git" ]; then
+  echo "Repo already cloned, fetching updates..."
+  cd "$WORK_DIR"
+  git fetch --all --prune
+  git checkout %s
+  git pull --ff-only || true
+else
+  echo "Cloning from mirror %s..."
+  mkdir -p "$(dirname "$WORK_DIR")"
+  git clone -b %s git://%s:%d/%s.git "$WORK_DIR"
+  cd "$WORK_DIR"
+fi
+`, MountWorkspace, spec.Rig, branch, spec.GitMirrorService, branch, spec.GitMirrorService, GitDaemonPort, spec.Rig)
+
+	// Set origin to actual GitHub URL for pushes.
+	if spec.GitURL != "" {
+		script += fmt.Sprintf(`git remote set-url origin %s
+`, spec.GitURL)
+	}
+
+	// Configure git identity from agent env vars.
+	script += fmt.Sprintf(`git config user.name "%s"
+git config user.email "%s@gastown"
+`, spec.AgentName, spec.AgentName)
+
+	return &corev1.Container{
+		Name:            InitCloneName,
+		Image:           InitCloneImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"/bin/sh", "-c", script},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: VolumeWorkspace, MountPath: MountWorkspace},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+		},
+	}
+}
+
 func restartPolicyForRole(role string) corev1.RestartPolicy {
 	if role == "polecat" {
 		return corev1.RestartPolicyNever

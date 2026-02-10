@@ -137,6 +137,80 @@ func (c *DaemonClient) ListAgentBeads(ctx context.Context) ([]AgentBead, error) 
 	return beads, nil
 }
 
+// RigInfo represents a registered rig from daemon rig beads.
+type RigInfo struct {
+	Name           string // Rig name (from bead title)
+	Prefix         string // Beads prefix (e.g., "bd", "gt")
+	GitURL         string // Repository URL
+	GitMirrorSvc   string // In-cluster git mirror service name (e.g., "git-mirror-beads")
+	DefaultBranch  string // Default branch (e.g., "main")
+}
+
+// ListRigBeads queries the daemon for rig beads (type=rig) and extracts
+// git_mirror labels. Returns a map of rig name → RigInfo.
+func (c *DaemonClient) ListRigBeads(ctx context.Context) (map[string]RigInfo, error) {
+	body := map[string]interface{}{
+		"exclude_status": []string{"closed"},
+		"issue_type":     "rig",
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	url := c.baseURL + "/bd.v1.BeadsService/List"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("daemon request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daemon returned status %d", resp.StatusCode)
+	}
+
+	var result []issueJSON
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	rigs := make(map[string]RigInfo)
+	for _, issue := range result {
+		info := RigInfo{Name: issue.Title}
+		for _, label := range issue.Labels {
+			parts := strings.SplitN(label, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			switch parts[0] {
+			case "prefix":
+				info.Prefix = parts[1]
+			case "git_url":
+				info.GitURL = parts[1]
+			case "git_mirror":
+				info.GitMirrorSvc = parts[1]
+			case "default_branch":
+				info.DefaultBranch = parts[1]
+			}
+		}
+		if info.Name != "" {
+			rigs[info.Name] = info
+		}
+	}
+
+	return rigs, nil
+}
+
 // UpdateBeadNotes updates the notes field of a bead via the daemon HTTP API.
 // Used by the status reporter to write backend metadata (coop_url, etc.).
 func (c *DaemonClient) UpdateBeadNotes(ctx context.Context, beadID, notes string) error {

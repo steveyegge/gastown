@@ -72,6 +72,17 @@ type Config struct {
 	// SyncInterval is how often to reconcile pod statuses with beads (env: SYNC_INTERVAL).
 	// Default: 60s.
 	SyncInterval time.Duration
+
+	// RigCache maps rig name → git mirror service name, populated at runtime
+	// from rig beads in the daemon. Not parsed from env/flags.
+	RigCache map[string]RigCacheEntry
+}
+
+// RigCacheEntry holds rig metadata from daemon rig beads.
+type RigCacheEntry struct {
+	GitMirrorSvc  string // e.g., "git-mirror-beads"
+	GitURL        string // e.g., "https://github.com/groblegark/beads.git"
+	DefaultBranch string // e.g., "main"
 }
 
 // Parse reads configuration from flags and environment variables.

@@ -1,0 +1,21 @@
+{{- range $name, $mirror := .Values.gitMirrors }}
+{{- if $mirror.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-mirror-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gastown.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: git-mirror
+    gastown.io/rig: {{ $name }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ $mirror.storageClass | default "gp2" }}
+  resources:
+    requests:
+      storage: {{ $mirror.storage | default "2Gi" }}
+{{- end }}
+{{- end }}

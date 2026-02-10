@@ -236,6 +236,21 @@ bd-daemon:
         memory: 128Mi
 
 # =============================================================================
+# Git Mirrors — fast in-cluster clones for agent pods
+# =============================================================================
+gitMirrors:
+  beads:
+    enabled: true
+    url: "https://github.com/groblegark/beads.git"
+    storage: "2Gi"
+    fetchIntervalSeconds: 300
+  gastown:
+    enabled: true
+    url: "https://github.com/groblegark/gastown.git"
+    storage: "1Gi"
+    fetchIntervalSeconds: 300
+
+# =============================================================================
 # Agent Controller — manages agent pods via beads events
 # =============================================================================
 agentController:

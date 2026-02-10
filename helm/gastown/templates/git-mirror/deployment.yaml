@@ -1,0 +1,188 @@
+{{- range $name, $mirror := .Values.gitMirrors }}
+{{- if $mirror.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-mirror-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gastown.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: git-mirror
+    gastown.io/rig: {{ $name }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "gastown.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: git-mirror
+      gastown.io/rig: {{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- include "gastown.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: git-mirror
+        gastown.io/rig: {{ $name }}
+    spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      initContainers:
+        - name: clone
+          image: {{ $mirror.image | default "alpine/git:latest" }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              REPO_DIR="/data/{{ $name }}.git"
+              if [ -d "$REPO_DIR/HEAD" ]; then
+                echo "Repo already cloned, fetching updates..."
+                cd "$REPO_DIR"
+                git fetch --all --prune
+              else
+                echo "Cloning {{ $mirror.url }} ..."
+                git clone --bare --mirror {{ $mirror.url }} "$REPO_DIR"
+              fi
+              # Enable git daemon export
+              touch "$REPO_DIR/git-daemon-export-ok"
+          volumeMounts:
+            - name: repo-data
+              mountPath: /data
+            {{- if $mirror.credentials }}
+            {{- if $mirror.credentials.secretName }}
+            - name: git-credentials
+              mountPath: /etc/git-credentials
+              readOnly: true
+            {{- end }}
+            {{- end }}
+          {{- if $mirror.credentials }}
+          {{- if $mirror.credentials.secretName }}
+          env:
+            {{- if eq (default "https" $mirror.credentials.type) "ssh" }}
+            - name: GIT_SSH_COMMAND
+              value: "ssh -i /etc/git-credentials/ssh-privatekey -o StrictHostKeyChecking=no"
+            {{- else }}
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: "credential.helper"
+            - name: GIT_CONFIG_VALUE_0
+              value: "store --file /etc/git-credentials/git-credentials"
+            {{- end }}
+          {{- end }}
+          {{- end }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      containers:
+        - name: git-daemon
+          image: {{ $mirror.image | default "alpine/git:latest" }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Start git daemon in background
+              git daemon \
+                --base-path=/data \
+                --export-all \
+                --reuseaddr \
+                --informative-errors \
+                --verbose \
+                --listen=0.0.0.0 \
+                --port=9418 &
+              GIT_PID=$!
+
+              # Periodic fetch loop
+              INTERVAL={{ $mirror.fetchIntervalSeconds | default 300 }}
+              while true; do
+                sleep "$INTERVAL"
+                REPO_DIR="/data/{{ $name }}.git"
+                if [ -d "$REPO_DIR" ]; then
+                  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Fetching updates for {{ $name }}..."
+                  cd "$REPO_DIR"
+                  {{- if $mirror.credentials }}
+                  {{- if $mirror.credentials.secretName }}
+                  {{- if eq (default "https" $mirror.credentials.type) "ssh" }}
+                  GIT_SSH_COMMAND="ssh -i /etc/git-credentials/ssh-privatekey -o StrictHostKeyChecking=no" \
+                  {{- end }}
+                  {{- end }}
+                  {{- end }}
+                  git fetch --all --prune 2>&1 || echo "Fetch failed, will retry"
+                fi
+              done
+          ports:
+            - name: git
+              containerPort: 9418
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: git
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: git
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: repo-data
+              mountPath: /data
+            {{- if $mirror.credentials }}
+            {{- if $mirror.credentials.secretName }}
+            - name: git-credentials
+              mountPath: /etc/git-credentials
+              readOnly: true
+            {{- end }}
+            {{- end }}
+          {{- if $mirror.credentials }}
+          {{- if $mirror.credentials.secretName }}
+          env:
+            {{- if ne (default "https" $mirror.credentials.type) "ssh" }}
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: "credential.helper"
+            - name: GIT_CONFIG_VALUE_0
+              value: "store --file /etc/git-credentials/git-credentials"
+            {{- end }}
+          {{- end }}
+          {{- end }}
+          resources:
+            requests:
+              cpu: {{ ($mirror.resources).requestsCPU | default "50m" }}
+              memory: {{ ($mirror.resources).requestsMemory | default "64Mi" }}
+            limits:
+              cpu: {{ ($mirror.resources).limitsCPU | default "200m" }}
+              memory: {{ ($mirror.resources).limitsMemory | default "256Mi" }}
+      volumes:
+        - name: repo-data
+          persistentVolumeClaim:
+            claimName: git-mirror-{{ $name }}
+        {{- if $mirror.credentials }}
+        {{- if $mirror.credentials.secretName }}
+        - name: git-credentials
+          secret:
+            secretName: {{ $mirror.credentials.secretName }}
+            defaultMode: 0400
+        {{- end }}
+        {{- end }}
+      {{- with $.Values.agentController.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}
