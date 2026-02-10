@@ -9,6 +9,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-10
+
+### Added
+
+#### K8s Agent Pod Controller
+- **Level-triggered reconciler** for desired-state convergence of agent pods
+- **SSE-based watcher** replaces shell-out to `bd activity` for real-time status sync
+- **Bidirectional beads-K8s status sync** between bead metadata and pod state
+- **Coop sidecar injection** for PTY-based agent management in pods
+- **CoopBuiltin mode** for agent images with coop baked in
+- **Claude OAuth credentials** and daemon token wired into agent pods
+- **Agent health probes** via Coop backend metadata reporting
+- **Git mirror Helm chart** + init-clone container for code access in pods
+
+#### Agent Image & Entrypoint
+- **Multi-stage Dockerfile** with Go build + release binary downloads
+- **Workspace bootstrap** — creates mayor/town.json, git repo, role dirs
+- **Daemon connection** — `gt connect --url` writes `.beads/config.yaml`
+- **Session persistence** on PVC across pod restarts
+- **Config bead materialization** for Claude Code hooks
+- **SessionStart/PreCompact/Stop hooks** in agent settings
+- **Full mail + decision hooks** in static fallback templates
+
+#### K8s Infrastructure
+- **Gastown wrapper Helm chart** consuming bd-daemon as OCI subchart
+- **Gastown-HA values** for Dolt HA cluster
+- **Agent controller Helm templates** with town name, NATS config, role env vars
+- **`gt sling --target=k8s`** for K8s polecat dispatch
+- **`gt mayor start --target=k8s`** with pod defaults and env vars
+- **K8s-aware `gt status`** and `gt polecat list/status/nuke`
+- **`gt connect`** command for remote K8s daemon connection
+- **`gt mayor attach`** to K8s mayor pod via coop port-forward
+
+#### Rig Management
+- **`gt rig register`** and daemon-mode rig list
+- **Mayor/deacon role defaults** and role-aware agent entrypoint
+
+#### Terminal & Coop Integration
+- **CoopBackend** implementing Backend interface via Coop HTTP API
+- **WebSocket state watcher** for Coop agent state subscriptions
+- **Coop backend wired into `gt nudge`/`gt peek`** + HTTP status reporter
+- **ResolveBackend** with bead metadata detection for Coop agents
+
+#### OJ Integration
+- **Runbook version headers** + auto-update stale copies
+- **Guard AutoNukeIfClean** for OJ-managed polecats
+- **OJ daemon health check** for GT doctor integration
+- **HealthCheck RPC** and structured health endpoint
+
+### Fixed
+
+#### Agent Reliability
+- **Survive Ctrl+C** — restart loop instead of exec for PID 1
+- **Prevent set -e** from killing restart loop on coop exit
+- **Clean up stale coop FIFO pipes** before restart
+- **Pin coop v0.3.0 and bd v0.57.12** in Dockerfile
+- **Session resume detection** and error handling improvements
+- **Use HTTP port** for daemon connection in agent pods
+
+#### Helm & Infrastructure
+- **Docker Hub imagePullSecrets** for rate-limited images
+- **ECR for Redis image** to avoid Docker Hub rate limits
+- **NATS URL disabled** for agent pods (use embedded NATS)
+- **Dolt commit tuning** — GC/squash config for s3-sync sidecar
+- **PVC subPath** for Claude state instead of emptyDir
+- **Pin agent pods to amd64 nodes**, deduplicate mayor env vars
+- **ExternalSecrets fallback** to name-based secret discovery
+
+#### Controller
+- **Include pinned agent beads** in reconciler query
+- **Filter agent pods** by gastown.io/agent label
+- **Use coop --resume** instead of passing --continue to Claude directly
+
+#### Other
+- **ResolveBackend** tries hq-prefixed ID for town-level agents
+- **Doctor routes_check** uses file loader instead of daemon
+- **K8s-only rigs** supported in `gt sling --target=k8s`
+- **GOTOOLCHAIN=auto** for Go 1.25+ compatibility in Docker build
+
 ## [0.5.0] - 2026-01-22
 
 ### Added

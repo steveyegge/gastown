@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -369,14 +370,8 @@ func applyCommonConfig(cfg *config.Config, spec *podmanager.AgentPodSpec) {
 	if len(cfg.RigCache) > 0 {
 		var rigEntries []string
 		for name, entry := range cfg.RigCache {
-			if entry.GitURL != "" {
-				prefix := "hq" // default prefix
-				// Extract prefix from the entry if available
-				if p := entry.DefaultBranch; p != "" {
-					_ = p // branch, not prefix — ignore
-				}
-				// Use rig name as-is — entrypoint expects name=url:prefix
-				rigEntries = append(rigEntries, fmt.Sprintf("%s=%s:%s", name, entry.GitURL, prefix))
+			if entry.GitURL != "" && entry.Prefix != "" {
+				rigEntries = append(rigEntries, fmt.Sprintf("%s=%s:%s", name, entry.GitURL, entry.Prefix))
 			}
 		}
 		if len(rigEntries) > 0 {
@@ -446,6 +441,7 @@ func refreshRigCache(ctx context.Context, logger *slog.Logger, daemon *daemoncli
 	}
 	for name, info := range rigs {
 		cfg.RigCache[name] = config.RigCacheEntry{
+			Prefix:        info.Prefix,
 			GitMirrorSvc:  info.GitMirrorSvc,
 			GitURL:        info.GitURL,
 			DefaultBranch: info.DefaultBranch,

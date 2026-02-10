@@ -683,16 +683,11 @@ func (g *Git) BranchExists(name string) (bool, error) {
 
 // RemoteBranchExists checks if a branch exists on the remote.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
-	_, err := g.run("ls-remote", "--heads", remote, branch)
-	if err != nil {
-		return false, err
-	}
-	// ls-remote returns empty if branch doesn't exist, need to check output
 	out, err := g.run("ls-remote", "--heads", remote, branch)
 	if err != nil {
 		return false, err
 	}
-	return out != "", nil
+	return strings.TrimSpace(out) != "", nil
 }
 
 // DeleteBranch deletes a local branch.

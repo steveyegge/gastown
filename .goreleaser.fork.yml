@@ -1,0 +1,58 @@
+# GoReleaser config for groblegark/gastown fork releases.
+# Only linux/amd64 for now — cross-compile needs extra toolchains.
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gt-linux-amd64
+    main: ./cmd/gt
+    binary: gt
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+      - -X github.com/steveyegge/gastown/internal/cmd.Version={{.Version}}
+      - -X github.com/steveyegge/gastown/internal/cmd.Build={{.ShortCommit}}
+      - -X github.com/steveyegge/gastown/internal/cmd.Commit={{.Commit}}
+
+archives:
+  - id: gt-archive
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+announce:
+  skip: true

@@ -75,6 +75,26 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.3.0",
+		Date:    "2026-02-10",
+		Changes: []string{
+			"NEW: K8s agent pod controller with level-triggered reconciler",
+			"NEW: Agent Docker image with workspace bootstrap and session persistence",
+			"NEW: Gastown Helm chart consuming bd-daemon as OCI subchart",
+			"NEW: gt sling --target=k8s for K8s polecat dispatch",
+			"NEW: gt connect for remote K8s daemon connection",
+			"NEW: gt mayor attach via coop port-forward to K8s pods",
+			"NEW: gt rig register + daemon-mode rig list",
+			"NEW: CoopBackend for gt nudge/peek via HTTP API",
+			"NEW: Git mirror Helm chart + init-clone container",
+			"NEW: Mail + decision hooks in agent static fallback templates",
+			"FIX: Agent survives Ctrl+C and coop exit with restart loop",
+			"FIX: Stale coop FIFO pipe cleanup before restart",
+			"FIX: Docker Hub rate limits — ECR for Redis, imagePullSecrets",
+			"FIX: Dolt commit health — GC/squash tuning for s3-sync sidecar",
+		},
+	},
+	{
 		Version: "0.5.0",
 		Date:    "2026-01-22",
 		Changes: []string{
