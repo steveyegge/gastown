@@ -437,23 +437,23 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		}
 	}
 
-	// Check for orphaned Claude/node processes
+	// Check for orphaned agent processes (Claude, OpenCode, etc.)
 	// These can be left behind if tmux sessions were killed but child processes didn't terminate
-	if pids := findOrphanedClaudeProcesses(townRoot); len(pids) > 0 {
+	if pids := findOrphanedAgentProcesses(townRoot); len(pids) > 0 {
 		respawned = append(respawned, fmt.Sprintf("orphaned agent processes (PIDs: %v)", pids))
 	}
 
 	return respawned
 }
 
-// findOrphanedClaudeProcesses finds Claude/OpenCode processes that are running in the
+// findOrphanedAgentProcesses finds Claude/OpenCode processes that are running in the
 // town directory but aren't associated with any active tmux session.
 // This can happen when tmux sessions are killed but child processes don't terminate.
 //
 // Only matches processes whose full command line references the town root path,
 // which avoids false positives on unrelated Node.js applications (VS Code
 // extensions, web servers, etc.).
-func findOrphanedClaudeProcesses(townRoot string) []int {
+func findOrphanedAgentProcesses(townRoot string) []int {
 	// Use ps to get PID, process name, and full command line in a single pass.
 	// Previous implementation used "pgrep -l node" which matched ALL node
 	// processes on the system regardless of whether they belonged to Gas Town.

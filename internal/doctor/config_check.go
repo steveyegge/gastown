@@ -521,10 +521,13 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 	}
 
 	// Town-level agents (mayor, deacon) - these are not rigs but have their own settings
+	// Check both providers (.claude and .opencode)
 	for _, agent := range []string{"mayor", "deacon"} {
-		agentSettings := filepath.Join(townRoot, agent, ".claude", "settings.json")
-		if _, err := os.Stat(agentSettings); err == nil {
-			files = append(files, agentSettings)
+		for _, hooksDir := range knownHooksDirs {
+			agentSettings := filepath.Join(townRoot, agent, hooksDir, "settings.json")
+			if _, err := os.Stat(agentSettings); err == nil {
+				files = append(files, agentSettings)
+			}
 		}
 	}
 
