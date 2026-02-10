@@ -632,6 +632,31 @@ type Migration struct {
 	TargetPath string
 }
 
+// findLocalDoltDB scans beadsDir/dolt/ for a subdirectory containing a .dolt
+// directory (an embedded Dolt database). Returns the full path to the database
+// directory, or "" if none found.
+//
+// bd names the subdirectory based on internal conventions (e.g., beads_hq,
+// beads_gt) that have changed across versions. Scanning avoids hardcoding
+// assumptions about the naming scheme.
+func findLocalDoltDB(beadsDir string) string {
+	doltParent := filepath.Join(beadsDir, "dolt")
+	entries, err := os.ReadDir(doltParent)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(doltParent, e.Name())
+		if _, err := os.Stat(filepath.Join(candidate, ".dolt")); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // FindMigratableDatabases finds existing dolt databases that can be migrated.
 func FindMigratableDatabases(townRoot string) []Migration {
 	var migrations []Migration
@@ -639,8 +664,8 @@ func FindMigratableDatabases(townRoot string) []Migration {
 
 	// Check town-level beads database -> .dolt-data/hq
 	townBeadsDir := beads.ResolveBeadsDir(townRoot)
-	townSource := filepath.Join(townBeadsDir, "dolt", "beads")
-	if _, err := os.Stat(filepath.Join(townSource, ".dolt")); err == nil {
+	townSource := findLocalDoltDB(townBeadsDir)
+	if townSource != "" {
 		// Check target doesn't already have data
 		targetDir := filepath.Join(config.DataDir, "hq")
 		if _, err := os.Stat(filepath.Join(targetDir, ".dolt")); os.IsNotExist(err) {
@@ -666,9 +691,9 @@ func FindMigratableDatabases(townRoot string) []Migration {
 
 		rigName := entry.Name()
 		resolvedBeadsDir := beads.ResolveBeadsDir(filepath.Join(townRoot, rigName))
-		rigSource := filepath.Join(resolvedBeadsDir, "dolt", "beads")
+		rigSource := findLocalDoltDB(resolvedBeadsDir)
 
-		if _, err := os.Stat(filepath.Join(rigSource, ".dolt")); err == nil {
+		if rigSource != "" {
 			// Check target doesn't already have data
 			targetDir := filepath.Join(config.DataDir, rigName)
 			if _, err := os.Stat(filepath.Join(targetDir, ".dolt")); os.IsNotExist(err) {
@@ -827,8 +852,8 @@ func checkWorkspace(townRoot, rigName, beadsDir string) *BrokenWorkspace {
 	}
 
 	// Check for local data that could be migrated
-	localDoltPath := filepath.Join(beadsDir, "dolt", "beads")
-	if _, err := os.Stat(filepath.Join(localDoltPath, ".dolt")); err == nil {
+	localDoltPath := findLocalDoltDB(beadsDir)
+	if localDoltPath != "" {
 		ws.HasLocalData = true
 		ws.LocalDataPath = localDoltPath
 	}

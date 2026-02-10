@@ -143,7 +143,7 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 	}
 
 	// Create the actual Dolt database at the redirected location
-	actualDoltDir := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads", ".dolt")
+	actualDoltDir := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads_myrig", ".dolt")
 	if err := os.MkdirAll(actualDoltDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 	for _, m := range migrations {
 		if m.RigName == rigName {
 			found = true
-			expectedSource := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads")
+			expectedSource := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads_myrig")
 			if m.SourcePath != expectedSource {
 				t.Errorf("SourcePath = %q, want %q", m.SourcePath, expectedSource)
 			}
@@ -174,11 +174,11 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 }
 
 func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
-	// Setup: rig with direct .beads/dolt/beads (no redirect)
+	// Setup: rig with direct .beads/dolt/beads_testrig (no redirect)
 	townRoot := t.TempDir()
 
 	rigName := "simple"
-	doltDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	doltDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig", ".dolt")
 	if err := os.MkdirAll(doltDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
 	for _, m := range migrations {
 		if m.RigName == rigName {
 			found = true
-			expectedSource := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+			expectedSource := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig")
 			if m.SourcePath != expectedSource {
 				t.Errorf("SourcePath = %q, want %q", m.SourcePath, expectedSource)
 			}
@@ -204,6 +204,65 @@ func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
 	if !found {
 		t.Errorf("expected to find migration for rig %q, got migrations: %v", rigName, migrations)
 	}
+}
+
+func TestFindLocalDoltDB(t *testing.T) {
+	t.Run("no dolt directory", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		result := findLocalDoltDB(beadsDir)
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("empty dolt directory", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("single database", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		dbDir := filepath.Join(beadsDir, "dolt", "beads_hq", ".dolt")
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(beadsDir, "dolt", "beads_hq")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+	})
+
+	t.Run("non-dolt files ignored", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		doltParent := filepath.Join(beadsDir, "dolt")
+		if err := os.MkdirAll(doltParent, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create a regular file (not a directory)
+		if err := os.WriteFile(filepath.Join(doltParent, "readme.txt"), []byte("hi"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Create a directory without .dolt inside
+		if err := os.MkdirAll(filepath.Join(doltParent, "not-a-db"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create the real database
+		if err := os.MkdirAll(filepath.Join(doltParent, "beads_gt", ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(doltParent, "beads_gt")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+	})
 }
 
 func TestEnsureMetadata_HQ(t *testing.T) {
@@ -522,7 +581,7 @@ func TestMigrateRigFromBeads(t *testing.T) {
 
 	// Create source database
 	rigName := "testrig"
-	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +624,7 @@ func TestMigrateRigFromBeads_AlreadyExists(t *testing.T) {
 	townRoot := t.TempDir()
 
 	rigName := "existing"
-	sourcePath := filepath.Join(townRoot, "src", ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, "src", ".beads", "dolt", "beads_existing")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +767,7 @@ func TestFindMigratableDatabases_SkipsAlreadyMigrated(t *testing.T) {
 
 	rigName := "already"
 	// Source exists
-	sourceDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_hq", ".dolt")
 	if err := os.MkdirAll(sourceDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +800,7 @@ func TestMidMigrationCrashRecovery_PartialMigration(t *testing.T) {
 	// Create 3 rigs with source databases
 	rigs := []string{"rig-alpha", "rig-beta", "rig-gamma"}
 	for _, rig := range rigs {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1015,7 +1074,7 @@ func TestConcurrentFindMigratableDatabases(t *testing.T) {
 
 	// Create a rig with source database
 	rigName := "concurrent-rig"
-	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_concurrent", ".dolt")
 	if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1055,7 +1114,7 @@ func TestConcurrentMigrateAndFind(t *testing.T) {
 	// Create multiple rigs
 	rigs := []string{"mig-a", "mig-b", "mig-c"}
 	for _, rig := range rigs {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1101,7 +1160,7 @@ func TestConcurrentMigrateAndFind(t *testing.T) {
 		wg.Add(1)
 		go func(rigName string) {
 			defer wg.Done()
-			sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+			sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_"+rigName)
 			_ = MigrateRigFromBeads(townRoot, rigName, sourcePath)
 		}(rig)
 	}
@@ -1358,7 +1417,7 @@ func TestMigrateRigFromBeads_IdempotentDetection(t *testing.T) {
 	townRoot := t.TempDir()
 
 	rigName := "idem-rig"
-	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_idem")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1445,7 +1504,7 @@ func TestFindAndMigrateAll_Idempotent(t *testing.T) {
 
 	// Create 2 rigs
 	for _, rig := range []string{"idm-a", "idm-b"} {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1861,7 +1920,7 @@ func TestFindMigratableDatabases_SpacesInPath(t *testing.T) {
 	}
 
 	rigName := "my-rig"
-	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_spacey", ".dolt")
 	if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1888,7 +1947,7 @@ func TestFindMigratableDatabases_EmptyTownRoot(t *testing.T) {
 
 func TestFindMigratableDatabases_TownBeads(t *testing.T) {
 	townRoot := t.TempDir()
-	hqSource := filepath.Join(townRoot, ".beads", "dolt", "beads", ".dolt")
+	hqSource := filepath.Join(townRoot, ".beads", "dolt", "beads_hq", ".dolt")
 	if err := os.MkdirAll(hqSource, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1907,7 +1966,7 @@ func TestFindMigratableDatabases_TownBeads(t *testing.T) {
 
 func TestFindMigratableDatabases_SkipsDotDirs(t *testing.T) {
 	townRoot := t.TempDir()
-	hiddenDolt := filepath.Join(townRoot, ".hidden-rig", ".beads", "dolt", "beads", ".dolt")
+	hiddenDolt := filepath.Join(townRoot, ".hidden-rig", ".beads", "dolt", "beads_hidden", ".dolt")
 	if err := os.MkdirAll(hiddenDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2072,7 +2131,7 @@ func TestFindBrokenWorkspaces_WithLocalData(t *testing.T) {
 	}
 
 	// Local Dolt data exists
-	localDolt := filepath.Join(beadsDir, "dolt", "beads", ".dolt")
+	localDolt := filepath.Join(beadsDir, "dolt", "beads_myrig", ".dolt")
 	if err := os.MkdirAll(localDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
