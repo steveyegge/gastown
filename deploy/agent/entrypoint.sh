@@ -164,8 +164,13 @@ printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferr
 
 COOP_RESUME_FLAG=""
 if [ "${SESSION_RESUME}" = "1" ]; then
-    LATEST_LOG=$(find "${CLAUDE_STATE}/projects" -name '*.jsonl' -type f 2>/dev/null \
-        | xargs ls -t 2>/dev/null | head -1)
+    # Find the most recent session log. Use -print0/sort to avoid issues
+    # when find returns no results (plain xargs runs ls with no args → bad).
+    LATEST_LOG=""
+    if [ -d "${CLAUDE_STATE}/projects" ]; then
+        LATEST_LOG=$(find "${CLAUDE_STATE}/projects" -name '*.jsonl' -type f -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -1 | cut -d' ' -f2-)
+    fi
 
     if [ -n "${LATEST_LOG}" ]; then
         COOP_RESUME_FLAG="--resume ${LATEST_LOG}"
@@ -185,12 +190,11 @@ echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
 
 if [ -n "${COOP_RESUME_FLAG}" ]; then
     echo "[entrypoint] Trying resume..."
-    ${COOP_CMD} ${COOP_RESUME_FLAG} -- claude --dangerously-skip-permissions
-    RC=$?
-    if [ $RC -ne 0 ]; then
-        echo "[entrypoint] Resume failed (exit $RC), starting fresh"
+    # Use || to prevent set -e from killing the script on resume failure
+    ${COOP_CMD} ${COOP_RESUME_FLAG} -- claude --dangerously-skip-permissions || {
+        echo "[entrypoint] Resume failed (exit $?), starting fresh"
         exec ${COOP_CMD} -- claude --dangerously-skip-permissions
-    fi
+    }
 else
     exec ${COOP_CMD} -- claude --dangerously-skip-permissions
 fi
