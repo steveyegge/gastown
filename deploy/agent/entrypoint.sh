@@ -411,8 +411,7 @@ while true; do
         echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT}) with resume"
         ${COOP_CMD} ${RESUME_FLAG} -- claude --dangerously-skip-permissions &
         COOP_PID=$!
-        wait "${COOP_PID}" 2>/dev/null
-        exit_code=$?
+        wait "${COOP_PID}" 2>/dev/null && exit_code=0 || exit_code=$?
         COOP_PID=""
 
         # If resume failed quickly, try fresh start instead.
@@ -422,16 +421,14 @@ while true; do
             ${COOP_CMD} -- claude --dangerously-skip-permissions &
             COOP_PID=$!
             start_time=$(date +%s)
-            wait "${COOP_PID}" 2>/dev/null
-            exit_code=$?
+            wait "${COOP_PID}" 2>/dev/null && exit_code=0 || exit_code=$?
             COOP_PID=""
         fi
     else
         echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
         ${COOP_CMD} -- claude --dangerously-skip-permissions &
         COOP_PID=$!
-        wait "${COOP_PID}" 2>/dev/null
-        exit_code=$?
+        wait "${COOP_PID}" 2>/dev/null && exit_code=0 || exit_code=$?
         COOP_PID=""
     fi
 
