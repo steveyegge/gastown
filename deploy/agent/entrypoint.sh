@@ -96,7 +96,9 @@ esac
 # This lets bd and gt commands talk to the remote daemon.
 
 if [ -n "${BD_DAEMON_HOST:-}" ] && [ ! -f "${WORKSPACE}/.beads/config.yaml" ]; then
-    DAEMON_URL="http://${BD_DAEMON_HOST}:${BD_DAEMON_PORT:-9080}"
+    # Use the HTTP port for daemon connection (bd CLI auto-detects HTTP URLs).
+    DAEMON_HTTP_PORT="${BD_DAEMON_HTTP_PORT:-9080}"
+    DAEMON_URL="http://${BD_DAEMON_HOST}:${DAEMON_HTTP_PORT}"
     echo "[entrypoint] Connecting to daemon at ${DAEMON_URL}"
     # gt connect needs to be in the workspace dir
     cd "${WORKSPACE}"

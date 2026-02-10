@@ -244,6 +244,7 @@ func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string) podm
 		Env: map[string]string{
 			"BD_DAEMON_HOST":          cfg.DaemonHost,
 			"BD_DAEMON_PORT":          fmt.Sprintf("%d", cfg.DaemonPort),
+			"BD_DAEMON_HTTP_PORT":     fmt.Sprintf("%d", cfg.DaemonHTTPPort),
 			"BEADS_AUTO_START_DAEMON": "false",
 			"BEADS_DOLT_SERVER_MODE":  "1",
 		},
@@ -291,6 +292,7 @@ func buildAgentPodSpec(cfg *config.Config, event beadswatcher.Event) podmanager.
 		Env: map[string]string{
 			"BD_DAEMON_HOST":          metadataOr(event, "daemon_host", cfg.DaemonHost),
 			"BD_DAEMON_PORT":          metadataOr(event, "daemon_port", fmt.Sprintf("%d", cfg.DaemonPort)),
+			"BD_DAEMON_HTTP_PORT":     metadataOr(event, "daemon_http_port", fmt.Sprintf("%d", cfg.DaemonHTTPPort)),
 			"BEADS_AUTO_START_DAEMON": "false",
 			"BEADS_DOLT_SERVER_MODE":  "1",
 		},
