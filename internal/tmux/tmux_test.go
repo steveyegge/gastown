@@ -1475,3 +1475,80 @@ func TestFindAgentPane_MultiPaneNoAgent(t *testing.T) {
 		t.Errorf("FindAgentPane with no agent = %q, want empty", paneID)
 	}
 }
+
+func TestNewSessionWithCommandAndEnv(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	env := map[string]string{
+		"GT_ROLE": "testrig/crew/testname",
+		"GT_RIG":  "testrig",
+		"GT_CREW": "testname",
+	}
+
+	// Create session with env vars and a command that prints GT_ROLE
+	cmd := `bash -c "echo GT_ROLE=$GT_ROLE; sleep 5"`
+	if err := tm.NewSessionWithCommandAndEnv(sessionName, "", cmd, env); err != nil {
+		t.Fatalf("NewSessionWithCommandAndEnv: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Fatal("expected session to exist after creation")
+	}
+
+	// Verify the env vars are set in the session environment
+	gotRole, err := tm.GetEnvironment(sessionName, "GT_ROLE")
+	if err != nil {
+		t.Fatalf("GetEnvironment GT_ROLE: %v", err)
+	}
+	if gotRole != "testrig/crew/testname" {
+		t.Errorf("GT_ROLE = %q, want %q", gotRole, "testrig/crew/testname")
+	}
+
+	gotRig, err := tm.GetEnvironment(sessionName, "GT_RIG")
+	if err != nil {
+		t.Fatalf("GetEnvironment GT_RIG: %v", err)
+	}
+	if gotRig != "testrig" {
+		t.Errorf("GT_RIG = %q, want %q", gotRig, "testrig")
+	}
+}
+
+func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-empty-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Empty env should work like NewSessionWithCommand
+	if err := tm.NewSessionWithCommandAndEnv(sessionName, "", "sleep 5", nil); err != nil {
+		t.Fatalf("NewSessionWithCommandAndEnv with nil env: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Fatal("expected session to exist after creation with empty env")
+	}
+}
