@@ -135,8 +135,8 @@ func (c *WispGCCheck) Fix(ctx *CheckContext) error {
 	for rigName := range c.abandonedRigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 
-		// Run bd --no-daemon mol wisp gc
-		cmd := exec.Command("bd", "--no-daemon", "mol", "wisp", "gc")
+		// Run bd mol wisp gc
+		cmd := exec.Command("bd", "mol", "wisp", "gc")
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			lastErr = fmt.Errorf("%s: %v (%s)", rigName, err, string(output))

@@ -161,7 +161,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 
 		// Hook the bead (or wisp compound if formula was applied)
-		hookCmd := exec.Command("bd", "--no-daemon", "update", beadToHook, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd := exec.Command("bd", "update", beadToHook, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {
