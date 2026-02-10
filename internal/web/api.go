@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -488,6 +489,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Rigs = parseRigListOutput(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: rig list: %v", err)
 		}
 	}()
 
@@ -498,6 +501,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Polecats = parseJSONPaths(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: polecat list: %v", err)
 		}
 	}()
 
@@ -508,6 +513,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Convoys = parseConvoyListOutput(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: convoy list: %v", err)
 		}
 	}()
 
@@ -518,6 +525,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Hooks = parseHooksListOutput(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: hooks list: %v", err)
 		}
 	}()
 
@@ -528,6 +537,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Messages = parseMailInboxOutput(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: mail inbox: %v", err)
 		}
 	}()
 
@@ -538,6 +549,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Crew = parseCrewListOutput(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: crew list: %v", err)
 		}
 	}()
 
@@ -548,6 +561,8 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			resp.Agents = parseAgentsFromStatus(output)
 			mu.Unlock()
+		} else {
+			log.Printf("warning: handleOptions: status: %v", err)
 		}
 	}()
 

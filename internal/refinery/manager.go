@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -463,7 +464,9 @@ Please review the feedback and address the issues before resubmitting.`,
 			mr.Branch, mr.IssueID, reason),
 		Priority: mail.PriorityNormal,
 	}
-	_ = router.Send(msg) // best-effort notification
+	if err := router.Send(msg); err != nil {
+		log.Printf("warning: notifying worker of rejection for %s: %v", mr.IssueID, err)
+	}
 }
 
 // findTownRoot walks up directories to find the town root.

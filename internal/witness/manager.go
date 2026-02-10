@@ -3,6 +3,7 @@ package witness
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,10 +179,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 
 	// Accept bypass permissions warning dialog if it appears.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
+	if err := t.AcceptBypassPermissionsWarning(sessionID); err != nil {
+		log.Printf("warning: accepting bypass permissions for %s: %v", sessionID, err)
+	}
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
-	_ = session.TrackSessionPID(townRoot, sessionID, t)
+	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
+		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
+	}
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

@@ -320,6 +320,7 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 
 	stdout, err := runCmd(f.cmdTimeout, "bd", args...)
 	if err != nil {
+		log.Printf("warning: bd show failed for %d issues: %v", len(issueIDs), err)
 		return result
 	}
 
@@ -331,6 +332,7 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 		UpdatedAt string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		log.Printf("warning: parsing bd show output: %v", err)
 		return result
 	}
 
@@ -817,7 +819,8 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 	// Query all in_progress issues (these are the ones being worked on)
 	stdout, err := f.runBdCmd(f.townRoot, "list", "--status=in_progress", "--json")
 	if err != nil {
-		return result // Return empty map on error
+		log.Printf("warning: bd list in_progress failed: %v", err)
+		return result
 	}
 
 	var issues []struct {
@@ -826,6 +829,7 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 		Assignee string `json:"assignee"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		log.Printf("warning: parsing bd list output: %v", err)
 		return result
 	}
 
