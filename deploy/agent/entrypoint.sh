@@ -29,6 +29,13 @@ echo "[entrypoint] Starting ${ROLE} agent: ${AGENT} (rig: ${RIG:-none})"
 
 # ── Workspace setup ──────────────────────────────────────────────────────
 
+# Set global git config FIRST so safe.directory is set before any repo ops.
+# The workspace volume mount is owned by root (EmptyDir/PVC) but we run as
+# UID 1000 — git's dubious-ownership check would block all operations without this.
+git config --global user.name "${GIT_AUTHOR_NAME:-${ROLE}}"
+git config --global user.email "${ROLE}@gastown.local"
+git config --global --add safe.directory '*'
+
 # Initialize git repo in workspace if not already present.
 # Persistent roles (mayor, crew, etc.) keep state across restarts via PVC.
 if [ ! -d "${WORKSPACE}/.git" ]; then
@@ -41,11 +48,6 @@ else
     echo "[entrypoint] Git repo already exists in ${WORKSPACE}"
     cd "${WORKSPACE}"
 fi
-
-# Set global git config so commands using -C or running from other dirs work.
-git config --global user.name "${GIT_AUTHOR_NAME:-${ROLE}}"
-git config --global user.email "${ROLE}@gastown.local"
-git config --global --add safe.directory "${WORKSPACE}"
 
 # ── Gas Town workspace structure ───────────────────────────────────────
 #
