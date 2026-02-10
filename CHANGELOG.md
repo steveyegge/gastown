@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Bump coop v0.4.0 → v0.5.0** in agent Dockerfile (session switch, usage tracking)
+- **Fix agent state check** in entrypoint: `waiting_for_input` → `idle` (coop v0.5.0 rename)
+
 ## [0.3.0] - 2026-02-10
 
 ### Added

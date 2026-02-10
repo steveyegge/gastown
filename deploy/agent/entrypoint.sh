@@ -414,7 +414,7 @@ auto_bypass_startup() {
         fi
         # If agent is past setup prompts, we're done
         agent_state=$(echo "${state}" | jq -r '.state // empty' 2>/dev/null)
-        if [ "${agent_state}" = "waiting_for_input" ] || [ "${agent_state}" = "working" ]; then
+        if [ "${agent_state}" = "idle" ] || [ "${agent_state}" = "working" ]; then
             return 0
         fi
     done
