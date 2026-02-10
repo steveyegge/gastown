@@ -195,6 +195,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
+	d.Register(doctor.NewDoltHooksCheck())
 
 	// Hooks sync check
 	d.Register(doctor.NewHooksSyncCheck())
