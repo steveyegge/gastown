@@ -285,11 +285,26 @@ if [ "${SESSION_RESUME}" = "1" ]; then
     fi
 fi
 
+# ── Clean up stale coop state ─────────────────────────────────────────────
+#
+# Coop creates FIFO pipes (hook.pipe) in session directories under
+# XDG_STATE_HOME/coop/sessions/<id>/. If the pod crashes or is killed,
+# the Drop handler never runs and the pipe persists on the PVC.
+# mkfifo() fails with EEXIST on restart, so we clean up before starting.
+
+if [ -d "${COOP_STATE}/sessions" ]; then
+    echo "[entrypoint] Cleaning up stale coop session artifacts"
+    find "${COOP_STATE}/sessions" -name 'hook.pipe' -delete 2>/dev/null || true
+fi
+
 # ── Start coop + Claude ──────────────────────────────────────────────────
 
 cd "${WORKSPACE}"
 
 COOP_CMD="coop --agent=claude --port 8080 --health-port 9090 --cols 200 --rows 50"
+
+# Enable debug logging for coop to diagnose startup issues.
+export COOP_LOG_LEVEL="${COOP_LOG_LEVEL:-debug}"
 
 echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
 
