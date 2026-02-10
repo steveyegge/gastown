@@ -211,7 +211,7 @@ func refreshIssueStatus(ctx context.Context, tracked []struct {
 		return nil
 	}
 
-	args := []string{"--no-daemon", "show"}
+	args := []string{"show"}
 	for _, t := range tracked {
 		args = append(args, t.ID)
 	}

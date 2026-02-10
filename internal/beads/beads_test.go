@@ -154,7 +154,7 @@ func TestIntegration(t *testing.T) {
 	// consistent data and prevents flaky test failures.
 	// We use --allow-stale to handle cases where the daemon is actively writing and
 	// the staleness check would otherwise fail spuriously.
-	syncCmd := exec.Command("bd", "--no-daemon", "--allow-stale", "sync", "--import-only")
+	syncCmd := exec.Command("bd", "--allow-stale", "sync", "--import-only")
 	syncCmd.Dir = dir
 	if err := syncCmd.Run(); err != nil {
 		// If sync fails (e.g., no database exists), just log and continue

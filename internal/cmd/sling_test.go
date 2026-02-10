@@ -145,9 +145,6 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$(pwd)|$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -182,10 +179,6 @@ setlocal enableextensions
 echo %CD%^|%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
   exit /b 0
@@ -337,9 +330,6 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "ARGS:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -374,10 +364,6 @@ setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -475,7 +461,7 @@ exit /b 0
 }
 
 // TestVerifyBeadExistsAllowStale reproduces the bug in gtl-ncq where beads
-// visible via regular bd show fail with --no-daemon due to database sync issues.
+// visible via regular bd show may fail due to database sync issues.
 // The fix uses --allow-stale to skip the sync check for existence verification.
 func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	townRoot := t.TempDir()
@@ -486,8 +472,8 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	}
 
 	// Create a stub bd that simulates the sync issue:
-	// - --no-daemon without --allow-stale fails (database out of sync)
-	// - --no-daemon with --allow-stale succeeds (skips sync check)
+	// - without --allow-stale fails (database out of sync)
+	// - with --allow-stale succeeds (skips sync check)
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
@@ -501,17 +487,6 @@ for arg in "$@"; do
   fi
 done
 
-if [ "$1" = "--no-daemon" ]; then
-  if [ "$allow_stale" = "true" ]; then
-    # --allow-stale skips sync check, succeeds
-    echo '[{"title":"Test bead","status":"open","assignee":""}]'
-    exit 0
-  else
-    # Without --allow-stale, fails with sync error
-    echo '{"error":"Database out of sync with JSONL."}'
-    exit 1
-  fi
-fi
 # Daemon mode works
 echo '[{"title":"Test bead","status":"open","assignee":""}]'
 exit 0
@@ -521,14 +496,6 @@ setlocal enableextensions
 set "allow=false"
 for %%A in (%*) do (
   if "%%~A"=="--allow-stale" set "allow=true"
-)
-if "%1"=="--no-daemon" (
-  if "%allow%"=="true" (
-    echo [{"title":"Test bead","status":"open","assignee":""}]
-    exit /b 0
-  )
-  echo {"error":"Database out of sync with JSONL."}
-  exit /b 1
 )
 echo [{"title":"Test bead","status":"open","assignee":""}]
 exit /b 0
@@ -546,7 +513,7 @@ exit /b 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	// EXPECTED: verifyBeadExists should use --no-daemon --allow-stale and succeed
+	// EXPECTED: verifyBeadExists should use --allow-stale and succeed
 	beadID := "jv-v599"
 	err = verifyBeadExists(beadID)
 	if err != nil {
@@ -578,19 +545,6 @@ for arg in "$@"; do
   fi
 done
 
-if [ "$1" = "--no-daemon" ]; then
-  shift
-  cmd="$1"
-  if [ "$cmd" = "show" ]; then
-    if [ "$allow_stale" = "true" ]; then
-      echo '[{"title":"Synced bead","status":"open","assignee":""}]'
-      exit 0
-    fi
-    echo '{"error":"Database out of sync"}'
-    exit 1
-  fi
-  exit 0
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -608,19 +562,6 @@ setlocal enableextensions
 set "allow=false"
 for %%A in (%*) do (
   if "%%~A"=="--allow-stale" set "allow=true"
-)
-set "cmd=%1"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  if "%cmd%"=="show" (
-    if "%allow%"=="true" (
-      echo [{"title":"Synced bead","status":"open","assignee":""}]
-      exit /b 0
-    )
-    echo {"error":"Database out of sync"}
-    exit /b 1
-  )
-  exit /b 0
 )
 set "cmd=%1"
 if "%cmd%"=="show" (
@@ -662,13 +603,13 @@ exit /b 0
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	// EXPECTED: gt sling should use daemon mode and succeed
-	// ACTUAL: verifyBeadExists uses --no-daemon and fails with sync error
+	// ACTUAL: verifyBeadExists fails with sync error without --allow-stale
 	beadID := "jv-v599"
 	err = runSling(nil, []string{beadID})
 	if err != nil {
 		// Check if it's the specific error we're testing for
 		if strings.Contains(err.Error(), "is not a valid bead or formula") {
-			t.Errorf("gt sling failed to recognize bead %q: %v\nExpected to use daemon mode, but used --no-daemon which fails when DB out of sync", beadID, err)
+			t.Errorf("gt sling failed to recognize bead %q: %v\nExpected to use --allow-stale, but failed when DB out of sync", beadID, err)
 		} else {
 			// Some other error - might be expected in dry-run mode
 			t.Logf("gt sling returned error (may be expected in test): %v", err)
@@ -771,9 +712,6 @@ func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$PWD|$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -811,10 +749,6 @@ setlocal enableextensions
 echo %CD%^|%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -951,9 +885,6 @@ func TestSlingNoMergeFlag(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "ARGS:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -970,7 +901,6 @@ exit 0
 setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
-if "%cmd%"=="--no-daemon" set "cmd=%2"
 if not "%cmd%"=="show" goto :notshow
 echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
 exit /b 0
@@ -1145,9 +1075,6 @@ func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "ENV:BD_DOLT_AUTO_COMMIT=${BD_DOLT_AUTO_COMMIT}|$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -1164,7 +1091,6 @@ exit 0
 setlocal enableextensions
 echo ENV:BD_DOLT_AUTO_COMMIT=%BD_DOLT_AUTO_COMMIT%^|%*>>"%BD_LOG%"
 set "cmd=%1"
-if "%cmd%"=="--no-daemon" set "cmd=%2"
 if not "%cmd%"=="show" goto :notshow
 echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
 exit /b 0

@@ -60,7 +60,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		}
 
 		// Create an issue and verify routes.jsonl is still valid
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create", "--type", "task", "--title", "test issue")
+		cmd = exec.Command("bd", "-q", "create", "--type", "task", "--title", "test issue")
 		cmd.Dir = townRoot
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd create failed: %v\nOutput: %s", err, output)
@@ -129,7 +129,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		os.MkdirAll(beadsDir, 0755)
 
 		// Initialize beads
-		cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
+		cmd := exec.Command("bd", "init", "--prefix", "test", "--quiet")
 		cmd.Dir = tmpDir
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
@@ -147,7 +147,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		}
 
 		// Create an issue - this triggers auto-export
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create", "--type", "task", "--title", "bug reproduction")
+		cmd = exec.Command("bd", "-q", "create", "--type", "task", "--title", "bug reproduction")
 		cmd.Dir = tmpDir
 		cmd.CombinedOutput() // Ignore error - we're testing the corruption
 

@@ -54,9 +54,6 @@ func TestSlingFormulaOnBeadHooksBaseBead(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 if [ "$1" = "--allow-stale" ]; then
   shift
 fi
@@ -97,10 +94,6 @@ setlocal enableextensions
 echo %*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="--allow-stale" (
   set "cmd=%2"
   set "sub=%3"
@@ -255,9 +248,6 @@ func TestSlingFormulaOnBeadSetsAttachedMoleculeInBaseBead(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 if [ "$1" = "--allow-stale" ]; then
   shift
 fi
@@ -298,10 +288,6 @@ setlocal enableextensions
 echo %*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="--allow-stale" (
   set "cmd=%2"
   set "sub=%3"
@@ -452,8 +438,8 @@ func TestDoneClosesAttachedMolecule(t *testing.T) {
 	// - Wisp gt-wisp-xyz (the attached molecule)
 	bdScript := fmt.Sprintf(`#!/bin/sh
 echo "$*" >> "%s/bd.log"
-# Strip --no-daemon and --allow-stale
-while [ "$1" = "--no-daemon" ] || [ "$1" = "--allow-stale" ]; do
+# Strip --allow-stale
+while [ "$1" = "--allow-stale" ]; do
   shift
 done
 cmd="$1"
@@ -492,12 +478,6 @@ echo %%*>>"%s\bd.log"
 set "cmd=%%1"
 set "beadID=%%2"
 :strip_flags
-if "%%cmd%%"=="--no-daemon" (
-  set "cmd=%%2"
-  set "beadID=%%3"
-  shift
-  goto strip_flags
-)
 if "%%cmd%%"=="--allow-stale" (
   set "cmd=%%2"
   set "beadID=%%3"

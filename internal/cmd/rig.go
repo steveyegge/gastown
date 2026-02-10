@@ -698,7 +698,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			workDir := filepath.Dir(beadsDir) // directory containing .beads/
 			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
 			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
-			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix, "--backend", "dolt", "--server")
+			initCmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
 			initCmd.Dir = workDir
 			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
 				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))

@@ -43,9 +43,6 @@ func TestInstantiateFormulaOnBead(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -79,10 +76,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"Fix bug ABC^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -180,7 +173,6 @@ func TestInstantiateFormulaOnBeadSkipCook(t *testing.T) {
 	logPath := filepath.Join(townRoot, "bd.log")
 	bdScript := `#!/bin/sh
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then shift; fi
 cmd="$1"; shift || true
 case "$cmd" in
   mol)
@@ -197,10 +189,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
     echo {^"new_epic_id^":^"gt-wisp-skip^"}
@@ -376,7 +364,6 @@ func TestFormulaOnBeadPassesVariables(t *testing.T) {
 	logPath := filepath.Join(townRoot, "bd.log")
 	bdScript := `#!/bin/sh
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then shift; fi
 cmd="$1"; shift || true
 case "$cmd" in
   cook) exit 0;;
@@ -394,10 +381,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (

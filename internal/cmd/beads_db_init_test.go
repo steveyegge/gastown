@@ -79,7 +79,7 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 	}
 
 	// Run bd init
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = path
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
@@ -87,7 +87,7 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 
 	// Create issues
 	for i := 1; i <= numIssues; i++ {
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create",
+		cmd = exec.Command("bd", "-q", "create",
 			"--type", "task", "--title", fmt.Sprintf("Test issue %d", i))
 		cmd.Dir = path
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -163,7 +163,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 
 		// NOW TRY TO USE bd - this is the key test for the bug
 		// Without the fix, the database doesn't exist and bd operations fail
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = exec.Command("bd", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-rig")
 		cmd.Dir = rigDir
 		output, err := cmd.CombinedOutput()
@@ -219,7 +219,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 
 		// Verify bd operations work with the configured prefix
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = exec.Command("bd", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-empty-repo")
 		cmd.Dir = rigDir
 		output, err := cmd.CombinedOutput()
@@ -307,7 +307,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 
 		// Verify bd operations work - the key test is that the database was initialized
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = exec.Command("bd", "--json", "-q", "create",
 			"--type", "task", "--title", "test-derived-prefix")
 		cmd.Dir = rigDir
 		output, err = cmd.CombinedOutput()
@@ -380,7 +380,7 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 	}
 
 	// Run bd init (creates database but no issues)
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = path
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
