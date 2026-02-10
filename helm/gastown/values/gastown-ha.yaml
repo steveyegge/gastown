@@ -109,6 +109,52 @@ dolt:
     failureThreshold: 3
   terminationGracePeriodSeconds: 60
 
+# Redis (needed by daemon for wisp store)
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  image:
+    registry: public.ecr.aws
+    repository: bitnami/redis
+    tag: "7.4.2"
+  master:
+    persistence:
+      enabled: false
+
+# Standalone NATS — event bus for daemon, slack-bot, and agent pods
+nats:
+  enabled: true
+  auth:
+    enabled: true
+    token: ""  # Set via --set nats.auth.token=<daemon-token> at deploy time
+  jetstream:
+    enabled: true
+    maxMemory: 256M
+  replicaCount: 1
+  resourceType: statefulset
+  persistence:
+    enabled: true
+    storageClass: gp2
+    size: 2Gi
+  image:
+    registry: public.ecr.aws
+    repository: bitnami/nats
+    tag: "2.10.24"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Allow ECR images (bitnami subchart blocks non-Docker Hub by default)
+global:
+  security:
+    allowInsecureImages: true
+
 # External Secrets
 externalSecrets:
   enabled: true

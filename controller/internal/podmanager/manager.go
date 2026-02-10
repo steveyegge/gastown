@@ -54,8 +54,8 @@ const (
 	AgentGID      = int64(1000)
 
 	// Init container constants.
-	InitCloneName    = "init-clone"
-	InitCloneImage   = "alpine/git:latest"
+	InitCloneName  = "init-clone"
+	InitCloneImage = "public.ecr.aws/docker/library/alpine:3.20"
 	GitDaemonPort    = 9418
 
 	// Coop sidecar constants.
@@ -820,6 +820,7 @@ func (m *K8sManager) buildInitCloneContainer(spec AgentPodSpec) *corev1.Containe
 
 	// Clone from git mirror into workspace/{rig}/work/, set origin to real URL.
 	script := fmt.Sprintf(`set -e
+apk add --no-cache git
 WORK_DIR="%s/%s/work"
 if [ -d "$WORK_DIR/.git" ]; then
   echo "Repo already cloned, fetching updates..."
@@ -846,11 +847,21 @@ fi
 git config user.email "%s@gastown"
 `, spec.AgentName, spec.AgentName)
 
+	// Run init container as root so apk can install git, then chown
+	// the workspace to the agent UID/GID so the main container can write.
+	script += fmt.Sprintf("chown -R %d:%d \"%s/%s\"\n", AgentUID, AgentGID, MountWorkspace, spec.Rig)
+
+	runAsRoot := int64(0)
+	runAsNonRoot := false
 	return &corev1.Container{
 		Name:            InitCloneName,
 		Image:           InitCloneImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/sh", "-c", script},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:    &runAsRoot,
+			RunAsNonRoot: &runAsNonRoot,
+		},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: VolumeWorkspace, MountPath: MountWorkspace},
 		},
