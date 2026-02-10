@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -130,6 +131,37 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 		args = append(args, "-c", workDir)
 	}
 	// Add the command as the last argument - tmux runs it as the pane's initial process
+	args = append(args, command)
+	_, err := t.run(args...)
+	return err
+}
+
+// NewSessionWithCommandAndEnv creates a new detached tmux session with environment
+// variables set via -e flags. This ensures the initial shell process inherits the
+// correct environment from the session, rather than inheriting from the tmux server
+// or parent process. The -e flags set session-level environment before the shell
+// starts, preventing stale env vars (e.g., GT_ROLE from a parent mayor session)
+// from leaking into crew/polecat shells.
+//
+// The command should still use 'exec env' for WaitForCommand detection compatibility,
+// but -e provides defense-in-depth for the initial shell environment.
+// Requires tmux >= 3.2.
+func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env map[string]string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add -e flags to set environment variables in the session before the shell starts.
+	// Keys are sorted for deterministic behavior.
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, env[k]))
+	}
+	// Add the command as the last argument
 	args = append(args, command)
 	_, err := t.run(args...)
 	return err

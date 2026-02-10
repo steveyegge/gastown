@@ -619,7 +619,24 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		Topic:     topic,
 	})
 
-	// Build startup command first
+	// Compute environment variables BEFORE creating the session.
+	// These are passed via tmux -e flags so the initial shell inherits the correct
+	// env from the start, preventing parent env (e.g., GT_ROLE=mayor) from leaking
+	// into crew sessions. See: https://github.com/steveyegge/gastown/issues/1289
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "crew",
+		Rig:              m.rig.Name,
+		AgentName:        name,
+		TownRoot:         townRoot,
+		RuntimeConfigDir: opts.ClaudeConfigDir,
+		BeadsNoDaemon:    true,
+	})
+	if opts.AgentOverride != "" {
+		envVars["GT_AGENT"] = opts.AgentOverride
+	}
+
+	// Build startup command (also includes env vars via 'exec env' for
+	// WaitForCommand detection — belt and suspenders with -e flags)
 	// SessionStart hook handles context loading (gt prime --hook)
 	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
 	if err != nil {
@@ -631,30 +648,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
+	// Create session with command and env vars via -e flags.
+	// The -e flags set session-level env BEFORE the shell starts, ensuring the
+	// initial shell inherits the correct GT_ROLE (not the parent's).
+	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
+	// See: https://github.com/steveyegge/gastown/issues/1289 (env inheritance fix)
+	if err := t.NewSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars); err != nil {
 		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "crew",
-		Rig:              m.rig.Name,
-		AgentName:        name,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.ClaudeConfigDir,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
-	// Persist agent override in tmux session env so handoff can read it back.
-	// The startup command sets GT_AGENT via exec env, but that only lives in the
-	// process tree. The tmux session env survives respawn-pane and is queryable.
-	if opts.AgentOverride != "" {
-		_ = t.SetEnvironment(sessionID, "GT_AGENT", opts.AgentOverride)
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
