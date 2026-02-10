@@ -375,20 +375,33 @@ export COOP_LOG_LEVEL="${COOP_LOG_LEVEL:-info}"
 # Coop v0.4.0 no longer auto-dismisses setup prompts (bypass, trust, etc).
 # This background function polls the coop /api/v1/agent endpoint and uses
 # the high-level /api/v1/agent/respond API to accept setup prompts.
+#
+# IMPORTANT: Coop's screen parser can false-positive on "bypass permissions"
+# text in the status bar after the agent is past setup. We only auto-respond
+# during the first ~20s of startup, and verify the screen actually shows the
+# bypass dialog (contains "No, exit" which is unique to the real prompt).
 auto_bypass_startup() {
-    for i in $(seq 1 30); do
+    for i in $(seq 1 10); do
         sleep 2
         state=$(curl -sf http://localhost:8080/api/v1/agent 2>/dev/null) || continue
         prompt_type=$(echo "${state}" | jq -r '.prompt.type // empty' 2>/dev/null)
         subtype=$(echo "${state}" | jq -r '.prompt.subtype // empty' 2>/dev/null)
         if [ "${prompt_type}" = "setup" ]; then
-            echo "[entrypoint] Auto-accepting setup prompt (subtype: ${subtype})"
-            # Option 2 = "Yes, I accept" for bypass; option 1 = "No, exit"
-            curl -sf -X POST http://localhost:8080/api/v1/agent/respond \
-                -H 'Content-Type: application/json' \
-                -d '{"option":2}' 2>&1 || true
-            # Keep looping — there may be multiple setup prompts in sequence
-            continue
+            # Verify this is a real setup prompt by checking the screen for
+            # the actual dialog text, not just the status bar mention.
+            screen=$(curl -sf http://localhost:8080/api/v1/screen 2>/dev/null)
+            if echo "${screen}" | jq -r '.lines[]' 2>/dev/null | grep -q "No, exit"; then
+                echo "[entrypoint] Auto-accepting setup prompt (subtype: ${subtype})"
+                # Option 2 = "Yes, I accept" for bypass; option 1 = "No, exit"
+                curl -sf -X POST http://localhost:8080/api/v1/agent/respond \
+                    -H 'Content-Type: application/json' \
+                    -d '{"option":2}' 2>&1 || true
+                # Keep looping — there may be multiple setup prompts in sequence
+                continue
+            else
+                echo "[entrypoint] Skipping false-positive setup prompt (screen lacks dialog)"
+                return 0
+            fi
         fi
         # If agent is past setup prompts, we're done
         agent_state=$(echo "${state}" | jq -r '.state // empty' 2>/dev/null)
@@ -396,7 +409,7 @@ auto_bypass_startup() {
             return 0
         fi
     done
-    echo "[entrypoint] WARNING: auto-bypass timed out after 60s"
+    echo "[entrypoint] WARNING: auto-bypass timed out after 20s"
 }
 
 # ── Monitor agent exit and shut down coop ──────────────────────────────
