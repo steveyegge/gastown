@@ -191,7 +191,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
-	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
+	_ = runtime.RunStartupBootstrap(t, sessionID, "refinery", initialPrompt, runtimeConfig)
 
 	return nil
 }

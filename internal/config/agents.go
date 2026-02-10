@@ -136,7 +136,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentCodex,
 		Command:             "codex",
 		Args:                []string{"--yolo"},
-		ProcessNames:        []string{"codex"}, // Codex CLI binary
+		ProcessNames:        []string{"codex", "node"}, // Codex can run as binary or node-backed
 		SessionIDEnv:        "", // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",

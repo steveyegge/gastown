@@ -114,6 +114,42 @@ func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.Runtime
 	return nil
 }
 
+// StartupBootstrapPlan describes startup actions needed after session launch.
+type StartupBootstrapPlan struct {
+	// SendPromptNudge means the startup prompt should be sent via nudge because
+	// the runtime doesn't support initial prompt args.
+	SendPromptNudge bool
+
+	// RunPrimeFallback means no hooks are available and startup fallback commands
+	// (gt prime, and mail injection for autonomous roles) must be nudged.
+	RunPrimeFallback bool
+}
+
+// GetStartupBootstrapPlan computes capability-based startup bootstrap actions.
+func GetStartupBootstrapPlan(role string, rc *config.RuntimeConfig) *StartupBootstrapPlan {
+	info := GetStartupFallbackInfo(rc)
+	return &StartupBootstrapPlan{
+		SendPromptNudge: info.SendBeaconNudge,
+		RunPrimeFallback: len(StartupFallbackCommands(role, rc)) > 0,
+	}
+}
+
+// RunStartupBootstrap executes the canonical startup bootstrap path.
+// It handles prompt delivery fallback for no-prompt runtimes and non-hook
+// gt prime fallback commands.
+func RunStartupBootstrap(t *tmux.Tmux, sessionID, role, startupPrompt string, rc *config.RuntimeConfig) error {
+	plan := GetStartupBootstrapPlan(role, rc)
+	if plan.SendPromptNudge && startupPrompt != "" {
+		if err := t.NudgeSession(sessionID, startupPrompt); err != nil {
+			return err
+		}
+	}
+	if plan.RunPrimeFallback {
+		return RunStartupFallback(t, sessionID, role, rc)
+	}
+	return nil
+}
+
 // isAutonomousRole returns true if the given role should automatically
 // inject mail check on startup. Autonomous roles (polecat, witness,
 // refinery, deacon, boot) operate without human prompting and need mail injection

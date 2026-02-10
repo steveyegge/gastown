@@ -140,7 +140,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
+	command, initialPrompt, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
 	if err != nil {
 		return err
 	}
@@ -188,6 +188,13 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		log.Printf("warning: accepting bypass permissions for %s: %v", sessionID, err)
 	}
 
+	// Run startup bootstrap only when runtime capabilities require fallback nudges.
+	plan := runtime.GetStartupBootstrapPlan("witness", runtimeConfig)
+	if plan.SendPromptNudge || plan.RunPrimeFallback {
+		runtime.SleepForReadyDelay(runtimeConfig)
+		_ = runtime.RunStartupBootstrap(t, sessionID, "witness", initialPrompt, runtimeConfig)
+	}
+
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
 		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
@@ -228,12 +235,12 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	return expanded
 }
 
-func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
+func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, string, error) {
 	if agentOverride != "" {
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
+		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), "", nil
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: fmt.Sprintf("%s/witness", rigName),
@@ -242,9 +249,9 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 	}, "Run `gt prime --hook` and begin patrol.")
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
-		return "", fmt.Errorf("building startup command: %w", err)
+		return "", "", fmt.Errorf("building startup command: %w", err)
 	}
-	return command, nil
+	return command, initialPrompt, nil
 }
 
 // Stop stops the witness.

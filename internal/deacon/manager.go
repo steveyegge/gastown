@@ -159,6 +159,15 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
+	// Run unified startup bootstrap fallback for no-hook/no-prompt runtimes.
+	if realTmux, ok := t.(*tmux.Tmux); ok {
+		plan := runtime.GetStartupBootstrapPlan("deacon", runtimeConfig)
+		if plan.SendPromptNudge || plan.RunPrimeFallback {
+			runtime.SleepForReadyDelay(runtimeConfig)
+			_ = runtime.RunStartupBootstrap(realTmux, sessionID, "deacon", initialPrompt, runtimeConfig)
+		}
+	}
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	return nil

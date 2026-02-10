@@ -1520,10 +1520,11 @@ func TestExpectedPaneCommands(t *testing.T) {
 		}
 	})
 
-	t.Run("codex maps to executable", func(t *testing.T) {
+	t.Run("codex maps to codex and node", func(t *testing.T) {
 		got := ExpectedPaneCommands(&RuntimeConfig{Command: "codex"})
-		if len(got) != 1 || got[0] != "codex" {
-			t.Fatalf("ExpectedPaneCommands(codex) = %v, want %v", got, []string{"codex"})
+		want := []string{"codex", "node"}
+		if len(got) != 2 || got[0] != "codex" || got[1] != "node" {
+			t.Fatalf("ExpectedPaneCommands(codex) = %v, want %v", got, want)
 		}
 	})
 }

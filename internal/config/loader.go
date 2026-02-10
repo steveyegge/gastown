@@ -1871,13 +1871,17 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
 // Claude can report as "node" (older versions) or "claude" (newer versions).
+// Codex can report as "codex" or "node" depending on launcher/environment.
 // Other runtimes typically report their executable name.
 func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
-	if filepath.Base(rc.Command) == "claude" {
+	switch filepath.Base(rc.Command) {
+	case "claude":
 		return []string{"node", "claude"}
+	case "codex":
+		return []string{"codex", "node"}
 	}
 	return []string{filepath.Base(rc.Command)}
 }

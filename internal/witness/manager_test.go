@@ -12,7 +12,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 		StartCommand: "exec run --town {town} --rig {rig} --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", roleConfig)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", roleConfig)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -21,10 +21,13 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 	if got != want {
 		t.Errorf("buildWitnessStartCommand = %q, want %q", got, want)
 	}
+	if prompt != "" {
+		t.Errorf("prompt = %q, want empty for role-config start command", prompt)
+	}
 }
 
 func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", nil)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", nil)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -35,6 +38,9 @@ func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
 	if !strings.Contains(got, "BD_ACTOR=gastown/witness") {
 		t.Errorf("expected BD_ACTOR=gastown/witness in command, got %q", got)
 	}
+	if prompt == "" {
+		t.Error("expected non-empty startup prompt for runtime startup command")
+	}
 }
 
 func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
@@ -42,7 +48,7 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 		StartCommand: "exec run --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", roleConfig)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", roleConfig)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -51,5 +57,8 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 	}
 	if !strings.Contains(got, "GT_ROLE=gastown/witness") {
 		t.Errorf("expected GT_ROLE=gastown/witness in command, got %q", got)
+	}
+	if prompt == "" {
+		t.Error("expected non-empty startup prompt when using runtime startup command")
 	}
 }

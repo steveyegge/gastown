@@ -672,6 +672,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
+	// Run startup bootstrap only when runtime capabilities require fallback nudges.
+	plan := runtime.GetStartupBootstrapPlan("crew", runtimeConfig)
+	if plan.SendPromptNudge || plan.RunPrimeFallback {
+		runtime.SleepForReadyDelay(runtimeConfig)
+		_ = runtime.RunStartupBootstrap(t, sessionID, "crew", beacon, runtimeConfig)
+	}
+
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, t)
 

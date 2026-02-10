@@ -390,7 +390,7 @@ type RuntimeConfig struct {
 
 	// PromptMode controls how prompts are passed to the runtime.
 	// Supported values: "arg" (append prompt arg), "none" (ignore prompt).
-	// Default: "arg" for claude/generic, "none" for codex.
+	// Default: "arg" for claude/codex/generic, "none" for opencode.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
 	// Session config controls environment integration for runtime session IDs.
@@ -659,8 +659,6 @@ func defaultRuntimeArgs(provider string) []string {
 
 func defaultPromptMode(provider string) string {
 	switch provider {
-	case "codex":
-		return "none"
 	case "opencode":
 		return "none"
 	default:
@@ -720,6 +718,10 @@ func defaultHooksFile(provider string) string {
 func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
+	}
+	if provider == "codex" {
+		// Codex can appear directly as "codex" or node-backed in some environments.
+		return []string{"codex", "node"}
 	}
 	if provider == "opencode" {
 		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.

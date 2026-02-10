@@ -253,6 +253,74 @@ func TestStartupFallbackCommands_RoleCasing(t *testing.T) {
 	}
 }
 
+func TestGetStartupBootstrapPlan_HooksWithPrompt(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	plan := GetStartupBootstrapPlan("polecat", rc)
+	if plan.SendPromptNudge {
+		t.Error("Hooks+Prompt should not send prompt nudge")
+	}
+	if plan.RunPrimeFallback {
+		t.Error("Hooks+Prompt should not run prime fallback")
+	}
+}
+
+func TestGetStartupBootstrapPlan_NoHooksWithPrompt(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	plan := GetStartupBootstrapPlan("crew", rc)
+	if plan.SendPromptNudge {
+		t.Error("NoHooks+Prompt should not send prompt nudge")
+	}
+	if !plan.RunPrimeFallback {
+		t.Error("NoHooks+Prompt should run prime fallback")
+	}
+}
+
+func TestGetStartupBootstrapPlan_NoHooksNoPrompt(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	plan := GetStartupBootstrapPlan("deacon", rc)
+	if !plan.SendPromptNudge {
+		t.Error("NoHooks+NoPrompt should send prompt nudge")
+	}
+	if !plan.RunPrimeFallback {
+		t.Error("NoHooks+NoPrompt should run prime fallback")
+	}
+}
+
+func TestGetStartupBootstrapPlan_HooksNoPrompt(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	plan := GetStartupBootstrapPlan("witness", rc)
+	if !plan.SendPromptNudge {
+		t.Error("Hooks+NoPrompt should send prompt nudge")
+	}
+	if plan.RunPrimeFallback {
+		t.Error("Hooks+NoPrompt should not run prime fallback")
+	}
+}
+
 func TestEnsureSettingsForRole_NilConfig(t *testing.T) {
 	// Should not panic with nil config
 	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", nil)

@@ -521,7 +521,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	deaconTownRoot, _ := workspace.FindFromCwdOrError()
 	runtimeCfg := config.ResolveRoleAgentConfig("deacon", deaconTownRoot, "")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
+	plan := runtime.GetStartupBootstrapPlan("deacon", runtimeCfg)
+	if plan.SendPromptNudge || plan.RunPrimeFallback {
+		runtime.SleepForReadyDelay(runtimeCfg)
+		_ = runtime.RunStartupBootstrap(t, sessionName, "deacon", initialPrompt, runtimeCfg)
+	}
 
 	return nil
 }
