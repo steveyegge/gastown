@@ -283,6 +283,131 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
+// BeadUpdater is the interface for updating bead notes via the daemon HTTP API.
+type BeadUpdater interface {
+	UpdateBeadNotes(ctx context.Context, beadID, notes string) error
+}
+
+// HTTPReporter reports backend metadata to beads via the daemon HTTP API.
+// Unlike BdReporter (which shells out to the bd CLI), this works in
+// distroless containers with no external binary dependencies.
+type HTTPReporter struct {
+	daemon    BeadUpdater
+	client    kubernetes.Interface
+	namespace string
+	logger    *slog.Logger
+
+	reportsTotal atomic.Int64
+	reportErrors atomic.Int64
+	syncRuns     atomic.Int64
+	syncErrors   atomic.Int64
+}
+
+// NewHTTPReporter creates a reporter that updates beads via daemon HTTP API.
+func NewHTTPReporter(daemon BeadUpdater, client kubernetes.Interface, namespace string, logger *slog.Logger) *HTTPReporter {
+	return &HTTPReporter{
+		daemon:    daemon,
+		client:    client,
+		namespace: namespace,
+		logger:    logger,
+	}
+}
+
+// ReportPodStatus logs the pod status. Agent state updates are deferred
+// to a future daemon RPC endpoint.
+func (r *HTTPReporter) ReportPodStatus(_ context.Context, agentName string, status PodStatus) error {
+	r.reportsTotal.Add(1)
+	r.logger.Info("pod status",
+		"agent", agentName, "pod", status.PodName,
+		"phase", status.Phase, "ready", status.Ready)
+	return nil
+}
+
+// ReportBackendMetadata writes backend connection info to the agent bead's
+// notes field via the daemon HTTP API.
+func (r *HTTPReporter) ReportBackendMetadata(ctx context.Context, agentName string, meta BackendMetadata) error {
+	r.reportsTotal.Add(1)
+
+	var lines []string
+	if meta.Backend != "" {
+		lines = append(lines, fmt.Sprintf("backend: %s", meta.Backend))
+	}
+	if meta.PodName != "" {
+		lines = append(lines, fmt.Sprintf("pod_name: %s", meta.PodName))
+	}
+	if meta.Namespace != "" {
+		lines = append(lines, fmt.Sprintf("pod_namespace: %s", meta.Namespace))
+	}
+	if meta.CoopURL != "" {
+		lines = append(lines, fmt.Sprintf("coop_url: %s", meta.CoopURL))
+	}
+	if meta.CoopToken != "" {
+		lines = append(lines, fmt.Sprintf("coop_token: %s", meta.CoopToken))
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+
+	notes := strings.Join(lines, "\n")
+	r.logger.Info("reporting backend metadata via HTTP",
+		"agent", agentName, "backend", meta.Backend, "coop_url", meta.CoopURL)
+
+	if err := r.daemon.UpdateBeadNotes(ctx, agentName, notes); err != nil {
+		r.reportErrors.Add(1)
+		r.logger.Warn("failed to report backend metadata",
+			"agent", agentName, "error", err)
+		return fmt.Errorf("reporting backend metadata for %s: %w", agentName, err)
+	}
+	return nil
+}
+
+// SyncAll reconciles all agent pod statuses with beads.
+func (r *HTTPReporter) SyncAll(ctx context.Context) error {
+	r.syncRuns.Add(1)
+
+	pods, err := r.client.CoreV1().Pods(r.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=gastown",
+	})
+	if err != nil {
+		r.syncErrors.Add(1)
+		return fmt.Errorf("listing agent pods: %w", err)
+	}
+
+	for _, pod := range pods.Items {
+		agentLabel := pod.Labels["gastown.io/agent"]
+		rigLabel := pod.Labels["gastown.io/rig"]
+		roleLabel := pod.Labels["gastown.io/role"]
+		if agentLabel == "" || rigLabel == "" || roleLabel == "" {
+			continue
+		}
+
+		agentBeadID := fmt.Sprintf("gt-%s-%s-%s", rigLabel, roleLabel, agentLabel)
+		status := PodStatus{
+			PodName:   pod.Name,
+			Namespace: pod.Namespace,
+			Phase:     string(pod.Status.Phase),
+			Ready:     isPodReady(&pod),
+			Message:   pod.Status.Message,
+		}
+
+		_ = r.ReportPodStatus(ctx, agentBeadID, status)
+	}
+
+	r.logger.Info("sync completed", "pods", len(pods.Items))
+	return nil
+}
+
+// Metrics returns a snapshot of current metric values.
+func (r *HTTPReporter) Metrics() MetricsSnapshot {
+	return MetricsSnapshot{
+		StatusReportsTotal: r.reportsTotal.Load(),
+		StatusReportErrors: r.reportErrors.Load(),
+		SyncAllRuns:        r.syncRuns.Load(),
+		SyncAllErrors:      r.syncErrors.Load(),
+	}
+}
+
 // StubReporter is a no-op implementation for testing.
 type StubReporter struct {
 	logger *slog.Logger

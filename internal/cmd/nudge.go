@@ -214,27 +214,29 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Try remote backend first (K8s-hosted agents via Coop or SSH).
+	// This works for any target format (rig/polecat, raw agent bead ID, etc.).
+	backend := terminal.ResolveBackend(target)
+	switch backend.(type) {
+	case *terminal.CoopBackend, *terminal.SSHBackend:
+		// Remote pod: session is always named "claude"
+		if err := backend.NudgeSession("claude", message); err != nil {
+			return fmt.Errorf("nudging remote session: %w", err)
+		}
+		fmt.Printf("%s Nudged %s (remote)\n", style.Bold.Render("✓"), target)
+		if townRoot != "" {
+			_ = LogNudge(townRoot, target, message)
+		}
+		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
+		return nil
+	}
+
 	// Check if target is rig/polecat format or raw session name
 	if strings.Contains(target, "/") {
 		// Parse rig/polecat format
 		rigName, polecatName, err := parseAddress(target)
 		if err != nil {
 			return err
-		}
-
-		// Try remote backend first (K8s-hosted agents).
-		backend := terminal.ResolveBackend(target)
-		if _, isSSH := backend.(*terminal.SSHBackend); isSSH {
-			// Remote pod: tmux session is always named "claude"
-			if err := backend.NudgeSession("claude", message); err != nil {
-				return fmt.Errorf("nudging remote session: %w", err)
-			}
-			fmt.Printf("%s Nudged %s/%s (remote)\n", style.Bold.Render("✓"), rigName, polecatName)
-			if townRoot != "" {
-				_ = LogNudge(townRoot, target, message)
-			}
-			_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
-			return nil
 		}
 
 		var sessionName string

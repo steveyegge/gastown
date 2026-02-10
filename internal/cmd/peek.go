@@ -61,6 +61,15 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
+	// Try remote backend first (K8s-hosted agents via Coop or SSH).
+	// This works for any target format (bead ID, rig/polecat, role shortcuts).
+	backend := terminal.ResolveBackend(address)
+	switch backend.(type) {
+	case *terminal.CoopBackend, *terminal.SSHBackend:
+		// Remote pod: session is always named "claude"
+		return peekViaBackend(backend, "claude", lines)
+	}
+
 	// Handle town-level agents (no rig prefix needed)
 	var sessionName string
 	switch address {
@@ -73,7 +82,7 @@ func runPeek(cmd *cobra.Command, args []string) error {
 	}
 
 	if sessionName != "" {
-		// Town-level agent - always local tmux
+		// Town-level agent - local tmux
 		return peekViaBackend(terminal.LocalBackend(), sessionName, lines)
 	}
 
@@ -81,14 +90,6 @@ func runPeek(cmd *cobra.Command, args []string) error {
 	rigName, polecatName, err := parseAddress(address)
 	if err != nil {
 		return err
-	}
-
-	// Try remote backend first (K8s-hosted agents).
-	// ResolveBackend checks agent bead metadata for backend=k8s.
-	backend := terminal.ResolveBackend(address)
-	if _, isSSH := backend.(*terminal.SSHBackend); isSSH {
-		// Remote pod: tmux session is always named "claude"
-		return peekViaBackend(backend, "claude", lines)
 	}
 
 	// Local agent: use SessionManager (resolves session names, validates state)

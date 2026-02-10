@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -42,12 +43,11 @@ func LocalBackend() Backend {
 // resolveCoopConfig checks agent bead metadata for Coop sidecar configuration.
 // Returns nil if the agent doesn't use Coop.
 func resolveCoopConfig(agentID string) (*coopResolvedConfig, error) {
-	cmd := exec.Command("bd", "show", agentID, "--json", "--field=backend,coop_url,coop_token") //nolint:gosec
-	output, err := cmd.Output()
+	notes, err := getAgentNotes(agentID)
 	if err != nil {
 		return nil, fmt.Errorf("agent bead lookup failed: %w", err)
 	}
-	return parseCoopConfig(string(output))
+	return parseCoopConfig(notes)
 }
 
 // coopResolvedConfig holds Coop connection info parsed from bead metadata.
@@ -92,25 +92,11 @@ func parseCoopConfig(output string) (*coopResolvedConfig, error) {
 //
 // Returns nil if the agent is local or metadata is unavailable.
 func resolveSSHConfig(agentID string) (*SSHConfig, error) {
-	// Query agent bead for backend metadata.
-	// Phase 4 will set fields like:
-	//   backend: k8s
-	//   pod_name: gt-gastown-toast-xxxxx
-	//   pod_namespace: gastown
-	//   ssh_host: gt@gt-gastown-toast-xxxxx.gastown.svc.cluster.local
-	//   ssh_port: 22
-	//
-	// For now, we also support environment variable override for testing:
-	//   GT_SSH_HOST=gt@localhost GT_SSH_PORT=2222 gt peek gastown/toast
-
-	// Try bd show --json to get agent bead metadata
-	cmd := exec.Command("bd", "show", agentID, "--json", "--field=backend,ssh_host,ssh_port,ssh_key") //nolint:gosec
-	output, err := cmd.Output()
+	notes, err := getAgentNotes(agentID)
 	if err != nil {
 		return nil, fmt.Errorf("agent bead lookup failed: %w", err)
 	}
-
-	return parseSSHConfig(string(output))
+	return parseSSHConfig(notes)
 }
 
 // parseSSHConfig parses SSH connection config from bd show output.
@@ -147,6 +133,29 @@ func parseSSHConfig(output string) (*SSHConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// getAgentNotes fetches the notes field from an agent bead via bd show --json.
+// Backend metadata (backend, coop_url, ssh_host, etc.) is stored in the notes
+// field as key: value pairs, one per line.
+func getAgentNotes(agentID string) (string, error) {
+	cmd := exec.Command("bd", "show", agentID, "--json") //nolint:gosec
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("bd show failed: %w", err)
+	}
+
+	// bd show --json returns an array of issues
+	var issues []struct {
+		Notes string `json:"notes"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return "", fmt.Errorf("failed to parse bd show output: %w", err)
+	}
+	if len(issues) == 0 {
+		return "", fmt.Errorf("agent bead %q not found", agentID)
+	}
+	return issues[0].Notes, nil
 }
 
 // parsePort parses a port string to int, defaulting to 22.

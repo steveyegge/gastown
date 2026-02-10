@@ -52,15 +52,13 @@ func main() {
 		DaemonPort:    fmt.Sprintf("%d", cfg.DaemonPort),
 	}, logger)
 	pods := podmanager.New(k8sClient, logger)
-	// TODO: Replace StubReporter with RPC-based reporter that talks to daemon
-	// directly (no bd binary needed in distroless container).
-	status := statusreporter.NewStubReporter(logger)
 
-	// Daemon client + reconciler for level-triggered correctness.
+	// Daemon client for HTTP API access (used by reconciler and status reporter).
 	daemon := daemonclient.New(daemonclient.Config{
 		BaseURL: fmt.Sprintf("http://%s:%d", cfg.DaemonHost, cfg.DaemonHTTPPort),
 		Token:   cfg.DaemonToken,
 	})
+	status := statusreporter.NewHTTPReporter(daemon, k8sClient, cfg.Namespace, logger)
 	rec := reconciler.New(daemon, pods, cfg, logger, BuildSpecFromBeadInfo)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

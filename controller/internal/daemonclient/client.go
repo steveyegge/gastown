@@ -137,6 +137,40 @@ func (c *DaemonClient) ListAgentBeads(ctx context.Context) ([]AgentBead, error) 
 	return beads, nil
 }
 
+// UpdateBeadNotes updates the notes field of a bead via the daemon HTTP API.
+// Used by the status reporter to write backend metadata (coop_url, etc.).
+func (c *DaemonClient) UpdateBeadNotes(ctx context.Context, beadID, notes string) error {
+	body := map[string]interface{}{
+		"id":    beadID,
+		"notes": notes,
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	url := c.baseURL + "/bd.v1.BeadsService/Update"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("daemon request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("daemon returned status %d for update %s", resp.StatusCode, beadID)
+	}
+	return nil
+}
+
 // hasLabel checks if a label exists in the list.
 func hasLabel(labels []string, target string) bool {
 	for _, l := range labels {
