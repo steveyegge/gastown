@@ -224,7 +224,7 @@ if [ "${MATERIALIZED}" = "0" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && gt mail check --inject && gt nudge deacon session-started"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && (gt mail check --inject || true) && (gt nudge deacon session-started || true)"
           }
         ]
       }
@@ -257,7 +257,7 @@ if [ "${MATERIALIZED}" = "0" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && (gt inject drain --quiet || true) && (gt nudge drain --quiet || true)"
           }
         ]
       }
@@ -286,7 +286,7 @@ HOOKS
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && gt nudge deacon session-started"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && (gt nudge deacon session-started || true)"
           }
         ]
       }
@@ -319,7 +319,7 @@ HOOKS
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && (gt inject drain --quiet || true) && (gt nudge drain --quiet || true)"
           }
         ]
       }
