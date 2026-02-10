@@ -704,6 +704,20 @@ func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	return out != "", nil
 }
 
+// RemoteTrackingBranchExists checks if a remote-tracking branch ref exists locally
+// (e.g. refs/remotes/origin/main), without hitting the network.
+func (g *Git) RemoteTrackingBranchExists(remote, branch string) (bool, error) {
+	ref := fmt.Sprintf("refs/remotes/%s/%s", remote, branch)
+	_, err := g.run("show-ref", "--verify", "--quiet", ref)
+	if err != nil {
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // DeleteBranch deletes a local branch.
 func (g *Git) DeleteBranch(name string, force bool) error {
 	flag := "-d"

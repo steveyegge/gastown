@@ -90,6 +90,22 @@ type MRInfo struct {
 	BlockedBy       string     // Task ID blocking this MR
 }
 
+// MRAnomaly represents an MR queue health problem that can stall processing.
+type MRAnomaly struct {
+	ID       string        `json:"id"`
+	Branch   string        `json:"branch"`
+	Type     string        `json:"type"`     // stale-claim | orphaned-branch
+	Severity string        `json:"severity"` // warning | critical
+	Assignee string        `json:"assignee,omitempty"`
+	Age      time.Duration `json:"age,omitempty"`
+	Detail   string        `json:"detail"`
+}
+
+const (
+	staleClaimWarningAfter  = 2 * time.Hour
+	staleClaimCriticalAfter = 6 * time.Hour
+)
+
 // Engineer is the merge queue processor that polls for ready merge-requests
 // and processes them according to the merge queue design.
 type Engineer struct {
@@ -981,6 +997,86 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 	}
 
 	return mrs, nil
+}
+
+// ListQueueAnomalies finds stale claims and orphaned branches in open MRs.
+// This gives Witness/Refinery patrols deterministic signals for deadlock risk.
+func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
+	issues, err := e.beads.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
+	}
+
+	return detectQueueAnomalies(issues, now, func(branch string) (bool, bool, error) {
+		localExists, err := e.git.BranchExists(branch)
+		if err != nil {
+			return false, false, err
+		}
+		remoteTrackingExists, err := e.git.RemoteTrackingBranchExists("origin", branch)
+		if err != nil {
+			return false, false, err
+		}
+		return localExists, remoteTrackingExists, nil
+	}), nil
+}
+
+func detectQueueAnomalies(
+	issues []*beads.Issue,
+	now time.Time,
+	branchExistsFn func(branch string) (localExists bool, remoteTrackingExists bool, err error),
+) []*MRAnomaly {
+	var anomalies []*MRAnomaly
+
+	for _, issue := range issues {
+		if issue == nil || issue.Status != "open" {
+			continue
+		}
+		fields := beads.ParseMRFields(issue)
+		if fields == nil || fields.Branch == "" {
+			continue
+		}
+
+		// 1) Stale claim detection.
+		if issue.Assignee != "" {
+			updatedAt, err := time.Parse(time.RFC3339, issue.UpdatedAt)
+			if err == nil {
+				age := now.Sub(updatedAt)
+				if age >= staleClaimWarningAfter {
+					severity := "warning"
+					if age >= staleClaimCriticalAfter {
+						severity = "critical"
+					}
+					anomalies = append(anomalies, &MRAnomaly{
+						ID:       issue.ID,
+						Branch:   fields.Branch,
+						Type:     "stale-claim",
+						Severity: severity,
+						Assignee: issue.Assignee,
+						Age:      age,
+						Detail:   "MR is claimed but not progressing",
+					})
+				}
+			}
+		}
+
+		// 2) Orphaned branch detection.
+		localExists, remoteTrackingExists, err := branchExistsFn(fields.Branch)
+		if err == nil && !localExists && !remoteTrackingExists {
+			anomalies = append(anomalies, &MRAnomaly{
+				ID:       issue.ID,
+				Branch:   fields.Branch,
+				Type:     "orphaned-branch",
+				Severity: "critical",
+				Detail:   "MR branch is missing locally and in origin/* tracking refs",
+			})
+		}
+	}
+
+	return anomalies
 }
 
 // ClaimMR claims an MR for processing by setting the assignee field.

@@ -20,6 +20,7 @@ title = 'Process pending cleanup wisps'
 
 [[steps]]
 description = "Ensure the refinery is alive and processing merge requests.\n\n```bash\n# Check if refinery session exists\ngt session status <rig>/refinery\n\n# Check for pending merge requests\nbd list --type=merge-request --status=open\n```\n\nIf MRs waiting AND refinery not running:\n```bash\ngt session start <rig>/refinery\ngt mail send <rig>/refinery -s \"PATROL: Wake up\" -m \"Merge requests in queue. Please process.\"\n```\n\nIf refinery running but queue stale (>30 min), send nudge."
+description = "Ensure the refinery is alive and processing merge requests.\n\n```bash\n# Check if refinery session exists\ngt session status <rig>/refinery\n\n# Check for pending merge requests\nbd list --type=merge-request --status=open\n\n# Check for stale claims / orphaned MR branches\ngt refinery ready <rig> --json\n```\n\nIf MRs waiting AND refinery not running:\n```bash\ngt session start <rig>/refinery\ngt mail send <rig>/refinery -s \"PATROL: Wake up\" -m \"Merge requests in queue. Please process.\"\n```\n\nIf `gt refinery ready --json` reports anomalies:\n- `stale-claim`: claimed MR not progressing for 2h+ (critical at 6h+)\n- `orphaned-branch`: MR branch missing locally and in `origin/*`\n\nEscalate anomalies to Deacon with MR IDs and branch names. If refinery is running but queue is stale (>30 min), send a nudge."
 id = 'check-refinery'
 needs = ['process-cleanups']
 title = 'Ensure refinery is alive'

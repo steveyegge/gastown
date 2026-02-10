@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -695,12 +696,23 @@ func runRefineryReady(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("listing ready MRs: %w", err)
 	}
+	anomalies, err := eng.ListQueueAnomalies(time.Now())
+	if err != nil {
+		return fmt.Errorf("listing queue anomalies: %w", err)
+	}
 
 	// JSON output
 	if refineryReadyJSON {
+		type readyOutput struct {
+			Ready     []*refinery.MRInfo    `json:"ready"`
+			Anomalies []*refinery.MRAnomaly `json:"anomalies,omitempty"`
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(ready)
+		return enc.Encode(readyOutput{
+			Ready:     ready,
+			Anomalies: anomalies,
+		})
 	}
 
 	// Human-readable output
@@ -715,6 +727,22 @@ func runRefineryReady(cmd *cobra.Command, args []string) error {
 		priority := fmt.Sprintf("P%d", mr.Priority)
 		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
 		fmt.Printf("     ID: %s  Worker: %s\n", mr.ID, mr.Worker)
+	}
+
+	if len(anomalies) > 0 {
+		fmt.Printf("\n%s Queue anomalies:\n\n", style.Bold.Render("⚠"))
+		for i, anomaly := range anomalies {
+			line := fmt.Sprintf("  %d. [%s] %s %s", i+1, anomaly.Severity, anomaly.Type, anomaly.ID)
+			fmt.Println(line)
+			fmt.Printf("     Branch: %s\n", anomaly.Branch)
+			if anomaly.Assignee != "" {
+				fmt.Printf("     Assignee: %s\n", anomaly.Assignee)
+			}
+			if anomaly.Age > 0 {
+				fmt.Printf("     Age: %s\n", anomaly.Age.Truncate(time.Second))
+			}
+			fmt.Printf("     Detail: %s\n", anomaly.Detail)
+		}
 	}
 
 	return nil
