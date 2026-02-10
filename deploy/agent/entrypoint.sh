@@ -303,8 +303,8 @@ cd "${WORKSPACE}"
 
 COOP_CMD="coop --agent=claude --port 8080 --health-port 9090 --cols 200 --rows 50"
 
-# Enable debug logging for coop to diagnose startup issues.
-export COOP_LOG_LEVEL="${COOP_LOG_LEVEL:-debug}"
+# Coop log level (overridable via pod env).
+export COOP_LOG_LEVEL="${COOP_LOG_LEVEL:-info}"
 
 echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
 
