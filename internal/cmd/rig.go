@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -86,6 +87,40 @@ var rigRemoveCmd = &cobra.Command{
 	Short: "Remove a rig from the registry (does not delete files)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runRigRemove,
+}
+
+// rigRegisterPrefix stores the --prefix flag value for gt rig register.
+var rigRegisterPrefix string
+
+// rigRegisterGitMirror stores the --git-mirror flag value.
+var rigRegisterGitMirror string
+
+// rigRegisterBranch stores the --branch flag value.
+var rigRegisterBranch string
+
+var rigRegisterCmd = &cobra.Command{
+	Use:   "register <name> <git-url>",
+	Short: "Register a rig in the daemon (K8s mode, no clone)",
+	Long: `Register a rig in the daemon without cloning the repository.
+
+This is a lightweight alternative to 'gt rig add' designed for K8s pods
+where each pod clones its own repo via an init container. It:
+  - Creates a rig bead (type=rig) in the daemon with labels
+  - Updates mayor/rigs.json with the rig entry
+  - Writes minimal config.json to the rig directory
+
+Labels set on the rig bead:
+  - prefix:<X>           Issue ID prefix for this rig
+  - git_url:<url>        Git repository URL
+  - git_mirror:<svc>     In-cluster git mirror service name (optional)
+  - default_branch:<br>  Default branch (default: main)
+  - state:active         Rig operational state
+
+Example:
+  gt rig register beads https://github.com/groblegark/beads --prefix bd
+  gt rig register gastown https://github.com/groblegark/gastown --prefix gt --git-mirror git-mirror-gastown`,
+	Args: cobra.ExactArgs(2),
+	RunE: runRigRegister,
 }
 
 var rigResetCmd = &cobra.Command{
@@ -286,6 +321,7 @@ func init() {
 	rigCmd.AddCommand(rigBootCmd)
 	rigCmd.AddCommand(rigListCmd)
 	rigCmd.AddCommand(rigRebootCmd)
+	rigCmd.AddCommand(rigRegisterCmd)
 	rigCmd.AddCommand(rigRemoveCmd)
 	rigCmd.AddCommand(rigResetCmd)
 	rigCmd.AddCommand(rigRestartCmd)
@@ -300,6 +336,10 @@ func init() {
 	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
 	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
+
+	rigRegisterCmd.Flags().StringVar(&rigRegisterPrefix, "prefix", "", "Beads issue prefix (required)")
+	rigRegisterCmd.Flags().StringVar(&rigRegisterGitMirror, "git-mirror", "", "In-cluster git mirror service name")
+	rigRegisterCmd.Flags().StringVar(&rigRegisterBranch, "branch", "main", "Default branch name")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -490,6 +530,12 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Check if connected to remote daemon — if so, list from rig beads.
+	daemonHost, _, _, _ := readDaemonConfig(townRoot)
+	if daemonHost != "" {
+		return runRigListDaemon(townRoot)
+	}
+
 	// Load rigs config
 	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsPath)
@@ -533,6 +579,61 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		}
 		if len(agents) > 0 {
 			fmt.Printf("    Agents: %v\n", agents)
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+// runRigListDaemon lists rigs from rig beads in the daemon (K8s mode).
+func runRigListDaemon(townRoot string) error {
+	listCmd := exec.Command("bd", "list", "--type=rig", "--json") //nolint:gosec
+	listCmd.Dir = townRoot
+	output, err := listCmd.Output()
+	if err != nil {
+		return fmt.Errorf("querying rig beads from daemon: %w", err)
+	}
+
+	var rigBeads []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Status      string `json:"status"`
+	}
+	if err := json.Unmarshal(output, &rigBeads); err != nil {
+		return fmt.Errorf("parsing rig beads: %w", err)
+	}
+
+	if len(rigBeads) == 0 {
+		fmt.Println("No rigs registered.")
+		fmt.Printf("\nRegister one with: %s\n", style.Dim.Render("gt rig register <name> <git-url> --prefix <prefix>"))
+		return nil
+	}
+
+	fmt.Printf("Rigs (from daemon):\n\n")
+
+	for _, rb := range rigBeads {
+		fields := beads.ParseRigFields(rb.Description)
+
+		state := fields.State
+		if state == "" {
+			state = "active"
+		}
+		stateIcon := style.Success.Render("●")
+		if state != "active" {
+			stateIcon = style.Dim.Render("○")
+		}
+
+		fmt.Printf("  %s %s\n", stateIcon, style.Bold.Render(rb.Title))
+		if fields.Prefix != "" {
+			fmt.Printf("    Prefix: %s-\n", fields.Prefix)
+		}
+		if fields.Repo != "" {
+			fmt.Printf("    Repo: %s\n", fields.Repo)
+		}
+		if state != "active" {
+			fmt.Printf("    State: %s\n", state)
 		}
 		fmt.Println()
 	}
@@ -679,6 +780,120 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	fmt.Printf("  Prefix: %s\n", result.BeadsPrefix)
 	if result.DefaultBranch != "" {
 		fmt.Printf("  Default branch: %s\n", result.DefaultBranch)
+	}
+
+	return nil
+}
+
+// runRigRegister implements gt rig register — lightweight K8s rig registration (bd-bvwv).
+// Creates a rig bead in the daemon and updates rigs.json without cloning.
+func runRigRegister(_ *cobra.Command, args []string) error {
+	name := args[0]
+	gitURL := args[1]
+
+	if rigRegisterPrefix == "" {
+		return fmt.Errorf("--prefix is required (e.g., --prefix bd)")
+	}
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{
+			Version: 1,
+			Rigs:    make(map[string]config.RigEntry),
+		}
+	}
+
+	// Check if already registered
+	if _, exists := rigsConfig.Rigs[name]; exists {
+		return fmt.Errorf("rig %q is already registered", name)
+	}
+
+	// Add to rigs.json
+	rigsConfig.Rigs[name] = config.RigEntry{
+		GitURL:  gitURL,
+		AddedAt: time.Now(),
+		BeadsConfig: &config.BeadsConfig{
+			Prefix: rigRegisterPrefix,
+		},
+	}
+	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+		return fmt.Errorf("saving rigs config: %w", err)
+	}
+
+	// Create minimal rig directory and config.json
+	rigDir := filepath.Join(townRoot, name)
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		return fmt.Errorf("creating rig directory: %w", err)
+	}
+
+	rigConfig := &rig.RigConfig{
+		Type:          "rig",
+		Version:       1,
+		Name:          name,
+		GitURL:        gitURL,
+		DefaultBranch: rigRegisterBranch,
+		CreatedAt:     time.Now(),
+		Beads: &rig.BeadsConfig{
+			Prefix: rigRegisterPrefix,
+		},
+	}
+	configData, err := json.MarshalIndent(rigConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling rig config: %w", err)
+	}
+	configPath := filepath.Join(rigDir, "config.json")
+	if err := os.WriteFile(configPath, configData, 0o644); err != nil {
+		return fmt.Errorf("saving rig config: %w", err)
+	}
+
+	// Create rig bead (type=rig) in daemon with labels
+	labels := []string{
+		fmt.Sprintf("prefix:%s", rigRegisterPrefix),
+		fmt.Sprintf("git_url:%s", gitURL),
+		fmt.Sprintf("default_branch:%s", rigRegisterBranch),
+		"state:active",
+	}
+	if rigRegisterGitMirror != "" {
+		labels = append(labels, fmt.Sprintf("git_mirror:%s", rigRegisterGitMirror))
+	}
+
+	createArgs := []string{
+		"create",
+		"--type", "rig",
+		"--title", name,
+		"--description", beads.FormatRigDescription(name, &beads.RigFields{
+			Repo:   gitURL,
+			Prefix: rigRegisterPrefix,
+			State:  "active",
+		}),
+		"--prefix", "hq-",
+		"--silent",
+	}
+	for _, label := range labels {
+		createArgs = append(createArgs, "--label", label)
+	}
+
+	createCmd := exec.Command("bd", createArgs...)
+	createCmd.Stderr = os.Stderr
+	if _, err := createCmd.Output(); err != nil {
+		fmt.Printf("  %s Could not create rig bead: %v\n", style.Warning.Render("!"), err)
+		fmt.Printf("  %s Rig registered locally but not in daemon\n", style.Dim.Render("ℹ"))
+	}
+
+	fmt.Printf("%s Registered rig %s\n", style.Success.Render("✓"), style.Bold.Render(name))
+	fmt.Printf("  Repository: %s\n", gitURL)
+	fmt.Printf("  Prefix: %s\n", rigRegisterPrefix)
+	fmt.Printf("  Branch: %s\n", rigRegisterBranch)
+	if rigRegisterGitMirror != "" {
+		fmt.Printf("  Git mirror: %s\n", rigRegisterGitMirror)
 	}
 
 	return nil
