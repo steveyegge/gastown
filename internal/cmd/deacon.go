@@ -1088,6 +1088,31 @@ func runDeaconStaleHooks(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("  %s %s: %s (age: %s, assignee: %s)\n",
 			status, r.BeadID, action, r.Age, r.Assignee)
+
+		// Surface partial work warnings
+		if r.PartialWork {
+			var details []string
+			if r.WorktreeDirty {
+				details = append(details, "uncommitted changes")
+			}
+			if r.UnpushedCount > 0 {
+				details = append(details, fmt.Sprintf("%d unpushed commit(s)", r.UnpushedCount))
+			}
+			fmt.Printf("    %s partial work detected: %s\n",
+				style.Bold.Render("⚠"), strings.Join(details, ", "))
+		}
+		if r.WorktreeError != "" {
+			fmt.Printf("    %s worktree check failed: %s\n",
+				style.Dim.Render("⚠"), r.WorktreeError)
+		}
+	}
+
+	// Count beads with partial work
+	partialWorkCount := 0
+	for _, r := range result.Results {
+		if r.PartialWork {
+			partialWorkCount++
+		}
 	}
 
 	// Summary
@@ -1097,6 +1122,10 @@ func runDeaconStaleHooks(cmd *cobra.Command, args []string) error {
 	} else if result.Unhooked > 0 {
 		fmt.Printf("\n%s Unhooked %d stale bead(s)\n",
 			style.Bold.Render("✓"), result.Unhooked)
+	}
+	if partialWorkCount > 0 {
+		fmt.Printf("%s %d bead(s) had partial work in worktree\n",
+			style.Bold.Render("⚠"), partialWorkCount)
 	}
 
 	return nil

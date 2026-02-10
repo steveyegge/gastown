@@ -282,7 +282,7 @@ func parseGroupAddress(address string) *ParsedGroup {
 	}
 }
 
-// agentBead represents an agent bead as returned by bd list --type=agent.
+// agentBead represents an agent bead as returned by bd list --label=gt:agent.
 type agentBead struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -578,7 +578,7 @@ func (r *Router) queryAgents(descContains string) []*agentBead {
 
 // queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
 func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
-	args := []string{"list", "--type=agent", "--json", "--limit=0"}
+	args := []string{"list", "--label=gt:agent", "--json", "--limit=0"}
 
 	if descContains != "" {
 		args = append(args, "--desc-contains="+descContains)
@@ -775,8 +775,9 @@ func (r *Router) sendToSingle(msg *Message) error {
 		return fmt.Errorf("invalid recipient %q: %w", msg.To, err)
 	}
 
-	// Build labels for from/thread/reply-to/cc
+	// Build labels for type, from/thread/reply-to/cc
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	if msg.ThreadID != "" {
 		labels = append(labels, "thread:"+msg.ThreadID)
@@ -790,9 +791,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=<recipient> -d <body>
+	// Build command: bd create <subject> --assignee=<recipient> -d <body> --labels=gt:message,...
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", toIdentity,
 		"-d", msg.Body,
 	}
@@ -887,8 +887,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 		return err
 	}
 
-	// Build labels for from/thread/reply-to/cc plus queue metadata
+	// Build labels for type, from/thread/reply-to/cc plus queue metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "queue:"+queueName)
 	if msg.ThreadID != "" {
@@ -902,10 +903,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=queue:<name> -d <body>
+	// Build command: bd create <subject> --assignee=queue:<name> -d <body>
 	// Use queue:<name> as assignee so inbox queries can filter by queue
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // queue:name
 		"-d", msg.Body,
 	}
@@ -963,8 +963,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		}
 	}
 
-	// Build labels for from/thread/reply-to/cc plus announce metadata
+	// Build labels for type, from/thread/reply-to/cc plus announce metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "announce:"+announceName)
 	if msg.ThreadID != "" {
@@ -978,10 +979,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=announce:<name> -d <body>
+	// Build command: bd create <subject> --assignee=announce:<name> -d <body>
 	// Use announce:<name> as assignee so queries can filter by channel
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // announce:name
 		"-d", msg.Body,
 	}
@@ -1041,8 +1041,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 		return fmt.Errorf("channel %s is closed", channelName)
 	}
 
-	// Build labels for from/thread/reply-to/cc plus channel metadata
+	// Build labels for type, from/thread/reply-to/cc plus channel metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "channel:"+channelName)
 	if msg.ThreadID != "" {
@@ -1056,10 +1057,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=channel:<name> -d <body>
+	// Build command: bd create <subject> --assignee=channel:<name> -d <body>
 	// Use channel:<name> as assignee so queries can filter by channel
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // channel:name
 		"-d", msg.Body,
 	}
@@ -1134,10 +1134,9 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	}
 
 	// Query existing messages in this announce channel
-	// Use bd list with labels filter to find messages with announce:<name> label
+	// Use bd list with labels filter to find messages with gt:message and announce:<name> labels
 	args := []string{"list",
-		"--type=message",
-		"--labels=announce:" + announceName,
+		"--labels=gt:message,announce:" + announceName,
 		"--json",
 		"--limit=0", // Get all
 		"--sort=created",

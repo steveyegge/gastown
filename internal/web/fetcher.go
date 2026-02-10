@@ -119,8 +119,8 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
-	// List all open convoy-type issues
-	stdout, err := f.runBdCmd(f.townRoot, "list", "--type=convoy", "--status=open", "--json")
+	// List all open convoy issues
+	stdout, err := f.runBdCmd(f.townRoot, "list", "--label=gt:convoy", "--status=open", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -919,8 +919,8 @@ func parseActivityTimestamp(s string) (int64, bool) {
 
 // FetchMail fetches recent mail messages from the beads database.
 func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
-	// List all message-type issues (mail)
-	stdout, err := f.runBdCmd(f.townRoot, "list", "--type=message", "--json", "--limit=50")
+	// List all message issues (mail)
+	stdout, err := f.runBdCmd(f.townRoot, "list", "--label=gt:message", "--json", "--limit=50")
 	if err != nil {
 		return nil, fmt.Errorf("listing mail: %w", err)
 	}
@@ -1264,8 +1264,8 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 
 // FetchQueues returns work queues and their status.
 func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
-	// List queue-type beads
-	stdout, err := f.runBdCmd(f.townRoot, "list", "--type=queue", "--json")
+	// List queue beads
+	stdout, err := f.runBdCmd(f.townRoot, "list", "--label=gt:queue", "--json")
 	if err != nil {
 		return nil, nil // No queues or bd not available
 	}
@@ -1540,8 +1540,19 @@ func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
 	var rows []IssueRow
 	for _, bead := range beads {
 		// Skip internal types (messages, convoys, queues, merge-requests, wisps)
+		// Check both legacy type field and gt: labels
+		isInternal := false
 		switch bead.Type {
 		case "message", "convoy", "queue", "merge-request", "wisp", "agent":
+			isInternal = true
+		}
+		for _, l := range bead.Labels {
+			switch l {
+			case "gt:message", "gt:convoy", "gt:queue", "gt:merge-request", "gt:wisp", "gt:agent":
+				isInternal = true
+			}
+		}
+		if isInternal {
 			continue
 		}
 

@@ -73,6 +73,7 @@ var (
 	convoyStrandedJSON bool
 	convoyCloseReason  string
 	convoyCloseNotify  string
+	convoyCloseForce   bool
 	convoyCheckDryRun  bool
 )
 
@@ -111,7 +112,7 @@ TRACKING SEMANTICS:
 COMMANDS:
   create    Create a convoy tracking specified issues
   add       Add issues to an existing convoy (reopens if closed)
-  close     Close a convoy (manually, regardless of tracked issue status)
+  close     Close a convoy (verifies all items done, or use --force)
   status    Show convoy progress, tracked issues, and active workers
   list      List convoys (the dashboard view)`,
 }
@@ -223,16 +224,15 @@ var convoyCloseCmd = &cobra.Command{
 	Short: "Close a convoy",
 	Long: `Close a convoy, optionally with a reason.
 
-Closes the convoy regardless of tracked issue status. Use this to:
-- Force-close abandoned convoys no longer relevant
-- Close convoys where work completed outside the tracked path
-- Manually close stuck convoys
+By default, verifies that all tracked issues are closed before allowing the
+close. Use --force to close regardless of tracked issue status.
 
 The close is idempotent - closing an already-closed convoy is a no-op.
 
 Examples:
-  gt convoy close hq-cv-abc
-  gt convoy close hq-cv-abc --reason="work done differently"
+  gt convoy close hq-cv-abc                           # Close (all items must be done)
+  gt convoy close hq-cv-abc --force                   # Force close abandoned convoy
+  gt convoy close hq-cv-abc --reason="no longer needed" --force
   gt convoy close hq-cv-xyz --notify mayor/`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConvoyClose,
@@ -266,6 +266,7 @@ func init() {
 	// Close flags
 	convoyCloseCmd.Flags().StringVar(&convoyCloseReason, "reason", "", "Reason for closing the convoy")
 	convoyCloseCmd.Flags().StringVar(&convoyCloseNotify, "notify", "", "Agent to notify on close (e.g., mayor/)")
+	convoyCloseCmd.Flags().BoolVarP(&convoyCloseForce, "force", "f", false, "Close even if tracked issues are still open")
 
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
@@ -660,10 +661,46 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Verify all tracked issues are done (unless --force)
+	tracked, err := getTrackedIssues(townBeads, convoyID)
+	if err != nil {
+		// If we can't check tracked issues, require --force
+		if !convoyCloseForce {
+			return fmt.Errorf("couldn't verify tracked issues: %w\n  Use --force to close anyway", err)
+		}
+		style.PrintWarning("couldn't verify tracked issues: %v", err)
+	}
+
+	if len(tracked) > 0 && !convoyCloseForce {
+		var openIssues []trackedIssueInfo
+		for _, t := range tracked {
+			if t.Status != "closed" && t.Status != "tombstone" {
+				openIssues = append(openIssues, t)
+			}
+		}
+
+		if len(openIssues) > 0 {
+			fmt.Printf("%s Convoy %s has %d open issue(s):\n\n", style.Warning.Render("⚠"), convoyID, len(openIssues))
+			for _, t := range openIssues {
+				status := "○"
+				if t.Status == "in_progress" || t.Status == "hooked" {
+					status = "▶"
+				}
+				fmt.Printf("    %s %s: %s [%s]\n", status, t.ID, t.Title, t.Status)
+			}
+			fmt.Printf("\n  Use %s to close anyway.\n", style.Bold.Render("--force"))
+			return fmt.Errorf("convoy has %d open issue(s)", len(openIssues))
+		}
+	}
+
 	// Build close reason
 	reason := convoyCloseReason
 	if reason == "" {
-		reason = "Manually closed"
+		if convoyCloseForce {
+			reason = "Force closed"
+		} else {
+			reason = "All tracked issues completed"
+		}
 	}
 
 	// Close the convoy
@@ -678,6 +715,32 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Closed convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
 	if convoyCloseReason != "" {
 		fmt.Printf("  Reason: %s\n", convoyCloseReason)
+	}
+
+	// Report cleanup summary
+	if len(tracked) > 0 {
+		closedCount := 0
+		openCount := 0
+		for _, t := range tracked {
+			if t.Status == "closed" || t.Status == "tombstone" {
+				closedCount++
+			} else {
+				openCount++
+			}
+		}
+		fmt.Printf("  Tracked: %d issue(s) (%d closed", len(tracked), closedCount)
+		if openCount > 0 {
+			fmt.Printf(", %d still open", openCount)
+		}
+		fmt.Println(")")
+	}
+
+	// Report molecule if present
+	for _, line := range strings.Split(convoy.Description, "\n") {
+		if strings.HasPrefix(line, "Molecule: ") {
+			mol := strings.TrimPrefix(line, "Molecule: ")
+			fmt.Printf("  Molecule: %s (not auto-detached)\n", mol)
+		}
 	}
 
 	// Send notification if --notify flag provided

@@ -160,19 +160,19 @@ func TestBrowser_LastActivityColors(t *testing.T) {
 				ID:           "hq-cv-green",
 				Title:        "Active Work",
 				Status:       "open",
-				LastActivity: activity.Calculate(time.Now().Add(-1 * time.Minute)), // Green: <2min
+				LastActivity: activity.Calculate(time.Now().Add(-1 * time.Minute)), // Green: <5min
 			},
 			{
 				ID:           "hq-cv-yellow",
 				Title:        "Stale Work",
 				Status:       "open",
-				LastActivity: activity.Calculate(time.Now().Add(-3 * time.Minute)), // Yellow: 2-5min
+				LastActivity: activity.Calculate(time.Now().Add(-6 * time.Minute)), // Yellow: 5-10min
 			},
 			{
 				ID:           "hq-cv-red",
 				Title:        "Stuck Work",
 				Status:       "open",
-				LastActivity: activity.Calculate(time.Now().Add(-10 * time.Minute)), // Red: >5min
+				LastActivity: activity.Calculate(time.Now().Add(-11 * time.Minute)), // Red: >=10min
 			},
 		},
 	}

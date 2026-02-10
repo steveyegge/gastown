@@ -913,9 +913,9 @@ func TestValidateRecipient(t *testing.T) {
 		t.Fatalf("bd config set types.custom failed: %v\n%s", err, out)
 	}
 
-	// Create test agent beads
+	// Create test agent beads using gt:agent label
 	createAgent := func(id, title string) {
-		cmd := exec.Command("bd", "create", title, "--type=agent", "--id="+id, "--force")
+		cmd := exec.Command("bd", "create", title, "--labels=gt:agent", "--id="+id, "--force")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 		if out, err := cmd.CombinedOutput(); err != nil {

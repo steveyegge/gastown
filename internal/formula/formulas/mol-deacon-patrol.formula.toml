@@ -759,9 +759,38 @@ If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
 **Exit criteria:** Wisps compacted (or nothing to compact)."""
 
 [[steps]]
+id = "compact-report"
+title = "Send compaction digest report"
+needs = ["wisp-compact"]
+description = """
+Generate and send the daily compaction digest.
+
+**Step 1: Send daily digest**
+```bash
+gt compact report
+```
+
+This runs compaction (capturing JSON results), queries active wisps,
+builds a per-category breakdown (Heartbeats, Patrols, Errors, Untyped),
+detects anomalies, and sends the digest to deacon/ (cc mayor/).
+
+A permanent event bead (wisp.compaction) is created for audit trail.
+
+**Step 2: Weekly rollup (Mondays only)**
+If today is Monday, also send the weekly rollup:
+```bash
+gt compact report --weekly
+```
+
+This aggregates the past 7 days of compaction event beads and sends
+trend data (totals, promotion rate, avg deleted/day) to mayor/.
+
+**Exit criteria:** Compaction digest sent (or nothing to report)."""
+
+[[steps]]
 id = "costs-digest"
 title = "Aggregate daily costs [DISABLED]"
-needs = ["wisp-compact"]
+needs = ["compact-report"]
 description = """
 **⚠️ DISABLED** - Skip this step entirely.
 

@@ -752,12 +752,13 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 
 	// bd show --json returns an array with one element
 	var issues []struct {
-		ID          string `json:"id"`
-		Type        string `json:"issue_type"`
-		Description string `json:"description"`
-		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"`   // Read from database column
-		AgentState  string `json:"agent_state"` // Read from database column
+		ID          string   `json:"id"`
+		Type        string   `json:"issue_type"`
+		Labels      []string `json:"labels"`
+		Description string   `json:"description"`
+		UpdatedAt   string   `json:"updated_at"`
+		HookBead    string   `json:"hook_bead"`   // Read from database column
+		AgentState  string   `json:"agent_state"` // Read from database column
 	}
 
 	if err := json.Unmarshal(output, &issues); err != nil {
@@ -769,7 +770,15 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	}
 
 	issue := issues[0]
-	if issue.Type != "agent" {
+	// Check for agent type via gt:agent label (preferred) or legacy type field
+	isAgent := issue.Type == "agent"
+	for _, l := range issue.Labels {
+		if l == "gt:agent" {
+			isAgent = true
+			break
+		}
+	}
+	if !isAgent {
 		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, issue.Type)
 	}
 
@@ -901,7 +910,7 @@ func (d *Daemon) checkGUPPViolations() {
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// List polecat agent beads for this rig
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
-	cmd := exec.Command(d.bdPath, "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -913,7 +922,6 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 
 	var agents []struct {
 		ID          string `json:"id"`
-		Type        string `json:"issue_type"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
 		HookBead    string `json:"hook_bead"` // Read from database column, not description
@@ -1001,7 +1009,7 @@ func (d *Daemon) checkOrphanedWork() {
 
 // checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
-	cmd := exec.Command(d.bdPath, "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 

@@ -138,8 +138,8 @@ func TestConvoyHandler_LastActivityColors(t *testing.T) {
 		wantClass string
 	}{
 		{"green for active", 30 * time.Second, "activity-green"},
-		{"yellow for stale", 3 * time.Minute, "activity-yellow"},
-		{"red for stuck", 10 * time.Minute, "activity-red"},
+		{"yellow for stale", 6 * time.Minute, "activity-yellow"},
+		{"red for stuck", 11 * time.Minute, "activity-red"},
 	}
 
 	for _, tt := range tests {
@@ -756,8 +756,8 @@ func TestE2E_Server_ActivityColors(t *testing.T) {
 		wantClass string
 	}{
 		{"green for recent", 20 * time.Second, "activity-green"},
-		{"yellow for stale", 3 * time.Minute, "activity-yellow"},
-		{"red for stuck", 8 * time.Minute, "activity-red"},
+		{"yellow for stale", 6 * time.Minute, "activity-yellow"},
+		{"red for stuck", 11 * time.Minute, "activity-red"},
 	}
 
 	for _, tt := range tests {

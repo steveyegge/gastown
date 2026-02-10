@@ -70,8 +70,8 @@ func TestConvoyTemplate_LastActivityColors(t *testing.T) {
 		wantClass string
 	}{
 		{"green for 1 minute", 1 * time.Minute, "activity-green"},
-		{"yellow for 3 minutes", 3 * time.Minute, "activity-yellow"},
-		{"red for 10 minutes", 10 * time.Minute, "activity-red"},
+		{"yellow for 6 minutes", 6 * time.Minute, "activity-yellow"},
+		{"red for 11 minutes", 11 * time.Minute, "activity-red"},
 	}
 
 	for _, tt := range tests {

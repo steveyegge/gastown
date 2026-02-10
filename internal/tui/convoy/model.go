@@ -87,7 +87,7 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	defer cancel()
 
 	// Get list of open convoys
-	listArgs := []string{"list", "--type=convoy", "--json"}
+	listArgs := []string{"list", "--label=gt:convoy", "--json"}
 	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
