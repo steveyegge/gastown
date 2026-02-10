@@ -16,18 +16,27 @@ import (
 // Backend detection checks the agent bead for a "backend" field set by
 // the K8s pod manager or Coop sidecar deployment.
 func ResolveBackend(agentID string) Backend {
-	// Check if agent has Coop backend metadata
-	coopCfg, err := resolveCoopConfig(agentID)
-	if err == nil && coopCfg != nil {
-		b := NewCoopBackend(coopCfg.CoopConfig)
-		b.AddSession("claude", coopCfg.baseURL)
-		return b
+	// Try the given agentID first, then hq-prefixed form for town-level
+	// shortnames (mayor → hq-mayor, deacon → hq-deacon, etc.).
+	candidates := []string{agentID}
+	if !strings.Contains(agentID, "/") && !strings.Contains(agentID, "-") {
+		candidates = append(candidates, "hq-"+agentID)
 	}
 
-	// Check if agent has K8s/SSH backend metadata
-	sshCfg, err := resolveSSHConfig(agentID)
-	if err == nil && sshCfg != nil {
-		return NewSSHBackend(*sshCfg)
+	for _, id := range candidates {
+		// Check if agent has Coop backend metadata
+		coopCfg, err := resolveCoopConfig(id)
+		if err == nil && coopCfg != nil {
+			b := NewCoopBackend(coopCfg.CoopConfig)
+			b.AddSession("claude", coopCfg.baseURL)
+			return b
+		}
+
+		// Check if agent has K8s/SSH backend metadata
+		sshCfg, err := resolveSSHConfig(id)
+		if err == nil && sshCfg != nil {
+			return NewSSHBackend(*sshCfg)
+		}
 	}
 
 	// Default: local tmux
