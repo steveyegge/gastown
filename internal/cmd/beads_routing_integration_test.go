@@ -110,7 +110,7 @@ func setupRoutingTestTown(t *testing.T) string {
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--no-daemon", "init", "--quiet", "--prefix", prefix)
+	cmd := exec.Command("bd", "init", "--quiet", "--prefix", prefix)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
@@ -128,7 +128,7 @@ func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 func createTestIssue(t *testing.T, dir, title string) *beads.Issue {
 	t.Helper()
 
-	args := []string{"--no-daemon", "create", "--json", "--title", title, "--type", "task",
+	args := []string{"create", "--json", "--title", title, "--type", "task",
 		"--description", "Integration test issue"}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir

@@ -1009,12 +1009,12 @@ func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
 	d.killBeadsDaemon(srcBeadsDir)
 
 	// Set up export command (reads from source)
-	exportCmd := exec.Command(d.bdPath, "export", "--no-daemon")
+	exportCmd := exec.Command(d.bdPath, "export")
 	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
 	exportCmd.Dir = filepath.Dir(srcBeadsDir)
 
 	// Set up import command (writes to destination)
-	importCmd := exec.Command(d.bdPath, "import", "--no-daemon")
+	importCmd := exec.Command(d.bdPath, "import")
 	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
 	importCmd.Dir = filepath.Dir(dstBeadsDir)
 

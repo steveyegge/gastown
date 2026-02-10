@@ -209,13 +209,13 @@ pwsh -NoProfile -NoLogo -File "` + psPath + `" %*
 	} else {
 		// Create a script that simulates bd init and other commands
 		// Also logs all create commands for verification.
-		// Note: beads.run() prepends --no-daemon --allow-stale to all commands,
+		// Note: beads.run() prepends --allow-stale to all commands,
 		// so we need to find the actual command in the argument list.
 		script := `#!/bin/sh
 # Mock bd for testing
 LOG_FILE="` + logPath + `"
 
-# Find the actual command (skip global flags like --no-daemon, --allow-stale)
+# Find the actual command (skip global flags like --allow-stale)
 cmd=""
 for arg in "$@"; do
   case "$arg" in

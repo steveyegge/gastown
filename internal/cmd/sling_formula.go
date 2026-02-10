@@ -51,18 +51,18 @@ func trimJSONForError(jsonOutput []byte) string {
 
 // verifyFormulaExists checks that the formula exists using bd formula show.
 // Formulas are TOML files (.formula.toml).
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Uses --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
-	// when formula not found, --no-daemon may exit 0 but produce empty stdout.
-	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName, "--allow-stale")
+	// Use Output() instead of Run() to detect bd exit 0 bug:
+	// when formula not found, bd may exit 0 but produce empty stdout.
+	cmd := exec.Command("bd", "formula", "show", formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -195,7 +195,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
-	cookArgs := []string{"--no-daemon", "cook", formulaName}
+	cookArgs := []string{"cook", formulaName}
 	cookCmd := exec.Command("bd", cookArgs...)
 	cookCmd.Dir = formulaWorkDir
 	cookCmd.Stderr = os.Stderr
@@ -205,7 +205,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
@@ -229,7 +229,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd := exec.Command("bd", "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Dir = beads.ResolveHookDir(townRoot, wispRootID, "")
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {

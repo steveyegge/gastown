@@ -106,6 +106,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	}
 
 	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	if runtimeConfig == nil {
+		runtimeConfig = config.DefaultRuntimeConfig()
+	}
 	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
@@ -128,7 +131,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// Before creating a new session, check if there's already a runtime session
 	// running in this crew's directory (might have been started manually or via
 	// a different mechanism)
-	if !hasSession {
+	if !hasSession && runtimeConfig.Tmux != nil {
 		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, runtimeConfig.Tmux.ProcessNames)
 		if err == nil && len(existingSessions) > 0 {
 			// Found an existing session with runtime running in this directory

@@ -52,9 +52,6 @@ func TestStartPolecatsWithWorkSkipsDotDirs(t *testing.T) {
 
 	binDir := t.TempDir()
 	bdScript := `#!/bin/sh
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 case "$cmd" in
   list)

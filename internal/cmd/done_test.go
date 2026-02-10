@@ -325,7 +325,7 @@ func TestGetIssueFromAgentHook(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Initialize the beads database
-			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
+			cmd := exec.Command("bd", "init", "--prefix", "test", "--quiet")
 			cmd.Dir = tmpDir
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("bd init: %v\n%s", err, output)
