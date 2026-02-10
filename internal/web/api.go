@@ -303,6 +303,10 @@ func (h *APIHandler) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "Missing message ID", http.StatusBadRequest)
 		return
 	}
+	if !isValidID(msgID) {
+		h.sendError(w, "Invalid message ID format", http.StatusBadRequest)
+		return
+	}
 
 	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
 	if err != nil {
@@ -751,6 +755,10 @@ func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "Missing issue ID", http.StatusBadRequest)
 		return
 	}
+	if !isValidID(issueID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
 
 	// Try structured JSON output first (preferred — no text parsing needed)
 	output, err := h.runBdCommand(r.Context(), 10*time.Second, []string{"show", issueID, "--json"})
@@ -800,6 +808,18 @@ func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title == "" {
 		h.sendError(w, "Title is required", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce length limits to prevent oversized payloads
+	const maxTitleLen = 500
+	const maxDescriptionLen = 100_000 // 100KB
+	if len(req.Title) > maxTitleLen {
+		h.sendError(w, fmt.Sprintf("Title too long (max %d bytes)", maxTitleLen), http.StatusBadRequest)
+		return
+	}
+	if len(req.Description) > maxDescriptionLen {
+		h.sendError(w, fmt.Sprintf("Description too long (max %d bytes)", maxDescriptionLen), http.StatusBadRequest)
 		return
 	}
 
@@ -1067,6 +1087,20 @@ func (h *APIHandler) handlePRShow(w http.ResponseWriter, r *http.Request) {
 
 	if prURL == "" && (repo == "" || number == "") {
 		h.sendError(w, "Missing repo/number or url parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Validate inputs to prevent argument injection
+	if prURL != "" && !strings.HasPrefix(prURL, "https://") {
+		h.sendError(w, "PR URL must start with https://", http.StatusBadRequest)
+		return
+	}
+	if number != "" && !isNumeric(number) {
+		h.sendError(w, "Invalid PR number format", http.StatusBadRequest)
+		return
+	}
+	if repo != "" && !isValidRepoRef(repo) {
+		h.sendError(w, "Invalid repo format (expected owner/repo)", http.StatusBadRequest)
 		return
 	}
 

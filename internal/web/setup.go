@@ -116,11 +116,13 @@ func (h *SetupAPIHandler) handleInstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Expand ~ to home directory
-	if strings.HasPrefix(req.Path, "~/") {
-		home, _ := os.UserHomeDir()
-		req.Path = filepath.Join(home, req.Path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal)
+	expanded, err := expandHomePath(req.Path)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+	req.Path = expanded
 
 	// Build gt install command
 	args := []string{"install", req.Path}
@@ -159,6 +161,14 @@ func (h *SetupAPIHandler) handleRigAdd(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "Name and gitUrl are required", http.StatusBadRequest)
 		return
 	}
+	if !isValidID(req.Name) {
+		h.sendError(w, "Invalid rig name format", http.StatusBadRequest)
+		return
+	}
+	if !isValidGitURL(req.GitURL) {
+		h.sendError(w, "Git URL must be https://, git@, or owner/repo format", http.StatusBadRequest)
+		return
+	}
 
 	args := []string{"rig", "add", req.Name, req.GitURL}
 
@@ -191,16 +201,20 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Expand ~ to home directory
-	path := req.Path
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal)
+	path, err := expandHomePath(req.Path)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	port := req.Port
 	if port == 0 {
 		port = 8080
+	}
+	if port < 1 || port > 65534 {
+		h.sendError(w, "Port must be between 1 and 65534", http.StatusBadRequest)
+		return
 	}
 
 	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
@@ -259,11 +273,12 @@ func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Expand ~ to home directory
-	path := req.Path
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal)
+	path, err := expandHomePath(req.Path)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(CheckWorkspaceResponse{Valid: false, Message: "Invalid path: " + err.Error()})
+		return
 	}
 
 	// Check if mayor/ directory exists (indicates a Gas Town HQ)
