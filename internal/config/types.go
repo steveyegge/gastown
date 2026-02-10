@@ -651,8 +651,8 @@ func defaultPromptMode(provider string) string {
 	switch provider {
 	case "codex":
 		return "none"
-	case "opencode":
-		return "none"
+	// OpenCode supports --prompt flag for initial prompts, so use "arg" mode.
+	// This allows startup beacons to be passed as CLI arguments.
 	default:
 		return "arg"
 	}

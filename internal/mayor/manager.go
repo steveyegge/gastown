@@ -79,12 +79,19 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)
 	// This ensures the agent has clear context immediately, not after nudges arrive
+	// Configure beacon based on agent's hook/prompt capabilities.
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
+		Recipient:               "mayor",
+		Sender:                  "human",
+		Topic:                   "cold-start",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
 	})
 
 	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
@@ -127,8 +134,31 @@ func (m *Manager) Start(agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
+	// Wait for runtime to be fully ready at the prompt (not just started)
+	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		_ = t.NudgeSession(sessionID, combined)
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			_ = t.NudgeSession(sessionID, beacon)
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
+		}
+	}
 
 	return nil
 }

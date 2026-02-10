@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -179,11 +180,28 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: "boot",
-		Sender:    "daemon",
-		Topic:     "triage",
-	}, "Run `" + cli.Name() + " boot triage` now.")
+	// Get runtime config and fallback info for the boot role
+	runtimeConfig := config.ResolveRoleAgentConfig("boot", b.townRoot, b.bootDir)
+
+	// Ensure runtime settings exist for boot
+	if err := runtime.EnsureSettingsForRole(b.bootDir, "boot", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
+	// Configure beacon based on agent's hook/prompt capabilities.
+	beaconConfig := session.BeaconConfig{
+		Recipient:               "boot",
+		Sender:                  "daemon",
+		Topic:                   "triage",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+	beacon := session.FormatStartupBeacon(beaconConfig)
+	initialPrompt := beacon + "\n\nRun `" + cli.Name() + " boot triage` now."
 
 	var startCmd string
 	if agentOverride != "" {
@@ -209,6 +227,32 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
+	}
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	// Boot is ephemeral so we run this in background.
+	if fallbackInfo.SendBeaconNudge || fallbackInfo.SendStartupNudge {
+		go func() {
+			// Wait for runtime to be fully ready at the prompt
+			runtime.SleepForReadyDelay(runtimeConfig)
+
+			sessionID := session.BootSessionName()
+			if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+				// Hooks + no prompt: Single combined nudge
+				combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+				_ = b.tmux.NudgeSession(sessionID, combined)
+			} else {
+				if fallbackInfo.SendBeaconNudge {
+					_ = b.tmux.NudgeSession(sessionID, beacon)
+				}
+				if fallbackInfo.StartupNudgeDelayMs > 0 {
+					time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+				}
+				if fallbackInfo.SendStartupNudge {
+					_ = b.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent())
+				}
+			}
+		}()
 	}
 
 	return nil

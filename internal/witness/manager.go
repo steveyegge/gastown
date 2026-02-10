@@ -130,14 +130,19 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return err
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
+	startResult, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig, fallbackInfo)
 	if err != nil {
 		return err
 	}
+	command := startResult.command
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -185,6 +190,34 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
+	// Wait for runtime to be fully ready at the prompt (not just started)
+	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if startResult.beacon != "" {
+		if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+			// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+			combined := startResult.beacon + "\n\n" + runtime.StartupNudgeContent()
+			_ = t.NudgeSession(sessionID, combined)
+		} else {
+			if fallbackInfo.SendBeaconNudge {
+				// Agent doesn't support CLI prompt - send beacon via nudge
+				_ = t.NudgeSession(sessionID, startResult.beacon)
+			}
+
+			if fallbackInfo.StartupNudgeDelayMs > 0 {
+				// Wait for agent to run gt prime before sending work instructions
+				time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+			}
+
+			if fallbackInfo.SendStartupNudge {
+				// Send work instructions via nudge
+				_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -218,23 +251,39 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	return expanded
 }
 
-func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
+// witnessStartResult contains the startup command and beacon for fallback handling.
+type witnessStartResult struct {
+	command string
+	beacon  string
+}
+
+func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig, fallbackInfo *runtime.StartupFallbackInfo) (*witnessStartResult, error) {
 	if agentOverride != "" {
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
+		return &witnessStartResult{
+			command: beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"),
+			beacon:  "", // Custom command, no beacon to nudge
+		}, nil
 	}
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: fmt.Sprintf("%s/witness", rigName),
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.")
+
+	// Configure beacon based on agent's hook/prompt capabilities.
+	beaconConfig := session.BeaconConfig{
+		Recipient:               fmt.Sprintf("%s/witness", rigName),
+		Sender:                  "deacon",
+		Topic:                   "patrol",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+	beacon := session.FormatStartupBeacon(beaconConfig)
+	initialPrompt := beacon + "\n\nI am Witness for " + rigName + ". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it."
+
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
-		return "", fmt.Errorf("building startup command: %w", err)
+		return nil, fmt.Errorf("building startup command: %w", err)
 	}
-	return command, nil
+	return &witnessStartResult{command: command, beacon: beacon}, nil
 }
 
 // Stop stops the witness.
