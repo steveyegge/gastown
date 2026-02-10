@@ -149,12 +149,11 @@ export XDG_STATE_HOME="${STATE_DIR}"
 echo "[entrypoint] XDG_STATE_HOME=${XDG_STATE_HOME}"
 
 # ── Claude settings ──────────────────────────────────────────────────────
+#
+# User-level settings (permissions) always written to ~/.claude/settings.json.
+# Hooks come from config bead materialization if available, otherwise static.
 
-# Write settings.json with permissions and hooks.
-# SessionStart: gt prime injects role context; bd prime injects beads workflow.
-# PreCompact: bd prime ensures context survives compaction.
-# Stop: gt handoff preserves session state for continuity.
-cat > "${CLAUDE_DIR}/settings.json" <<'SETTINGS'
+cat > "${CLAUDE_DIR}/settings.json" <<'PERMISSIONS'
 {
   "permissions": {
     "allow": [
@@ -168,7 +167,35 @@ cat > "${CLAUDE_DIR}/settings.json" <<'SETTINGS'
       "WebSearch(*)"
     ],
     "deny": []
-  },
+  }
+}
+PERMISSIONS
+
+# Try config bead materialization (writes to workspace .claude/settings.json).
+# This queries the daemon for claude-hooks config beads and merges them by
+# specificity (global → role → agent). Falls back to static hooks if no
+# config beads exist or daemon is unreachable.
+MATERIALIZE_SCOPE="${GT_TOWN_NAME:-town}/${GT_RIG:-}/${ROLE}/${AGENT}"
+MATERIALIZED=0
+
+if command -v gt &>/dev/null; then
+    echo "[entrypoint] Materializing hooks from config beads (scope: ${MATERIALIZE_SCOPE})"
+    cd "${WORKSPACE}"
+    if gt config materialize --hooks --scope="${MATERIALIZE_SCOPE}" 2>&1; then
+        # Verify the file was written with actual hooks content
+        if grep -q '"hooks"' "${WORKSPACE}/.claude/settings.json" 2>/dev/null; then
+            MATERIALIZED=1
+            echo "[entrypoint] Hooks materialized from config beads"
+        fi
+    fi
+fi
+
+if [ "${MATERIALIZED}" = "0" ]; then
+    echo "[entrypoint] No config beads found, writing static hooks"
+    # Write project-level settings with hooks to workspace .claude/settings.json
+    mkdir -p "${WORKSPACE}/.claude"
+    cat > "${WORKSPACE}/.claude/settings.json" <<'HOOKS'
+{
   "hooks": {
     "SessionStart": [
       {
@@ -214,7 +241,8 @@ cat > "${CLAUDE_DIR}/settings.json" <<'SETTINGS'
     ]
   }
 }
-SETTINGS
+HOOKS
+fi
 
 # Write CLAUDE.md with role context if not already present
 if [ ! -f "${WORKSPACE}/CLAUDE.md" ]; then
