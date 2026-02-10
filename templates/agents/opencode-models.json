@@ -5,19 +5,9 @@
   "models_api": "https://models.dev/api.json",
   "models_api_note": "LLMs should fetch current model list from models_api. The 'models' below are fallback examples with gastown-specific delay recommendations.",
   "models": {
-    "openrouter": {
-      "openrouter/moonshotai/kimi-k2.5": {
-        "description": "Kimi K2.5 via OpenRouter (default agent)",
-        "ready_delay_ms": 1000
-      }
-    },
     "opencode": {
-      "openrouter/moonshotai/kimi-k2.5": {
-        "description": "Kimi K2.5 via OpenRouter (default)",
-        "ready_delay_ms": 1000
-      },
-      "kimi-k2.5-free": {
-        "description": "Kimi K2.5 Free via OpenRouter", 
+      "opencode/kimi-k2.5-free": {
+        "description": "Kimi K2.5 via Opencode (default)",
         "ready_delay_ms": 1000
       },
       "glm-4.7-free": {

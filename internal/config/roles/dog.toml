@@ -10,7 +10,7 @@ prompt_template = "dog.md.tmpl"
 pattern = "gt-dog-{name}"
 work_dir = "{town}/deacon/dogs/{name}"
 needs_pre_sync = false
-start_command = "exec opencode -m openrouter/moonshot-ai/kimi-k2.5-free"
+start_command = "exec opencode -m opencode/kimi-k2.5-free"
 
 [env]
 GT_ROLE = "dog"

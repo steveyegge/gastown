@@ -683,7 +683,7 @@ func TestOpenCodeAgentPresetEnv(t *testing.T) {
 	}
 
 	// Check Args (should include Kimi K2.5 Free model)
-	wantArgs := []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"}
+	wantArgs := []string{"-m", "opencode/kimi-k2.5-free"}
 	if len(info.Args) != len(wantArgs) || (len(info.Args) > 0 && info.Args[0] != wantArgs[0]) {
 		t.Errorf("opencode args = %v, want %v", info.Args, wantArgs)
 	}

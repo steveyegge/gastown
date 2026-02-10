@@ -10,7 +10,7 @@ prompt_template = "polecat.md.tmpl"
 pattern = "gt-{rig}-{name}"
 work_dir = "{town}/{rig}/polecats/{name}"
 needs_pre_sync = true
-start_command = "exec opencode -m openrouter/moonshot-ai/kimi-k2.5-free"
+start_command = "exec opencode -m opencode/kimi-k2.5-free"
 
 [env]
 GT_ROLE = "polecat"

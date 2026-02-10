@@ -110,7 +110,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentKimi: {
 		Name:    AgentKimi,
 		Command: "opencode",
-		Args:    []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"},
+		Args:    []string{"-m", "opencode/kimi-k2.5-free"},
 		Env: map[string]string{
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
@@ -207,7 +207,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentOpenCode: {
 		Name:    AgentOpenCode,
 		Command: "opencode",
-		Args:    []string{"-m", "openrouter/moonshot-ai/kimi-k2.5-free"}, // Default to Kimi K2.5 Free
+		Args:    []string{"-m", "opencode/kimi-k2.5-free"}, // Default to Kimi K2.5 Free
 		Env: map[string]string{
 			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
