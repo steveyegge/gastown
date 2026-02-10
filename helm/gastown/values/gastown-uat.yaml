@@ -229,12 +229,12 @@ agentController:
   enabled: true
 
   image:
-    repository: ""          # Set to your controller image repository
+    repository: ghcr.io/groblegark/gastown/agent-controller
     tag: "latest"
     pullPolicy: Always
 
   agentImage:
-    repository: ""          # Set to your agent image repository
+    repository: ghcr.io/groblegark/gastown/gastown-agent
     tag: "latest"
 
   credentialsSecret: "claude-credentials"
