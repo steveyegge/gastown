@@ -231,6 +231,10 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 	scored := make([]scoredIssue, 0, len(issues))
 	for _, issue := range issues {
+		// Defensive filter: bd status filters can drift; queue must only include open MRs.
+		if issue == nil || issue.Status != "open" {
+			continue
+		}
 		score := m.calculateIssueScore(issue, now)
 		scored = append(scored, scoredIssue{issue: issue, score: score})
 	}
