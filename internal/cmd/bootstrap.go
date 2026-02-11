@@ -37,19 +37,17 @@ This is the first command to run after 'gt connect' on a new K8s namespace.
 It creates:
   - Town identity config bead
   - Rig beads and route beads for each configured rig
-  - Agent beads for K8s-managed agents (gt:agent + execution_target:k8s)
   - Config beads: hooks, roles, agent presets, messaging, escalation
 
-Examples:
-  # Bootstrap with town name and one rig
-  gt bootstrap --town gastown-next \
-    --rig "beads:bd:https://github.com/org/beads.git"
+Agent beads are NOT created by bootstrap — they are created by the
+controller when it reconciles (bead-first pattern), or by 'gt rig register'
+when adding agents to a rig. The --agent flag exists only for testing.
 
-  # Bootstrap with agents pre-registered
+Examples:
+  # Bootstrap with town name and rigs
   gt bootstrap --town gastown-next \
     --rig "beads:bd:https://github.com/org/beads.git" \
-    --agent "beads:polecat:test" \
-    --agent "beads:polecat:obsidian"
+    --rig "gastown:gt:https://github.com/org/gastown.git"
 
   # Dry run to see what would be created
   gt bootstrap --town gastown-next --dry-run
@@ -64,7 +62,7 @@ func init() {
 	bootstrapCmd.Flags().StringSliceVar(&bootstrapRigs, "rig", nil,
 		`Rig to register as "name:prefix:git_url" (repeatable)`)
 	bootstrapCmd.Flags().StringSliceVar(&bootstrapAgents, "agent", nil,
-		`Agent to create as "rig:role:name" (repeatable)`)
+		`[testing only] Pre-create agent bead as "rig:role:name" (normally created by controller)`)
 	bootstrapCmd.Flags().BoolVar(&bootstrapDryRun, "dry-run", false, "Show what would be created")
 	bootstrapCmd.Flags().BoolVar(&bootstrapForce, "force", false, "Overwrite existing beads")
 	_ = bootstrapCmd.MarkFlagRequired("town")
@@ -350,8 +348,15 @@ func bootstrapAgentBeads(bd *beads.Beads, stats *bootstrapStats) error {
 			return fmt.Errorf("creating agent bead %s: %w", agentID, err)
 		}
 
-		// Add required labels for controller detection
-		for _, label := range []string{"gt:agent", "execution_target:k8s"} {
+		// Add required labels for controller detection + structured metadata
+		labels := []string{
+			"gt:agent",
+			"execution_target:k8s",
+			"rig:" + rigName,
+			"role:" + role,
+			"agent:" + name,
+		}
+		for _, label := range labels {
 			if addErr := bd.AddLabel(agentID, label); addErr != nil {
 				fmt.Printf("  %s Could not add label %s to %s: %v\n",
 					style.Warning.Render("!"), label, agentID, addErr)
