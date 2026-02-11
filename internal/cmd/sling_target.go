@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -19,13 +20,22 @@ func resolveTargetAgent(target string) (agentID string, pane string, hookRoot st
 	// Convert session name to agent ID format (this doesn't require tmux)
 	agentID = sessionToAgentID(sessionName)
 
-	// Get the pane for that session
+	// Check if this agent uses a non-local backend (Coop, K8s).
+	// If so, skip tmux pane/workdir lookups — the caller handles empty pane
+	// gracefully (sling.go falls back to "agent will discover work via gt prime"),
+	// and ResolveHookDir falls back to townRoot when hookRoot is empty.
+	backend := terminal.ResolveBackend(agentID)
+	if _, isTmux := backend.(*terminal.TmuxBackend); !isTmux {
+		// Non-local agent (Coop or K8s) — no tmux pane or workdir available
+		return agentID, "", "", nil
+	}
+
+	// Local tmux agent — get pane and working directory
 	pane, err = getSessionPane(sessionName)
 	if err != nil {
 		return "", "", "", fmt.Errorf("getting pane for %s: %w", sessionName, err)
 	}
 
-	// Get the target's working directory for hook storage
 	t := tmux.NewTmux()
 	hookRoot, err = t.GetPaneWorkDir(sessionName)
 	if err != nil {

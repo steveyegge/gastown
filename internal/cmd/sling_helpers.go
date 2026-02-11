@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -410,6 +411,35 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
 	t := tmux.NewTmux()
 	return t.NudgePane(pane, prompt)
+}
+
+// nudgeViaBackend attempts to nudge a non-tmux agent (Coop/K8s) via the Backend interface.
+// Returns true if the nudge was sent successfully.
+func nudgeViaBackend(agentID, beadID, subject, args string) bool {
+	backend := terminal.ResolveBackend(agentID)
+	if _, isTmux := backend.(*terminal.TmuxBackend); isTmux {
+		return false // Local tmux — caller should use pane-based nudge
+	}
+
+	// Build the same prompt as injectStartPrompt
+	var prompt string
+	if args != "" {
+		if subject != "" {
+			prompt = fmt.Sprintf("Work slung: %s (%s). Args: %s. Start working now - use these args to guide your execution.", beadID, subject, args)
+		} else {
+			prompt = fmt.Sprintf("Work slung: %s. Args: %s. Start working now - use these args to guide your execution.", beadID, args)
+		}
+	} else if subject != "" {
+		prompt = fmt.Sprintf("Work slung: %s (%s). Start working on it now - no questions, just begin.", beadID, subject)
+	} else {
+		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `gt hook` to see the hook, then begin.", beadID)
+	}
+
+	// Use "claude" as the session name — matches CoopBackend.AddSession convention
+	if err := backend.NudgeSession("claude", prompt); err != nil {
+		return false
+	}
+	return true
 }
 
 // getSessionFromPane extracts session name from a pane target.

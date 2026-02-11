@@ -846,7 +846,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	} else if freshlySpawned {
 		// Fresh polecat already got StartupNudge from SessionManager.Start()
 	} else if targetPane == "" {
-		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+		// No tmux pane — try nudging via backend (Coop/K8s) before giving up
+		if nudgeViaBackend(targetAgent, beadID, slingSubject, slingArgs) {
+			fmt.Printf("%s Start prompt sent (via backend)\n", style.Bold.Render("▶"))
+		} else {
+			fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+		}
 	} else {
 		// Ensure agent is ready before nudging (prevents race condition where
 		// message arrives before Claude has fully started - see issue #115)
