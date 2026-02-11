@@ -195,6 +195,35 @@ func (a *AgentIdentity) Address() string {
 	}
 }
 
+// BeadID returns the K8s pod name / bead ID format for this identity.
+// This matches the format used by the controller when creating agent pods
+// and their corresponding beads: gt-<rig>-<role>-<name>.
+// Examples:
+//   - mayor → "gt-town-mayor-hq" (uses fixed convention)
+//   - deacon → "hq-deacon"
+//   - witness → "gt-gastown-witness"  (no name suffix for singletons)
+//   - refinery → "gt-gastown-refinery"
+//   - crew → "gt-gastown-crew-dave"
+//   - polecat → "gt-gastown-polecat-furiosa"
+func (a *AgentIdentity) BeadID() string {
+	switch a.Role {
+	case RoleMayor:
+		return "gt-town-mayor-hq"
+	case RoleDeacon:
+		return "hq-deacon"
+	case RoleWitness:
+		return fmt.Sprintf("gt-%s-witness", a.Rig)
+	case RoleRefinery:
+		return fmt.Sprintf("gt-%s-refinery", a.Rig)
+	case RoleCrew:
+		return fmt.Sprintf("gt-%s-crew-%s", a.Rig, a.Name)
+	case RolePolecat:
+		return fmt.Sprintf("gt-%s-polecat-%s", a.Rig, a.Name)
+	default:
+		return ""
+	}
+}
+
 // GTRole returns the GT_ROLE environment variable format.
 // This is the same as Address() for most roles.
 func (a *AgentIdentity) GTRole() string {

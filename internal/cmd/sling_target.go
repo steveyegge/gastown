@@ -45,15 +45,17 @@ func resolveTargetAgent(target string) (agentID string, pane string, hookRoot st
 	return agentID, pane, hookRoot, nil
 }
 
-// sessionToAgentID converts a session name to agent ID format.
+// sessionToAgentID converts a session name to bead ID format.
 // Uses session.ParseSessionName for consistent parsing across the codebase.
+// Returns the BeadID format (gt-<rig>-<role>-<name>) which matches the
+// bead IDs created by the controller for K8s agent pods.
 func sessionToAgentID(sessionName string) string {
 	identity, err := session.ParseSessionName(sessionName)
 	if err != nil {
 		// Fallback for unparseable sessions
 		return sessionName
 	}
-	return identity.Address()
+	return identity.BeadID()
 }
 
 // resolveBackendForSession resolves the Backend for a tmux session name.

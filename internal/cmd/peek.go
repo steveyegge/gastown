@@ -61,16 +61,19 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
-	// Try remote backend first (K8s-hosted agents via Coop or SSH).
-	// This works for any target format (bead ID, rig/polecat, role shortcuts).
-	backend := terminal.ResolveBackend(address)
-	switch backend.(type) {
-	case *terminal.CoopBackend, *terminal.SSHBackend:
-		// Remote pod: session is always named "claude"
-		return peekViaBackend(backend, "claude", lines)
+	// Convert address to bead ID format for remote backend lookup.
+	// ParseAddress handles rig/name, rig/crew/name, and role shortnames.
+	identity, err := session.ParseAddress(address)
+	if err == nil {
+		beadID := identity.BeadID()
+		backend := terminal.ResolveBackend(beadID)
+		switch backend.(type) {
+		case *terminal.CoopBackend, *terminal.SSHBackend:
+			return peekViaBackend(backend, "claude", lines)
+		}
 	}
 
-	// Resolve session name from address
+	// Resolve session name from address for local tmux lookup
 	var sessionName string
 	switch address {
 	case "mayor":
@@ -80,16 +83,20 @@ func runPeek(cmd *cobra.Command, args []string) error {
 	case "boot":
 		sessionName = "gt-boot"
 	default:
-		// Standard rig/polecat or rig/crew/name format
-		rigName, polecatName, err := parseAddress(address)
-		if err != nil {
-			return err
-		}
-		if strings.HasPrefix(polecatName, "crew/") {
-			crewName := strings.TrimPrefix(polecatName, "crew/")
-			sessionName = session.CrewSessionName(rigName, crewName)
+		if identity != nil {
+			sessionName = identity.SessionName()
 		} else {
-			sessionName = fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+			// Fallback for unparseable addresses
+			rigName, polecatName, parseErr := parseAddress(address)
+			if parseErr != nil {
+				return parseErr
+			}
+			if strings.HasPrefix(polecatName, "crew/") {
+				crewName := strings.TrimPrefix(polecatName, "crew/")
+				sessionName = session.CrewSessionName(rigName, crewName)
+			} else {
+				sessionName = fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+			}
 		}
 	}
 
