@@ -33,6 +33,7 @@ type tmuxOps interface {
 	SetAutoRespawnHook(session string) error
 	AcceptBypassPermissionsWarning(session string) error
 	SendKeysRaw(session, keys string) error
+	NudgeSession(session, message string) error
 	GetSessionInfo(name string) (*tmux.SessionInfo, error)
 }
 
@@ -159,13 +160,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	// Run unified startup bootstrap fallback for no-hook/no-prompt runtimes.
-	if realTmux, ok := t.(*tmux.Tmux); ok {
-		plan := runtime.GetStartupBootstrapPlan("deacon", runtimeConfig)
-		if plan.SendPromptNudge || plan.RunPrimeFallback {
-			runtime.SleepForReadyDelay(runtimeConfig)
-			_ = runtime.RunStartupBootstrap(realTmux, sessionID, "deacon", initialPrompt, runtimeConfig)
-		}
+	// Run unified startup bootstrap fallback for runtime configs that need nudges.
+	plan := runtime.GetStartupBootstrapPlan("deacon", runtimeConfig)
+	if plan.SendPromptNudge || plan.RunPrimeFallback {
+		runtime.SleepForReadyDelay(runtimeConfig)
+		_ = runtime.RunStartupBootstrap(t, sessionID, "deacon", initialPrompt, runtimeConfig)
 	}
 
 	time.Sleep(constants.ShutdownNotifyDelay)

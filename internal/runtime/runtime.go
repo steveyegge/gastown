@@ -11,8 +11,11 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/templates/commands"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+type startupNudger interface {
+	NudgeSession(session, message string) error
+}
 
 // EnsureSettingsForRole provisions all agent-specific configuration for a role.
 // settingsDir is where provider settings (e.g., .claude/settings.json) are installed.
@@ -104,7 +107,7 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 }
 
 // RunStartupFallback sends the startup fallback commands via tmux.
-func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.RuntimeConfig) error {
+func RunStartupFallback(t startupNudger, sessionID, role string, rc *config.RuntimeConfig) error {
 	commands := StartupFallbackCommands(role, rc)
 	for _, cmd := range commands {
 		if err := t.NudgeSession(sessionID, cmd); err != nil {
@@ -129,7 +132,7 @@ type StartupBootstrapPlan struct {
 func GetStartupBootstrapPlan(role string, rc *config.RuntimeConfig) *StartupBootstrapPlan {
 	info := GetStartupFallbackInfo(rc)
 	return &StartupBootstrapPlan{
-		SendPromptNudge: info.SendBeaconNudge,
+		SendPromptNudge:  info.SendBeaconNudge,
 		RunPrimeFallback: len(StartupFallbackCommands(role, rc)) > 0,
 	}
 }
@@ -137,7 +140,7 @@ func GetStartupBootstrapPlan(role string, rc *config.RuntimeConfig) *StartupBoot
 // RunStartupBootstrap executes the canonical startup bootstrap path.
 // It handles prompt delivery fallback for no-prompt runtimes and non-hook
 // gt prime fallback commands.
-func RunStartupBootstrap(t *tmux.Tmux, sessionID, role, startupPrompt string, rc *config.RuntimeConfig) error {
+func RunStartupBootstrap(t startupNudger, sessionID, role, startupPrompt string, rc *config.RuntimeConfig) error {
 	plan := GetStartupBootstrapPlan(role, rc)
 	if plan.SendPromptNudge && startupPrompt != "" {
 		if err := t.NudgeSession(sessionID, startupPrompt); err != nil {
