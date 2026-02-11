@@ -1,12 +1,14 @@
 package doltserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // SyncOptions controls the behavior of SyncDatabases.
@@ -198,17 +200,23 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 		return 0, nil // not initialized — nothing to purge
 	}
 
-	// Build bd purge command
+	// Build bd purge command with timeout to prevent one slow DB from stalling sync.
 	args := []string{"purge", "--json"}
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
 
-	cmd := exec.Command("bd", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
 	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return 0, fmt.Errorf("bd purge for %s: timed out after 60s (possible lock contention)", dbName)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("bd purge for %s: %w (%s)", dbName, err, strings.TrimSpace(string(output)))
 	}
