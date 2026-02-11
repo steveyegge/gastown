@@ -878,9 +878,21 @@ func (b *Beads) Stats() (string, error) {
 	return string(out), nil
 }
 
+// IsDaemonMode returns true when a remote daemon is handling all storage
+// operations, so local filesystem checks (.beads/ directory, redirect files,
+// custom type sentinels) should be skipped. The bd subprocess already routes
+// to the daemon via BD_DAEMON_HOST, so gastown wrapper functions don't need
+// to do pre-flight filesystem validation.
+func IsDaemonMode() bool {
+	return os.Getenv("BD_DAEMON_HOST") != ""
+}
+
 // IsBeadsRepo checks if the working directory is a beads repository.
 // ZFC: Check file existence directly instead of parsing bd errors.
 func (b *Beads) IsBeadsRepo() bool {
+	if IsDaemonMode() {
+		return true // Trust daemon — no local .beads/ required
+	}
 	beadsDir := ResolveBeadsDir(b.workDir)
 	info, err := os.Stat(beadsDir)
 	return err == nil && info.IsDir()

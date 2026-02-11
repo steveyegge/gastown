@@ -193,23 +193,54 @@ func ParseAgentFields(description string) *AgentFields {
 // where the bead may be routed to a different database than the one this wrapper
 // is connected to.
 func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
-	// Resolve where this bead will actually be written (handles multi-repo routing)
-	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	// In daemon mode, skip local filesystem pre-flight checks.
+	// The bd subprocess routes to the daemon via BD_DAEMON_HOST, which
+	// handles routing and custom types on the server side.
+	var targetDir string
+	if !IsDaemonMode() {
+		// Resolve where this bead will actually be written (handles multi-repo routing)
+		targetDir = ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
 
-	// Ensure target database has custom types configured
-	// This is cached (sentinel file + in-memory) so repeated calls are fast
-	if err := EnsureCustomTypes(targetDir); err != nil {
-		return nil, fmt.Errorf("prepare target for agent bead %s: %w", id, err)
+		// Ensure target database has custom types configured
+		// This is cached (sentinel file + in-memory) so repeated calls are fast
+		if err := EnsureCustomTypes(targetDir); err != nil {
+			return nil, fmt.Errorf("prepare target for agent bead %s: %w", id, err)
+		}
 	}
 
 	description := FormatAgentDescription(title, fields)
+
+	// Build labels list. Always include gt:agent, plus structured labels
+	// (rig, role, agent) so the K8s controller can extract them without
+	// relying on fragile ID parsing. See bd-puds.8.
+	labels := "gt:agent"
+	if fields != nil {
+		if fields.Rig != "" {
+			labels += ",rig:" + fields.Rig
+		}
+		if fields.RoleType != "" {
+			labels += ",role:" + fields.RoleType
+		}
+	}
+	// Extract agent name from ID: last segment after prefix-rig-role-
+	// e.g., "gt-gastown-polecat-nux" → "nux"
+	if fields != nil && fields.Rig != "" && fields.RoleType != "" {
+		prefix := strings.SplitN(id, "-", 2)[0] // "gt"
+		agentPrefix := prefix + "-" + fields.Rig + "-" + fields.RoleType + "-"
+		if strings.HasPrefix(id, agentPrefix) {
+			agentName := id[len(agentPrefix):]
+			if agentName != "" {
+				labels += ",agent:" + agentName
+			}
+		}
+	}
 
 	args := []string{"create", "--json",
 		"--id=" + id,
 		"--title=" + title,
 		"--description=" + description,
 		"--type=agent",
-		"--labels=gt:agent",
+		"--labels=" + labels,
 		"--pinned", // Agent beads must be pinned for AttachMolecule (fix: bd-3q6.5-1)
 	}
 	if NeedsForceForID(id) {
@@ -237,9 +268,14 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Set the hook slot if specified (this is the authoritative storage)
 	// This fixes the slot inconsistency bug where bead status is 'hooked' but
 	// agent's hook slot is empty. See mi-619.
-	// Must run from targetDir since that's where the agent bead was created
+	// Must run from targetDir since that's where the agent bead was created.
+	// In daemon mode, use workDir — the subprocess routes via BD_DAEMON_HOST.
 	if fields != nil && fields.HookBead != "" {
-		if err := runSlotSet(targetDir, id, "hook", fields.HookBead); err != nil {
+		slotDir := targetDir
+		if slotDir == "" {
+			slotDir = b.workDir
+		}
+		if err := runSlotSet(slotDir, id, "hook", fields.HookBead); err != nil {
 			// Non-fatal: warn but continue - description text has the backup
 			fmt.Printf("Warning: could not set hook slot: %v\n", err)
 		}
@@ -276,8 +312,12 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, err
 	}
 
-	// Resolve where this bead lives (for slot operations)
-	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	// Resolve where this bead lives (for slot operations).
+	// In daemon mode, skip — the subprocess routes via BD_DAEMON_HOST.
+	var targetDir string
+	if !IsDaemonMode() {
+		targetDir = ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	}
 
 	// The bead already exists (should be closed from previous polecat lifecycle)
 	// Reopen it and update its fields
@@ -302,16 +342,38 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
 	}
 
-	// Note: role slot no longer set - role definitions are config-based
+	// Ensure structured labels exist on reopened beads (may be missing from older agent beads).
+	// The controller uses these to set GT_ROLE correctly. See bd-puds.8.
+	if fields != nil {
+		if fields.Rig != "" {
+			_ = b.AddLabel(id, "rig:"+fields.Rig)
+		}
+		if fields.RoleType != "" {
+			_ = b.AddLabel(id, "role:"+fields.RoleType)
+		}
+		// Extract agent name from ID
+		if fields.Rig != "" && fields.RoleType != "" {
+			prefix := strings.SplitN(id, "-", 2)[0]
+			agentPrefix := prefix + "-" + fields.Rig + "-" + fields.RoleType + "-"
+			if strings.HasPrefix(id, agentPrefix) {
+				if agentName := id[len(agentPrefix):]; agentName != "" {
+					_ = b.AddLabel(id, "agent:"+agentName)
+				}
+			}
+		}
+	}
 
-	// Clear any existing hook slot (handles stale state from previous lifecycle)
-	// Must run from targetDir since that's where the agent bead lives
-	_ = runSlotClear(targetDir, id, "hook")
+	// Clear any existing hook slot (handles stale state from previous lifecycle).
+	// In daemon mode, use workDir — the subprocess routes via BD_DAEMON_HOST.
+	slotDir := targetDir
+	if slotDir == "" {
+		slotDir = b.workDir
+	}
+	_ = runSlotClear(slotDir, id, "hook")
 
 	// Set the hook slot if specified
-	// Must run from targetDir since that's where the agent bead lives
 	if fields != nil && fields.HookBead != "" {
-		if err := runSlotSet(targetDir, id, "hook", fields.HookBead); err != nil {
+		if err := runSlotSet(slotDir, id, "hook", fields.HookBead); err != nil {
 			// Non-fatal: warn but continue - description text has the backup
 			fmt.Printf("Warning: could not set hook slot: %v\n", err)
 		}
