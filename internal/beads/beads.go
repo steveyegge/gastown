@@ -14,6 +14,7 @@ import (
 	yaml "go.yaml.in/yaml/v2"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/state"
 )
 
 // Common errors
@@ -261,7 +262,11 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		hasDaemonHost := os.Getenv("BD_DAEMON_HOST") != ""
 		hasDaemonToken := os.Getenv("BD_DAEMON_TOKEN") != ""
 		if !hasDaemonHost || !hasDaemonToken {
+			// Try workspace-level config first, then global fallback.
 			host, token := readDaemonConfig(beadsDir)
+			if host == "" {
+				host, token = readGlobalDaemonConfig()
+			}
 			if host != "" && !hasDaemonHost {
 				cmd.Env = append(cmd.Env, "BD_DAEMON_HOST="+host)
 			}
@@ -342,6 +347,47 @@ func readDaemonConfig(beadsDir string) (host, token string) {
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		return "", ""
+	}
+	var config yaml.MapSlice
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return "", ""
+	}
+	for _, item := range config {
+		switch item.Key {
+		case "daemon-host":
+			if s, ok := item.Value.(string); ok {
+				host = s
+			}
+		case "daemon-token":
+			if s, ok := item.Value.(string); ok {
+				token = s
+			}
+		}
+	}
+	return host, token
+}
+
+// readGlobalDaemonConfig reads daemon-host and daemon-token from global config.
+// Checks multiple locations in order:
+//  1. ~/.config/gastown/daemon.yaml (gastown-specific config)
+//  2. ~/.beads/config.yaml (user-level beads config)
+//
+// Returns empty strings if no config is found.
+// This is the fallback when workspace-level .beads/config.yaml doesn't have daemon config.
+func readGlobalDaemonConfig() (host, token string) {
+	// Try gastown-specific config first
+	configPath := state.DaemonConfigPath()
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path from state package
+	if err != nil {
+		// Fallback: try ~/.beads/config.yaml (user-level beads config)
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return "", ""
+		}
+		data, err = os.ReadFile(filepath.Join(home, ".beads", "config.yaml")) //nolint:gosec // G304: path is constructed internally
+		if err != nil {
+			return "", ""
+		}
 	}
 	var config yaml.MapSlice
 	if err := yaml.Unmarshal(data, &config); err != nil {

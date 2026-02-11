@@ -533,6 +533,9 @@ func runRigList(cmd *cobra.Command, args []string) error {
 
 	// Check if connected to remote daemon — if so, list from rig beads.
 	daemonHost, _, _, _ := readDaemonConfig(townRoot)
+	if daemonHost == "" {
+		daemonHost, _, _, _ = readGlobalDaemonConfig()
+	}
 	if daemonHost != "" {
 		return runRigListDaemon(townRoot)
 	}

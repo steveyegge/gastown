@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	yaml "go.yaml.in/yaml/v2"
 
+	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -127,6 +128,65 @@ func readDaemonConfig(townRoot string) (daemonHost, daemonToken, configPath stri
 	return daemonHost, daemonToken, configPath, nil
 }
 
+// GlobalDaemonConfig holds the parsed global daemon configuration.
+type GlobalDaemonConfig struct {
+	DaemonHost string
+	DaemonToken string
+	TownName    string
+	ConfigPath  string
+}
+
+// readGlobalDaemonConfig reads daemon-host, daemon-token, and town-name from the global config.
+// Returns empty strings if the file doesn't exist.
+func readGlobalDaemonConfig() (daemonHost, daemonToken, configPath string, err error) {
+	cfg, err := readGlobalDaemonConfigFull()
+	if err != nil {
+		return "", "", cfg.ConfigPath, err
+	}
+	return cfg.DaemonHost, cfg.DaemonToken, cfg.ConfigPath, nil
+}
+
+// readGlobalDaemonConfigFull reads the full global daemon config including town-name.
+func readGlobalDaemonConfigFull() (*GlobalDaemonConfig, error) {
+	cfg := &GlobalDaemonConfig{ConfigPath: state.DaemonConfigPath()}
+
+	data, readErr := os.ReadFile(cfg.ConfigPath)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return cfg, nil
+		}
+		return cfg, fmt.Errorf("reading global config: %w", readErr)
+	}
+
+	if len(data) == 0 {
+		return cfg, nil
+	}
+
+	var config yaml.MapSlice
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return cfg, fmt.Errorf("parsing global config: %w", err)
+	}
+
+	for _, item := range config {
+		switch item.Key {
+		case "daemon-host":
+			if v, ok := item.Value.(string); ok {
+				cfg.DaemonHost = v
+			}
+		case "daemon-token":
+			if v, ok := item.Value.(string); ok {
+				cfg.DaemonToken = v
+			}
+		case "town-name":
+			if v, ok := item.Value.(string); ok {
+				cfg.TownName = v
+			}
+		}
+	}
+
+	return cfg, nil
+}
+
 // maskToken returns a display-safe representation of a token.
 func maskToken(token string) string {
 	if token == "" {
@@ -139,15 +199,25 @@ func maskToken(token string) string {
 }
 
 // runConnectStatus shows the current remote daemon connection info.
+// Works both inside and outside a workspace directory.
 func runConnectStatus(cmd *cobra.Command, args []string) error {
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("finding workspace root: %w", err)
+	var daemonHost, daemonToken, configPath string
+
+	// Try workspace-level config first.
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		daemonHost, daemonToken, configPath, err = readDaemonConfig(townRoot)
+		if err != nil {
+			return err
+		}
 	}
 
-	daemonHost, daemonToken, configPath, err := readDaemonConfig(townRoot)
-	if err != nil {
-		return err
+	// Fall back to global config if workspace config has no daemon.
+	if daemonHost == "" {
+		var err error
+		daemonHost, daemonToken, configPath, err = readGlobalDaemonConfig()
+		if err != nil {
+			return err
+		}
 	}
 
 	if daemonHost == "" {

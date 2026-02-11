@@ -173,12 +173,55 @@ func GetTownName(townRoot string) (string, error) {
 
 // GetTownNameFromCwd locates the town root from the current working directory
 // and returns the town name from its configuration.
+// Falls back to the global daemon config if not in a workspace.
 func GetTownNameFromCwd() (string, error) {
-	townRoot, err := FindFromCwdOrError()
+	// Try workspace first.
+	townRoot, err := FindFromCwd()
+	if err == nil && townRoot != "" {
+		return GetTownName(townRoot)
+	}
+
+	// Fall back to global daemon config.
+	name, err := GetTownNameFromGlobalConfig()
+	if err == nil && name != "" {
+		return name, nil
+	}
+
+	return "", ErrNotFound
+}
+
+// GetTownNameFromGlobalConfig reads the town name from the global daemon config
+// at ~/.config/gastown/daemon.yaml. This allows commands to determine the town
+// name without being in a workspace directory.
+func GetTownNameFromGlobalConfig() (string, error) {
+	configPath := globalDaemonConfigPath()
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return "", err
 	}
-	return GetTownName(townRoot)
+
+	// Simple line-based parsing for "town-name: value".
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "town-name:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "town-name:"))
+			if value != "" {
+				return value, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("town-name not found in %s", configPath)
+}
+
+// globalDaemonConfigPath returns the path to the global daemon config.
+// Duplicates state.DaemonConfigPath() to avoid circular imports.
+func globalDaemonConfigPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "gastown", "daemon.yaml")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "gastown", "daemon.yaml")
 }
 
 // MustGetTownName returns the town name or panics if it cannot be loaded.

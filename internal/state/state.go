@@ -59,6 +59,13 @@ func StatePath() string {
 	return filepath.Join(StateDir(), "state.json")
 }
 
+// DaemonConfigPath returns the path to the global daemon config.
+// Uses ~/.config/gastown/daemon.yaml (XDG-compliant).
+// This allows gt connect to work without being in a workspace directory.
+func DaemonConfigPath() string {
+	return filepath.Join(ConfigDir(), "daemon.yaml")
+}
+
 // IsEnabled checks if Gas Town is globally enabled.
 // Priority: env override > state file > default (false)
 func IsEnabled() bool {

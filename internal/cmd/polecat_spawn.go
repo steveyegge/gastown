@@ -621,15 +621,13 @@ func spawnPolecatForK8sCMD(townRoot, rigName string, r *rig.Rig, opts SlingSpawn
 	fmt.Printf("Allocated polecat: %s (K8s)\n", polecatName)
 
 	// Create or reopen agent bead with spawning state and hook_bead set atomically.
-	// In K8s mode, use the town root (which has daemon connection via .beads/config.yaml)
-	// instead of the rig's local mayor/rig path (which may not exist).
+	// Always use townRoot for the beads client — it has daemon connection via
+	// .beads/config.yaml. Using the rig's local .beads/ would bypass the daemon
+	// and hit a stale local SQLite (missing columns like auto_close).
+	// The daemon handles prefix-based routing to the correct database.
 	prefix := beads.GetPrefixForRig(townRoot, rigName)
 	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
-	rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
-	if _, err := os.Stat(rigBeadsPath); os.IsNotExist(err) {
-		rigBeadsPath = townRoot
-	}
-	beadsClient := beads.New(rigBeadsPath)
+	beadsClient := beads.New(townRoot)
 	_, err := beadsClient.CreateOrReopenAgentBead(agentBeadID, agentBeadID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        rigName,
