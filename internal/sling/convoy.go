@@ -6,16 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // IsTrackedByConvoy checks if an issue is already being tracked by a convoy.
 // Returns the convoy ID if tracked, empty string otherwise.
 func IsTrackedByConvoy(beadID, townRoot string) string {
-	depCmd := exec.Command("bd", "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
+	depCmd := bdcmd.Command( "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
 	depCmd.Dir = townRoot
 	out, err := depCmd.Output()
 	if err != nil {
@@ -67,7 +67,7 @@ func CreateAutoConvoy(beadID, beadTitle, assignee, townRoot string, opts ConvoyO
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
+	createCmd := bdcmd.Command( createArgs...)
 	createCmd.Dir = townRoot
 	createCmd.Stderr = os.Stderr
 	if err := createCmd.Run(); err != nil {
@@ -76,7 +76,7 @@ func CreateAutoConvoy(beadID, beadTitle, assignee, townRoot string, opts ConvoyO
 
 	trackBeadID := FormatTrackBeadID(beadID, townRoot)
 	depArgs := []string{"dep", "add", convoyID, trackBeadID, "--type=tracks"}
-	depCmd := exec.Command("bd", depArgs...)
+	depCmd := bdcmd.Command( depArgs...)
 	depCmd.Dir = townRoot
 	depCmd.Stderr = os.Stderr
 	if err := depCmd.Run(); err != nil {
@@ -89,7 +89,7 @@ func CreateAutoConvoy(beadID, beadTitle, assignee, townRoot string, opts ConvoyO
 // AddToConvoy adds a bead to an existing convoy.
 func AddToConvoy(convoyID, beadID, townRoot string) error {
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
+	showCmd := bdcmd.Command( showArgs...)
 	showCmd.Dir = townRoot
 	out, err := showCmd.Output()
 	if err != nil {
@@ -112,7 +112,7 @@ func AddToConvoy(convoyID, beadID, townRoot string) error {
 
 	if convoy.Status == "closed" {
 		reopenArgs := []string{"update", convoyID, "--status=open"}
-		reopenCmd := exec.Command("bd", reopenArgs...)
+		reopenCmd := bdcmd.Command( reopenArgs...)
 		reopenCmd.Dir = townRoot
 		if err := reopenCmd.Run(); err != nil {
 			return fmt.Errorf("couldn't reopen convoy: %w", err)
@@ -121,7 +121,7 @@ func AddToConvoy(convoyID, beadID, townRoot string) error {
 
 	trackBeadID := FormatTrackBeadID(beadID, townRoot)
 	depArgs := []string{"dep", "add", convoyID, trackBeadID, "--type=tracks"}
-	depCmd := exec.Command("bd", depArgs...)
+	depCmd := bdcmd.Command( depArgs...)
 	depCmd.Dir = townRoot
 	depCmd.Stderr = os.Stderr
 	if err := depCmd.Run(); err != nil {

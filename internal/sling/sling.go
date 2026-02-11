@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -697,7 +698,8 @@ func storeMetadata(opts SlingOptions, beadID, attachedMoleculeID string, out io.
 	}
 }
 
-// newBDCommand creates an exec.Command for "bd" with the given args.
+// newBDCommand creates an exec.Cmd for "bd" with the given args.
+// Uses bdcmd.Command for proper daemon env propagation.
 func newBDCommand(args ...string) *exec.Cmd {
-	return exec.Command("bd", args...)
+	return bdcmd.Command(args...)
 }

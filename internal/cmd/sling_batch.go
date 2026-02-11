@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -152,7 +152,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 
 		// Hook the bead (or wisp compound if formula was applied)
-		hookCmd := exec.Command("bd", "update", beadToHook, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd := bdcmd.Command( "update", beadToHook, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {

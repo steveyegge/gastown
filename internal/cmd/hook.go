@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
+
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
@@ -279,7 +281,7 @@ func runHook(_ *cobra.Command, args []string) error {
 					if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 						closeArgs = append(closeArgs, "--session="+sessionID)
 					}
-					closeCmd := exec.Command("bd", closeArgs...)
+					closeCmd := bdcmd.Command( closeArgs...)
 					closeCmd.Stderr = os.Stderr
 					if err := closeCmd.Run(); err != nil {
 						return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
@@ -353,7 +355,7 @@ func runHook(_ *cobra.Command, args []string) error {
 // doHook performs the actual hook operation and logs the event.
 // It uses the bd CLI for discovery-based bead routing.
 func doHook(beadID, agentID string) error {
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd := bdcmd.Command( "update", beadID, "--status=hooked", "--assignee="+agentID)
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)

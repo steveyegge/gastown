@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
@@ -157,7 +158,7 @@ func storeOjJobIDInBead(beadID, ojJobID string) error {
 		return nil
 	}
 
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -180,7 +181,7 @@ func storeOjJobIDInBead(beadID, ojJobID string) error {
 	fields.OjJobID = ojJobID
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -199,7 +200,7 @@ func releasePolecatName(mgr *polecat.Manager, name string) {
 
 // getBeadInstructions reads the instructions from a bead for passing to OJ.
 func getBeadInstructions(beadID string) string {
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return ""
@@ -271,7 +272,7 @@ func parseRunbookVersion(content string) string {
 
 // GetBeadBase reads the base branch from a bead, defaulting to "main".
 func GetBeadBase(beadID string) string {
-	showCmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	showCmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return "main"

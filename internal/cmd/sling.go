@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -491,7 +491,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 
 		// Unhook the bead from old owner (set status back to open)
-		unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
+		unhookCmd := bdcmd.Command( "update", beadID, "--status=open", "--assignee=")
 		unhookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, "")
 		if err := unhookCmd.Run(); err != nil {
 			fmt.Printf("%s Could not unhook bead from old owner: %v\n", style.Dim.Render("Warning:"), err)
@@ -685,7 +685,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	skipVerify := os.Getenv("GT_TEST_SKIP_HOOK_VERIFY") != "" // For tests with stub bd
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd := bdcmd.Command( "update", beadID, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Dir = hookDir
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {

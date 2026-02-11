@@ -3,16 +3,16 @@ package sling
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // VerifyBeadExists checks that the bead exists using bd show.
 // Uses bd's native prefix-based routing via routes.jsonl.
 func VerifyBeadExists(beadID, townRoot string) error {
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = townRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -26,7 +26,7 @@ func VerifyBeadExists(beadID, townRoot string) error {
 
 // GetBeadInfo returns status and assignee for a bead.
 func GetBeadInfo(beadID, townRoot string) (*BeadInfo, error) {
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = townRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -47,11 +47,11 @@ func GetBeadInfo(beadID, townRoot string) (*BeadInfo, error) {
 
 // VerifyFormulaExists checks that the formula exists using bd formula show.
 func VerifyFormulaExists(formulaName string) error {
-	cmd := exec.Command("bd", "formula", "show", formulaName, "--allow-stale")
+	cmd := bdcmd.Command( "formula", "show", formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
-	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	cmd = bdcmd.Command( "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -97,7 +97,7 @@ func CountHookedBeadsForAgent(townRoot, agentID string) int {
 
 // GetBeadInstructions reads the instructions (title) from a bead.
 func GetBeadInstructions(beadID string) string {
-	cmd := exec.Command("bd", "show", beadID, "--json")
+	cmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -111,7 +111,7 @@ func GetBeadInstructions(beadID string) string {
 
 // GetBeadBase reads the base branch from a bead, defaulting to "main".
 func GetBeadBase(beadID string) string {
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	out, err := cmd.Output()
 	if err != nil {
 		return "main"

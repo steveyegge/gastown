@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
@@ -53,13 +54,13 @@ func trimJSONForError(jsonOutput []byte) string {
 // Uses --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	cmd := exec.Command("bd", "formula", "show", formulaName, "--allow-stale")
+	cmd := bdcmd.Command( "formula", "show", formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	cmd = bdcmd.Command( "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -190,7 +191,7 @@ func runSlingFormula(args []string) error {
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
 	cookArgs := []string{"cook", formulaName}
-	cookCmd := exec.Command("bd", cookArgs...)
+	cookCmd := bdcmd.Command( cookArgs...)
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking formula: %w", err)
@@ -204,7 +205,7 @@ func runSlingFormula(args []string) error {
 	}
 	wispArgs = append(wispArgs, "--json")
 
-	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd := bdcmd.Command( wispArgs...)
 	wispCmd.Stderr = os.Stderr // Show wisp errors to user
 	wispOut, err := wispCmd.Output()
 	if err != nil {
@@ -242,7 +243,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd := bdcmd.Command( "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Dir = beads.ResolveHookDir(townRoot, wispRootID, "")
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {

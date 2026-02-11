@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -21,7 +21,7 @@ func HookBead(beadID, targetAgent, townRoot, hookWorkDir string, out io.Writer) 
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd := bdcmd.Command("update", beadID, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Dir = hookDir
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {

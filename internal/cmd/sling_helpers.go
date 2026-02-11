@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
+
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -28,7 +30,7 @@ type beadInfo struct {
 // Uses --allow-stale to find beads when database is out of sync.
 // For existence checks, stale data is acceptable - we just need to know it exists.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
@@ -48,7 +50,7 @@ func verifyBeadExists(beadID string) error {
 // Uses bd's native prefix-based routing via routes.jsonl.
 // Uses --allow-stale for consistency with verifyBeadExists.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
 		cmd.Dir = townRoot
@@ -75,7 +77,7 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables no-tmux mode where agents discover args via gt prime / bd show.
 func storeArgsInBead(beadID, args string) error {
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	showCmd := bdcmd.Command( "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -114,7 +116,7 @@ func storeArgsInBead(beadID, args string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -131,7 +133,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -160,7 +162,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -184,7 +186,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Get the bead to preserve existing description content
-		showCmd := exec.Command("bd", "show", beadID, "--json")
+		showCmd := bdcmd.Command( "show", beadID, "--json")
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -220,7 +222,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -238,7 +240,7 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -267,7 +269,7 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -284,7 +286,7 @@ func storeMergeStrategyInBead(beadID, strategy string) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -313,7 +315,7 @@ func storeMergeStrategyInBead(beadID, strategy string) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -330,7 +332,7 @@ func storeConvoyOwnedInBead(beadID string, owned bool) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -359,7 +361,7 @@ func storeConvoyOwnedInBead(beadID string, owned bool) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -675,7 +677,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 1: Cook the formula (ensures proto exists)
 	if !skipCook {
-		cookCmd := exec.Command("bd", "cook", formulaName)
+		cookCmd := bdcmd.Command( "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
@@ -691,7 +693,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		wispArgs = append(wispArgs, "--var", variable)
 	}
 	wispArgs = append(wispArgs, "--json")
-	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd := bdcmd.Command( wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 	wispCmd.Stderr = os.Stderr
@@ -708,7 +710,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 3: Bond wisp to original bead (creates compound)
 	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
-	bondCmd := exec.Command("bd", bondArgs...)
+	bondCmd := bdcmd.Command( bondArgs...)
 	bondCmd.Dir = formulaWorkDir
 	bondCmd.Stderr = os.Stderr
 	bondOut, err := bondCmd.Output()
@@ -733,7 +735,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 // CookFormula cooks a formula to ensure its proto exists.
 // This is useful for batch mode where we cook once before processing multiple beads.
 func CookFormula(formulaName, workDir string) error {
-	cookCmd := exec.Command("bd", "cook", formulaName)
+	cookCmd := bdcmd.Command( "cook", formulaName)
 	cookCmd.Dir = workDir
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()

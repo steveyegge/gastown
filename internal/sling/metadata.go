@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -165,7 +165,7 @@ func StoreOjJobIDInBead(beadID, ojJobID string) error {
 
 // fetchBeadIssue fetches a bead issue by ID.
 func fetchBeadIssue(beadID string) (*beads.Issue, error) {
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdcmd.Command( "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("fetching bead: %w", err)
@@ -188,7 +188,7 @@ func fetchBeadIssue(beadID string) (*beads.Issue, error) {
 
 // updateBeadDescription updates a bead's description field.
 func updateBeadDescription(beadID, newDesc string) error {
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdcmd.Command( "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)

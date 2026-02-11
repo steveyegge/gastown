@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
@@ -588,7 +588,7 @@ func (m *SessionManager) StopAll(force bool) error {
 // This must be called before starting a session to avoid CPU spin loops
 // from agents retrying work on invalid issues.
 func (m *SessionManager) validateIssue(issueID, workDir string) error {
-	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
+	cmd := bdcmd.Command( "show", issueID, "--json") //nolint:gosec
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {
@@ -612,7 +612,7 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 
 // hookIssue pins an issue to a polecat's hook using bd update.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
-	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
+	cmd := bdcmd.Command( "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
 	cmd.Dir = workDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -17,7 +17,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 1: Cook the formula (ensures proto exists)
 	if !skipCook {
-		cookCmd := exec.Command("bd", "cook", formulaName)
+		cookCmd := bdcmd.Command( "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
@@ -33,7 +33,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		wispArgs = append(wispArgs, "--var", variable)
 	}
 	wispArgs = append(wispArgs, "--json")
-	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd := bdcmd.Command( wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 	wispCmd.Stderr = os.Stderr
@@ -49,7 +49,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 3: Bond wisp to original bead (creates compound)
 	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
-	bondCmd := exec.Command("bd", bondArgs...)
+	bondCmd := bdcmd.Command( bondArgs...)
 	bondCmd.Dir = formulaWorkDir
 	bondCmd.Stderr = os.Stderr
 	bondOut, err := bondCmd.Output()
@@ -72,7 +72,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 // CookFormula cooks a formula to ensure its proto exists.
 func CookFormula(formulaName, workDir string) error {
-	cookCmd := exec.Command("bd", "cook", formulaName)
+	cookCmd := bdcmd.Command( "cook", formulaName)
 	cookCmd.Dir = workDir
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()
