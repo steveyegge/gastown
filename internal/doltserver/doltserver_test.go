@@ -1,11 +1,14 @@
 package doltserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -273,9 +276,50 @@ func TestFindLocalDoltDB(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+
+		// Capture stderr to verify warning is emitted
+		origStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stderr = w
+
 		result := findLocalDoltDB(beadsDir)
+
+		w.Close()
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		os.Stderr = origStderr
+
 		// Should return the first alphabetically (beads_gt < beads_old)
 		expected := filepath.Join(doltParent, "beads_gt")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+		// Verify warning was emitted
+		if !strings.Contains(buf.String(), "multiple dolt databases found") {
+			t.Errorf("expected multi-candidate warning on stderr, got %q", buf.String())
+		}
+	})
+
+	t.Run("symlink to directory with dolt database", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		doltParent := filepath.Join(beadsDir, "dolt")
+		if err := os.MkdirAll(doltParent, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create the real database directory outside the dolt parent
+		realDB := filepath.Join(beadsDir, "real_beads_hq")
+		if err := os.MkdirAll(filepath.Join(realDB, ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Symlink it into dolt/
+		if err := os.Symlink(realDB, filepath.Join(doltParent, "beads_hq")); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(doltParent, "beads_hq")
 		if result != expected {
 			t.Errorf("got %q, want %q", result, expected)
 		}

@@ -640,8 +640,9 @@ type Migration struct {
 // beads_gt) that have changed across versions. Scanning avoids hardcoding
 // assumptions about the naming scheme.
 //
-// If multiple databases are found, returns an error-like empty string and logs
-// a warning — the caller should not silently pick one.
+// If multiple databases are found, returns the first one alphabetically
+// (os.ReadDir sorts by name) and logs a warning to stderr. In practice each
+// .beads/dolt/ should contain exactly one database.
 func findLocalDoltDB(beadsDir string) string {
 	doltParent := filepath.Join(beadsDir, "dolt")
 	entries, err := os.ReadDir(doltParent)
