@@ -241,35 +241,25 @@ func TestRigSettingsSet(t *testing.T) {
 		}
 	})
 
-	t.Run("type inference for bool", func(t *testing.T) {
+	t.Run("type inference for bool falls back to string", func(t *testing.T) {
 		townRoot, rigName := setupTestRigForSettings(t)
 		rigPath := filepath.Join(townRoot, rigName)
 
-		// Test bool parsing with a field that can accept bool
-		// Since Agent is a string field, we can't test bool directly on it
-		// Instead, test that parseValue correctly identifies "true" and "false" as bools
-		// by checking the parseValue function behavior
-		// Note: The actual setting will fail because Agent field is string, not bool
-		// This tests that type inference works, but struct validation prevents invalid types
+		// parseValue("true") infers bool, but Agent is a string field.
+		// setNestedValue should fall back to storing it as the string "true".
 		cmd := rigSettingsSetCmd
 		err := runRigSettingsSet(cmd, []string{rigName, "agent", "true"})
-		// This should fail because we can't set a bool to a string field
-		// The error is expected and shows that type inference works but struct validation prevents it
 		if err != nil {
-			// Expected: type inference parses "true" as bool, but struct field is string
-			if !strings.Contains(err.Error(), "cannot unmarshal bool") {
-				t.Logf("Expected error about bool/string mismatch, got: %v", err)
-			}
-		} else {
-			// If it succeeded, "true" was stored as string (valid agent name)
-			settingsPath := filepath.Join(rigPath, "settings", "config.json")
-			settings, err := config.LoadRigSettings(settingsPath)
-			if err != nil {
-				t.Fatalf("load settings: %v", err)
-			}
-			if settings.Agent != "true" {
-				t.Errorf("Agent = %q, want %q", settings.Agent, "true")
-			}
+			t.Fatalf("runRigSettingsSet error: %v", err)
+		}
+
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if settings.Agent != "true" {
+			t.Errorf("Agent = %q, want %q", settings.Agent, "true")
 		}
 	})
 
@@ -295,34 +285,70 @@ func TestRigSettingsSet(t *testing.T) {
 		}
 	})
 
-	t.Run("type inference for JSON", func(t *testing.T) {
+	t.Run("number on string field falls back to string", func(t *testing.T) {
 		townRoot, rigName := setupTestRigForSettings(t)
 		rigPath := filepath.Join(townRoot, rigName)
 
-		// Set a JSON array value
-		// Note: role_agents expects string values, not arrays, so this will fail validation
-		// This tests that JSON parsing works, but struct validation prevents invalid types
+		// parseValue("42") infers int, but Agent is a string field.
+		// setNestedValue should fall back to storing it as the string "42".
+		cmd := rigSettingsSetCmd
+		err := runRigSettingsSet(cmd, []string{rigName, "agent", "42"})
+		if err != nil {
+			t.Fatalf("runRigSettingsSet error: %v", err)
+		}
+
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if settings.Agent != "42" {
+			t.Errorf("Agent = %q, want %q", settings.Agent, "42")
+		}
+	})
+
+	t.Run("false on string field falls back to string", func(t *testing.T) {
+		townRoot, rigName := setupTestRigForSettings(t)
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// parseValue("false") infers bool, but role_agents values are strings.
+		cmd := rigSettingsSetCmd
+		err := runRigSettingsSet(cmd, []string{rigName, "role_agents.witness", "false"})
+		if err != nil {
+			t.Fatalf("runRigSettingsSet error: %v", err)
+		}
+
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if settings.RoleAgents["witness"] != "false" {
+			t.Errorf("RoleAgents[witness] = %q, want %q", settings.RoleAgents["witness"], "false")
+		}
+	})
+
+	t.Run("type inference for JSON array falls back to string", func(t *testing.T) {
+		townRoot, rigName := setupTestRigForSettings(t)
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// parseValue parses this as a JSON array, but role_agents values are strings.
+		// setNestedValue should fall back to storing the raw string representation.
 		cmd := rigSettingsSetCmd
 		err := runRigSettingsSet(cmd, []string{rigName, "role_agents.witness", `["gemini", "claude"]`})
-		// This should fail because we can't set an array to a string field
-		// The error is expected and shows that JSON parsing works but struct validation prevents it
 		if err != nil {
-			// Expected: JSON parsing works, but struct field is string, not array
-			if !strings.Contains(err.Error(), "cannot unmarshal array") {
-				t.Logf("Expected error about array/string mismatch, got: %v", err)
-			}
-		} else {
-			// If it succeeded somehow, verify the file is valid JSON
-			settingsPath := filepath.Join(rigPath, "settings", "config.json")
-			data, err := os.ReadFile(settingsPath)
-			if err != nil {
-				t.Fatalf("read settings: %v", err)
-			}
-			var m map[string]interface{}
-			if err := json.Unmarshal(data, &m); err != nil {
-				t.Fatalf("parse JSON: %v", err)
-			}
-			t.Logf("JSON after setting array: %v", m)
+			t.Fatalf("runRigSettingsSet error: %v", err)
+		}
+
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings, err := config.LoadRigSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		// The fallback uses fmt.Sprintf("%v", value) which for a slice gives "[gemini claude]"
+		// This is the expected behavior when a JSON array is set on a string field
+		if settings.RoleAgents["witness"] == "" {
+			t.Error("RoleAgents[witness] should not be empty after set")
 		}
 	})
 

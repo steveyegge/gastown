@@ -882,6 +882,22 @@ func isValidBeadsPrefix(prefix string) bool {
 	return beadsPrefixRegexp.MatchString(prefix)
 }
 
+// isStandardBeadHash checks if a string looks like a standard 5-char bead hash.
+// Regular bead IDs use a 5-character base32-encoded hash (e.g., "mawit", "z0ixd").
+// This distinguishes regular issues from agent beads (suffix like "witness")
+// and merge requests (10-char suffix).
+func isStandardBeadHash(s string) bool {
+	if len(s) != 5 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 // bdDatabaseExists checks if a beads directory has an initialized database.
 // Checks for Dolt metadata (the standard backend).
 func bdDatabaseExists(beadsDir string) bool {
@@ -925,11 +941,13 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 	}
 
 	// Fallback: try to detect prefix from existing issues in issues.jsonl
-	// Look for the first issue ID pattern like "gt-abc123"
+	// Parse multiple lines and only consider regular issue IDs (5-char hashes)
+	// to avoid misdetecting agent beads like "gt-demo-witness" as prefix "gt-demo".
 	beadsDir := filepath.Dir(configPath)
 	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
 	if issuesData, err := os.ReadFile(issuesPath); err == nil {
 		issuesLines := strings.Split(string(issuesData), "\n")
+		var detectedPrefix string
 		for _, line := range issuesLines {
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -940,17 +958,31 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 				start := idx + 6 // len(`"id":"`)
 				if end := strings.Index(line[start:], `"`); end != -1 {
 					issueID := line[start : start+end]
-					// Extract prefix (everything before the last hyphen-hash part)
+					// Only consider IDs with a 5-char alphanumeric hash suffix
+					// (standard bead format). This filters out agent beads
+					// (gt-demo-witness), merge requests (gt-mr-abc1234567),
+					// and other multi-hyphen IDs.
 					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
+						hash := issueID[dashIdx+1:]
+						if !isStandardBeadHash(hash) {
+							continue
+						}
 						prefix := issueID[:dashIdx]
-						// Handle prefixes like "gt" (from "gt-abc") - return without trailing hyphen
-						if isValidBeadsPrefix(prefix) {
-							return prefix
+						if !isValidBeadsPrefix(prefix) {
+							continue
+						}
+						if detectedPrefix == "" {
+							detectedPrefix = prefix
+						} else if detectedPrefix != prefix {
+							// Conflicting prefixes — can't determine reliably
+							return ""
 						}
 					}
 				}
 			}
-			break // Only check first issue
+		}
+		if detectedPrefix != "" {
+			return detectedPrefix
 		}
 	}
 

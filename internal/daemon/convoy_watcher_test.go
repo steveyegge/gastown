@@ -58,32 +58,39 @@ func TestBdActivityEventParsing(t *testing.T) {
 }
 
 func TestIsCloseEvent(t *testing.T) {
-	closedEvent := bdActivityEvent{
-		Type:      "status",
-		IssueID:   "gt-test",
-		NewStatus: "closed",
+	tests := []struct {
+		name string
+		event bdActivityEvent
+		want  bool
+	}{
+		{
+			name:  "closed status event",
+			event: bdActivityEvent{Type: "status", IssueID: "gt-test", NewStatus: "closed"},
+			want:  true,
+		},
+		{
+			name:  "in_progress status event",
+			event: bdActivityEvent{Type: "status", IssueID: "gt-test", NewStatus: "in_progress"},
+			want:  false,
+		},
+		{
+			name:  "create event",
+			event: bdActivityEvent{Type: "create", IssueID: "gt-test"},
+			want:  false,
+		},
+		{
+			name:  "empty event",
+			event: bdActivityEvent{},
+			want:  false,
+		},
 	}
 
-	if closedEvent.Type != "status" || closedEvent.NewStatus != "closed" {
-		t.Error("should detect close event")
-	}
-
-	inProgressEvent := bdActivityEvent{
-		Type:      "status",
-		IssueID:   "gt-test",
-		NewStatus: "in_progress",
-	}
-
-	if inProgressEvent.Type == "status" && inProgressEvent.NewStatus == "closed" {
-		t.Error("should not detect in_progress as close")
-	}
-
-	createEvent := bdActivityEvent{
-		Type:    "create",
-		IssueID: "gt-test",
-	}
-
-	if createEvent.Type == "status" && createEvent.NewStatus == "closed" {
-		t.Error("should not detect create as close")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.event.isCloseEvent()
+			if got != tc.want {
+				t.Errorf("isCloseEvent() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

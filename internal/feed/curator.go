@@ -190,6 +190,13 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 func (c *Curator) readRecentFeedEvents(window time.Duration) []FeedEvent {
 	feedPath := filepath.Join(c.townRoot, FeedFile)
 
+	// Acquire shared read lock to prevent partial reads during concurrent writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.RLock(); err != nil {
+		return nil
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
 	data, err := os.ReadFile(feedPath)
 	if err != nil {
 		return nil

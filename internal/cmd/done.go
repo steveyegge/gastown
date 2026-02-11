@@ -634,8 +634,12 @@ notifyWitness:
 	}
 
 	// Log done event (townlog and activity feed)
-	_ = LogDone(townRoot, sender, issueID)
-	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
+	if err := LogDone(townRoot, sender, issueID); err != nil {
+		style.PrintWarning("could not log done event: %v", err)
+	}
+	if err := events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch)); err != nil {
+		style.PrintWarning("could not log feed event: %v", err)
+	}
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
@@ -756,6 +760,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 
 		if envRole == "" || envRig == "" {
 			// Can't determine role, skip agent state update
+			style.PrintWarning("could not determine role for agent state update (env: GT_ROLE=%q, GT_RIG=%q)", envRole, envRig)
 			return
 		}
 
@@ -782,6 +787,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 
 	agentBeadID := getAgentBeadID(ctx)
 	if agentBeadID == "" {
+		style.PrintWarning("no agent bead ID found for %s/%s, skipping agent state update", ctx.Rig, ctx.Polecat)
 		return
 	}
 
@@ -812,6 +818,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		// Agent bead doesn't exist - nothing to clear, that's fine
 		// This happens for polecats created before identity beads existed,
 		// or if the agent bead was deleted by another process
+		style.PrintWarning("agent bead %s not found, skipping state update: %v", agentBeadID, err)
 		return
 	}
 

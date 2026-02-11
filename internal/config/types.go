@@ -1014,7 +1014,8 @@ type EscalationConfig struct {
 
 	// MaxReescalations limits how many times an escalation can be
 	// re-escalated. Default: 2 (low→medium→high, then stops)
-	MaxReescalations int `json:"max_reescalations,omitempty"`
+	// Pointer type to distinguish "not configured" (nil) from explicit 0.
+	MaxReescalations *int `json:"max_reescalations,omitempty"`
 }
 
 // EscalationContacts contains contact information for external notification channels.
@@ -1065,6 +1066,9 @@ func NextSeverity(severity string) string {
 	}
 }
 
+// intPtr returns a pointer to the given int value.
+func intPtr(v int) *int { return &v }
+
 // NewEscalationConfig creates a new EscalationConfig with sensible defaults.
 func NewEscalationConfig() *EscalationConfig {
 	return &EscalationConfig{
@@ -1078,6 +1082,6 @@ func NewEscalationConfig() *EscalationConfig {
 		},
 		Contacts:         EscalationContacts{},
 		StaleThreshold:   "4h",
-		MaxReescalations: 2,
+		MaxReescalations: intPtr(2),
 	}
 }

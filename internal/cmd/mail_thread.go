@@ -80,9 +80,6 @@ func runMailThread(cmd *cobra.Command, args []string) error {
 }
 
 func runMailReply(cmd *cobra.Command, args []string) error {
-	if mailReplyMessage == "" {
-		return fmt.Errorf("required flag \"message\" or \"body\" not set")
-	}
 	msgID := args[0]
 
 	// Get message body from positional arg or flag (positional takes precedence)

@@ -752,7 +752,7 @@ func (f *LiveConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
 			continue
 		}
 
-		// Determine agent type: refinery is its own permanent role, others are polecats (ephemeral)
+		// Determine agent type: refinery is its own permanent role, others are polecats (ephemeral sessions)
 		agentType := "polecat"
 		if workerName == "refinery" {
 			agentType = "refinery"

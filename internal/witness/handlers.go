@@ -1056,6 +1056,24 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
 				}
 				result.Zombies = append(result.Zombies, zombie)
+			} else {
+				// Agent is alive. Check if the hooked bead has been closed.
+				// A polecat that closed its bead but didn't run gt done is
+				// occupying a slot without doing work. See: gt-h1l6i
+				_, hookBead := getAgentBeadState(workDir, agentBeadID)
+				if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
+					zombie := ZombieResult{
+						PolecatName: polecatName,
+						AgentState:  "bead-closed-still-running",
+						HookBead:    hookBead,
+						Action:      "nuke-bead-closed-polecat",
+					}
+					if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+						zombie.Error = err
+						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
+					}
+					result.Zombies = append(result.Zombies, zombie)
+				}
 			}
 			continue // Either handled or not a zombie
 		}
@@ -1207,6 +1225,25 @@ func getAgentBeadState(workDir, agentBeadID string) (agentState, hookBead string
 	}
 
 	return issues[0].AgentState, issues[0].HookBead
+}
+
+// getBeadStatus returns the status of a bead (e.g., "open", "closed", "hooked").
+// Returns empty string if the bead doesn't exist or can't be queried.
+func getBeadStatus(workDir, beadID string) string {
+	if beadID == "" {
+		return ""
+	}
+	output, err := util.ExecWithOutput(workDir, "bd", "show", beadID, "--json")
+	if err != nil || output == "" {
+		return ""
+	}
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+	return issues[0].Status
 }
 
 // DoneIntent represents a parsed done-intent label from an agent bead.

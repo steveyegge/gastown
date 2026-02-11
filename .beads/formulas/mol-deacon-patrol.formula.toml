@@ -303,8 +303,9 @@ Note which convoys were fed for observability:
 ```
 
 **If no idle dogs available:**
-Log warning and continue - the convoy will be detected again next cycle.
-Dog pool maintenance step ensures dogs are available.
+Pool dispatch auto-creates a dog when the pool is under capacity (max 4).
+If the pool is at capacity, log warning and continue - the convoy will be
+detected again next cycle when a dog becomes idle.
 
 **Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
 

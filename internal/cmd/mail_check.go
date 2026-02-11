@@ -23,7 +23,7 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	workDir, err := findMailWorkDir()
 	if err != nil {
 		if mailCheckInject {
-			// Inject mode: always exit 0, silent on error
+			fmt.Fprintf(os.Stderr, "gt mail check: workspace lookup failed: %v\n", err)
 			return nil
 		}
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
@@ -34,6 +34,7 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	mailbox, err := router.GetMailbox(address)
 	if err != nil {
 		if mailCheckInject {
+			fmt.Fprintf(os.Stderr, "gt mail check: mailbox error for %s: %v\n", address, err)
 			return nil
 		}
 		return fmt.Errorf("getting mailbox: %w", err)
@@ -43,6 +44,7 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	_, unread, err := mailbox.Count()
 	if err != nil {
 		if mailCheckInject {
+			fmt.Fprintf(os.Stderr, "gt mail check: count error for %s: %v\n", address, err)
 			return nil
 		}
 		return fmt.Errorf("counting messages: %w", err)
@@ -65,7 +67,11 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	// as background context that does NOT interrupt the current task.
 	if mailCheckInject {
 		if unread > 0 {
-			messages, _ := mailbox.ListUnread()
+			messages, listErr := mailbox.ListUnread()
+			if listErr != nil {
+				fmt.Fprintf(os.Stderr, "gt mail check: could not list unread for %s: %v\n", address, listErr)
+				return nil
+			}
 
 			// Separate urgent from non-urgent
 			var urgent, normal []*mail.Message

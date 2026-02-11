@@ -128,7 +128,7 @@ git worktree add -b polecat/<name>-<timestamp> polecats/<name>
 ```
 
 Crew workspaces (`crew/<name>/`) are full git clones for human developers who need
-independent repos. Polecats are ephemeral and benefit from worktree efficiency.
+independent repos. Polecat sessions are ephemeral and benefit from worktree efficiency.
 
 ## Storage Layer: Dolt SQL Server
 

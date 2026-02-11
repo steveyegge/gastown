@@ -341,19 +341,6 @@ func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalRes
 	}
 }
 
-// GetCurrentStepBackoff retrieves backoff config from the current step.
-// This is used by patrol agents to get the timeout for await-signal.
-func GetCurrentStepBackoff(workDir string) (*beads.BackoffConfig, error) {
-	b := beads.New(workDir)
-
-	// Get current agent's hook
-	// This would need to query the pinned/hooked bead and parse its description
-	// for backoff configuration. For now, return nil (use defaults).
-	_ = b
-
-	return nil, nil
-}
-
 // parseIntSimple parses a string to int without using strconv.
 func parseIntSimple(s string) (int, error) {
 	if s == "" {

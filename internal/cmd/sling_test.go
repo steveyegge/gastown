@@ -1128,6 +1128,35 @@ func TestCheckCrossRigGuard(t *testing.T) {
 	}
 }
 
+func TestIsHookedAgentDead_UnknownFormat(t *testing.T) {
+	// Unknown assignee formats should return false (conservative)
+	tests := []struct {
+		name     string
+		assignee string
+	}{
+		{"empty", ""},
+		{"unknown_single", "foobar"},
+		{"four_parts", "a/b/c/d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if isHookedAgentDead(tt.assignee) {
+				t.Errorf("isHookedAgentDead(%q) = true, want false (unknown format)", tt.assignee)
+			}
+		})
+	}
+}
+
+func TestIsHookedAgentDead_NoTmuxSession(t *testing.T) {
+	// For a known assignee format where no tmux session exists,
+	// isHookedAgentDead should return true (session is dead).
+	// Use a highly unlikely polecat name to ensure no collision with real sessions.
+	result := isHookedAgentDead("nonexistent_rig_xyz/polecats/ghost_polecat_999")
+	// This might return true (no session) or false (tmux not available).
+	// We just verify it doesn't panic.
+	_ = result
+}
+
 func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
 	townRoot := t.TempDir()
 

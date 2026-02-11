@@ -27,8 +27,16 @@ type DetachOptions struct {
 }
 
 // DetachMoleculeWithAudit removes molecule attachment from a pinned bead and logs the operation.
+// Uses advisory file locking to prevent concurrent read-modify-write races.
 // Returns the updated issue.
 func (b *Beads) DetachMoleculeWithAudit(pinnedBeadID string, opts DetachOptions) (*Issue, error) {
+	// Acquire per-bead lock to serialize concurrent attach/detach operations
+	unlock, err := b.lockBead(pinnedBeadID)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring bead lock: %w", err)
+	}
+	defer unlock()
+
 	// Fetch the pinned bead first to get previous state
 	issue, err := b.Show(pinnedBeadID)
 	if err != nil {

@@ -131,20 +131,3 @@ func (f *Formula) ValidateTemplateVariables() error {
 	return nil
 }
 
-// GetUndefinedVariables returns a list of template variables used in the formula
-// that are not defined in the [vars] section. Useful for tooling and diagnostics.
-func (f *Formula) GetUndefinedVariables() []string {
-	if err := f.ValidateTemplateVariables(); err != nil {
-		// Parse the error to extract variable names
-		// This is a bit hacky but works for now
-		errStr := err.Error()
-		if idx := strings.Index(errStr, ": "); idx > 0 {
-			varsStr := errStr[idx+2:]
-			if endIdx := strings.Index(varsStr, " ("); endIdx > 0 {
-				varsStr = varsStr[:endIdx]
-			}
-			return strings.Split(varsStr, ", ")
-		}
-	}
-	return nil
-}

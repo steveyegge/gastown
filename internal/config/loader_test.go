@@ -3166,7 +3166,7 @@ func TestEscalationConfigRoundTrip(t *testing.T) {
 			HumanSMS:   "+15551234567",
 		},
 		StaleThreshold:   "2h",
-		MaxReescalations: 3,
+		MaxReescalations: intPtr(3),
 	}
 
 	if err := SaveEscalationConfig(path, original); err != nil {
@@ -3187,8 +3187,8 @@ func TestEscalationConfigRoundTrip(t *testing.T) {
 	if loaded.StaleThreshold != original.StaleThreshold {
 		t.Errorf("StaleThreshold = %q, want %q", loaded.StaleThreshold, original.StaleThreshold)
 	}
-	if loaded.MaxReescalations != original.MaxReescalations {
-		t.Errorf("MaxReescalations = %d, want %d", loaded.MaxReescalations, original.MaxReescalations)
+	if *loaded.MaxReescalations != *original.MaxReescalations {
+		t.Errorf("MaxReescalations = %d, want %d", *loaded.MaxReescalations, *original.MaxReescalations)
 	}
 	if loaded.Contacts.HumanEmail != original.Contacts.HumanEmail {
 		t.Errorf("Contacts.HumanEmail = %q, want %q", loaded.Contacts.HumanEmail, original.Contacts.HumanEmail)
@@ -3226,8 +3226,8 @@ func TestEscalationConfigDefaults(t *testing.T) {
 	if cfg.StaleThreshold != "4h" {
 		t.Errorf("StaleThreshold = %q, want %q", cfg.StaleThreshold, "4h")
 	}
-	if cfg.MaxReescalations != 2 {
-		t.Errorf("MaxReescalations = %d, want %d", cfg.MaxReescalations, 2)
+	if cfg.MaxReescalations == nil || *cfg.MaxReescalations != 2 {
+		t.Errorf("MaxReescalations = %v, want %d", cfg.MaxReescalations, 2)
 	}
 
 	// Check default routes
@@ -3307,7 +3307,7 @@ func TestEscalationConfigValidation(t *testing.T) {
 			config: &EscalationConfig{
 				Type:             "escalation",
 				Version:          1,
-				MaxReescalations: -1,
+				MaxReescalations: intPtr(-1),
 			},
 			wantErr: true,
 			errMsg:  "max_reescalations must be non-negative",
@@ -3423,23 +3423,30 @@ func TestEscalationConfigGetMaxReescalations(t *testing.T) {
 		expected int
 	}{
 		{
-			name:     "default when zero",
+			name:     "default when nil",
 			config:   &EscalationConfig{},
 			expected: 2,
 		},
 		{
+			name: "explicit zero means never re-escalate",
+			config: &EscalationConfig{
+				MaxReescalations: intPtr(0),
+			},
+			expected: 0,
+		},
+		{
 			name: "custom value",
 			config: &EscalationConfig{
-				MaxReescalations: 5,
+				MaxReescalations: intPtr(5),
 			},
 			expected: 5,
 		},
 		{
-			name: "default when negative (should not happen after validation)",
+			name: "negative returns negative (should not happen after validation)",
 			config: &EscalationConfig{
-				MaxReescalations: -1,
+				MaxReescalations: intPtr(-1),
 			},
-			expected: 2,
+			expected: -1,
 		},
 	}
 

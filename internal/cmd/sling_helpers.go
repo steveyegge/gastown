@@ -1,16 +1,18 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -532,4 +534,100 @@ func CookFormula(formulaName, workDir, townRoot string) error {
 	cookCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()
+}
+
+// isHookedAgentDead checks if the tmux session for a hooked assignee is dead.
+// Used by sling to auto-force re-sling when the previous agent has no active session (gt-pqf9x).
+// Returns true if the session is confirmed dead. Returns false if alive or if we
+// can't determine liveness (conservative: don't auto-force on uncertainty).
+func isHookedAgentDead(assignee string) bool {
+	sessionName, _ := assigneeToSessionName(assignee)
+	if sessionName == "" {
+		return false // Unknown format, can't determine
+	}
+	t := tmux.NewTmux()
+	alive, err := t.HasSession(sessionName)
+	if err != nil {
+		return false // tmux not available or error, be conservative
+	}
+	return !alive
+}
+
+// hookBeadWithRetry hooks a bead to a target agent with exponential backoff retry
+// and post-hook verification. This ensures the hook sticks even under Dolt concurrency.
+// See: https://github.com/steveyegge/gastown/issues/148
+func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
+	const maxRetries = 10
+	const baseBackoff = 500 * time.Millisecond
+	const maxBackoff = 30 * time.Second
+	skipVerify := os.Getenv("GT_TEST_SKIP_HOOK_VERIFY") != ""
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd.Dir = hookDir
+		hookCmd.Stderr = os.Stderr
+		if err := hookCmd.Run(); err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hooking bead after %d attempts: %w", maxRetries, err)
+		}
+
+		if skipVerify {
+			break
+		}
+
+		verifyInfo, verifyErr := getBeadInfo(beadID)
+		if verifyErr != nil {
+			lastErr = fmt.Errorf("verifying hook: %w", verifyErr)
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s Hook verification failed, retrying in %v...\n", style.Warning.Render("⚠"), backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("verifying hook after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		if verifyInfo.Status != "hooked" || verifyInfo.Assignee != targetAgent {
+			lastErr = fmt.Errorf("hook did not stick: status=%s, assignee=%s (expected hooked, %s)",
+				verifyInfo.Status, verifyInfo.Assignee, targetAgent)
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s %v, retrying in %v...\n", style.Warning.Render("⚠"), lastErr, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hook failed after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		break
+	}
+
+	return nil
+}
+
+// slingBackoff calculates exponential backoff with ±25% jitter for a given attempt (1-indexed).
+// Formula: base * 2^(attempt-1) * (1 ± 25% random), capped at max.
+func slingBackoff(attempt int, base, max time.Duration) time.Duration {
+	backoff := base
+	for i := 1; i < attempt; i++ {
+		backoff *= 2
+		if backoff > max {
+			backoff = max
+			break
+		}
+	}
+	// Apply ±25% jitter
+	jitter := 1.0 + (rand.Float64()-0.5)*0.5 // range [0.75, 1.25]
+	result := time.Duration(float64(backoff) * jitter)
+	if result > max {
+		result = max
+	}
+	return result
 }

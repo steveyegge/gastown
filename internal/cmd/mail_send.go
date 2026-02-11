@@ -109,11 +109,11 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		router := mail.NewRouter(workDir)
 		mailbox, err := router.GetMailbox(from)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠ Could not open mailbox for thread lookup: %v\n", err)
+			style.PrintWarning("could not open mailbox for thread lookup: %v", err)
 		} else {
 			original, err := mailbox.Get(mailReplyTo)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ Could not find original message %s for threading (new thread will be created)\n", mailReplyTo)
+				style.PrintWarning("could not find original message %s for threading (new thread will be created)", mailReplyTo)
 			} else {
 				msg.ThreadID = original.ThreadID
 			}

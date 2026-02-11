@@ -147,14 +147,22 @@ func LoadRoleDefinition(townRoot, rigPath, roleName string) (*RoleDefinition, er
 
 	// 2. Apply town-level overrides if present
 	townOverridePath := filepath.Join(townRoot, "roles", roleName+".toml")
-	if override, err := loadRoleOverride(townOverridePath); err == nil {
+	if override, err := loadRoleOverride(townOverridePath); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("town-level role override %s: %w", townOverridePath, err)
+		}
+	} else {
 		mergeRoleDefinition(def, override)
 	}
 
 	// 3. Apply rig-level overrides if present (only for rig-scoped roles)
 	if rigPath != "" {
 		rigOverridePath := filepath.Join(rigPath, "roles", roleName+".toml")
-		if override, err := loadRoleOverride(rigOverridePath); err == nil {
+		if override, err := loadRoleOverride(rigOverridePath); err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("rig-level role override %s: %w", rigOverridePath, err)
+			}
+		} else {
 			mergeRoleDefinition(def, override)
 		}
 	}

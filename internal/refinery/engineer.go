@@ -100,9 +100,6 @@ type Engineer struct {
 	workDir string
 	output  io.Writer    // Output destination for user-facing messages
 	router  *mail.Router // Mail router for sending protocol messages
-
-	// stopCh is used for graceful shutdown
-	stopCh chan struct{}
 }
 
 // NewEngineer creates a new Engineer for the given rig.
@@ -127,7 +124,6 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		workDir: gitDir,
 		output:  os.Stdout,
 		router:  mail.NewRouter(r.Path),
-		stopCh:  make(chan struct{}),
 	}
 }
 

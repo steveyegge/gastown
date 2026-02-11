@@ -503,19 +503,11 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 
 	case strings.Contains(sessionName, "-crew-"):
 		// gt-<rig>-crew-<name> -> <townRoot>/<rig>/crew/<name>
-		parts := strings.Split(sessionName, "-")
-		if len(parts) < 4 {
-			return "", fmt.Errorf("invalid crew session name: %s", sessionName)
+		rig, name, ok := parseCrewSessionName(sessionName)
+		if !ok {
+			return "", fmt.Errorf("cannot parse crew session name: %s", sessionName)
 		}
-		// Find the index of "crew" to split rig name (may contain dashes)
-		for i, p := range parts {
-			if p == "crew" && i > 1 && i < len(parts)-1 {
-				rig := strings.Join(parts[1:i], "-")
-				name := strings.Join(parts[i+1:], "-")
-				return fmt.Sprintf("%s/%s/crew/%s", townRoot, rig, name), nil
-			}
-		}
-		return "", fmt.Errorf("cannot parse crew session name: %s", sessionName)
+		return fmt.Sprintf("%s/%s/crew/%s", townRoot, rig, name), nil
 
 	case strings.HasSuffix(sessionName, "-witness"):
 		// gt-<rig>-witness -> <townRoot>/<rig>/witness

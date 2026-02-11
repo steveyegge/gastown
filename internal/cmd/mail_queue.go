@@ -121,7 +121,9 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 		}
 
 		// Another worker claimed it first — remove our stale labels and try next
-		_ = releaseQueueMessage(beadsDir, candidate.ID, caller)
+		if releaseErr := releaseQueueMessage(beadsDir, candidate.ID, caller); releaseErr != nil {
+			style.PrintWarning("could not release stale claim on %s: %v", candidate.ID, releaseErr)
+		}
 	}
 
 	if claimed == nil {

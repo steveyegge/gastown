@@ -44,7 +44,7 @@ var dogCmd = &cobra.Command{
 	Long: `Manage dogs - reusable workers for infrastructure and cleanup.
 
 CATS VS DOGS:
-  Polecats (cats) build features. One rig. Ephemeral (one task, then nuked).
+  Polecats (cats) build features. One rig. Ephemeral sessions (one task, then nuked).
   Dogs clean up messes. Cross-rig. Reusable (multiple tasks, eventually recycled).
 
 Dogs are managed by the Deacon for town-level work:

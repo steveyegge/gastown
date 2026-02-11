@@ -149,11 +149,17 @@ func copyFilePreserveMode(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
-	defer dstFile.Close()
 
 	// Copy contents
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
 		return fmt.Errorf("copy contents: %w", err)
+	}
+
+	// Explicitly check Close() — on many filesystems, buffered data is flushed
+	// at Close() time, so a full-disk error surfaces here, not during Write.
+	if err := dstFile.Close(); err != nil {
+		return fmt.Errorf("closing destination: %w", err)
 	}
 
 	return nil

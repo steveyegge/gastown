@@ -101,10 +101,10 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// Rig identity bead doesn't exist (legacy rig) - create it
 		fmt.Printf("  Creating rig identity bead %s...\n", rigBeadID)
-		rigBead, err = bd.CreateRigBead(rigBeadID, rigName, &beads.RigFields{
+		rigBead, err = bd.CreateRigBead(rigName, &beads.RigFields{
 			Repo:   r.GitURL,
 			Prefix: prefix,
-			State:  "active",
+			State:  beads.RigStateActive,
 		})
 		if err != nil {
 			return fmt.Errorf("creating rig identity bead: %w", err)

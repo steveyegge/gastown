@@ -39,6 +39,11 @@ type bdActivityEvent struct {
 	NewStatus string `json:"new_status,omitempty"`
 }
 
+// isCloseEvent returns true if the event represents an issue being closed.
+func (e bdActivityEvent) isCloseEvent() bool {
+	return e.Type == "status" && e.NewStatus == "closed"
+}
+
 // NewConvoyWatcher creates a new convoy watcher.
 // PATCH-006: Added gtPath and bdPath parameters.
 func NewConvoyWatcher(townRoot string, logger func(format string, args ...interface{}), gtPath, bdPath string) *ConvoyWatcher {
@@ -138,7 +143,7 @@ func (w *ConvoyWatcher) processLine(line string) {
 	}
 
 	// Only interested in status changes to closed
-	if event.Type != "status" || event.NewStatus != "closed" {
+	if !event.isCloseEvent() {
 		return
 	}
 

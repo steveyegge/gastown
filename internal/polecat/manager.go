@@ -929,6 +929,8 @@ func forceRemoveDir(dir string) error {
 // AllocateName allocates a name from the name pool.
 // Returns a pooled name (polecat-01 through polecat-50) if available,
 // otherwise returns an overflow name (rigname-N).
+// After allocation, kills any lingering tmux session for the name (gt-pqf9x)
+// to prevent "session already running" errors when reusing names from dead polecats.
 func (m *Manager) AllocateName() (string, error) {
 	// Acquire pool lock to prevent concurrent allocations from racing
 	fl, err := m.lockPool()
@@ -947,6 +949,18 @@ func (m *Manager) AllocateName() (string, error) {
 
 	if err := m.namePool.Save(); err != nil {
 		return "", fmt.Errorf("saving pool state: %w", err)
+	}
+
+	// Kill any lingering tmux session for this name (gt-pqf9x).
+	// ReconcilePool kills sessions for names without directories, but a name
+	// can be allocated after its directory was cleaned up while the tmux session
+	// lingers (race between cleanup and allocation). This extra check ensures
+	// no stale session blocks the new polecat's session creation.
+	if m.tmux != nil {
+		sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+		if alive, _ := m.tmux.HasSession(sessionName); alive {
+			_ = m.tmux.KillSessionWithProcesses(sessionName)
+		}
 	}
 
 	return name, nil

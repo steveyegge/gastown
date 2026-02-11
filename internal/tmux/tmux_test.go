@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1390,6 +1391,56 @@ func TestFindAgentPane_NonexistentSession(t *testing.T) {
 	_, err := tm.FindAgentPane("nonexistent-session-findagent-xyz")
 	if err == nil {
 		t.Error("FindAgentPane on nonexistent session should return error")
+	}
+}
+
+func TestValidateSessionName(t *testing.T) {
+	tests := []struct {
+		name    string
+		session string
+		wantErr bool
+	}{
+		{"valid alphanumeric", "gt-gastown-crew-tom", false},
+		{"valid with underscore", "hq_deacon", false},
+		{"valid simple", "test123", false},
+		{"empty string", "", true},
+		{"contains dot", "my.session", true},
+		{"contains colon", "my:session", true},
+		{"contains space", "my session", true},
+		{"contains slash", "rig/crew/tom", true},
+		{"contains single quote", "it's", true},
+		{"contains semicolon", "a;rm -rf /", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSessionName(tc.session)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateSessionName(%q) error = %v, wantErr %v", tc.session, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestNewSession_RejectsInvalidName(t *testing.T) {
+	tm := NewTmux()
+	err := tm.NewSession("invalid.name", "")
+	if err == nil {
+		t.Error("NewSession should reject session name with dots")
+	}
+	if !errors.Is(err, ErrInvalidSessionName) {
+		t.Errorf("expected ErrInvalidSessionName, got %v", err)
+	}
+}
+
+func TestEnsureSessionFresh_RejectsInvalidName(t *testing.T) {
+	tm := NewTmux()
+	err := tm.EnsureSessionFresh("has:colon", "")
+	if err == nil {
+		t.Error("EnsureSessionFresh should reject session name with colons")
+	}
+	if !errors.Is(err, ErrInvalidSessionName) {
+		t.Errorf("expected ErrInvalidSessionName, got %v", err)
 	}
 }
 

@@ -286,9 +286,24 @@ func setNestedValue(obj interface{}, keyPath string, value interface{}) error {
 		return fmt.Errorf("marshaling result: %w", err)
 	}
 
-	// Unmarshal back into the original struct
+	// Unmarshal back into the original struct.
+	// If this fails (e.g., parseValue inferred bool/number but the target field
+	// is a string), fall back to the string representation of the value.
 	if err := json.Unmarshal(data, obj); err != nil {
-		return fmt.Errorf("unmarshaling result: %w", err)
+		if _, isString := value.(string); !isString {
+			strVal := fmt.Sprintf("%v", value)
+			current[finalKey] = strVal
+			value = strVal
+			data, marshalErr := json.Marshal(m)
+			if marshalErr != nil {
+				return fmt.Errorf("marshaling result: %w", marshalErr)
+			}
+			if retryErr := json.Unmarshal(data, obj); retryErr != nil {
+				return fmt.Errorf("unmarshaling result: %w", err)
+			}
+		} else {
+			return fmt.Errorf("unmarshaling result: %w", err)
+		}
 	}
 
 	// Verify the value was actually set by marshaling back and checking.

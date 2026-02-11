@@ -1649,30 +1649,6 @@ func TestParseWispTTLKey(t *testing.T) {
 	}
 }
 
-// TestRoleBeadID tests role bead ID generation.
-func TestRoleBeadID(t *testing.T) {
-	tests := []struct {
-		roleType string
-		want     string
-	}{
-		{"mayor", "gt-mayor-role"},
-		{"deacon", "gt-deacon-role"},
-		{"witness", "gt-witness-role"},
-		{"refinery", "gt-refinery-role"},
-		{"crew", "gt-crew-role"},
-		{"polecat", "gt-polecat-role"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.roleType, func(t *testing.T) {
-			got := RoleBeadID(tt.roleType)
-			if got != tt.want {
-				t.Errorf("RoleBeadID(%q) = %q, want %q", tt.roleType, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestDelegationStruct tests the Delegation struct serialization.
 func TestDelegationStruct(t *testing.T) {
 	tests := []struct {

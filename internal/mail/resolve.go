@@ -7,6 +7,7 @@
 package mail
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -148,11 +149,11 @@ func (r *Resolver) resolveAtPatternWithVisited(address string, visited map[strin
 	// First check if this is a beads-native group (if beads available)
 	if r.beads != nil {
 		groupName := strings.TrimPrefix(address, "@")
-		issue, fields, err := r.beads.LookupGroupByName(groupName)
-		if err != nil {
+		_, fields, err := r.beads.LookupGroupByName(groupName)
+		if err != nil && !errors.Is(err, beads.ErrNotFound) {
 			return nil, err
 		}
-		if issue != nil && fields != nil {
+		if err == nil && fields != nil {
 			// Found a beads-native group - expand its members
 			return r.expandGroupMembersWithVisited(fields, visited)
 		}
@@ -177,10 +178,10 @@ func (r *Resolver) resolveByNameWithVisited(name string, visited map[string]bool
 	// Check for beads-native group
 	if r.beads != nil {
 		_, fields, err := r.beads.LookupGroupByName(name)
-		if err != nil {
+		if err != nil && !errors.Is(err, beads.ErrNotFound) {
 			return nil, err
 		}
-		if fields != nil {
+		if err == nil && fields != nil {
 			foundGroup = true
 			groupFields = fields
 		}
@@ -275,10 +276,10 @@ func (r *Resolver) resolveBeadsGroupWithVisited(name string, visited map[string]
 
 	_, fields, err := r.beads.LookupGroupByName(name)
 	if err != nil {
+		if errors.Is(err, beads.ErrNotFound) {
+			return nil, fmt.Errorf("group not found: %s", name)
+		}
 		return nil, err
-	}
-	if fields == nil {
-		return nil, fmt.Errorf("group not found: %s", name)
 	}
 
 	return r.expandGroupMembersWithVisited(fields, visited)

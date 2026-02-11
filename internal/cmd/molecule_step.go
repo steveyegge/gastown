@@ -153,7 +153,7 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 	// Step 5: Handle next action
 	switch result.Action {
 	case "continue":
-		return handleStepContinue(cwd, townRoot, workDir, readySteps[0], moleculeStepDryRun)
+		return handleStepContinue(cwd, townRoot, readySteps[0], moleculeStepDryRun)
 
 	case "parallel":
 		return handleParallelSteps(cwd, townRoot, workDir, readySteps, moleculeStepDryRun)
@@ -368,7 +368,7 @@ func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool,
 }
 
 // handleStepContinue handles continuing to the next step.
-func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun bool) error { // workDir unused but kept for signature consistency
+func handleStepContinue(cwd, townRoot string, nextStep *beads.Issue, dryRun bool) error {
 	fmt.Printf("\n%s Next step: %s\n", style.Bold.Render("→"), nextStep.ID)
 	fmt.Printf("  %s\n", nextStep.Title)
 
@@ -528,7 +528,7 @@ func handleParallelSteps(cwd, townRoot, workDir string, steps []*beads.Issue, dr
 	// Other steps can be picked up by other agents or run manually
 	if len(steps) > 0 {
 		fmt.Printf("\n%s Continuing with first parallel step: %s\n", style.Bold.Render("→"), steps[0].ID)
-		return handleStepContinue(cwd, townRoot, workDir, steps[0], dryRun)
+		return handleStepContinue(cwd, townRoot, steps[0], dryRun)
 	}
 
 	return nil

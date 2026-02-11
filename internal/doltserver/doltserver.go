@@ -1218,20 +1218,36 @@ func RecoverReadOnly(townRoot string) error {
 		return fmt.Errorf("failed to restart Dolt server: %w", err)
 	}
 
-	// Wait for server to be ready
-	time.Sleep(2 * time.Second)
+	// Verify recovery with exponential backoff (server may need time to become writable)
+	const maxAttempts = 5
+	const baseBackoff = 500 * time.Millisecond
+	const maxBackoff = 8 * time.Second
 
-	// Verify recovery
-	readOnly, err = CheckReadOnly(townRoot)
-	if err != nil {
-		return fmt.Errorf("post-restart probe failed: %w", err)
-	}
-	if readOnly {
-		return fmt.Errorf("Dolt server still read-only after restart")
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		backoff := baseBackoff
+		for i := 1; i < attempt; i++ {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+				break
+			}
+		}
+		time.Sleep(backoff)
+
+		readOnly, err = CheckReadOnly(townRoot)
+		if err != nil {
+			if attempt == maxAttempts {
+				return fmt.Errorf("post-restart probe failed after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+		if !readOnly {
+			fmt.Printf("Dolt server recovered from read-only state\n")
+			return nil
+		}
 	}
 
-	fmt.Printf("Dolt server recovered from read-only state\n")
-	return nil
+	return fmt.Errorf("Dolt server still read-only after restart (%d verification attempts)", maxAttempts)
 }
 
 // doltSQLWithRecovery executes a SQL statement with retry logic and, if retries

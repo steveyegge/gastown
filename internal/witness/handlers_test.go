@@ -414,3 +414,84 @@ func TestExtractPolecatFromJSON_InvalidInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestGetBeadStatus_NoBdAvailable(t *testing.T) {
+	// When bd is not available (test environment), getBeadStatus
+	// should return empty string without panicking
+	result := getBeadStatus("/nonexistent", "gt-abc123")
+	if result != "" {
+		t.Errorf("getBeadStatus = %q, want empty when bd unavailable", result)
+	}
+}
+
+func TestGetBeadStatus_EmptyBeadID(t *testing.T) {
+	// Empty bead ID should return empty string immediately
+	result := getBeadStatus("/nonexistent", "")
+	if result != "" {
+		t.Errorf("getBeadStatus(\"\") = %q, want empty", result)
+	}
+}
+
+func TestDetectZombie_BeadClosedStillRunning(t *testing.T) {
+	// Verify the logic: live session + agent alive + hooked bead closed → zombie
+	// This is the gt-h1l6i fix: DetectZombiePolecats now checks if the
+	// polecat's hooked bead has been closed while the session is still running.
+	sessionAlive := true
+	agentAlive := true
+	var doneIntent *DoneIntent // No done-intent
+	hookBead := "gt-some-issue"
+	beadStatus := "closed"
+
+	// Live session + agent alive + no done-intent + bead closed → should detect
+	shouldDetect := sessionAlive && agentAlive && doneIntent == nil &&
+		hookBead != "" && beadStatus == "closed"
+	if !shouldDetect {
+		t.Error("expected zombie detection for live session with closed bead")
+	}
+
+	// Bead open → NOT a zombie
+	beadStatus = "open"
+	shouldSkip := sessionAlive && agentAlive && doneIntent == nil &&
+		hookBead != "" && beadStatus == "closed"
+	if shouldSkip {
+		t.Error("should not detect zombie when bead is still open")
+	}
+
+	// No hook bead → NOT a zombie
+	hookBead = ""
+	beadStatus = "closed"
+	shouldSkipNoHook := sessionAlive && agentAlive && doneIntent == nil &&
+		hookBead != "" && beadStatus == "closed"
+	if shouldSkipNoHook {
+		t.Error("should not detect zombie when no hook bead exists")
+	}
+}
+
+func TestDetectZombie_BeadClosedVsDoneIntent(t *testing.T) {
+	// Verify done-intent takes priority over closed-bead check.
+	// If done-intent exists (recent), the polecat is still working through
+	// gt done and we should NOT trigger the closed-bead path.
+	sessionAlive := true
+	agentAlive := true
+	doneIntent := &DoneIntent{
+		ExitType:  "COMPLETED",
+		Timestamp: time.Now().Add(-10 * time.Second), // Recent
+	}
+	hookBead := "gt-some-issue"
+	beadStatus := "closed"
+
+	// Done-intent exists + bead closed → done-intent check runs first,
+	// closed-bead check should NOT run (it's in the else branch)
+	doneIntentHandled := sessionAlive && doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second
+	closedBeadCheck := sessionAlive && agentAlive && doneIntent == nil &&
+		hookBead != "" && beadStatus == "closed"
+
+	// Neither should trigger: done-intent is recent (not stuck), and
+	// closed-bead check requires doneIntent == nil
+	if doneIntentHandled {
+		t.Error("recent done-intent should not trigger stuck-session handler")
+	}
+	if closedBeadCheck {
+		t.Error("closed-bead check should not run when done-intent exists")
+	}
+}

@@ -223,6 +223,14 @@ func runReady(cmd *cobra.Command, args []string) error {
 		TownRoot: townRoot,
 	}
 
+	// Check for source errors
+	var failedSources []string
+	for _, src := range sources {
+		if src.Error != "" {
+			failedSources = append(failedSources, src.Name)
+		}
+	}
+
 	// Output
 	if readyJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -230,7 +238,19 @@ func runReady(cmd *cobra.Command, args []string) error {
 		return enc.Encode(result)
 	}
 
-	return printReadyHuman(result)
+	if err := printReadyHuman(result); err != nil {
+		return err
+	}
+
+	// Surface source errors to the user
+	if len(failedSources) > 0 {
+		if len(failedSources) == len(sources) {
+			return fmt.Errorf("all sources failed to load: %s", strings.Join(failedSources, ", "))
+		}
+		style.PrintWarning("some sources failed to load: %s (results may be incomplete)", strings.Join(failedSources, ", "))
+	}
+
+	return nil
 }
 
 func printReadyHuman(result ReadyResult) error {

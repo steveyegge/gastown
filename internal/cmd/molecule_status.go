@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -975,16 +974,6 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 	}
 
 	return nil
-}
-
-// getGitRootForMolStatus returns the git root for hook file lookup.
-func getGitRootForMolStatus() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // isTownLevelRole returns true if the agent ID is a town-level role.

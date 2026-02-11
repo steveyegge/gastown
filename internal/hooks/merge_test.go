@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -272,5 +274,60 @@ func TestLoadAllOverridesEmptyDir(t *testing.T) {
 
 	if len(overrides) != 0 {
 		t.Errorf("expected 0 overrides, got %d", len(overrides))
+	}
+}
+
+func TestLoadAllOverridesSkipsInvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// Create a valid override first
+	crew := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Bash(git push*)", Hooks: []Hook{{Type: "command", Command: "block"}}},
+		},
+	}
+	if err := SaveOverride("crew", crew); err != nil {
+		t.Fatalf("SaveOverride crew: %v", err)
+	}
+
+	// Write an invalid JSON file directly into overrides dir
+	invalidPath := filepath.Join(OverridesDir(), "polecats.json")
+	if err := os.WriteFile(invalidPath, []byte("{invalid json!!}"), 0644); err != nil {
+		t.Fatalf("writing invalid file: %v", err)
+	}
+
+	overrides, err := LoadAllOverrides()
+	if err != nil {
+		t.Fatalf("LoadAllOverrides should not return error for invalid JSON: %v", err)
+	}
+
+	// Valid override should still load
+	if _, ok := overrides["crew"]; !ok {
+		t.Error("missing 'crew' override — valid overrides should still load")
+	}
+
+	// Invalid file should be skipped (not present in map)
+	if _, ok := overrides["polecats"]; ok {
+		t.Error("invalid 'polecats' override should have been skipped")
+	}
+}
+
+func TestLoadAllOverridesReturnsReadDirError(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// Create the overrides dir as a file (not a directory) to force a ReadDir error
+	overridesDir := OverridesDir()
+	if err := os.MkdirAll(filepath.Dir(overridesDir), 0755); err != nil {
+		t.Fatalf("creating parent dir: %v", err)
+	}
+	if err := os.WriteFile(overridesDir, []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("writing file at overrides path: %v", err)
+	}
+
+	_, err := LoadAllOverrides()
+	if err == nil {
+		t.Fatal("expected error when overrides dir is not a directory")
 	}
 }

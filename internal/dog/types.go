@@ -1,6 +1,6 @@
 // Package dog manages Dogs - Deacon's helper workers for infrastructure tasks.
 // Dogs are reusable workers with multi-rig worktrees, managed by the Deacon.
-// Unlike polecats (single-rig, ephemeral), dogs handle cross-rig infrastructure work.
+// Unlike polecats (single-rig, ephemeral sessions), dogs handle cross-rig infrastructure work.
 package dog
 
 import (

@@ -146,10 +146,7 @@ func init() {
 func runHookOrStatus(cmd *cobra.Command, args []string) error {
 	// --clear flag is alias for 'gt unhook'
 	if hookClear {
-		// Pass through dry-run and force flags
-		unslingDryRun = hookDryRun
-		unslingForce = hookForce
-		return runUnsling(cmd, args)
+		return runUnslingWith(cmd, args, hookDryRun, hookForce)
 	}
 	if len(args) == 0 {
 		// No args - show status
@@ -161,10 +158,7 @@ func runHookOrStatus(cmd *cobra.Command, args []string) error {
 
 // runHookClear handles 'gt hook clear' - delegates to runUnsling
 func runHookClear(cmd *cobra.Command, args []string) error {
-	// Pass through dry-run and force flags from hookClearCmd to unsling
-	unslingDryRun = hookDryRun
-	unslingForce = hookForce
-	return runUnsling(cmd, args)
+	return runUnslingWith(cmd, args, hookDryRun, hookForce)
 }
 
 func runHook(_ *cobra.Command, args []string) error {

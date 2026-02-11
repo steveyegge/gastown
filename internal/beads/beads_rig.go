@@ -3,15 +3,37 @@ package beads
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
 
+// RigState represents the operational state of a rig.
+type RigState string
+
+const (
+	// RigStateActive means the rig is operational and accepting work.
+	RigStateActive RigState = "active"
+	// RigStateArchived means the rig is no longer in use.
+	RigStateArchived RigState = "archived"
+	// RigStateMaintenance means the rig is temporarily offline for maintenance.
+	RigStateMaintenance RigState = "maintenance"
+)
+
+// ValidRigState returns true if the given state is a recognized rig state.
+func ValidRigState(s RigState) bool {
+	switch s {
+	case RigStateActive, RigStateArchived, RigStateMaintenance:
+		return true
+	}
+	return false
+}
+
 // RigFields contains the fields specific to rig identity beads.
 type RigFields struct {
-	Repo   string // Git URL for the rig's repository
-	Prefix string // Beads prefix for this rig (e.g., "gt", "bd")
-	State  string // Operational state: active, archived, maintenance
+	Repo   string   // Git URL for the rig's repository
+	Prefix string   // Beads prefix for this rig (e.g., "gt", "bd")
+	State  RigState // Operational state: active, archived, maintenance
 }
 
 // FormatRigDescription formats the description field for a rig identity bead.
@@ -31,7 +53,7 @@ func FormatRigDescription(name string, fields *RigFields) string {
 		lines = append(lines, fmt.Sprintf("prefix: %s", fields.Prefix))
 	}
 	if fields.State != "" {
-		lines = append(lines, fmt.Sprintf("state: %s", fields.State))
+		lines = append(lines, fmt.Sprintf("state: %s", string(fields.State)))
 	}
 
 	return strings.Join(lines, "\n")
@@ -64,7 +86,7 @@ func ParseRigFields(description string) *RigFields {
 		case "prefix":
 			fields.Prefix = value
 		case "state":
-			fields.State = value
+			fields.State = RigState(value)
 		}
 	}
 
@@ -73,14 +95,23 @@ func ParseRigFields(description string) *RigFields {
 
 // CreateRigBead creates a rig identity bead for tracking rig metadata.
 // The ID format is: <prefix>-rig-<name> (e.g., gt-rig-gastown)
-// Use RigBeadID() helper to generate correct IDs.
+// The ID is constructed internally from fields.Prefix and name.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
-func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, error) {
-	description := FormatRigDescription(title, fields)
+func (b *Beads) CreateRigBead(name string, fields *RigFields) (*Issue, error) {
+	if fields != nil && fields.State != "" && !ValidRigState(fields.State) {
+		return nil, fmt.Errorf("invalid rig state %q: must be one of active, archived, maintenance", fields.State)
+	}
+
+	prefix := "gt"
+	if fields != nil && fields.Prefix != "" {
+		prefix = fields.Prefix
+	}
+	id := RigBeadIDWithPrefix(prefix, name)
+	description := FormatRigDescription(name, fields)
 
 	args := []string{"create", "--json",
 		"--id=" + id,
-		"--title=" + title,
+		"--title=" + name,
 		"--description=" + description,
 		"--labels=gt:rig",
 	}
@@ -105,6 +136,98 @@ func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, erro
 	}
 
 	return &issue, nil
+}
+
+// GetRigBead retrieves a rig bead by name.
+// Returns ErrNotFound if the rig does not exist.
+func (b *Beads) GetRigBead(name string) (*Issue, *RigFields, error) {
+	id := RigBeadID(name)
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+
+	if !HasLabel(issue, "gt:rig") {
+		return nil, nil, fmt.Errorf("bead %s is not a rig bead (missing gt:rig label)", id)
+	}
+
+	fields := ParseRigFields(issue.Description)
+	return issue, fields, nil
+}
+
+// GetRigByID retrieves a rig bead by its full ID.
+// Returns ErrNotFound if the rig does not exist.
+func (b *Beads) GetRigByID(id string) (*Issue, *RigFields, error) {
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+
+	if !HasLabel(issue, "gt:rig") {
+		return nil, nil, fmt.Errorf("bead %s is not a rig bead (missing gt:rig label)", id)
+	}
+
+	fields := ParseRigFields(issue.Description)
+	return issue, fields, nil
+}
+
+// UpdateRigBead updates the fields for a rig bead.
+func (b *Beads) UpdateRigBead(name string, fields *RigFields) (*Issue, error) {
+	issue, _, err := b.GetRigBead(name)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("rig %q not found", name)
+		}
+		return nil, err
+	}
+
+	description := FormatRigDescription(name, fields)
+
+	if err := b.Update(issue.ID, UpdateOptions{Description: &description}); err != nil {
+		return nil, err
+	}
+
+	updated, err := b.Show(issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching updated rig: %w", err)
+	}
+	return updated, nil
+}
+
+// DeleteRigBead permanently deletes a rig bead.
+func (b *Beads) DeleteRigBead(name string) error {
+	id := RigBeadID(name)
+	_, err := b.run("delete", id, "--hard", "--force")
+	return err
+}
+
+// ListRigBeads returns all rig beads.
+func (b *Beads) ListRigBeads() (map[string]*RigFields, error) {
+	out, err := b.run("list", "--label=gt:rig", "--json")
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	result := make(map[string]*RigFields, len(issues))
+	for _, issue := range issues {
+		fields := ParseRigFields(issue.Description)
+		if fields.Prefix != "" {
+			result[fields.Prefix] = fields
+		}
+	}
+
+	return result, nil
 }
 
 // RigBeadIDWithPrefix generates a rig identity bead ID using the specified prefix.

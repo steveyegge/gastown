@@ -66,7 +66,12 @@ type StaleHookScanResult struct {
 	Results     []*StaleHookResult `json:"results"`
 }
 
-// ScanStaleHooks finds hooked beads older than the threshold and optionally unhooks them.
+// ScanStaleHooks finds hooked beads with dead agents and optionally unhooks them.
+// Session liveness is checked for ALL hooked beads regardless of age (gt-pqf9x).
+// A hooked bead is considered stale if:
+//  1. The assignee's tmux session is dead (immediate unhook), OR
+//  2. The bead is older than MaxAge AND we can't determine session liveness
+//     (e.g., unknown assignee format)
 func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult, error) {
 	if cfg == nil {
 		cfg = DefaultStaleHookConfig()
@@ -85,18 +90,10 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 
 	result.TotalHooked = len(hookedBeads)
 
-	// Filter to stale ones (older than threshold)
 	threshold := time.Now().Add(-cfg.MaxAge)
 	t := tmux.NewTmux()
 
 	for _, bead := range hookedBeads {
-		// Skip if updated recently (not stale)
-		if bead.UpdatedAt.After(threshold) {
-			continue
-		}
-
-		result.StaleCount++
-
 		hookResult := &StaleHookResult{
 			BeadID:   bead.ID,
 			Title:    bead.Title,
@@ -104,14 +101,36 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 			Age:      time.Since(bead.UpdatedAt).Round(time.Minute).String(),
 		}
 
-		// Check if assignee agent is still alive
+		// Check if assignee agent is still alive (regardless of age)
+		sessionChecked := false
 		if bead.Assignee != "" {
 			sessionName := assigneeToSessionName(bead.Assignee)
 			if sessionName != "" {
 				alive, _ := t.HasSession(sessionName)
 				hookResult.AgentAlive = alive
+				sessionChecked = true
 			}
 		}
+
+		// Determine if this hook is stale:
+		// - Agent confirmed dead → stale (regardless of age)
+		// - Can't check session + older than MaxAge → stale (fallback)
+		// - Agent alive → not stale
+		isStale := false
+		if sessionChecked && !hookResult.AgentAlive {
+			// Session confirmed dead — unhook immediately regardless of age
+			isStale = true
+		} else if !sessionChecked && bead.UpdatedAt.Before(threshold) {
+			// Can't determine session liveness (unknown assignee format)
+			// Fall back to age-based check
+			isStale = true
+		}
+
+		if !isStale {
+			continue
+		}
+
+		result.StaleCount++
 
 		// If agent is dead/gone, check worktree state before unhooking
 		if !hookResult.AgentAlive {

@@ -253,7 +253,8 @@ func loadAgentRegistryFromPathLocked(path string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			loadedPaths[path] = true
+			// Don't cache non-existent paths — the file may be created later
+			// and we need to pick it up on the next load call.
 			return nil
 		}
 		return err

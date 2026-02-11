@@ -151,26 +151,37 @@ func runHooksInit(cmd *cobra.Command, args []string) error {
 
 // findCommonHooks finds hook entries common across all targets.
 // An entry is "common" if every target has the same matcher+hooks for that event type.
+// Collects candidate entries from ALL targets to compute a proper intersection.
 func findCommonHooks(targets []targetHooks) *hooks.HooksConfig {
 	if len(targets) == 0 {
 		return hooks.DefaultBase()
 	}
 
-	// Start with the first target's config as candidate base
 	result := &hooks.HooksConfig{}
 
 	for _, et := range hooks.EventTypes {
-		// Get entries from first target
-		first := targets[0].config.GetEntries(et)
-		if len(first) == 0 {
-			continue
+		// Collect unique candidate entries from ALL targets (not just the first).
+		// Using matcher+hooks as the dedup key ensures we consider every distinct
+		// entry regardless of which target introduced it.
+		type entryKey struct {
+			matcher string
+			hooks   string // serialized hooks for comparison
+		}
+		seen := make(map[entryKey]hooks.HookEntry)
+		for _, th := range targets {
+			for _, entry := range th.config.GetEntries(et) {
+				key := entryKey{matcher: entry.Matcher, hooks: hooksFingerprint(entry.Hooks)}
+				if _, ok := seen[key]; !ok {
+					seen[key] = entry
+				}
+			}
 		}
 
-		// Check each entry: is it present in ALL other targets?
+		// Check each candidate: is it present in ALL targets?
 		var common []hooks.HookEntry
-		for _, entry := range first {
+		for _, entry := range seen {
 			isCommon := true
-			for _, th := range targets[1:] {
+			for _, th := range targets {
 				otherEntries := th.config.GetEntries(et)
 				found := false
 				for _, oe := range otherEntries {
@@ -194,6 +205,15 @@ func findCommonHooks(targets []targetHooks) *hooks.HooksConfig {
 	}
 
 	return result
+}
+
+// hooksFingerprint returns a string key for a slice of hooks, used for deduplication.
+func hooksFingerprint(hks []hooks.Hook) string {
+	var s string
+	for _, h := range hks {
+		s += h.Type + ":" + h.Command + ";"
+	}
+	return s
 }
 
 // computeDiff returns hooks in target that are not in base, or nil if identical.

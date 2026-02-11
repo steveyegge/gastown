@@ -1866,7 +1866,7 @@ func validateEscalationConfig(c *EscalationConfig) error {
 	}
 
 	// Validate max_reescalations is non-negative
-	if c.MaxReescalations < 0 {
+	if c.MaxReescalations != nil && *c.MaxReescalations < 0 {
 		return fmt.Errorf("%w: max_reescalations must be non-negative", ErrMissingField)
 	}
 
@@ -1897,10 +1897,10 @@ func (c *EscalationConfig) GetRouteForSeverity(severity string) []string {
 }
 
 // GetMaxReescalations returns the maximum number of re-escalations allowed.
-// Returns 2 if not configured.
+// Returns 2 if not configured (nil). Explicit 0 means "never re-escalate".
 func (c *EscalationConfig) GetMaxReescalations() int {
-	if c.MaxReescalations <= 0 {
+	if c.MaxReescalations == nil {
 		return 2
 	}
-	return c.MaxReescalations
+	return *c.MaxReescalations
 }
