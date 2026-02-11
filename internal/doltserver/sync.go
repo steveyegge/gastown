@@ -1,8 +1,11 @@
 package doltserver
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,6 +19,13 @@ type SyncOptions struct {
 
 	// Filter restricts sync to a single database name. Empty means all.
 	Filter string
+
+	// GC enables garbage collection of closed ephemeral beads before push.
+	// Runs "bd purge" for each database to remove closed wisps/convoys.
+	GC bool
+
+	// TownRoot is the Gas Town workspace root (needed for beads dir resolution).
+	TownRoot string
 }
 
 // SyncResult records the outcome of syncing a single database.
@@ -37,6 +47,12 @@ type SyncResult struct {
 
 	// Remote is the origin push URL, or empty if none configured.
 	Remote string
+
+	// Purged is the number of closed ephemeral beads removed by --gc.
+	Purged int
+
+	// PurgeError is non-nil if bd purge failed (non-fatal, sync continues).
+	PurgeError error
 }
 
 // HasRemote checks whether a Dolt database directory has an "origin" remote configured.
@@ -168,6 +184,13 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 			}
 		}
 
+		// GC: purge closed ephemeral beads before push
+		if opts.GC && opts.TownRoot != "" {
+			purged, purgeErr := purgeClosedEphemerals(opts.TownRoot, db, opts.DryRun)
+			result.Purged = purged
+			result.PurgeError = purgeErr
+		}
+
 		if opts.DryRun {
 			result.DryRun = true
 			results = append(results, result)
@@ -193,4 +216,42 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 	}
 
 	return results
+}
+
+// purgeClosedEphemerals runs "bd purge" for a specific rig database to remove
+// closed ephemeral beads (wisps, convoys) before pushing to DoltHub.
+// Returns the number of beads purged and any error encountered.
+// Errors are non-fatal — the caller should log them but continue with sync.
+func purgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
+	// Resolve the beads directory for this rig
+	beadsDir, err := FindOrCreateRigBeadsDir(townRoot, dbName)
+	if err != nil {
+		return 0, fmt.Errorf("resolving beads dir for %s: %w", dbName, err)
+	}
+
+	// Build bd purge command
+	args := []string{"purge", "--json"}
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("bd purge for %s: %w (%s)", dbName, err, strings.TrimSpace(string(output)))
+	}
+
+	// Parse JSON output to get purged count
+	var result struct {
+		PurgedCount int `json:"purged_count"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		// bd purge succeeded but we couldn't parse output — not fatal
+		return 0, nil
+	}
+
+	return result.PurgedCount, nil
 }
