@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/registry"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -210,17 +212,6 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
-	// Create tmux instance for runtime checks
-	t := tmux.NewTmux()
-
-	// Pre-fetch all tmux sessions for O(1) lookup
-	allSessions := make(map[string]bool)
-	if sessions, err := t.ListSessions(); err == nil {
-		for _, s := range sessions {
-			allSessions[s] = true
-		}
-	}
-
 	// Discover rigs
 	rigs, err := mgr.DiscoverRigs()
 	if err != nil {
@@ -317,6 +308,27 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	}
 
 	beadsWg.Wait()
+
+	// Discover all sessions via SessionRegistry for unified liveness.
+	// Uses the pre-fetched allAgentBeads as the canonical agent lister and
+	// tmux for local session detection. The registry handles both tmux
+	// presence checks and coop health checks in a single DiscoverAll call,
+	// replacing both tmux.ListSessions() and checkCoopAgentLiveness().
+	allSessions := make(map[string]bool)
+	{
+		lister := &mapAgentLister{agents: allAgentBeads}
+		reg := registry.New(lister, nil, tmux.NewTmux())
+		ctx := context.Background()
+		if sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{CheckLiveness: true}); err == nil {
+			for _, s := range sessions {
+				if s.Alive {
+					allSessions[s.TmuxSession] = true
+					// Also key by bead ID for K8s agents (coop liveness)
+					allSessions[s.ID] = true
+				}
+			}
+		}
+	}
 
 	// Create mail router for inbox lookups
 	mailRouter := mail.NewRouter(townRoot)
@@ -1061,6 +1073,18 @@ func populateMailInfo(agent *AgentRuntime, router *mail.Router) {
 	}
 }
 
+// mapAgentLister wraps a pre-fetched map of agent beads to satisfy the
+// registry.AgentLister interface. This allows the SessionRegistry to work
+// with agent beads that were already fetched from multiple beads instances
+// (town + per-rig) without re-querying.
+type mapAgentLister struct {
+	agents map[string]*beads.Issue
+}
+
+func (m *mapAgentLister) ListAgentBeads() (map[string]*beads.Issue, error) {
+	return m.agents, nil
+}
+
 // agentDef defines an agent to discover
 type agentDef struct {
 	name    string
@@ -1171,6 +1195,9 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 				// Detect K8s polecats via label
 				if beads.HasLabel(issue, "execution_target:k8s") {
 					agent.Target = "k8s"
+					// For K8s agents, liveness was already resolved by the
+					// SessionRegistry (keyed by bead ID in allSessions).
+					agent.Running = allSessions[d.beadID]
 				}
 			}
 

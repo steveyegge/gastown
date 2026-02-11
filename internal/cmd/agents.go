@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/registry"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -190,6 +193,7 @@ func categorizeSession(name string) *AgentSession {
 }
 
 // getAgentSessions returns all categorized Gas Town sessions.
+// Discovers both local tmux sessions and K8s agents via the SessionRegistry.
 func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 	t := tmux.NewTmux()
 	sessions, err := t.ListSessions()
@@ -197,6 +201,8 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 		return nil, err
 	}
 
+	// Categorize local tmux sessions
+	seen := make(map[string]bool) // track session names to avoid duplicates
 	var agents []*AgentSession
 	for _, name := range sessions {
 		agent := categorizeSession(name)
@@ -207,6 +213,13 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 			continue
 		}
 		agents = append(agents, agent)
+		seen[name] = true
+	}
+
+	// Also discover K8s agents from the SessionRegistry (if workspace available).
+	// These agents don't have tmux sessions — they run in K8s pods with coop.
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		agents = mergeK8sAgents(agents, seen, townRoot, includePolecats)
 	}
 
 	// Sort: mayor, deacon first, then by rig, then by type
@@ -248,6 +261,62 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 	})
 
 	return agents, nil
+}
+
+// mergeK8sAgents discovers K8s agents via the SessionRegistry and merges
+// them into the agents list. K8s agents don't have tmux sessions — they run
+// in pods with coop. Uses the pre-fetched agent beads as the registry source.
+func mergeK8sAgents(agents []*AgentSession, seen map[string]bool, townRoot string, includePolecats bool) []*AgentSession {
+	// Collect all agent beads from town + rig beads instances
+	allAgentBeads := make(map[string]*beads.Issue)
+	townBeadsPath := beads.GetTownBeadsPath(townRoot)
+	if townBeads, err := beads.New(townBeadsPath).ListAgentBeads(); err == nil {
+		for k, v := range townBeads {
+			allAgentBeads[k] = v
+		}
+	}
+
+	// Build registry and discover K8s sessions
+	lister := &mapAgentLister{agents: allAgentBeads}
+	reg := registry.New(lister, nil, nil) // no tmux — already handled above
+	ctx := context.Background()
+	sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{CheckLiveness: true})
+	if err != nil {
+		return agents
+	}
+
+	for _, s := range sessions {
+		if s.Target != "k8s" || seen[s.TmuxSession] {
+			continue
+		}
+		agent := &AgentSession{
+			Name:      s.TmuxSession,
+			Rig:       s.Rig,
+			AgentName: s.Name,
+		}
+		switch s.Role {
+		case "polecat":
+			if !includePolecats {
+				continue
+			}
+			agent.Type = AgentPolecat
+		case "crew":
+			agent.Type = AgentCrew
+		case "witness":
+			agent.Type = AgentWitness
+		case "refinery":
+			agent.Type = AgentRefinery
+		case "coordinator", "mayor":
+			agent.Type = AgentMayor
+		case "health-check", "deacon":
+			agent.Type = AgentDeacon
+		default:
+			agent.Type = AgentPolecat
+		}
+		agents = append(agents, agent)
+		seen[s.TmuxSession] = true
+	}
+	return agents
 }
 
 // displayLabel returns the menu display label for an agent.

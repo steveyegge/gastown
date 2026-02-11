@@ -14,6 +14,7 @@ type localTmux interface {
 	SendKeysRaw(session, keys string) error
 	IsPaneDead(session string) (bool, error)
 	SetPaneDiedHook(session, agentID string) error
+	KillSessionWithProcesses(session string) error
 }
 
 // TmuxBackend wraps a local tmux instance to implement Backend.
@@ -61,7 +62,7 @@ func (b *TmuxBackend) SetPaneDiedHook(session, agentID string) error {
 
 // --- Coop-first stubs (return ErrNotSupported) ---
 
-func (b *TmuxBackend) KillSession(_ string) error                    { return ErrNotSupported }
+func (b *TmuxBackend) KillSession(session string) error { return b.tmux.KillSessionWithProcesses(session) }
 func (b *TmuxBackend) IsAgentRunning(_ string) (bool, error)         { return false, ErrNotSupported }
 func (b *TmuxBackend) GetAgentState(_ string) (string, error)        { return "", ErrNotSupported }
 func (b *TmuxBackend) SetEnvironment(_, _, _ string) error           { return ErrNotSupported }

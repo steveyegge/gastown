@@ -295,14 +295,19 @@ func (m *mockLocalTmux) SetPaneDiedHook(session, agentID string) error {
 	return m.setPaneDiedHookErr
 }
 
+func (m *mockLocalTmux) KillSessionWithProcesses(session string) error {
+	return nil
+}
+
 // --- Phase 2 stubs (ErrNotSupported tests) ---
 
 func TestTmuxBackend_CoopMethodsReturnErrNotSupported(t *testing.T) {
 	mock := &mockLocalTmux{}
 	b := &TmuxBackend{tmux: mock}
 
-	if err := b.KillSession("s"); err != ErrNotSupported {
-		t.Errorf("KillSession: got %v, want ErrNotSupported", err)
+	// KillSession now delegates to KillSessionWithProcesses (no longer ErrNotSupported)
+	if err := b.KillSession("s"); err != nil {
+		t.Errorf("KillSession: got %v, want nil", err)
 	}
 	if _, err := b.IsAgentRunning("s"); err != ErrNotSupported {
 		t.Errorf("IsAgentRunning: got %v, want ErrNotSupported", err)

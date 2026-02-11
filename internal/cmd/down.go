@@ -11,14 +11,17 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/registry"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -194,6 +197,20 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 3.5: Stop K8s agents via coop backend
+	k8sStopped, k8sErrors := stopK8sAgents(townRoot, downDryRun)
+	for _, label := range k8sStopped {
+		if downDryRun {
+			printDownStatus(label, true, "would stop")
+		} else {
+			printDownStatus(label, true, "stopped")
+		}
+	}
+	for _, label := range k8sErrors {
+		printDownStatus(label, false, "failed to stop")
+		allOK = false
+	}
+
 	// Phase 4: Stop Daemon
 	running, pid, daemonErr := daemon.IsRunning(townRoot)
 	if daemonErr != nil {
@@ -350,7 +367,8 @@ func printDownStatus(name string, ok bool, detail string) {
 // stopSession gracefully stops a tmux session.
 // Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
 func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
-	running, err := t.HasSession(sessionName)
+	backend := terminal.NewTmuxBackend(t)
+	running, err := backend.HasSession(sessionName)
 	if err != nil {
 		return false, err
 	}
@@ -360,12 +378,12 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
-		_ = t.SendKeysRaw(sessionName, "C-c")
+		_ = backend.SendKeys(sessionName, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
+	// Kill the session via Backend (delegates to KillSessionWithProcesses for tmux)
+	return true, backend.KillSession(sessionName)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.
@@ -478,5 +496,61 @@ func isProcessInTown(pid int, townRoot string) bool {
 	// Check if the command line includes the town path
 	command := string(output)
 	return strings.Contains(command, townRoot)
+}
+
+// stopK8sAgents discovers and stops K8s agents via their coop backend.
+// Checks both town-level and rig-level agent beads for execution_target:k8s.
+// Returns lists of successfully stopped agent labels and error labels.
+func stopK8sAgents(townRoot string, dryRun bool) (stopped []string, errors []string) {
+	// Collect all agent beads from town and rig levels
+	allAgents := make(map[string]*beads.Issue)
+
+	// Town-level agent beads
+	townBeadsPath := beads.GetTownBeadsPath(townRoot)
+	if agents, err := beads.New(townBeadsPath).ListAgentBeads(); err == nil {
+		for id, issue := range agents {
+			allAgents[id] = issue
+		}
+	}
+
+	// Rig-level agent beads
+	for _, rigName := range discoverRigs(townRoot) {
+		rigBeadsPath := filepath.Join(townRoot, rigName, "mayor", "rig")
+		if agents, err := beads.New(rigBeadsPath).ListAgentBeads(); err == nil {
+			for id, issue := range agents {
+				allAgents[id] = issue
+			}
+		}
+	}
+
+	// Use SessionRegistry to discover K8s sessions with backend resolution
+	lister := &mapAgentLister{agents: allAgents}
+	reg := registry.New(lister, nil, nil) // no tmux needed for K8s agents
+	ctx := context.Background()
+	sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{})
+	if err != nil {
+		return stopped, errors
+	}
+
+	for _, s := range sessions {
+		if s.Target != "k8s" {
+			continue
+		}
+
+		label := fmt.Sprintf("K8s agent (%s)", s.ID)
+		if dryRun {
+			stopped = append(stopped, label)
+			continue
+		}
+
+		backend := terminal.ResolveBackend(s.ID)
+		if err := backend.KillSession("claude"); err != nil {
+			errors = append(errors, label)
+		} else {
+			stopped = append(stopped, label)
+		}
+	}
+
+	return stopped, errors
 }
 
