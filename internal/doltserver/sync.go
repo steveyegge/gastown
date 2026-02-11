@@ -49,17 +49,14 @@ func HasRemote(dbDir string) (string, error) {
 		return "", fmt.Errorf("dolt remote -v: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
 
-	// Parse output lines looking for origin push URL.
-	// Format: "origin  https://doltremoteapi.dolthub.com/org/repo  (push)"
+	// Parse output lines looking for origin remote URL.
+	// Dolt format: "origin https://doltremoteapi.dolthub.com/org/repo {}"
+	// Git format:  "origin  https://... (push)"
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "origin") {
 			continue
 		}
-		if !strings.Contains(line, "(push)") {
-			continue
-		}
-		// Extract URL between "origin" and "(push)"
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			return parts[1], nil
@@ -85,8 +82,9 @@ func CommitWorkingSet(dbDir string) error {
 	output, err := commitCmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
-		// "nothing to commit" is success — no changes to push
-		if strings.Contains(strings.ToLower(msg), "nothing to commit") {
+		// "nothing to commit" or "no changes added" is success — no changes to push
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "nothing to commit") || strings.Contains(lower, "no changes added") {
 			return nil
 		}
 		return fmt.Errorf("dolt commit: %w (%s)", err, msg)
