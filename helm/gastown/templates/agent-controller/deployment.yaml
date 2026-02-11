@@ -72,6 +72,9 @@ spec:
             {{- if .Values.agentController.natsURL }}
             - name: NATS_URL
               value: {{ .Values.agentController.natsURL }}
+            {{- else if (index .Values "bd-daemon" "nats" "enabled") }}
+            - name: NATS_URL
+              value: nats://{{ .Release.Name }}-bd-daemon-nats:4222
             {{- end }}
             {{- if .Values.agentController.natsTokenSecret }}
             - name: NATS_TOKEN_SECRET
