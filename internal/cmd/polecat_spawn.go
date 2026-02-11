@@ -288,22 +288,18 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	debug := os.Getenv("GT_DEBUG_SLING") != ""
 	if debug {
 		fmt.Fprintf(os.Stderr, "[sling-debug] SpawnPolecatForSling: session started, verifying session %q exists...\n", sessionName)
-		hasCmd := exec.Command("tmux", "has-session", "-t", "="+sessionName)
-		if hasErr := hasCmd.Run(); hasErr != nil {
+		hasSession, hasErr := backend.HasSession(sessionName)
+		if hasErr != nil || !hasSession {
 			fmt.Fprintf(os.Stderr, "[sling-debug] WARNING: session %q does NOT exist after Start() returned!\n", sessionName)
-			// Try to get more info about what happened
-			listCmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-			if listOut, listErr := listCmd.Output(); listErr == nil {
-				fmt.Fprintf(os.Stderr, "[sling-debug] Current sessions: %s\n", strings.TrimSpace(string(listOut)))
-			}
 		} else {
 			fmt.Fprintf(os.Stderr, "[sling-debug] session %q exists, checking if pane is alive...\n", sessionName)
-			// Check if Claude is running
-			paneCmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_current_command}")
-			if paneOut, paneErr := paneCmd.Output(); paneErr == nil {
-				fmt.Fprintf(os.Stderr, "[sling-debug] pane command: %s\n", strings.TrimSpace(string(paneOut)))
+			dead, deadErr := backend.IsPaneDead(sessionName)
+			if deadErr != nil {
+				fmt.Fprintf(os.Stderr, "[sling-debug] IsPaneDead check failed: %v\n", deadErr)
+			} else if dead {
+				fmt.Fprintf(os.Stderr, "[sling-debug] pane is dead\n")
 			} else {
-				fmt.Fprintf(os.Stderr, "[sling-debug] list-panes failed: %v\n", paneErr)
+				fmt.Fprintf(os.Stderr, "[sling-debug] pane is alive\n")
 			}
 		}
 	}
