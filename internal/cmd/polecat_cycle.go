@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // cyclePolecatSession switches to the next or previous polecat session in the same rig.
@@ -71,8 +72,7 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 	targetSession := sessions[targetIdx]
 
 	// Switch to target session
-	cmd := exec.Command("tmux", "switch-client", "-t", targetSession)
-	if err := cmd.Run(); err != nil {
+	if err := tmux.NewTmux().SwitchClient(targetSession); err != nil {
 		return fmt.Errorf("switching to %s: %w", targetSession, err)
 	}
 
@@ -134,8 +134,7 @@ func parsePolecatSessionName(sessionName string) (rigName, polecatName string, o
 // Uses tmux list-sessions to find sessions matching gt-<rig>-<name> pattern,
 // excluding crew, witness, and refinery sessions.
 func findRigPolecatSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-	out, err := cmd.Output()
+	allSessions, err := tmux.NewTmux().ListSessions()
 	if err != nil {
 		// No tmux server or no sessions
 		return nil, nil
@@ -144,7 +143,7 @@ func findRigPolecatSessions(rigName string) ([]string, error) { //nolint:unparam
 	prefix := fmt.Sprintf("gt-%s-", rigName)
 	var sessions []string
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range allSessions {
 		if line == "" {
 			continue
 		}
