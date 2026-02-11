@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -81,9 +82,10 @@ func runRecover(cmd *cobra.Command, args []string) error {
 	}
 
 	t := tmux.NewTmux()
+	backend := terminal.NewTmuxBackend(t)
 
 	// Check if session exists
-	exists, err := t.HasSession(sessionName)
+	exists, err := backend.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
@@ -113,7 +115,7 @@ func runRecover(cmd *cobra.Command, args []string) error {
 // resolveRecoverTarget resolves a target string to session name and metadata.
 // Returns: sessionName, targetType, rigName, agentName, error
 func resolveRecoverTarget(target string) (string, string, string, string, error) {
-	t := tmux.NewTmux()
+	backend := terminal.NewTmuxBackend(tmux.NewTmux())
 
 	// Handle role shortcuts
 	switch target {
@@ -159,7 +161,7 @@ func resolveRecoverTarget(target string) (string, string, string, string, error)
 	}
 
 	// Try as raw session name (legacy)
-	exists, err := t.HasSession(target)
+	exists, err := backend.HasSession(target)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("checking session: %w", err)
 	}
@@ -172,8 +174,9 @@ func resolveRecoverTarget(target string) (string, string, string, string, error)
 
 // recoverInterruptOnly sends just the Escape key (Level 1).
 func recoverInterruptOnly(t *tmux.Tmux, sessionName string) error {
+	backend := terminal.NewTmuxBackend(t)
 	fmt.Printf("Level 1: Sending Escape to interrupt...\n")
-	if err := t.SendKeysRaw(sessionName, "Escape"); err != nil {
+	if err := backend.SendKeys(sessionName, "Escape"); err != nil {
 		return fmt.Errorf("sending Escape: %w", err)
 	}
 	fmt.Printf("%s Escape sent. Agent should show interrupted prompt.\n", style.SuccessPrefix)
@@ -182,9 +185,11 @@ func recoverInterruptOnly(t *tmux.Tmux, sessionName string) error {
 
 // recoverSoftEscalation tries interrupt then clear (Levels 1-2).
 func recoverSoftEscalation(t *tmux.Tmux, sessionName string) error {
+	backend := terminal.NewTmuxBackend(t)
+
 	// Level 1: Interrupt
 	fmt.Printf("Level 1: Sending Escape to interrupt...\n")
-	_ = t.SendKeysRaw(sessionName, "Escape")
+	_ = backend.SendKeys(sessionName, "Escape")
 	time.Sleep(500 * time.Millisecond)
 
 	// Check if agent responded (capture output)
@@ -193,7 +198,7 @@ func recoverSoftEscalation(t *tmux.Tmux, sessionName string) error {
 
 	// Level 2: Clear
 	fmt.Printf("Level 2: Sending /clear to reset conversation...\n")
-	if err := t.NudgeSession(sessionName, "/clear"); err != nil {
+	if err := backend.NudgeSession(sessionName, "/clear"); err != nil {
 		return fmt.Errorf("sending /clear: %w", err)
 	}
 
@@ -204,9 +209,11 @@ func recoverSoftEscalation(t *tmux.Tmux, sessionName string) error {
 
 // recoverFullEscalation tries all levels: interrupt -> clear -> force restart.
 func recoverFullEscalation(t *tmux.Tmux, sessionName, targetType, rigName, agentName string) error {
+	backend := terminal.NewTmuxBackend(t)
+
 	// Level 1: Interrupt
 	fmt.Printf("Level 1: Sending Escape to interrupt...\n")
-	_ = t.SendKeysRaw(sessionName, "Escape")
+	_ = backend.SendKeys(sessionName, "Escape")
 	time.Sleep(500 * time.Millisecond)
 
 	// Brief wait to see if interrupt worked
@@ -215,12 +222,13 @@ func recoverFullEscalation(t *tmux.Tmux, sessionName, targetType, rigName, agent
 
 	// Level 2: Clear
 	fmt.Printf("Level 2: Sending /clear to reset conversation...\n")
-	if err := t.NudgeSession(sessionName, "/clear"); err != nil {
+	if err := backend.NudgeSession(sessionName, "/clear"); err != nil {
 		fmt.Printf("         Warning: /clear failed: %v\n", err)
 	}
 	time.Sleep(3 * time.Second)
 
 	// Check if agent is responding
+	// tmux-only: IsAgentAlive checks tmux pane process state
 	if t.IsAgentAlive(sessionName) {
 		fmt.Printf("%s Recovery appears successful after /clear.\n", style.SuccessPrefix)
 		fmt.Printf("         Hooked work is preserved.\n")
@@ -234,9 +242,11 @@ func recoverFullEscalation(t *tmux.Tmux, sessionName, targetType, rigName, agent
 
 // recoverForceRestart kills and restarts the session (Level 3).
 func recoverForceRestart(t *tmux.Tmux, sessionName, targetType, rigName, agentName string) error {
-	// Kill existing session
+	backend := terminal.NewTmuxBackend(t)
+
+	// Kill existing session and all descendant processes
 	fmt.Printf("         Killing session %s...\n", sessionName)
-	if err := t.KillSessionWithProcesses(sessionName); err != nil {
+	if err := backend.KillSession(sessionName); err != nil {
 		fmt.Printf("         Warning: kill failed: %v\n", err)
 	}
 
