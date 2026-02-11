@@ -899,153 +899,75 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	config := doltserver.DefaultConfig(townRoot)
-
-	// Determine which databases to sync
-	var databases []string
-	if doltSyncDB != "" {
-		// Single database mode
-		dbDir := doltserver.RigDatabaseDir(townRoot, doltSyncDB)
-		if _, err := os.Stat(filepath.Join(dbDir, ".dolt")); os.IsNotExist(err) {
-			return fmt.Errorf("database %q not found in %s", doltSyncDB, config.DataDir)
-		}
-		databases = []string{doltSyncDB}
-	} else {
-		databases, err = doltserver.ListDatabases(townRoot)
-		if err != nil {
-			return fmt.Errorf("listing databases: %w", err)
-		}
-		if len(databases) == 0 {
-			fmt.Println("No databases found to sync.")
-			return nil
-		}
+	// Validate --db flag if set
+	if doltSyncDB != "" && !doltserver.DatabaseExists(townRoot, doltSyncDB) {
+		return fmt.Errorf("database %q not found in .dolt-data/\nRun 'gt dolt list' to see available databases", doltSyncDB)
 	}
 
-	// Check which databases have remotes configured
-	type syncTarget struct {
-		name    string
-		dir     string
-		remotes string // raw output of dolt remote -v
-	}
-	var targets []syncTarget
+	// Check server state
+	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
 
-	for _, db := range databases {
-		dbDir := doltserver.RigDatabaseDir(townRoot, db)
-		remoteCmd := exec.Command("dolt", "remote", "-v")
-		remoteCmd.Dir = dbDir
-		output, err := remoteCmd.CombinedOutput()
-		if err != nil {
-			fmt.Printf("  %s %s: could not list remotes: %v\n", style.Dim.Render("⚠"), db, err)
-			continue
-		}
-		remoteOutput := strings.TrimSpace(string(output))
-		if remoteOutput == "" {
-			continue // no remotes configured
-		}
-		// Check that "origin" remote exists
-		hasOrigin := false
-		for _, line := range strings.Split(remoteOutput, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "origin") {
-				hasOrigin = true
-				break
-			}
-		}
-		if !hasOrigin {
-			continue
-		}
-		targets = append(targets, syncTarget{name: db, dir: dbDir, remotes: remoteOutput})
-	}
-
-	if len(targets) == 0 {
-		fmt.Println("No databases with configured origin remotes found.")
-		return nil
-	}
-
-	// Show what will be pushed
-	fmt.Printf("Databases to sync (%d):\n\n", len(targets))
-	for _, t := range targets {
-		// Extract origin URL from remote -v output
-		originURL := ""
-		for _, line := range strings.Split(t.remotes, "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 && fields[0] == "origin" {
-				originURL = fields[1]
-				break
-			}
-		}
-		fmt.Printf("  %s → %s\n", style.Bold.Render(t.name), style.Dim.Render(originURL))
-	}
-
-	if doltSyncDry {
-		pushVerb := "push"
-		if doltSyncForce {
-			pushVerb = "force-push"
-		}
-		fmt.Printf("\nDry run: would %s %d database(s). No changes made.\n", pushVerb, len(targets))
-		return nil
-	}
-
-	// Stop Dolt server if running (required for CLI push)
-	serverWasRunning, _, _ := doltserver.IsRunning(townRoot)
-	if serverWasRunning {
-		fmt.Printf("\nStopping Dolt server for push...")
+	if wasRunning {
+		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
 		if err := doltserver.Stop(townRoot); err != nil {
 			return fmt.Errorf("stopping Dolt server: %w", err)
 		}
-		fmt.Printf(" %s\n", style.Bold.Render("stopped"))
-	}
+		fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
 
-	// Push each database
-	fmt.Println()
-	var succeeded, failed []string
-	for _, t := range targets {
-		pushArgs := []string{"push", "origin", "main"}
-		if doltSyncForce {
-			pushArgs = []string{"push", "--force", "origin", "main"}
-		}
-		pushCmd := exec.Command("dolt", pushArgs...)
-		pushCmd.Dir = t.dir
-
-		fmt.Printf("  Pushing %s...", t.name)
-		output, err := pushCmd.CombinedOutput()
-		if err != nil {
-			fmt.Printf(" %s\n", style.Bold.Render("FAILED"))
-			errMsg := strings.TrimSpace(string(output))
-			if errMsg != "" {
-				fmt.Printf("    %s\n", style.Dim.Render(errMsg))
+		// Guarantee restart even if push fails
+		defer func() {
+			fmt.Printf("\nRestarting Dolt server...\n")
+			if startErr := doltserver.Start(townRoot); startErr != nil {
+				fmt.Printf("%s Failed to restart Dolt server: %v\n", style.Bold.Render("✗"), startErr)
+				fmt.Printf("  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
+			} else {
+				fmt.Printf("%s Dolt server restarted\n", style.Bold.Render("✓"))
 			}
-			failed = append(failed, t.name)
-		} else {
-			fmt.Printf(" %s\n", style.Bold.Render("✓"))
-			succeeded = append(succeeded, t.name)
+		}()
+	}
+
+	opts := doltserver.SyncOptions{
+		Force:  doltSyncForce,
+		DryRun: doltSyncDry,
+		Filter: doltSyncDB,
+	}
+
+	results := doltserver.SyncDatabases(townRoot, opts)
+
+	if len(results) == 0 {
+		fmt.Println("No databases to sync.")
+		return nil
+	}
+
+	fmt.Printf("\nSyncing %d database(s)...\n", len(results))
+
+	var pushed, skipped, failed int
+	for _, r := range results {
+		fmt.Println()
+		switch {
+		case r.Pushed:
+			fmt.Printf("  %s %s → origin main\n", style.Bold.Render("✓"), r.Database)
+			fmt.Printf("    %s\n", style.Dim.Render(r.Remote))
+			pushed++
+		case r.DryRun:
+			fmt.Printf("  %s %s → origin main (dry run)\n", style.Bold.Render("~"), r.Database)
+			fmt.Printf("    %s\n", style.Dim.Render(r.Remote))
+			pushed++ // count as would-push for summary
+		case r.Skipped:
+			fmt.Printf("  %s %s — no remote configured\n", style.Dim.Render("○"), r.Database)
+			skipped++
+		case r.Error != nil:
+			fmt.Printf("  %s %s → origin main\n", style.Bold.Render("✗"), r.Database)
+			fmt.Printf("    error: %v\n", r.Error)
+			failed++
 		}
 	}
 
-	// Restart Dolt server if it was running
-	if serverWasRunning {
-		fmt.Printf("\nRestarting Dolt server...")
-		if err := doltserver.Start(townRoot); err != nil {
-			fmt.Printf(" %s\n", style.Bold.Render("FAILED"))
-			fmt.Printf("  %s Could not restart Dolt server: %v\n", style.Bold.Render("⚠"), err)
-			fmt.Printf("  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
-		} else {
-			state, _ := doltserver.LoadState(townRoot)
-			fmt.Printf(" %s (PID %d)\n", style.Bold.Render("✓"), state.PID)
-		}
-	}
+	fmt.Printf("\nSummary: %d pushed, %d skipped, %d failed\n", pushed, skipped, failed)
 
-	// Summary
-	fmt.Println()
-	if len(succeeded) > 0 {
-		fmt.Printf("%s Pushed %d database(s): %s\n",
-			style.Bold.Render("✓"), len(succeeded), strings.Join(succeeded, ", "))
+	if failed > 0 {
+		return fmt.Errorf("%d database(s) failed to sync", failed)
 	}
-	if len(failed) > 0 {
-		fmt.Printf("%s Failed %d database(s): %s\n",
-			style.Bold.Render("✗"), len(failed), strings.Join(failed, ", "))
-		return fmt.Errorf("%d database(s) failed to push", len(failed))
-	}
-
 	return nil
 }
 
