@@ -576,6 +576,74 @@ inject_initial_prompt() {
     fi
 }
 
+# ── OAuth credential refresh ────────────────────────────────────────────
+# Claude OAuth access tokens expire after ~8 hours. This background loop
+# uses the refresh_token to obtain a fresh access_token before expiry.
+# Runs every 5 minutes, refreshes when within 1 hour of expiry.
+#
+# Token endpoint: https://platform.claude.com/v1/oauth/token
+# Client ID: from Claude Code source (public OAuth client).
+OAUTH_TOKEN_URL="https://platform.claude.com/v1/oauth/token"
+OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+CREDS_FILE="${CLAUDE_STATE}/.credentials.json"
+
+refresh_credentials() {
+    sleep 30  # Let Claude start first
+    while true; do
+        sleep 300  # Check every 5 minutes
+
+        # Read current credentials
+        if [ ! -f "${CREDS_FILE}" ]; then
+            continue
+        fi
+
+        expires_at=$(jq -r '.claudeAiOauth.expiresAt // 0' "${CREDS_FILE}" 2>/dev/null)
+        refresh_token=$(jq -r '.claudeAiOauth.refreshToken // empty' "${CREDS_FILE}" 2>/dev/null)
+
+        if [ -z "${refresh_token}" ] || [ "${expires_at}" = "0" ]; then
+            continue
+        fi
+
+        # Check if within 1 hour of expiry (3600000ms)
+        now_ms=$(date +%s)000
+        remaining_ms=$((expires_at - now_ms))
+        if [ "${remaining_ms}" -gt 3600000 ]; then
+            continue  # More than 1 hour left, skip
+        fi
+
+        echo "[entrypoint] OAuth token expires in $((remaining_ms / 60000))m, refreshing..."
+
+        response=$(curl -sf "${OAUTH_TOKEN_URL}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"grant_type\":\"refresh_token\",\"refresh_token\":\"${refresh_token}\",\"client_id\":\"${OAUTH_CLIENT_ID}\"}" 2>/dev/null) || {
+            echo "[entrypoint] WARNING: OAuth refresh request failed"
+            continue
+        }
+
+        # Validate response has required fields
+        new_access_token=$(echo "${response}" | jq -r '.access_token // empty' 2>/dev/null)
+        new_refresh_token=$(echo "${response}" | jq -r '.refresh_token // empty' 2>/dev/null)
+        expires_in=$(echo "${response}" | jq -r '.expires_in // 0' 2>/dev/null)
+
+        if [ -z "${new_access_token}" ] || [ -z "${new_refresh_token}" ]; then
+            echo "[entrypoint] WARNING: OAuth refresh returned invalid response"
+            continue
+        fi
+
+        # Compute new expiresAt (current time + expires_in seconds, in ms)
+        new_expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
+
+        # Read current creds and update tokens (preserves other fields like scopes)
+        jq --arg at "${new_access_token}" \
+           --arg rt "${new_refresh_token}" \
+           --argjson ea "${new_expires_at}" \
+           '.claudeAiOauth.accessToken = $at | .claudeAiOauth.refreshToken = $rt | .claudeAiOauth.expiresAt = $ea' \
+           "${CREDS_FILE}" > "${CREDS_FILE}.tmp" && mv "${CREDS_FILE}.tmp" "${CREDS_FILE}"
+
+        echo "[entrypoint] OAuth credentials refreshed (expires in $((expires_in / 3600))h)"
+    done
+}
+
 # ── Monitor agent exit and shut down coop ──────────────────────────────
 # Coop v0.4.0 stays alive in "awaiting shutdown" after the agent exits.
 # This monitor polls the agent state and sends a shutdown request when
@@ -608,6 +676,9 @@ forward_signal() {
 }
 trap 'forward_signal TERM' TERM
 trap 'forward_signal INT' INT
+
+# Start credential refresh in background (survives coop restarts).
+refresh_credentials &
 
 # ── Restart loop ──────────────────────────────────────────────────────────
 # Max restarts to avoid infinite crash loop. Reset on successful long-lived run.
