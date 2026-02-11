@@ -39,8 +39,27 @@ required = ["CLAUDE.md"]
 check = "off"           # TODO: fix ASCII art false positives in design docs then enable
 
 [check.tests]
-check = "off"
-auto = false
+check = "error"
+auto = true
+
+# Require test changes when source changes on feat/fix commits
+[check.tests.commit]
+check = "error"
+scope = "branch"
+exclude = ["**/main.go", "gen/**", "mobile/gen/**"]
+
+# Suite disabled until pre-existing failures are fixed (26 failing)
+# [[check.tests.suite]]
+# runner = "go"
+
+[check.tests.time]
+check = "warn"
+
+# Track binary size and build time (CI only)
+[check.build]
+check = "error"
+targets = ["cmd/gt", "controller/cmd/controller"]
+size_max = "50 MB"
 
 [check.license]
 check = "off"
