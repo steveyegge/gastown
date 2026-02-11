@@ -236,9 +236,8 @@ jobs:
 
       - name: Install beads (bd)
         # Clone and build to handle replace directives that break go install @version
-        # Pinned to fix/bootstrap-prefix-database-1669 until beads PR #1670 merges
         run: |
-          git clone --depth 1 --branch fix/bootstrap-prefix-database-1669 https://github.com/steveyegge/beads /tmp/beads
+          git clone --depth 1 https://github.com/steveyegge/beads /tmp/beads
           cd /tmp/beads && go install ./cmd/bd
 
       - name: Build gt
