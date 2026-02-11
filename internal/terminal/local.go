@@ -1,6 +1,10 @@
 package terminal
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -70,4 +74,24 @@ func (b *TmuxBackend) GetEnvironment(_, _ string) (string, error)    { return ""
 func (b *TmuxBackend) GetPaneWorkDir(_ string) (string, error)       { return "", ErrNotSupported }
 func (b *TmuxBackend) SendInput(_ string, _ string, _ bool) error    { return ErrNotSupported }
 func (b *TmuxBackend) RespawnPane(_ string) error                    { return ErrNotSupported }
-func (b *TmuxBackend) SwitchSession(_ string, _ SwitchConfig) error  { return ErrNotSupported }
+func (b *TmuxBackend) SwitchSession(_ string, _ SwitchConfig) error { return ErrNotSupported }
+
+// AttachSession attaches to a tmux session interactively.
+// If already inside tmux, uses switch-client. Otherwise uses attach-session.
+func (b *TmuxBackend) AttachSession(session string) error {
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("tmux not found: %w", err)
+	}
+
+	var cmd *exec.Cmd
+	if os.Getenv("TMUX") != "" {
+		cmd = exec.Command(tmuxPath, "switch-client", "-t", session)
+	} else {
+		cmd = exec.Command(tmuxPath, "attach-session", "-t", session)
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}

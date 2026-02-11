@@ -197,3 +197,4 @@ func (b *SSHBackend) GetPaneWorkDir(_ string) (string, error)       { return "",
 func (b *SSHBackend) SendInput(_ string, _ string, _ bool) error    { return ErrNotSupported }
 func (b *SSHBackend) RespawnPane(_ string) error                    { return ErrNotSupported }
 func (b *SSHBackend) SwitchSession(_ string, _ SwitchConfig) error  { return ErrNotSupported }
+func (b *SSHBackend) AttachSession(_ string) error                  { return ErrNotSupported }

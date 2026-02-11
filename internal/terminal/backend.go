@@ -83,6 +83,12 @@ type Backend interface {
 	// SwitchSession switches the agent session to use new credentials/env.
 	// For coop: PUT /api/v1/session/switch with the provided config.
 	SwitchSession(session string, cfg SwitchConfig) error
+
+	// AttachSession takes over the current terminal to interact with the session.
+	// For tmux: switch-client (if inside tmux) or attach-session (if outside).
+	// For coop: execs into `coop attach <url>` which streams the terminal via WebSocket.
+	// This is a blocking call — it does not return until the user detaches.
+	AttachSession(session string) error
 }
 
 // SwitchConfig holds parameters for a session switch operation.

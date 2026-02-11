@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -587,4 +591,45 @@ func (b *CoopBackend) SwitchSession(session string, cfg SwitchConfig) error {
 		return fmt.Errorf("coop: switch returned %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
+}
+
+// AttachSession attaches to a coop session by execing into `coop attach <url>`.
+// This replaces the current process — it does not return on success.
+func (b *CoopBackend) AttachSession(session string) error {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return err
+	}
+
+	coopPath, err := findCoopBinary()
+	if err != nil {
+		return err
+	}
+
+	// Replace this process with coop attach.
+	return syscall.Exec(coopPath, []string{"coop", "attach", base}, os.Environ())
+}
+
+// findCoopBinary locates the coop binary on the system.
+func findCoopBinary() (string, error) {
+	// Check PATH first.
+	if p, err := exec.LookPath("coop"); err == nil {
+		return p, nil
+	}
+
+	// Check common build locations.
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		for _, rel := range []string{
+			"coop/target/release/coop",
+			"coop/target/debug/coop",
+		} {
+			p := filepath.Join(home, rel)
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("coop binary not found in PATH or ~/coop/target/")
 }
