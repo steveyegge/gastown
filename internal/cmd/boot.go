@@ -362,7 +362,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			hookBead := getDeaconHookBead()
 			if hookBead == "" {
 				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, start patrol: gt deacon patrol")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, create a patrol wisp (`bd mol wisp mol-deacon-patrol`), hook it (`bd update <wisp-id> --status=hooked --assignee=deacon`), and continue patrol.")
 				return "nudge", "deacon-idle", nil
 			}
 
@@ -371,7 +371,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			lastActivity, err := getMoleculeLastActivity(hookBead)
 			if err == nil && !lastActivity.IsZero() && time.Since(lastActivity) > 15*time.Minute {
 				fmt.Printf("Deacon has hooked work but no progress in %s - nudging\n", time.Since(lastActivity).Round(time.Minute))
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue work or restart patrol: gt deacon patrol")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue current patrol work, or create a fresh patrol wisp (`bd mol wisp mol-deacon-patrol`) and hook it.")
 				return "nudge", "deacon-stale-work", nil
 			}
 		}

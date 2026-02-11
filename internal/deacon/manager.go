@@ -104,7 +104,7 @@ func (m *Manager) Start(agentOverride string) error {
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.", runtimeConfig)
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run `gt deacon heartbeat`. 2. Check `gt hook`; if work is hooked, execute it. 3. If no hook, create a patrol wisp with `bd mol wisp mol-deacon-patrol`, then hook it (`bd update <wisp-id> --status=hooked --assignee=deacon`) and execute it. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.", runtimeConfig)
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
