@@ -210,6 +210,14 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 		return 0, fmt.Errorf("resolving beads dir for %s: %w", dbName, err)
 	}
 
+	// Skip databases with uninitialized beads dirs (no metadata.json).
+	// An empty .beads/ directory causes bd to attempt a fresh bootstrap,
+	// which hangs waiting on dolt init or lock acquisition.
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		return 0, nil // not initialized — nothing to purge
+	}
+
 	// Build bd purge command
 	args := []string{"purge", "--json"}
 	if dryRun {
