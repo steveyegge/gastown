@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -269,11 +268,7 @@ func getCurrentTmuxSession() (string, error) {
 	if s := os.Getenv("TMUX_SESSION"); s != "" {
 		return s, nil
 	}
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return tmux.NewTmux().GetCurrentSessionName()
 }
 
 // resolveRoleToSession converts a role name or path to a tmux session name.
@@ -680,7 +675,7 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 	if handoffWatch && os.Getenv("TMUX") != "" {
 		fmt.Printf("Switching to %s...\n", targetSession)
 		// Use tmux switch-client to move our view to the target session
-		if err := exec.Command("tmux", "switch-client", "-t", targetSession).Run(); err != nil {
+		if err := tmux.NewTmux().SwitchClient(targetSession); err != nil {
 			// Non-fatal - they can manually switch
 			fmt.Printf("Note: Could not auto-switch (use: tmux switch-client -t %s)\n", targetSession)
 		}
@@ -713,34 +708,21 @@ func getSessionPane(sessionName string) (string, error) {
 		fmt.Fprintf(os.Stderr, "[sling-debug] getSessionPane: looking for session %q\n", sessionName)
 	}
 
+	t := tmux.NewTmux()
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		// Get the pane ID for the first pane in the session
-		cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
+		paneID, err := t.GetPaneID(sessionName)
 		if err != nil {
-			// Capture stderr for better error diagnosis
-			stderrStr := strings.TrimSpace(stderr.String())
-			if stderrStr != "" {
-				lastErr = fmt.Errorf("%w: %s", err, stderrStr)
-			} else if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
-				lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
-			} else {
-				lastErr = err
-			}
+			lastErr = err
 			if debug && i%5 == 0 {
-				// Check if session exists using Backend abstraction
 				b := terminal.LocalBackend()
 				has, _ := b.HasSession(sessionName)
-				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: list-panes failed: %v, has-session: %v\n", i, lastErr, has)
+				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: GetPaneID failed: %v, has-session: %v\n", i, lastErr, has)
 			}
 			time.Sleep(retryDelay)
 			continue
 		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) == 0 || lines[0] == "" {
+		if paneID == "" {
 			lastErr = fmt.Errorf("no panes found in session")
 			if debug {
 				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: session exists but no panes\n", i)
@@ -749,9 +731,9 @@ func getSessionPane(sessionName string) (string, error) {
 			continue
 		}
 		if debug {
-			fmt.Fprintf(os.Stderr, "[sling-debug] found pane %s after %d retries\n", lines[0], i)
+			fmt.Fprintf(os.Stderr, "[sling-debug] found pane %s after %d retries\n", paneID, i)
 		}
-		return lines[0], nil
+		return paneID, nil
 	}
 	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
 }

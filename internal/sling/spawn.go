@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -425,22 +424,21 @@ func GetSessionPane(sessionName string) (string, error) {
 	const maxRetries = 30
 	const retryDelay = 100 * time.Millisecond
 
+	t := tmux.NewTmux()
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
-		out, err := cmd.Output()
+		paneID, err := t.GetPaneID(sessionName)
 		if err != nil {
 			lastErr = err
 			time.Sleep(retryDelay)
 			continue
 		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) == 0 || lines[0] == "" {
+		if paneID == "" {
 			lastErr = fmt.Errorf("no panes found in session")
 			time.Sleep(retryDelay)
 			continue
 		}
-		return lines[0], nil
+		return paneID, nil
 	}
 	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
 }

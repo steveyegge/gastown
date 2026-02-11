@@ -365,14 +365,11 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 	t := tmux.NewTmux()
 	sessions, _ := t.ListSessions()
 	for _, sess := range sessions {
-		// Get pane PIDs for this session (with timeout to avoid hanging on dead sessions)
-		paneCtx, paneCancel := context.WithTimeout(context.Background(), cmdTimeout)
-		out, err := exec.CommandContext(paneCtx, "tmux", "list-panes", "-t", sess, "-F", "#{pane_pid}").Output()
-		paneCancel()
+		panePIDs, err := t.ListPanePIDs(sess)
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for _, line := range panePIDs {
 			var pid int
 			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
 				pids[pid] = true
