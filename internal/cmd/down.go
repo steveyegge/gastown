@@ -363,11 +363,11 @@ func printDownStatus(name string, ok bool, detail string) {
 	}
 }
 
-// stopSession gracefully stops a tmux session.
+// stopSession gracefully stops a session (local tmux or remote).
 // Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
 func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
-	backend := terminal.NewTmuxBackend(t)
-	running, err := backend.HasSession(sessionName)
+	backend, sessionKey := resolveBackendForSession(sessionName)
+	running, err := backend.HasSession(sessionKey)
 	if err != nil {
 		return false, err
 	}
@@ -377,12 +377,12 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
-		_ = backend.SendKeys(sessionName, "C-c")
+		_ = backend.SendKeys(sessionKey, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Kill the session via Backend (delegates to KillSessionWithProcesses for tmux)
-	return true, backend.KillSession(sessionName)
+	return true, backend.KillSession(sessionKey)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.

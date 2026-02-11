@@ -164,7 +164,6 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	}
 
 	t := tmux.NewTmux()
-	backend := terminal.NewTmuxBackend(t)
 
 	// Expand role shortcuts to session names and resolve backend.
 	// These shortcuts let users type "mayor" instead of "gt-mayor".
@@ -285,7 +284,8 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			// Try crew first (matches mail system's addressToSessionIDs pattern),
 			// then fall back to polecat.
 			crewSession := crewSessionName(rigName, polecatName)
-			if exists, _ := backend.HasSession(crewSession); exists {
+			crewBackend, crewKey := resolveBackendForSession(crewSession)
+			if exists, _ := crewBackend.HasSession(crewKey); exists {
 				sessionName = crewSession
 				isCrewTarget = true
 			} else {
@@ -309,12 +309,15 @@ func runNudge(cmd *cobra.Command, args []string) error {
 					_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
 					return nil
 				}
-				// OJ send failed, fall through to tmux
+				// OJ send failed, fall through to backend
 			}
 		}
 
+		// Resolve backend for the determined session
+		backend, sessionKey := resolveBackendForSession(sessionName)
+
 		// Send nudge using queue (safe) or direct (may cause API 400)
-		if err := sendOrQueueNudge(backend, t, townRoot, sessionName, message, target); err != nil {
+		if err := sendOrQueueNudge(backend, t, townRoot, sessionKey, message, target); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
@@ -327,7 +330,8 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
 	} else {
 		// Raw session name (legacy)
-		exists, err := backend.HasSession(target)
+		backend, sessionKey := resolveBackendForSession(target)
+		exists, err := backend.HasSession(sessionKey)
 		if err != nil {
 			return fmt.Errorf("checking session: %w", err)
 		}
@@ -335,7 +339,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := sendOrQueueNudge(backend, t, townRoot, target, message, ""); err != nil {
+		if err := sendOrQueueNudge(backend, t, townRoot, sessionKey, message, ""); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 

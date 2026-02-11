@@ -21,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -1375,7 +1374,6 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	t := tmux.NewTmux()
-	backend := terminal.NewTmuxBackend(t)
 
 	// Header
 	fmt.Printf("%s\n", style.Bold.Render(rigName))
@@ -1434,7 +1432,8 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (%d)\n", len(polecats))
 		for _, p := range polecats {
 			sessionName := fmt.Sprintf("gt-%s-%s", rigName, p.Name)
-			hasSession, _ := backend.HasSession(sessionName)
+			pcBackend, pcKey := resolveBackendForSession(sessionName)
+			hasSession, _ := pcBackend.HasSession(pcKey)
 
 			sessionIcon := style.Dim.Render("○")
 			if hasSession {
@@ -1461,7 +1460,8 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (%d)\n", len(crewWorkers))
 		for _, w := range crewWorkers {
 			sessionName := crewSessionName(rigName, w.Name)
-			hasSession, _ := backend.HasSession(sessionName)
+			cwBackend, cwKey := resolveBackendForSession(sessionName)
+			hasSession, _ := cwBackend.HasSession(cwKey)
 
 			sessionIcon := style.Dim.Render("○")
 			if hasSession {
@@ -1629,7 +1629,6 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 	g := git.NewGit(townRoot)
 	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
-	backend := terminal.NewTmuxBackend(t)
 
 	// Track results
 	var succeeded []string
@@ -1730,7 +1729,8 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 1. Start the witness
 		witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-		witnessRunning, _ := backend.HasSession(witnessSession)
+		witBackend, witKey := resolveBackendForSession(witnessSession)
+		witnessRunning, _ := witBackend.HasSession(witKey)
 		if witnessRunning {
 			skipped = append(skipped, "witness")
 		} else {
@@ -1749,7 +1749,8 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 2. Start the refinery
 		refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-		refineryRunning, _ := backend.HasSession(refinerySession)
+		refBackend, refKey := resolveBackendForSession(refinerySession)
+		refineryRunning, _ := refBackend.HasSession(refKey)
 		if refineryRunning {
 			skipped = append(skipped, "refinery")
 		} else {
