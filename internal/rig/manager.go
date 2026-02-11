@@ -1151,26 +1151,40 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 	}
 
 	// Create role-specific bootstrap pointer
+	c := cli.Name()
 	var bootstrap string
 	switch role {
 	case "mayor":
 		bootstrap = `# Mayor Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + c + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
+Full context is injected by ` + "`" + c + " prime`" + ` at session start.
+
+## Quick Reference
+
+- Dispatch work: ` + "`" + c + " sling <bead> <rig>`" + `
+- Message agent: ` + "`" + c + " nudge <target> \"msg\"`" + ` (never tmux send-keys)
+- Kill stuck agent: ` + "`" + c + " polecat nuke <rig>/<name> --force`" + `
+- Pause rig: ` + "`" + c + " rig park <rig>`" + ` (not rig stop — daemon restarts stopped rigs)
+- Resume rig: ` + "`" + c + " rig unpark <rig>`" + `
+- Disable rig: ` + "`" + c + " rig dock <rig>`" + ` (persistent, survives daemon restarts)
+- Re-enable rig: ` + "`" + c + " rig undock <rig>`" + `
+- Create issue: ` + "`bd create \"title\"`" + `
 `
 	case "refinery":
 		bootstrap = `# Refinery Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + c + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
+Full context is injected by ` + "`" + c + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check MQ: ` + "`" + cli.Name() + " mq list`" + `
-- Process next: ` + "`" + cli.Name() + " mq process`" + `
+- Check merge queue: ` + "`" + c + " mq list " + rigName + "`" + ` (never git branch -r | grep polecat)
+- Message polecat: ` + "`" + c + " nudge <rig>/<name> \"msg\"`" + ` (never tmux send-keys)
+- Create issue: ` + "`bd create \"title\"`" + `
+- Cycle session: ` + "`" + c + " handoff`" + `
 `
 	case "crew":
 		name := workerName
@@ -1179,14 +1193,19 @@ Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session star
 		}
 		bootstrap = `# Crew Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + c + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
+Full context is injected by ` + "`" + c + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`" + cli.Name() + " hook`" + `
-- Check mail: ` + "`" + cli.Name() + " mail inbox`" + `
+- Check hook: ` + "`" + c + " hook`" + `
+- Check mail: ` + "`" + c + " mail inbox`" + `
+- Message agent: ` + "`" + c + " nudge <target> \"msg\"`" + ` (never tmux send-keys)
+- Dispatch work: ` + "`" + c + " sling <bead> <rig>`" + `
+- Pause rig: ` + "`" + c + " rig park <rig>`" + ` (not rig stop — daemon restarts stopped rigs)
+- Resume rig: ` + "`" + c + " rig unpark <rig>`" + `
+- Cycle session: ` + "`" + c + " handoff`" + `
 `
 	case "polecat":
 		name := workerName
@@ -1195,21 +1214,25 @@ Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session star
 		}
 		bootstrap = `# Polecat Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + c + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
+Full context is injected by ` + "`" + c + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`" + cli.Name() + " hook`" + `
-- Report done: ` + "`" + cli.Name() + " done`" + `
+- Check hook: ` + "`" + c + " hook`" + `
+- Report done: ` + "`" + c + " done`" + ` (CRITICAL — run when work complete)
+- Next step: ` + "`bd ready`" + `
+- Message agent: ` + "`" + c + " nudge <target> \"msg\"`" + ` (never tmux send-keys)
+- File new issue: ` + "`bd create \"title\"`" + `
+- Ask for help: ` + "`" + c + " mail send <rig>/witness -s \"HELP: ...\" -m \"...\"`" + `
 `
 	default:
 		bootstrap = `# Agent Context
 
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + c + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
+Full context is injected by ` + "`" + c + " prime`" + ` at session start.
 `
 	}
 
