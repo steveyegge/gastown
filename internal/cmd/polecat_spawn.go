@@ -102,6 +102,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Get polecat manager (with tmux for session-aware allocation)
 	polecatGit := git.NewGit(r.Path)
 	t := tmux.NewTmux()
+	backend := terminal.NewTmuxBackend(t)
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
 	// Allocate a new polecat name
@@ -248,7 +249,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 				fmt.Printf("  Polecat %s has hooked work (%s), killing stale session...\n",
 					polecatName, agentBead.HookBead)
 				sessionName := polecatSessMgr.SessionName(polecatName)
-				_ = t.KillSessionWithProcesses(sessionName)
+				_ = backend.KillSession(sessionName)
 				running = false // Will start fresh session below
 			}
 		}
@@ -310,7 +311,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Final verification: confirm worktree and session both still exist.
 	// Issue: gt sling reports success but worktree never created (hq-yh8icr).
 	// This catches any race conditions or cleanup that might have occurred.
-	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, t, terminal.NewTmuxBackend(t)); err != nil {
+	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, t, backend); err != nil {
 		return nil, fmt.Errorf("spawn verification failed for %s: %w", polecatName, err)
 	}
 
