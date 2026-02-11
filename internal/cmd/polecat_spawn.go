@@ -69,9 +69,8 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Load rig config
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	// Load rig config (beads-first, filesystem fallback).
+	rigsConfig, err := loadRigsConfigBeadsFirst(townRoot)
 	if err != nil {
 		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
 	}
@@ -341,9 +340,8 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Load rig config
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	// Load rig config (beads-first, filesystem fallback).
+	rigsConfig, err := loadRigsConfigBeadsFirst(townRoot)
 	if err != nil {
 		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
 	}
@@ -424,8 +422,7 @@ func IsRigName(target string) (string, bool) {
 		return "", false
 	}
 
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	rigsConfig, err := loadRigsConfigBeadsFirst(townRoot)
 	if err != nil {
 		return "", false
 	}
