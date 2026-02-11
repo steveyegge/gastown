@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -1106,9 +1107,10 @@ func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
 		return true // Can't determine session = treat as ready
 	}
 
-	// Check if tmux session exists
-	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
-	if err := checkCmd.Run(); err != nil {
+	// Check if session exists via Backend (supports K8s/Coop agents)
+	backend := terminal.ResolveBackend(t.Assignee)
+	exists, err := backend.HasSession(sessionName)
+	if err != nil || !exists {
 		return true // Session doesn't exist = ready
 	}
 
