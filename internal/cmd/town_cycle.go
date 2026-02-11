@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // townCycleSession is the --session flag for town next/prev commands.
@@ -135,8 +135,7 @@ func cycleTownSession(direction int, sessionOverride string) error {
 	targetSession := sessions[targetIdx]
 
 	// Switch to target session
-	cmd := exec.Command("tmux", "switch-client", "-t", targetSession)
-	if err := cmd.Run(); err != nil {
+	if err := tmux.NewTmux().SwitchClient(targetSession); err != nil {
 		return fmt.Errorf("switching to %s: %w", targetSession, err)
 	}
 
@@ -146,7 +145,7 @@ func cycleTownSession(direction int, sessionOverride string) error {
 // findRunningTownSessions returns a list of currently running town-level sessions.
 func findRunningTownSessions() ([]string, error) {
 	// Get all tmux sessions
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	allSessions, err := tmux.NewTmux().ListSessions()
 	if err != nil {
 		return nil, fmt.Errorf("listing tmux sessions: %w", err)
 	}
@@ -158,7 +157,7 @@ func findRunningTownSessions() ([]string, error) {
 	}
 
 	var running []string
-	for _, line := range splitLines(string(out)) {
+	for _, line := range allSessions {
 		if line == "" {
 			continue
 		}
