@@ -164,6 +164,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	}
 
 	t := tmux.NewTmux()
+	backend := terminal.NewTmuxBackend(t)
 
 	// Expand role shortcuts to session names and resolve backend.
 	// These shortcuts let users type "mayor" instead of "gt-mayor".
@@ -247,11 +248,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 
 	// Try remote backend first (K8s-hosted agents via Coop or SSH).
 	// This works for any target format (rig/polecat, raw agent bead ID, etc.).
-	backend := terminal.ResolveBackend(target)
-	switch backend.(type) {
+	remoteBackend := terminal.ResolveBackend(target)
+	switch remoteBackend.(type) {
 	case *terminal.CoopBackend, *terminal.SSHBackend:
 		// Remote pod: session is always named "claude"
-		if err := backend.NudgeSession("claude", message); err != nil {
+		if err := remoteBackend.NudgeSession("claude", message); err != nil {
 			return fmt.Errorf("nudging remote session: %w", err)
 		}
 		fmt.Printf("%s Nudged %s (remote)\n", style.Bold.Render("✓"), target)
@@ -284,7 +285,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			// Try crew first (matches mail system's addressToSessionIDs pattern),
 			// then fall back to polecat.
 			crewSession := crewSessionName(rigName, polecatName)
-			if exists, _ := t.HasSession(crewSession); exists {
+			if exists, _ := backend.HasSession(crewSession); exists {
 				sessionName = crewSession
 				isCrewTarget = true
 			} else {
@@ -313,7 +314,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 
 		// Send nudge using queue (safe) or direct (may cause API 400)
-		if err := sendOrQueueNudge(t, townRoot, sessionName, message, target); err != nil {
+		if err := sendOrQueueNudge(backend, t, townRoot, sessionName, message, target); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
@@ -326,7 +327,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
 	} else {
 		// Raw session name (legacy)
-		exists, err := t.HasSession(target)
+		exists, err := backend.HasSession(target)
 		if err != nil {
 			return fmt.Errorf("checking session: %w", err)
 		}
@@ -334,7 +335,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := sendOrQueueNudge(t, townRoot, target, message, ""); err != nil {
+		if err := sendOrQueueNudge(backend, t, townRoot, target, message, ""); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
@@ -425,14 +426,14 @@ func runNudgeChannel(channelName, message string) error {
 	}
 
 	// Send nudges
-	t := tmux.NewTmux()
+	backend := terminal.NewTmuxBackend(tmux.NewTmux())
 	var succeeded, failed int
 	var failures []string
 
 	fmt.Printf("Nudging channel %q (%d target(s))...\n\n", channelName, len(targets))
 
 	for i, sessionName := range targets {
-		if err := t.NudgeSession(sessionName, prefixedMessage); err != nil {
+		if err := backend.NudgeSession(sessionName, prefixedMessage); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", sessionName, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, sessionName)
@@ -611,21 +612,22 @@ func addressToAgentBeadID(address string) string {
 	}
 }
 
-// sendOrQueueNudge sends a nudge either directly via tmux (default) or queued for later delivery.
+// sendOrQueueNudge sends a nudge either directly via Backend (default) or queued for later delivery.
 // By default, nudges are sent directly to wake up idle agents immediately.
 // Use --queue flag to buffer nudges when the target may be busy processing tools.
 // Use --delay flag to wait before sending (useful after session restart) (gt-j7iaxs).
 // Use --wait-ready flag to poll until agent is alive before sending (gt-kk330e).
 //
+// backend is used for NudgeSession; t is needed for tmux-specific WaitForAgentReady.
 // targetAddress is the original rig/polecat address (e.g., "gastown/furiosa") used to
 // check if the target is OJ-managed. Pass "" if unknown (falls through to tmux).
-func sendOrQueueNudge(t *tmux.Tmux, townRoot, sessionName, message, targetAddress string) error {
+func sendOrQueueNudge(backend terminal.Backend, t *tmux.Tmux, townRoot, sessionName, message, targetAddress string) error {
 	// If --queue flag is set and we're in a workspace, queue the nudge
 	if nudgeQueueFlag && townRoot != "" {
 		nq := inject.NewNudgeQueue(townRoot, sessionName)
 		if err := nq.Enqueue(message); err != nil {
 			// Fall back to direct send if queueing fails
-			return t.NudgeSession(sessionName, message)
+			return backend.NudgeSession(sessionName, message)
 		}
 		return nil
 	}
@@ -645,8 +647,8 @@ func sendOrQueueNudge(t *tmux.Tmux, townRoot, sessionName, message, targetAddres
 		time.Sleep(time.Duration(nudgeDelayFlag) * time.Millisecond)
 	}
 
-	// Default: send directly via tmux to wake up the target immediately
-	return t.NudgeSession(sessionName, message)
+	// Default: send directly via Backend to wake up the target immediately
+	return backend.NudgeSession(sessionName, message)
 }
 
 // nudgeDrainCmd drains the nudge queue for the current session.
