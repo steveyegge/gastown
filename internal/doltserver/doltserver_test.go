@@ -267,7 +267,7 @@ func TestFindLocalDoltDB(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple databases returns first alphabetically with warning", func(t *testing.T) {
+	t.Run("multiple databases returns empty with warning", func(t *testing.T) {
 		beadsDir := t.TempDir()
 		doltParent := filepath.Join(beadsDir, "dolt")
 		// Create two valid dolt databases
@@ -292,10 +292,9 @@ func TestFindLocalDoltDB(t *testing.T) {
 		io.Copy(&buf, r)
 		os.Stderr = origStderr
 
-		// Should return the first alphabetically (beads_gt < beads_old)
-		expected := filepath.Join(doltParent, "beads_gt")
-		if result != expected {
-			t.Errorf("got %q, want %q", result, expected)
+		// Should fail closed on ambiguity — return empty string
+		if result != "" {
+			t.Errorf("expected empty string for ambiguous multi-candidate, got %q", result)
 		}
 		// Verify warning was emitted
 		if !strings.Contains(buf.String(), "multiple dolt databases found") {

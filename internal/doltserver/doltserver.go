@@ -640,9 +640,8 @@ type Migration struct {
 // beads_gt) that have changed across versions. Scanning avoids hardcoding
 // assumptions about the naming scheme.
 //
-// If multiple databases are found, returns the first one alphabetically
-// (os.ReadDir sorts by name) and logs a warning to stderr. In practice each
-// .beads/dolt/ should contain exactly one database.
+// If multiple databases are found, returns "" and logs a warning to stderr.
+// Callers should not silently pick one — ambiguity requires manual resolution.
 func findLocalDoltDB(beadsDir string) string {
 	doltParent := filepath.Join(beadsDir, "dolt")
 	entries, err := os.ReadDir(doltParent)
@@ -675,12 +674,13 @@ func findLocalDoltDB(beadsDir string) string {
 	}
 	if len(candidates) == 0 {
 		if len(entries) > 0 {
-			fmt.Fprintf(os.Stderr, "Warning: %s exists but contains no valid dolt database\n", doltParent)
+			fmt.Fprintf(os.Stderr, "[doltserver] Warning: %s exists but contains no valid dolt database\n", doltParent)
 		}
 		return ""
 	}
 	if len(candidates) > 1 {
-		fmt.Fprintf(os.Stderr, "Warning: multiple dolt databases found in %s: %v — using %s\n", doltParent, candidates, candidates[0])
+		fmt.Fprintf(os.Stderr, "[doltserver] Warning: multiple dolt databases found in %s: %v — manual resolution required\n", doltParent, candidates)
+		return ""
 	}
 	return candidates[0]
 }
@@ -738,7 +738,7 @@ func FindMigratableDatabases(townRoot string) []Migration {
 }
 
 // MigrateRigFromBeads migrates an existing beads Dolt database to the data directory.
-// This is used to migrate from the old per-rig .beads/dolt/beads layout to the new
+// This is used to migrate from the old per-rig .beads/dolt/<db_name> layout to the new
 // centralized .dolt-data/<rigname> layout.
 func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 	config := DefaultConfig(townRoot)
