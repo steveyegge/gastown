@@ -536,6 +536,18 @@ after finishing implementation is the "Idle Polecat heresy" - a critical failure
 
 ---
 
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Signal work complete | `{{ cmd }} done` | ~~bd close <root-issue>~~ (Refinery closes it) |
+| Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Check workflow steps | `bd ready` | ~~gt mol status~~ (less useful) |
+| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Escalate blocker | `{{ cmd }} escalate "desc" -s HIGH` | ~~waiting for human~~ (never wait) |
+
 Polecat: {{ .Polecat }}
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}

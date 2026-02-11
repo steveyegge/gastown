@@ -334,4 +334,23 @@ When creating PRs, default to `--repo` with the origin remote (gh CLI defaults t
 gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
 ```
 
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |
+| Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Kill stuck polecat | `{{ cmd }} polecat nuke <rig>/<name> --force` | ~~gt polecat kill~~ (not a command) |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
+| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
+| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+
+**Rig lifecycle commands (park vs dock vs stop):**
+- `park/unpark` — Temporary pause. Daemon skips parked rigs.
+- `dock/undock` — Persistent disable. Survives daemon restarts.
+- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
+- `restart/reboot` — Stop then start rig agents.
+
 Town root: {{ .TownRoot }}

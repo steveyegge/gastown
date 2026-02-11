@@ -503,6 +503,24 @@ See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 - **Clean git state**: Keep `git status` clean before breaks.
 - **Spot desire paths**: When commands fail but "should have worked", file a bead.
 
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |
+| Stop my session | `{{ cmd }} crew stop {{ .Polecat }}` | ~~gt rig stop~~ (stops rig agents, not crew) |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
+| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
+
+**Rig lifecycle commands (park vs dock vs stop):**
+- `park/unpark` — Temporary pause. Daemon skips parked rigs.
+- `dock/undock` — Persistent disable. Survives daemon restarts.
+- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
+- `restart/reboot` — Stop then start rig agents.
+
 Crew member: {{ .Polecat }}
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
