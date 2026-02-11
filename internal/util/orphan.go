@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // minOrphanAge is the minimum age (in seconds) a process must be before
@@ -30,25 +32,24 @@ const minOrphanAge = 60
 func getTmuxSessionPIDs() map[int]bool {
 	pids := make(map[int]bool)
 
+	t := tmux.NewTmux()
+
 	// Get list of ALL tmux sessions (not just gt-*/hq-*)
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	sessions, err := t.ListSessions()
 	if err != nil {
 		return pids // tmux not available or no sessions
 	}
-
-	// Protect ALL sessions - user's personal sessions are just as important
-	sessions := strings.Split(strings.TrimSpace(string(out)), "\n")
 
 	// For each session, get the PIDs of processes in its panes
 	for _, session := range sessions {
 		if session == "" {
 			continue
 		}
-		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		panePIDs, err := t.ListPanePIDs(session)
 		if err != nil {
 			continue
 		}
-		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for _, pidStr := range panePIDs {
 			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
 				pids[pid] = true
 				// Also add child processes of the pane shell
@@ -385,8 +386,8 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Returning empty is safer than marking all Claude processes as zombies.
 	if len(validPIDs) == 0 {
 		// Check if tmux is even running
-		if err := exec.Command("tmux", "list-sessions").Run(); err != nil {
-			return nil, fmt.Errorf("tmux not available: %w", err)
+		if !tmux.NewTmux().IsAvailable() {
+			return nil, fmt.Errorf("tmux not available")
 		}
 		// tmux is running but no gt-*/hq-* sessions - that's a valid state,
 		// but we can't safely determine zombies without reference sessions.
