@@ -77,6 +77,31 @@ type TmuxLister interface {
 	ListSessions() ([]string, error)
 }
 
+// BeadWriter creates and closes agent beads. This interface is satisfied by
+// beads.Beads and allows the registry to manage agent lifecycle.
+type BeadWriter interface {
+	// CreateOrReopenAgentBead creates an agent bead or reopens a closed one.
+	CreateOrReopenAgentBead(id, title string, fields *beads.AgentFields) (*beads.Issue, error)
+	// CloseAndClearAgentBead closes an agent bead with a reason.
+	CloseAndClearAgentBead(id, reason string) error
+	// AddLabel adds a label to a bead.
+	AddLabel(id, label string) error
+}
+
+// CreateSessionOpts configures session creation.
+type CreateSessionOpts struct {
+	// ID is the bead identifier (e.g., "gt-gastown-crew-k8s").
+	ID string
+	// Title is the display name for the agent.
+	Title string
+	// Rig is the rig name.
+	Rig string
+	// Role is the agent role (polecat, crew, witness, etc.).
+	Role string
+	// K8s indicates this is a K8s agent (adds execution_target:k8s label).
+	K8s bool
+}
+
 // DiscoverOpts controls session discovery behavior.
 type DiscoverOpts struct {
 	// CheckLiveness enables health-checking each discovered session.
@@ -100,6 +125,7 @@ type SessionRegistry struct {
 	lister AgentLister
 	notes  NotesReader
 	tmux   TmuxLister
+	writer BeadWriter // optional, needed for Create/Destroy operations
 }
 
 // New creates a SessionRegistry.
@@ -113,6 +139,12 @@ func New(lister AgentLister, notes NotesReader, tmux TmuxLister) *SessionRegistr
 		notes:  notes,
 		tmux:   tmux,
 	}
+}
+
+// SetWriter sets the BeadWriter for session lifecycle operations.
+// This is optional — only needed for CreateSession/DestroySession.
+func (r *SessionRegistry) SetWriter(w BeadWriter) {
+	r.writer = w
 }
 
 // DiscoverAll discovers all agent sessions, optionally health-checking them.
@@ -353,4 +385,71 @@ func computeTmuxSession(id, rig, role, name string) string {
 	}
 	// For everything else, the bead ID IS the tmux session name
 	return id
+}
+
+// --- Session lifecycle operations ---
+
+// CreateSession creates an agent bead, triggering the K8s controller to create
+// a pod (when K8s=true). The controller watches for agent beads with
+// agent_state=spawning and execution_target:k8s labels.
+func (r *SessionRegistry) CreateSession(opts CreateSessionOpts) (*Session, error) {
+	if r.writer == nil {
+		return nil, fmt.Errorf("registry: no BeadWriter configured (call SetWriter)")
+	}
+	if opts.ID == "" {
+		return nil, fmt.Errorf("registry: session ID is required")
+	}
+
+	fields := &beads.AgentFields{
+		RoleType:   opts.Role,
+		Rig:        opts.Rig,
+		AgentState: "spawning",
+	}
+
+	issue, err := r.writer.CreateOrReopenAgentBead(opts.ID, opts.Title, fields)
+	if err != nil {
+		return nil, fmt.Errorf("creating agent bead: %w", err)
+	}
+
+	// Add K8s label so the controller picks up this agent
+	if opts.K8s {
+		if err := r.writer.AddLabel(opts.ID, "execution_target:k8s"); err != nil {
+			return nil, fmt.Errorf("adding k8s label: %w", err)
+		}
+	}
+
+	s := r.buildSession(issue.ID, issue)
+	if opts.K8s {
+		s.Target = "k8s"
+		s.BackendType = "coop"
+	}
+
+	return &s, nil
+}
+
+// DestroySession closes the agent bead, triggering the K8s controller to
+// delete the pod. For local agents, this just closes the bead — the caller
+// is responsible for killing the tmux session.
+func (r *SessionRegistry) DestroySession(agentID, reason string) error {
+	if r.writer == nil {
+		return fmt.Errorf("registry: no BeadWriter configured (call SetWriter)")
+	}
+	return r.writer.CloseAndClearAgentBead(agentID, reason)
+}
+
+// RestartSession restarts an agent by switching the coop session in-place.
+// This only works for coop-backed sessions. For tmux sessions, use
+// Backend.RespawnPane() directly.
+func (r *SessionRegistry) RestartSession(ctx context.Context, agentID string) error {
+	s, err := r.Lookup(ctx, agentID, false)
+	if err != nil {
+		return err
+	}
+	if s.BackendType != "coop" || s.CoopURL == "" {
+		return fmt.Errorf("restart only supported for coop sessions (got backend=%s)", s.BackendType)
+	}
+
+	b := terminal.NewCoopBackend(terminal.CoopConfig{Timeout: 30 * time.Second})
+	b.AddSession("claude", s.CoopURL)
+	return b.RespawnPane("claude")
 }

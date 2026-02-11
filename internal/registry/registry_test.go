@@ -406,6 +406,260 @@ func TestParseNameFromID(t *testing.T) {
 	}
 }
 
+// --- mockBeadWriter for lifecycle tests ---
+
+type mockBeadWriter struct {
+	created    map[string]*beads.Issue
+	closed     map[string]string
+	labels     map[string][]string
+	createErr  error
+	closeErr   error
+	addLabelErr error
+}
+
+func newMockWriter() *mockBeadWriter {
+	return &mockBeadWriter{
+		created: make(map[string]*beads.Issue),
+		closed:  make(map[string]string),
+		labels:  make(map[string][]string),
+	}
+}
+
+func (m *mockBeadWriter) CreateOrReopenAgentBead(id, title string, fields *beads.AgentFields) (*beads.Issue, error) {
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
+	issue := &beads.Issue{
+		ID:          id,
+		Title:       title,
+		Description: beads.FormatAgentDescription(title, fields),
+		Labels:      []string{"gt:agent"},
+	}
+	m.created[id] = issue
+	return issue, nil
+}
+
+func (m *mockBeadWriter) CloseAndClearAgentBead(id, reason string) error {
+	if m.closeErr != nil {
+		return m.closeErr
+	}
+	m.closed[id] = reason
+	return nil
+}
+
+func (m *mockBeadWriter) AddLabel(id, label string) error {
+	if m.addLabelErr != nil {
+		return m.addLabelErr
+	}
+	m.labels[id] = append(m.labels[id], label)
+	return nil
+}
+
+func TestCreateSession_K8s(t *testing.T) {
+	writer := newMockWriter()
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		&mockNotesReader{notes: map[string]string{}},
+		nil,
+	)
+	reg.SetWriter(writer)
+
+	s, err := reg.CreateSession(CreateSessionOpts{
+		ID:    "gt-gastown-crew-k8s",
+		Title: "k8s crew",
+		Rig:   "gastown",
+		Role:  "crew",
+		K8s:   true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.ID != "gt-gastown-crew-k8s" {
+		t.Errorf("ID = %q, want gt-gastown-crew-k8s", s.ID)
+	}
+	if s.Target != "k8s" {
+		t.Errorf("Target = %q, want k8s", s.Target)
+	}
+	if s.BackendType != "coop" {
+		t.Errorf("BackendType = %q, want coop", s.BackendType)
+	}
+
+	// Verify bead was created
+	if _, ok := writer.created["gt-gastown-crew-k8s"]; !ok {
+		t.Error("expected bead to be created")
+	}
+
+	// Verify K8s label was added
+	labels := writer.labels["gt-gastown-crew-k8s"]
+	found := false
+	for _, l := range labels {
+		if l == "execution_target:k8s" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected execution_target:k8s label, got %v", labels)
+	}
+}
+
+func TestCreateSession_Local(t *testing.T) {
+	writer := newMockWriter()
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		&mockNotesReader{notes: map[string]string{}},
+		nil,
+	)
+	reg.SetWriter(writer)
+
+	s, err := reg.CreateSession(CreateSessionOpts{
+		ID:    "hq-mayor",
+		Title: "Mayor",
+		Role:  "mayor",
+		K8s:   false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Target != "local" {
+		t.Errorf("Target = %q, want local", s.Target)
+	}
+	if s.BackendType != "tmux" {
+		t.Errorf("BackendType = %q, want tmux", s.BackendType)
+	}
+
+	// No K8s label
+	if len(writer.labels["hq-mayor"]) != 0 {
+		t.Errorf("expected no labels for local agent, got %v", writer.labels["hq-mayor"])
+	}
+}
+
+func TestCreateSession_NoWriter(t *testing.T) {
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		nil,
+		nil,
+	)
+
+	_, err := reg.CreateSession(CreateSessionOpts{ID: "test", Title: "Test"})
+	if err == nil {
+		t.Fatal("expected error when no writer configured")
+	}
+}
+
+func TestCreateSession_EmptyID(t *testing.T) {
+	writer := newMockWriter()
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		nil,
+		nil,
+	)
+	reg.SetWriter(writer)
+
+	_, err := reg.CreateSession(CreateSessionOpts{Title: "Test"})
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+}
+
+func TestDestroySession(t *testing.T) {
+	writer := newMockWriter()
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		nil,
+		nil,
+	)
+	reg.SetWriter(writer)
+
+	err := reg.DestroySession("gt-gastown-crew-k8s", "shutdown requested")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	reason, ok := writer.closed["gt-gastown-crew-k8s"]
+	if !ok {
+		t.Fatal("expected bead to be closed")
+	}
+	if reason != "shutdown requested" {
+		t.Errorf("close reason = %q, want %q", reason, "shutdown requested")
+	}
+}
+
+func TestDestroySession_NoWriter(t *testing.T) {
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{}},
+		nil,
+		nil,
+	)
+
+	err := reg.DestroySession("test", "reason")
+	if err == nil {
+		t.Fatal("expected error when no writer configured")
+	}
+}
+
+func TestRestartSession_CoopBackend(t *testing.T) {
+	// Create mock coop server that accepts PUT /api/v1/session/switch
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		switch r.URL.Path {
+		case "/api/v1/agent/state":
+			json.NewEncoder(w).Encode(map[string]string{"state": "working", "agent": "claude"})
+		case "/api/v1/session/switch":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{
+			"gt-gastown-crew-k8s": {
+				ID:          "gt-gastown-crew-k8s",
+				Title:       "k8s crew",
+				Description: "k8s crew\n\nrole_type: crew\nrig: gastown\nagent_state: working",
+				Labels:      []string{"gt:agent", "execution_target:k8s"},
+			},
+		}},
+		&mockNotesReader{notes: map[string]string{
+			"gt-gastown-crew-k8s": "backend: coop\ncoop_url: " + srv.URL,
+		}},
+		nil,
+	)
+
+	err := reg.RestartSession(context.Background(), "gt-gastown-crew-k8s")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != "PUT" {
+		t.Errorf("expected PUT, got %s", gotMethod)
+	}
+	if gotPath != "/api/v1/session/switch" {
+		t.Errorf("expected /api/v1/session/switch, got %s", gotPath)
+	}
+}
+
+func TestRestartSession_TmuxBackendFails(t *testing.T) {
+	reg := New(
+		&mockAgentLister{beads: map[string]*beads.Issue{
+			"hq-mayor": {
+				ID:          "hq-mayor",
+				Title:       "Mayor",
+				Description: "Mayor\n\nrole_type: mayor\nrig: null\nagent_state: working",
+				Labels:      []string{"gt:agent"},
+			},
+		}},
+		&mockNotesReader{notes: map[string]string{}},
+		nil,
+	)
+
+	err := reg.RestartSession(context.Background(), "hq-mayor")
+	if err == nil {
+		t.Fatal("expected error for non-coop session")
+	}
+}
+
 func TestHookBeadFromJSON(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{
