@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // CrewStatusItem represents detailed status for a crew worker.
@@ -80,12 +79,12 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	t := tmux.NewTmux()
 	var items []CrewStatusItem
 
 	for _, w := range workers {
 		sessionID := crewSessionName(r.Name, w.Name)
-		hasSession, _ := t.HasSession(sessionID)
+		backend, sessionKey := resolveBackendForSession(sessionID)
+		hasSession, _ := backend.HasSession(sessionKey)
 
 		// Git status
 		crewGit := git.NewGit(w.ClonePath)

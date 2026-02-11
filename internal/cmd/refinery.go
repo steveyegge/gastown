@@ -10,7 +10,6 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -522,8 +521,8 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	sessionID := fmt.Sprintf("gt-%s-refinery", rigName)
 
 	// Check if session exists
-	t := tmux.NewTmux()
-	running, err := t.HasSession(sessionID)
+	backend, sessionKey := resolveBackendForSession(sessionID)
+	running, err := backend.HasSession(sessionKey)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
@@ -536,8 +535,8 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
 	}
 
-	// Attach to session using exec to properly forward TTY
-	return attachToTmuxSession(sessionID)
+	// Attach to session
+	return backend.AttachSession(sessionKey)
 }
 
 func runRefineryRestart(cmd *cobra.Command, args []string) error {

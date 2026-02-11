@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -192,13 +191,13 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Kill tmux session if it exists.
-	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-	t := tmux.NewTmux()
+	// Kill session if it exists.
+	// Use KillSession to ensure all descendant processes are killed.
 	sessionName := witnessSessionName(rigName)
-	running, _ := t.HasSession(sessionName)
+	backend, sessionKey := resolveBackendForSession(sessionName)
+	running, _ := backend.HasSession(sessionKey)
 	if running {
-		if err := t.KillSessionWithProcesses(sessionName); err != nil {
+		if err := backend.KillSession(sessionKey); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}

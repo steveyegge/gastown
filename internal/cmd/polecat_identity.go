@@ -277,7 +277,6 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 	// Filter for polecat beads in this rig
 	identities := []IdentityInfo{} // Initialize to empty slice (not nil) for JSON
 	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
 
 	for id, issue := range agentBeads {
 		// Parse the bead ID to check if it's a polecat for this rig
@@ -300,8 +299,10 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 			worktreeExists = true
 		}
 
-		// Check if session is running
-		sessionRunning, _ := polecatMgr.IsRunning(name)
+		// Check if session is running (resolve per-polecat backend for remote support)
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, name)
+		pcBackend, pcKey := resolveBackendForSession(sessionName)
+		sessionRunning, _ := pcBackend.HasSession(pcKey)
 
 		info := IdentityInfo{
 			Rig:            rigName,
@@ -396,7 +397,6 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 
 	// Check worktree and session
 	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
 	mgr := polecat.NewManager(r, nil, t)
 
 	worktreeExists := false
@@ -404,7 +404,10 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	if p, err := mgr.Get(polecatName); err == nil && p != nil {
 		worktreeExists = true
 	}
-	sessionRunning, _ := polecatMgr.IsRunning(polecatName)
+	// Resolve per-polecat backend for remote support
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	pcBackend, pcKey := resolveBackendForSession(sessionName)
+	sessionRunning, _ := pcBackend.HasSession(pcKey)
 
 	// Build CV summary for enhanced display
 	var cv *CVSummary
@@ -589,9 +592,9 @@ func runPolecatIdentityRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Safety check: no active session
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
-	running, _ := polecatMgr.IsRunning(oldName)
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, oldName)
+	pcBackend, pcKey := resolveBackendForSession(sessionName)
+	running, _ := pcBackend.HasSession(pcKey)
 	if running {
 		return fmt.Errorf("cannot rename: polecat session %s is running", oldName)
 	}
@@ -660,9 +663,9 @@ func runPolecatIdentityRemove(cmd *cobra.Command, args []string) error {
 		var reasons []string
 
 		// Check for active session
-		t := tmux.NewTmux()
-		polecatMgr := polecat.NewSessionManager(t, r)
-		running, _ := polecatMgr.IsRunning(polecatName)
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		pcBackend, pcKey := resolveBackendForSession(sessionName)
+		running, _ := pcBackend.HasSession(pcKey)
 		if running {
 			reasons = append(reasons, "session is running")
 		}

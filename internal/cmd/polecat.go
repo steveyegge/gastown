@@ -647,9 +647,12 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("polecat '%s' not found in rig '%s'", polecatName, rigName)
 	}
 
-	// Get session info
+	// Get session info (resolve backend for remote support)
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	pcBackend, _ := resolveBackendForSession(sessionName)
+	polecatMgr.SetBackend(pcBackend)
 	sessInfo, err := polecatMgr.Status(polecatName)
 	if err != nil {
 		// Non-fatal - continue without session info
