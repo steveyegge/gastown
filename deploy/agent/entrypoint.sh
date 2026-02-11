@@ -465,7 +465,7 @@ fi
 
 # ── Skip Claude onboarding wizard ─────────────────────────────────────────
 
-printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferredTheme":"dark"}\n' > "${HOME}/.claude.json"
+printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.37","preferredTheme":"dark","bypassPermissionsModeAccepted":true}\n' > "${HOME}/.claude.json"
 
 # ── Start coop + Claude ──────────────────────────────────────────────────
 #
