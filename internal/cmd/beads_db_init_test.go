@@ -334,6 +334,66 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 		t.Logf("Created issue with derived prefix: %s", result.ID)
 	})
+
+	t.Run("MissingMetadataTriggersReInit", func(t *testing.T) {
+		// Exercises the rig.go:691 code path where metadata.json is missing
+		// and gt rig add --adopt must re-initialize the database.
+		// This simulates an edge case (e.g., legacy repo, manual deletion)
+		// where dolt/ and metadata.json are absent despite .beads/ existing.
+
+		townRoot := filepath.Join(tmpDir, "town-reinit")
+
+		// Install town
+		cmd := exec.Command(gtBinary, "install", townRoot, "--name", "reinit-test")
+		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+		}
+
+		// Create a tracked beads repo with issues
+		rigDir := filepath.Join(townRoot, "reinitrig")
+		createTrackedBeadsRepoWithIssues(t, rigDir, "reinit-prefix", 2)
+
+		// Forcibly remove metadata.json and dolt/ to simulate missing DB state.
+		// This forces the rig.go initialization branch (metadata.json check).
+		beadsDir := filepath.Join(rigDir, ".beads")
+		os.Remove(filepath.Join(beadsDir, "metadata.json"))
+		os.RemoveAll(filepath.Join(beadsDir, "dolt"))
+
+		// Verify metadata.json is actually gone
+		if _, err := os.Stat(filepath.Join(beadsDir, "metadata.json")); !os.IsNotExist(err) {
+			t.Fatalf("expected metadata.json to be removed, but stat returned: %v", err)
+		}
+
+		// Add rig with --adopt --force
+		cmd = exec.Command(gtBinary, "rig", "add", "reinitrig", "--adopt", "--force", "--prefix", "reinit-prefix")
+		cmd.Dir = townRoot
+		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("gt rig add failed: %v\nOutput: %s", err, output)
+		}
+
+		// Verify the re-init path was triggered: adopt output should confirm init
+		if !strings.Contains(string(output), "Initialized beads database") {
+			t.Fatalf("expected 'Initialized beads database' in adopt output, got:\n%s", output)
+		}
+
+		// Verify the database artifacts were recreated
+		metadataPath := filepath.Join(beadsDir, "metadata.json")
+		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+			t.Fatal("metadata.json was not recreated by rig add --adopt")
+		}
+		doltDir := filepath.Join(beadsDir, "dolt")
+		if _, err := os.Stat(doltDir); os.IsNotExist(err) {
+			t.Fatal("dolt/ directory was not recreated by rig add --adopt")
+		}
+
+		t.Logf("Re-init path verified: metadata.json and dolt/ recreated after adopt")
+		// NOTE: We don't test bd create here because rig.go inits with --server mode,
+		// which requires a running dolt sql-server for runtime access. The init itself
+		// is verified by checking that metadata.json and dolt/ were recreated.
+	})
 }
 
 // createTrackedBeadsRepoWithNoIssues creates a git repo with .beads/ tracked but NO issues.
