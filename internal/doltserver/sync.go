@@ -19,13 +19,6 @@ type SyncOptions struct {
 
 	// Filter restricts sync to a single database name. Empty means all.
 	Filter string
-
-	// GC enables garbage collection of closed ephemeral beads before push.
-	// Runs "bd purge" for each database to remove closed wisps/convoys.
-	GC bool
-
-	// TownRoot is the Gas Town workspace root (needed for beads dir resolution).
-	TownRoot string
 }
 
 // SyncResult records the outcome of syncing a single database.
@@ -47,12 +40,6 @@ type SyncResult struct {
 
 	// Remote is the origin push URL, or empty if none configured.
 	Remote string
-
-	// Purged is the number of closed ephemeral beads removed by --gc.
-	Purged int
-
-	// PurgeError is non-nil if bd purge failed (non-fatal, sync continues).
-	PurgeError error
 }
 
 // HasRemote checks whether a Dolt database directory has an "origin" remote configured.
@@ -164,13 +151,6 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 			continue
 		}
 
-		// GC: purge closed ephemeral beads before push
-		if opts.GC && opts.TownRoot != "" {
-			purged, purgeErr := purgeClosedEphemerals(opts.TownRoot, db, opts.DryRun)
-			result.Purged = purged
-			result.PurgeError = purgeErr
-		}
-
 		if opts.DryRun {
 			result.DryRun = true
 			results = append(results, result)
@@ -198,11 +178,12 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 	return results
 }
 
-// purgeClosedEphemerals runs "bd purge" for a specific rig database to remove
+// PurgeClosedEphemerals runs "bd purge" for a specific rig database to remove
 // closed ephemeral beads (wisps, convoys) before pushing to DoltHub.
 // Returns the number of beads purged and any error encountered.
 // Errors are non-fatal — the caller should log them but continue with sync.
-func purgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
+// Must be called while the Dolt server is still running (bd purge needs SQL access).
+func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 	// Resolve the beads directory for this rig
 	beadsDir, err := FindOrCreateRigBeadsDir(townRoot, dbName)
 	if err != nil {
