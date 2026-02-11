@@ -327,16 +327,10 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// Explicit target provided
 		target = args[0]
 	} else {
-		// Use cwd-based detection for status display
-		// This ensures we show the hook for the agent whose directory we're in,
-		// not the agent from the GT_ROLE env var (which might be different if
-		// we cd'd into another rig's crew/polecat directory)
-		roleCtx = detectRole(cwd, townRoot)
-		if roleCtx.Role == RoleUnknown {
-			// Fall back to GT_ROLE when cwd doesn't identify an agent
-			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
-			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
-		}
+		// Use GetRoleWithContext which checks GT_ROLE env var first (authoritative),
+		// then falls back to cwd detection. This is critical for K8s agents where
+		// GT_ROLE=polecat but the workspace root has mayor/ directory structure.
+		roleCtx, _ = GetRoleWithContext(cwd, townRoot)
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -800,16 +794,10 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// Explicit target provided
 		target = args[0]
 	} else {
-		// Use cwd-based detection for status display
-		// This ensures we show the hook for the agent whose directory we're in,
-		// not the agent from the GT_ROLE env var (which might be different if
-		// we cd'd into another rig's crew/polecat directory)
-		roleCtx = detectRole(cwd, townRoot)
-		if roleCtx.Role == RoleUnknown {
-			// Fall back to GT_ROLE when cwd doesn't identify an agent
-			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
-			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
-		}
+		// Use GetRoleWithContext which checks GT_ROLE env var first (authoritative),
+		// then falls back to cwd detection. This is critical for K8s agents where
+		// GT_ROLE=polecat but the workspace root has mayor/ directory structure.
+		roleCtx, _ = GetRoleWithContext(cwd, townRoot)
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
