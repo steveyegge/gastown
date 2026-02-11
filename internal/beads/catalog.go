@@ -48,6 +48,11 @@ func NewMoleculeCatalog() *MoleculeCatalog {
 // Molecules are loaded from town, rig, and project levels (no builtin molecules).
 // Each level follows .beads/redirect if present (for shared beads support).
 func LoadCatalog(townRoot, rigPath, projectPath string) (*MoleculeCatalog, error) {
+	// In daemon mode, molecule catalogs are served via daemon RPC.
+	if IsDaemonMode() {
+		return NewMoleculeCatalog(), nil
+	}
+
 	catalog := NewMoleculeCatalog()
 
 	// 1. Load town-level molecules (follows redirect if present)

@@ -36,6 +36,9 @@ type MetadataConfig struct {
 // Server mode connects to a centralized dolt sql-server instead of embedded driver.
 // Checks both dolt_server_enabled (legacy) and dolt_mode: "server" (preferred).
 func IsDoltServerMode(beadsDir string) bool {
+	if IsDaemonMode() {
+		return false // Backend detection handled by daemon
+	}
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
@@ -54,6 +57,9 @@ func IsDoltServerMode(beadsDir string) bool {
 // IsDoltNative returns true if beads uses dolt-native mode (shared via symlinks).
 // Dolt-native mode is characterized by dolt/.dolt being a symlink to a shared database.
 func IsDoltNative(beadsDir string) bool {
+	if IsDaemonMode() {
+		return false // Backend detection handled by daemon
+	}
 	if !IsDoltServerMode(beadsDir) {
 		return false
 	}
@@ -71,6 +77,9 @@ func IsDoltNative(beadsDir string) bool {
 // It preserves the rig's config.yaml and formulas but replaces the dolt/ directory
 // with symlinks to the town-level database.
 func SetupDoltNativeSymlinks(rigBeadsDir, townBeadsDir string) error {
+	if IsDaemonMode() {
+		return fmt.Errorf("SetupDoltNativeSymlinks not supported in daemon mode")
+	}
 	rigDoltDir := filepath.Join(rigBeadsDir, "dolt")
 
 	// Remove existing dolt/ directory (from tracked beads)
@@ -145,6 +154,9 @@ func SetupDoltNativeSymlinks(rigBeadsDir, townBeadsDir string) error {
 // 2. config.yaml "storage-backend" field
 // 3. Default to "sqlite"
 func GetStorageBackend(beadsDir string) string {
+	if IsDaemonMode() {
+		return BackendDolt // Daemon always uses Dolt
+	}
 	// First, check metadata.json (highest priority)
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	if data, err := os.ReadFile(metadataPath); err == nil { //nolint:gosec // G304: path is constructed internally
@@ -204,6 +216,9 @@ type QueryResult map[string]interface{}
 // It automatically detects the backend and uses the appropriate query method.
 // The query should be a SELECT statement.
 func RunQuery(beadsDir, query string) ([]QueryResult, error) {
+	if IsDaemonMode() {
+		return nil, fmt.Errorf("RunQuery not supported in daemon mode; use daemon RPC instead")
+	}
 	backend := DetectBackend(beadsDir)
 
 	switch backend {
@@ -293,6 +308,9 @@ func runDoltQuery(beadsDir, query string) ([]QueryResult, error) {
 // It respects the backend configuration in each rig's metadata.json.
 // Returns a list of (beadsDir, dbPath) tuples.
 func FindBeadsDBsInRigs(townRoot string) ([]string, error) {
+	if IsDaemonMode() {
+		return nil, fmt.Errorf("FindBeadsDBsInRigs not supported in daemon mode")
+	}
 	// Discover rigs with beads databases
 	rigDirs, err := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
 	if err != nil {

@@ -950,6 +950,11 @@ Before signaling completion:
 // The beadsDir should be the actual beads directory (after following any redirect).
 // Returns nil if PRIME.md already exists (idempotent).
 func ProvisionPrimeMD(beadsDir string) error {
+	// In daemon mode, PRIME context is served via daemon RPC, not local files.
+	if IsDaemonMode() {
+		return nil
+	}
+
 	primePath := filepath.Join(beadsDir, "PRIME.md")
 
 	// Check if already exists - don't overwrite customizations

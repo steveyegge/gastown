@@ -222,6 +222,9 @@ func RemoveRoute(townRoot string, prefix string) error {
 
 // WriteRoutes writes routes to routes.jsonl, overwriting existing content.
 func WriteRoutes(beadsDir string, routes []Route) error {
+	if IsDaemonMode() {
+		return fmt.Errorf("WriteRoutes not supported in daemon mode; use bd route commands instead")
+	}
 	// Ensure beads directory exists
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return fmt.Errorf("creating beads directory: %w", err)

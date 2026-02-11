@@ -27,6 +27,12 @@ func ResolveBeadsDir(workDir string) string {
 		workDir = filepath.Dir(workDir)
 	}
 	beadsDir := filepath.Join(workDir, ".beads")
+
+	// In daemon mode, skip redirect resolution — the daemon handles routing.
+	if IsDaemonMode() {
+		return beadsDir
+	}
+
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
 	// Check for redirect file
@@ -163,6 +169,10 @@ func cleanBeadsRuntimeFiles(beadsDir string) error {
 // Safety: This function refuses to create redirects in the canonical beads location
 // (mayor/rig) to prevent circular redirect chains.
 func SetupRedirect(townRoot, worktreePath string) error {
+	if IsDaemonMode() {
+		return fmt.Errorf("SetupRedirect not supported in daemon mode")
+	}
+
 	// Get rig root from worktree path
 	// worktreePath = <town>/<rig>/crew/<name> or <town>/<rig>/refinery/rig etc.
 	relPath, err := filepath.Rel(townRoot, worktreePath)

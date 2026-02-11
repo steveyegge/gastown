@@ -27,6 +27,11 @@ var (
 // The town root is identified by the presence of mayor/town.json.
 // Returns empty string if not found (reached filesystem root).
 func FindTownRoot(startDir string) string {
+	// In daemon mode, no filesystem walk needed — routing handled by daemon.
+	if IsDaemonMode() {
+		return ""
+	}
+
 	dir := startDir
 	for {
 		townFile := filepath.Join(dir, "mayor", "town.json")
@@ -79,6 +84,11 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 //
 // This function is thread-safe and idempotent.
 func EnsureCustomTypes(beadsDir string) error {
+	// In daemon mode, custom types are managed server-side.
+	if IsDaemonMode() {
+		return nil
+	}
+
 	if beadsDir == "" {
 		return fmt.Errorf("empty beads directory")
 	}
