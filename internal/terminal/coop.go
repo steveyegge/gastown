@@ -376,3 +376,215 @@ type CoopRespondResponse struct {
 	PromptType *string `json:"prompt_type,omitempty"`
 	Reason     *string `json:"reason,omitempty"`
 }
+
+// coopStatusResponse mirrors Coop's StatusResponse from /api/v1/status.
+type coopStatusResponse struct {
+	State    string `json:"state"`
+	PID      *int32 `json:"pid,omitempty"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+}
+
+// coopSignalRequest is the body for POST /api/v1/signal.
+type coopSignalRequest struct {
+	Signal string `json:"signal"`
+}
+
+// coopInputRequest is the body for POST /api/v1/input.
+type coopInputRequest struct {
+	Text  string `json:"text"`
+	Enter bool   `json:"enter"`
+}
+
+// coopSwitchRequest is the body for PUT /api/v1/session/switch.
+type coopSwitchRequest struct {
+	ExtraEnv map[string]string `json:"extra_env,omitempty"`
+}
+
+// coopEnvResponse is returned by GET /api/v1/env/:key.
+type coopEnvResponse struct {
+	Key   string  `json:"key"`
+	Value *string `json:"value"`
+}
+
+// coopCwdResponse is returned by GET /api/v1/session/cwd.
+type coopCwdResponse struct {
+	Cwd string `json:"cwd"`
+}
+
+// coopEnvSetRequest is the body for PUT /api/v1/env/:key.
+type coopEnvSetRequest struct {
+	Value string `json:"value"`
+}
+
+// --- Coop-first Backend method implementations ---
+
+func (b *CoopBackend) KillSession(session string) error {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(coopSignalRequest{Signal: "SIGTERM"})
+	resp, err := b.doRequest("POST", base+"/api/v1/signal", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("coop: signal request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("coop: signal returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (b *CoopBackend) IsAgentRunning(session string) (bool, error) {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := b.doRequest("GET", base+"/api/v1/status", nil)
+	if err != nil {
+		return false, fmt.Errorf("coop: status request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("coop: status returned %d", resp.StatusCode)
+	}
+
+	var status coopStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return false, fmt.Errorf("coop: parsing status: %w", err)
+	}
+
+	return status.State == "running", nil
+}
+
+func (b *CoopBackend) GetAgentState(session string) (string, error) {
+	state, err := b.AgentState(session)
+	if err != nil {
+		return "", err
+	}
+	return state.State, nil
+}
+
+func (b *CoopBackend) SetEnvironment(session, key, value string) error {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(coopEnvSetRequest{Value: value})
+	resp, err := b.doRequest("PUT", base+"/api/v1/env/"+key, strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("coop: set env request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("coop: set env returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (b *CoopBackend) GetEnvironment(session, key string) (string, error) {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := b.doRequest("GET", base+"/api/v1/env/"+key, nil)
+	if err != nil {
+		return "", fmt.Errorf("coop: get env request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("coop: env var %q not found", key)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("coop: get env returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var envResp coopEnvResponse
+	if err := json.NewDecoder(resp.Body).Decode(&envResp); err != nil {
+		return "", fmt.Errorf("coop: parsing env response: %w", err)
+	}
+	if envResp.Value == nil {
+		return "", fmt.Errorf("coop: env var %q not found", key)
+	}
+	return *envResp.Value, nil
+}
+
+func (b *CoopBackend) GetPaneWorkDir(session string) (string, error) {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := b.doRequest("GET", base+"/api/v1/session/cwd", nil)
+	if err != nil {
+		return "", fmt.Errorf("coop: cwd request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("coop: cwd returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var cwdResp coopCwdResponse
+	if err := json.NewDecoder(resp.Body).Decode(&cwdResp); err != nil {
+		return "", fmt.Errorf("coop: parsing cwd response: %w", err)
+	}
+	return cwdResp.Cwd, nil
+}
+
+func (b *CoopBackend) SendInput(session string, text string, enter bool) error {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(coopInputRequest{Text: text, Enter: enter})
+	resp, err := b.doRequest("POST", base+"/api/v1/input", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("coop: input request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("coop: input returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (b *CoopBackend) RespawnPane(session string) error {
+	// Switch-to-self with no extra env restarts the agent process.
+	return b.SwitchSession(session, SwitchConfig{})
+}
+
+func (b *CoopBackend) SwitchSession(session string, cfg SwitchConfig) error {
+	base, err := b.baseURL(session)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(coopSwitchRequest{ExtraEnv: cfg.ExtraEnv})
+	resp, err := b.doRequest("PUT", base+"/api/v1/session/switch", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("coop: switch request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("coop: switch returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}

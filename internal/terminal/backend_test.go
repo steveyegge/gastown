@@ -295,6 +295,41 @@ func (m *mockLocalTmux) SetPaneDiedHook(session, agentID string) error {
 	return m.setPaneDiedHookErr
 }
 
+// --- Phase 2 stubs (ErrNotSupported tests) ---
+
+func TestTmuxBackend_CoopMethodsReturnErrNotSupported(t *testing.T) {
+	mock := &mockLocalTmux{}
+	b := &TmuxBackend{tmux: mock}
+
+	if err := b.KillSession("s"); err != ErrNotSupported {
+		t.Errorf("KillSession: got %v, want ErrNotSupported", err)
+	}
+	if _, err := b.IsAgentRunning("s"); err != ErrNotSupported {
+		t.Errorf("IsAgentRunning: got %v, want ErrNotSupported", err)
+	}
+	if _, err := b.GetAgentState("s"); err != ErrNotSupported {
+		t.Errorf("GetAgentState: got %v, want ErrNotSupported", err)
+	}
+	if err := b.SetEnvironment("s", "k", "v"); err != ErrNotSupported {
+		t.Errorf("SetEnvironment: got %v, want ErrNotSupported", err)
+	}
+	if _, err := b.GetEnvironment("s", "k"); err != ErrNotSupported {
+		t.Errorf("GetEnvironment: got %v, want ErrNotSupported", err)
+	}
+	if _, err := b.GetPaneWorkDir("s"); err != ErrNotSupported {
+		t.Errorf("GetPaneWorkDir: got %v, want ErrNotSupported", err)
+	}
+	if err := b.SendInput("s", "t", true); err != ErrNotSupported {
+		t.Errorf("SendInput: got %v, want ErrNotSupported", err)
+	}
+	if err := b.RespawnPane("s"); err != ErrNotSupported {
+		t.Errorf("RespawnPane: got %v, want ErrNotSupported", err)
+	}
+	if err := b.SwitchSession("s", SwitchConfig{}); err != ErrNotSupported {
+		t.Errorf("SwitchSession: got %v, want ErrNotSupported", err)
+	}
+}
+
 func TestTmuxBackend_HasSession(t *testing.T) {
 	mock := &mockLocalTmux{hasSessionResult: true}
 	b := &TmuxBackend{tmux: mock}

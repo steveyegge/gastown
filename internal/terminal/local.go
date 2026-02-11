@@ -58,3 +58,15 @@ func (b *TmuxBackend) IsPaneDead(session string) (bool, error) {
 func (b *TmuxBackend) SetPaneDiedHook(session, agentID string) error {
 	return b.tmux.SetPaneDiedHook(session, agentID)
 }
+
+// --- Coop-first stubs (return ErrNotSupported) ---
+
+func (b *TmuxBackend) KillSession(_ string) error                    { return ErrNotSupported }
+func (b *TmuxBackend) IsAgentRunning(_ string) (bool, error)         { return false, ErrNotSupported }
+func (b *TmuxBackend) GetAgentState(_ string) (string, error)        { return "", ErrNotSupported }
+func (b *TmuxBackend) SetEnvironment(_, _, _ string) error           { return ErrNotSupported }
+func (b *TmuxBackend) GetEnvironment(_, _ string) (string, error)    { return "", ErrNotSupported }
+func (b *TmuxBackend) GetPaneWorkDir(_ string) (string, error)       { return "", ErrNotSupported }
+func (b *TmuxBackend) SendInput(_ string, _ string, _ bool) error    { return ErrNotSupported }
+func (b *TmuxBackend) RespawnPane(_ string) error                    { return ErrNotSupported }
+func (b *TmuxBackend) SwitchSession(_ string, _ SwitchConfig) error  { return ErrNotSupported }

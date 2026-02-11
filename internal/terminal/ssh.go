@@ -185,3 +185,15 @@ func (b *SSHBackend) SetPaneDiedHook(session, agentID string) error {
 	_, err := b.runRemote(10*time.Second, hookCmd)
 	return err
 }
+
+// --- Coop-first stubs (return ErrNotSupported) ---
+
+func (b *SSHBackend) KillSession(_ string) error                    { return ErrNotSupported }
+func (b *SSHBackend) IsAgentRunning(_ string) (bool, error)         { return false, ErrNotSupported }
+func (b *SSHBackend) GetAgentState(_ string) (string, error)        { return "", ErrNotSupported }
+func (b *SSHBackend) SetEnvironment(_, _, _ string) error           { return ErrNotSupported }
+func (b *SSHBackend) GetEnvironment(_, _ string) (string, error)    { return "", ErrNotSupported }
+func (b *SSHBackend) GetPaneWorkDir(_ string) (string, error)       { return "", ErrNotSupported }
+func (b *SSHBackend) SendInput(_ string, _ string, _ bool) error    { return ErrNotSupported }
+func (b *SSHBackend) RespawnPane(_ string) error                    { return ErrNotSupported }
+func (b *SSHBackend) SwitchSession(_ string, _ SwitchConfig) error  { return ErrNotSupported }

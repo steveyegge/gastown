@@ -309,3 +309,259 @@ func TestCoopBackend_TrailingSlash(t *testing.T) {
 		t.Errorf("got %q, want %q (trailing slash should be stripped)", url, "http://host:8080")
 	}
 }
+
+// --- Phase 2: Coop-first method tests ---
+
+func TestCoopBackend_KillSession(t *testing.T) {
+	var gotSignal string
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/signal" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var req struct{ Signal string }
+		json.NewDecoder(r.Body).Decode(&req)
+		gotSignal = req.Signal
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := b.KillSession("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotSignal != "SIGTERM" {
+		t.Errorf("got signal %q, want SIGTERM", gotSignal)
+	}
+}
+
+func TestCoopBackend_KillSession_NotRegistered(t *testing.T) {
+	b := NewCoopBackend(CoopConfig{})
+	err := b.KillSession("missing")
+	if err == nil {
+		t.Fatal("expected error for unregistered session")
+	}
+}
+
+func TestCoopBackend_IsAgentRunning_True(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/status" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(coopStatusResponse{State: "running", PID: new(int32)})
+	}))
+	defer srv.Close()
+
+	running, err := b.IsAgentRunning("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !running {
+		t.Error("expected running=true")
+	}
+}
+
+func TestCoopBackend_IsAgentRunning_Exited(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(coopStatusResponse{State: "exited"})
+	}))
+	defer srv.Close()
+
+	running, err := b.IsAgentRunning("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if running {
+		t.Error("expected running=false for exited process")
+	}
+}
+
+func TestCoopBackend_GetAgentState(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/agent/state" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(CoopAgentState{
+			State: "permission_prompt",
+			Agent: "claude-code",
+		})
+	}))
+	defer srv.Close()
+
+	state, err := b.GetAgentState("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != "permission_prompt" {
+		t.Errorf("got state %q, want %q", state, "permission_prompt")
+	}
+}
+
+func TestCoopBackend_SetEnvironment(t *testing.T) {
+	var gotKey, gotValue string
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		// Path should be /api/v1/env/MY_VAR
+		gotKey = strings.TrimPrefix(r.URL.Path, "/api/v1/env/")
+		var req struct{ Value string }
+		json.NewDecoder(r.Body).Decode(&req)
+		gotValue = req.Value
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := b.SetEnvironment("test", "MY_VAR", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotKey != "MY_VAR" {
+		t.Errorf("got key %q, want MY_VAR", gotKey)
+	}
+	if gotValue != "hello" {
+		t.Errorf("got value %q, want hello", gotValue)
+	}
+}
+
+func TestCoopBackend_GetEnvironment(t *testing.T) {
+	val := "world"
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		key := strings.TrimPrefix(r.URL.Path, "/api/v1/env/")
+		json.NewEncoder(w).Encode(coopEnvResponse{Key: key, Value: &val})
+	}))
+	defer srv.Close()
+
+	result, err := b.GetEnvironment("test", "MY_VAR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "world" {
+		t.Errorf("got %q, want %q", result, "world")
+	}
+}
+
+func TestCoopBackend_GetEnvironment_NotFound(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := b.GetEnvironment("test", "MISSING")
+	if err == nil {
+		t.Fatal("expected error for missing env var")
+	}
+}
+
+func TestCoopBackend_GetEnvironment_NullValue(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(coopEnvResponse{Key: "X", Value: nil})
+	}))
+	defer srv.Close()
+
+	_, err := b.GetEnvironment("test", "X")
+	if err == nil {
+		t.Fatal("expected error for null value")
+	}
+}
+
+func TestCoopBackend_GetPaneWorkDir(t *testing.T) {
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/session/cwd" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(coopCwdResponse{Cwd: "/home/agent/workspace"})
+	}))
+	defer srv.Close()
+
+	cwd, err := b.GetPaneWorkDir("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cwd != "/home/agent/workspace" {
+		t.Errorf("got %q, want %q", cwd, "/home/agent/workspace")
+	}
+}
+
+func TestCoopBackend_SendInput(t *testing.T) {
+	var gotText string
+	var gotEnter bool
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/input" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var req coopInputRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		gotText = req.Text
+		gotEnter = req.Enter
+		json.NewEncoder(w).Encode(map[string]int{"bytes_written": len(req.Text)})
+	}))
+	defer srv.Close()
+
+	err := b.SendInput("test", "hello world", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotText != "hello world" {
+		t.Errorf("got text %q, want %q", gotText, "hello world")
+	}
+	if !gotEnter {
+		t.Error("expected enter=true")
+	}
+}
+
+func TestCoopBackend_SwitchSession(t *testing.T) {
+	var gotEnv map[string]string
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/session/switch" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "PUT" {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		var req coopSwitchRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		gotEnv = req.ExtraEnv
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := b.SwitchSession("test", SwitchConfig{
+		ExtraEnv: map[string]string{"KEY": "val"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotEnv["KEY"] != "val" {
+		t.Errorf("got env %v, want KEY=val", gotEnv)
+	}
+}
+
+func TestCoopBackend_RespawnPane(t *testing.T) {
+	var gotPath, gotMethod string
+	b, srv := newTestCoop(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := b.RespawnPane("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/api/v1/session/switch" {
+		t.Errorf("expected /api/v1/session/switch, got %s", gotPath)
+	}
+	if gotMethod != "PUT" {
+		t.Errorf("expected PUT, got %s", gotMethod)
+	}
+}
