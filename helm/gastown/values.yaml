@@ -253,6 +253,31 @@ bd-daemon:
       replicaCount: 0
 
   # =============================================================================
+  # NATS event bus (daemon, agents, slack-bot)
+  # =============================================================================
+  nats:
+    enabled: true
+    auth:
+      enabled: false
+    jetstream:
+      maxMemory: 256M
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 2Gi
+    image:
+      registry: public.ecr.aws
+      repository: docker/library/nats
+      tag: "2.10-alpine"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # =============================================================================
   # External Secrets (merged for all components)
   # =============================================================================
   externalSecrets:
