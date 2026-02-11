@@ -921,11 +921,18 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		if listErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: --gc: could not list databases: %v\n", listErr)
 		} else {
+			fmt.Printf("GC: purging closed ephemeral beads from %d database(s)...\n", len(databases))
 			for _, db := range databases {
 				if doltSyncDB != "" && db != doltSyncDB {
 					continue
 				}
+				fmt.Printf("  %s: running bd purge...\n", db)
 				purged, purgeErr := doltserver.PurgeClosedEphemerals(townRoot, db, doltSyncDry)
+				if purgeErr != nil {
+					fmt.Printf("  %s: error: %v\n", db, purgeErr)
+				} else {
+					fmt.Printf("  %s: %d purged\n", db, purged)
+				}
 				purgeResults[db] = struct {
 					purged int
 					err    error
