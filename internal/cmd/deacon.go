@@ -476,11 +476,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon. First run `gt deacon heartbeat`. Then check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
+	}, "I am Deacon. First run `gt deacon heartbeat`. Then check gt hook, if empty create mol-deacon-patrol wisp and execute it.", runtimeConfig)
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -521,11 +521,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	deaconTownRoot, _ := workspace.FindFromCwdOrError()
 	runtimeCfg := config.ResolveRoleAgentConfig("deacon", deaconTownRoot, "")
-	plan := runtime.GetStartupBootstrapPlan("deacon", runtimeCfg)
-	if plan.SendPromptNudge || plan.RunPrimeFallback {
-		runtime.SleepForReadyDelay(runtimeCfg)
-		_ = runtime.RunStartupBootstrap(t, sessionName, "deacon", initialPrompt, runtimeCfg)
-	}
+	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionName, "deacon", initialPrompt, runtimeCfg)
 
 	return nil
 }

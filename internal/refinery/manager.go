@@ -134,11 +134,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
 		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "Run `gt prime --hook` and begin patrol.")
+	}, "Check your hook and begin patrol.", runtimeConfig)
 
 	var command string
 	if agentOverride != "" {
@@ -189,9 +189,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
-	// Wait for runtime to be fully ready
-	runtime.SleepForReadyDelay(runtimeConfig)
-	_ = runtime.RunStartupBootstrap(t, sessionID, "refinery", initialPrompt, runtimeConfig)
+	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "refinery", initialPrompt, runtimeConfig)
 
 	return nil
 }

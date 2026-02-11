@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/deacon"
 )
 
 func TestBootSpawnAgentFlag(t *testing.T) {
@@ -204,5 +206,59 @@ func TestMolCurrentJSONParsing(t *testing.T) {
 	expected, _ := time.Parse(time.RFC3339, "2026-02-03T05:29:21Z")
 	if !latest.Equal(expected) {
 		t.Errorf("expected latest closed_at to be %v, got %v", expected, latest)
+	}
+}
+
+func TestClassifyStaleHeartbeatAction_DefersDuringStartupGraceForPreRestartHeartbeat(t *testing.T) {
+	now := time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC)
+	sessionStartedAt := now.Add(-1 * time.Minute)
+	hb := &deacon.Heartbeat{Timestamp: now.Add(-40 * time.Minute)}
+
+	deferForStartup, restart, _ := classifyStaleHeartbeatAction(now, sessionStartedAt, hb)
+	if !deferForStartup {
+		t.Fatal("expected startup grace defer for pre-restart stale heartbeat")
+	}
+	if restart {
+		t.Fatal("did not expect restart during startup grace defer")
+	}
+}
+
+func TestClassifyStaleHeartbeatAction_DefersDuringStartupGraceWhenHeartbeatMissing(t *testing.T) {
+	now := time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC)
+	sessionStartedAt := now.Add(-30 * time.Second)
+
+	deferForStartup, restart, _ := classifyStaleHeartbeatAction(now, sessionStartedAt, nil)
+	if !deferForStartup {
+		t.Fatal("expected startup grace defer when heartbeat is missing right after session start")
+	}
+	if restart {
+		t.Fatal("did not expect restart during startup grace defer")
+	}
+}
+
+func TestClassifyStaleHeartbeatAction_RestartsAfterGraceWhenVeryStale(t *testing.T) {
+	now := time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC)
+	sessionStartedAt := now.Add(-5 * time.Minute)
+	hb := &deacon.Heartbeat{Timestamp: now.Add(-40 * time.Minute)}
+
+	deferForStartup, restart, _ := classifyStaleHeartbeatAction(now, sessionStartedAt, hb)
+	if deferForStartup {
+		t.Fatal("did not expect startup grace defer after grace window")
+	}
+	if !restart {
+		t.Fatal("expected restart for very stale heartbeat after grace")
+	}
+}
+
+func TestClassifyStaleHeartbeatAction_NudgesForStaleNotVeryStale(t *testing.T) {
+	now := time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC)
+	hb := &deacon.Heartbeat{Timestamp: now.Add(-20 * time.Minute)}
+
+	deferForStartup, restart, _ := classifyStaleHeartbeatAction(now, time.Time{}, hb)
+	if deferForStartup {
+		t.Fatal("did not expect startup grace defer without session start time")
+	}
+	if restart {
+		t.Fatal("did not expect restart for stale-but-not-very-stale heartbeat")
 	}
 }

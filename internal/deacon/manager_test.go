@@ -179,7 +179,7 @@ func TestStart_NoExistingSession(t *testing.T) {
 	}
 }
 
-func TestStart_NoHookRuntime_RunsStartupFallback(t *testing.T) {
+func TestStart_NoHookRuntimeWithPrompt_DoesNotRunStartupFallback(t *testing.T) {
 	townRoot := t.TempDir()
 
 	settings := config.NewTownSettings()
@@ -208,8 +208,40 @@ func TestStart_NoHookRuntime_RunsStartupFallback(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	if len(mock.nudgeCalls) == 0 {
-		t.Fatal("expected startup fallback nudge for no-hook runtime")
+	for _, call := range mock.nudgeCalls {
+		if strings.Contains(call, "gt prime") {
+			t.Fatalf("expected no startup fallback nudge for no-hook+prompt runtime, got %v", mock.nudgeCalls)
+		}
+	}
+}
+
+func TestStart_NoHookRuntimeNoPrompt_RunsStartupFallback(t *testing.T) {
+	townRoot := t.TempDir()
+
+	settings := config.NewTownSettings()
+	settings.RoleAgents["deacon"] = "opencode-fast"
+	settings.Agents["opencode-fast"] = &config.RuntimeConfig{
+		Provider:   "opencode",
+		Command:    "opencode",
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyDelayMs: 0,
+		},
+	}
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings() error = %v", err)
+	}
+
+	mock := &mockTmux{
+		hasSessionResult: false,
+	}
+	m := newTestManager(townRoot, mock)
+
+	if err := m.Start(""); err != nil {
+		t.Fatalf("Start() error = %v", err)
 	}
 
 	foundPrimeFallback := false
@@ -220,7 +252,7 @@ func TestStart_NoHookRuntime_RunsStartupFallback(t *testing.T) {
 		}
 	}
 	if !foundPrimeFallback {
-		t.Fatalf("expected startup fallback nudge to include gt prime, got %v", mock.nudgeCalls)
+		t.Fatalf("expected startup fallback nudge to include gt prime for no-hook+no-prompt runtime, got %v", mock.nudgeCalls)
 	}
 }
 

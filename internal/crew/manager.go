@@ -622,11 +622,11 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if topic == "" {
 		topic = "start"
 	}
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+	beacon := runtime.StartupBeacon(session.BeaconConfig{
 		Recipient: address,
 		Sender:    "human",
 		Topic:     topic,
-	})
+	}, runtimeConfig)
 
 	// Compute environment variables BEFORE creating the session.
 	// These are passed via tmux -e flags so the initial shell inherits the correct
@@ -673,11 +673,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	_ = t.SetCrewCycleBindings(sessionID)
 
 	// Run startup bootstrap only when runtime capabilities require fallback nudges.
-	plan := runtime.GetStartupBootstrapPlan("crew", runtimeConfig)
-	if plan.SendPromptNudge || plan.RunPrimeFallback {
-		runtime.SleepForReadyDelay(runtimeConfig)
-		_ = runtime.RunStartupBootstrap(t, sessionID, "crew", beacon, runtimeConfig)
-	}
+	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "crew", beacon, runtimeConfig)
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, t)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
@@ -12,7 +13,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 		StartCommand: "exec run --town {town} --rig {rig} --role {role}",
 	}
 
-	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", roleConfig)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", roleConfig, config.DefaultRuntimeConfig())
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -27,7 +28,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 }
 
 func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
-	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", nil)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", nil, config.DefaultRuntimeConfig())
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -48,7 +49,7 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 		StartCommand: "exec run --role {role}",
 	}
 
-	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", roleConfig)
+	got, prompt, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", roleConfig, config.DefaultRuntimeConfig())
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}

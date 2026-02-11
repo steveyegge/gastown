@@ -11,9 +11,9 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -140,7 +140,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, initialPrompt, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
+	command, initialPrompt, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig, runtimeConfig)
 	if err != nil {
 		return err
 	}
@@ -189,11 +189,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 
 	// Run startup bootstrap only when runtime capabilities require fallback nudges.
-	plan := runtime.GetStartupBootstrapPlan("witness", runtimeConfig)
-	if plan.SendPromptNudge || plan.RunPrimeFallback {
-		runtime.SleepForReadyDelay(runtimeConfig)
-		_ = runtime.RunStartupBootstrap(t, sessionID, "witness", initialPrompt, runtimeConfig)
-	}
+	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "witness", initialPrompt, runtimeConfig)
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
@@ -235,18 +231,18 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	return expanded
 }
 
-func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, string, error) {
+func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig, runtimeConfig *config.RuntimeConfig) (string, string, error) {
 	if agentOverride != "" {
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), "", nil
 	}
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
 		Recipient: fmt.Sprintf("%s/witness", rigName),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "Run `gt prime --hook` and begin patrol.")
+	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.", runtimeConfig)
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
 		return "", "", fmt.Errorf("building startup command: %w", err)

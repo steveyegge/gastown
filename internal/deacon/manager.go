@@ -100,11 +100,11 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.")
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.", runtimeConfig)
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -161,11 +161,7 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	// Run unified startup bootstrap fallback for runtime configs that need nudges.
-	plan := runtime.GetStartupBootstrapPlan("deacon", runtimeConfig)
-	if plan.SendPromptNudge || plan.RunPrimeFallback {
-		runtime.SleepForReadyDelay(runtimeConfig)
-		_ = runtime.RunStartupBootstrap(t, sessionID, "deacon", initialPrompt, runtimeConfig)
-	}
+	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "deacon", initialPrompt, runtimeConfig)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

@@ -208,7 +208,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		Topic:     "assigned",
 		MolID:     opts.Issue,
 	}
-	beacon := session.FormatStartupBeacon(beaconConfig)
+	beacon := runtime.StartupBeacon(beaconConfig, runtimeConfig)
 
 	command := opts.Command
 	if command == "" {
@@ -311,11 +311,8 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Accept bypass permissions warning dialog if it appears
 	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
 
-	// Wait for runtime to be fully ready at the prompt (not just started)
-	runtime.SleepForReadyDelay(runtimeConfig)
-
 	// Run startup bootstrap through one canonical path (no duplicate fallback nudges).
-	debugSession("RunStartupBootstrap", runtime.RunStartupBootstrap(m.tmux, sessionID, "polecat", beacon, runtimeConfig))
+	debugSession("RunStartupBootstrap", runtime.RunStartupBootstrapIfNeeded(m.tmux, sessionID, "polecat", beacon, runtimeConfig))
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 func TestSessionIDFromEnv_Default(t *testing.T) {
@@ -282,8 +283,8 @@ func TestGetStartupBootstrapPlan_NoHooksWithPrompt(t *testing.T) {
 	if plan.SendPromptNudge {
 		t.Error("NoHooks+Prompt should not send prompt nudge")
 	}
-	if !plan.RunPrimeFallback {
-		t.Error("NoHooks+Prompt should run prime fallback")
+	if plan.RunPrimeFallback {
+		t.Error("NoHooks+Prompt should not run prime fallback")
 	}
 }
 
@@ -301,6 +302,42 @@ func TestGetStartupBootstrapPlan_NoHooksNoPrompt(t *testing.T) {
 	}
 	if !plan.RunPrimeFallback {
 		t.Error("NoHooks+NoPrompt should run prime fallback")
+	}
+}
+
+func TestStartupBeacon_NoHooksWithPrompt_IncludesPrimeInstruction(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	beacon := StartupBeacon(session.BeaconConfig{
+		Recipient: "gastown/crew/fiddler",
+		Sender:    "human",
+		Topic:     "start",
+	}, rc)
+	if !contains(beacon, "Run `gt prime`") {
+		t.Errorf("StartupBeacon() should include gt prime instruction for no-hooks+prompt runtime, got %q", beacon)
+	}
+}
+
+func TestStartupBeacon_HooksWithPrompt_NoPrimeInstruction(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	beacon := StartupBeacon(session.BeaconConfig{
+		Recipient: "gastown/crew/fiddler",
+		Sender:    "human",
+		Topic:     "start",
+	}, rc)
+	if contains(beacon, "Run `gt prime`") {
+		t.Errorf("StartupBeacon() should not include gt prime instruction for hooks+prompt runtime, got %q", beacon)
 	}
 }
 

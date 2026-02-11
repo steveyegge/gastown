@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/opencode"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 )
 
@@ -128,12 +129,30 @@ type StartupBootstrapPlan struct {
 	RunPrimeFallback bool
 }
 
+func runtimeHasHooks(rc *config.RuntimeConfig) bool {
+	if rc == nil {
+		rc = config.DefaultRuntimeConfig()
+	}
+	return rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none"
+}
+
+func runtimeHasPrompt(rc *config.RuntimeConfig) bool {
+	if rc == nil {
+		rc = config.DefaultRuntimeConfig()
+	}
+	return rc.PromptMode != "none"
+}
+
 // GetStartupBootstrapPlan computes capability-based startup bootstrap actions.
 func GetStartupBootstrapPlan(role string, rc *config.RuntimeConfig) *StartupBootstrapPlan {
-	info := GetStartupFallbackInfo(rc)
+	hasHooks := runtimeHasHooks(rc)
+	hasPrompt := runtimeHasPrompt(rc)
 	return &StartupBootstrapPlan{
-		SendPromptNudge:  info.SendBeaconNudge,
-		RunPrimeFallback: len(StartupFallbackCommands(role, rc)) > 0,
+		SendPromptNudge: !hasPrompt,
+		// Prime fallback nudges are only needed when both hooks and prompt delivery
+		// are unavailable. No-hooks+prompt runtimes must not get startup nudges that
+		// can interrupt the first turn.
+		RunPrimeFallback: !hasHooks && !hasPrompt && len(StartupFallbackCommands(role, rc)) > 0,
 	}
 }
 
@@ -151,6 +170,16 @@ func RunStartupBootstrap(t startupNudger, sessionID, role, startupPrompt string,
 		return RunStartupFallback(t, sessionID, role, rc)
 	}
 	return nil
+}
+
+// RunStartupBootstrapIfNeeded runs startup bootstrap only when capability fallbacks are required.
+func RunStartupBootstrapIfNeeded(t startupNudger, sessionID, role, startupPrompt string, rc *config.RuntimeConfig) error {
+	plan := GetStartupBootstrapPlan(role, rc)
+	if !plan.SendPromptNudge && !plan.RunPrimeFallback {
+		return nil
+	}
+	SleepForReadyDelay(rc)
+	return RunStartupBootstrap(t, sessionID, role, startupPrompt, rc)
 }
 
 // isAutonomousRole returns true if the given role should automatically
@@ -204,12 +233,8 @@ type StartupFallbackInfo struct {
 
 // GetStartupFallbackInfo returns the fallback actions needed based on agent capabilities.
 func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
-	if rc == nil {
-		rc = config.DefaultRuntimeConfig()
-	}
-
-	hasHooks := rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none"
-	hasPrompt := rc.PromptMode != "none"
+	hasHooks := runtimeHasHooks(rc)
+	hasPrompt := runtimeHasPrompt(rc)
 
 	info := &StartupFallbackInfo{}
 
@@ -233,6 +258,23 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 	// else: hooks + prompt - nothing needed, all in CLI prompt + hook
 
 	return info
+}
+
+// StartupBeaconConfig applies capability-based startup fallback behavior to beacon config.
+func StartupBeaconConfig(cfg session.BeaconConfig, rc *config.RuntimeConfig) session.BeaconConfig {
+	info := GetStartupFallbackInfo(rc)
+	cfg.IncludePrimeInstruction = info.IncludePrimeInBeacon
+	return cfg
+}
+
+// StartupBeacon builds the startup beacon with capability-based fallback behavior.
+func StartupBeacon(cfg session.BeaconConfig, rc *config.RuntimeConfig) string {
+	return session.FormatStartupBeacon(StartupBeaconConfig(cfg, rc))
+}
+
+// StartupPrompt builds the startup prompt with capability-based fallback behavior.
+func StartupPrompt(cfg session.BeaconConfig, instructions string, rc *config.RuntimeConfig) string {
+	return session.BuildStartupPrompt(StartupBeaconConfig(cfg, rc), instructions)
 }
 
 // StartupNudgeContent returns the work instructions to send as a startup nudge.
