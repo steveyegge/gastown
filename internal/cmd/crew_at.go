@@ -105,7 +105,18 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	var runtimeConfig *config.RuntimeConfig
+	if crewAgentOverride != "" {
+		rc, _, resolveErr := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		if resolveErr != nil {
+			style.PrintWarning("could not resolve agent override %q: %v, falling back to default", crewAgentOverride, resolveErr)
+			runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+		} else {
+			runtimeConfig = rc
+		}
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	}
 	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
