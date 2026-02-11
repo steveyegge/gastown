@@ -629,7 +629,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		AgentName:        name,
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
-		BeadsNoDaemon:    true,
 	})
 	if opts.AgentOverride != "" {
 		envVars["GT_AGENT"] = opts.AgentOverride
