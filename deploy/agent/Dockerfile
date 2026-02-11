@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG TARGETARCH=amd64
-ARG COOP_VERSION=v0.5.1
+ARG COOP_VERSION=v0.5.2
 ARG BD_VERSION=v0.57.13
 
 # Download coop from groblegark/coop releases
