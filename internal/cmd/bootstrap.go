@@ -261,7 +261,31 @@ func bootstrapRigBeads(bd *beads.Beads, townRoot string, stats *bootstrapStats) 
 			return fmt.Errorf("creating rig config bead for %s: %w", name, err)
 		}
 		stats.add(c, s, u)
+
+		// Create route bead (type=route) — enables prefix-based routing via daemon
+		routeID := "hq-route-" + prefix
+		routeTitle := fmt.Sprintf("%s- → %s", prefix, name)
+		routeDesc := fmt.Sprintf("Route for prefix %s- to path %s", prefix, name)
+		routeLabels := []string{
+			"prefix:" + prefix,
+			"path:" + name,
+		}
+		c, s, u, err = bootstrapBead(bd, routeID, routeTitle, routeDesc, routeLabels, "route")
+		if err != nil {
+			return fmt.Errorf("creating route bead for %s: %w", name, err)
+		}
+		stats.add(c, s, u)
 	}
+
+	// Create hq- route for town root (hq-* beads live in town-level db)
+	hqRouteID := "hq-route-hq"
+	hqLabels := []string{"prefix:hq", "path:."}
+	c, s, u, err := bootstrapBead(bd, hqRouteID, "hq- → town root",
+		"Route for prefix hq- to town root", hqLabels, "route")
+	if err != nil {
+		return fmt.Errorf("creating hq route bead: %w", err)
+	}
+	stats.add(c, s, u)
 
 	// Save rigs.json
 	if !bootstrapDryRun {
@@ -389,12 +413,9 @@ func bootstrapConfigBeads(bd *beads.Beads, townRoot string, stats *bootstrapStat
 	}
 	stats.add(c, s, u)
 
-	// Agent presets (from built-in defaults)
-	c, s, u, err = bootstrapAgentPresetBeads(bd)
-	if err != nil {
-		return fmt.Errorf("agent preset beads: %w", err)
-	}
-	stats.add(c, s, u)
+	// NOTE: Agent presets (claude, gemini, codex, etc.) are NOT seeded here.
+	// They are hardcoded built-ins in config/agents.go. The configbeads agent
+	// preset path exists but has no runtime callers in the daemon.
 
 	// Messaging config (defaults)
 	msgConfig := config.NewMessagingConfig()
@@ -555,52 +576,6 @@ func bootstrapRoleBeads(bd *beads.Beads) (created, skipped, updated int, err err
 		skipped += s
 		updated += u
 	}
-	return created, skipped, updated, nil
-}
-
-// bootstrapAgentPresetBeads seeds built-in agent presets and role-agent mappings.
-func bootstrapAgentPresetBeads(bd *beads.Beads) (created, skipped, updated int, err error) {
-	for _, name := range config.ListAgentPresets() {
-		preset := config.GetAgentPresetByName(name)
-		if preset == nil {
-			continue
-		}
-
-		presetJSON, _ := json.Marshal(preset)
-		var metadata map[string]interface{}
-		_ = json.Unmarshal(presetJSON, &metadata)
-
-		slug := "agent-" + name
-		desc := fmt.Sprintf("Agent preset: %s", name)
-		c, s, u, seedErr := bootstrapConfigBead(bd, slug, beads.ConfigCategoryAgentPreset,
-			"*", "", "", metadata, desc)
-		if seedErr != nil {
-			return created, skipped, updated, fmt.Errorf("preset %s: %w", name, seedErr)
-		}
-		created += c
-		skipped += s
-		updated += u
-	}
-
-	roleAgents := map[string]interface{}{
-		"role_agents": map[string]string{
-			"mayor":    "claude-opus",
-			"deacon":   "claude-haiku",
-			"witness":  "claude-haiku",
-			"refinery": "claude-sonnet",
-			"polecat":  "claude-sonnet",
-			"crew":     "claude-sonnet",
-		},
-	}
-	c, s, u, seedErr := bootstrapConfigBead(bd, "role-agents-global", beads.ConfigCategoryAgentPreset,
-		"*", "", "", roleAgents, "Default role-agent mappings")
-	if seedErr != nil {
-		return created, skipped, updated, fmt.Errorf("role-agents: %w", seedErr)
-	}
-	created += c
-	skipped += s
-	updated += u
-
 	return created, skipped, updated, nil
 }
 
