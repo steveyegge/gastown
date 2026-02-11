@@ -3,11 +3,21 @@
 package rig
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/wisp"
+)
+
+// beadWarned tracks which rig names have already emitted a missing-bead warning
+// so we don't spam stderr on every config key lookup.
+var (
+	beadWarnedMu sync.Mutex
+	beadWarned   = map[string]bool{}
 )
 
 // ConfigSource identifies which layer a config value came from.
@@ -181,6 +191,15 @@ func (r *Rig) getBeadLabel(key string) interface{} {
 
 	issue, err := bd.Show(rigBeadID)
 	if err != nil {
+		// Warn once per rig when daemon is connected but bead is missing.
+		if beads.IsDaemonMode() {
+			beadWarnedMu.Lock()
+			if !beadWarned[r.Name] {
+				beadWarned[r.Name] = true
+				fmt.Fprintf(os.Stderr, "Warning: rig identity bead %s not found for rig %q — bead config layer inactive\n", rigBeadID, r.Name)
+			}
+			beadWarnedMu.Unlock()
+		}
 		return nil
 	}
 

@@ -531,44 +531,44 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Check if connected to remote daemon — if so, list from rig beads.
-	daemonHost, _, _, _ := readDaemonConfig(townRoot)
-	if daemonHost == "" {
-		daemonHost, _, _, _ = readGlobalDaemonConfig()
-	}
-	if daemonHost != "" {
-		return runRigListDaemon(townRoot)
-	}
-
-	// Load rigs config
-	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsPath)
-	if err != nil {
-		fmt.Println("No rigs configured.")
-		return nil
-	}
-
-	if len(rigsConfig.Rigs) == 0 {
+	// Use beads-first config loading (daemon config beads → rigs.json fallback).
+	rigsConfig, err := loadRigsConfigBeadsFirst(townRoot)
+	if err != nil || len(rigsConfig.Rigs) == 0 {
 		fmt.Println("No rigs configured.")
 		fmt.Printf("\nAdd one with: %s\n", style.Dim.Render("gt rig add <name> <git-url>"))
 		return nil
 	}
 
-	// Create rig manager to get details
+	// Create rig manager to get filesystem details where available.
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
 	fmt.Printf("Rigs in %s:\n\n", townRoot)
 
-	for name := range rigsConfig.Rigs {
+	for name, entry := range rigsConfig.Rigs {
 		r, err := mgr.GetRig(name)
 		if err != nil {
-			fmt.Printf("  %s %s\n", style.Warning.Render("!"), name)
+			// Rig directory doesn't exist locally — show registry info only.
+			fmt.Printf("  %s %s\n", style.Dim.Render("○"), style.Bold.Render(name))
+			if entry.GitURL != "" {
+				fmt.Printf("    Repo: %s\n", entry.GitURL)
+			}
+			if entry.BeadsConfig != nil && entry.BeadsConfig.Prefix != "" {
+				fmt.Printf("    Prefix: %s-\n", entry.BeadsConfig.Prefix)
+			}
+			fmt.Printf("    %s\n", style.Dim.Render("(not cloned locally)"))
+			fmt.Println()
 			continue
 		}
 
 		summary := r.Summary()
-		fmt.Printf("  %s\n", style.Bold.Render(name))
+		fmt.Printf("  %s %s\n", style.Success.Render("●"), style.Bold.Render(name))
+		if entry.GitURL != "" {
+			fmt.Printf("    Repo: %s\n", entry.GitURL)
+		}
+		if entry.BeadsConfig != nil && entry.BeadsConfig.Prefix != "" {
+			fmt.Printf("    Prefix: %s-\n", entry.BeadsConfig.Prefix)
+		}
 		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
 
 		agents := []string{}
@@ -590,60 +590,6 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runRigListDaemon lists rigs from rig beads in the daemon (K8s mode).
-func runRigListDaemon(townRoot string) error {
-	listCmd := exec.Command("bd", "list", "--type=rig", "--json") //nolint:gosec
-	listCmd.Dir = townRoot
-	output, err := listCmd.Output()
-	if err != nil {
-		return fmt.Errorf("querying rig beads from daemon: %w", err)
-	}
-
-	var rigBeads []struct {
-		ID          string `json:"id"`
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
-	}
-	if err := json.Unmarshal(output, &rigBeads); err != nil {
-		return fmt.Errorf("parsing rig beads: %w", err)
-	}
-
-	if len(rigBeads) == 0 {
-		fmt.Println("No rigs registered.")
-		fmt.Printf("\nRegister one with: %s\n", style.Dim.Render("gt rig register <name> <git-url> --prefix <prefix>"))
-		return nil
-	}
-
-	fmt.Printf("Rigs (from daemon):\n\n")
-
-	for _, rb := range rigBeads {
-		fields := beads.ParseRigFields(rb.Description)
-
-		state := fields.State
-		if state == "" {
-			state = "active"
-		}
-		stateIcon := style.Success.Render("●")
-		if state != "active" {
-			stateIcon = style.Dim.Render("○")
-		}
-
-		fmt.Printf("  %s %s\n", stateIcon, style.Bold.Render(rb.Title))
-		if fields.Prefix != "" {
-			fmt.Printf("    Prefix: %s-\n", fields.Prefix)
-		}
-		if fields.Repo != "" {
-			fmt.Printf("    Repo: %s\n", fields.Repo)
-		}
-		if state != "active" {
-			fmt.Printf("    State: %s\n", state)
-		}
-		fmt.Println()
-	}
-
-	return nil
-}
 
 func runRigRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
