@@ -376,10 +376,24 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 }
 
+// ValidateTestCommand validates that a test command is safe to execute.
+// TestCommand comes from the rig's operator-controlled config.json, not from
+// user input or PR branches. This validation provides defense-in-depth for the
+// trusted infrastructure config path.
+func ValidateTestCommand(cmd string) error {
+	if strings.TrimSpace(cmd) == "" {
+		return fmt.Errorf("test command must not be empty")
+	}
+	return nil
+}
+
 // runTests runs the configured test command and returns the result.
 func (e *Engineer) runTests(ctx context.Context) ProcessResult {
-	if e.config.TestCommand == "" {
-		return ProcessResult{Success: true}
+	if err := ValidateTestCommand(e.config.TestCommand); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("invalid test command: %v", err),
+		}
 	}
 
 	// Run the test command with retries for flaky tests
@@ -394,8 +408,10 @@ func (e *Engineer) runTests(ctx context.Context) ProcessResult {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Retrying tests (attempt %d/%d)...\n", attempt, maxRetries)
 		}
 
-		// Note: TestCommand comes from rig's config.json (trusted infrastructure config),
-		// not from PR branches. Shell execution is intentional for flexibility (pipes, etc).
+		// Trust boundary: TestCommand comes from rig's config.json (operator-controlled
+		// infrastructure config), not from PR branches or user input. Shell execution
+		// is intentional for flexibility (pipes, env vars, etc).
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Executing test command: %s\n", e.config.TestCommand)
 		cmd := exec.CommandContext(ctx, "sh", "-c", e.config.TestCommand) //nolint:gosec // G204: TestCommand is from trusted rig config
 		cmd.Dir = e.workDir
 		var stdout, stderr bytes.Buffer

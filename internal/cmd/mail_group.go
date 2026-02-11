@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -159,12 +160,12 @@ func runGroupShow(cmd *cobra.Command, args []string) error {
 	}
 
 	b := beads.New(townRoot)
-	issue, fields, err := b.GetGroupBead(name)
+	_, fields, err := b.GetGroupByName(name)
 	if err != nil {
+		if errors.Is(err, beads.ErrNotFound) {
+			return fmt.Errorf("group not found: %s", name)
+		}
 		return fmt.Errorf("getting group: %w", err)
-	}
-	if issue == nil {
-		return fmt.Errorf("group not found: %s", name)
 	}
 
 	if groupJSON {
@@ -222,15 +223,18 @@ func runGroupCreate(cmd *cobra.Command, args []string) error {
 	b := beads.New(townRoot)
 
 	// Check if group already exists
-	existing, _, err := b.GetGroupBead(name)
-	if err != nil {
+	existing, _, err := b.GetGroupByName(name)
+	if err != nil && !errors.Is(err, beads.ErrNotFound) {
 		return err
 	}
 	if existing != nil {
 		return fmt.Errorf("group already exists: %s", name)
 	}
 
-	_, err = b.CreateGroupBead(name, members, createdBy)
+	_, err = b.CreateGroupBead(name, &beads.GroupFields{
+		Members:   members,
+		CreatedBy: createdBy,
+	})
 	if err != nil {
 		return fmt.Errorf("creating group: %w", err)
 	}
@@ -253,7 +257,7 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	b := beads.New(townRoot)
-	if err := b.AddGroupMember(name, member); err != nil {
+	if _, err := b.AddGroupMember(name, member); err != nil {
 		return fmt.Errorf("adding member: %w", err)
 	}
 
@@ -271,7 +275,7 @@ func runGroupRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	b := beads.New(townRoot)
-	if err := b.RemoveGroupMember(name, member); err != nil {
+	if _, err := b.RemoveGroupMember(name, member); err != nil {
 		return fmt.Errorf("removing member: %w", err)
 	}
 
@@ -290,12 +294,12 @@ func runGroupDelete(cmd *cobra.Command, args []string) error {
 	b := beads.New(townRoot)
 
 	// Check if group exists
-	existing, _, err := b.GetGroupBead(name)
+	_, _, err = b.GetGroupByName(name)
 	if err != nil {
+		if errors.Is(err, beads.ErrNotFound) {
+			return fmt.Errorf("group not found: %s", name)
+		}
 		return err
-	}
-	if existing == nil {
-		return fmt.Errorf("group not found: %s", name)
 	}
 
 	if err := b.DeleteGroupBead(name); err != nil {

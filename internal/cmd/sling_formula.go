@@ -226,7 +226,6 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-	attachedMoleculeID := wispRootID
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
@@ -248,27 +247,19 @@ func runSlingFormula(args []string) error {
 	// Note: formula slinging uses town root as workDir (no polecat-specific path)
 	updateAgentHookBead(targetAgent, wispRootID, "", townBeadsDir)
 
-	// Store dispatcher in bead description (enables completion notification to dispatcher)
-	if err := storeDispatcherInBead(wispRootID, actor); err != nil {
-		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+	// Store all attachment fields in a single read-modify-write cycle.
+	// NOTE: For standalone formula sling, the wisp IS the work - do NOT store
+	// attached_molecule as a self-reference (the wisp's own ID pointing to itself
+	// is meaningless). attached_molecule is only meaningful when a formula-on-bead
+	// creates a wisp that's bonded to a separate base bead.
+	fieldUpdates := beadFieldUpdates{
+		Dispatcher: actor,
+		Args:       slingArgs,
 	}
-
-	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
-	if slingArgs != "" {
-		if err := storeArgsInBead(wispRootID, slingArgs); err != nil {
-			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
-		} else {
-			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
-		}
-	}
-
-	// Record the attached molecule after other description updates to avoid overwrite.
-	if attachedMoleculeID != "" {
-		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
-			// Warn but don't fail - polecat can still work through steps
-			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-		}
+	if err := storeFieldsInBead(wispRootID, fieldUpdates); err != nil {
+		fmt.Printf("%s Could not store fields in bead: %v\n", style.Dim.Render("Warning:"), err)
+	} else if slingArgs != "" {
+		fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 	}
 
 	// Start delayed dog session now that hook is set

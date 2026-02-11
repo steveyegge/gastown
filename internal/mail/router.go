@@ -282,7 +282,7 @@ func parseGroupAddress(address string) *ParsedGroup {
 	}
 }
 
-// agentBead represents an agent bead as returned by bd list --type=agent.
+// agentBead represents an agent bead as returned by bd list --label=gt:agent.
 type agentBead struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -578,13 +578,15 @@ func (r *Router) queryAgents(descContains string) []*agentBead {
 
 // queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
 func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
-	args := []string{"list", "--type=agent", "--json", "--limit=0"}
+	args := []string{"list", "--label=gt:agent", "--json", "--limit=0"}
 
 	if descContains != "" {
 		args = append(args, "--desc-contains="+descContains)
 	}
 
-	stdout, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdReadCtx()
+	defer cancel()
+	stdout, err := runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return nil, fmt.Errorf("querying agents in %s: %w", beadsDir, err)
 	}
@@ -694,6 +696,7 @@ func (r *Router) sendToGroup(msg *Message) error {
 		// Create a copy of the message for this recipient
 		msgCopy := *msg
 		msgCopy.To = recipient
+		msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 
 		if err := r.sendToSingle(&msgCopy); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
@@ -754,6 +757,16 @@ func (r *Router) validateRecipient(identity string) error {
 
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
+	// Ensure message has an ID (callers may omit it; bd create doesn't generate one)
+	if msg.ID == "" {
+		msg.ID = generateID()
+	}
+
+	// Validate message before sending
+	if err := msg.Validate(); err != nil {
+		return fmt.Errorf("invalid message: %w", err)
+	}
+
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
 
@@ -762,8 +775,9 @@ func (r *Router) sendToSingle(msg *Message) error {
 		return fmt.Errorf("invalid recipient %q: %w", msg.To, err)
 	}
 
-	// Build labels for from/thread/reply-to/cc
+	// Build labels for type, from/thread/reply-to/cc
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	if msg.ThreadID != "" {
 		labels = append(labels, "thread:"+msg.ThreadID)
@@ -777,9 +791,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=<recipient> -d <body>
+	// Build command: bd create <subject> --assignee=<recipient> -d <body> --labels=gt:message,...
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", toIdentity,
 		"-d", msg.Body,
 	}
@@ -805,7 +818,9 @@ func (r *Router) sendToSingle(msg *Message) error {
 	if err := r.ensureCustomTypes(beadsDir); err != nil {
 		return err
 	}
-	_, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err := runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending message: %w", err)
 	}
@@ -821,7 +836,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 
 // sendToList expands a mailing list and sends individual copies to each recipient.
 // Each recipient gets their own message copy with the same content.
-// Returns a ListDeliveryResult with details about the fan-out.
+// Collects all delivery errors and reports partial failures.
 func (r *Router) sendToList(msg *Message) error {
 	listName := parseListName(msg.To)
 	recipients, err := r.expandList(listName)
@@ -829,24 +844,21 @@ func (r *Router) sendToList(msg *Message) error {
 		return err
 	}
 
-	// Send to each recipient
-	var lastErr error
-	successCount := 0
+	// Fan-out: send a copy to each recipient, collecting all errors
+	var errs []string
 	for _, recipient := range recipients {
 		// Create a copy of the message for this recipient
-		copy := *msg
-		copy.To = recipient
+		msgCopy := *msg
+		msgCopy.To = recipient
+		msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 
-		if err := r.Send(&copy); err != nil {
-			lastErr = err
-			continue
+		if err := r.Send(&msgCopy); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
 		}
-		successCount++
 	}
 
-	// If all sends failed, return the last error
-	if successCount == 0 && lastErr != nil {
-		return fmt.Errorf("sending to list %s: %w", listName, lastErr)
+	if len(errs) > 0 {
+		return fmt.Errorf("sending to list %s: some deliveries failed: %s", listName, strings.Join(errs, "; "))
 	}
 
 	return nil
@@ -875,8 +887,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 		return err
 	}
 
-	// Build labels for from/thread/reply-to/cc plus queue metadata
+	// Build labels for type, from/thread/reply-to/cc plus queue metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "queue:"+queueName)
 	if msg.ThreadID != "" {
@@ -890,10 +903,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=queue:<name> -d <body>
+	// Build command: bd create <subject> --assignee=queue:<name> -d <body>
 	// Use queue:<name> as assignee so inbox queries can filter by queue
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // queue:name
 		"-d", msg.Body,
 	}
@@ -918,7 +930,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 	if err := r.ensureCustomTypes(beadsDir); err != nil {
 		return err
 	}
-	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err = runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to queue %s: %w", queueName, err)
 	}
@@ -949,8 +963,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		}
 	}
 
-	// Build labels for from/thread/reply-to/cc plus announce metadata
+	// Build labels for type, from/thread/reply-to/cc plus announce metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "announce:"+announceName)
 	if msg.ThreadID != "" {
@@ -964,10 +979,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=announce:<name> -d <body>
+	// Build command: bd create <subject> --assignee=announce:<name> -d <body>
 	// Use announce:<name> as assignee so queries can filter by channel
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // announce:name
 		"-d", msg.Body,
 	}
@@ -992,7 +1006,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 	if err := r.ensureCustomTypes(beadsDir); err != nil {
 		return err
 	}
-	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err = runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to announce %s: %w", announceName, err)
 	}
@@ -1025,8 +1041,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 		return fmt.Errorf("channel %s is closed", channelName)
 	}
 
-	// Build labels for from/thread/reply-to/cc plus channel metadata
+	// Build labels for type, from/thread/reply-to/cc plus channel metadata
 	var labels []string
+	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "channel:"+channelName)
 	if msg.ThreadID != "" {
@@ -1040,10 +1057,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create <subject> --type=message --assignee=channel:<name> -d <body>
+	// Build command: bd create <subject> --assignee=channel:<name> -d <body>
 	// Use channel:<name> as assignee so queries can filter by channel
 	args := []string{"create", msg.Subject,
-		"--type", "message",
 		"--assignee", msg.To, // channel:name
 		"-d", msg.Body,
 	}
@@ -1068,7 +1084,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 	if err := r.ensureCustomTypes(beadsDir); err != nil {
 		return err
 	}
-	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err = runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to channel %s: %w", channelName, err)
 	}
@@ -1078,6 +1096,7 @@ func (r *Router) sendToChannel(msg *Message) error {
 
 	// Fan-out delivery: send a copy to each subscriber's inbox
 	if len(fields.Subscribers) > 0 {
+		var errs []string
 		for _, subscriber := range fields.Subscribers {
 			// Skip self-delivery (don't notify the sender)
 			if isSelfMail(msg.From, subscriber) {
@@ -1087,10 +1106,15 @@ func (r *Router) sendToChannel(msg *Message) error {
 			// Create a copy for this subscriber with channel context in subject
 			msgCopy := *msg
 			msgCopy.To = subscriber
+			msgCopy.ID = "" // Each fan-out copy gets its own ID from bd create
 			msgCopy.Subject = fmt.Sprintf("[channel:%s] %s", channelName, msg.Subject)
 
-			// Best-effort delivery - don't fail the channel send if one subscriber fails
-			_ = r.sendToSingle(&msgCopy)
+			if err := r.sendToSingle(&msgCopy); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", subscriber, err))
+			}
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("channel %s: some subscriber deliveries failed: %s", channelName, strings.Join(errs, "; "))
 		}
 	}
 
@@ -1110,17 +1134,18 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	}
 
 	// Query existing messages in this announce channel
-	// Use bd list with labels filter to find messages with announce:<name> label
+	// Use bd list with labels filter to find messages with gt:message and announce:<name> labels
 	args := []string{"list",
-		"--type=message",
-		"--labels=announce:" + announceName,
+		"--labels=gt:message,announce:" + announceName,
 		"--json",
 		"--limit=0", // Get all
 		"--sort=created",
 		"--asc", // Oldest first
 	}
 
-	stdout, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	ctx, cancel := bdReadCtx()
+	defer cancel()
+	stdout, err := runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("querying announce messages: %w", err)
 	}
@@ -1145,18 +1170,18 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	for i := 0; i < toDelete && i < len(messages); i++ {
 		deleteArgs := []string{"close", messages[i].ID, "--reason=retention pruning"}
 		// Best-effort deletion - don't fail if one delete fails
-		_, _ = runBdCommand(deleteArgs, filepath.Dir(beadsDir), beadsDir)
+		delCtx, delCancel := bdWriteCtx()
+		_, _ = runBdCommand(delCtx, deleteArgs, filepath.Dir(beadsDir), beadsDir)
+		delCancel()
 	}
 
 	return nil
 }
 
 // isSelfMail returns true if sender and recipient are the same identity.
-// Normalizes addresses by removing trailing slashes for comparison.
+// Uses AddressToIdentity for canonical normalization (handles crew/, polecats/ paths).
 func isSelfMail(from, to string) bool {
-	fromNorm := strings.TrimSuffix(from, "/")
-	toNorm := strings.TrimSuffix(to, "/")
-	return fromNorm == toNorm
+	return AddressToIdentity(from) == AddressToIdentity(to)
 }
 
 // GetMailbox returns a Mailbox for the given address.
@@ -1170,7 +1195,15 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 // notifyRecipient sends a notification to a recipient's tmux session.
 // Uses NudgeSession to add the notification to the agent's conversation history.
 // Supports mayor/, deacon/, rig/crew/name, rig/polecats/name, and rig/name addresses.
+// Respects agent DND/muted state - skips notification if recipient has DND enabled.
 func (r *Router) notifyRecipient(msg *Message) error {
+	// Check DND status before attempting notification
+	if r.townRoot != "" {
+		if r.isRecipientMuted(msg.To) {
+			return nil // Recipient has DND enabled, skip notification
+		}
+	}
+
 	sessionIDs := addressToSessionIDs(msg.To)
 	if len(sessionIDs) == 0 {
 		return nil // Unable to determine session ID
@@ -1185,12 +1218,69 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			continue
 		}
 
+		// Overseer is a human operator - use a visible banner instead of NudgeSession
+		// (which types into Claude's input and would disrupt the human's terminal).
+		if msg.To == "overseer" {
+			return r.tmux.SendNotificationBanner(sessionID, msg.From, msg.Subject)
+		}
+
 		// Send notification to the agent's conversation history
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 
 	return nil // No active session found
+}
+
+// isRecipientMuted checks if a mail recipient has DND/muted notifications enabled.
+// Returns true if the recipient is muted and should not receive tmux nudges.
+// Fails open (returns false) if the agent bead cannot be found.
+func (r *Router) isRecipientMuted(address string) bool {
+	agentBeadID := addressToAgentBeadID(address)
+	if agentBeadID == "" {
+		return false // Can't determine agent bead, allow notification
+	}
+
+	bd := beads.New(r.townRoot)
+	level, err := bd.GetAgentNotificationLevel(agentBeadID)
+	if err != nil {
+		return false // Agent bead might not exist, allow notification
+	}
+
+	return level == beads.NotifyMuted
+}
+
+// addressToAgentBeadID converts a mail address to an agent bead ID for DND lookup.
+// Returns empty string if the address cannot be converted.
+func addressToAgentBeadID(address string) string {
+	switch {
+	case address == "overseer":
+		return "" // Overseer is a human, no agent bead
+	case strings.HasPrefix(address, "mayor"):
+		return session.MayorSessionName()
+	case strings.HasPrefix(address, "deacon"):
+		return session.DeaconSessionName()
+	}
+
+	parts := strings.SplitN(address, "/", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return ""
+	}
+
+	rig := parts[0]
+	target := parts[1]
+
+	switch {
+	case target == "witness":
+		return fmt.Sprintf("gt-%s-witness", rig)
+	case target == "refinery":
+		return fmt.Sprintf("gt-%s-refinery", rig)
+	case strings.HasPrefix(target, "crew/"):
+		crewName := strings.TrimPrefix(target, "crew/")
+		return fmt.Sprintf("gt-%s-crew-%s", rig, crewName)
+	default:
+		return fmt.Sprintf("gt-%s-polecat-%s", rig, target)
+	}
 }
 
 // addressToSessionIDs converts a mail address to possible tmux session IDs.
@@ -1201,6 +1291,11 @@ func (r *Router) notifyRecipient(msg *Message) error {
 // This supersedes the approach in PR #896 which only handled slash-to-dash
 // conversion but didn't address the crew/polecat ambiguity.
 func addressToSessionIDs(address string) []string {
+	// Overseer address: "overseer" (human operator)
+	if address == "overseer" {
+		return []string{session.OverseerSessionName()}
+	}
+
 	// Mayor address: "mayor/" or "mayor"
 	if strings.HasPrefix(address, "mayor") {
 		return []string{session.MayorSessionName()}

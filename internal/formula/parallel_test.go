@@ -12,7 +12,7 @@ func TestParallelReadySteps(t *testing.T) {
 	}
 
 	// Verify parallel flag is not set on sequential steps
-	sequentialSteps := []string{"survey-workers", "check-timer-gates", "check-swarm-completion", "ping-deacon"}
+	sequentialSteps := []string{"survey-workers", "check-timer-gates", "check-swarm-completion", "check-deacon"}
 	for _, id := range sequentialSteps {
 		step := f.GetStep(id)
 		if step == nil {
@@ -41,7 +41,7 @@ func TestParallelReadySteps(t *testing.T) {
 		t.Errorf("Expected sequential step survey-workers, got %s", sequential)
 	}
 
-	// Verify patrol-cleanup needs ping-deacon
+	// Verify patrol-cleanup needs check-deacon
 	patrolCleanup := f.GetStep("patrol-cleanup")
 	if patrolCleanup == nil {
 		t.Fatal("patrol-cleanup step not found")
@@ -49,7 +49,7 @@ func TestParallelReadySteps(t *testing.T) {
 	if len(patrolCleanup.Needs) != 1 {
 		t.Errorf("patrol-cleanup should need 1 step, got %d: %v", len(patrolCleanup.Needs), patrolCleanup.Needs)
 	}
-	if len(patrolCleanup.Needs) == 1 && patrolCleanup.Needs[0] != "ping-deacon" {
-		t.Errorf("patrol-cleanup should need ping-deacon, got %v", patrolCleanup.Needs)
+	if len(patrolCleanup.Needs) == 1 && patrolCleanup.Needs[0] != "check-deacon" {
+		t.Errorf("patrol-cleanup should need check-deacon, got %v", patrolCleanup.Needs)
 	}
 }

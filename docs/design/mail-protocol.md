@@ -128,24 +128,17 @@ The Refinery will retry the merge after rebase is complete.
 
 **Handler**: Witness notifies polecat with rebase instructions.
 
-### WITNESS_PING
+### WITNESS_PING (deprecated)
 
-**Route**: Witness → Deacon (all witnesses send)
+**Status**: Removed. Witnesses no longer send WITNESS_PING mail.
 
-**Purpose**: Second-order monitoring - ensure Deacon is alive.
+**Previous behavior**: Witnesses sent heartbeat mail to the Deacon every patrol
+cycle, which spammed inboxes with routine noise.
 
-**Subject format**: `WITNESS_PING <rig>`
-
-**Body format**:
-```
-Rig: <rig>
-Timestamp: <timestamp>
-Patrol: <cycle-number>
-```
-
-**Trigger**: Each witness sends periodically (every N patrol cycles).
-
-**Handler**: Deacon acknowledges. If no ack, witnesses escalate to Mayor.
+**Current behavior**: Witnesses passively check the Deacon's agent bead
+`last_activity` timestamp. If stale (>5 minutes), they escalate directly to
+the Mayor with an `ALERT: Deacon appears unresponsive` message. No routine
+heartbeat mail is sent — only escalations when a problem is detected.
 
 ### HELP
 
@@ -294,15 +287,15 @@ Polecat                       │                          │
 
 ```
 Witness-1 ──┐
-            │ WITNESS_PING
-Witness-2 ──┼────────────────> Deacon
+            │ (check agent bead last_activity)
+Witness-2 ──┼────────────────> Deacon agent bead
             │
 Witness-N ──┘
                                  │
-                          (if no response)
+                          (if stale >5min)
                                  │
-            <────────────────────┘
-            Escalate to Mayor
+            ─────────────────────┘
+            ALERT to Mayor (mail only on failure)
 ```
 
 ## Implementation

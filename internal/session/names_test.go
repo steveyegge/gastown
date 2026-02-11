@@ -22,6 +22,14 @@ func TestDeaconSessionName(t *testing.T) {
 	}
 }
 
+func TestOverseerSessionName(t *testing.T) {
+	want := "hq-overseer"
+	got := OverseerSessionName()
+	if got != want {
+		t.Errorf("OverseerSessionName() = %q, want %q", got, want)
+	}
+}
+
 func TestWitnessSessionName(t *testing.T) {
 	tests := []struct {
 		rig  string

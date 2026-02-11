@@ -210,14 +210,14 @@ func TestWarrantFilePath(t *testing.T) {
 		want   string
 	}{
 		{
-			dir:    "/tmp/warrants",
+			dir:    filepath.Join("/tmp", "warrants"),
 			target: "gastown/polecats/alpha",
-			want:   "/tmp/warrants/gastown_polecats_alpha.warrant.json",
+			want:   filepath.Join("/tmp", "warrants", "gastown_polecats_alpha.warrant.json"),
 		},
 		{
-			dir:    "/home/user/gt/warrants",
+			dir:    filepath.Join("/home", "user", "gt", "warrants"),
 			target: "deacon/dogs/bravo",
-			want:   "/home/user/gt/warrants/deacon_dogs_bravo.warrant.json",
+			want:   filepath.Join("/home", "user", "gt", "warrants", "deacon_dogs_bravo.warrant.json"),
 		},
 	}
 

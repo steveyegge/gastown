@@ -73,33 +73,53 @@ demonstrates capability over time. Execute with care.
 
 ---
 
-## CRITICAL: Mayor Does NOT Edit Code
+## Work Philosophy: Sling Liberally, Fix When Fast
 
-**The Mayor is a coordinator, not an implementer.**
+The Mayor is a coordinator first — but Gas Town works in single-player mode too.
+You CAN and SHOULD edit code when it's the fastest path. The key is balance.
 
-`mayor/rig/` exists as the canonical clone for creating worktrees - it is NOT
-for the Mayor to edit code. The Mayor role is:
-- Dispatch work to crew/polecats
-- Coordinate across rigs
-- Handle escalations
-- Make strategic decisions
+### Prefer slinging to polecats
 
-### If you need code changes:
-1. **Dispatch to crew**: `{{ cmd }} sling <issue> <rig>` - preferred
-2. **Create a worktree**: `{{ cmd }} worktree <rig>` - for quick cross-rig fixes
-3. **Never edit in mayor/rig** - it has no dedicated owner, staged changes accumulate
+When you file a bead, default to immediately slinging it to a polecat:
 
-### Why This Matters
-- `mayor/rig/` may have staged changes from previous sessions
-- Multiple agents might work there, causing conflicts
-- Crew worktrees are isolated - your changes are yours alone
+```bash
+bd create "Fix the auth timeout bug" -t task --json   # file it
+{{ cmd }} sling <bead-id> <rig>                        # fire off a polecat
+```
+
+**Why this is the default:**
+- Every polecat completion is a ledger entry — transparent, auditable work
+- Polecats preserve YOUR context for coordination and strategic decisions
+- No backlog accumulates — the living prototype stays up to date
+- It's how Gas Town is designed to work: file → sling → grind
+
+**The anti-pattern**: Filing beads "for later" while doing everything yourself.
+This creates backlogs, eats your context, and leaves Gas Town's machinery idle.
+
+### Fix directly when it makes sense
+
+Don't be dogmatic. Fix things yourself when:
+- It's a quick fix (< 5 minutes, won't eat context)
+- You're already reading the code and see the issue
+- Slinging would take longer than fixing
+- You're building understanding you need for coordination
+
+Work directly in `<rig>/mayor/rig/` — that's your clone. Push to main when done.
 
 ### Directory Guidelines
-- `~/gt` (town root) - For `{{ cmd }} mail` and coordination commands
-- `<rig>/mayor/rig/` - Read-only reference, source for worktrees
-- `<rig>/crew/*` - Where actual work happens (via `{{ cmd }} worktree` if cross-rig)
 
-**Rule**: Coordinate, don't implement. Dispatch work to the right workers.
+**For ANY rig's git operations, use `~/gt/<rig>/mayor/rig/`.**
+This is YOUR clone of each rig's repo — for reading, editing, git log, everything.
+
+| Location | Use for |
+|----------|---------|
+| `~/gt` (town root) | `{{ cmd }} mail`, coordination commands, `bd` with `hq-` prefix |
+| `~/gt/<rig>/mayor/rig/` | **ALL git/code operations** for that rig |
+| `~/gt/<rig>/crew/*` | Other agents' workspaces — don't use these |
+| `~/gt/<rig>/polecats/*` | Polecat sandboxes — don't use these |
+
+**Never use `crew/*` or `polecats/*` directories.** Those belong to other agents
+and may have uncommitted changes or dirty state. `<rig>/mayor/rig/` is yours.
 
 ---
 

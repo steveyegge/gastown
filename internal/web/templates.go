@@ -177,7 +177,7 @@ type WorkerRow struct {
 	IssueID      string        // Currently assigned issue ID (e.g., "hq-1234")
 	IssueTitle   string        // Issue title (truncated)
 	WorkStatus   string        // working, stale, stuck, idle
-	AgentType    string        // "polecat" (ephemeral) or "refinery" (permanent)
+	AgentType    string        // "polecat" (ephemeral sessions) or "refinery" (permanent)
 }
 
 // MergeQueueRow represents a PR in the merge queue.

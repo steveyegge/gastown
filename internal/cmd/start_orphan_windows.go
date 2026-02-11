@@ -14,3 +14,9 @@ func cleanupOrphanedClaude(graceSecs int) {
 	fmt.Printf("  %s Orphan cleanup not supported on Windows\n",
 		style.Dim.Render("○"))
 }
+
+// verifyNoOrphans is a Windows stub.
+func verifyNoOrphans() {
+	fmt.Printf("  %s Orphan verification not supported on Windows\n",
+		style.Dim.Render("○"))
+}

@@ -227,8 +227,8 @@ func TestBeads_getTownRoot(t *testing.T) {
 		t.Errorf("second getTownRoot() = %q, want cached %q", root2, root1)
 	}
 
-	// Verify searchedRoot flag is set
-	if !b.searchedRoot {
-		t.Error("expected searchedRoot to be true after getTownRoot()")
+	// Verify caching works (sync.Once ensures single execution)
+	if b.townRoot != tmpDir {
+		t.Errorf("expected townRoot to be cached as %q, got %q", tmpDir, b.townRoot)
 	}
 }

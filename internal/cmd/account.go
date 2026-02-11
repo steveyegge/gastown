@@ -184,7 +184,11 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build config directory path
-	configDir := config.DefaultAccountsConfigDir() + "/" + handle
+	baseDir, err := config.DefaultAccountsConfigDir()
+	if err != nil {
+		return fmt.Errorf("determining accounts config directory: %w", err)
+	}
+	configDir := baseDir + "/" + handle
 
 	// Create the config directory
 	if err := os.MkdirAll(configDir, 0755); err != nil {

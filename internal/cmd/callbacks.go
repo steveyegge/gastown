@@ -274,12 +274,12 @@ func classifyCallback(subject string) CallbackType {
 
 // handlePolecatDone processes a POLECAT_DONE callback.
 // These come from Witnesses forwarding polecat completion notices.
-func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
+func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternPolecatDone.FindStringSubmatch(msg.Subject)
-	polecatName := ""
-	if len(matches) > 1 {
-		polecatName = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse polecat name from subject: %q", msg.Subject)
 	}
+	polecatName := matches[1]
 
 	// Extract info from body
 	var exitType, issueID string
@@ -306,12 +306,12 @@ func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string,
 }
 
 // handleMergeCompleted processes a merge completion callback from Refinery.
-func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
+func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternMergeCompleted.FindStringSubmatch(msg.Subject)
-	branch := ""
-	if len(matches) > 1 {
-		branch = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse branch from subject: %q", msg.Subject)
 	}
+	branch := matches[1]
 
 	// Extract MR ID and source issue from body
 	var mrID, sourceIssue, mergeCommit string
@@ -353,12 +353,12 @@ func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (stri
 }
 
 // handleMergeRejected processes a merge rejection callback from Refinery.
-func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
+func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternMergeRejected.FindStringSubmatch(msg.Subject)
-	branch := ""
-	if len(matches) > 1 {
-		branch = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse branch from subject: %q", msg.Subject)
 	}
+	branch := matches[1]
 
 	// Extract reason from body
 	var reason string
@@ -386,10 +386,10 @@ func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (strin
 // handleHelp processes a HELP: request from a polecat.
 func handleHelp(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternHelp.FindStringSubmatch(msg.Subject)
-	topic := ""
-	if len(matches) > 1 {
-		topic = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse topic from subject: %q", msg.Subject)
 	}
+	topic := matches[1]
 
 	if dryRun {
 		return fmt.Sprintf("would forward help request to overseer: %s", topic), nil
@@ -417,10 +417,10 @@ func handleHelp(townRoot string, msg *mail.Message, dryRun bool) (string, error)
 // handleEscalation processes an ESCALATION: from a Witness.
 func handleEscalation(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternEscalation.FindStringSubmatch(msg.Subject)
-	topic := ""
-	if len(matches) > 1 {
-		topic = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse topic from subject: %q", msg.Subject)
 	}
+	topic := matches[1]
 
 	if dryRun {
 		return fmt.Sprintf("would forward escalation to overseer: %s", topic), nil
@@ -448,10 +448,10 @@ func handleEscalation(townRoot string, msg *mail.Message, dryRun bool) (string, 
 // handleSling processes a SLING_REQUEST to spawn work on a polecat.
 func handleSling(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternSling.FindStringSubmatch(msg.Subject)
-	beadID := ""
-	if len(matches) > 1 {
-		beadID = matches[1]
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse bead ID from subject: %q", msg.Subject)
 	}
+	beadID := matches[1]
 
 	// Extract rig from body
 	var targetRig string

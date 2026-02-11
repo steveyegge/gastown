@@ -810,3 +810,106 @@ func TestDetectBeadsPrefixFromConfig_TrailingDash(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectBeadsPrefixFromConfig_FallbackIssuesJSONL(t *testing.T) {
+	tests := []struct {
+		name       string
+		issuesJSON string
+		want       string
+	}{
+		{
+			name:       "regular issue ID extracts prefix",
+			issuesJSON: `{"id":"gt-mawit","title":"test"}`,
+			want:       "gt",
+		},
+		{
+			name: "skips agent bead with multi-hyphen ID",
+			issuesJSON: `{"id":"gt-demo-witness","title":"agent"}
+{"id":"gt-abc12","title":"regular"}`,
+			want: "gt",
+		},
+		{
+			name: "skips agent bead when only entry",
+			issuesJSON: `{"id":"gt-demo-witness","title":"agent"}`,
+			want: "",
+		},
+		{
+			name: "multi-hyphen prefix with regular hash",
+			issuesJSON: `{"id":"baseball-v3-abc12","title":"test"}`,
+			want: "baseball-v3",
+		},
+		{
+			name: "multiple regular issues agree on prefix",
+			issuesJSON: `{"id":"gt-mawit","title":"a"}
+{"id":"gt-1nfip","title":"b"}
+{"id":"gt-6vvz1","title":"c"}`,
+			want: "gt",
+		},
+		{
+			name: "filters out merge request IDs (10-char suffix)",
+			issuesJSON: `{"id":"gt-mr-abc1234567","title":"mr"}
+{"id":"gt-mawit","title":"regular"}`,
+			want: "gt",
+		},
+		{
+			name:       "empty issues file returns empty",
+			issuesJSON: "",
+			want:       "",
+		},
+		{
+			name: "mixed agent and regular IDs returns correct prefix",
+			issuesJSON: `{"id":"gt-gastown-polecat-cheedo","title":"agent"}
+{"id":"gt-gastown-witness","title":"agent"}
+{"id":"gt-abc12","title":"regular"}
+{"id":"gt-xyz99","title":"regular"}`,
+			want: "gt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Write config.yaml without a prefix key to trigger fallback
+			configPath := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte("# no prefix\n"), 0644); err != nil {
+				t.Fatalf("writing config.yaml: %v", err)
+			}
+			issuesPath := filepath.Join(dir, "issues.jsonl")
+			if err := os.WriteFile(issuesPath, []byte(tt.issuesJSON), 0644); err != nil {
+				t.Fatalf("writing issues.jsonl: %v", err)
+			}
+			got := detectBeadsPrefixFromConfig(configPath)
+			if got != tt.want {
+				t.Errorf("detectBeadsPrefixFromConfig() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsStandardBeadHash(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"mawit", true},
+		{"abc12", true},
+		{"z0ixd", true},
+		{"00000", true},
+		{"abcde", true},
+		{"witness", false},  // too long (agent role)
+		{"abc", false},      // too short
+		{"ABC12", false},    // uppercase
+		{"abc-1", false},    // contains hyphen
+		{"", false},         // empty
+		{"abc1234567", false}, // 10 chars (MR hash)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isStandardBeadHash(tt.input)
+			if got != tt.want {
+				t.Errorf("isStandardBeadHash(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

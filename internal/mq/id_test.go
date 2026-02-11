@@ -46,7 +46,7 @@ func TestGenerateMRIDWithTime(t *testing.T) {
 				t.Errorf("GenerateMRIDWithTime() = %q, want prefix %q", got, tt.want)
 			}
 
-			// Verify total format: prefix-mr-XXXXXX (6 hex chars)
+			// Verify total format: prefix-mr-XXXXXXXXXX (10 hex chars)
 			parts := strings.Split(got, "-mr-")
 			if len(parts) != 2 {
 				t.Errorf("GenerateMRIDWithTime() = %q, expected format <prefix>-mr-<hash>", got)
@@ -57,8 +57,8 @@ func TestGenerateMRIDWithTime(t *testing.T) {
 				t.Errorf("GenerateMRIDWithTime() prefix = %q, want %q", parts[0], tt.prefix)
 			}
 
-			if len(parts[1]) != 6 {
-				t.Errorf("GenerateMRIDWithTime() hash length = %d, want 6", len(parts[1]))
+			if len(parts[1]) != 10 {
+				t.Errorf("GenerateMRIDWithTime() hash length = %d, want 10", len(parts[1]))
 			}
 
 			// Verify hash is valid hex
@@ -122,7 +122,7 @@ func TestGenerateMRID(t *testing.T) {
 	}
 
 	parts := strings.Split(id, "-mr-")
-	if len(parts) != 2 || len(parts[1]) != 6 {
+	if len(parts) != 2 || len(parts[1]) != 10 {
 		t.Errorf("GenerateMRID() = %q, invalid format", id)
 	}
 }

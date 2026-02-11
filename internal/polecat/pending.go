@@ -100,6 +100,7 @@ func CheckInboxForSpawns(townRoot string) ([]*PendingSpawn, error) {
 type TriggerResult struct {
 	Spawn     *PendingSpawn
 	Triggered bool
+	Skipped   bool // true when spawn exists but runtime is not ready yet
 	Error     error
 }
 
@@ -141,10 +142,12 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 
 		// Check if runtime is ready (non-blocking poll)
 		rigPath := filepath.Join(townRoot, ps.Rig)
-		runtimeConfig := config.LoadRuntimeConfig(rigPath)
+		runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, rigPath)
 		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
 		if err != nil {
 			// Not ready yet - leave mail in inbox for next poll
+			result.Skipped = true
+			results = append(results, result)
 			continue
 		}
 
@@ -182,7 +185,9 @@ func PruneStalePending(townRoot string, maxAge time.Duration) (int, error) {
 		if ps.SpawnedAt.Before(cutoff) {
 			// Archive stale spawn message
 			if ps.mailbox != nil {
-				_ = ps.mailbox.Archive(ps.MailID)
+				if err := ps.mailbox.Archive(ps.MailID); err != nil {
+					continue // Don't count as pruned if archive failed
+				}
 			}
 			pruned++
 		}

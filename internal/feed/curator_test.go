@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 )
 
@@ -149,6 +150,188 @@ func TestCurator_DedupesDoneEvents(t *testing.T) {
 	// Should only have 1 event due to deduplication
 	if lines != 1 {
 		t.Errorf("expected 1 feed event after deduplication, got %d", lines)
+	}
+}
+
+// --- Config loading tests ---
+
+func TestCurator_DefaultConfig_NoSettingsFile(t *testing.T) {
+	// When no settings file exists, NewCurator should use defaults.
+	tmpDir := t.TempDir()
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 10*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 10s", curator.doneDedupeWindow)
+	}
+	if curator.slingAggregateWindow != 30*time.Second {
+		t.Errorf("slingAggregateWindow = %v, want 30s", curator.slingAggregateWindow)
+	}
+	if curator.minAggregateCount != 3 {
+		t.Errorf("minAggregateCount = %d, want 3", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_DefaultConfig_EmptyTownRoot(t *testing.T) {
+	// Empty townRoot should use defaults without crashing.
+	curator := NewCurator("")
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 10*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 10s", curator.doneDedupeWindow)
+	}
+	if curator.minAggregateCount != 3 {
+		t.Errorf("minAggregateCount = %d, want 3", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_CustomConfig_FromSettingsFile(t *testing.T) {
+	// Write a settings/config.json with custom FeedCurator values.
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	ts.FeedCurator = &config.FeedCuratorConfig{
+		DoneDedupeWindow:     "20s",
+		SlingAggregateWindow: "1m",
+		MinAggregateCount:    7,
+	}
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 20*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 20s", curator.doneDedupeWindow)
+	}
+	if curator.slingAggregateWindow != 1*time.Minute {
+		t.Errorf("slingAggregateWindow = %v, want 1m", curator.slingAggregateWindow)
+	}
+	if curator.minAggregateCount != 7 {
+		t.Errorf("minAggregateCount = %d, want 7", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_PartialConfig_FallsBackToDefaults(t *testing.T) {
+	// Settings file exists but FeedCurator section is absent → defaults.
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	// No FeedCurator set
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 10*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 10s (default)", curator.doneDedupeWindow)
+	}
+	if curator.slingAggregateWindow != 30*time.Second {
+		t.Errorf("slingAggregateWindow = %v, want 30s (default)", curator.slingAggregateWindow)
+	}
+	if curator.minAggregateCount != 3 {
+		t.Errorf("minAggregateCount = %d, want 3 (default)", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_PartialFeedCuratorConfig_EmptyDurations(t *testing.T) {
+	// FeedCurator section exists but some duration fields are empty → fallback defaults.
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	ts.FeedCurator = &config.FeedCuratorConfig{
+		DoneDedupeWindow: "25s",
+		// SlingAggregateWindow left empty → fallback
+		MinAggregateCount: 10,
+	}
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 25*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 25s", curator.doneDedupeWindow)
+	}
+	// Empty string → ParseDurationOrDefault falls back to 30s
+	if curator.slingAggregateWindow != 30*time.Second {
+		t.Errorf("slingAggregateWindow = %v, want 30s (fallback)", curator.slingAggregateWindow)
+	}
+	if curator.minAggregateCount != 10 {
+		t.Errorf("minAggregateCount = %d, want 10", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_PartialFeedCuratorConfig_ZeroMinAggregate(t *testing.T) {
+	// FeedCurator section exists with durations but MinAggregateCount is omitted (zero value).
+	// Must fall back to default 3, NOT use 0 (which would aggregate every sling event).
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	ts.FeedCurator = &config.FeedCuratorConfig{
+		DoneDedupeWindow:     "25s",
+		SlingAggregateWindow: "1m",
+		// MinAggregateCount intentionally omitted (zero value)
+	}
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.minAggregateCount != 3 {
+		t.Errorf("minAggregateCount = %d, want 3 (default for zero/omitted value)", curator.minAggregateCount)
+	}
+}
+
+func TestCurator_InvalidDurationString_FallsBack(t *testing.T) {
+	// Invalid duration string in config → falls back to default.
+	tmpDir := t.TempDir()
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	ts := config.NewTownSettings()
+	ts.FeedCurator = &config.FeedCuratorConfig{
+		DoneDedupeWindow:     "not-valid",
+		SlingAggregateWindow: "also-bad",
+		MinAggregateCount:    3,
+	}
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	if curator.doneDedupeWindow != 10*time.Second {
+		t.Errorf("doneDedupeWindow = %v, want 10s (fallback for invalid)", curator.doneDedupeWindow)
+	}
+	if curator.slingAggregateWindow != 30*time.Second {
+		t.Errorf("slingAggregateWindow = %v, want 30s (fallback for invalid)", curator.slingAggregateWindow)
 	}
 }
 

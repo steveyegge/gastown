@@ -74,7 +74,10 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	total, unread, _ := mailbox.Count()
+	total, unread, err := mailbox.Count()
+	if err != nil {
+		style.PrintWarning("could not count messages: %v", err)
+	}
 	fmt.Printf("%s Inbox: %s (%d messages, %d unread)\n\n",
 		style.Bold.Render("📬"), address, total, unread)
 

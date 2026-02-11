@@ -174,9 +174,15 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	closeCmd := exec.Command("bd", "close", sourceID, "--reason", closeReason)
 	closeCmd.Stderr = os.Stderr
 	if err := closeCmd.Run(); err != nil {
-		// Try to clean up the new bead if close fails
+		// Clean up the new bead since we couldn't close the source
 		fmt.Fprintf(os.Stderr, "Warning: failed to close source bead: %v\n", err)
-		fmt.Fprintf(os.Stderr, "New bead %s was created but source %s remains open\n", newID, sourceID)
+		cleanupCmd := exec.Command("bd", "close", newID, "--reason", "Cleanup: source bead close failed during move")
+		if cleanupErr := cleanupCmd.Run(); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: also failed to clean up new bead %s: %v\n", newID, cleanupErr)
+			fmt.Fprintf(os.Stderr, "Both %s and %s remain open - manual cleanup needed\n", sourceID, newID)
+		} else {
+			fmt.Fprintf(os.Stderr, "Cleaned up new bead %s\n", newID)
+		}
 		return err
 	}
 

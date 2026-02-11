@@ -24,6 +24,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -58,6 +59,17 @@ type Daemon struct {
 	// See: https://github.com/steveyegge/gastown/issues/567
 	// Note: Only accessed from heartbeat loop goroutine - no sync needed.
 	deaconLastStarted time.Time
+
+	// syncFailures tracks consecutive git pull failures per workdir.
+	// Used to escalate logging from WARN to ERROR after repeated failures.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	syncFailures map[string]int
+
+	// PATCH-006: Resolved binary paths to avoid PATH issues in subprocesses.
+	// The daemon may be started with a limited PATH, causing exec.Command("gt", ...)
+	// to fail with "executable file not found in $PATH".
+	gtPath string
+	bdPath string
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -104,6 +116,19 @@ func New(config *Config) (*Daemon, error) {
 		}
 	}
 
+	// PATCH-006: Resolve binary paths at startup to avoid PATH issues in subprocesses.
+	// If not found, fall back to bare command names (will use PATH at runtime).
+	gtPath, err := exec.LookPath("gt")
+	if err != nil {
+		gtPath = "gt" // Fallback - will fail with helpful error if not in PATH
+		logger.Printf("Warning: gt not found in PATH, subprocess calls may fail")
+	}
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		bdPath = "bd" // Fallback
+		logger.Printf("Warning: bd not found in PATH, subprocess calls may fail")
+	}
+
 	return &Daemon{
 		config:       config,
 		patrolConfig: patrolConfig,
@@ -112,6 +137,8 @@ func New(config *Config) (*Daemon, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 		doltServer:   doltServer,
+		gtPath:       gtPath,
+		bdPath:       bdPath,
 	}, nil
 }
 
@@ -137,9 +164,17 @@ func (d *Daemon) Run() error {
 	defer func() { _ = fileLock.Unlock() }()
 
 	// Pre-flight check: all rigs must be on Dolt backend.
-	// Refuse to start if any rig is still on SQLite.
 	if err := d.checkAllRigsDolt(); err != nil {
 		return err
+	}
+
+	// Repair metadata.json for all rigs on startup.
+	// This auto-fixes stale jsonl_export values (e.g., "beads.jsonl" → "issues.jsonl")
+	// left behind by historical migrations.
+	if _, errs := doltserver.EnsureAllMetadata(d.config.TownRoot); len(errs) > 0 {
+		for _, e := range errs {
+			d.logger.Printf("Warning: metadata repair: %v", e)
+		}
 	}
 
 	// Write PID file
@@ -178,7 +213,7 @@ func (d *Daemon) Run() error {
 	}
 
 	// Start convoy watcher for event-driven convoy completion
-	d.convoyWatcher = NewConvoyWatcher(d.config.TownRoot, d.logger.Printf)
+	d.convoyWatcher = NewConvoyWatcher(d.config.TownRoot, d.logger.Printf, d.gtPath, d.bdPath)
 	if err := d.convoyWatcher.Start(); err != nil {
 		d.logger.Printf("Warning: failed to start convoy watcher: %v", err)
 	} else {
@@ -198,6 +233,23 @@ func (d *Daemon) Run() error {
 		}
 	}
 
+	// Start dedicated Dolt health check ticker if Dolt server is configured.
+	// This runs at a much higher frequency (default 30s) than the general
+	// heartbeat (3 min) so Dolt crashes are detected quickly.
+	var doltHealthTicker *time.Ticker
+	var doltHealthChan <-chan time.Time
+	if d.doltServer != nil && d.doltServer.IsEnabled() {
+		interval := d.doltServer.HealthCheckInterval()
+		doltHealthTicker = time.NewTicker(interval)
+		doltHealthChan = doltHealthTicker.C
+		defer doltHealthTicker.Stop()
+		d.logger.Printf("Dolt health check ticker started (interval %v)", interval)
+	}
+
+	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
+	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
+	// per-session approach which has been tested to work for continuous recovery.
+
 	// Initial heartbeat
 	d.heartbeat(state)
 
@@ -215,6 +267,13 @@ func (d *Daemon) Run() error {
 			} else {
 				d.logger.Printf("Received signal %v, shutting down", sig)
 				return d.shutdown(state)
+			}
+
+		case <-doltHealthChan:
+			// Dedicated Dolt health check — fast crash detection independent
+			// of the 3-minute general heartbeat.
+			if !d.isShutdownInProgress() {
+				d.ensureDoltServerRunning()
 			}
 
 		case <-timer.C:
@@ -353,7 +412,6 @@ func (d *Daemon) ensureDoltServerRunning() {
 }
 
 // checkAllRigsDolt verifies all rigs are using the Dolt backend.
-// Returns an error if any rig is on SQLite, preventing daemon startup.
 func (d *Daemon) checkAllRigsDolt() error {
 	var problems []string
 
@@ -390,9 +448,6 @@ func readBeadsBackend(beadsDir string) string {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
-		if _, statErr := os.Stat(filepath.Join(beadsDir, "beads.db")); statErr == nil {
-			return "sqlite"
-		}
 		return ""
 	}
 
@@ -403,9 +458,6 @@ func readBeadsBackend(beadsDir string) string {
 		return ""
 	}
 
-	if metadata.Backend == "" {
-		return "sqlite" // Default to SQLite if backend not specified
-	}
 	return metadata.Backend
 }
 
@@ -509,18 +561,56 @@ const deaconGracePeriod = 5 * time.Minute
 // checkDeaconHeartbeat checks if the Deacon is making progress.
 // This is a belt-and-suspenders fallback in case Boot doesn't detect stuck states.
 // Uses the heartbeat file that the Deacon updates on each patrol cycle.
+//
+// PATCH-005: Fixed grace period logic. Old logic skipped heartbeat check entirely
+// during grace period, allowing stuck Deacons to go undetected. New logic:
+// - Always read heartbeat first
+// - Grace period only applies if heartbeat is from BEFORE we started Deacon
+// - If heartbeat is from AFTER start but stale, Deacon is stuck
 func (d *Daemon) checkDeaconHeartbeat() {
-	// Grace period: don't check heartbeat for newly started sessions.
-	// This prevents the race condition where we start a Deacon, then immediately
-	// see a stale heartbeat (from before the crash) and kill the session we just started.
-	// See: https://github.com/steveyegge/gastown/issues/567
-	if !d.deaconLastStarted.IsZero() && time.Since(d.deaconLastStarted) < deaconGracePeriod {
-		d.logger.Printf("Deacon started recently (%s ago), skipping heartbeat check",
-			time.Since(d.deaconLastStarted).Round(time.Second))
-		return
+	// Always read heartbeat first (PATCH-005)
+	hb := deacon.ReadHeartbeat(d.config.TownRoot)
+
+	sessionName := d.getDeaconSessionName()
+
+	// Check if we recently started a Deacon
+	if !d.deaconLastStarted.IsZero() {
+		timeSinceStart := time.Since(d.deaconLastStarted)
+
+		if hb == nil {
+			// No heartbeat file exists
+			if timeSinceStart < deaconGracePeriod {
+				d.logger.Printf("Deacon started %s ago, awaiting first heartbeat...",
+					timeSinceStart.Round(time.Second))
+				return
+			}
+			// Grace period expired without any heartbeat - Deacon failed to start
+			d.logger.Printf("Deacon started %s ago but hasn't written heartbeat - restarting",
+				timeSinceStart.Round(time.Minute))
+			d.restartStuckDeacon(sessionName)
+			return
+		}
+
+		// Heartbeat exists - check if it's from BEFORE we started this Deacon
+		if hb.Timestamp.Before(d.deaconLastStarted) {
+			// Heartbeat is stale (from before restart)
+			if timeSinceStart < deaconGracePeriod {
+				d.logger.Printf("Deacon started %s ago, heartbeat is pre-restart, awaiting fresh heartbeat...",
+					timeSinceStart.Round(time.Second))
+				return
+			}
+			// Grace period expired but heartbeat still from before start
+			d.logger.Printf("Deacon started %s ago but heartbeat still pre-restart - Deacon stuck at startup",
+				timeSinceStart.Round(time.Minute))
+			d.restartStuckDeacon(sessionName)
+			return
+		}
+
+		// Heartbeat is from AFTER we started - Deacon has written at least one heartbeat
+		// Fall through to normal staleness check
 	}
 
-	hb := deacon.ReadHeartbeat(d.config.TownRoot)
+	// No recent start tracking or Deacon has written fresh heartbeat - check normally
 	if hb == nil {
 		// No heartbeat file - Deacon hasn't started a cycle yet
 		return
@@ -528,15 +618,12 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	age := hb.Age()
 
-	// If heartbeat is very stale (>15 min), the Deacon is likely stuck
+	// If heartbeat is fresh, nothing to do
 	if !hb.ShouldPoke() {
-		// Heartbeat is fresh enough
 		return
 	}
 
 	d.logger.Printf("Deacon heartbeat is stale (%s old), checking session...", age.Round(time.Minute))
-
-	sessionName := d.getDeaconSessionName()
 
 	// Check if session exists
 	hasSession, err := d.tmux.HasSession(sessionName)
@@ -552,16 +639,10 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 
 	// Session exists but heartbeat is stale - Deacon is stuck
-	if age > 30*time.Minute {
-		// Very stuck - restart the session.
-		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
-			d.logger.Printf("Error killing stuck Deacon: %v", err)
-		}
-		// Spawn new Deacon immediately instead of waiting for next heartbeat
-		// (kill may fail if session disappeared between check and kill)
-		d.ensureDeaconRunning()
+	// PATCH-002: Reduced from 30m to 10m for faster recovery.
+	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
+	if age > 10*time.Minute {
+		d.restartStuckDeacon(sessionName)
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
@@ -569,6 +650,21 @@ func (d *Daemon) checkDeaconHeartbeat() {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
 	}
+}
+
+// restartStuckDeacon kills and restarts a stuck Deacon session.
+// Extracted for reuse by PATCH-005 grace period logic.
+func (d *Daemon) restartStuckDeacon(sessionName string) {
+	// Check if session exists before trying to kill
+	hasSession, _ := d.tmux.HasSession(sessionName)
+	if hasSession {
+		d.logger.Printf("Killing stuck Deacon session %s", sessionName)
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			d.logger.Printf("Error killing stuck Deacon: %v", err)
+		}
+	}
+	// Spawn new Deacon immediately
+	d.ensureDeaconRunning()
 }
 
 // ensureWitnessesRunning ensures witnesses are running for configured rigs.
@@ -851,7 +947,7 @@ func (d *Daemon) processLifecycleRequests() {
 // 1. Pipe issues from errant db to town db (bd export | bd import)
 // 2. Remove the errant .beads directory
 //
-// This uses bd export/import which are backend-agnostic (work with SQLite or Dolt).
+// This uses bd export/import which are backend-agnostic.
 func (d *Daemon) cleanupTownServiceBeads() {
 	// Town-level service directories that should NOT have their own .beads
 	serviceDirs := []string{"mayor", "deacon"}
@@ -874,7 +970,7 @@ func (d *Daemon) cleanupTownServiceBeads() {
 
 		// Check if it has database files (the actual problem)
 		hasDB := false
-		dbPatterns := []string{"*.db", "beads.db", "hq.db", "dolt"}
+		dbPatterns := []string{"*.db", "dolt"}
 		for _, pattern := range dbPatterns {
 			matches, _ := filepath.Glob(filepath.Join(svcBeadsDir, pattern))
 			if len(matches) > 0 {
@@ -890,7 +986,7 @@ func (d *Daemon) cleanupTownServiceBeads() {
 		d.logger.Printf("Found errant .beads in %s - migrating to town beads", svc)
 
 		// Migrate: pipe export from errant db directly to import in town db
-		// This avoids temporary files and is backend-agnostic (works with SQLite or Dolt)
+		// This avoids temporary files and is backend-agnostic
 		if err := d.migrateBeadsToTown(svcBeadsDir, townBeadsDir); err != nil {
 			d.logger.Printf("Warning: failed to migrate %s/.beads: %v", svc, err)
 			continue
@@ -906,19 +1002,19 @@ func (d *Daemon) cleanupTownServiceBeads() {
 }
 
 // migrateBeadsToTown pipes issues from source beads dir to town beads dir.
-// Uses bd export | bd import which is backend-agnostic (works with SQLite or Dolt).
+// Uses bd export | bd import which is backend-agnostic.
 func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
 	// Kill any bd daemon for the source beads directory first.
 	// The daemon holds the database lock, preventing export from reading.
 	d.killBeadsDaemon(srcBeadsDir)
 
 	// Set up export command (reads from source)
-	exportCmd := exec.Command("bd", "export", "--no-daemon")
+	exportCmd := exec.Command(d.bdPath, "export", "--no-daemon")
 	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
 	exportCmd.Dir = filepath.Dir(srcBeadsDir)
 
 	// Set up import command (writes to destination)
-	importCmd := exec.Command("bd", "import", "--no-daemon")
+	importCmd := exec.Command(d.bdPath, "import", "--no-daemon")
 	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
 	importCmd.Dir = filepath.Dir(dstBeadsDir)
 
@@ -1057,8 +1153,9 @@ func (d *Daemon) Stop() {
 // This prevents the daemon from fighting shutdown by auto-restarting killed agents.
 //
 // Uses flock to check actual lock status rather than file existence, since
-// the lock file may persist after shutdown completes. If the file exists but
-// is not locked, it is removed as self-healing cleanup.
+// the lock file persists after shutdown completes. The file is intentionally
+// never removed: flock works on file descriptors, not paths, and removing
+// the file while another process waits on the flock defeats mutual exclusion.
 func (d *Daemon) isShutdownInProgress() bool {
 	lockPath := filepath.Join(d.config.TownRoot, "daemon", "shutdown.lock")
 
@@ -1077,13 +1174,37 @@ func (d *Daemon) isShutdownInProgress() bool {
 
 	if locked {
 		// We acquired the lock, so no shutdown is holding it
-		// Release immediately and clean up stale file
+		// Release immediately; leave the file in place so all
+		// concurrent callers flock the same inode.
 		_ = lock.Unlock()
-		_ = os.Remove(lockPath) // Self-healing: remove orphaned lock file
 		return false
 	}
 
 	// Could not acquire lock - shutdown is in progress
+	return true
+}
+
+// IsShutdownInProgress checks if a shutdown is currently in progress for the given town.
+// This is the exported version of isShutdownInProgress for use by other packages
+// (e.g., Boot triage) that need to avoid restarting sessions during shutdown.
+func IsShutdownInProgress(townRoot string) bool {
+	lockPath := filepath.Join(townRoot, "daemon", "shutdown.lock")
+
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		return false
+	}
+
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		return true
+	}
+
+	if locked {
+		_ = lock.Unlock()
+		return false
+	}
+
 	return true
 }
 
@@ -1346,6 +1467,14 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 		return
 	}
 
+	// TOCTOU guard: re-verify session is still dead before restarting.
+	// Between the initial check and now, the session may have been restarted
+	// by another heartbeat cycle, witness, or the polecat itself.
+	sessionRevived, err := d.tmux.HasSession(sessionName)
+	if err == nil && sessionRevived {
+		return // Session came back - no restart needed
+	}
+
 	// Polecat has work but session is dead - this is a crash!
 	d.logger.Printf("CRASH DETECTED: polecat %s/%s has hook_bead=%s but session %s is dead",
 		rigName, polecatName, info.HookBead, sessionName)
@@ -1497,7 +1626,7 @@ restart_error: %v
 Manual intervention may be required.`,
 		polecatName, hookBead, restartErr)
 
-	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
+	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 	if err := cmd.Run(); err != nil {

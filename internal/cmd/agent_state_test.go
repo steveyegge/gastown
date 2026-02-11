@@ -254,7 +254,7 @@ func TestParseAgentBeadLabels(t *testing.T) {
 		{
 			name:      "empty stdout with stderr",
 			stdout:    []byte{},
-			stderr:    []byte("database mismatch: client expects dolt but daemon serves sqlite"),
+			stderr:    []byte("database mismatch: client expects dolt but daemon has different backend"),
 			agentBead: "gt-test",
 			wantErr:   "database mismatch",
 		},

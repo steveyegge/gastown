@@ -21,17 +21,36 @@ import (
 // sessionNudgeLocks serializes nudges to the same session.
 // This prevents interleaving when multiple nudges arrive concurrently,
 // which can cause garbled input and missed Enter keys.
-var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
+// Uses channel-based semaphores instead of sync.Mutex to support
+// timed lock acquisition — preventing permanent lockout if a nudge hangs.
+var sessionNudgeLocks sync.Map // map[string]chan struct{}
+
+// nudgeLockTimeout is how long to wait to acquire the per-session nudge lock.
+// If a previous nudge is still holding the lock after this duration, we give up
+// rather than blocking forever. This prevents a hung tmux from permanently
+// blocking all future nudges to that session.
+const nudgeLockTimeout = 30 * time.Second
 
 // validSessionNameRe validates session names to prevent shell injection
 var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer        = errors.New("no tmux server running")
-	ErrSessionExists   = errors.New("session already exists")
-	ErrSessionNotFound = errors.New("session not found")
+	ErrNoServer            = errors.New("no tmux server running")
+	ErrSessionExists       = errors.New("session already exists")
+	ErrSessionNotFound     = errors.New("session not found")
+	ErrInvalidSessionName  = errors.New("invalid session name")
 )
+
+// validateSessionName checks that a session name contains only safe characters.
+// Returns ErrInvalidSessionName if the name contains dots, colons, or other
+// characters that cause tmux to silently fail or produce cryptic errors.
+func validateSessionName(name string) error {
+	if name == "" || !validSessionNameRe.MatchString(name) {
+		return fmt.Errorf("%w %q: must match %s", ErrInvalidSessionName, name, validSessionNameRe.String())
+	}
+	return nil
+}
 
 // Tmux wraps tmux operations.
 type Tmux struct{}
@@ -42,8 +61,12 @@ func NewTmux() *Tmux {
 }
 
 // run executes a tmux command and returns stdout.
+// All commands include -u flag for UTF-8 support regardless of locale settings.
+// See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	// Prepend -u flag for UTF-8 mode (PATCH-004)
+	allArgs := append([]string{"-u"}, args...)
+	cmd := exec.Command("tmux", allArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -82,6 +105,9 @@ func (t *Tmux) wrapError(err error, stderr string, args []string) error {
 
 // NewSession creates a new detached tmux session.
 func (t *Tmux) NewSession(name, workDir string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
@@ -96,6 +122,9 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // initial process of the pane.
 // See: https://github.com/anthropics/gastown/issues/280
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
@@ -114,31 +143,45 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 // - The tmux session exists
 // - But Claude (node process) is not running in it
 //
-// Returns nil if session was created successfully.
+// Uses create-first approach to avoid TOCTOU race conditions in multi-agent
+// environments where another agent could create the same session between a
+// check and create call.
+//
+// Returns nil if session was created successfully or already exists with a running agent.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
-	// Check if session already exists
-	exists, err := t.HasSession(name)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+	if err := validateSessionName(name); err != nil {
+		return err
 	}
 
-	if exists {
-		// Session exists - check if it's a zombie
-		if !t.IsAgentRunning(name) {
-			// Zombie session: tmux alive but Claude dead
-			// Kill it so we can create a fresh one
-			// Use KillSessionWithProcesses to ensure all descendant processes are killed
-			if err := t.KillSessionWithProcesses(name); err != nil {
-				return fmt.Errorf("killing zombie session: %w", err)
-			}
-		} else {
-			// Session is healthy (Claude running) - nothing to do
-			return nil
-		}
+	// Try to create the session first (atomic — avoids check-then-create race)
+	err := t.NewSession(name, workDir)
+	if err == nil {
+		return nil // Created successfully
+	}
+	if err != ErrSessionExists {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Create fresh session
-	return t.NewSession(name, workDir)
+	// Session already exists — check if it's a zombie
+	if t.IsAgentRunning(name) {
+		// Session is healthy (agent running) — nothing to do
+		return nil
+	}
+
+	// Zombie session: tmux alive but agent dead
+	// Kill it so we can create a fresh one
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed
+	if err := t.KillSessionWithProcesses(name); err != nil {
+		return fmt.Errorf("killing zombie session: %w", err)
+	}
+
+	// Create fresh session (handle race: another agent may have created it
+	// between our kill and this create — that's fine, treat as success)
+	err = t.NewSession(name, workDir)
+	if err == ErrSessionExists {
+		return nil
+	}
+	return err
 }
 
 // KillSession terminates a tmux session.
@@ -178,23 +221,27 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
-		// First, kill the entire process group. This catches processes that:
-		// - Reparented to init (PID 1) when their parent died
-		// - Are not direct children but stayed in the same process group
-		// Note: Processes that called setsid() will have a new PGID and won't be killed here
-		pgid := getProcessGroupID(pid)
-		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group using syscall.Kill() directly, rather than shelling
-			// out to /usr/bin/kill which has parsing ambiguity with negative PGIDs.
-			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
-			// syscall.Kill with negative PID targets the process group (POSIX).
-			pgidInt, _ := strconv.Atoi(pgid)
-			killProcessGroup(pgidInt)
+		// Walk the process tree for all descendants (catches processes that
+		// called setsid() and created their own process groups)
+		descendants := getAllDescendants(pid)
+
+		// Build known PID set for group membership verification
+		knownPIDs := make(map[string]bool, len(descendants)+1)
+		knownPIDs[pid] = true
+		for _, d := range descendants {
+			knownPIDs[d] = true
 		}
 
-		// Also walk the process tree for any descendants that might have called setsid()
-		// and created their own process groups (rare but possible)
-		descendants := getAllDescendants(pid)
+		// Find reparented processes from our process group. Instead of killing
+		// the entire group blindly with syscall.Kill(-pgid, ...) — which could
+		// hit unrelated processes sharing the same PGID — we enumerate group
+		// members and only include those reparented to init (PPID == 1), which
+		// indicates they were likely children in our tree that outlived their parent.
+		pgid := getProcessGroupID(pid)
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			reparented := collectReparentedGroupMembers(pgid, knownPIDs)
+			descendants = append(descendants, reparented...)
+		}
 
 		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
 		for _, dpid := range descendants {
@@ -250,20 +297,28 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		// Collect all PIDs to kill (from multiple sources)
 		toKill := make(map[string]bool)
 
-		// 1. Get all process group members (catches reparented processes)
-		if pgid != "" && pgid != "0" && pgid != "1" {
-			for _, member := range getProcessGroupMembers(pgid) {
-				if !exclude[member] {
-					toKill[member] = true
-				}
-			}
-		}
-
-		// 2. Get all descendant PIDs recursively (catches processes that called setsid())
+		// 1. Get all descendant PIDs recursively (catches processes that called setsid())
 		descendants := getAllDescendants(pid)
+
+		// Build known PID set for group membership verification
+		knownPIDs := make(map[string]bool, len(descendants)+1)
+		knownPIDs[pid] = true
 		for _, dpid := range descendants {
 			if !exclude[dpid] {
 				toKill[dpid] = true
+			}
+			knownPIDs[dpid] = true
+		}
+
+		// 2. Get verified process group members (only reparented-to-init processes).
+		// Instead of adding ALL group members — which could include unrelated
+		// processes sharing the same PGID — we only add those that were reparented
+		// to init (PPID == 1), indicating they were likely children in our tree.
+		if pgid != "" && pgid != "0" && pgid != "1" {
+			for _, member := range collectReparentedGroupMembers(pgid, knownPIDs) {
+				if !exclude[member] {
+					toKill[member] = true
+				}
 			}
 		}
 
@@ -303,6 +358,32 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		return nil
 	}
 	return err
+}
+
+// collectReparentedGroupMembers returns process group members that have been
+// reparented to init (PPID == 1) but are not in the known descendant set.
+// These are processes that were likely children in our tree but outlived their
+// parent and got reparented to init while keeping the original PGID.
+//
+// This is safer than killing the entire process group blindly with
+// syscall.Kill(-pgid, ...), which could hit unrelated processes if the PGID
+// is shared or has been reused after the group leader exited.
+func collectReparentedGroupMembers(pgid string, knownPIDs map[string]bool) []string {
+	members := getProcessGroupMembers(pgid)
+	var reparented []string
+	for _, member := range members {
+		if knownPIDs[member] {
+			continue // Already in descendant list, will be handled there
+		}
+		// Check if reparented to init — probably was our child
+		ppid := getParentPID(member)
+		if ppid == "1" {
+			reparented = append(reparented, member)
+		}
+		// Otherwise skip — this process is not in our tree and not reparented,
+		// so it's likely unrelated and should not be killed
+	}
+	return reparented
 }
 
 // getAllDescendants recursively finds all descendant PIDs of a process.
@@ -350,19 +431,26 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		return fmt.Errorf("pane PID is empty")
 	}
 
-	// First, kill the entire process group. This catches processes that:
-	// - Reparented to init (PID 1) when their parent died
-	// - Are not direct children but stayed in the same process group
-	pgid := getProcessGroupID(pid)
-	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group using syscall.Kill() directly.
-		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
-		pgidInt, _ := strconv.Atoi(pgid)
-		killProcessGroup(pgidInt)
+	// Walk the process tree for all descendants (catches processes that
+	// called setsid() and created their own process groups)
+	descendants := getAllDescendants(pid)
+
+	// Build known PID set for group membership verification
+	knownPIDs := make(map[string]bool, len(descendants)+1)
+	knownPIDs[pid] = true
+	for _, d := range descendants {
+		knownPIDs[d] = true
 	}
 
-	// Also walk the process tree for any descendants that might have called setsid()
-	descendants := getAllDescendants(pid)
+	// Find reparented processes from our process group. Instead of killing
+	// the entire group blindly with syscall.Kill(-pgid, ...) — which could
+	// hit unrelated processes sharing the same PGID — we enumerate group
+	// members and only include those reparented to init (PPID == 1).
+	pgid := getProcessGroupID(pid)
+	if pgid != "" && pgid != "0" && pgid != "1" {
+		reparented := collectReparentedGroupMembers(pgid, knownPIDs)
+		descendants = append(descendants, reparented...)
+	}
 
 	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
 	for _, dpid := range descendants {
@@ -678,11 +766,35 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
-// getSessionNudgeLock returns the mutex for serializing nudges to a session.
-// Creates a new mutex if one doesn't exist for this session.
-func getSessionNudgeLock(session string) *sync.Mutex {
-	actual, _ := sessionNudgeLocks.LoadOrStore(session, &sync.Mutex{})
-	return actual.(*sync.Mutex)
+// getSessionNudgeSem returns the channel semaphore for serializing nudges to a session.
+// Creates a new semaphore if one doesn't exist for this session.
+// The semaphore is a buffered channel of size 1 — send to acquire, receive to release.
+func getSessionNudgeSem(session string) chan struct{} {
+	sem := make(chan struct{}, 1)
+	actual, _ := sessionNudgeLocks.LoadOrStore(session, sem)
+	return actual.(chan struct{})
+}
+
+// acquireNudgeLock attempts to acquire the per-session nudge lock with a timeout.
+// Returns true if the lock was acquired, false if the timeout expired.
+func acquireNudgeLock(session string, timeout time.Duration) bool {
+	sem := getSessionNudgeSem(session)
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// releaseNudgeLock releases the per-session nudge lock.
+func releaseNudgeLock(session string) {
+	sem := getSessionNudgeSem(session)
+	select {
+	case <-sem:
+	default:
+		// Lock wasn't held — shouldn't happen, but don't block
+	}
 }
 
 // IsSessionAttached returns true if the session has any clients attached.
@@ -729,13 +841,22 @@ func (t *Tmux) WakePaneIfDetached(target string) {
 // queue up and execute one at a time. This prevents garbled input when
 // SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
-	// Serialize nudges to this session to prevent interleaving
-	lock := getSessionNudgeLock(session)
-	lock.Lock()
-	defer lock.Unlock()
+	// Serialize nudges to this session to prevent interleaving.
+	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	if !acquireNudgeLock(session, nudgeLockTimeout) {
+		return fmt.Errorf("nudge lock timeout for session %q: previous nudge may be hung", session)
+	}
+	defer releaseNudgeLock(session)
+
+	// Resolve the correct target: in multi-pane sessions, find the pane
+	// running the agent rather than sending to the focused pane.
+	target := session
+	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
+		target = agentPane
+	}
 
 	// 1. Send text in literal mode (handles special characters)
-	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
+	if _, err := t.run("send-keys", "-t", target, "-l", message); err != nil {
 		return err
 	}
 
@@ -744,7 +865,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", session, "Escape")
+	_, _ = t.run("send-keys", "-t", target, "Escape")
 	time.Sleep(100 * time.Millisecond)
 
 	// 4. Send Enter with retry (critical for message submission)
@@ -753,7 +874,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 		if attempt > 0 {
 			time.Sleep(200 * time.Millisecond)
 		}
-		if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
 			lastErr = err
 			continue
 		}
@@ -769,10 +890,12 @@ func (t *Tmux) NudgeSession(session, message string) error {
 // After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
-	// Serialize nudges to this pane to prevent interleaving
-	lock := getSessionNudgeLock(pane)
-	lock.Lock()
-	defer lock.Unlock()
+	// Serialize nudges to this pane to prevent interleaving.
+	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	if !acquireNudgeLock(pane, nudgeLockTimeout) {
+		return fmt.Errorf("nudge lock timeout for pane %q: previous nudge may be hung", pane)
+	}
+	defer releaseNudgeLock(pane)
 
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
@@ -852,6 +975,67 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// FindAgentPane finds the pane running an agent process within a session.
+// In multi-pane sessions, send-keys -t <session> targets the active/focused pane,
+// which may not be the agent pane. This method enumerates all panes and returns
+// the pane ID (e.g., "%5") of the one running the agent.
+//
+// Detection checks pane_current_command, then falls back to process tree inspection
+// (same logic as IsRuntimeRunning) to handle agents started via shell wrappers.
+//
+// Returns ("", nil) if the session has only one pane (no disambiguation needed),
+// or if no agent pane can be identified (caller should fall back to session targeting).
+func (t *Tmux) FindAgentPane(session string) (string, error) {
+	// List all panes with ID, command, and PID
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) <= 1 {
+		// Single pane - no disambiguation needed
+		return "", nil
+	}
+
+	// Get agent process names from session environment
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	processNames := config.GetProcessNames(agentName)
+
+	// Check each pane for agent process
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		paneID := parts[0]
+		paneCmd := parts[1]
+		panePID := parts[2]
+
+		// Direct command match
+		for _, name := range processNames {
+			if paneCmd == name {
+				return paneID, nil
+			}
+		}
+
+		// Shell with agent descendant
+		for _, shell := range constants.SupportedShells {
+			if paneCmd == shell && hasDescendantWithNames(panePID, processNames, 0) {
+				return paneID, nil
+			}
+		}
+
+		// Version-as-argv[0] (e.g., "2.1.30") — check real binary name
+		if processMatchesNames(panePID, processNames) {
+			return paneID, nil
+		}
+	}
+
+	// No agent pane found
+	return "", nil
 }
 
 // GetPaneID returns the pane identifier for a session's first pane.
@@ -1077,6 +1261,9 @@ func (t *Tmux) GetAllEnvironment(session string) (map[string]string, error) {
 
 // RenameSession renames a session.
 func (t *Tmux) RenameSession(oldName, newName string) error {
+	if err := validateSessionName(newName); err != nil {
+		return err
+	}
 	_, err := t.run("rename-session", "-t", oldName, newName)
 	return err
 }
@@ -1414,9 +1601,8 @@ func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 // SetDynamicStatus configures the right side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
-	// Validate session name to prevent shell injection
-	if !validSessionNameRe.MatchString(session) {
-		return fmt.Errorf("invalid session name %q: must match %s", session, validSessionNameRe.String())
+	if err := validateSessionName(session); err != nil {
+		return err
 	}
 
 	// tmux calls this command every status-interval seconds
@@ -1624,6 +1810,37 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	return err
 }
 
+// GetSessionCreatedUnix returns the Unix timestamp when a session was created.
+// Returns 0 if the session doesn't exist or can't be queried.
+func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{session_created}")
+	if err != nil {
+		return 0, err
+	}
+	ts, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing session_created %q: %w", out, err)
+	}
+	return ts, nil
+}
+
+// CurrentSessionName returns the tmux session name for the current process.
+// It parses the TMUX environment variable (format: socket,pid,session_index)
+// and queries tmux for the session name. Returns empty string if not in tmux.
+func CurrentSessionName() string {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return ""
+	}
+	// TMUX format: /path/to/socket,server_pid,session_index
+	// We can use display-message to get the session name directly
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // CleanupOrphanedSessions scans for zombie Gas Town sessions and kills them.
 // A zombie session is one where tmux is alive but the Claude process has died.
 // This runs at `gt start` time to prevent session name conflicts and resource accumulation.
@@ -1662,9 +1879,12 @@ func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
 // When the pane exits, tmux runs the hook command with exit status info.
 // The agentID is used to identify the agent in crash logs (e.g., "gastown/Toast").
 func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
-	// Sanitize inputs to prevent shell injection
-	session = strings.ReplaceAll(session, "'", "'\\''")
+	if err := validateSessionName(session); err != nil {
+		return err
+	}
+	// Sanitize agentID to prevent shell injection (session already validated by regex)
 	agentID = strings.ReplaceAll(agentID, "'", "'\\''")
+	session = strings.ReplaceAll(session, "'", "'\\''") // safe after validation, but keep for consistency
 
 	// Hook command logs the crash with exit status
 	// #{pane_dead_status} is the exit code of the process that died
@@ -1675,4 +1895,66 @@ func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
 	// Set the hook on this specific session
 	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
 	return err
+}
+
+// SetAutoRespawnHook configures a session to automatically respawn when the pane dies.
+// This is used for persistent agents like Deacon that should never exit.
+// PATCH-010: Fixes Deacon crash loop by respawning at tmux level.
+//
+// The hook:
+// 1. Waits 3 seconds (debounce rapid crashes)
+// 2. Respawns the pane with its original command
+// 3. Re-enables remain-on-exit (respawn-pane resets it to off!)
+//
+// Requires remain-on-exit to be set first (called automatically by this function).
+func (t *Tmux) SetAutoRespawnHook(session string) error {
+	if err := validateSessionName(session); err != nil {
+		return err
+	}
+	// First, enable remain-on-exit so the pane stays after process exit
+	if err := t.SetRemainOnExit(session, true); err != nil {
+		return fmt.Errorf("setting remain-on-exit: %w", err)
+	}
+
+	// Sanitize session name for shell safety
+	safeSession := strings.ReplaceAll(session, "'", "'\\''")
+
+	// Hook command: wait, respawn, then re-enable remain-on-exit
+	// IMPORTANT: respawn-pane automatically resets remain-on-exit to off!
+	// We must re-enable it after each respawn for continuous recovery.
+	// The sleep prevents rapid respawn loops if Claude crashes immediately.
+	hookCmd := fmt.Sprintf(`run-shell "sleep 3 && tmux respawn-pane -k -t '%s' && tmux set-option -t '%s' remain-on-exit on"`, safeSession, safeSession)
+
+	// Set the hook on this specific session
+	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
+	if err != nil {
+		return fmt.Errorf("setting pane-died hook: %w", err)
+	}
+
+	return nil
+}
+
+// SetGlobalDeaconRespawnHook sets up a global hook that respawns hq-deacon panes.
+// DEPRECATED: Global pane-died hooks don't fire reliably in tmux 3.2a.
+// Use SetAutoRespawnHook with per-session hooks instead (called by deacon manager).
+//
+// Keeping this function for reference in case tmux behavior changes in future versions.
+func (t *Tmux) SetGlobalDeaconRespawnHook() error {
+	// Hook command that only respawns hq-deacon sessions
+	// Uses #{session_name} to check if this is the deacon session
+	// #{pane_id} identifies the exact pane that died
+	// IMPORTANT: We must re-enable remain-on-exit after respawn-pane resets it!
+	//
+	// NOTE: Testing showed global pane-died hooks don't fire in tmux 3.2a,
+	// even though per-session hooks work correctly. The per-session approach
+	// in SetAutoRespawnHook is the reliable solution.
+	hookCmd := `run-shell "if [ '#{session_name}' = 'hq-deacon' ]; then sleep 3 && tmux respawn-pane -k -t #{pane_id} && tmux set-option -t #{session_name} remain-on-exit on; fi"`
+
+	// Set as a global hook so it applies to all sessions
+	_, err := t.run("set-hook", "-g", "pane-died", hookCmd)
+	if err != nil {
+		return fmt.Errorf("setting global pane-died hook: %w", err)
+	}
+
+	return nil
 }

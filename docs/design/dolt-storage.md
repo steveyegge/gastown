@@ -1,13 +1,15 @@
 # Dolt Storage Architecture
 
 > **Status**: Canonical reference — consolidates all prior Dolt design docs
-> **Date**: 2026-02-05
+> **Date**: 2026-02-09 (updated)
 > **Context**: Dolt as the unified data layer for Beads and Gas Town
 > **Consolidates**: DOLT-STORAGE-DESIGN.md, THREE-PLANES.md, dolt-integration-analysis-v{1,2}.md,
 > dolt-license-analysis.md (all deleted; available in git history under ~/hop/docs/)
 > **Key decisions**: SQLite retired. JSONL retired (interim backup only). Dolt is the
 > only backend. Server mode is **required** (embedded mode fully removed — no fallback).
 > Dolt-in-git replaces JSONL for federation when it ships.
+> **Migration history**: See `~/gt/mayor/DOLT-HEALTH-P0.md` for the 2-week war-room
+> document that drove the migration from embedded to server mode (Jan-Feb 2026).
 
 ---
 
@@ -146,7 +148,8 @@ DESIGN PLANE                  OPERATIONAL PLANE              LEDGER PLANE
 
 ## Part 3: Dolt-in-Git — The JSONL Replacement
 
-> **Status**: Dolt team actively building this (~1 week from 2026-01-30).
+> **Status**: Awaiting delivery from Dolt team. Originally estimated ~1 week from
+> 2026-01-30; still in progress as of 2026-02-09. Not blocking Gas Town operations.
 
 Instead of serializing Dolt data to JSONL for git transport, push Dolt's native
 binary files directly into the git repo. Clone the repo, you have the code AND
@@ -255,16 +258,22 @@ in case of disk crashes. The git-tracked JSONL files are the recovery path.
 
 ---
 
-## Part 6: Gas Town Current State (2026-02-05)
+## Part 6: Gas Town Current State (2026-02-09)
 
 ### What's Working
 
-- Dolt SQL Server as the **only** access method — embedded mode removed
+- Dolt SQL Server as the **only** access method — embedded mode fully removed
 - Centralized data directory at `~/gt/.dolt-data/` with per-rig subdirectories
 - `gt daemon` auto-starts, monitors, and auto-restarts the Dolt server
 - Server commands: `gt dolt start`, `gt dolt stop`, `gt dolt status`, `gt dolt logs`
-- 5 concurrent `bd` processes tested with zero contention
-- Creates persist, reads work, `gt ready` shows items across all rigs
+- Branch-per-polecat write concurrency: 50 concurrent writers tested clean (see Part 12)
+- Daemon health checks every 30s with exponential backoff on crash restart
+- Migration tool (`bd migrate dolt`) tested on lab VM, bugs fixed
+- All 4+ databases live and serving (hq, beads, gastown, wyvern, plus test rigs)
+
+**Note on standalone Beads**: The `bd` CLI for standalone use (outside Gas Town) still
+retains embedded Dolt as an option. Embedded removal applies to Gas Town only — standalone
+users may not have a Dolt server running. This distinction is in the `bd` codebase, not `gt`.
 
 ### Server Management
 
@@ -334,8 +343,8 @@ root@tcp(127.0.0.1:3307)/gastown # Specific rig database
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | `dolt-native` | Pure Dolt server, no JSONL | Gas Town (current default) |
-| `git-portable` | Dolt + JSONL export on push | Beads Classic upgrade path |
-| `dolt-in-git` | Dolt binary files in git | Future default (when shipped) |
+| `git-portable` | Dolt + JSONL export on push | Standalone Beads upgrade path |
+| `dolt-in-git` | Dolt binary files in git | Future default (awaiting Dolt team delivery) |
 
 ### Conflict Resolution
 
@@ -488,23 +497,31 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 
 - **Dolt Server mode**: Required for all access. Commands: `gt dolt start/stop/status`
 - **Centralized data directory**: `~/.dolt-data/` with per-rig subdirectories
-- **Migration tooling**: `gt dolt migrate` + manual moves for rig-level databases
+- **Migration tooling**: `gt dolt migrate` + `bd migrate dolt` (tested on lab VM, bugs fixed)
 - **Daemon integration**: Dolt server auto-starts/stops/restarts via `gt daemon`
-- **All 4 databases migrated**: hq (4197), beads (2468), gastown (1053), wyvern
+- **All databases migrated**: hq, beads, gastown, wyvern (plus test rigs)
+- **Embedded mode removed from Gas Town**: No embedded fallback in `gt`. Server-only.
+- **Branch-per-polecat for write concurrency**: Each polecat gets a Dolt branch at sling
+  time. 50 concurrent writers tested clean. See Part 12.
+- **Doctor checks**: `gt doctor` validates Dolt server health, stale redirects, routes,
+  and beads integrity (44 check types total)
 
 ### Immediate
 
-1. **Remove embedded mode from bd** (see Part 11): Major code simplification.
-2. **Dolt-in-git integration**: Dolt team delivering soon.
-   When ready, integrate into bd — replace JSONL with Dolt binary commits.
-3. **Gas Town pristine state**: Clean up old `.beads/dolt/` directories, stale
+1. **Dolt-in-git integration**: Awaiting delivery from Dolt team (overdue from ~Feb 6
+   estimate). When ready, integrate into bd — replace JSONL with Dolt binary commits.
+2. **Gas Town pristine state**: Clean up old `.beads/dolt/` directories, stale
    SQLite, misrouted beads, stale JSONL.
+3. **Dolt optimistic lock fix (upstream)**: The Dolt team is working on a fix for
+   the `optimistic lock failed on database Root update` error. Branch-per-polecat
+   eliminates this as a blocking issue for Gas Town, but the upstream fix will
+   benefit standalone `bd` users and simplify the architecture further.
 
 ### Next
 
 - Closed-beads-only ledger export
-- Agent-managed Dolt migration flow for Beads users
-- Ship `bd` release (server-only, no embedded driver → smaller binary)
+- Remove embedded mode from `bd` CLI (Gas Town done; standalone beads next)
+- Ship `bd` release (server-only binary option → ~20MB vs ~120MB)
 - Per-rig server option for isolation (if demand emerges)
 
 ### Future
@@ -534,10 +551,109 @@ Direct answers from Tim Sehn (CEO) and Dustin Brown (engineer), January 2026.
 | dolt_diff() for export | No dirty_issues table; Dolt IS the tracker | 2026-01-16 |
 | Per-worktree export state | Prevent polecats exporting each other's work | 2026-01-16 |
 | Apache 2.0 compatible with MIT | Standard attribution, no architectural impact | 2026-01-13 |
+| **Branch-per-polecat** | Per-worker Dolt branches eliminate optimistic lock contention at 50+ concurrent writers. Tested 2026-02-08. | 2026-02-08 |
+| **Dolt team fixing optimistic lock** | Upstream fix in progress for `Error 1105: optimistic lock failed`. Branch-per-polecat is the Gas Town workaround; upstream fix benefits standalone bd users. | 2026-02-09 |
+
+---
+
+## Part 12: Branch-Per-Polecat (Write Concurrency Fix)
+
+> Added 2026-02-08 by Mayor. **Implemented and deployed.**
+> Stress test evidence in `~/gt/mayor/dolt-branch-test.go`.
+
+### The Problem
+
+Dolt's optimistic locking causes `Error 1105: optimistic lock failed on database Root
+update` when multiple agents commit to the same branch concurrently. At 20 concurrent
+writers on `main`, 50% fail. The Phase 0 band-aid (10 retries with exponential backoff)
+helps but doesn't solve the architectural ceiling.
+
+The Dolt team is aware of this issue and is working on an upstream fix to the optimistic
+lock mechanism. However, branch-per-polecat is the correct architectural solution
+regardless — it eliminates contention by design rather than by retry.
+
+### The Fix
+
+Each polecat gets its own Dolt branch. Branches are independent Root pointers — no
+contention between branches. Merges are sequential (refinery or gt done).
+
+```
+gt sling <bead> <rig>
+  └─ CALL DOLT_BRANCH('polecat-furiosa-1707350000')
+     └─ Polecat env: BD_BRANCH=polecat-furiosa-1707350000
+        └─ bd connects, runs: CALL DOLT_CHECKOUT('polecat-furiosa-1707350000')
+           └─ All bd creates/updates/closes write to polecat branch
+              └─ Zero contention with other polecats
+
+gt done
+  └─ CALL DOLT_CHECKOUT('main')
+     └─ CALL DOLT_MERGE('polecat-furiosa-1707350000')
+        └─ CALL DOLT_BRANCH('-D', 'polecat-furiosa-1707350000')
+```
+
+### Stress Test Results
+
+| Concurrency | Single Branch (main) | Per-Worker Branches | Sequential Merge |
+|-------------|---------------------|--------------------|-----------------|
+| 10 | 10/10 (100%) | 10/10 (100%) | 10/10 (100%) |
+| 20 | 10/20 (50%) | **20/20 (100%)** | 20/20 (100%) |
+| 50 | 25/50 (50%) | **50/50 (100%)** | 50/50 (100%) |
+
+Each worker performed 5 insert+commit cycles. All workers launched simultaneously
+via barrier. 50 workers = 250 total Dolt commits, all successful, in 2 seconds.
+Sequential merge of all 50 branches completed in 312ms.
+
+### Why This Works
+
+Tim Sehn (Dolt CEO): "Branches are just pointers to commits, like Git. Millions of
+branches without issue." And: "We merge the Prolly Trees — much smarter/faster than
+sequential replay."
+
+Each branch has its own Root. DOLT_COMMIT on branch A doesn't touch branch B's Root.
+The optimistic lock only fires when two writers try to update the SAME Root. With
+per-polecat branches, this never happens.
+
+### Implementation (Gas Town side) — Complete
+
+1. `gt sling` (`internal/polecat/session_manager.go`): After worktree creation, creates
+   Dolt branch via SQL: `CALL DOLT_BRANCH('polecat-<name>-<timestamp>')`
+2. Sets `BD_BRANCH` env var in the polecat's tmux session environment
+3. `gt done` (`internal/cmd/done.go`): Reads `BD_BRANCH`, merges branch to main via
+   `CALL DOLT_MERGE()`, deletes branch, unsets env var
+4. `gt polecat nuke`: deletes branch as part of cleanup (idempotent)
+5. Branch lifecycle managed in `internal/doltserver/doltserver.go`:
+   `CreatePolecatBranch`, `MergePolecatBranch`, `DeletePolecatBranch`
+
+### Implementation (Beads side) — Complete
+
+1. On connection open, checks `BD_BRANCH` env var
+2. If set, runs `CALL DOLT_CHECKOUT('<branch>')` on the connection
+3. All subsequent operations happen on that branch transparently
+4. No other bd code changes needed — SQL operations are branch-agnostic
+
+### Merge Conflicts
+
+Conflicts should be rare: each polecat works on different issues (different rows).
+If conflicts occur (e.g., two polecats update the same parent epic's child count):
+- Dolt's `dolt_conflicts` table captures them
+- `newest-wins` resolution applies (our default)
+- Worst case: retry the merge after resolving
+
+### Relationship to AT War Rigs
+
+Dolt branches and AT War Rigs are orthogonal solutions to different problems:
+- **Branches**: Solve write contention at the storage layer (launch-track)
+- **AT War Rigs**: Solve coordination overhead at the session layer (post-launch)
+
+Both could coexist. With branches, AT War Rigs become less urgent — the Dolt
+contention ceiling is removed regardless of how sessions are managed.
 
 ---
 
 ## Part 11: Code Simplification (Embedded Removal)
+
+> **Gas Town status**: Complete — `gt` has no embedded Dolt code paths.
+> **Standalone Beads status**: Pending — `bd` CLI still retains embedded for users without a server.
 
 Removing embedded mode entirely enables significant cleanup across the `bd` codebase.
 This is not incremental — it's a wholesale removal of a code path that no longer executes.

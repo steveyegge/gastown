@@ -96,6 +96,84 @@ func TestRenderAgentDetails_UsesRigPrefix(t *testing.T) {
 	}
 }
 
+func TestDiscoverRigAgents_ZombieSessionNotRunning(t *testing.T) {
+	// Verify that a session in allSessions with value=false (zombie: tmux alive,
+	// agent dead) results in agent.Running=false. This is the core fix for gt-bd6i3.
+	townRoot := t.TempDir()
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "gt-", Path: "gastown/mayor/rig"},
+	})
+
+	r := &rig.Rig{
+		Name:       "gastown",
+		Path:       filepath.Join(townRoot, "gastown"),
+		HasWitness: true,
+	}
+
+	// allSessions has the witness session but marked as zombie (false).
+	// This simulates a tmux session that exists but whose agent process has died.
+	allSessions := map[string]bool{
+		"gt-gastown-witness": false, // zombie: tmux exists, agent dead
+	}
+
+	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, true)
+	for _, a := range agents {
+		if a.Role == "witness" {
+			if a.Running {
+				t.Fatal("zombie witness session (allSessions=false) should show as not running")
+			}
+			return
+		}
+	}
+	t.Fatal("witness agent not found in results")
+}
+
+func TestDiscoverRigAgents_MissingSessionNotRunning(t *testing.T) {
+	// Verify that a session not in allSessions at all results in agent.Running=false.
+	townRoot := t.TempDir()
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "gt-", Path: "gastown/mayor/rig"},
+	})
+
+	r := &rig.Rig{
+		Name:       "gastown",
+		Path:       filepath.Join(townRoot, "gastown"),
+		HasWitness: true,
+	}
+
+	// Empty sessions map - no tmux sessions exist at all
+	allSessions := map[string]bool{}
+
+	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, true)
+	for _, a := range agents {
+		if a.Role == "witness" {
+			if a.Running {
+				t.Fatal("witness with no tmux session should show as not running")
+			}
+			return
+		}
+	}
+	t.Fatal("witness agent not found in results")
+}
+
+func TestBuildStatusIndicator_ZombieShowsStopped(t *testing.T) {
+	// Verify that a zombie agent (Running=false) shows ○ (stopped), not ● (running)
+	agent := AgentRuntime{Running: false}
+	indicator := buildStatusIndicator(agent)
+	if strings.Contains(indicator, "●") {
+		t.Fatal("zombie agent (Running=false) should not show ● indicator")
+	}
+}
+
+func TestBuildStatusIndicator_AliveShowsRunning(t *testing.T) {
+	// Verify that an alive agent (Running=true) shows ● (running)
+	agent := AgentRuntime{Running: true}
+	indicator := buildStatusIndicator(agent)
+	if strings.Contains(indicator, "○") {
+		t.Fatal("alive agent (Running=true) should not show ○ indicator")
+	}
+}
+
 func TestRunStatusWatch_RejectsZeroInterval(t *testing.T) {
 	oldInterval := statusInterval
 	oldWatch := statusWatch

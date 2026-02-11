@@ -79,6 +79,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_POLECAT"] = cfg.AgentName
 		env["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		// Disable Dolt auto-commit for polecats. With branch-per-polecat,
+		// individual commits are pointless — all changes merge at gt done time
+		// via DOLT_MERGE. Without this, concurrent polecats cause manifest
+		// contention leading to Dolt read-only mode (gt-5cc2p).
+		env["BD_DOLT_AUTO_COMMIT"] = "off"
 
 	case "crew":
 		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)

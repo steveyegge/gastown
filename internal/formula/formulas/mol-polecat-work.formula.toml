@@ -152,7 +152,7 @@ let someone else's mess consume your entire mission.
 ```bash
 git stash                   # Save your branch state
 git checkout origin/main
-go test ./...               # Or appropriate test command
+{{test_command}}            # Run tests (configured per-rig)
 ```
 
 **2. If tests PASS:**
@@ -287,8 +287,7 @@ Verify your changes don't break anything and are properly tested.
 
 **1. Run the full test suite:**
 ```bash
-go test ./...               # For Go projects
-# Or appropriate command for your stack
+{{test_command}}            # Run tests (configured per-rig)
 ```
 
 **ALL TESTS MUST PASS.** Do not proceed with failures.
@@ -303,7 +302,7 @@ go test ./...               # For Go projects
 # Check if failure exists on main:
 git stash
 git checkout main
-go test ./...
+{{test_command}}
 git checkout -
 git stash pop
 ```
@@ -315,11 +314,11 @@ git stash pop
 
 **4. Run any other quality checks:**
 ```bash
-# Linting (if configured)
-golangci-lint run ./...
+# Linting
+{{lint_command}}
 
 # Build check
-go build ./...
+{{build_command}}
 ```
 
 **Exit criteria:** All tests pass, new code has appropriate test coverage."""
@@ -472,3 +471,15 @@ You are NOT involved in any of that. You're gone. Done means gone.
 [vars.issue]
 description = "The issue ID assigned to this polecat"
 required = true
+
+[vars.test_command]
+description = "Command to run tests (auto-detected from rig settings)"
+default = "go test ./..."
+
+[vars.lint_command]
+description = "Command to run linting (auto-detected from rig settings)"
+default = "golangci-lint run ./..."
+
+[vars.build_command]
+description = "Command to run build (auto-detected from rig settings)"
+default = "go build ./..."

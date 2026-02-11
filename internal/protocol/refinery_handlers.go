@@ -51,14 +51,6 @@ func (h *DefaultRefineryHandler) HandleMergeReady(payload *MergeReadyPayload) er
 	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
 	_, _ = fmt.Fprintf(h.Output, "  Verified: %s\n", payload.Verified)
 
-	// Validate required fields
-	if payload.Branch == "" {
-		return fmt.Errorf("missing branch in MERGE_READY payload")
-	}
-	if payload.Polecat == "" {
-		return fmt.Errorf("missing polecat in MERGE_READY payload")
-	}
-
 	// The merge-request bead is created by `gt done` with gt:merge-request label.
 	// The Refinery queries beads directly via ReadyWithType("merge-request").
 	// No need to add to mrqueue - that was a duplicate tracking file.

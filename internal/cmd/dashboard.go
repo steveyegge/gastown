@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/web"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -47,7 +48,8 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	var handler http.Handler
 	var err error
 
-	if _, wsErr := workspace.FindFromCwdOrError(); wsErr != nil {
+	townRoot, wsErr := workspace.FindFromCwdOrError()
+	if wsErr != nil {
 		// No workspace - run in setup mode
 		handler, err = web.NewSetupMux()
 		if err != nil {
@@ -60,7 +62,15 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating convoy fetcher: %w", fetchErr)
 		}
 
-		handler, err = web.NewDashboardMux(fetcher)
+		// Load web timeouts config (nil-safe: NewDashboardMux applies defaults)
+		var webCfg *config.WebTimeoutsConfig
+		if ts, loadErr := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); loadErr == nil {
+			webCfg = ts.WebTimeouts
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: loading town settings: %v (using defaults)\n", loadErr)
+		}
+
+		handler, err = web.NewDashboardMux(fetcher, webCfg)
 		if err != nil {
 			return fmt.Errorf("creating dashboard handler: %w", err)
 		}

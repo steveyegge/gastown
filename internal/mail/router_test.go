@@ -71,6 +71,7 @@ func TestIsTownLevelAddress(t *testing.T) {
 		{"mayor/", true},
 		{"deacon", true},
 		{"deacon/", true},
+		{"overseer", true},
 		{"gastown/refinery", false},
 		{"gastown/polecats/Toast", false},
 		{"gastown/", false},
@@ -92,6 +93,9 @@ func TestAddressToSessionIDs(t *testing.T) {
 		address string
 		want    []string
 	}{
+		// Overseer (human operator) - single session
+		{"overseer", []string{"hq-overseer"}},
+
 		// Town-level addresses - single session
 		{"mayor", []string{"hq-mayor"}},
 		{"mayor/", []string{"hq-mayor"}},
@@ -137,6 +141,7 @@ func TestAddressToSessionID(t *testing.T) {
 		address string
 		want    string
 	}{
+		{"overseer", "hq-overseer"},
 		{"mayor", "hq-mayor"},
 		{"mayor/", "hq-mayor"},
 		{"deacon", "hq-deacon"},
@@ -169,8 +174,14 @@ func TestIsSelfMail(t *testing.T) {
 		{"mayor/", "mayor", true},
 		{"gastown/Toast", "gastown/Toast", true},
 		{"gastown/Toast/", "gastown/Toast", true},
+		{"gastown/crew/max", "gastown/max", true},
+		{"gastown/max", "gastown/crew/max", true},
+		{"gastown/polecats/Toast", "gastown/Toast", true},
+		{"gastown/Toast", "gastown/polecats/Toast", true},
+		{"gastown/crew/max", "gastown/polecats/max", true},
 		{"mayor/", "deacon/", false},
 		{"gastown/Toast", "gastown/Nux", false},
+		{"gastown/crew/max", "gastown/crew/nux", false},
 		{"", "", true},
 	}
 
@@ -902,9 +913,9 @@ func TestValidateRecipient(t *testing.T) {
 		t.Fatalf("bd config set types.custom failed: %v\n%s", err, out)
 	}
 
-	// Create test agent beads
+	// Create test agent beads using gt:agent label
 	createAgent := func(id, title string) {
-		cmd := exec.Command("bd", "create", title, "--type=agent", "--id="+id, "--force")
+		cmd := exec.Command("bd", "create", title, "--labels=gt:agent", "--id="+id, "--force")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -959,6 +970,79 @@ func TestValidateRecipient(t *testing.T) {
 				if err != nil {
 					t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
 				}
+			}
+		})
+	}
+}
+
+func TestAddressToAgentBeadID(t *testing.T) {
+	tests := []struct {
+		name     string
+		address  string
+		expected string
+	}{
+		{
+			name:     "overseer returns empty",
+			address:  "overseer",
+			expected: "",
+		},
+		{
+			name:     "mayor",
+			address:  "mayor/",
+			expected: "hq-mayor",
+		},
+		{
+			name:     "mayor without slash",
+			address:  "mayor",
+			expected: "hq-mayor",
+		},
+		{
+			name:     "deacon",
+			address:  "deacon/",
+			expected: "hq-deacon",
+		},
+		{
+			name:     "witness",
+			address:  "gastown/witness",
+			expected: "gt-gastown-witness",
+		},
+		{
+			name:     "refinery",
+			address:  "gastown/refinery",
+			expected: "gt-gastown-refinery",
+		},
+		{
+			name:     "crew member",
+			address:  "gastown/crew/max",
+			expected: "gt-gastown-crew-max",
+		},
+		{
+			name:     "polecat (default)",
+			address:  "gastown/alpha",
+			expected: "gt-gastown-polecat-alpha",
+		},
+		{
+			name:     "empty address",
+			address:  "",
+			expected: "",
+		},
+		{
+			name:     "no slash non-special",
+			address:  "unknown",
+			expected: "",
+		},
+		{
+			name:     "rig with empty target",
+			address:  "gastown/",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := addressToAgentBeadID(tt.address)
+			if got != tt.expected {
+				t.Errorf("addressToAgentBeadID(%q) = %q, want %q", tt.address, got, tt.expected)
 			}
 		})
 	}

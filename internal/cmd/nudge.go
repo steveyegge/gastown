@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -17,11 +19,15 @@ import (
 
 var nudgeMessageFlag string
 var nudgeForceFlag bool
+var nudgeStdinFlag bool
+var nudgeIfFreshFlag bool
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
 	nudgeCmd.Flags().StringVarP(&nudgeMessageFlag, "message", "m", "", "Message to send")
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
+	nudgeCmd.Flags().BoolVar(&nudgeStdinFlag, "stdin", false, "Read message from stdin (avoids shell quoting issues)")
+	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -63,13 +69,53 @@ Examples:
   gt nudge mayor "Status update requested"
   gt nudge witness "Check polecat health"
   gt nudge deacon session-started
-  gt nudge channel:workers "New priority work available"`,
+  gt nudge channel:workers "New priority work available"
+
+  # Use --stdin for messages with special characters or formatting:
+  gt nudge gastown/alpha --stdin <<'EOF'
+  Status update:
+  - Task 1: complete
+  - Task 2: in progress
+  EOF`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runNudge,
 }
 
+// ifFreshMaxAge is the maximum session age for --if-fresh to allow a nudge.
+// Sessions older than this are considered compaction/clear restarts, not new sessions.
+const ifFreshMaxAge = 60 * time.Second
+
 func runNudge(cmd *cobra.Command, args []string) error {
+	// --if-fresh: skip nudge if the caller's tmux session is older than 60s.
+	// This prevents compaction/clear SessionStart hooks from spamming the deacon.
+	if nudgeIfFreshFlag {
+		sessionName := tmux.CurrentSessionName()
+		if sessionName != "" {
+			t := tmux.NewTmux()
+			created, err := t.GetSessionCreatedUnix(sessionName)
+			if err == nil && created > 0 {
+				age := time.Since(time.Unix(created, 0))
+				if age > ifFreshMaxAge {
+					// Session is old — this is a compaction/clear, not a new session
+					return nil
+				}
+			}
+		}
+	}
+
 	target := args[0]
+
+	// Handle --stdin: read message from stdin (avoids shell quoting issues)
+	if nudgeStdinFlag {
+		if nudgeMessageFlag != "" {
+			return fmt.Errorf("cannot use --stdin with --message/-m")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		nudgeMessageFlag = strings.TrimRight(string(data), "\n")
+	}
 
 	// Get message from -m flag or positional arg
 	var message string
@@ -318,12 +364,23 @@ func runNudgeChannel(channelName, message string) error {
 
 	// Send nudges
 	t := tmux.NewTmux()
-	var succeeded, failed int
+	var succeeded, failed, skipped int
 	var failures []string
 
 	fmt.Printf("Nudging channel %q (%d target(s))...\n\n", channelName, len(targets))
 
 	for i, sessionName := range targets {
+		// Check DND status before nudging each target
+		// Convert session name back to address format for DND lookup
+		targetAddr := sessionNameToAddress(sessionName)
+		if targetAddr != "" {
+			if shouldSend, level, _ := shouldNudgeTarget(townRoot, targetAddr, false); !shouldSend {
+				skipped++
+				fmt.Printf("  %s %s (DND: %s)\n", style.Dim.Render("○"), sessionName, level)
+				continue
+			}
+		}
+
 		if err := t.NudgeSession(sessionName, prefixedMessage); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", sessionName, err))
@@ -345,15 +402,22 @@ func runNudgeChannel(channelName, message string) error {
 	_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", "channel:"+channelName, message))
 
 	if failed > 0 {
-		fmt.Printf("%s Channel nudge complete: %d succeeded, %d failed\n",
-			style.WarningPrefix, succeeded, failed)
+		summary := fmt.Sprintf("Channel nudge complete: %d succeeded, %d failed", succeeded, failed)
+		if skipped > 0 {
+			summary += fmt.Sprintf(", %d skipped (DND)", skipped)
+		}
+		fmt.Printf("%s %s\n", style.WarningPrefix, summary)
 		for _, f := range failures {
 			fmt.Printf("  %s\n", style.Dim.Render(f))
 		}
 		return fmt.Errorf("%d nudge(s) failed", failed)
 	}
 
-	fmt.Printf("%s Channel nudge complete: %d target(s) nudged\n", style.SuccessPrefix, succeeded)
+	summary := fmt.Sprintf("Channel nudge complete: %d target(s) nudged", succeeded)
+	if skipped > 0 {
+		summary += fmt.Sprintf(", %d skipped (DND)", skipped)
+	}
+	fmt.Printf("%s %s\n", style.SuccessPrefix, summary)
 	return nil
 }
 
@@ -456,6 +520,53 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 
 	// Allow nudge if level is not muted
 	return level != beads.NotifyMuted, level, nil
+}
+
+// sessionNameToAddress converts a tmux session name back to a mail address
+// for DND lookup. Returns empty string if the format is unrecognized.
+// Examples:
+//   - "gt-gastown-crew-max" -> "gastown/crew/max"
+//   - "gt-gastown-alpha" -> "gastown/alpha"
+//   - "gt-gastown-witness" -> "gastown/witness"
+//   - "hq-mayor" -> "mayor"
+//   - "hq-deacon" -> "deacon"
+func sessionNameToAddress(sessionName string) string {
+	if sessionName == session.MayorSessionName() {
+		return "mayor"
+	}
+	if sessionName == session.DeaconSessionName() {
+		return "deacon"
+	}
+
+	// Expected format: gt-<rig>-<rest>
+	if !strings.HasPrefix(sessionName, "gt-") {
+		return ""
+	}
+	rest := strings.TrimPrefix(sessionName, "gt-")
+
+	// Try to split into rig and target components
+	// Format: rig-crew-name or rig-witness or rig-refinery or rig-name
+	parts := strings.SplitN(rest, "-", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	rig := parts[0]
+	target := parts[1]
+
+	// Check for crew prefix: crew-<name>
+	if strings.HasPrefix(target, "crew-") {
+		crewName := strings.TrimPrefix(target, "crew-")
+		return fmt.Sprintf("%s/crew/%s", rig, crewName)
+	}
+
+	// Infrastructure roles
+	if target == "witness" || target == "refinery" {
+		return fmt.Sprintf("%s/%s", rig, target)
+	}
+
+	// Polecat (simple name after rig)
+	return fmt.Sprintf("%s/%s", rig, target)
 }
 
 // addressToAgentBeadID converts a target address to an agent bead ID.

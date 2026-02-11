@@ -6,9 +6,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// groupNameRegex matches valid group names: lowercase alphanumeric, hyphens, underscores.
+var groupNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// MaxGroupNameLength is the maximum allowed length for a group name.
+const MaxGroupNameLength = 64
+
+// ValidateGroupName checks that a group name is valid.
+// Rules: non-empty, max 64 chars, lowercase alphanumeric plus hyphens/underscores,
+// must start with alphanumeric, no leading/trailing whitespace.
+func ValidateGroupName(name string) error {
+	if name != strings.TrimSpace(name) {
+		return fmt.Errorf("group name %q has leading or trailing whitespace", name)
+	}
+	if name == "" {
+		return fmt.Errorf("group name must not be empty")
+	}
+	if len(name) > MaxGroupNameLength {
+		return fmt.Errorf("group name %q is too long (%d chars, max %d)", name, len(name), MaxGroupNameLength)
+	}
+	if !groupNameRegex.MatchString(name) {
+		return fmt.Errorf("group name %q is invalid: must be lowercase alphanumeric, hyphens, or underscores, starting with alphanumeric", name)
+	}
+	return nil
+}
 
 // GroupFields holds structured fields for group beads.
 // These are stored as "key: value" lines in the description.
@@ -96,25 +122,36 @@ func ParseGroupFields(description string) *GroupFields {
 	return fields
 }
 
-// GroupBeadID returns the bead ID for a group name.
-// Format: hq-group-<name> (town-level, groups span rigs)
+// GroupBeadIDWithPrefix generates a group bead ID using the specified prefix.
+// Format: <prefix>-group-<name> (e.g., hq-group-ops-team)
+func GroupBeadIDWithPrefix(prefix, name string) string {
+	return fmt.Sprintf("%s-group-%s", prefix, name)
+}
+
+// GroupBeadID returns the bead ID for a group name using "hq" prefix.
+// Groups are town-level entities (hq- prefix) because they span rigs.
+// For non-standard prefixes, use GroupBeadIDWithPrefix.
 func GroupBeadID(name string) string {
-	return "hq-group-" + name
+	return GroupBeadIDWithPrefix("hq", name)
 }
 
 // CreateGroupBead creates a group bead for mail distribution.
 // The ID format is: hq-group-<name> (e.g., hq-group-ops-team)
 // Groups are town-level entities (hq- prefix) because they span rigs.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
-func (b *Beads) CreateGroupBead(name string, members []string, createdBy string) (*Issue, error) {
+func (b *Beads) CreateGroupBead(name string, fields *GroupFields) (*Issue, error) {
+	if err := ValidateGroupName(name); err != nil {
+		return nil, err
+	}
 	id := GroupBeadID(name)
 	title := fmt.Sprintf("Group: %s", name)
 
-	fields := &GroupFields{
-		Name:      name,
-		Members:   members,
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().Format(time.RFC3339),
+	if fields == nil {
+		fields = &GroupFields{}
+	}
+	fields.Name = name
+	if fields.CreatedAt == "" {
+		fields.CreatedAt = time.Now().Format(time.RFC3339)
 	}
 
 	description := FormatGroupDescription(title, fields)
@@ -147,14 +184,14 @@ func (b *Beads) CreateGroupBead(name string, members []string, createdBy string)
 	return &issue, nil
 }
 
-// GetGroupBead retrieves a group bead by name.
-// Returns nil, nil if not found.
-func (b *Beads) GetGroupBead(name string) (*Issue, *GroupFields, error) {
+// GetGroupByName retrieves a group bead by name.
+// Returns ErrNotFound if the group does not exist.
+func (b *Beads) GetGroupByName(name string) (*Issue, *GroupFields, error) {
 	id := GroupBeadID(name)
 	issue, err := b.Show(id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return nil, nil, nil
+			return nil, nil, ErrNotFound
 		}
 		return nil, nil, err
 	}
@@ -168,12 +205,12 @@ func (b *Beads) GetGroupBead(name string) (*Issue, *GroupFields, error) {
 }
 
 // GetGroupByID retrieves a group bead by its full ID.
-// Returns nil, nil if not found.
+// Returns ErrNotFound if the group does not exist.
 func (b *Beads) GetGroupByID(id string) (*Issue, *GroupFields, error) {
 	issue, err := b.Show(id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return nil, nil, nil
+			return nil, nil, ErrNotFound
 		}
 		return nil, nil, err
 	}
@@ -187,52 +224,68 @@ func (b *Beads) GetGroupByID(id string) (*Issue, *GroupFields, error) {
 }
 
 // UpdateGroupMembers updates the members list for a group.
-func (b *Beads) UpdateGroupMembers(name string, members []string) error {
-	issue, fields, err := b.GetGroupBead(name)
+func (b *Beads) UpdateGroupMembers(name string, members []string) (*Issue, error) {
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
-		return err
-	}
-	if issue == nil {
-		return fmt.Errorf("group %q not found", name)
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("group %q not found", name)
+		}
+		return nil, err
 	}
 
 	fields.Members = members
 	description := FormatGroupDescription(issue.Title, fields)
 
-	return b.Update(issue.ID, UpdateOptions{Description: &description})
+	if err := b.Update(issue.ID, UpdateOptions{Description: &description}); err != nil {
+		return nil, err
+	}
+
+	updated, err := b.Show(issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching updated group: %w", err)
+	}
+	return updated, nil
 }
 
 // AddGroupMember adds a member to a group if not already present.
-func (b *Beads) AddGroupMember(name string, member string) error {
-	issue, fields, err := b.GetGroupBead(name)
+func (b *Beads) AddGroupMember(name string, member string) (*Issue, error) {
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
-		return err
-	}
-	if issue == nil {
-		return fmt.Errorf("group %q not found", name)
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("group %q not found", name)
+		}
+		return nil, err
 	}
 
 	// Check if already a member
 	for _, m := range fields.Members {
 		if m == member {
-			return nil // Already a member
+			return issue, nil // Already a member
 		}
 	}
 
 	fields.Members = append(fields.Members, member)
 	description := FormatGroupDescription(issue.Title, fields)
 
-	return b.Update(issue.ID, UpdateOptions{Description: &description})
+	if err := b.Update(issue.ID, UpdateOptions{Description: &description}); err != nil {
+		return nil, err
+	}
+
+	updated, err := b.Show(issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching updated group: %w", err)
+	}
+	return updated, nil
 }
 
 // RemoveGroupMember removes a member from a group.
-func (b *Beads) RemoveGroupMember(name string, member string) error {
-	issue, fields, err := b.GetGroupBead(name)
+func (b *Beads) RemoveGroupMember(name string, member string) (*Issue, error) {
+	issue, fields, err := b.GetGroupByName(name)
 	if err != nil {
-		return err
-	}
-	if issue == nil {
-		return fmt.Errorf("group %q not found", name)
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("group %q not found", name)
+		}
+		return nil, err
 	}
 
 	// Filter out the member
@@ -246,7 +299,15 @@ func (b *Beads) RemoveGroupMember(name string, member string) error {
 	fields.Members = newMembers
 	description := FormatGroupDescription(issue.Title, fields)
 
-	return b.Update(issue.ID, UpdateOptions{Description: &description})
+	if err := b.Update(issue.ID, UpdateOptions{Description: &description}); err != nil {
+		return nil, err
+	}
+
+	updated, err := b.Show(issue.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching updated group: %w", err)
+	}
+	return updated, nil
 }
 
 // DeleteGroupBead permanently deletes a group bead.
@@ -281,13 +342,14 @@ func (b *Beads) ListGroupBeads() (map[string]*GroupFields, error) {
 
 // LookupGroupByName finds a group by its name field (not by ID).
 // This is used for address resolution where we may not know the full bead ID.
+// Returns ErrNotFound if no group with the given name exists.
 func (b *Beads) LookupGroupByName(name string) (*Issue, *GroupFields, error) {
 	// First try direct lookup by standard ID format
-	issue, fields, err := b.GetGroupBead(name)
-	if err != nil {
+	issue, fields, err := b.GetGroupByName(name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, nil, err
 	}
-	if issue != nil {
+	if err == nil {
 		return issue, fields, nil
 	}
 
@@ -307,5 +369,5 @@ func (b *Beads) LookupGroupByName(name string) (*Issue, *GroupFields, error) {
 		return issue, fields, nil
 	}
 
-	return nil, nil, nil // Not found
+	return nil, nil, ErrNotFound
 }

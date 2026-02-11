@@ -61,12 +61,16 @@ func CopyOverlay(rigPath, destPath string) error {
 func EnsureGitignorePatterns(worktreePath string) error {
 	gitignorePath := filepath.Join(worktreePath, ".gitignore")
 
-	// Required patterns for Gas Town worktrees
+	// Required patterns for Gas Town worktrees.
+	// DO NOT add ".beads/" here. Beads manages its own .beads/.gitignore
+	// (created by bd init) which selectively ignores runtime files while
+	// tracking issues.jsonl. Adding .beads/ here overrides that and breaks
+	// bd sync. This has regressed twice (PR #753 added it, #891 removed it,
+	// #966 re-added it). See overlay_test.go for a regression guard.
 	requiredPatterns := []string{
 		".runtime/",
 		".claude/",
 		".logs/",
-		".beads/",
 	}
 
 	// Read existing gitignore content
@@ -145,11 +149,17 @@ func copyFilePreserveMode(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
-	defer dstFile.Close()
 
 	// Copy contents
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
 		return fmt.Errorf("copy contents: %w", err)
+	}
+
+	// Explicitly check Close() — on many filesystems, buffered data is flushed
+	// at Close() time, so a full-disk error surfaces here, not during Write.
+	if err := dstFile.Close(); err != nil {
+		return fmt.Errorf("closing destination: %w", err)
 	}
 
 	return nil

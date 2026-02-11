@@ -2,11 +2,13 @@
 package rig
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // RunSetupHooks executes setup hooks found in <rigPath>/.runtime/setup-hooks/.
@@ -97,11 +99,17 @@ func RunSetupHooks(rigPath, worktreePath string) error {
 // - Working directory set to worktreePath
 // - Environment variable GT_WORKTREE_PATH pointing to the worktree
 // - Environment variable GT_RIG_PATH pointing to the rig
+// hookTimeout is the maximum time a setup hook is allowed to run.
+const hookTimeout = 60 * time.Second
+
 func runHook(hookPath, worktreePath string) error {
 	// Get the rig path from the hook path (strip .runtime/setup-hooks/)
 	rigPath := filepath.Dir(filepath.Dir(filepath.Dir(hookPath)))
 
-	cmd := exec.Command(hookPath)
+	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, hookPath)
 	cmd.Dir = worktreePath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -110,5 +118,11 @@ func runHook(hookPath, worktreePath string) error {
 		fmt.Sprintf("GT_RIG_PATH=%s", rigPath),
 	)
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timed out after %s", hookTimeout)
+		}
+		return err
+	}
+	return nil
 }

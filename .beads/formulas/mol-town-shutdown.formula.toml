@@ -196,3 +196,8 @@ The daemon will:
 Polecats are NOT auto-respawned. Use `gt sling` or let Witness
 restart them based on their preserved hooks.
 """
+
+[vars]
+[vars.shutdown_reason]
+description = "Reason for the shutdown (provided by caller)"
+default = ""

@@ -12,7 +12,8 @@ import (
 // no corresponding agent on disk. This catches beads inherited from upstream or
 // left over after crew members are removed.
 //
-// Only checks crew worker beads (not polecats, which are transient by design).
+// Checks crew worker beads and polecat agent beads. Polecats have persistent
+// identity (agent beads survive nuke cycles), so stale detection applies to them too.
 // The fix closes stale beads so they no longer pollute bd ready output.
 type StaleAgentBeadsCheck struct {
 	FixableCheck
@@ -24,7 +25,7 @@ func NewStaleAgentBeadsCheck() *StaleAgentBeadsCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "stale-agent-beads",
-				CheckDescription: "Detect agent beads for removed crew members",
+				CheckDescription: "Detect agent beads for removed workers (crew and polecats)",
 				CheckCategory:    CategoryRig,
 			},
 		},
@@ -74,34 +75,45 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		rigName := info.name
 
 		// Get actual crew workers on disk
-		diskWorkers := listCrewWorkers(ctx.TownRoot, rigName)
-		diskSet := make(map[string]bool, len(diskWorkers))
-		for _, w := range diskWorkers {
-			diskSet[w] = true
+		crewDiskWorkers := listCrewWorkers(ctx.TownRoot, rigName)
+		crewDiskSet := make(map[string]bool, len(crewDiskWorkers))
+		for _, w := range crewDiskWorkers {
+			crewDiskSet[w] = true
 		}
 
-		// List all beads and find crew agent beads
-		// Crew bead IDs follow the pattern: prefix-rig-crew-name
+		// Get actual polecats on disk
+		polecatDiskWorkers := listPolecats(ctx.TownRoot, rigName)
+		polecatDiskSet := make(map[string]bool, len(polecatDiskWorkers))
+		for _, w := range polecatDiskWorkers {
+			polecatDiskSet[w] = true
+		}
+
+		// Agent bead ID patterns:
+		// Crew:    prefix-rig-crew-name
+		// Polecat: prefix-rig-polecat-name
 		crewPrefix := fmt.Sprintf("%s-%s-crew-", prefix, rigName)
+		polecatPrefix := fmt.Sprintf("%s-%s-polecat-", prefix, rigName)
 		allBeads, err := bd.List(beads.ListOptions{
 			Status:   "all",
 			Priority: -1,
+			Label:    "gt:agent",
 		})
 		if err != nil {
 			continue
 		}
 
 		for _, issue := range allBeads {
-			if !strings.HasPrefix(issue.ID, crewPrefix) {
-				continue
-			}
-			// Extract worker name from bead ID
-			workerName := strings.TrimPrefix(issue.ID, crewPrefix)
-			if workerName == "" {
-				continue
-			}
-			if !diskSet[workerName] {
-				stale = append(stale, issue.ID)
+			switch {
+			case strings.HasPrefix(issue.ID, crewPrefix):
+				workerName := strings.TrimPrefix(issue.ID, crewPrefix)
+				if workerName != "" && !crewDiskSet[workerName] {
+					stale = append(stale, issue.ID)
+				}
+			case strings.HasPrefix(issue.ID, polecatPrefix):
+				workerName := strings.TrimPrefix(issue.ID, polecatPrefix)
+				if workerName != "" && !polecatDiskSet[workerName] {
+					stale = append(stale, issue.ID)
+				}
 			}
 		}
 	}
@@ -117,7 +129,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d stale agent bead(s) for removed crew", len(stale)),
+		Message: fmt.Sprintf("%d stale agent bead(s) for removed workers", len(stale)),
 		Details: stale,
 		FixHint: "Run 'gt doctor --fix' to close stale agent beads",
 	}

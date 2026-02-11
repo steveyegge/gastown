@@ -101,9 +101,9 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	beadsDir := filepath.Join(hqPath, ".beads")
 	assertDirExists(t, beadsDir, ".beads/")
 
-	// Verify beads database was created
-	dbPath := filepath.Join(beadsDir, "beads.db")
-	assertFileExists(t, dbPath, ".beads/beads.db")
+	// Verify beads database was initialized (metadata.json exists)
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	assertFileExists(t, metadataPath, ".beads/metadata.json")
 
 	// Verify prefix by running bd config get issue_prefix
 	// Use --no-daemon to avoid daemon startup issues in test environment

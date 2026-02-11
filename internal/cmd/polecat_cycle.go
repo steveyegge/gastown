@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // cyclePolecatSession switches to the next or previous polecat session in the same rig.
@@ -80,54 +82,30 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 }
 
 // parsePolecatSessionName extracts rig and polecat name from a tmux session name.
-// Format: gt-<rig>-<name> where name is NOT crew-*, witness, or refinery.
+// Format: gt-<rig>-<name> where name is NOT crew-*, witness, refinery, mayor, or deacon.
 // Returns empty strings and false if the format doesn't match.
+//
+// Delegates to session.ParseSessionName for consistent parsing of hyphenated
+// rig names (e.g., gt-my-rig-Toast correctly yields rig="my-rig", name="Toast").
 func parsePolecatSessionName(sessionName string) (rigName, polecatName string, ok bool) { //nolint:unparam // polecatName kept for API consistency
-	// Must start with "gt-"
-	if !strings.HasPrefix(sessionName, "gt-") {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
 		return "", "", false
 	}
-
-	// Exclude town-level sessions by exact match
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-	if sessionName == mayorSession || sessionName == deaconSession {
+	if identity.Role != session.RolePolecat {
 		return "", "", false
 	}
-
-	// Also exclude by suffix pattern (gt-{town}-mayor, gt-{town}-deacon)
-	// This handles cases where town config isn't available
-	if strings.HasSuffix(sessionName, "-mayor") || strings.HasSuffix(sessionName, "-deacon") {
+	if identity.Rig == "" || identity.Name == "" {
 		return "", "", false
 	}
-
-	// Remove "gt-" prefix
-	rest := sessionName[3:]
-
-	// Must have at least one hyphen (rig-name)
-	idx := strings.Index(rest, "-")
-	if idx == -1 {
+	// Exclude names that are reserved for other session types.
+	// Mayor/deacon use hq- prefix in practice, but gt-<rig>-mayor/deacon
+	// patterns should still be excluded defensively.
+	switch identity.Name {
+	case "mayor", "deacon":
 		return "", "", false
 	}
-
-	rigName = rest[:idx]
-	polecatName = rest[idx+1:]
-
-	if rigName == "" || polecatName == "" {
-		return "", "", false
-	}
-
-	// Exclude crew sessions (contain "crew-" prefix in the name part)
-	if strings.HasPrefix(polecatName, "crew-") {
-		return "", "", false
-	}
-
-	// Exclude rig infra sessions
-	if polecatName == "witness" || polecatName == "refinery" {
-		return "", "", false
-	}
-
-	return rigName, polecatName, true
+	return identity.Rig, identity.Name, true
 }
 
 // findRigPolecatSessions returns all polecat sessions for a given rig.

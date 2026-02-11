@@ -13,19 +13,13 @@ import (
 	"time"
 )
 
-const (
-	// DefaultCommandTimeout is the default timeout for command execution.
-	DefaultCommandTimeout = 30 * time.Second
-	// MaxCommandTimeout is the maximum allowed timeout.
-	MaxCommandTimeout = 60 * time.Second
-)
 
 // CommandRequest is the JSON request body for /api/run.
 type CommandRequest struct {
 	// Command is the gt command to run (without the "gt" prefix).
 	// Example: "status --json" or "mail inbox"
 	Command string `json:"command"`
-	// Timeout in seconds (optional, default 30, max 60)
+	// Timeout in seconds (optional; see WebTimeoutsConfig for defaults)
 	Timeout int `json:"timeout,omitempty"`
 }
 
@@ -49,6 +43,9 @@ type APIHandler struct {
 	gtPath string
 	// workDir is the working directory for command execution.
 	workDir string
+	// Configurable timeouts (from TownSettings.WebTimeouts)
+	defaultRunTimeout time.Duration
+	maxRunTimeout     time.Duration
 	// Options cache
 	optionsCache     *OptionsResponse
 	optionsCacheTime time.Time
@@ -57,14 +54,16 @@ type APIHandler struct {
 
 const optionsCacheTTL = 30 * time.Second
 
-// NewAPIHandler creates a new API handler.
-func NewAPIHandler() *APIHandler {
+// NewAPIHandler creates a new API handler with the given run timeouts.
+func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
 	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
 	// tests it returns the test binary, causing fork bombs when executed.
 	workDir, _ := os.Getwd()
 	return &APIHandler{
-		gtPath:  "gt",
-		workDir: workDir,
+		gtPath:            "gt",
+		workDir:           workDir,
+		defaultRunTimeout: defaultRunTimeout,
+		maxRunTimeout:     maxRunTimeout,
 	}
 }
 
@@ -125,11 +124,11 @@ func (h *APIHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine timeout
-	timeout := DefaultCommandTimeout
+	timeout := h.defaultRunTimeout
 	if req.Timeout > 0 {
 		timeout = time.Duration(req.Timeout) * time.Second
-		if timeout > MaxCommandTimeout {
-			timeout = MaxCommandTimeout
+		if timeout > h.maxRunTimeout {
+			timeout = h.maxRunTimeout
 		}
 	}
 
@@ -387,7 +386,7 @@ func parseMailInboxText(output string) []MailMessage {
 			rest := strings.TrimSpace(trimmed[2:])
 			if strings.HasPrefix(rest, "●") {
 				current.Read = false
-				current.Subject = strings.TrimSpace(rest[len("●"):])
+				current.Subject = strings.TrimSpace(strings.TrimPrefix(rest, "●"))
 			} else {
 				current.Read = true
 				current.Subject = rest
@@ -705,30 +704,6 @@ func parseAgentsFromStatus(jsonStr string) []OptionItem {
 	return agents
 }
 
-// parseJSONNames extracts a field from a JSON array of objects.
-func parseJSONNames(jsonStr string, field string) []string {
-	var items []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &items); err != nil {
-		// Try parsing as object with array field
-		var wrapper map[string][]map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &wrapper); err != nil {
-			return nil
-		}
-		for _, v := range wrapper {
-			items = v
-			break
-		}
-	}
-
-	var names []string
-	for _, item := range items {
-		if name, ok := item[field].(string); ok && name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // parseJSONPaths extracts rig/name paths from polecat JSON output.
 func parseJSONPaths(jsonStr string) []string {
 	var items []map[string]interface{}
@@ -777,14 +752,23 @@ func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run bd show to get issue details
-	output, err := h.runBdCommand(r.Context(), 10*time.Second, []string{"show", issueID})
+	// Try structured JSON output first (preferred — no text parsing needed)
+	output, err := h.runBdCommand(r.Context(), 10*time.Second, []string{"show", issueID, "--json"})
+	if err == nil {
+		if resp, ok := parseIssueShowJSON(output, issueID); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	// Fall back to text parsing
+	output, err = h.runBdCommand(r.Context(), 10*time.Second, []string{"show", issueID})
 	if err != nil {
 		h.sendError(w, "Failed to fetch issue: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Parse the output
 	resp := parseIssueShowOutput(output, issueID)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -913,7 +897,48 @@ func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, ar
 	return output, nil
 }
 
-// parseIssueShowOutput parses the output from "bd show <id>".
+// parseIssueShowJSON parses the JSON output from "bd show <id> --json".
+// Returns (response, true) on success, or (zero, false) if parsing fails.
+func parseIssueShowJSON(output string, issueID string) (IssueShowResponse, bool) {
+	var items []struct {
+		ID          string   `json:"id"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Status      string   `json:"status"`
+		Priority    int      `json:"priority"`
+		Type        string   `json:"issue_type"`
+		CreatedAt   string   `json:"created_at"`
+		UpdatedAt   string   `json:"updated_at"`
+		DependsOn   []string `json:"depends_on,omitempty"`
+		Blocks      []string `json:"blocks,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil || len(items) == 0 {
+		return IssueShowResponse{}, false
+	}
+	item := items[0]
+
+	priority := ""
+	if item.Priority > 0 {
+		priority = fmt.Sprintf("P%d", item.Priority)
+	}
+
+	return IssueShowResponse{
+		ID:          item.ID,
+		Title:       item.Title,
+		Type:        item.Type,
+		Status:      item.Status,
+		Priority:    priority,
+		Description: item.Description,
+		Created:     item.CreatedAt,
+		Updated:     item.UpdatedAt,
+		DependsOn:   item.DependsOn,
+		Blocks:      item.Blocks,
+		RawOutput:   output,
+	}, true
+}
+
+// parseIssueShowOutput parses the text output from "bd show <id>".
+// This is the fallback path when --json is unavailable.
 func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 	resp := IssueShowResponse{
 		ID:        issueID,
@@ -950,14 +975,13 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 
 				// Now parse the title from before the bracket
 				// Format: "○ id · title"
-				// Find the second · which separates id from title
-				if firstDot := strings.Index(beforeBracket, "·"); firstDot > 0 {
-					afterFirstDot := beforeBracket[firstDot+len("·"):]
-					if secondDot := strings.Index(afterFirstDot, "·"); secondDot > 0 {
-						resp.Title = strings.TrimSpace(afterFirstDot[secondDot+len("·"):])
+				// Use strings.Cut for safe splitting on multi-byte "·" separator
+				if _, afterFirst, ok := strings.Cut(beforeBracket, "·"); ok {
+					if _, afterSecond, ok := strings.Cut(afterFirst, "·"); ok {
+						resp.Title = strings.TrimSpace(afterSecond)
 					} else {
 						// Only one dot - id is embedded in icon part
-						resp.Title = strings.TrimSpace(afterFirstDot)
+						resp.Title = strings.TrimSpace(afterFirst)
 					}
 				}
 			}
@@ -967,9 +991,10 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 		if strings.HasPrefix(line, "Type:") {
 			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
 		} else if strings.HasPrefix(line, "Created:") {
+			// Split always returns >= 1 element; parts[0] is safe unconditionally
 			parts := strings.Split(line, "·")
 			resp.Created = strings.TrimSpace(strings.TrimPrefix(parts[0], "Created:"))
-			if len(parts) > 1 {
+			if len(parts) >= 2 {
 				resp.Updated = strings.TrimSpace(strings.TrimPrefix(parts[1], "Updated:"))
 			}
 		} else if line == "DESCRIPTION" {
@@ -1290,7 +1315,9 @@ func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook stri
 
 		// Found session
 		var activityUnix int64
-		fmt.Sscanf(parts[1], "%d", &activityUnix)
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil {
+			continue
+		}
 		attached := parts[2] == "1"
 
 		sessionStatus := "detached"

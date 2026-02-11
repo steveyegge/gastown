@@ -18,10 +18,11 @@ var catCmd = &cobra.Command{
 	Long: `Display the content of a bead (issue, task, molecule, etc.).
 
 This is a convenience wrapper around 'bd show' that integrates with gt.
-Accepts any bead ID (bd-*, hq-*, mol-*).
+Accepts any bead ID with a recognized prefix (gt-*, bd-*, hq-*, mol-*, etc.).
 
 Examples:
-  gt cat bd-abc123       # Show a bead
+  gt cat gt-abc123       # Show a gastown bead
+  gt cat bd-abc123       # Show a beads bead
   gt cat hq-xyz789       # Show a town-level bead
   gt cat bd-abc --json   # Output as JSON`,
 	Args: cobra.ExactArgs(1),
@@ -38,7 +39,7 @@ func runCat(cmd *cobra.Command, args []string) error {
 
 	// Validate it looks like a bead ID
 	if !isBeadID(beadID) {
-		return fmt.Errorf("invalid bead ID %q (expected bd-*, hq-*, or mol-* prefix)", beadID)
+		return fmt.Errorf("invalid bead ID %q (expected format: <prefix>-<id>, e.g. gt-abc123)", beadID)
 	}
 
 	// Build bd show command
@@ -55,12 +56,19 @@ func runCat(cmd *cobra.Command, args []string) error {
 }
 
 // isBeadID checks if a string looks like a bead ID.
+// Bead IDs have the format <prefix>-<id> where prefix is lowercase letters
+// (e.g. gt-abc123, bd-xyz, hq-cv-foo, wisp-bar, mol-baz).
 func isBeadID(s string) bool {
-	prefixes := []string{"bd-", "hq-", "mol-"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(s, prefix) {
-			return true
+	// Must contain a dash and start with lowercase letters
+	dashIdx := strings.Index(s, "-")
+	if dashIdx <= 0 || dashIdx >= len(s)-1 {
+		return false
+	}
+	// Prefix must be all lowercase letters
+	for _, c := range s[:dashIdx] {
+		if c < 'a' || c > 'z' {
+			return false
 		}
 	}
-	return false
+	return true
 }

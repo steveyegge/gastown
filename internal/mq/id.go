@@ -12,13 +12,13 @@ import (
 // GenerateMRID generates a merge request ID following the convention: <prefix>-mr-<hash>
 //
 // The hash is derived from the branch name + current timestamp + random bytes to ensure uniqueness.
-// Example: gt-mr-abc123 for a gastown merge request.
+// Example: gt-mr-abc1234567 for a gastown merge request.
 //
 // Parameters:
 //   - prefix: The project prefix (e.g., "gt" for gastown)
 //   - branch: The source branch name (e.g., "polecat/Nux/gt-xyz")
 //
-// Returns a string in the format "<prefix>-mr-<6-char-hash>"
+// Returns a string in the format "<prefix>-mr-<10-char-hash>"
 func GenerateMRID(prefix, branch string) string {
 	// Generate 8 random bytes for additional uniqueness
 	randomBytes := make([]byte, 8)
@@ -36,7 +36,7 @@ func GenerateMRID(prefix, branch string) string {
 //   - branch: The source branch name (e.g., "polecat/Nux/gt-xyz")
 //   - timestamp: The time to use for ID generation instead of time.Now()
 //
-// Returns a string in the format "<prefix>-mr-<6-char-hash>"
+// Returns a string in the format "<prefix>-mr-<10-char-hash>"
 func GenerateMRIDWithTime(prefix, branch string, timestamp time.Time) string {
 	return generateMRIDInternal(prefix, branch, timestamp, nil)
 }
@@ -49,8 +49,10 @@ func generateMRIDInternal(prefix, branch string, timestamp time.Time, randomByte
 	// Generate SHA256 hash
 	hash := sha256.Sum256([]byte(input))
 
-	// Take first 6 characters of hex-encoded hash
-	hashStr := hex.EncodeToString(hash[:])[:6]
+	// Take first 10 characters of hex-encoded hash
+	// 10 hex chars = 40 bits → ~1.1 trillion values per namespace
+	// Birthday paradox: ~1% collision at ~150K IDs (vs 577 with 6 chars)
+	hashStr := hex.EncodeToString(hash[:])[:10]
 
 	return fmt.Sprintf("%s-mr-%s", prefix, hashStr)
 }

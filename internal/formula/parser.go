@@ -3,6 +3,7 @@ package formula
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/BurntSushi/toml"
 )
@@ -166,6 +167,11 @@ func (f *Formula) validateExpansion() error {
 		}
 	}
 
+	// Check for cycles
+	if err := f.checkExpansionCycles(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -191,20 +197,31 @@ func (f *Formula) validateAspect() error {
 
 // checkCycles detects circular dependencies in steps.
 func (f *Formula) checkCycles() error {
-	// Build adjacency list
 	deps := make(map[string][]string)
 	for _, step := range f.Steps {
 		deps[step.ID] = step.Needs
 	}
+	return checkDependencyCycles(deps)
+}
 
-	// DFS for cycle detection
+// checkExpansionCycles detects circular dependencies in expansion templates.
+func (f *Formula) checkExpansionCycles() error {
+	deps := make(map[string][]string)
+	for _, tmpl := range f.Template {
+		deps[tmpl.ID] = tmpl.Needs
+	}
+	return checkDependencyCycles(deps)
+}
+
+// checkDependencyCycles detects cycles in a dependency graph.
+func checkDependencyCycles(deps map[string][]string) error {
 	visited := make(map[string]bool)
 	inStack := make(map[string]bool)
 
 	var visit func(id string) error
 	visit = func(id string) error {
 		if inStack[id] {
-			return fmt.Errorf("cycle detected involving step: %s", id)
+			return fmt.Errorf("cycle detected involving: %s", id)
 		}
 		if visited[id] {
 			return nil
@@ -222,8 +239,15 @@ func (f *Formula) checkCycles() error {
 		return nil
 	}
 
-	for _, step := range f.Steps {
-		if err := visit(step.ID); err != nil {
+	// Sort keys for deterministic cycle detection order
+	ids := make([]string, 0, len(deps))
+	for id := range deps {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		if err := visit(id); err != nil {
 			return err
 		}
 	}

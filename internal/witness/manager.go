@@ -180,6 +180,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
+	// Track PID for defense-in-depth orphan cleanup (non-fatal)
+	_ = session.TrackSessionPID(townRoot, sessionID, t)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	return nil

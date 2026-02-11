@@ -100,3 +100,10 @@ func TestDogDispatchOptionsStruct(t *testing.T) {
 		t.Error("DelaySessionStart should be true")
 	}
 }
+
+// TestMaxDogPoolSize verifies the pool size constant matches the documented limit.
+func TestMaxDogPoolSize(t *testing.T) {
+	if maxDogPoolSize != 4 {
+		t.Errorf("maxDogPoolSize = %d, want 4 (matches mol-deacon-patrol pool sizing guideline)", maxDogPoolSize)
+	}
+}

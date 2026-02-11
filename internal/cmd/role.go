@@ -476,7 +476,7 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		{RoleDeacon, "Background supervisor daemon"},
 		{RoleWitness, "Per-rig polecat lifecycle manager"},
 		{RoleRefinery, "Per-rig merge queue processor"},
-		{RolePolecat, "Ephemeral worker with own worktree"},
+		{RolePolecat, "Worker with persistent identity, ephemeral sessions"},
 		{RoleCrew, "Persistent worker with own worktree"},
 	}
 
@@ -530,7 +530,6 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 		AgentName: info.Polecat,
 		TownRoot:  townRoot,
 	})
-	envVars[EnvGTRole] = string(info.Role)
 	envVars[EnvGTRoleHome] = home
 
 	// Output in sorted order for consistent output

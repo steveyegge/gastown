@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 )
 
@@ -44,30 +46,40 @@ type Curator struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+
+	// Configurable deduplication/aggregation settings (from TownSettings.FeedCurator)
+	doneDedupeWindow     time.Duration
+	slingAggregateWindow time.Duration
+	minAggregateCount    int
 }
 
-// Deduplication/aggregation settings
-const (
-	// Dedupe window for repeated done events from same actor
-	doneDedupeWindow = 10 * time.Second
-
-	// Aggregation window for sling events
-	slingAggregateWindow = 30 * time.Second
-
-	// Mail aggregation window
-	mailAggregateWindow = 30 * time.Second
-
-	// Minimum events to trigger aggregation
-	minAggregateCount = 3
-)
-
 // NewCurator creates a new feed curator.
+// Loads FeedCurator config from TownSettings; falls back to defaults if missing.
 func NewCurator(townRoot string) *Curator {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	cfg := config.DefaultFeedCuratorConfig()
+	if townRoot != "" {
+		if ts, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil && ts.FeedCurator != nil {
+			// Replace entire default — individual fields fall back below.
+			// Duration fields get fallbacks via ParseDurationOrDefault (empty string → default).
+			// Non-duration fields need explicit zero-value guards.
+			cfg = ts.FeedCurator
+		}
+	}
+
+	minAgg := cfg.MinAggregateCount
+	if minAgg <= 0 {
+		minAgg = 3 // default: aggregate after 3+ events
+	}
+
 	return &Curator{
-		townRoot: townRoot,
-		ctx:      ctx,
-		cancel:   cancel,
+		townRoot:             townRoot,
+		ctx:                  ctx,
+		cancel:               cancel,
+		doneDedupeWindow:     config.ParseDurationOrDefault(cfg.DoneDedupeWindow, 10*time.Second),
+		slingAggregateWindow: config.ParseDurationOrDefault(cfg.SlingAggregateWindow, 30*time.Second),
+		minAggregateCount:    minAgg,
 	}
 }
 
@@ -160,7 +172,7 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 	case events.TypeDone:
 		// Dedupe repeated done events from same actor within window
 		// Check if we've already written a done event for this actor to the feed
-		recentFeedEvents := c.readRecentFeedEvents(doneDedupeWindow)
+		recentFeedEvents := c.readRecentFeedEvents(c.doneDedupeWindow)
 		for _, e := range recentFeedEvents {
 			if e.Type == events.TypeDone && e.Actor == event.Actor {
 				return true // Skip duplicate (already in feed)
@@ -177,6 +189,13 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 // ZFC: The feed file is the observable state of what we've already output.
 func (c *Curator) readRecentFeedEvents(window time.Duration) []FeedEvent {
 	feedPath := filepath.Join(c.townRoot, FeedFile)
+
+	// Acquire shared read lock to prevent partial reads during concurrent writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.RLock(); err != nil {
+		return nil
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
 
 	data, err := os.ReadFile(feedPath)
 	if err != nil {
@@ -290,8 +309,8 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 
 	// Check for aggregation opportunity (ZFC: derive from events file)
 	if event.Type == events.TypeSling {
-		slingCount := c.countRecentSlings(event.Actor, slingAggregateWindow)
-		if slingCount >= minAggregateCount {
+		slingCount := c.countRecentSlings(event.Actor, c.slingAggregateWindow)
+		if slingCount >= c.minAggregateCount {
 			feedEvent.Count = slingCount
 			feedEvent.Summary = fmt.Sprintf("%s dispatching work to %d agents", event.Actor, slingCount)
 		}
@@ -304,6 +323,14 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	data = append(data, '\n')
 
 	feedPath := filepath.Join(c.townRoot, FeedFile)
+
+	// Acquire cross-process file lock to prevent interleaved writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.Lock(); err != nil {
+		return
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
 	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: feed file is non-sensitive operational data
 	if err != nil {
 		return

@@ -435,7 +435,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	rigCount := len(rigs)
 
 	// Build status
-	// Note: Polecats excluded - they're ephemeral and idle detection is a GC concern
+	// Note: Polecats excluded - their sessions are ephemeral and idle detection is a GC concern
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
 
@@ -464,7 +464,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 
 // runWitnessStatusLine outputs status for a witness session.
 // Shows: crew count, hook or mail preview
-// Note: Polecats excluded - they're ephemeral and idle detection is a GC concern
+// Note: Polecats excluded - their sessions are ephemeral and idle detection is a GC concern
 func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-witness

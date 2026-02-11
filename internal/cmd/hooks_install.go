@@ -16,7 +16,8 @@ import (
 var (
 	installRole    string
 	installAllRigs bool
-	installDryRun  bool
+	installDryRun    bool
+	hooksInstForce   bool
 )
 
 var hooksInstallCmd = &cobra.Command{
@@ -41,6 +42,7 @@ func init() {
 	hooksInstallCmd.Flags().StringVar(&installRole, "role", "", "Install to all worktrees of this role (crew, polecat, witness, refinery)")
 	hooksInstallCmd.Flags().BoolVar(&installAllRigs, "all-rigs", false, "Install across all rigs (requires --role)")
 	hooksInstallCmd.Flags().BoolVar(&installDryRun, "dry-run", false, "Preview changes without writing files")
+	hooksInstallCmd.Flags().BoolVar(&hooksInstForce, "force", false, "Install even if hook is disabled in registry")
 }
 
 func runHooksInstall(cmd *cobra.Command, args []string) error {
@@ -64,7 +66,10 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if !hookDef.Enabled {
-		fmt.Printf("%s Hook %q is disabled in registry. Use --force to install anyway.\n",
+		if !hooksInstForce {
+			return fmt.Errorf("hook %q is disabled in registry; use --force to install anyway", hookName)
+		}
+		fmt.Printf("%s Hook %q is disabled in registry, installing with --force.\n",
 			style.Warning.Render("Warning:"), hookName)
 	}
 

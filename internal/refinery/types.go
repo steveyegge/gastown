@@ -75,47 +75,11 @@ const (
 	CloseReasonSuperseded CloseReason = "superseded"
 )
 
-
-// MergeConfig contains configuration for the merge process.
-type MergeConfig struct {
-	// RunTests controls whether tests are run after merge.
-	// Default: true
-	RunTests bool `json:"run_tests"`
-
-	// TestCommand is the command to run for testing.
-	// Default: "go test ./..."
-	TestCommand string `json:"test_command"`
-
-	// DeleteMergedBranches controls whether merged branches are deleted.
-	// Default: true
-	DeleteMergedBranches bool `json:"delete_merged_branches"`
-
-	// PushRetryCount is the number of times to retry a failed push.
-	// Default: 3
-	PushRetryCount int `json:"push_retry_count"`
-
-	// PushRetryDelayMs is the base delay between push retries in milliseconds.
-	// Each retry doubles the delay (exponential backoff).
-	// Default: 1000
-	PushRetryDelayMs int `json:"push_retry_delay_ms"`
-}
-
-// DefaultMergeConfig returns the default merge configuration.
-func DefaultMergeConfig() MergeConfig {
-	return MergeConfig{
-		RunTests:             true,
-		TestCommand:          "go test ./...",
-		DeleteMergedBranches: true,
-		PushRetryCount:       3,
-		PushRetryDelayMs:     1000,
-	}
-}
-
 // QueueItem represents an item in the merge queue for display.
 type QueueItem struct {
-	Position  int       `json:"position"`
-	MR        *MergeRequest `json:"mr"`
-	Age       string    `json:"age"`
+	Position int           `json:"position"`
+	MR       *MergeRequest `json:"mr"`
+	Age      string        `json:"age"`
 }
 
 // State transition errors.

@@ -17,7 +17,8 @@ export const GasTown = async ({ $, directory }) => {
     if (autonomousRoles.has(role)) {
       await run("gt mail check --inject");
     }
-    await run("gt nudge deacon session-started");
+    // NOTE: session-started nudge to deacon removed — it interrupted
+    // the deacon's await-signal backoff. Deacon wakes on beads activity.
   };
 
   return {

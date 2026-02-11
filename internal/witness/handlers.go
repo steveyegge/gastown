@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,12 +37,16 @@ type HandlerResult struct {
 // For COMPLETED exits with MR and clean state, auto-nukes immediately (ephemeral model).
 // For exits with pending MR but dirty state, creates cleanup wisp for manual intervention.
 //
+// When a pending MR exists, sends MERGE_READY to the Refinery to trigger
+// immediate merge queue processing. This ensures work flows through the system
+// without waiting for the daemon's heartbeat cycle.
+//
 // Ephemeral Polecat Model:
 // Polecats are truly ephemeral - done at MR submission, recyclable immediately.
 // Once the branch is pushed (cleanup_status=clean), the polecat can be nuked.
 // The MR lifecycle continues independently in the Refinery.
 // If conflicts arise, Refinery creates a NEW conflict-resolution task for a NEW polecat.
-func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResult {
+func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.Router) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
 		ProtocolType: ProtoPolecatDone,
@@ -93,9 +98,30 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 			result.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
+		// Send MERGE_READY to Refinery to trigger immediate processing.
+		// This is the canonical signal that keeps work flowing through the system
+		// without waiting for the daemon's heartbeat cycle.
+		if router != nil {
+			mailID, err := sendMergeReady(router, rigName, payload)
+			if err != nil {
+				// Non-fatal - Refinery will still pick up work on next patrol cycle
+				result.Error = fmt.Errorf("sending MERGE_READY: %w (non-fatal)", err)
+			} else {
+				result.MailSent = mailID
+
+				// Nudge the refinery to check its inbox immediately.
+				if nudgeErr := nudgeRefinery(rigName); nudgeErr != nil {
+					// Non-fatal - refinery will still pick up on next cycle
+					if result.Error == nil {
+						result.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
+					}
+				}
+			}
+		}
+
 		result.Handled = true
 		result.WispCreated = wispID
-		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, local branch preserved for conflict resolution)", payload.PolecatName, payload.MRID)
+		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, MERGE_READY sent to refinery)", payload.PolecatName, payload.MRID)
 		return result
 	}
 
@@ -208,17 +234,17 @@ func HandleHelp(workDir, rigName string, msg *mail.Message, router *mail.Router)
 		return result
 	}
 
-	// Need to escalate to Mayor
+	// Need to escalate to Deacon (first line of escalation for routine ops)
 	if assessment.NeedsEscalation {
-		mailID, err := escalateToMayor(router, rigName, payload, assessment.EscalationReason)
+		mailID, err := escalateToDeacon(router, rigName, payload, assessment.EscalationReason)
 		if err != nil {
-			result.Error = fmt.Errorf("escalating to mayor: %w", err)
+			result.Error = fmt.Errorf("escalating to deacon: %w", err)
 			return result
 		}
 
 		result.Handled = true
 		result.MailSent = mailID
-		result.Action = fmt.Sprintf("escalated '%s' to mayor: %s", payload.Topic, assessment.EscalationReason)
+		result.Action = fmt.Sprintf("escalated '%s' to deacon: %s", payload.Topic, assessment.EscalationReason)
 	}
 
 	return result
@@ -503,16 +529,15 @@ func findCleanupWisp(workDir, polecatName string) (string, error) {
 		return "", nil
 	}
 
-	// Simple extraction - look for "id" field
-	// Full JSON parsing would add dependency on encoding/json
-	if idx := strings.Index(output, `"id":`); idx >= 0 {
-		rest := output[idx+5:]
-		rest = strings.TrimLeft(rest, ` "`)
-		if endIdx := strings.IndexAny(rest, `",}`); endIdx > 0 {
-			return rest[:endIdx], nil
-		}
+	var items []struct {
+		ID string `json:"id"`
 	}
-
+	if err := json.Unmarshal([]byte(output), &items); err != nil {
+		return "", fmt.Errorf("parsing cleanup wisp response: %w", err)
+	}
+	if len(items) > 0 {
+		return items[0].ID, nil
+	}
 	return "", nil
 }
 
@@ -548,15 +573,15 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 		return ""
 	}
 
-	// Parse the JSON response
-	var resp agentBeadResponse
-	if err := json.Unmarshal([]byte(output), &resp); err != nil {
+	// Parse the JSON response — bd show --json returns an array
+	var issues []agentBeadResponse
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
 		return ""
 	}
 
 	// Parse cleanup_status from description
 	// Description format has "cleanup_status: <value>" line
-	for _, line := range strings.Split(resp.Description, "\n") {
+	for _, line := range strings.Split(issues[0].Description, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(strings.ToLower(line), "cleanup_status:") {
 			value := strings.TrimSpace(strings.TrimPrefix(line, "cleanup_status:"))
@@ -570,11 +595,65 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	return ""
 }
 
-// escalateToMayor sends an escalation mail to the Mayor.
-func escalateToMayor(router *mail.Router, rigName string, payload *HelpPayload, reason string) (string, error) {
+// sendMergeReady sends a MERGE_READY notification to the Refinery.
+// This signals that a polecat's work is ready for merge queue processing.
+func sendMergeReady(router *mail.Router, rigName string, payload *PolecatDonePayload) (string, error) {
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/witness", rigName),
+		fmt.Sprintf("%s/refinery", rigName),
+		fmt.Sprintf("MERGE_READY %s", payload.PolecatName),
+		fmt.Sprintf(`Branch: %s
+Issue: %s
+MR: %s
+Polecat: %s
+Verified: clean git state`,
+			payload.Branch,
+			payload.IssueID,
+			payload.MRID,
+			payload.PolecatName,
+		),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	if err := router.Send(msg); err != nil {
+		return "", err
+	}
+
+	return msg.ID, nil
+}
+
+// nudgeRefinery sends a nudge to the refinery session to wake it up.
+// This ensures the refinery processes MERGE_READY mail immediately
+// rather than waiting for its next patrol cycle or daemon heartbeat.
+func nudgeRefinery(rigName string) error {
+	t := tmux.NewTmux()
+	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Check if refinery is running
+	running, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking refinery session: %w", err)
+	}
+
+	if !running {
+		// Refinery not running - daemon will start it on next heartbeat.
+		// The MERGE_READY mail will be waiting in its inbox.
+		return nil
+	}
+
+	// Nudge the running refinery to check its inbox
+	nudgeMsg := "MERGE_READY received - check inbox for pending work"
+	return t.NudgeSession(sessionName, nudgeMsg)
+}
+
+// escalateToDeacon sends an escalation mail to the Deacon for routine operational issues.
+// The Deacon is the first line of escalation for witness operations. Only truly strategic
+// issues (deacon down, cross-rig coordination) should go directly to Mayor.
+func escalateToDeacon(router *mail.Router, rigName string, payload *HelpPayload, reason string) (string, error) {
 	msg := &mail.Message{
 		From:     fmt.Sprintf("%s/witness", rigName),
-		To:       "mayor/",
+		To:       "deacon/",
 		Subject:  fmt.Sprintf("Escalation: %s needs help", payload.Agent),
 		Priority: mail.PriorityHigh,
 		Body: fmt.Sprintf(`Agent: %s
@@ -611,14 +690,15 @@ type RecoveryPayload struct {
 	DetectedAt    time.Time
 }
 
-// EscalateRecoveryNeeded sends a RECOVERY_NEEDED escalation to the Mayor.
+// EscalateRecoveryNeeded sends a RECOVERY_NEEDED escalation to the Deacon.
 // This is used when a dormant polecat has unpushed work that needs recovery
-// before cleanup. The Mayor should coordinate recovery (e.g., push the branch,
-// save the work) before authorizing cleanup.
+// before cleanup. The Deacon should coordinate recovery (e.g., push the branch,
+// save the work) before authorizing cleanup. Only escalates to Mayor if Deacon
+// cannot resolve.
 func EscalateRecoveryNeeded(router *mail.Router, rigName string, payload *RecoveryPayload) (string, error) {
 	msg := &mail.Message{
 		From:     fmt.Sprintf("%s/witness", rigName),
-		To:       "mayor/",
+		To:       "deacon/",
 		Subject:  fmt.Sprintf("RECOVERY_NEEDED %s/%s", rigName, payload.PolecatName),
 		Priority: mail.PriorityUrgent,
 		Body: fmt.Sprintf(`Polecat: %s/%s
@@ -658,14 +738,8 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 		return fmt.Errorf("getting wisp: %w", err)
 	}
 
-	// Extract polecat name from existing labels for the update
-	var polecatName string
-	if idx := strings.Index(output, `polecat:`); idx >= 0 {
-		rest := output[idx+8:]
-		if endIdx := strings.IndexAny(rest, `",]}`); endIdx > 0 {
-			polecatName = rest[:endIdx]
-		}
-	}
+	// Extract polecat name from existing labels via JSON parsing
+	polecatName := extractPolecatFromJSON(output)
 
 	if polecatName == "" {
 		polecatName = "unknown"
@@ -675,6 +749,23 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
 	return util.ExecRun(workDir, "bd", "update", wispID, "--labels", newLabels)
+}
+
+// extractPolecatFromJSON extracts the polecat name from bd show --json output.
+// Returns empty string if the output is malformed or no polecat label is found.
+func extractPolecatFromJSON(output string) string {
+	var items []struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil || len(items) == 0 {
+		return ""
+	}
+	for _, label := range items[0].Labels {
+		if name, ok := strings.CutPrefix(label, "polecat:"); ok {
+			return name
+		}
+	}
+	return ""
 }
 
 // NukePolecat executes the actual nuke operation for a polecat.
@@ -844,4 +935,403 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 
 	// Commit is not on any remote's default branch
 	return false, nil
+}
+
+// ZombieResult describes a detected zombie polecat and the action taken.
+type ZombieResult struct {
+	PolecatName string
+	AgentState  string
+	HookBead    string
+	Action      string // "auto-nuked", "escalated", "cleanup-wisp-created"
+	Error       error
+}
+
+// DetectZombiePolecatsResult contains the results of a zombie detection sweep.
+type DetectZombiePolecatsResult struct {
+	Checked int
+	Zombies []ZombieResult
+	Errors  []error // Transient errors that prevented checking some polecats
+}
+
+// DetectZombiePolecats cross-references polecat agent state with tmux session
+// existence and agent process liveness to find zombie polecats. Two zombie classes:
+//   - Session-dead: tmux session is dead but agent bead still shows agent_state=
+//     "working", "running", or "spawning", or has a hook_bead assigned.
+//   - Agent-dead: tmux session exists but the agent process (Claude/node) inside
+//     it has died. Detected via IsAgentAlive. See gt-kj6r6.
+//
+// Zombies cannot send POLECAT_DONE or other signals, so they sit undetected
+// by the reactive signal-based patrol. This function provides proactive detection.
+//
+// Race safety: Records the detection timestamp before checking session liveness.
+// Before taking any destructive action (nuke), re-verifies that the session
+// hasn't been recreated since detection. This prevents killing newly-spawned
+// sessions that reuse the same name.
+//
+// Dedup: Checks for existing cleanup wisps before escalating, preventing
+// infinite escalation loops on subsequent patrol cycles.
+//
+// For each zombie found:
+//   - If git state is clean (no unpushed work): auto-nuke
+//   - If git state is dirty (unpushed/uncommitted work): escalate to Mayor via
+//     EscalateRecoveryNeeded, create cleanup wisp
+func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZombiePolecatsResult {
+	result := &DetectZombiePolecatsResult{}
+
+	// Find town root for beads prefix resolution
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	// List all polecat directories
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return result // No polecats directory
+	}
+
+	t := tmux.NewTmux()
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		polecatName := entry.Name()
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		result.Checked++
+
+		// Record timestamp BEFORE checking session liveness.
+		// Used later to guard against TOCTOU race where a new session
+		// could be spawned between our check and the nuke action.
+		detectedAt := time.Now()
+
+		// Check if tmux session exists
+		sessionAlive, err := t.HasSession(sessionName)
+		if err != nil {
+			// Transient tmux error — record it so the caller knows detection
+			// was incomplete, rather than silently skipping this polecat.
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking session %s: %w", sessionName, err))
+			continue
+		}
+		// Read agent bead labels for done-intent detection.
+		// Done early because we need it for both live and dead session paths.
+		prefix := beads.GetPrefixForRig(townRoot, rigName)
+		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+		labels := getAgentBeadLabels(workDir, agentBeadID)
+		doneIntent := extractDoneIntent(labels)
+
+		if sessionAlive {
+			// Live session — normally not a zombie. But check for done-intent
+			// that's been stuck too long (polecat hung in gt done).
+			if doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second {
+				// Polecat has been stuck in gt done for >60s — kill session.
+				zombie := ZombieResult{
+					PolecatName: polecatName,
+					AgentState:  "stuck-in-done",
+					Action:      fmt.Sprintf("killed-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
+				}
+				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+					zombie.Error = err
+					zombie.Action = fmt.Sprintf("kill-stuck-session-failed: %v", err)
+				}
+				result.Zombies = append(result.Zombies, zombie)
+				continue
+			}
+
+			// Tmux session exists but agent process may have died inside it.
+			// This catches the "tmux-alive-but-agent-dead" zombie class that
+			// status.go detects but DetectZombiePolecats previously missed.
+			// See: gt-kj6r6
+			if !t.IsAgentAlive(sessionName) {
+				zombie := ZombieResult{
+					PolecatName: polecatName,
+					AgentState:  "agent-dead-in-session",
+					Action:      "killed-agent-dead-session",
+				}
+				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+					zombie.Error = err
+					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
+				}
+				result.Zombies = append(result.Zombies, zombie)
+			} else {
+				// Agent is alive. Check if the hooked bead has been closed.
+				// A polecat that closed its bead but didn't run gt done is
+				// occupying a slot without doing work. See: gt-h1l6i
+				_, hookBead := getAgentBeadState(workDir, agentBeadID)
+				if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
+					zombie := ZombieResult{
+						PolecatName: polecatName,
+						AgentState:  "bead-closed-still-running",
+						HookBead:    hookBead,
+						Action:      "nuke-bead-closed-polecat",
+					}
+					if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+						zombie.Error = err
+						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
+					}
+					result.Zombies = append(result.Zombies, zombie)
+				}
+			}
+			continue // Either handled or not a zombie
+		}
+
+		// Session is dead. Check for done-intent first (faster path).
+		if doneIntent != nil {
+			age := time.Since(doneIntent.Timestamp)
+			if age < 30*time.Second {
+				// Recent done-intent — polecat is still working through gt done.
+				// Skip, don't interfere.
+				continue
+			}
+			// Old done-intent + dead session = polecat tried to exit but session
+			// died mid-gt-done. Auto-nuke without further checks.
+			zombie := ZombieResult{
+				PolecatName: polecatName,
+				AgentState:  "done-intent-dead",
+				Action:      fmt.Sprintf("auto-nuked (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
+			}
+			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+				zombie.Error = err
+				zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
+			}
+			result.Zombies = append(result.Zombies, zombie)
+			continue
+		}
+
+		// No done-intent. Fall back to standard zombie detection.
+		agentState, hookBead := getAgentBeadState(workDir, agentBeadID)
+
+		// A zombie has a dead session but agent_state suggests it should be alive,
+		// or it still has work hooked. Include "spawning" so polecats that crash
+		// during spawn are detected rather than invisible to zombie detection.
+		isZombie := false
+		if hookBead != "" {
+			isZombie = true
+		}
+		if agentState == "working" || agentState == "running" || agentState == "spawning" {
+			isZombie = true
+		}
+
+		if !isZombie {
+			continue
+		}
+
+		// TOCTOU guard: Before taking any destructive action, re-verify that
+		// the session hasn't been recreated since we checked. A new polecat
+		// manager may have spawned a fresh session with the same name.
+		if sessionRecreated(t, sessionName, detectedAt) {
+			continue // New session exists — not a zombie, skip
+		}
+
+		// Zombie detected! Determine cleanup action based on git state.
+		zombie := ZombieResult{
+			PolecatName: polecatName,
+			AgentState:  agentState,
+			HookBead:    hookBead,
+		}
+
+		cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
+
+		switch cleanupStatus {
+		case "clean":
+			// Polecat ran gt done and confirmed clean state — safe to auto-nuke.
+			nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
+			if nukeResult.Nuked {
+				zombie.Action = "auto-nuked"
+			} else if nukeResult.Skipped {
+				wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
+				if wispErr != nil {
+					zombie.Error = wispErr
+				}
+				zombie.Action = fmt.Sprintf("cleanup-wisp-created:%s (skip reason: %s)", wispID, nukeResult.Reason)
+			} else if nukeResult.Error != nil {
+				zombie.Error = nukeResult.Error
+				zombie.Action = "nuke-failed"
+			}
+
+		case "":
+			// Empty cleanup_status means the agent bead has no cleanup info —
+			// the polecat likely crashed before running gt done. AutoNukeIfClean
+			// handles this via verifyCommitOnMain fallback: only nukes if the
+			// polecat's commit is already on main, otherwise skips.
+			nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
+			if nukeResult.Nuked {
+				zombie.Action = "auto-nuked"
+			} else if nukeResult.Skipped {
+				// Couldn't nuke cleanly — create cleanup wisp
+				wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
+				if wispErr != nil {
+					zombie.Error = wispErr
+				}
+				zombie.Action = fmt.Sprintf("cleanup-wisp-created:%s (skip reason: %s)", wispID, nukeResult.Reason)
+			} else if nukeResult.Error != nil {
+				zombie.Error = nukeResult.Error
+				zombie.Action = "nuke-failed"
+			}
+
+		case "has_uncommitted", "has_stash", "has_unpushed":
+			// Dirty state — escalate to Mayor for recovery, but only if we
+			// haven't already created a cleanup wisp for this polecat (dedup).
+			existingWisp := findAnyCleanupWisp(workDir, polecatName)
+			if existingWisp != "" {
+				// Already tracked — skip escalation to prevent infinite loops.
+				zombie.Action = fmt.Sprintf("already-tracked (cleanup_status=%s, existing-wisp=%s)", cleanupStatus, existingWisp)
+			} else {
+				if router != nil {
+					_, escErr := EscalateRecoveryNeeded(router, rigName, &RecoveryPayload{
+						PolecatName:   polecatName,
+						Rig:           rigName,
+						CleanupStatus: cleanupStatus,
+						IssueID:       hookBead,
+						DetectedAt:    time.Now(),
+					})
+					if escErr != nil {
+						zombie.Error = escErr
+					}
+				}
+				// Create cleanup wisp for tracking
+				wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
+				if wispErr != nil && zombie.Error == nil {
+					zombie.Error = wispErr
+				}
+				zombie.Action = fmt.Sprintf("escalated (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
+			}
+		}
+
+		result.Zombies = append(result.Zombies, zombie)
+	}
+
+	return result
+}
+
+// getAgentBeadState reads agent_state and hook_bead from an agent bead.
+// Returns the agent_state string and hook_bead ID.
+func getAgentBeadState(workDir, agentBeadID string) (agentState, hookBead string) {
+	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
+	if err != nil || output == "" {
+		return "", ""
+	}
+
+	// Parse JSON response — bd show --json returns an array
+	var issues []struct {
+		AgentState string `json:"agent_state"`
+		HookBead   string `json:"hook_bead"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return "", ""
+	}
+
+	return issues[0].AgentState, issues[0].HookBead
+}
+
+// getBeadStatus returns the status of a bead (e.g., "open", "closed", "hooked").
+// Returns empty string if the bead doesn't exist or can't be queried.
+func getBeadStatus(workDir, beadID string) string {
+	if beadID == "" {
+		return ""
+	}
+	output, err := util.ExecWithOutput(workDir, "bd", "show", beadID, "--json")
+	if err != nil || output == "" {
+		return ""
+	}
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+	return issues[0].Status
+}
+
+// DoneIntent represents a parsed done-intent label from an agent bead.
+type DoneIntent struct {
+	ExitType  string
+	Timestamp time.Time
+}
+
+// extractDoneIntent parses a done-intent:<type>:<unix-ts> label from a label list.
+// Returns nil if no done-intent label is found or if the label is malformed.
+func extractDoneIntent(labels []string) *DoneIntent {
+	for _, label := range labels {
+		if !strings.HasPrefix(label, "done-intent:") {
+			continue
+		}
+		// Format: done-intent:<type>:<unix-ts>
+		parts := strings.SplitN(label, ":", 3)
+		if len(parts) != 3 {
+			return nil // Malformed
+		}
+		ts, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return nil // Malformed timestamp
+		}
+		return &DoneIntent{
+			ExitType:  parts[1],
+			Timestamp: time.Unix(ts, 0),
+		}
+	}
+	return nil
+}
+
+// getAgentBeadLabels reads the labels from an agent bead.
+func getAgentBeadLabels(workDir, agentBeadID string) []string {
+	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
+	if err != nil || output == "" {
+		return nil
+	}
+
+	var issues []struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return nil
+	}
+
+	return issues[0].Labels
+}
+
+// sessionRecreated checks whether a tmux session was (re)created after the
+// given timestamp. Returns true if the session exists and was created after
+// detectedAt, indicating a new session replaced the dead one (TOCTOU guard).
+func sessionRecreated(t *tmux.Tmux, sessionName string, detectedAt time.Time) bool {
+	alive, err := t.HasSession(sessionName)
+	if err != nil || !alive {
+		return false // Still dead — not recreated
+	}
+	// Session exists now. Check if it was created after our detection.
+	createdAt, err := session.SessionCreatedAt(sessionName)
+	if err != nil {
+		// Can't determine creation time — assume recreated to be safe.
+		// Better to skip a real zombie than kill a live session.
+		return true
+	}
+	return !createdAt.Before(detectedAt)
+}
+
+// findAnyCleanupWisp checks if any cleanup wisp already exists for a polecat,
+// regardless of state. Used to prevent duplicate escalation on repeated patrol
+// cycles for the same zombie.
+func findAnyCleanupWisp(workDir, polecatName string) string {
+	output, err := util.ExecWithOutput(workDir, "bd", "list",
+		"--ephemeral",
+		"--labels", fmt.Sprintf("cleanup,polecat:%s", polecatName),
+		"--status", "open",
+		"--json",
+	)
+	if err != nil {
+		return ""
+	}
+	if output == "" || output == "[]" || output == "null" {
+		return ""
+	}
+	var items []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil || len(items) == 0 {
+		return ""
+	}
+	return items[0].ID
 }

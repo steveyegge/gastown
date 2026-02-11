@@ -149,7 +149,7 @@ func TestIntegration(t *testing.T) {
 	b := New(dir)
 
 	// Sync database with JSONL before testing to avoid "Database out of sync" errors.
-	// This can happen when JSONL is updated (e.g., by git pull) but the SQLite database
+	// This can happen when JSONL is updated (e.g., by git pull) but the database
 	// hasn't been imported yet. Running sync --import-only ensures we test against
 	// consistent data and prevents flaky test failures.
 	// We use --allow-stale to handle cases where the daemon is actively writing and
@@ -1649,30 +1649,6 @@ func TestParseWispTTLKey(t *testing.T) {
 	}
 }
 
-// TestRoleBeadID tests role bead ID generation.
-func TestRoleBeadID(t *testing.T) {
-	tests := []struct {
-		roleType string
-		want     string
-	}{
-		{"mayor", "gt-mayor-role"},
-		{"deacon", "gt-deacon-role"},
-		{"witness", "gt-witness-role"},
-		{"refinery", "gt-refinery-role"},
-		{"crew", "gt-crew-role"},
-		{"polecat", "gt-polecat-role"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.roleType, func(t *testing.T) {
-			got := RoleBeadID(tt.roleType)
-			if got != tt.want {
-				t.Errorf("RoleBeadID(%q) = %q, want %q", tt.roleType, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestDelegationStruct tests the Delegation struct serialization.
 func TestDelegationStruct(t *testing.T) {
 	tests := []struct {
@@ -2342,7 +2318,7 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		t.Errorf("Spawn 1: status = %q, want 'open'", issue1.Status)
 	}
 
-	// Nuke 1: Close agent bead (workaround for tombstone bug)
+	// Nuke 1: Close agent bead (legacy path - CloseAndClearAgentBead)
 	err = bd.CloseAndClearAgentBead(agentID, "polecat nuked")
 	if err != nil {
 		t.Fatalf("Nuke 1 - CloseAndClearAgentBead: %v", err)
@@ -2391,6 +2367,102 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 	}
 
 	t.Log("LIFECYCLE TEST PASSED: spawn → nuke → respawn works with close/reopen")
+}
+
+// TestResetAgentBeadForReuse_NukeRespawnCycle tests the preferred nuke→respawn
+// lifecycle using ResetAgentBeadForReuse (gt-14b8o fix). Unlike CloseAndClearAgentBead,
+// this keeps the bead open with agent_state="nuked", avoiding the close/reopen cycle
+// that fails on Dolt backends.
+func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
+	t.Skip("bd CLI 0.47.2 bug: database writes don't commit")
+
+	tmpDir := t.TempDir()
+	bd := NewIsolated(tmpDir)
+	if err := bd.Init("test"); err != nil {
+		t.Fatalf("bd init: %v", err)
+	}
+
+	agentID := "test-testrig-polecat-reset"
+
+	// Spawn 1: Create agent bead
+	issue1, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-1",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 1: %v", err)
+	}
+	if issue1.Status != "open" {
+		t.Errorf("Spawn 1: status = %q, want 'open'", issue1.Status)
+	}
+
+	// Nuke 1: Reset for reuse (bead stays open with cleared fields)
+	err = bd.ResetAgentBeadForReuse(agentID, "polecat nuked")
+	if err != nil {
+		t.Fatalf("Nuke 1 - ResetAgentBeadForReuse: %v", err)
+	}
+
+	// Verify bead is still open with cleared fields
+	nukedIssue, err := bd.Show(agentID)
+	if err != nil {
+		t.Fatalf("Show after nuke: %v", err)
+	}
+	if nukedIssue.Status != "open" {
+		t.Errorf("After nuke: status = %q, want 'open' (bead should stay open)", nukedIssue.Status)
+	}
+	nukedFields := ParseAgentFields(nukedIssue.Description)
+	if nukedFields.AgentState != "nuked" {
+		t.Errorf("After nuke: agent_state = %q, want 'nuked'", nukedFields.AgentState)
+	}
+	if nukedFields.HookBead != "" {
+		t.Errorf("After nuke: hook_bead = %q, want empty", nukedFields.HookBead)
+	}
+
+	// Spawn 2: CreateOrReopenAgentBead should detect open bead and update it
+	issue2, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-2",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 2: %v", err)
+	}
+	if issue2.Status != "open" {
+		t.Errorf("Spawn 2: status = %q, want 'open'", issue2.Status)
+	}
+	fields := ParseAgentFields(issue2.Description)
+	if fields.HookBead != "test-task-2" {
+		t.Errorf("Spawn 2: hook_bead = %q, want 'test-task-2'", fields.HookBead)
+	}
+	if fields.AgentState != "spawning" {
+		t.Errorf("Spawn 2: agent_state = %q, want 'spawning'", fields.AgentState)
+	}
+
+	// Nuke 2: Reset again
+	err = bd.ResetAgentBeadForReuse(agentID, "polecat nuked again")
+	if err != nil {
+		t.Fatalf("Nuke 2: %v", err)
+	}
+
+	// Spawn 3: Should still work
+	issue3, err := bd.CreateOrReopenAgentBead(agentID, agentID, &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "testrig",
+		AgentState: "spawning",
+		HookBead:   "test-task-3",
+	})
+	if err != nil {
+		t.Fatalf("Spawn 3: %v", err)
+	}
+	fields = ParseAgentFields(issue3.Description)
+	if fields.HookBead != "test-task-3" {
+		t.Errorf("Spawn 3: hook_bead = %q, want 'test-task-3'", fields.HookBead)
+	}
+
+	t.Log("LIFECYCLE TEST PASSED: spawn → reset → respawn works without close/reopen")
 }
 
 // TestCloseAndClearAgentBead_FieldClearing tests that CloseAndClearAgentBead clears all mutable

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -657,6 +658,122 @@ func TestUpdateFormulas_UpdatesUntracked(t *testing.T) {
 	}
 	if report.Untracked != 0 {
 		t.Errorf("after update, Untracked = %d, want 0", report.Untracked)
+	}
+}
+
+// TestProvisionFormulas_StatError tests that ProvisionFormulas returns an error
+// when os.Stat fails with something other than IsNotExist (e.g. permission denied).
+func TestProvisionFormulas_StatError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Get at least one embedded formula name
+	embedded, err := getEmbeddedFormulas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var targetFormula string
+	for name := range embedded {
+		targetFormula = name
+		break
+	}
+
+	// Create formulas directory
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	if err := os.MkdirAll(formulasDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the formula file as a directory — os.Stat succeeds but it's a dir,
+	// so we need a different approach. Instead, make the parent dir unreadable
+	// for the specific file by creating a subdirectory with no permissions
+	// that blocks stat. Actually, the simplest way: create a file, then remove
+	// read+execute permission from the parent directory so Stat fails with EACCES.
+	//
+	// We'll use a symlink pointing to a nonexistent target through an unreadable dir.
+	// Simpler: just write the formula, then chmod the formulasDir to 0000 before
+	// the Stat call. But ProvisionFormulas does MkdirAll first...
+	//
+	// Best approach: pre-create a broken symlink at the formula path.
+	// os.Stat on a broken symlink returns an error that is NOT os.IsNotExist.
+	destPath := filepath.Join(formulasDir, targetFormula)
+	brokenTarget := filepath.Join(tmpDir, "nonexistent-dir", "nonexistent-file")
+	if err := os.Symlink(brokenTarget, destPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// ProvisionFormulas should return an error about the stat failure
+	_, err = ProvisionFormulas(tmpDir)
+	if err == nil {
+		t.Fatal("ProvisionFormulas should return error for broken symlink stat failure")
+	}
+	if !os.IsNotExist(err) {
+		// The error wraps the underlying stat error — verify it mentions the formula
+		if got := err.Error(); got == "" {
+			t.Error("error message should not be empty")
+		}
+	}
+}
+
+// TestCheckFormulaHealth_ErrorCounter tests that CheckFormulaHealth increments
+// the Error counter for files that can't be read (e.g. permission denied).
+func TestCheckFormulaHealth_ErrorCounter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod(path, 0000) does not prevent reading on Windows")
+	}
+	tmpDir := t.TempDir()
+
+	// Provision fresh
+	_, err := ProvisionFormulas(tmpDir)
+	if err != nil {
+		t.Fatalf("ProvisionFormulas() error: %v", err)
+	}
+
+	// Make one formula file unreadable
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	installed, err := loadInstalledRecord(formulasDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var targetFormula string
+	for name := range installed.Formulas {
+		targetFormula = name
+		break
+	}
+	if targetFormula == "" {
+		t.Skip("no formulas installed")
+	}
+
+	formulaPath := filepath.Join(formulasDir, targetFormula)
+	if err := os.Chmod(formulaPath, 0000); err != nil {
+		t.Fatal(err)
+	}
+	// Restore permissions on cleanup so t.TempDir() can remove it
+	t.Cleanup(func() { os.Chmod(formulaPath, 0644) })
+
+	// Check health
+	report, err := CheckFormulaHealth(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckFormulaHealth() error: %v", err)
+	}
+
+	if report.Error != 1 {
+		t.Errorf("Error = %d, want 1", report.Error)
+	}
+
+	// Verify the specific formula has "error" status
+	found := false
+	for _, f := range report.Formulas {
+		if f.Name == targetFormula {
+			if f.Status != "error" {
+				t.Errorf("formula %s status = %q, want %q", targetFormula, f.Status, "error")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("formula %s not found in report", targetFormula)
 	}
 }
 

@@ -181,7 +181,7 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	crewDir := filepath.Join(rigPath, "crew")
 	if entries, err := os.ReadDir(crewDir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 				rig.Crew = append(rig.Crew, e.Name())
 			}
 		}
@@ -391,9 +391,8 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	fmt.Printf("   ✓ Created mayor clone\n")
 
 	// Check if source repo has tracked .beads/ directory.
-	// If so, we need to initialize the database (beads.db is gitignored so it doesn't exist after clone).
+	// If so, we need to initialize the database (it doesn't exist after clone since DB files are gitignored).
 	sourceBeadsDir := filepath.Join(mayorRigPath, ".beads")
-	sourceBeadsDB := filepath.Join(sourceBeadsDir, "beads.db")
 	if _, err := os.Stat(sourceBeadsDir); err == nil {
 		// Remove any redirect file that might have been accidentally tracked.
 		// Redirect files are runtime/local config and should not be in git.
@@ -422,9 +421,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		}
 
 		// Initialize bd database if it doesn't exist.
-		// beads.db is gitignored so it won't exist after clone - we need to create it.
+		// DB files are gitignored so they won't exist after clone — bd init creates them.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
-		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
+		if !bdDatabaseExists(sourceBeadsDir) {
 			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix, "--backend", "dolt") // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
@@ -491,7 +490,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
 	refineryPath := filepath.Dir(refineryRigPath)
-	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	runtimeConfig := config.ResolveRoleAgentConfig("refinery", m.townRoot, rigPath)
 	if err := m.createPatrolHooks(refineryPath, runtimeConfig); err != nil {
 		fmt.Printf("  Warning: Could not create refinery hooks: %v\n", err)
 	}
@@ -694,7 +693,6 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	_, _ = migrateCmd.CombinedOutput()
 
 	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
-	// bd init creates beads.db but not issues.jsonl in SQLite mode.
 	// Without issues.jsonl, bd's auto-export might write issues to other .jsonl files.
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
 	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
@@ -884,6 +882,32 @@ func isValidBeadsPrefix(prefix string) bool {
 	return beadsPrefixRegexp.MatchString(prefix)
 }
 
+// isStandardBeadHash checks if a string looks like a standard 5-char bead hash.
+// Regular bead IDs use a 5-character base32-encoded hash (e.g., "mawit", "z0ixd").
+// This distinguishes regular issues from agent beads (suffix like "witness")
+// and merge requests (10-char suffix).
+func isStandardBeadHash(s string) bool {
+	if len(s) != 5 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// bdDatabaseExists checks if a beads directory has an initialized database.
+// Checks for Dolt metadata (the standard backend).
+func bdDatabaseExists(beadsDir string) bool {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	if _, err := os.Stat(metadataPath); err == nil {
+		return true
+	}
+	return false
+}
+
 // When adding a rig from a source repo that has .beads/ tracked in git (like a project
 // that already uses beads for issue tracking), we need to use that project's existing
 // prefix instead of generating a new one. Otherwise, the rig would have a mismatched
@@ -917,11 +941,13 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 	}
 
 	// Fallback: try to detect prefix from existing issues in issues.jsonl
-	// Look for the first issue ID pattern like "gt-abc123"
+	// Parse multiple lines and only consider regular issue IDs (5-char hashes)
+	// to avoid misdetecting agent beads like "gt-demo-witness" as prefix "gt-demo".
 	beadsDir := filepath.Dir(configPath)
 	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
 	if issuesData, err := os.ReadFile(issuesPath); err == nil {
 		issuesLines := strings.Split(string(issuesData), "\n")
+		var detectedPrefix string
 		for _, line := range issuesLines {
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -932,17 +958,31 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 				start := idx + 6 // len(`"id":"`)
 				if end := strings.Index(line[start:], `"`); end != -1 {
 					issueID := line[start : start+end]
-					// Extract prefix (everything before the last hyphen-hash part)
+					// Only consider IDs with a 5-char alphanumeric hash suffix
+					// (standard bead format). This filters out agent beads
+					// (gt-demo-witness), merge requests (gt-mr-abc1234567),
+					// and other multi-hyphen IDs.
 					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
+						hash := issueID[dashIdx+1:]
+						if !isStandardBeadHash(hash) {
+							continue
+						}
 						prefix := issueID[:dashIdx]
-						// Handle prefixes like "gt" (from "gt-abc") - return without trailing hyphen
-						if isValidBeadsPrefix(prefix) {
-							return prefix
+						if !isValidBeadsPrefix(prefix) {
+							continue
+						}
+						if detectedPrefix == "" {
+							detectedPrefix = prefix
+						} else if detectedPrefix != prefix {
+							// Conflicting prefixes — can't determine reliably
+							return ""
 						}
 					}
 				}
 			}
-			break // Only check first issue
+		}
+		if detectedPrefix != "" {
+			return detectedPrefix
 		}
 	}
 

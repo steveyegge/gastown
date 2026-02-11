@@ -63,7 +63,7 @@ Your personal workspace within a rig. Where you do hands-on work.
 
 ### Polecats 🦨
 
-Ephemeral worker agents that spawn, complete a task, and disappear.
+Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist.
 
 ### Hooks 🪝
 

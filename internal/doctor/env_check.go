@@ -97,9 +97,17 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
+		// Determine role for AgentEnv lookup.
+		// Boot watchdog is parsed as deacon with name "boot", but AgentEnv
+		// uses "boot" as a distinct role for env var generation.
+		role := string(identity.Role)
+		if identity.Role == session.RoleDeacon && identity.Name == "boot" {
+			role = "boot"
+		}
+
 		// Get expected env vars based on role
 		expected := config.AgentEnv(config.AgentEnvConfig{
-			Role:      string(identity.Role),
+			Role:      role,
 			Rig:       identity.Rig,
 			AgentName: identity.Name,
 			TownRoot:  ctx.TownRoot,

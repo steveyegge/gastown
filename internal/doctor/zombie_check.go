@@ -124,6 +124,13 @@ func (c *ZombieSessionCheck) Fix(ctx *CheckContext) error {
 			continue
 		}
 
+		// TOCTOU guard: re-verify Claude is still dead in this session.
+		// Between Run() identifying zombies and Fix() killing them,
+		// a Claude process may have started (e.g., session was restarted).
+		if t.IsAgentAlive(sess) {
+			continue
+		}
+
 		// Log pre-death event for audit trail
 		_ = events.LogFeed(events.TypeSessionDeath, sess,
 			events.SessionDeathPayload(sess, "unknown", "zombie cleanup", "gt doctor"))

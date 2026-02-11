@@ -1,10 +1,17 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/steveyegge/gastown/internal/mail"
 )
+
+// ErrNoHandler is returned when a message is a recognized protocol message
+// but no handler is registered for its type. This lets callers distinguish
+// between "not a protocol message" (false, nil) and "protocol message but
+// misrouted/unhandled" (true, ErrNoHandler).
+var ErrNoHandler = errors.New("no handler registered for protocol message type")
 
 // Handler processes a protocol message and returns an error if processing failed.
 type Handler func(msg *mail.Message) error
@@ -78,17 +85,26 @@ func WrapWitnessHandlers(h WitnessHandler) *HandlerRegistry {
 	registry := NewHandlerRegistry()
 
 	registry.Register(TypeMerged, func(msg *mail.Message) error {
-		payload := ParseMergedPayload(msg.Body)
+		payload, err := ParseMergedPayload(msg.Body)
+		if err != nil {
+			return err
+		}
 		return h.HandleMerged(payload)
 	})
 
 	registry.Register(TypeMergeFailed, func(msg *mail.Message) error {
-		payload := ParseMergeFailedPayload(msg.Body)
+		payload, err := ParseMergeFailedPayload(msg.Body)
+		if err != nil {
+			return err
+		}
 		return h.HandleMergeFailed(payload)
 	})
 
 	registry.Register(TypeReworkRequest, func(msg *mail.Message) error {
-		payload := ParseReworkRequestPayload(msg.Body)
+		payload, err := ParseReworkRequestPayload(msg.Body)
+		if err != nil {
+			return err
+		}
 		return h.HandleReworkRequest(payload)
 	})
 
@@ -100,7 +116,10 @@ func WrapRefineryHandlers(h RefineryHandler) *HandlerRegistry {
 	registry := NewHandlerRegistry()
 
 	registry.Register(TypeMergeReady, func(msg *mail.Message) error {
-		payload := ParseMergeReadyPayload(msg.Body)
+		payload, err := ParseMergeReadyPayload(msg.Body)
+		if err != nil {
+			return err
+		}
 		return h.HandleMergeReady(payload)
 	})
 
@@ -109,14 +128,16 @@ func WrapRefineryHandlers(h RefineryHandler) *HandlerRegistry {
 
 // ProcessProtocolMessage processes a protocol message using the registry.
 // It returns (true, nil) if the message was handled successfully,
-// (true, error) if handling failed, or (false, nil) if not a protocol message.
+// (true, error) if handling failed, (true, ErrNoHandler) if the message is
+// a recognized protocol message but no handler is registered, or
+// (false, nil) if not a protocol message.
 func (r *HandlerRegistry) ProcessProtocolMessage(msg *mail.Message) (bool, error) {
 	if !IsProtocolMessage(msg.Subject) {
 		return false, nil
 	}
 
 	if !r.CanHandle(msg) {
-		return false, nil
+		return true, ErrNoHandler
 	}
 
 	err := r.Handle(msg)

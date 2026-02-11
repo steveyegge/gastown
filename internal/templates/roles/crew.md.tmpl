@@ -411,17 +411,75 @@ fixed heuristics (N rounds → cycle), you cycle when it feels right:
 
 When you restart, your hook still has your molecule. The handoff mail provides context.
 
-## Session End Checklist
+## Landing the Plane (Session End Protocol)
 
-Before ending your session:
+When ending a session, complete ALL steps below. The plane is NOT landed until
+`git push` succeeds. NEVER stop before pushing. NEVER say "ready to push when
+you are!" - that is a FAILURE. YOU must push, not the user.
 
-```
-[ ] git status              (check for uncommitted changes)
-[ ] git push                (push any commits)
-[ ] Check inbox             (any messages needing response?)
-[ ] gt handoff              (cycle to fresh session)
-    # Or with context: gt handoff -s "Brief" -m "Details"
-```
+**MANDATORY WORKFLOW - COMPLETE ALL STEPS:**
+
+1. **File beads for remaining work** that needs follow-up:
+   ```bash
+   bd create "Follow-up: description" -t task
+   ```
+
+2. **Run quality gates** (only if code changes were made):
+   ```bash
+   go test ./...             # or: make test
+   golangci-lint run ./...   # or: make lint
+   ```
+   File P0 beads if quality gates are broken.
+
+3. **Update beads** - close finished work, update status:
+   ```bash
+   bd close <id> --reason "Completed"
+   ```
+
+4. **PUSH TO REMOTE - NON-NEGOTIABLE:**
+   ```bash
+   # Pull first to catch any remote changes
+   git pull --rebase
+
+   # Stage and commit any remaining changes
+   git add <files> && git commit -m "description"
+
+   # MANDATORY: Push everything to remote
+   # DO NOT STOP BEFORE THIS COMMAND COMPLETES
+   git push
+
+   # MANDATORY: Verify push succeeded
+   git status   # MUST show "up to date with origin/main"
+   ```
+
+   **CRITICAL RULES:**
+   - The plane has NOT landed until `git push` completes successfully
+   - NEVER stop before `git push` - unpushed work breaks multi-agent coordination
+   - NEVER say "ready to push when you are!" - YOU must push, not the user
+   - If `git push` fails, resolve the issue and retry until it succeeds
+
+5. **Clean up git state:**
+   ```bash
+   git stash clear              # Remove old stashes
+   git remote prune origin      # Clean up deleted remote branches
+   ```
+
+6. **Handoff or close:**
+   ```bash
+   # If cycling to fresh context:
+   {{ cmd }} handoff -s "Brief summary" -m "Details for next session"
+
+   # If done for now, verify clean state:
+   git status
+   ```
+
+7. **Provide session summary:**
+   - What was completed this session
+   - What beads were filed for follow-up
+   - Status of quality gates (all passing / issues filed)
+   - Confirmation that ALL changes have been pushed to remote
+
+**REMEMBER: Landing the plane means EVERYTHING is pushed to remote. No exceptions.**
 
 ## Desire Paths: Improving the Tooling
 

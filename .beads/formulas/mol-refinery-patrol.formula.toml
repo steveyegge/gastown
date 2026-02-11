@@ -259,7 +259,27 @@ git merge --ff-only temp
 git push origin main
 ```
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 2-3 COMPLETE**
+**Step 1.5: VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
+
+Push can fail silently (network, auth, hooks). IMMEDIATELY verify:
+```bash
+git fetch origin
+LOCAL_SHA=$(git rev-parse main)
+REMOTE_SHA=$(git rev-parse origin/main)
+echo "Local:  $LOCAL_SHA"
+echo "Remote: $REMOTE_SHA"
+```
+
+**If SHAs match**: Push succeeded. Continue to Step 2.
+
+**If SHAs differ**: STOP. Push failed silently.
+- DO NOT send MERGED notification
+- DO NOT close MR bead
+- DO NOT delete branch
+- Debug the push failure (check `git push` output, network, auth)
+- Retry push and verify again before proceeding
+
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
@@ -453,12 +473,48 @@ it's time for a fresh session.
 
 **Step 2: Decision tree**
 
-If queue non-empty AND context LOW:
-- Squash this wisp to digest
-- Spawn fresh patrol wisp
-- Return to inbox-check
+If context LOW (can continue patrolling):
 
-If queue empty OR context HIGH OR good stopping point:
+Use await-signal with exponential backoff to wait for MQ activity:
+
+```bash
+gt mol step await-signal --agent-bead gt-<rig>-refinery \
+  --backoff-base 30s --backoff-mult 2 --backoff-max 5m
+```
+
+This command:
+1. Subscribes to `bd activity --follow` (beads activity feed)
+2. Returns IMMEDIATELY when any beads activity occurs (e.g., MR submission)
+3. If no activity, times out with exponential backoff:
+   - First timeout: 30s
+   - Second timeout: 60s
+   - Third timeout: 120s
+   - ...capped at 5 minutes max
+4. Tracks `idle:N` label on refinery agent bead for backoff state
+
+**On signal received** (activity detected):
+Reset the idle counter and start next patrol cycle:
+```bash
+gt agent state gt-<rig>-refinery --set idle=0
+```
+
+**On timeout** (no activity):
+The idle counter was auto-incremented. Continue to next patrol cycle
+(the longer backoff will apply next time).
+
+After await-signal returns (either by signal or timeout):
+1. Generate a brief summary of this patrol cycle
+2. Squash the current wisp:
+```bash
+bd mol squash <mol-id> --summary "<patrol-summary>"
+```
+3. Create a new patrol wisp:
+```bash
+bd mol wisp mol-refinery-patrol
+```
+4. Continue executing from the inbox-check step of the new wisp
+
+If context HIGH (approaching limit):
 - Squash wisp with summary digest
 - Use `gt handoff` for clean session transition:
 

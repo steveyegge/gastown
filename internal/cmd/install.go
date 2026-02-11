@@ -445,9 +445,12 @@ func writeJSON(path string, data interface{}) error {
 
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
+// Uses Dolt backend in server mode (Gas Town runs a shared Dolt sql-server).
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq
-	cmd := exec.Command("bd", "init", "--prefix", "hq")
+	// Run: bd init --prefix hq --backend dolt --server
+	// IMPORTANT: Must pass --backend dolt to prevent SQLite database creation.
+	// Without this, bd init defaults to SQLite, which causes Classic contamination.
+	cmd := exec.Command("bd", "init", "--prefix", "hq", "--backend", "dolt", "--server")
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()
@@ -496,7 +499,6 @@ func initTownBeads(townPath string) error {
 	}
 
 	// Ensure issues.jsonl exists BEFORE creating routes.jsonl.
-	// bd init creates beads.db but not issues.jsonl in SQLite mode.
 	// If routes.jsonl is created first, bd's auto-export will write issues to routes.jsonl,
 	// corrupting it. Creating an empty issues.jsonl prevents this.
 	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")

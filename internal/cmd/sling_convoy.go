@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -58,11 +57,15 @@ func isTrackedByConvoy(beadID string) string {
 }
 
 // findConvoyByDescription searches open convoys for one tracking the given beadID.
+// Checks both convoy descriptions (for auto-created convoys) and tracked deps
+// (for manually-created convoys where the description won't match).
 // Returns convoy ID if found, empty string otherwise.
 func findConvoyByDescription(townRoot, beadID string) string {
+	townBeads := filepath.Join(townRoot, ".beads")
+
 	// Query all open convoys from HQ
 	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=convoy", "--status=open", "--json")
-	listCmd.Dir = filepath.Join(townRoot, ".beads")
+	listCmd.Dir = townBeads
 
 	out, err := listCmd.Output()
 	if err != nil {
@@ -78,6 +81,7 @@ func findConvoyByDescription(townRoot, beadID string) string {
 	}
 
 	// Check if any convoy's description mentions tracking this beadID
+	// (matches auto-created convoys with "Auto-created convoy tracking <beadID>")
 	trackingPattern := fmt.Sprintf("tracking %s", beadID)
 	for _, convoy := range convoys {
 		if strings.Contains(convoy.Description, trackingPattern) {
@@ -85,7 +89,51 @@ func findConvoyByDescription(townRoot, beadID string) string {
 		}
 	}
 
+	// Check tracked deps of each convoy (for manually-created convoys).
+	// This handles the case where cross-rig dep resolution (direction=up) fails
+	// but the convoy does have a tracks dependency on the bead.
+	for _, convoy := range convoys {
+		if convoyTracksBead(townBeads, convoy.ID, beadID) {
+			return convoy.ID
+		}
+	}
+
 	return ""
+}
+
+// convoyTracksBead checks if a convoy has a tracks dependency on the given beadID.
+// Handles both raw bead IDs and external-formatted references (e.g., "external:gt-mol:gt-mol-xyz").
+func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
+	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd.Dir = beadsDir
+
+	out, err := depCmd.Output()
+	if err != nil {
+		return false
+	}
+
+	var tracked []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &tracked); err != nil {
+		return false
+	}
+
+	for _, t := range tracked {
+		// Exact match (raw beadID stored as-is)
+		if t.ID == beadID {
+			return true
+		}
+		// External reference match: unwrap "external:prefix:beadID" format
+		if strings.HasPrefix(t.ID, "external:") {
+			parts := strings.SplitN(t.ID, ":", 3)
+			if len(parts) == 3 && parts[2] == beadID {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.
@@ -125,38 +173,22 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 		return "", fmt.Errorf("creating convoy: %w", err)
 	}
 
-	// Add tracking relation: convoy tracks the issue
-	trackBeadID := formatTrackBeadID(beadID)
-	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
+	// Add tracking relation: convoy tracks the issue.
+	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
+	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
+	depArgs := []string{"--no-daemon", "dep", "add", convoyID, beadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = townBeads
+	depCmd.Dir = townRoot
 	depCmd.Stderr = os.Stderr
 
 	if err := depCmd.Run(); err != nil {
-		// Convoy was created but tracking failed - log warning but continue
-		fmt.Printf("%s Could not add tracking relation: %v\n", style.Dim.Render("Warning:"), err)
+		// Tracking failed — delete the orphan convoy to prevent accumulation
+		delCmd := exec.Command("bd", "--no-daemon", "close", convoyID, "-r", "tracking dep failed")
+		delCmd.Dir = townRoot
+		_ = delCmd.Run()
+		return "", fmt.Errorf("adding tracking relation for %s: %w", beadID, err)
 	}
 
 	return convoyID, nil
 }
 
-// formatTrackBeadID formats a bead ID for use in convoy tracking dependencies.
-// Cross-rig beads (non-hq- prefixed) are formatted as external references
-// so the bd tool can resolve them when running from HQ context.
-//
-// Examples:
-//   - "hq-abc123" -> "hq-abc123" (HQ beads unchanged)
-//   - "gt-mol-xyz" -> "external:gt-mol:gt-mol-xyz"
-//   - "beads-task-123" -> "external:beads-task:beads-task-123"
-func formatTrackBeadID(beadID string) string {
-	if strings.HasPrefix(beadID, "hq-") {
-		return beadID
-	}
-	parts := strings.SplitN(beadID, "-", 3)
-	if len(parts) >= 2 {
-		rigPrefix := parts[0] + "-" + parts[1]
-		return fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
-	}
-	// Fallback for malformed IDs (single segment)
-	return beadID
-}

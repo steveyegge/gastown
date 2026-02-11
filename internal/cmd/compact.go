@@ -41,9 +41,10 @@ type compactResult struct {
 }
 
 type compactAction struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Reason string `json:"reason"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Reason   string `json:"reason"`
+	WispType string `json:"wisp_type,omitempty"`
 }
 
 var compactCmd = &cobra.Command{
@@ -310,7 +311,7 @@ func listWisps(bd *beads.Beads) ([]*compactIssue, error) {
 
 // promoteWisp makes a wisp permanent by setting --persistent and adding a comment.
 func promoteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compactResult) {
-	action := compactAction{ID: w.ID, Title: w.Title, Reason: reason}
+	action := compactAction{ID: w.ID, Title: w.Title, Reason: reason, WispType: w.WispType}
 
 	if compactDryRun {
 		result.Promoted = append(result.Promoted, action)
@@ -341,7 +342,7 @@ func promoteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compac
 
 // deleteWisp removes a closed wisp that has expired past its TTL.
 func deleteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compactResult) {
-	action := compactAction{ID: w.ID, Title: w.Title, Reason: reason}
+	action := compactAction{ID: w.ID, Title: w.Title, Reason: reason, WispType: w.WispType}
 
 	if compactDryRun {
 		result.Deleted = append(result.Deleted, action)

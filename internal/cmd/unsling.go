@@ -51,6 +51,10 @@ func init() {
 }
 
 func runUnsling(cmd *cobra.Command, args []string) error {
+	return runUnslingWith(cmd, args, unslingDryRun, unslingForce)
+}
+
+func runUnslingWith(cmd *cobra.Command, args []string, dryRun, force bool) error {
 	var targetBeadID string
 	var targetAgent string
 
@@ -149,7 +153,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		// hook_bead is empty, but there may be stale beads with status "hooked"
 		// still assigned to this agent (e.g., hook_bead was cleared but bead status
 		// wasn't updated). Clean them up so gt hook and gt unsling stay consistent.
-		cleaned := cleanStaleHookedBeads(cmd, b, agentID, targetBeadID, townRoot, beadsPath)
+		cleaned := cleanStaleHookedBeads(cmd, b, agentID, targetBeadID, townRoot, beadsPath, dryRun)
 		if !cleaned {
 			if targetAgent != "" {
 				fmt.Printf("%s No work hooked for %s\n", style.Dim.Render("ℹ"), agentID)
@@ -176,7 +180,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 	hookedBead, err := hookedB.Show(hookedBeadID)
 	if err != nil {
 		// Bead might be deleted - still allow unsling with --force
-		if !unslingForce {
+		if !force {
 			return fmt.Errorf("getting hooked bead %s: %w\n  Use --force to unsling anyway", hookedBeadID, err)
 		}
 		// Force mode - proceed without the bead details
@@ -185,7 +189,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 
 	// Check if work is complete (warn if not, unless --force)
 	isComplete := hookedBead.Status == "closed"
-	if !isComplete && !unslingForce {
+	if !isComplete && !force {
 		return fmt.Errorf("hooked work %s is incomplete (%s)\n  Use --force to unsling anyway",
 			hookedBeadID, hookedBead.Title)
 	}
@@ -196,7 +200,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Unslinging %s...\n", style.Bold.Render("🪝"), hookedBeadID)
 	}
 
-	if unslingDryRun {
+	if dryRun {
 		fmt.Printf("Would clear hook_bead from agent bead %s\n", agentBeadID)
 		return nil
 	}
@@ -243,7 +247,7 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 // bead's status wasn't updated back to "open". Without this, gt hook shows the
 // stale hook (via fallback query) but gt unsling says "Nothing on your hook".
 // Returns true if any stale beads were cleaned up.
-func cleanStaleHookedBeads(cmd *cobra.Command, b *beads.Beads, agentID, targetBeadID, townRoot, beadsPath string) bool {
+func cleanStaleHookedBeads(cmd *cobra.Command, b *beads.Beads, agentID, targetBeadID, townRoot, beadsPath string, dryRun bool) bool {
 	// Query for beads with status=hooked assigned to this agent
 	staleBeads, err := b.List(beads.ListOptions{
 		Status:   beads.StatusHooked,
@@ -268,7 +272,7 @@ func cleanStaleHookedBeads(cmd *cobra.Command, b *beads.Beads, agentID, targetBe
 		staleBeads = filtered
 	}
 
-	if unslingDryRun {
+	if dryRun {
 		for _, sb := range staleBeads {
 			fmt.Printf("Would clean up stale hooked bead %s (%s)\n", sb.ID, sb.Title)
 		}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
 )
@@ -305,88 +306,6 @@ func TestGetRefineryStatusHint(t *testing.T) {
 	}
 }
 
-func TestTruncateStatusHint(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"short line unchanged", "Hello world", "Hello world"},
-		{"exactly 60 chars unchanged", "123456789012345678901234567890123456789012345678901234567890", "123456789012345678901234567890123456789012345678901234567890"},
-		{"61 chars truncated", "1234567890123456789012345678901234567890123456789012345678901", "123456789012345678901234567890123456789012345678901234567..."},
-		{"long line truncated", "This is a very long line that should be truncated because it exceeds sixty characters", "This is a very long line that should be truncated because..."},
-		{"empty string", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateStatusHint(tt.input)
-			if got != tt.want {
-				t.Errorf("truncateStatusHint(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParsePolecatSessionName(t *testing.T) {
-	tests := []struct {
-		name        string
-		sessionName string
-		wantRig     string
-		wantPolecat string
-		wantOk      bool
-	}{
-		{"valid polecat session", "gt-roxas-dag", "roxas", "dag", true},
-		{"valid polecat with hyphen", "gt-gas-town-nux", "gas", "town-nux", true},
-		{"refinery session", "gt-roxas-refinery", "roxas", "refinery", true},
-		{"witness session", "gt-gastown-witness", "gastown", "witness", true},
-		{"not gt prefix", "other-roxas-dag", "", "", false},
-		{"too few parts", "gt-roxas", "", "", false},
-		{"empty string", "", "", "", false},
-		{"single gt", "gt", "", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rig, polecat, ok := parsePolecatSessionName(tt.sessionName)
-			if ok != tt.wantOk {
-				t.Errorf("parsePolecatSessionName(%q) ok = %v, want %v",
-					tt.sessionName, ok, tt.wantOk)
-			}
-			if ok && (rig != tt.wantRig || polecat != tt.wantPolecat) {
-				t.Errorf("parsePolecatSessionName(%q) = (%q, %q), want (%q, %q)",
-					tt.sessionName, rig, polecat, tt.wantRig, tt.wantPolecat)
-			}
-		})
-	}
-}
-
-func TestIsWorkerSession(t *testing.T) {
-	tests := []struct {
-		name     string
-		polecat  string
-		wantWork bool
-	}{
-		{"polecat dag is worker", "dag", true},
-		{"polecat nux is worker", "nux", true},
-		{"refinery is worker", "refinery", true},
-		{"witness is not worker", "witness", false},
-		{"mayor is not worker", "mayor", false},
-		{"deacon is not worker", "deacon", false},
-		{"boot is not worker", "boot", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isWorkerSession(tt.polecat)
-			if got != tt.wantWork {
-				t.Errorf("isWorkerSession(%q) = %v, want %v",
-					tt.polecat, got, tt.wantWork)
-			}
-		})
-	}
-}
-
 func TestParseActivityTimestamp(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -413,5 +332,151 @@ func TestParseActivityTimestamp(t *testing.T) {
 					tt.input, unix, tt.wantUnix)
 			}
 		})
+	}
+}
+
+// --- calculateWorkerWorkStatus with configurable thresholds ---
+
+func TestCalculateWorkerWorkStatus_DefaultThresholds(t *testing.T) {
+	stale := 5 * time.Minute
+	stuck := 30 * time.Minute
+
+	tests := []struct {
+		name       string
+		age        time.Duration
+		issueID    string
+		workerName string
+		want       string
+	}{
+		{"refinery always working", 1 * time.Hour, "gt-123", "refinery", "working"},
+		{"refinery working even without issue", 0, "", "refinery", "working"},
+		{"no issue means idle", 0, "", "dag", "idle"},
+		{"no issue means idle even if active", 1 * time.Second, "", "nux", "idle"},
+		{"very recent is working", 1 * time.Second, "gt-123", "dag", "working"},
+		{"just under stale is working", stale - 1*time.Second, "gt-123", "dag", "working"},
+		{"at stale boundary is stale", stale, "gt-123", "dag", "stale"},
+		{"between stale and stuck is stale", 15 * time.Minute, "gt-123", "dag", "stale"},
+		{"just under stuck is stale", stuck - 1*time.Second, "gt-123", "dag", "stale"},
+		{"at stuck boundary is stuck", stuck, "gt-123", "dag", "stuck"},
+		{"well past stuck is stuck", 2 * time.Hour, "gt-123", "dag", "stuck"},
+		{"zero age with issue is working", 0, "gt-456", "nux", "working"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateWorkerWorkStatus(tt.age, tt.issueID, tt.workerName, stale, stuck)
+			if got != tt.want {
+				t.Errorf("calculateWorkerWorkStatus(%v, %q, %q, %v, %v) = %q, want %q",
+					tt.age, tt.issueID, tt.workerName, stale, stuck, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCalculateWorkerWorkStatus_CustomThresholds(t *testing.T) {
+	// Use very different thresholds to prove they're actually used
+	stale := 1 * time.Minute
+	stuck := 5 * time.Minute
+
+	tests := []struct {
+		name    string
+		age     time.Duration
+		issueID string
+		want    string
+	}{
+		{"30s is working with 1m stale", 30 * time.Second, "gt-1", "working"},
+		{"90s is stale with 1m stale", 90 * time.Second, "gt-1", "stale"},
+		{"3m is stale with 5m stuck", 3 * time.Minute, "gt-1", "stale"},
+		{"6m is stuck with 5m stuck", 6 * time.Minute, "gt-1", "stuck"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateWorkerWorkStatus(tt.age, tt.issueID, "dag", stale, stuck)
+			if got != tt.want {
+				t.Errorf("calculateWorkerWorkStatus(%v, %q, dag, %v, %v) = %q, want %q",
+					tt.age, tt.issueID, stale, stuck, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCalculateWorkerWorkStatus_LargeThresholds(t *testing.T) {
+	// Very large thresholds — everything should be "working"
+	stale := 24 * time.Hour
+	stuck := 48 * time.Hour
+
+	got := calculateWorkerWorkStatus(12*time.Hour, "gt-1", "dag", stale, stuck)
+	if got != "working" {
+		t.Errorf("12h with 24h stale threshold should be working, got %q", got)
+	}
+
+	got = calculateWorkerWorkStatus(36*time.Hour, "gt-1", "dag", stale, stuck)
+	if got != "stale" {
+		t.Errorf("36h with 24h/48h thresholds should be stale, got %q", got)
+	}
+}
+
+func TestCalculateWorkerWorkStatus_ZeroThresholds(t *testing.T) {
+	// Zero thresholds: everything with an issue should be stuck
+	got := calculateWorkerWorkStatus(0, "gt-1", "dag", 0, 0)
+	if got != "stuck" {
+		t.Errorf("0 age with 0/0 thresholds should be stuck, got %q", got)
+	}
+}
+
+// --- NewConvoyHandler timeout ---
+
+func TestNewConvoyHandler_StoresTimeout(t *testing.T) {
+	mock := &MockConvoyFetcher{}
+	timeout := 15 * time.Second
+
+	handler, err := NewConvoyHandler(mock, timeout)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler: %v", err)
+	}
+
+	if handler.fetchTimeout != timeout {
+		t.Errorf("fetchTimeout = %v, want %v", handler.fetchTimeout, timeout)
+	}
+}
+
+func TestNewConvoyHandler_ZeroTimeout(t *testing.T) {
+	mock := &MockConvoyFetcher{}
+	handler, err := NewConvoyHandler(mock, 0)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler: %v", err)
+	}
+
+	if handler.fetchTimeout != 0 {
+		t.Errorf("fetchTimeout = %v, want 0", handler.fetchTimeout)
+	}
+}
+
+// --- NewAPIHandler timeout ---
+
+func TestNewAPIHandler_StoresTimeouts(t *testing.T) {
+	defTimeout := 45 * time.Second
+	maxTimeout := 90 * time.Second
+
+	handler := NewAPIHandler(defTimeout, maxTimeout)
+	if handler.defaultRunTimeout != defTimeout {
+		t.Errorf("defaultRunTimeout = %v, want %v", handler.defaultRunTimeout, defTimeout)
+	}
+	if handler.maxRunTimeout != maxTimeout {
+		t.Errorf("maxRunTimeout = %v, want %v", handler.maxRunTimeout, maxTimeout)
+	}
+}
+
+// --- NewDashboardMux nil config ---
+
+func TestNewDashboardMux_NilConfig(t *testing.T) {
+	mock := &MockConvoyFetcher{}
+	mux, err := NewDashboardMux(mock, nil)
+	if err != nil {
+		t.Fatalf("NewDashboardMux(nil config): %v", err)
+	}
+	if mux == nil {
+		t.Fatal("NewDashboardMux returned nil handler")
 	}
 }

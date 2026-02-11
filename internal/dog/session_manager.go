@@ -26,15 +26,19 @@ var (
 // SessionManager handles dog session lifecycle.
 type SessionManager struct {
 	tmux     *tmux.Tmux
+	mgr      *Manager
 	townRoot string
 	townName string
 }
 
 // NewSessionManager creates a new dog session manager.
-func NewSessionManager(t *tmux.Tmux, townRoot string) *SessionManager {
+// The Manager parameter is used to sync persistent dog state (idle/working)
+// when sessions start and stop.
+func NewSessionManager(t *tmux.Tmux, townRoot string, mgr *Manager) *SessionManager {
 	townName, _ := workspace.GetTownName(townRoot)
 	return &SessionManager{
 		tmux:     t,
+		mgr:      mgr,
 		townRoot: townRoot,
 		townName: townName,
 	}
@@ -161,10 +165,23 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	// Verify session survived startup
 	running, err = m.tmux.HasSession(sessionID)
 	if err != nil {
+		// Clean up the session we just created to prevent orphans
+		_ = m.tmux.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("verifying session: %w", err)
 	}
 	if !running {
 		return fmt.Errorf("session %s died during startup", sessionID)
+	}
+
+	// Track PID for defense-in-depth orphan cleanup (non-fatal)
+	_ = session.TrackSessionPID(m.townRoot, sessionID, m.tmux)
+
+	// Update persistent state to working
+	if m.mgr != nil {
+		if err := m.mgr.SetState(dogName, StateWorking); err != nil {
+			// Log but don't fail - session is running, state sync is best-effort
+			fmt.Fprintf(os.Stderr, "warning: failed to set dog %s state to working: %v\n", dogName, err)
+		}
 	}
 
 	return nil
@@ -185,11 +202,18 @@ func (m *SessionManager) Stop(dogName string, force bool) error {
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
-		time.Sleep(100 * time.Millisecond)
+		session.WaitForSessionExit(m.tmux, sessionID, constants.GracefulShutdownTimeout)
 	}
 
 	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
+	}
+
+	// Update persistent state to idle so dog is available for reassignment
+	if m.mgr != nil {
+		if err := m.mgr.SetState(dogName, StateIdle); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to set dog %s state to idle: %v\n", dogName, err)
+		}
 	}
 
 	return nil

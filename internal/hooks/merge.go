@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +45,10 @@ func LoadAllOverrides() (map[string]*HooksConfig, error) {
 	dir := OverridesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return overrides, nil // No overrides dir is fine
+		if errors.Is(err, os.ErrNotExist) {
+			return overrides, nil // No overrides dir is fine
+		}
+		return nil, fmt.Errorf("reading overrides directory %s: %w", dir, err)
 	}
 
 	for _, entry := range entries {
@@ -57,7 +62,8 @@ func LoadAllOverrides() (map[string]*HooksConfig, error) {
 
 		cfg, err := loadConfig(filepath.Join(dir, name))
 		if err != nil {
-			continue // Skip invalid files
+			fmt.Fprintf(os.Stderr, "Warning: skipping invalid hooks override %s: %v\n", name, err)
+			continue
 		}
 		overrides[key] = cfg
 	}

@@ -3,7 +3,11 @@ package beads
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/lock"
 )
 
 // StatusPinned is the status for pinned beads that never get closed.
@@ -148,10 +152,30 @@ func (b *Beads) ClearMail(reason string) (*ClearMailResult, error) {
 	return result, nil
 }
 
+// lockBead acquires a cross-process advisory lock for a bead operation.
+// Returns a cleanup function that releases the lock.
+// Lock files are stored in <beadsDir>/locks/<beadID>.flock.
+func (b *Beads) lockBead(beadID string) (func(), error) {
+	locksDir := filepath.Join(b.getResolvedBeadsDir(), "locks")
+	if err := os.MkdirAll(locksDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating locks directory: %w", err)
+	}
+	lockPath := filepath.Join(locksDir, beadID+".flock")
+	return lock.FlockAcquire(lockPath)
+}
+
 // AttachMolecule attaches a molecule to a pinned bead by updating its description.
 // The moleculeID is the root issue ID of the molecule to attach.
+// Uses advisory file locking to prevent concurrent read-modify-write races.
 // Returns the updated issue.
 func (b *Beads) AttachMolecule(pinnedBeadID, moleculeID string) (*Issue, error) {
+	// Acquire per-bead lock to serialize concurrent attach/detach operations
+	unlock, err := b.lockBead(pinnedBeadID)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring bead lock: %w", err)
+	}
+	defer unlock()
+
 	// Fetch the pinned bead
 	issue, err := b.Show(pinnedBeadID)
 	if err != nil {
@@ -182,8 +206,16 @@ func (b *Beads) AttachMolecule(pinnedBeadID, moleculeID string) (*Issue, error) 
 }
 
 // DetachMolecule removes molecule attachment from a pinned bead.
+// Uses advisory file locking to prevent concurrent read-modify-write races.
 // Returns the updated issue.
 func (b *Beads) DetachMolecule(pinnedBeadID string) (*Issue, error) {
+	// Acquire per-bead lock to serialize concurrent attach/detach operations
+	unlock, err := b.lockBead(pinnedBeadID)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring bead lock: %w", err)
+	}
+	defer unlock()
+
 	// Fetch the pinned bead
 	issue, err := b.Show(pinnedBeadID)
 	if err != nil {

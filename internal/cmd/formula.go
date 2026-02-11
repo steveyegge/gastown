@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/text/cases"
@@ -266,7 +267,7 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Currently only convoy formulas are supported for execution
-	if f.Type != "convoy" {
+	if f.Type != formula.TypeConvoy {
 		fmt.Printf("%s Formula type '%s' not yet supported for execution.\n",
 			style.Dim.Render("Note:"), f.Type)
 		fmt.Printf("Currently only 'convoy' formulas can be run.\n")
@@ -283,7 +284,7 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 }
 
 // dryRunFormula shows what would happen without executing
-func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
+func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 	fmt.Printf("%s Would execute formula:\n", style.Dim.Render("[dry-run]"))
 	fmt.Printf("  Formula: %s\n", style.Bold.Render(formulaName))
 	fmt.Printf("  Type:    %s\n", f.Type)
@@ -292,7 +293,7 @@ func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
 		fmt.Printf("  PR:      #%d\n", formulaRunPR)
 	}
 
-	if f.Type == "convoy" && len(f.Legs) > 0 {
+	if f.Type == formula.TypeConvoy && len(f.Legs) > 0 {
 		// Generate review ID for dry-run display
 		reviewID := generateFormulaShortID()
 
@@ -368,7 +369,7 @@ func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
 }
 
 // executeConvoyFormula spawns a convoy of polecats to execute a convoy formula
-func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
+func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) error {
 	fmt.Printf("%s Executing convoy formula: %s\n\n",
 		style.Bold.Render("🚚"), formulaName)
 
@@ -628,36 +629,6 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 	return nil
 }
 
-// formulaData holds parsed formula information
-type formulaData struct {
-	Name        string
-	Description string
-	Type        string
-	Legs        []formulaLeg
-	Synthesis   *formulaSynthesis
-	Prompts     map[string]string
-	Output      *formulaOutput
-}
-
-type formulaOutput struct {
-	Directory  string
-	LegPattern string
-	Synthesis  string
-}
-
-type formulaLeg struct {
-	ID          string
-	Title       string
-	Focus       string
-	Description string
-}
-
-type formulaSynthesis struct {
-	Title       string
-	Description string
-	DependsOn   []string
-}
-
 // findFormulaFile searches for a formula file by name
 func findFormulaFile(name string) (string, error) {
 	// Search paths in order
@@ -692,207 +663,9 @@ func findFormulaFile(name string) (string, error) {
 	return "", fmt.Errorf("formula '%s' not found in search paths", name)
 }
 
-// parseFormulaFile parses a formula file into formulaData
-func parseFormulaFile(path string) (*formulaData, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use simple TOML parsing for the fields we need
-	// (avoids importing the full formula package which might cause cycles)
-	f := &formulaData{
-		Prompts: make(map[string]string),
-	}
-
-	content := string(data)
-
-	// Parse formula name
-	if match := extractTOMLValue(content, "formula"); match != "" {
-		f.Name = match
-	}
-
-	// Parse description
-	if match := extractTOMLMultiline(content, "description"); match != "" {
-		f.Description = match
-	}
-
-	// Parse type
-	if match := extractTOMLValue(content, "type"); match != "" {
-		f.Type = match
-	}
-
-	// Parse legs (convoy formulas)
-	f.Legs = extractLegs(content)
-
-	// Parse synthesis
-	f.Synthesis = extractSynthesis(content)
-
-	// Parse prompts
-	f.Prompts = extractPrompts(content)
-
-	// Parse output config
-	f.Output = extractOutput(content)
-
-	return f, nil
-}
-
-// extractTOMLValue extracts a simple quoted value from TOML
-func extractTOMLValue(content, key string) string {
-	// Match: key = "value" or key = 'value'
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, key+" =") || strings.HasPrefix(line, key+"=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				val := strings.TrimSpace(parts[1])
-				// Remove quotes
-				if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') {
-					return val[1 : len(val)-1]
-				}
-				return val
-			}
-		}
-	}
-	return ""
-}
-
-// extractTOMLMultiline extracts a multiline string (""" ... """)
-func extractTOMLMultiline(content, key string) string {
-	// Look for key = """
-	keyPattern := key + ` = """`
-	idx := strings.Index(content, keyPattern)
-	if idx == -1 {
-		// Try single-line
-		return extractTOMLValue(content, key)
-	}
-
-	start := idx + len(keyPattern)
-	end := strings.Index(content[start:], `"""`)
-	if end == -1 {
-		return ""
-	}
-
-	return strings.TrimSpace(content[start : start+end])
-}
-
-// extractLegs parses [[legs]] sections from TOML
-func extractLegs(content string) []formulaLeg {
-	var legs []formulaLeg
-
-	// Split by [[legs]]
-	sections := strings.Split(content, "[[legs]]")
-	for i, section := range sections {
-		if i == 0 {
-			continue // Skip content before first [[legs]]
-		}
-
-		// Find where this section ends (next [[ or EOF)
-		endIdx := strings.Index(section, "[[")
-		if endIdx == -1 {
-			endIdx = len(section)
-		}
-		section = section[:endIdx]
-
-		leg := formulaLeg{
-			ID:          extractTOMLValue(section, "id"),
-			Title:       extractTOMLValue(section, "title"),
-			Focus:       extractTOMLValue(section, "focus"),
-			Description: extractTOMLMultiline(section, "description"),
-		}
-
-		if leg.ID != "" {
-			legs = append(legs, leg)
-		}
-	}
-
-	return legs
-}
-
-// extractSynthesis parses [synthesis] section from TOML
-func extractSynthesis(content string) *formulaSynthesis {
-	idx := strings.Index(content, "[synthesis]")
-	if idx == -1 {
-		return nil
-	}
-
-	section := content[idx:]
-	// Find where section ends
-	if endIdx := strings.Index(section[1:], "\n["); endIdx != -1 {
-		section = section[:endIdx+1]
-	}
-
-	syn := &formulaSynthesis{
-		Title:       extractTOMLValue(section, "title"),
-		Description: extractTOMLMultiline(section, "description"),
-	}
-
-	// Parse depends_on array
-	if depsLine := extractTOMLValue(section, "depends_on"); depsLine != "" {
-		// Simple array parsing: ["a", "b", "c"]
-		depsLine = strings.Trim(depsLine, "[]")
-		for _, dep := range strings.Split(depsLine, ",") {
-			dep = strings.Trim(strings.TrimSpace(dep), `"'`)
-			if dep != "" {
-				syn.DependsOn = append(syn.DependsOn, dep)
-			}
-		}
-	}
-
-	if syn.Title == "" && syn.Description == "" {
-		return nil
-	}
-
-	return syn
-}
-
-// extractPrompts parses [prompts] section from TOML
-func extractPrompts(content string) map[string]string {
-	prompts := make(map[string]string)
-
-	idx := strings.Index(content, "[prompts]")
-	if idx == -1 {
-		return prompts
-	}
-
-	section := content[idx:]
-	// Find where section ends
-	if endIdx := strings.Index(section[1:], "\n["); endIdx != -1 {
-		section = section[:endIdx+1]
-	}
-
-	// Extract base prompt
-	if base := extractTOMLMultiline(section, "base"); base != "" {
-		prompts["base"] = base
-	}
-
-	return prompts
-}
-
-// extractOutput parses [output] section from TOML
-func extractOutput(content string) *formulaOutput {
-	idx := strings.Index(content, "[output]")
-	if idx == -1 {
-		return nil
-	}
-
-	section := content[idx:]
-	// Find where section ends (next [ that isn't part of output)
-	if endIdx := strings.Index(section[1:], "\n["); endIdx != -1 {
-		section = section[:endIdx+1]
-	}
-
-	out := &formulaOutput{
-		Directory:  extractTOMLValue(section, "directory"),
-		LegPattern: extractTOMLValue(section, "leg_pattern"),
-		Synthesis:  extractTOMLValue(section, "synthesis"),
-	}
-
-	if out.Directory == "" && out.LegPattern == "" && out.Synthesis == "" {
-		return nil
-	}
-
-	return out
+// parseFormulaFile parses a formula file using the formula package's TOML parser.
+func parseFormulaFile(path string) (*formula.Formula, error) {
+	return formula.ParseFile(path)
 }
 
 // renderTemplate renders a Go text/template with the given context map

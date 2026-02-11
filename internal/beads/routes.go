@@ -37,7 +37,9 @@ func LoadRoutes(beadsDir string) ([]Route, error) {
 
 	var routes []Route
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue // Skip empty lines and comments
@@ -45,7 +47,8 @@ func LoadRoutes(beadsDir string) ([]Route, error) {
 
 		var route Route
 		if err := json.Unmarshal([]byte(line), &route); err != nil {
-			continue // Skip malformed lines
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed route at %s:%d: %v\n", routesPath, lineNum, err)
+			continue
 		}
 		if route.Prefix != "" && route.Path != "" {
 			routes = append(routes, route)
@@ -137,6 +140,10 @@ func WriteRoutes(beadsDir string, routes []Route) error {
 		if _, err := file.WriteString("\n"); err != nil {
 			return fmt.Errorf("writing newline: %w", err)
 		}
+	}
+
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("syncing routes file: %w", err)
 	}
 
 	return nil
@@ -232,6 +239,31 @@ func GetRigPathForPrefix(townRoot, prefix string) string {
 				return townRoot // Town-level beads
 			}
 			return filepath.Join(townRoot, r.Path)
+		}
+	}
+
+	return ""
+}
+
+// GetRigNameForPrefix returns the rig name that owns a given bead prefix.
+// For example, "gt-" returns "gastown", "bd-" returns "beads".
+// Returns empty string if the prefix is town-level (path=".") or not found in routes.
+func GetRigNameForPrefix(townRoot, prefix string) string {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			if r.Path == "." {
+				return "" // Town-level bead, no specific rig
+			}
+			parts := strings.SplitN(r.Path, "/", 2)
+			if len(parts) > 0 {
+				return parts[0]
+			}
 		}
 	}
 

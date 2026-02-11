@@ -2,8 +2,11 @@
 package cmd
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -273,6 +276,8 @@ var (
 	rigResetRole       string
 	rigShutdownForce   bool
 	rigShutdownNuclear bool
+	rigRebootForce     bool
+	rigRebootNuclear   bool
 	rigStopForce       bool
 	rigStopNuclear     bool
 	rigRestartForce    bool
@@ -309,7 +314,8 @@ func init() {
 	rigShutdownCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown")
 	rigShutdownCmd.Flags().BoolVar(&rigShutdownNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 
-	rigRebootCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown during reboot")
+	rigRebootCmd.Flags().BoolVarP(&rigRebootForce, "force", "f", false, "Force immediate shutdown during reboot")
+	rigRebootCmd.Flags().BoolVar(&rigRebootNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks during reboot (loses uncommitted work!)")
 
 	rigStopCmd.Flags().BoolVarP(&rigStopForce, "force", "f", false, "Force immediate shutdown")
 	rigStopCmd.Flags().BoolVar(&rigStopNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
@@ -387,6 +393,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Add new rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		// Non-fatal: daemon will still work, just won't auto-manage this rig
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
 	// Add route to town-level routes.jsonl for prefix-based routing.
 	// Route points to the canonical beads location:
 	// - If source repo has .beads/ tracked in git, route to mayor/rig
@@ -417,16 +429,16 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// Create rig identity bead
 	if newRig.Config.Prefix != "" && beadsWorkDir != "" {
 		bd := beads.New(beadsWorkDir)
-		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
 		fields := &beads.RigFields{
 			Repo:   gitURL,
 			Prefix: newRig.Config.Prefix,
-			State:  "active",
+			State:  beads.RigStateActive,
 		}
-		if _, err := bd.CreateRigBead(rigBeadID, name, fields); err != nil {
+		if _, err := bd.CreateRigBead(name, fields); err != nil {
 			// Non-fatal: rig is functional without the identity bead
 			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
 		} else {
+			rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
 			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
 	}
@@ -617,6 +629,11 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Add adopted rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
 	// Add route to town-level routes.jsonl for prefix-based routing
 	if result.BeadsPrefix != "" {
 		routePath := name
@@ -631,6 +648,65 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		if err := beads.AppendRoute(townRoot, route); err != nil {
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
 		}
+	}
+
+	// Check for tracked beads and initialize database if missing (Issue #72)
+	rigPath := filepath.Join(townRoot, name)
+	beadsDirCandidates := []string{
+		filepath.Join(rigPath, ".beads"),
+		filepath.Join(rigPath, "mayor", "rig", ".beads"),
+	}
+	for _, beadsDir := range beadsDirCandidates {
+		if _, err := os.Stat(beadsDir); err != nil {
+			continue
+		}
+
+		// Detect prefix from issues.jsonl (prefix is stored in DB, not config.yaml)
+		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+		if f, readErr := os.Open(jsonlPath); readErr == nil {
+			scanner := bufio.NewScanner(f)
+			if scanner.Scan() {
+				var issue struct {
+					ID string `json:"id"`
+				}
+				if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
+					// Extract prefix: everything before the last "-" segment
+					if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
+						detected := issue.ID[:lastDash]
+						if detected != "" && rigAddPrefix != "" {
+							if strings.TrimSuffix(rigAddPrefix, "-") != detected {
+								f.Close()
+								return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
+							}
+						}
+						if detected != "" && result.BeadsPrefix == "" {
+							result.BeadsPrefix = detected
+						}
+					}
+				}
+			}
+			f.Close()
+		}
+
+		// Init database if metadata.json is missing (DB files are gitignored)
+		metadataPath := filepath.Join(beadsDir, "metadata.json")
+		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+			prefix := result.BeadsPrefix
+			if prefix == "" {
+				break
+			}
+			workDir := filepath.Dir(beadsDir) // directory containing .beads/
+			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
+			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
+			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix, "--backend", "dolt", "--server")
+			initCmd.Dir = workDir
+			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
+				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
+			} else {
+				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
+			}
+		}
+		break
 	}
 
 	// Print results
@@ -1089,7 +1165,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
-	infos, err := polecatMgr.List()
+	infos, err := polecatMgr.ListPolecats()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
@@ -1131,6 +1207,10 @@ func runRigReboot(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
 	fmt.Printf("Rebooting rig %s...\n\n", style.Bold.Render(rigName))
+
+	// Propagate reboot flags to shutdown globals
+	rigShutdownForce = rigRebootForce
+	rigShutdownNuclear = rigRebootNuclear
 
 	// Shutdown first
 	if err := runRigShutdown(cmd, args); err != nil {
@@ -1238,9 +1318,20 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 				sessionIcon = style.Success.Render("●")
 			}
 
-			stateStr := string(p.State)
+			// Reconcile display state with tmux session liveness.
+			// Per gt-zecmc design: tmux is ground truth for observable states.
+			// If session is running but beads says done, the polecat is still alive.
+			// If session is dead but beads says working, the polecat is actually done.
+			displayState := p.State
+			if hasSession && displayState == polecat.StateDone {
+				displayState = polecat.StateWorking
+			} else if !hasSession && displayState.IsActive() {
+				displayState = polecat.StateDone
+			}
+
+			stateStr := string(displayState)
 			if p.Issue != "" {
-				stateStr = fmt.Sprintf("%s → %s", p.State, p.Issue)
+				stateStr = fmt.Sprintf("%s → %s", displayState, p.Issue)
 			}
 
 			fmt.Printf("  %s %s: %s\n", sessionIcon, p.Name, stateStr)
@@ -1352,7 +1443,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigStopForce); err != nil {
@@ -1483,7 +1574,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 1. Stop all polecat sessions
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigRestartForce); err != nil {

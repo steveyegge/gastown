@@ -38,7 +38,7 @@ const MaxLifecycleMessageAge = 6 * time.Hour
 // ProcessLifecycleRequests checks for and processes lifecycle requests from the deacon inbox.
 func (d *Daemon) ProcessLifecycleRequests() {
 	// Get mail for deacon identity (using gt mail, not bd mail)
-	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
+	cmd := exec.Command(d.gtPath, "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -554,8 +554,13 @@ func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
 	}
 }
 
+// syncFailureEscalationThreshold is the number of consecutive pull failures
+// before logging escalates from WARN to ERROR.
+const syncFailureEscalationThreshold = 3
+
 // syncWorkspace syncs a git workspace before starting a new session.
 // This ensures agents with persistent clones (like refinery) start with current code.
+// Handles dirty working trees by auto-stashing before pull and restoring after.
 func (d *Daemon) syncWorkspace(workDir string) {
 	// Determine default branch from rig config
 	// workDir is like <townRoot>/<rigName>/<role>/rig or <townRoot>/<rigName>/crew/<name>
@@ -591,6 +596,29 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	// Reset stderr buffer
 	stderr.Reset()
 
+	// Check if working tree is dirty before attempting pull.
+	// "git pull --rebase" fails with "cannot pull with rebase: You have unstaged changes"
+	// on dirty trees, so we auto-stash first and restore after.
+	stashed := false
+	if d.isWorkingTreeDirty(workDir) {
+		d.logger.Printf("Warning: dirty working tree in %s, auto-stashing before pull", workDir)
+		stashCmd := exec.Command("git", "stash", "push", "-u", "-m", "daemon-auto-stash: pre-sync")
+		stashCmd.Dir = workDir
+		stashCmd.Stderr = &stderr
+		stashCmd.Env = os.Environ()
+		if err := stashCmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			d.logger.Printf("Warning: git stash failed in %s: %s, skipping pull", workDir, errMsg)
+			d.recordSyncFailure(workDir)
+			return
+		}
+		stashed = true
+		stderr.Reset()
+	}
+
 	// Pull with rebase to incorporate changes
 	pullCmd := exec.Command("git", "pull", "--rebase", "origin", defaultBranch)
 	pullCmd.Dir = workDir
@@ -601,11 +629,73 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		if errMsg == "" {
 			errMsg = err.Error()
 		}
-		d.logger.Printf("Warning: git pull failed in %s: %s (agent may have conflicts)", workDir, errMsg)
-		// Don't fail - agent can handle conflicts
+		d.recordSyncFailure(workDir)
+		failures := d.getSyncFailures(workDir)
+		if failures >= syncFailureEscalationThreshold {
+			d.logger.Printf("Error: git pull repeatedly failing in %s (%d consecutive failures): %s", workDir, failures, errMsg)
+		} else {
+			d.logger.Printf("Warning: git pull failed in %s (%d consecutive failure(s)): %s", workDir, failures, errMsg)
+		}
+	} else {
+		// Pull succeeded - reset failure counter
+		d.resetSyncFailures(workDir)
+	}
+
+	// Restore stashed changes if we stashed them
+	if stashed {
+		stderr.Reset()
+		popCmd := exec.Command("git", "stash", "pop")
+		popCmd.Dir = workDir
+		popCmd.Stderr = &stderr
+		popCmd.Env = os.Environ()
+		if err := popCmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			d.logger.Printf("Warning: git stash pop failed in %s: %s (stashed changes preserved in stash list)", workDir, errMsg)
+		}
 	}
 
 	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
+}
+
+// isWorkingTreeDirty checks if a git working tree has uncommitted changes.
+func (d *Daemon) isWorkingTreeDirty(workDir string) bool {
+	// "git status --porcelain" outputs nothing if clean
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = workDir
+	cmd.Env = os.Environ()
+	output, err := cmd.Output()
+	if err != nil {
+		// If we can't check, assume dirty to be safe
+		return true
+	}
+	return len(strings.TrimSpace(string(output))) > 0
+}
+
+// recordSyncFailure increments the consecutive failure counter for a workdir.
+func (d *Daemon) recordSyncFailure(workDir string) {
+	if d.syncFailures == nil {
+		d.syncFailures = make(map[string]int)
+	}
+	d.syncFailures[workDir]++
+}
+
+// getSyncFailures returns the consecutive failure count for a workdir.
+func (d *Daemon) getSyncFailures(workDir string) int {
+	if d.syncFailures == nil {
+		return 0
+	}
+	return d.syncFailures[workDir]
+}
+
+// resetSyncFailures clears the failure counter for a workdir after a successful sync.
+func (d *Daemon) resetSyncFailures(workDir string) {
+	if d.syncFailures == nil {
+		return
+	}
+	delete(d.syncFailures, workDir)
 }
 
 // closeMessage removes a lifecycle mail message after processing.
@@ -613,7 +703,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 // doesn't mark messages as read (to preserve handoff messages).
 func (d *Daemon) closeMessage(id string) error {
 	// Use gt mail delete to actually remove the message
-	cmd := exec.Command("gt", "mail", "delete", id)
+	cmd := exec.Command(d.gtPath, "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -651,7 +741,7 @@ func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
 
 // getAgentBeadInfo fetches and parses an agent bead by ID.
 func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
-	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -662,12 +752,13 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 
 	// bd show --json returns an array with one element
 	var issues []struct {
-		ID          string `json:"id"`
-		Type        string `json:"issue_type"`
-		Description string `json:"description"`
-		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"`   // Read from database column
-		AgentState  string `json:"agent_state"` // Read from database column
+		ID          string   `json:"id"`
+		Type        string   `json:"issue_type"`
+		Labels      []string `json:"labels"`
+		Description string   `json:"description"`
+		UpdatedAt   string   `json:"updated_at"`
+		HookBead    string   `json:"hook_bead"`   // Read from database column
+		AgentState  string   `json:"agent_state"` // Read from database column
 	}
 
 	if err := json.Unmarshal(output, &issues); err != nil {
@@ -679,7 +770,15 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	}
 
 	issue := issues[0]
-	if issue.Type != "agent" {
+	// Check for agent type via gt:agent label (preferred) or legacy type field
+	isAgent := issue.Type == "agent"
+	for _, l := range issue.Labels {
+		if l == "gt:agent" {
+			isAgent = true
+			break
+		}
+	}
+	if !isAgent {
 		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, issue.Type)
 	}
 
@@ -703,6 +802,28 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	info.HookBead = issue.HookBead
 
 	return info, nil
+}
+
+// getAgentHookBead re-reads the hook_bead for an agent bead from the database.
+// Used for TOCTOU re-verification before taking destructive action on agents.
+// Returns empty string on error or if no hook_bead is set.
+func (d *Daemon) getAgentHookBead(agentBeadID string) string {
+	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json")
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	var issues []struct {
+		HookBead string `json:"hook_bead"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+	return issues[0].HookBead
 }
 
 // identityToAgentBeadID maps a daemon identity to an agent bead ID.
@@ -789,7 +910,7 @@ func (d *Daemon) checkGUPPViolations() {
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// List polecat agent beads for this rig
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -801,7 +922,6 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 
 	var agents []struct {
 		ID          string `json:"id"`
-		Type        string `json:"issue_type"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
 		HookBead    string `json:"hook_bead"` // Read from database column, not description
@@ -865,7 +985,7 @@ stuck_duration: %v
 Action needed: Check if agent is alive and responsive. Consider restarting if stuck.`,
 		agentID, hookBead, stuckDuration.Round(time.Minute))
 
-	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
@@ -889,7 +1009,7 @@ func (d *Daemon) checkOrphanedWork() {
 
 // checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
@@ -932,11 +1052,22 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 			continue
 		}
 
+		// TOCTOU guard: re-verify agent state before taking action.
+		// Between the bd list above and now, the agent may have been
+		// restarted or its hook_bead cleared. Re-check both conditions.
+		if d.tmux.IsAgentAlive(sessionName) {
+			continue
+		}
+		currentHookBead := d.getAgentHookBead(agent.ID)
+		if currentHookBead == "" {
+			continue
+		}
+
 		// Session dead but has hooked work = orphaned!
 		d.logger.Printf("Orphaned work detected: agent %s session is dead but has hook_bead=%s",
-			agent.ID, agent.HookBead)
+			agent.ID, currentHookBead)
 
-		d.notifyWitnessOfOrphanedWork(rigName, agent.ID, agent.HookBead)
+		d.notifyWitnessOfOrphanedWork(rigName, agent.ID, currentHookBead)
 	}
 }
 
@@ -963,7 +1094,7 @@ hook_bead: %s
 Action needed: Either restart the agent or reassign the work.`,
 		agentID, hookBead)
 
-	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
+	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 

@@ -18,6 +18,8 @@ func TestClassifyMessage(t *testing.T) {
 		{"MERGED valkyrie", ProtoMerged},
 		{"MERGE_FAILED nux", ProtoMergeFailed},
 		{"MERGE_FAILED ace", ProtoMergeFailed},
+		{"MERGE_READY nux", ProtoMergeReady},
+		{"MERGE_READY ace", ProtoMergeReady},
 		{"🤝 HANDOFF: Patrol context", ProtoHandoff},
 		{"🤝HANDOFF: No space", ProtoHandoff},
 		{"SWARM_START", ProtoSwarmStart},
@@ -215,6 +217,63 @@ func TestParseMergeFailed_InvalidSubject(t *testing.T) {
 	_, err := ParseMergeFailed("Not a merge failed", "body")
 	if err == nil {
 		t.Error("ParseMergeFailed() expected error for invalid subject")
+	}
+}
+
+func TestParseMergeReady(t *testing.T) {
+	subject := "MERGE_READY nux"
+	body := `Branch: polecat/nux/gt-abc123
+Issue: gt-abc123
+MR: mr-xyz789
+Polecat: nux
+Verified: clean git state`
+
+	payload, err := ParseMergeReady(subject, body)
+	if err != nil {
+		t.Fatalf("ParseMergeReady() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.Branch != "polecat/nux/gt-abc123" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc123")
+	}
+	if payload.IssueID != "gt-abc123" {
+		t.Errorf("IssueID = %q, want %q", payload.IssueID, "gt-abc123")
+	}
+	if payload.MRID != "mr-xyz789" {
+		t.Errorf("MRID = %q, want %q", payload.MRID, "mr-xyz789")
+	}
+	if payload.ReadyAt.IsZero() {
+		t.Error("ReadyAt should not be zero")
+	}
+}
+
+func TestParseMergeReady_MinimalBody(t *testing.T) {
+	subject := "MERGE_READY ace"
+	body := "Branch: feature-ace"
+
+	payload, err := ParseMergeReady(subject, body)
+	if err != nil {
+		t.Fatalf("ParseMergeReady() error = %v", err)
+	}
+
+	if payload.PolecatName != "ace" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "ace")
+	}
+	if payload.Branch != "feature-ace" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "feature-ace")
+	}
+	if payload.IssueID != "" {
+		t.Errorf("IssueID = %q, want empty", payload.IssueID)
+	}
+}
+
+func TestParseMergeReady_InvalidSubject(t *testing.T) {
+	_, err := ParseMergeReady("Not a merge ready", "body")
+	if err == nil {
+		t.Error("ParseMergeReady() expected error for invalid subject")
 	}
 }
 

@@ -11,6 +11,10 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// maxDogPoolSize is the maximum number of dogs allowed in the pool.
+// Pool dispatch auto-creates dogs up to this limit.
+const maxDogPoolSize = 4
+
 // IsDogTarget checks if target is a dog target pattern.
 // Returns the dog name (or empty for pool dispatch) and true if it's a dog target.
 // Patterns:
@@ -64,6 +68,7 @@ type DogDispatchInfo struct {
 	sessionDelayed bool
 	townRoot       string
 	workDesc       string
+	rigsConfig     *config.RigsConfig
 }
 
 // DispatchToDog finds or spawns a dog for work dispatch.
@@ -112,18 +117,24 @@ func DispatchToDog(dogName string, opts DogDispatchOptions) (*DogDispatchInfo, e
 		}
 
 		if targetDog == nil {
-			if opts.Create {
-				// No idle dogs - create one
-				newName := generateDogName(mgr)
-				targetDog, err = mgr.Add(newName)
-				if err != nil {
-					return nil, fmt.Errorf("creating dog %s: %w", newName, err)
-				}
-				fmt.Printf("✓ Created dog %s (pool was empty)\n", newName)
-				spawned = true
-			} else {
-				return nil, fmt.Errorf("no idle dogs available (use --create to add)")
+			// No idle dogs - auto-create one if pool is under max size.
+			// Pool dispatch means "send to any available dog" - if none exist,
+			// spawning one is the natural behavior (see mol-deacon-patrol:
+			// "Spawn on demand when pool is empty").
+			dogs, listErr := mgr.List()
+			if listErr != nil {
+				return nil, fmt.Errorf("listing dogs: %w", listErr)
 			}
+			if len(dogs) >= maxDogPoolSize {
+				return nil, fmt.Errorf("no idle dogs available (pool at max %d, all busy)", maxDogPoolSize)
+			}
+			newName := generateDogName(mgr)
+			targetDog, err = mgr.Add(newName)
+			if err != nil {
+				return nil, fmt.Errorf("creating dog %s: %w", newName, err)
+			}
+			fmt.Printf("✓ Auto-created dog %s (no idle dogs, pool %d/%d)\n", newName, len(dogs)+1, maxDogPoolSize)
+			spawned = true
 		}
 	}
 
@@ -146,12 +157,13 @@ func DispatchToDog(dogName string, opts DogDispatchOptions) (*DogDispatchInfo, e
 			sessionDelayed: true,
 			townRoot:       townRoot,
 			workDesc:       opts.WorkDesc,
+			rigsConfig:     rigsConfig,
 		}, nil
 	}
 
 	// Ensure dog session is running (start if needed)
 	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, townRoot)
+	sessMgr := dog.NewSessionManager(t, townRoot, mgr)
 
 	sessOpts := dog.SessionStartOptions{
 		WorkDesc: opts.WorkDesc,
@@ -179,7 +191,8 @@ func (d *DogDispatchInfo) StartDelayedSession() (string, error) {
 	}
 
 	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, d.townRoot)
+	mgr := dog.NewManager(d.townRoot, d.rigsConfig)
+	sessMgr := dog.NewSessionManager(t, d.townRoot, mgr)
 
 	opts := dog.SessionStartOptions{
 		WorkDesc: d.workDesc,

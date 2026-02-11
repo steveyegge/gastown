@@ -86,3 +86,41 @@ func cleanupOrphanedClaude(graceSecs int) {
 			style.Bold.Render("✓"))
 	}
 }
+
+// verifyNoOrphans checks that no Claude processes survived shutdown.
+// If any are found, it reports them and attempts a final SIGKILL.
+func verifyNoOrphans() {
+	orphans, err := util.FindOrphanedClaudeProcesses()
+	if err != nil {
+		fmt.Printf("  %s Could not verify: %v\n", style.Bold.Render("⚠"), err)
+		return
+	}
+
+	// Also check for zombie processes (have TTY but no tmux session)
+	zombies, zErr := util.FindZombieClaudeProcesses()
+	if zErr != nil {
+		// Non-fatal, FindOrphanedClaudeProcesses already covered TTY-less ones
+		zombies = nil
+	}
+
+	totalSurvivors := len(orphans) + len(zombies)
+	if totalSurvivors == 0 {
+		fmt.Printf("  %s No orphaned Claude processes detected\n", style.Bold.Render("✓"))
+		return
+	}
+
+	fmt.Printf("  %s %d Claude process(es) survived shutdown:\n",
+		style.Bold.Render("⚠"), totalSurvivors)
+
+	// Kill orphans (TTY-less)
+	for _, o := range orphans {
+		fmt.Printf("    PID %d (%s, age %ds) - sending SIGKILL\n", o.PID, o.Cmd, o.Age)
+		_ = syscall.Kill(o.PID, syscall.SIGKILL)
+	}
+
+	// Kill zombies (have TTY but no tmux session)
+	for _, z := range zombies {
+		fmt.Printf("    PID %d (%s, age %ds, tty %s) - sending SIGKILL\n", z.PID, z.Cmd, z.Age, z.TTY)
+		_ = syscall.Kill(z.PID, syscall.SIGKILL)
+	}
+}
