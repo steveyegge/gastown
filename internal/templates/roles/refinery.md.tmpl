@@ -313,15 +313,10 @@ git branch -d polecat/<worker>           # Delete local polecat branch
 
 **generate-summary**: Summarize this patrol cycle.
 
-**context-check**: Check context usage AND session wall-clock time.
-```bash
-CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
-AGE_HOURS=$(( ($(date +%s) - CREATED) / 3600 ))
-echo "Session age: ${AGE_HOURS}h"
-# If > 4h → EXIT (mandatory, prevents memory bloat)
-```
+**context-check**: Assess session health — check your own RSS (`ps -o rss= -p $$`),
+session age, context usage, and work done. Fresh sessions are cheap; memory bloat is not.
 
-**burn-or-loop**: Decision point (see below).
+**burn-or-loop**: Decision point — continue or handoff (see below).
 
 ### Close Steps as You Work
 ```bash
@@ -346,20 +341,17 @@ Then squash and decide:
 # Squash the wisp to a digest
 bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
 
-# Check session age (MANDATORY circuit breaker)
-CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
-AGE_HOURS=$(( ($(date +%s) - CREATED) / 3600 ))
+# Assess session health: RSS, session age, context, work done
+RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
+echo "RSS: ${RSS_MB} MB"
 
-# EXIT if: session > 4h, OR context HIGH, OR 3+ merges this cycle
-# LOOP if: session <= 4h AND context LOW AND < 3 merges
-
-# Option A: Loop (session young, low context)
+# Option A: Continue (session is healthy and light)
 bd mol wisp mol-refinery-patrol
 bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 # Continue to inbox-check...
 
-# Option B: Exit (session > 4h, high context, or heavy cycle)
-gt handoff -s "Patrol complete" -m "Session age: ${AGE_HOURS}h. Queue: ..."
+# Option B: Hand off (session is getting heavy)
+gt handoff -s "Patrol complete" -m "RSS: ${RSS_MB}MB. Queue: ..."
 ```
 
 **NEVER sleep-poll manually** (e.g., `sleep 30 && bd list`). Use `gt mol step await-signal`.
