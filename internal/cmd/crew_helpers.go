@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -206,13 +207,11 @@ func isInTmuxSession(targetSession string) bool {
 	}
 
 	// Get current session name
-	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
-	out, err := cmd.Output()
+	currentSession, err := tmux.NewTmux().GetCurrentSessionName()
 	if err != nil {
 		return false
 	}
 
-	currentSession := strings.TrimSpace(string(out))
 	return currentSession == targetSession
 }
 
@@ -380,8 +379,7 @@ func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
 // Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
 func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-	out, err := cmd.Output()
+	allSessions, err := tmux.NewTmux().ListSessions()
 	if err != nil {
 		// No tmux server or no sessions
 		return nil, nil
@@ -390,7 +388,7 @@ func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam //
 	prefix := fmt.Sprintf("gt-%s-crew-", rigName)
 	var sessions []string
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range allSessions {
 		if line == "" {
 			continue
 		}
