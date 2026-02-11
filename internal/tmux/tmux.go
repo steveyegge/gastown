@@ -1006,6 +1006,15 @@ func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
 	return nil
 }
 
+// GetSessionName returns the session name for a given pane target (e.g., "%9").
+func (t *Tmux) GetSessionName(pane string) (string, error) {
+	out, err := t.run("display-message", "-t", pane, "-p", "#{session_name}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {
@@ -1030,6 +1039,25 @@ func (t *Tmux) GetPaneID(session string) (string, error) {
 	return lines[0], nil
 }
 
+// ListAllPaneIDs returns all pane IDs across all windows in a session.
+// Uses the -s flag to list panes in all windows (not just the current one).
+func (t *Tmux) ListAllPaneIDs(session string) ([]string, error) {
+	out, err := t.run("list-panes", "-t", session, "-s", "-F", "#{pane_id}")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var panes []string
+	for _, line := range strings.Split(out, "\n") {
+		if line != "" {
+			panes = append(panes, line)
+		}
+	}
+	return panes, nil
+}
+
 // GetPaneWorkDir returns the current working directory of a pane.
 func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_current_path}")
@@ -1046,6 +1074,18 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// ListPanePIDs returns all pane PIDs for a session (one per pane).
+func (t *Tmux) ListPanePIDs(session string) ([]string, error) {
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_pid}")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
 }
 
 // hasChildWithNames checks if a process has a descendant matching any of the given names.
@@ -1165,6 +1205,31 @@ func (t *Tmux) AttachSession(session string) error {
 // SelectWindow selects a window by index.
 func (t *Tmux) SelectWindow(session string, index int) error {
 	_, err := t.run("select-window", "-t", fmt.Sprintf("%s:%d", session, index))
+	return err
+}
+
+// SelectWindowByTarget selects a window by target string (e.g., "session:windowname").
+func (t *Tmux) SelectWindowByTarget(target string) error {
+	_, err := t.run("select-window", "-t", target)
+	return err
+}
+
+// ListWindowNames returns all window names in a session.
+func (t *Tmux) ListWindowNames(session string) ([]string, error) {
+	out, err := t.run("list-windows", "-t", session, "-F", "#{window_name}")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// NewWindow creates a new tmux window with the given name and command.
+func (t *Tmux) NewWindow(session, windowName, workDir, command string) error {
+	args := []string{"new-window", "-t", session, "-n", windowName, "-c", workDir, command}
+	_, err := t.run(args...)
 	return err
 }
 
@@ -1494,6 +1559,15 @@ func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	}
 
 	return info, nil
+}
+
+// GetOption returns the value of a tmux option for a session.
+func (t *Tmux) GetOption(session, option string) (string, error) {
+	out, err := t.run("show-options", "-t", session, option)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // ApplyTheme sets the status bar style for a session.
