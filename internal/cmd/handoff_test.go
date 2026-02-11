@@ -63,6 +63,49 @@ func TestSessionWorkDir(t *testing.T) {
 	}
 }
 
+func TestGetCurrentTmuxSession_EnvFallback(t *testing.T) {
+	// When GT_SESSION is set, getCurrentTmuxSession should return it
+	// without trying to call tmux (which may not be available on K8s).
+	t.Setenv("GT_SESSION", "test-session")
+	t.Setenv("TMUX_SESSION", "")
+
+	result, err := getCurrentTmuxSession()
+	if err != nil {
+		t.Fatalf("getCurrentTmuxSession() returned error: %v", err)
+	}
+	if result != "test-session" {
+		t.Errorf("getCurrentTmuxSession() = %q, want %q", result, "test-session")
+	}
+}
+
+func TestGetCurrentTmuxSession_TMUXSessionFallback(t *testing.T) {
+	// When GT_SESSION is not set but TMUX_SESSION is, it should fall back.
+	t.Setenv("GT_SESSION", "")
+	t.Setenv("TMUX_SESSION", "other-session")
+
+	result, err := getCurrentTmuxSession()
+	if err != nil {
+		t.Fatalf("getCurrentTmuxSession() returned error: %v", err)
+	}
+	if result != "other-session" {
+		t.Errorf("getCurrentTmuxSession() = %q, want %q", result, "other-session")
+	}
+}
+
+func TestGetCurrentTmuxSession_PrefersGTSession(t *testing.T) {
+	// When both GT_SESSION and TMUX_SESSION are set, GT_SESSION wins.
+	t.Setenv("GT_SESSION", "gt-wins")
+	t.Setenv("TMUX_SESSION", "tmux-loses")
+
+	result, err := getCurrentTmuxSession()
+	if err != nil {
+		t.Fatalf("getCurrentTmuxSession() returned error: %v", err)
+	}
+	if result != "gt-wins" {
+		t.Errorf("getCurrentTmuxSession() = %q, want %q (GT_SESSION should take priority)", result, "gt-wins")
+	}
+}
+
 func TestDetectTownRootFromCwd_EnvFallback(t *testing.T) {
 	// Save original env vars and restore after test
 	origTownRoot := os.Getenv("GT_TOWN_ROOT")
