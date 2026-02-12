@@ -485,11 +485,28 @@ coopBroker:
       enabled: false
       sourceRange: []
 
+  # Multiplexer sidecar (coop-mux)
+  mux:
+    enabled: false
+    port: 9800
+    screenPollMs: 500
+    statusPollMs: 2000
+    healthCheckMs: 10000
+    maxHealthFailures: 3
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+
   # Service
   service:
     type: ClusterIP
     port: 8080
     healthPort: 9090
+    muxPort: 9800
 
   # Resources (light — no PTY, no agent)
   resources:

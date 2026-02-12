@@ -471,6 +471,12 @@ func applyCommonConfig(cfg *config.Config, spec *podmanager.AgentPodSpec) {
 			})
 		}
 	}
+
+	// Wire mux registration URL. Agent pods auto-register with the mux
+	// on startup so they appear in the aggregated dashboard.
+	if cfg.CoopMuxURL != "" {
+		spec.Env["COOP_MUX_URL"] = cfg.CoopMuxURL
+	}
 }
 
 // namespaceFromEvent returns the namespace from event metadata or a default.

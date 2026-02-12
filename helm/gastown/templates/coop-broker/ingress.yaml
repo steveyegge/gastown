@@ -10,6 +10,17 @@ spec:
   entryPoints:
     - websecure
   routes:
+    {{- if .Values.coopBroker.mux.enabled }}
+    - match: Host(`{{ .Values.coopBroker.ingress.host }}`) && PathPrefix(`/mux`)
+      kind: Rule
+      services:
+        - name: {{ include "gastown.coopBroker.fullname" . }}
+          port: {{ .Values.coopBroker.service.muxPort }}
+      {{- if .Values.coopBroker.ingress.ipWhitelist.enabled }}
+      middlewares:
+        - name: {{ include "gastown.coopBroker.fullname" . }}-ipwhitelist
+      {{- end }}
+    {{- end }}
     - match: Host(`{{ .Values.coopBroker.ingress.host }}`)
       kind: Rule
       services:

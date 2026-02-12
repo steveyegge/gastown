@@ -107,6 +107,61 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.coopBroker.resources | nindent 12 }}
+        {{- if .Values.coopBroker.mux.enabled }}
+        - name: coop-mux
+          image: "{{ .Values.coopBroker.image.repository }}:{{ .Values.coopBroker.image.tag }}"
+          imagePullPolicy: {{ .Values.coopBroker.image.pullPolicy }}
+          command: ["coop-mux"]
+          args:
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "{{ .Values.coopBroker.mux.port }}"
+            - "--screen-poll-ms"
+            - "{{ .Values.coopBroker.mux.screenPollMs }}"
+            - "--status-poll-ms"
+            - "{{ .Values.coopBroker.mux.statusPollMs }}"
+            - "--health-check-ms"
+            - "{{ .Values.coopBroker.mux.healthCheckMs }}"
+            - "--max-health-failures"
+            - "{{ .Values.coopBroker.mux.maxHealthFailures }}"
+          env:
+            - name: COOP_MUX_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gastown.coopBroker.authTokenSecretName" . }}
+                  key: token
+            - name: RUST_LOG
+              value: "info"
+          ports:
+            - name: mux
+              containerPort: {{ .Values.coopBroker.mux.port }}
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: mux
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: mux
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: mux
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.coopBroker.mux.resources | nindent 12 }}
+        {{- end }}
         {{- if .Values.coopBroker.credentialsSecret }}
         - name: credential-seeder
           image: "{{ .Values.coopBroker.image.repository }}:{{ .Values.coopBroker.image.tag }}"

@@ -52,7 +52,8 @@ RUN set -e; \
     curl -fsSL "https://github.com/groblegark/coop/releases/download/${COOP_VERSION}/coop-linux-${ARCH}.tar.gz" \
       -o /tmp/coop.tar.gz \
     && tar -xzf /tmp/coop.tar.gz -C /usr/local/bin \
-    && chmod +x /usr/local/bin/coop
+    && chmod +x /usr/local/bin/coop \
+    && chmod +x /usr/local/bin/coop-mux 2>/dev/null || true
 
 # Download bd from groblegark/beads releases
 RUN set -e; \
@@ -94,6 +95,7 @@ RUN usermod -l agent -d /home/agent -m ubuntu \
 # Copy binaries
 COPY --from=gt-builder /gt /usr/local/bin/gt
 COPY --from=downloader /usr/local/bin/coop /usr/local/bin/coop
+COPY --from=downloader /usr/local/bin/coop-mux /usr/local/bin/coop-mux
 COPY --from=downloader /usr/local/bin/bd /usr/local/bin/bd
 
 # Copy entrypoint script

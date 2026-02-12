@@ -99,6 +99,10 @@ spec:
             - name: COOP_BROKER_TOKEN_SECRET
               value: {{ include "gastown.coopBroker.authTokenSecretName" . }}
             {{- end }}
+            {{- if and .Values.coopBroker.enabled .Values.coopBroker.mux.enabled }}
+            - name: COOP_MUX_URL
+              value: {{ include "gastown.coopBroker.muxServiceURL" . }}
+            {{- end }}
           resources:
             {{- toYaml .Values.agentController.resources | nindent 12 }}
       {{- with .Values.agentController.nodeSelector }}

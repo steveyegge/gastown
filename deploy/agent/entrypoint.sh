@@ -678,10 +678,71 @@ monitor_agent_exit() {
     done
 }
 
+# ── Mux registration ──────────────────────────────────────────────────────
+# If COOP_MUX_URL is set, register this agent's coop instance with the
+# multiplexer so it appears in the mux dashboard and aggregated WebSocket.
+MUX_SESSION_ID=""
+register_with_mux() {
+    local mux_url="${COOP_MUX_URL}"
+    if [ -z "${mux_url}" ]; then
+        return 0
+    fi
+
+    # Wait for local coop to be healthy
+    for i in $(seq 1 30); do
+        sleep 2
+        curl -sf http://localhost:8080/api/v1/health >/dev/null 2>&1 && break
+    done
+
+    # Use pod hostname as session ID (stable across coop restarts within same pod)
+    local session_id="${HOSTNAME:-$(hostname)}"
+    local coop_url="http://$(hostname -i 2>/dev/null || echo localhost):8080"
+    local auth_token="${COOP_AUTH_TOKEN:-${COOP_BROKER_TOKEN:-}}"
+    local mux_auth="${COOP_MUX_AUTH_TOKEN:-${auth_token}}"
+
+    # Build registration payload
+    local payload
+    payload=$(jq -n \
+        --arg url "${coop_url}" \
+        --arg id "${session_id}" \
+        --arg role "${GT_ROLE:-unknown}" \
+        --arg agent "${GT_AGENT:-unknown}" \
+        '{url: $url, id: $id, metadata: {role: $role, agent: $agent}}')
+
+    # Add auth_token to payload if set
+    if [ -n "${auth_token}" ]; then
+        payload=$(echo "${payload}" | jq --arg t "${auth_token}" '.auth_token = $t')
+    fi
+
+    local result
+    result=$(curl -sf -X POST "${mux_url}/api/v1/sessions" \
+        -H 'Content-Type: application/json' \
+        ${mux_auth:+-H "Authorization: Bearer ${mux_auth}"} \
+        -d "${payload}" 2>&1) || {
+        echo "[entrypoint] WARNING: mux registration failed: ${result}"
+        return 0
+    }
+
+    MUX_SESSION_ID="${session_id}"
+    echo "[entrypoint] Registered with mux as '${session_id}'"
+}
+
+deregister_from_mux() {
+    if [ -z "${COOP_MUX_URL}" ] || [ -z "${MUX_SESSION_ID}" ]; then
+        return 0
+    fi
+    local mux_auth="${COOP_MUX_AUTH_TOKEN:-${COOP_AUTH_TOKEN:-}}"
+    curl -sf -X DELETE "${COOP_MUX_URL}/api/v1/sessions/${MUX_SESSION_ID}" \
+        ${mux_auth:+-H "Authorization: Bearer ${mux_auth}"} >/dev/null 2>&1 || true
+    echo "[entrypoint] Deregistered from mux (${MUX_SESSION_ID})"
+    MUX_SESSION_ID=""
+}
+
 # ── Signal forwarding ─────────────────────────────────────────────────────
 # Forward SIGTERM from K8s to coop so it can do graceful shutdown.
 COOP_PID=""
 forward_signal() {
+    deregister_from_mux
     if [ -n "${COOP_PID}" ]; then
         echo "[entrypoint] Forwarding $1 to coop (pid ${COOP_PID})"
         kill -"$1" "${COOP_PID}" 2>/dev/null || true
@@ -728,7 +789,7 @@ while true; do
         echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT}) with resume"
         ${COOP_CMD} ${RESUME_FLAG} -- claude --dangerously-skip-permissions &
         COOP_PID=$!
-        (auto_bypass_startup && inject_initial_prompt) &
+        (auto_bypass_startup && register_with_mux && inject_initial_prompt) &
         monitor_agent_exit &
         wait "${COOP_PID}" 2>/dev/null && exit_code=0 || exit_code=$?
         COOP_PID=""
@@ -745,7 +806,7 @@ while true; do
         echo "[entrypoint] Starting coop + claude (${ROLE}/${AGENT})"
         ${COOP_CMD} -- claude --dangerously-skip-permissions &
         COOP_PID=$!
-        (auto_bypass_startup && inject_initial_prompt) &
+        (auto_bypass_startup && register_with_mux && inject_initial_prompt) &
         monitor_agent_exit &
         wait "${COOP_PID}" 2>/dev/null && exit_code=0 || exit_code=$?
         COOP_PID=""

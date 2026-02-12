@@ -144,3 +144,10 @@ Coop Broker service URL (for agent pods to register with)
 {{- define "gastown.coopBroker.serviceURL" -}}
 {{- printf "http://%s:%d" (include "gastown.coopBroker.fullname" .) (int .Values.coopBroker.service.port) }}
 {{- end }}
+
+{{/*
+Coop Mux service URL (for dashboard and session management)
+*/}}
+{{- define "gastown.coopBroker.muxServiceURL" -}}
+{{- printf "http://%s:%d" (include "gastown.coopBroker.fullname" .) (int .Values.coopBroker.service.muxPort) }}
+{{- end }}
