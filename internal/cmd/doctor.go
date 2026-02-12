@@ -59,6 +59,9 @@ Crew workspace checks:
   - crew-state               Validate crew worker state.json files (fixable)
   - crew-worktrees           Detect stale cross-rig worktrees (fixable)
 
+Migration checks (fixable):
+  - sparse-checkout          Detect legacy sparse checkout across all rigs
+
 Rig checks (with --rig flag):
   - rig-is-git-repo          Verify rig is a valid git repository
   - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
@@ -179,6 +182,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 	d.Register(doctor.NewClaudeSettingsCheck())
+
+	// Sparse checkout migration (runs across all rigs, not just --rig mode)
+	d.Register(doctor.NewSparseCheckoutCheck())
 
 	// Priming subsystem check
 	d.Register(doctor.NewPrimingCheck())

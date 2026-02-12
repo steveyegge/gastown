@@ -28,11 +28,48 @@ func TestSparseCheckoutCheck_NoRigSpecified(t *testing.T) {
 
 	result := check.Run(ctx)
 
-	if result.Status != StatusError {
-		t.Errorf("expected StatusError when no rig specified, got %v", result.Status)
+	// No rig specified + no rigs found = StatusOK (nothing to check)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no rigs found, got %v", result.Status)
 	}
-	if !strings.Contains(result.Message, "No rig specified") {
-		t.Errorf("expected message about no rig, got %q", result.Message)
+}
+
+func TestSparseCheckoutCheck_TownWideMode(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create two rigs with config.json so discoverRigPaths finds them
+	rig1Dir := filepath.Join(tmpDir, "rig1")
+	rig2Dir := filepath.Join(tmpDir, "rig2")
+
+	// rig1: mayor/rig with legacy sparse checkout
+	mayorRig1 := filepath.Join(rig1Dir, "mayor", "rig")
+	initGitRepo(t, mayorRig1)
+	configureLegacySparseCheckout(t, mayorRig1)
+	if err := os.WriteFile(filepath.Join(rig1Dir, "config.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// rig2: mayor/rig with legacy sparse checkout
+	mayorRig2 := filepath.Join(rig2Dir, "mayor", "rig")
+	initGitRepo(t, mayorRig2)
+	configureLegacySparseCheckout(t, mayorRig2)
+	if err := os.WriteFile(filepath.Join(rig2Dir, "config.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: ""} // no --rig flag
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning in town-wide mode, got %v", result.Status)
+	}
+	if !strings.Contains(result.Message, "2 repo(s) have legacy") {
+		t.Errorf("expected message about 2 repos, got %q", result.Message)
+	}
+	if len(result.Details) != 2 {
+		t.Errorf("expected 2 details, got %d: %v", len(result.Details), result.Details)
 	}
 }
 

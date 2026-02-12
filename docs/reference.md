@@ -407,9 +407,9 @@ at session start. Interactive agents wait for user prompts.
 
 | Problem | Solution |
 |---------|----------|
-| Agent using wrong settings | Check `gt doctor`, verify sparse checkout |
-| Settings not found | Ensure `.claude/settings.json` exists at role home |
-| Source repo settings leaking | Run `gt doctor --fix` to configure sparse checkout |
+| Agent using wrong settings | Check `gt doctor`, verify settings.local.json |
+| Settings not found | Ensure `.claude/settings.local.json` exists at role home |
+| Source repo settings leaking | Run `gt doctor --fix` to remove legacy sparse checkout |
 | Mayor settings affecting polecats | Mayor should run in `mayor/`, not town root |
 
 ## CLI Reference
