@@ -429,3 +429,57 @@ func assertNotSet(t *testing.T, env map[string]string, key string) {
 		t.Errorf("env[%q] should not be set, but is %q", key, env[key])
 	}
 }
+
+func TestSanitizeAgentEnv(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		resolvedEnv map[string]string
+		callerEnv   map[string]string
+		wantKey     bool   // expect NODE_OPTIONS to be present in resolvedEnv
+		wantValue   string // expected value if present
+	}{
+		{
+			name:        "neither map has NODE_OPTIONS — sets empty",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat"},
+			callerEnv:   map[string]string{"GT_ROLE": "polecat"},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "caller provides NODE_OPTIONS — preserved",
+			resolvedEnv: map[string]string{"NODE_OPTIONS": "--max-old-space-size=4096"},
+			callerEnv:   map[string]string{"NODE_OPTIONS": "--max-old-space-size=4096"},
+			wantKey:     true,
+			wantValue:   "--max-old-space-size=4096",
+		},
+		{
+			name:        "rc.Env provides NODE_OPTIONS in resolvedEnv — preserved",
+			resolvedEnv: map[string]string{"NODE_OPTIONS": "--max-old-space-size=8192"},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "--max-old-space-size=8192",
+		},
+		{
+			name:        "empty maps — sets empty",
+			resolvedEnv: map[string]string{},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SanitizeAgentEnv(tt.resolvedEnv, tt.callerEnv)
+			val, ok := tt.resolvedEnv["NODE_OPTIONS"]
+			if ok != tt.wantKey {
+				t.Errorf("NODE_OPTIONS present=%v, want %v", ok, tt.wantKey)
+			}
+			if ok && val != tt.wantValue {
+				t.Errorf("NODE_OPTIONS=%q, want %q", val, tt.wantValue)
+			}
+		})
+	}
+}

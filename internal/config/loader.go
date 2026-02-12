@@ -1557,7 +1557,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		resolvedEnv[k] = v
 	}
 
-	sanitizeAgentEnv(resolvedEnv, envVars)
+	SanitizeAgentEnv(resolvedEnv, envVars)
 
 	// Build environment export prefix
 	var exports []string
@@ -1587,15 +1587,19 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	return cmd
 }
 
-// sanitizeAgentEnv clears environment variables that are known to break agent
+// SanitizeAgentEnv clears environment variables that are known to break agent
 // startup when inherited from the parent shell/tmux environment.
-// The callerEnv map is checked so that intentionally-provided values (via envVars
-// or RuntimeConfig.Env) are preserved.
-func sanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
+//
+// callerEnv is the original env map from the caller (before rc.Env merging).
+// resolvedEnv is the post-merge map that may also contain values from rc.Env.
+// NODE_OPTIONS is only cleared if neither callerEnv nor resolvedEnv (via rc.Env)
+// explicitly provides it.
+func SanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
 	// NODE_OPTIONS may contain debugger flags (e.g., --inspect from VSCode)
 	// that cause Claude's Node.js runtime to crash with "Debugger attached" errors.
-	// Only clear if not explicitly provided by the caller.
+	// Only clear if not explicitly provided by the caller or agent config (rc.Env).
 	if _, ok := callerEnv["NODE_OPTIONS"]; !ok {
+		// Inner guard: preserve if rc.Env already set it in resolvedEnv
 		if _, ok := resolvedEnv["NODE_OPTIONS"]; !ok {
 			resolvedEnv["NODE_OPTIONS"] = ""
 		}
@@ -1699,7 +1703,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		resolvedEnv[k] = v
 	}
 
-	sanitizeAgentEnv(resolvedEnv, envVars)
+	SanitizeAgentEnv(resolvedEnv, envVars)
 
 	// Build environment export prefix
 	var exports []string

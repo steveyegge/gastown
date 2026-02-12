@@ -479,6 +479,10 @@ func buildRestartCommand(sessionName string) (string, error) {
 		}
 	}
 
+	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
+	// from being inherited through tmux into Claude's Node.js runtime.
+	exports = append(exports, "NODE_OPTIONS=")
+
 	if len(exports) > 0 {
 		return fmt.Sprintf("cd %s && export %s && exec %s", workDir, strings.Join(exports, " "), runtimeCmd), nil
 	}
