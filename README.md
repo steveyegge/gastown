@@ -307,7 +307,7 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 
 **Notes:**
 
-- Claude uses hooks in `.claude/settings.json` for mail injection and startup.
+- Claude uses hooks in `.claude/settings.local.json` for mail injection and startup.
 - For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
   `~/.codex/config.toml` so role instructions are picked up.
 - For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback

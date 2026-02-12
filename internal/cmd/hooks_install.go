@@ -174,7 +174,13 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 			if entries, err := os.ReadDir(polecatsDir); err == nil {
 				for _, e := range entries {
 					if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-						targets = append(targets, filepath.Join(polecatsDir, e.Name()))
+						// New layout: polecats/<name>/<rigname>/ is the worktree
+						// Fall back to polecats/<name>/ for legacy layout
+						polecatWorkDir := filepath.Join(polecatsDir, e.Name(), rig)
+						if _, err := os.Stat(polecatWorkDir); err != nil {
+							polecatWorkDir = filepath.Join(polecatsDir, e.Name())
+						}
+						targets = append(targets, polecatWorkDir)
 					}
 				}
 			}

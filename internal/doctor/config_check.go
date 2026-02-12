@@ -554,14 +554,21 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 			}
 		}
 
-		// Polecats - settings in worktree (polecats/<name>/<rigname>/)
+		// Polecats - settings in worktree (polecats/<name>/<rigname>/ or legacy polecats/<name>/)
 		polecatsPath := filepath.Join(rig, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
+					// New layout: polecats/<name>/<rigname>/
 					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.local.json")
 					if _, err := os.Stat(polecatSettings); err == nil {
 						files = append(files, polecatSettings)
+					} else {
+						// Legacy layout: polecats/<name>/
+						legacySettings := filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.local.json")
+						if _, err := os.Stat(legacySettings); err == nil {
+							files = append(files, legacySettings)
+						}
 					}
 				}
 			}

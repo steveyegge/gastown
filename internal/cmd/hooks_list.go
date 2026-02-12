@@ -14,8 +14,8 @@ import (
 
 var hooksListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Show all managed settings.json locations",
-	Long: `Show all managed .claude/settings.json locations and their sync status.
+	Short: "Show all managed settings.local.json locations",
+	Long: `Show all managed .claude/settings.local.json locations and their sync status.
 
 Displays each target with its override chain and whether it is
 currently in sync with the base + overrides configuration.
@@ -89,7 +89,7 @@ func buildTargetInfo(target hooks.Target) listTargetInfo {
 		}
 	}
 
-	// Check if settings.json exists
+	// Check if settings.local.json exists
 	_, err := os.Stat(target.Path)
 	exists := err == nil
 

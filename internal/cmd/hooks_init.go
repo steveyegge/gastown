@@ -13,10 +13,10 @@ var hooksInitDryRun bool
 
 var hooksInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Bootstrap base config from existing settings.json files",
-	Long: `Bootstrap the hooks base config by analyzing existing settings.json files.
+	Short: "Bootstrap base config from existing settings.local.json files",
+	Long: `Bootstrap the hooks base config by analyzing existing settings.local.json files.
 
-This scans all managed .claude/settings.json files in the workspace,
+This scans all managed .claude/settings.local.json files in the workspace,
 finds hooks that are common across all targets (becomes the base config),
 and identifies per-target differences (becomes overrides).
 

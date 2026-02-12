@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/hooks"
@@ -115,7 +116,7 @@ func (c *HooksSyncCheck) Fix(ctx *CheckContext) error {
 		}
 		current.EnabledPlugins["beads@beads-marketplace"] = false
 
-		claudeDir := target.Path[:len(target.Path)-len("/settings.local.json")]
+		claudeDir := filepath.Dir(target.Path)
 		if err := os.MkdirAll(claudeDir, 0755); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: creating dir: %v", target.DisplayKey(), err))
 			continue

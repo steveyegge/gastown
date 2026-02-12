@@ -16,7 +16,7 @@ var hooksDiffCmd = &cobra.Command{
 	Short: "Show what sync would change",
 	Long: `Show what 'gt hooks sync' would change without applying.
 
-Compares the current .claude/settings.json files against what would
+Compares the current .claude/settings.local.json files against what would
 be generated from base + overrides. Uses color to highlight additions
 and removals.
 

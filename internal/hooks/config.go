@@ -272,8 +272,14 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			if polecats, err := os.ReadDir(polecatsDir); err == nil {
 				for _, p := range polecats {
 					if p.IsDir() && !strings.HasPrefix(p.Name(), ".") {
+						// New layout: polecats/<name>/<rigname>/ is the worktree
+						// Fall back to polecats/<name>/ for legacy layout
+						polecatWorkDir := filepath.Join(polecatsDir, p.Name(), rigName)
+						if _, err := os.Stat(polecatWorkDir); err != nil {
+							polecatWorkDir = filepath.Join(polecatsDir, p.Name())
+						}
 						targets = append(targets, Target{
-							Path: filepath.Join(polecatsDir, p.Name(), ".claude", "settings.local.json"),
+							Path: filepath.Join(polecatWorkDir, ".claude", "settings.local.json"),
 							Key:  rigName + "/polecats",
 							Rig:  rigName,
 							Role: "polecats",

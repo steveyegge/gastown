@@ -4,7 +4,7 @@ Centralized Claude Code hook management for Gas Town workspaces.
 
 ## Overview
 
-Gas Town manages `.claude/settings.json` files across all agent locations
+Gas Town manages `.claude/settings.local.json` files across all agent locations
 (mayor, deacon, crew, witness, refinery, polecats). The hooks system provides
 a single source of truth with a base config and per-role/per-rig overrides.
 
@@ -32,21 +32,21 @@ Each rig generates settings for these locations:
 
 | Target | Path | Override Key |
 |--------|------|--------------|
-| Rig root | `<rig>/.claude/settings.json` | `<rig>/rig` |
-| Crew (shared) | `<rig>/crew/.claude/settings.json` | `<rig>/crew` |
-| Witness | `<rig>/witness/.claude/settings.json` | `<rig>/witness` |
-| Refinery | `<rig>/refinery/.claude/settings.json` | `<rig>/refinery` |
-| Polecats (shared) | `<rig>/polecats/.claude/settings.json` | `<rig>/polecats` |
+| Rig root | `<rig>/.claude/settings.local.json` | `<rig>/rig` |
+| Crew (shared) | `<rig>/crew/.claude/settings.local.json` | `<rig>/crew` |
+| Witness | `<rig>/witness/.claude/settings.local.json` | `<rig>/witness` |
+| Refinery | `<rig>/refinery/.claude/settings.local.json` | `<rig>/refinery` |
+| Polecats (shared) | `<rig>/polecats/.claude/settings.local.json` | `<rig>/polecats` |
 
 Town-level targets:
-- `mayor/.claude/settings.json` (key: `mayor`)
-- `deacon/.claude/settings.json` (key: `deacon`)
+- `mayor/.claude/settings.local.json` (key: `mayor`)
+- `deacon/.claude/settings.local.json` (key: `deacon`)
 
 ## Commands
 
 ### `gt hooks sync`
 
-Regenerate all `.claude/settings.json` files from base + overrides.
+Regenerate all `.claude/settings.local.json` files from base + overrides.
 Preserves non-hooks fields (editorMode, enabledPlugins, etc.).
 
 ```bash
@@ -84,7 +84,7 @@ gt hooks override crew --show       # Print current override
 
 ### `gt hooks list`
 
-Show all managed settings.json locations and their sync status.
+Show all managed settings.local.json locations and their sync status.
 
 ```bash
 gt hooks list             # Show all targets
@@ -103,7 +103,7 @@ gt hooks scan --json      # JSON output
 
 ### `gt hooks init`
 
-Bootstrap base config from existing settings.json files. Analyzes all
+Bootstrap base config from existing settings.local.json files. Analyzes all
 current settings, extracts common hooks as the base, and creates overrides
 for per-target differences.
 
@@ -133,7 +133,7 @@ new rig's targets (crew, witness, refinery, polecats).
 
 ### `gt doctor`
 
-The `hooks-sync` check verifies all settings.json files match what
+The `hooks-sync` check verifies all settings.local.json files match what
 `gt hooks sync` would generate. Use `gt doctor --fix` to auto-fix
 out-of-sync targets.
 
