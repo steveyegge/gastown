@@ -37,6 +37,14 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	// Deprecation warning for K8s namespaces
+	if os.Getenv("BEADS_DOLT_SERVER_MODE") == "1" {
+		fmt.Fprintf(os.Stderr, "%s gt init is deprecated for K8s namespaces.\n"+
+			"  Directory setup is handled by the entrypoint script.\n"+
+			"  DB seeding is handled by: gt bootstrap --town <name> --seed-config\n\n",
+			style.Warning.Render("⚠"))
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
