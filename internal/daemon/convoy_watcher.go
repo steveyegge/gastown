@@ -85,7 +85,7 @@ func (w *ConvoyWatcher) run() {
 
 // watchActivity starts bd activity and processes events until error or context cancellation.
 func (w *ConvoyWatcher) watchActivity() error {
-	cmd := exec.CommandContext(w.ctx, "bd", "activity", "--follow", "--town", "--json")
+	cmd := exec.CommandContext(w.ctx, "bd", "activity", "--follow", "--town", "--json", "--no-daemon")
 	cmd.Dir = w.townRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
