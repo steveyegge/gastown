@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -45,8 +46,7 @@ func initDecisionBeadsDB(t *testing.T, dir, prefix string) {
 	t.Helper()
 
 	beadsDir := filepath.Join(dir, ".beads")
-	cmd := exec.Command("bd", "--sandbox", "init", "--quiet", "--prefix", prefix)
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, "--sandbox", "init", "--quiet", "--prefix", prefix)
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)

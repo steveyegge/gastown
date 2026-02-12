@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -107,8 +108,7 @@ func setupRoutingTestTown(t *testing.T) string {
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--sandbox", "init", "--quiet", "--prefix", prefix)
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, "--sandbox", "init", "--quiet", "--prefix", prefix)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
 	}
@@ -127,12 +127,10 @@ func createTestIssue(t *testing.T, dir, title string) *beads.Issue {
 
 	args := []string{"--sandbox", "create", "--json", "--title", title, "--type", "task",
 		"--description", "Integration test issue"}
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, args...)
 	output, err := cmd.Output()
 	if err != nil {
-		combinedCmd := exec.Command("bd", args...)
-		combinedCmd.Dir = dir
+		combinedCmd := bdcmd.CommandInDir(dir, args...)
 		combinedOutput, _ := combinedCmd.CombinedOutput()
 		t.Fatalf("create issue in %s: %v\n%s", dir, err, combinedOutput)
 	}

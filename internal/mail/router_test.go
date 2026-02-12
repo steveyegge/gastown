@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 )
 
 func TestDetectTownRoot(t *testing.T) {
@@ -980,24 +982,21 @@ func TestValidateRecipient(t *testing.T) {
 	}
 
 	// Initialize beads database with "gt" prefix (matches agent bead IDs)
-	cmd := exec.Command("bd", "init", "gt")
-	cmd.Dir = townRoot
+	cmd := bdcmd.CommandInDir(townRoot, "init", "gt")
 	cmd.Env = cleanEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, out)
 	}
 
 	// Set issue prefix to "gt" (matches agent bead ID pattern)
-	cmd = exec.Command("bd", "config", "set", "issue_prefix", "gt")
-	cmd.Dir = townRoot
+	cmd = bdcmd.CommandInDir(townRoot, "config", "set", "issue_prefix", "gt")
 	cmd.Env = cleanEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd config set issue_prefix failed: %v\n%s", err, out)
 	}
 
 	// Register custom types (agent, message, etc.) - required before creating agents
-	cmd = exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request")
-	cmd.Dir = townRoot
+	cmd = bdcmd.CommandInDir(townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request")
 	cmd.Env = cleanEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd config set types.custom failed: %v\n%s", err, out)
@@ -1005,8 +1004,7 @@ func TestValidateRecipient(t *testing.T) {
 
 	// Create test agent beads
 	createAgent := func(id, title string) {
-		cmd := exec.Command("bd", "create", title, "--type=agent", "--id="+id, "--force")
-		cmd.Dir = townRoot
+		cmd := bdcmd.CommandInDir(townRoot, "create", title, "--type=agent", "--id="+id, "--force")
 		cmd.Env = cleanEnv
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("creating agent %s: %v\n%s", id, err, out)

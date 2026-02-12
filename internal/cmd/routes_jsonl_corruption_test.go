@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 )
 
 // TestRoutesJSONLCorruption tests that routes.jsonl is not corrupted by bd auto-export.
@@ -60,8 +62,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		}
 
 		// Create an issue and verify routes.jsonl is still valid
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create", "--type", "task", "--title", "test issue")
-		cmd.Dir = townRoot
+		cmd = bdcmd.CommandInDir(townRoot, "--no-daemon", "-q", "create", "--type", "task", "--title", "test issue")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd create failed: %v\nOutput: %s", err, output)
 		}
@@ -133,8 +134,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		os.MkdirAll(beadsDir, 0755)
 
 		// Initialize beads
-		cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
-		cmd.Dir = tmpDir
+		cmd := bdcmd.CommandInDir(tmpDir, "--no-daemon", "init", "--prefix", "test", "--quiet")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
 		}
@@ -151,8 +151,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		}
 
 		// Create an issue - this triggers auto-export
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create", "--type", "task", "--title", "bug reproduction")
-		cmd.Dir = tmpDir
+		cmd = bdcmd.CommandInDir(tmpDir, "--no-daemon", "-q", "create", "--type", "task", "--title", "bug reproduction")
 		cmd.CombinedOutput() // Ignore error - we're testing the corruption
 
 		// Check if routes.jsonl was corrupted

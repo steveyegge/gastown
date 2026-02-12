@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -107,12 +108,11 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 
 	// Verify prefix by running bd config get issue_prefix
 	// Use --no-daemon to avoid daemon startup issues in test environment
-	bdCmd := exec.Command("bd", "--no-daemon", "config", "get", "issue_prefix")
-	bdCmd.Dir = hqPath
+	bdCmd := bdcmd.CommandInDir(hqPath, "--no-daemon", "config", "get", "issue_prefix")
 	prefixOutput, err := bdCmd.Output() // Use Output() to get only stdout
 	if err != nil {
 		// If Output() fails, try CombinedOutput for better error info
-		combinedOut, _ := exec.Command("bd", "--no-daemon", "config", "get", "issue_prefix").CombinedOutput()
+		combinedOut, _ := bdcmd.Command("--no-daemon", "config", "get", "issue_prefix").CombinedOutput()
 		t.Fatalf("bd config get issue_prefix failed: %v\nOutput: %s", err, combinedOut)
 	}
 
@@ -315,12 +315,10 @@ func assertFileExists(t *testing.T, path, name string) {
 
 func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 	t.Helper()
-	cmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
-	cmd.Dir = townRoot
+	cmd := bdcmd.CommandInDir(townRoot, "--no-daemon", "--json", "slot", "show", issueID)
 	output, err := cmd.Output()
 	if err != nil {
-		debugCmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
-		debugCmd.Dir = townRoot
+		debugCmd := bdcmd.CommandInDir(townRoot, "--no-daemon", "--json", "slot", "show", issueID)
 		combined, _ := debugCmd.CombinedOutput()
 		t.Fatalf("bd slot show %s failed: %v\nOutput: %s", issueID, err, combined)
 	}

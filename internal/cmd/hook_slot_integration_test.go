@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -74,8 +75,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 func initBeadsDB(t *testing.T, dir string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--no-daemon", "init")
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, "--no-daemon", "init")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, output)
 	}

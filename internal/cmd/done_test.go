@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -322,8 +322,7 @@ func TestGetIssueFromAgentHook(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Initialize the beads database
-			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
-			cmd.Dir = tmpDir
+			cmd := bdcmd.CommandInDir(tmpDir, "--no-daemon", "init", "--prefix", "test", "--quiet")
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("bd init: %v\n%s", err, output)
 			}

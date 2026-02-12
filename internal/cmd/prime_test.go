@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -389,8 +390,7 @@ func TestDetectSessionState(t *testing.T) {
 		townRoot := workDir
 
 		// Initialize beads database
-		initCmd := exec.Command("bd", "init", "--prefix=bd-")
-		initCmd.Dir = workDir
+		initCmd := bdcmd.CommandInDir(workDir, "init", "--prefix=bd-")
 		if output, err := initCmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd init failed: %v\n%s", err, output)
 		}

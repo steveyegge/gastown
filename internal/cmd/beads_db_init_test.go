@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 )
 
 // createTrackedBeadsRepoWithIssues creates a git repo with .beads/ tracked that contains existing issues.
@@ -69,17 +71,15 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 	}
 
 	// Run bd init
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
-	cmd.Dir = path
+	cmd := bdcmd.CommandInDir(path, "--no-daemon", "init", "--prefix", prefix)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
 	}
 
 	// Create issues
 	for i := 1; i <= numIssues; i++ {
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create",
+		cmd = bdcmd.CommandInDir(path, "--no-daemon", "-q", "create",
 			"--type", "task", "--title", fmt.Sprintf("Test issue %d", i))
-		cmd.Dir = path
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd create issue %d failed: %v\nOutput: %s", i, err, output)
 		}
@@ -161,9 +161,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		// NOW TRY TO USE bd - this is the key test for the bug
 		// Without the fix, beads.db doesn't exist and bd operations fail
 		rigPath := filepath.Join(townRoot, "myrig", "mayor", "rig")
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = bdcmd.CommandInDir(rigPath, "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-rig")
-		cmd.Dir = rigPath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (bug!): %v\nOutput: %s\n\nThis is the bug: beads.db doesn't exist after clone because bd init was never run", err, output)
@@ -220,9 +219,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 
 		// Verify bd operations work with the configured prefix
 		rigPath := filepath.Join(townRoot, "emptyrig", "mayor", "rig")
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = bdcmd.CommandInDir(rigPath, "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-empty-repo")
-		cmd.Dir = rigPath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed: %v\nOutput: %s", err, output)
@@ -319,9 +317,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 
 		// Verify bd operations work - the key test is that beads.db was initialized
 		rigPath := filepath.Join(townRoot, "testrig", "mayor", "rig")
-		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
+		cmd = bdcmd.CommandInDir(rigPath, "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-derived-prefix")
-		cmd.Dir = rigPath
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (beads.db not initialized?): %v\nOutput: %s", err, output)
@@ -392,8 +389,7 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 	}
 
 	// Run bd init (creates beads.db but no issues)
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
-	cmd.Dir = path
+	cmd := bdcmd.CommandInDir(path, "--no-daemon", "init", "--prefix", prefix)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
 	}

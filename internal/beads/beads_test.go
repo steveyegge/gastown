@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 )
 
 // TestReadDaemonConfig verifies that readDaemonConfig reads daemon-host and
@@ -211,8 +212,7 @@ func TestIntegration(t *testing.T) {
 	// consistent data and prevents flaky test failures.
 	// We use --allow-stale to handle cases where the daemon is actively writing and
 	// the staleness check would otherwise fail spuriously.
-	syncCmd := exec.Command("bd", "--no-daemon", "--allow-stale", "import")
-	syncCmd.Dir = dir
+	syncCmd := bdcmd.CommandInDir(dir, "--no-daemon", "--allow-stale", "import")
 	if err := syncCmd.Run(); err != nil {
 		// If import fails (e.g., no database exists), just log and continue
 		t.Logf("bd import failed (may not have db): %v", err)

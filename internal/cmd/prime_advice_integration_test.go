@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -112,8 +113,7 @@ func createAdvice(t *testing.T, dir, title, description string, labels []string)
 	}
 	args = append(args, "--json")
 
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bd advice add failed in %s: %v\n%s", dir, err, output)
@@ -144,8 +144,7 @@ func createAdvice(t *testing.T, dir, title, description string, labels []string)
 func listAdviceForAgent(t *testing.T, dir, agentID string) []AdviceBead {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--sandbox", "advice", "list", "--for="+agentID, "--json")
-	cmd.Dir = dir
+	cmd := bdcmd.CommandInDir(dir, "--sandbox", "advice", "list", "--for="+agentID, "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		// Silently return empty if command fails (e.g., no advice)
@@ -344,11 +343,10 @@ func TestAdviceEndToEndFlow(t *testing.T) {
 	// Step 1: Create advice with --rig flag (using shorthand)
 	t.Run("create_with_rig_shorthand", func(t *testing.T) {
 		// Use bd advice add --rig=gastown
-		cmd := exec.Command("bd", "--sandbox", "advice", "add",
+		cmd := bdcmd.CommandInDir(gasRigPath, "--sandbox", "advice", "add",
 			"Rig shorthand test",
 			"--rig=gastown",
 			"-d", "Created with --rig shorthand")
-		cmd.Dir = gasRigPath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd advice add --rig failed: %v\n%s", err, output)
@@ -372,11 +370,10 @@ func TestAdviceEndToEndFlow(t *testing.T) {
 	// Step 2: Create global advice (with -l global)
 	t.Run("create_global_advice", func(t *testing.T) {
 		// Create global advice in gastown rig
-		cmd := exec.Command("bd", "--sandbox", "advice", "add",
+		cmd := bdcmd.CommandInDir(gasRigPath, "--sandbox", "advice", "add",
 			"Global flow test",
 			"-l", "global",
 			"-d", "Created as global advice")
-		cmd.Dir = gasRigPath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd advice add global failed in gastown: %v\n%s", err, output)
@@ -384,11 +381,10 @@ func TestAdviceEndToEndFlow(t *testing.T) {
 
 		// Also create in beads rig (global advice needs to be in each database
 		// where agents query - this reflects the decentralized beads architecture)
-		cmd2 := exec.Command("bd", "--sandbox", "advice", "add",
+		cmd2 := bdcmd.CommandInDir(beadsRigPath, "--sandbox", "advice", "add",
 			"Global flow test",
 			"-l", "global",
 			"-d", "Created as global advice")
-		cmd2.Dir = beadsRigPath
 		output2, err2 := cmd2.CombinedOutput()
 		if err2 != nil {
 			t.Fatalf("bd advice add global failed in beads: %v\n%s", err2, output2)
@@ -413,11 +409,10 @@ func TestAdviceEndToEndFlow(t *testing.T) {
 	// So advice with BOTH rig:X AND role:Y is visible to ALL agents in rig X.
 	// To test role-only isolation, we create advice with ONLY the role label.
 	t.Run("create_with_role_shorthand", func(t *testing.T) {
-		cmd := exec.Command("bd", "--sandbox", "advice", "add",
+		cmd := bdcmd.CommandInDir(gasRigPath, "--sandbox", "advice", "add",
 			"Witness role test",
 			"--role=witness", // Only role label, no rig
 			"-d", "Created with --role shorthand for witness")
-		cmd.Dir = gasRigPath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd advice add --role failed: %v\n%s", err, output)
@@ -455,11 +450,10 @@ func TestAdviceAgentSpecific(t *testing.T) {
 	initBeadsDBWithPrefix(t, beadsRigPath, "bd")
 
 	// Create agent-specific advice for gastown/polecats/alpha
-	cmd := exec.Command("bd", "--sandbox", "advice", "add",
+	cmd := bdcmd.CommandInDir(gasRigPath, "--sandbox", "advice", "add",
 		"Alpha-specific advice",
 		"--agent=gastown/polecats/alpha",
 		"-d", "Only alpha should see this")
-	cmd.Dir = gasRigPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bd advice add --agent failed: %v\n%s", err, output)

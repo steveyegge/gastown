@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -132,14 +133,13 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 
 	// Create a session.ended event in TOWN beads (simulating mayor/deacon)
 	townEventPayload := `{"cost_usd":1.50,"session_id":"hq-mayor","role":"mayor","ended_at":"2026-01-12T10:00:00Z"}`
-	townEventCmd := exec.Command("bd", "create",
+	townEventCmd := bdcmd.CommandInDir(townRoot, "create",
 		"--type=event",
 		"--title=Town session ended",
 		"--event-category=session.ended",
 		"--event-payload="+townEventPayload,
 		"--json",
 	)
-	townEventCmd.Dir = townRoot
 	townEventCmd.Env = filterGTEnv(os.Environ())
 	townOut, err := townEventCmd.CombinedOutput()
 	if err != nil {
@@ -149,14 +149,13 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 
 	// Create a session.ended event in RIG beads (simulating polecat)
 	rigEventPayload := `{"cost_usd":2.50,"session_id":"gt-testrig-toast","role":"polecat","rig":"testrig","worker":"toast","ended_at":"2026-01-12T11:00:00Z"}`
-	rigEventCmd := exec.Command("bd", "create",
+	rigEventCmd := bdcmd.CommandInDir(rigPath, "create",
 		"--type=event",
 		"--title=Rig session ended",
 		"--event-category=session.ended",
 		"--event-payload="+rigEventPayload,
 		"--json",
 	)
-	rigEventCmd.Dir = rigPath
 	rigEventCmd.Env = filterGTEnv(os.Environ())
 	rigOut, err := rigEventCmd.CombinedOutput()
 	if err != nil {
@@ -165,16 +164,14 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	t.Logf("Created rig event: %s", string(rigOut))
 
 	// Verify events are in separate databases by querying each directly
-	townListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
-	townListCmd.Dir = townRoot
+	townListCmd := bdcmd.CommandInDir(townRoot, "list", "--type=event", "--all", "--json")
 	townListCmd.Env = filterGTEnv(os.Environ())
 	townListOut, err := townListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing town events: %v\n%s", err, townListOut)
 	}
 
-	rigListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
-	rigListCmd.Dir = rigPath
+	rigListCmd := bdcmd.CommandInDir(rigPath, "list", "--type=event", "--all", "--json")
 	rigListCmd.Env = filterGTEnv(os.Environ())
 	rigListOut, err := rigListCmd.CombinedOutput()
 	if err != nil {
