@@ -291,7 +291,7 @@ These are set in tmux session environment when agents are spawned.
 |------|---------------|
 | **Mayor** | `GT_ROLE=mayor`, `BD_ACTOR=mayor` |
 | **Deacon** | `GT_ROLE=deacon`, `BD_ACTOR=deacon` |
-| **Boot** | `GT_ROLE=boot`, `BD_ACTOR=deacon-boot` |
+| **Boot** | `GT_ROLE=deacon/boot`, `BD_ACTOR=deacon-boot` |
 | **Witness** | `GT_ROLE=witness`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/witness` |
 | **Refinery** | `GT_ROLE=refinery`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/refinery` |
 | **Polecat** | `GT_ROLE=polecat`, `GT_RIG=<rig>`, `GT_POLECAT=<name>`, `BD_ACTOR=<rig>/polecats/<name>` |

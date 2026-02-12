@@ -340,7 +340,10 @@ func parseRoleString(s string) (Role, string, string) {
 	switch parts[1] {
 	case "boot":
 		// Handle compound "deacon/boot" format from GT_ROLE env var
-		return RoleBoot, "", ""
+		if rig == "deacon" && len(parts) == 2 {
+			return RoleBoot, "", ""
+		}
+		return Role(s), "", ""
 	case "witness":
 		return RoleWitness, rig, ""
 	case "refinery":
