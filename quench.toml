@@ -48,9 +48,8 @@ check = "error"
 scope = "branch"
 exclude = ["**/main.go", "gen/**", "mobile/gen/**"]
 
-# Suite disabled until pre-existing failures are fixed (26 failing)
-# [[check.tests.suite]]
-# runner = "go"
+[[check.tests.suite]]
+runner = "go"
 
 [check.tests.time]
 check = "warn"

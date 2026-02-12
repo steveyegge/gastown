@@ -957,9 +957,13 @@ func TestValidateRecipient(t *testing.T) {
 
 	// Create isolated beads environment for testing.
 	// Override HOME so bd doesn't read ~/.beads/config.yaml (which may set
-	// daemon-host), and strip daemon env vars.
+	// daemon-host), and strip daemon env vars. Set process-level env too so
+	// the Router's internal bd calls also use the test environment.
 	tmpDir := t.TempDir()
 	townRoot := tmpDir
+	t.Setenv("BD_DAEMON_HOST", "")
+	t.Setenv("BD_DAEMON_TOKEN", "")
+	t.Setenv("HOME", tmpDir)
 
 	cleanEnv := []string{
 		"HOME=" + tmpDir,
@@ -1015,6 +1019,15 @@ func TestValidateRecipient(t *testing.T) {
 	createAgent("gt-testrig-witness", "Test witness")
 	createAgent("gt-testrig-crew-alice", "Test crew alice")
 	createAgent("gt-testrig-polecat-bob", "Test polecat bob")
+
+	// runBdCommand doesn't set cmd.Dir, so bd inherits CWD. Change to
+	// the test town root so bd won't discover the gastown repo's
+	// .beads/config.yaml (which sets daemon-host, routing queries away).
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir to town root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	r := NewRouterWithTownRoot(townRoot, townRoot)
 
