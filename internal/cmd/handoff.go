@@ -483,9 +483,14 @@ func buildRestartCommand(sessionName string) (string, error) {
 
 	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
 	// from being inherited through tmux into Claude's Node.js runtime.
-	// Only clear if the agent's runtime config doesn't explicitly set it
-	// (e.g., for memory tuning via --max-old-space-size in rc.toml [agents.X.env]).
-	if _, hasNodeOpts := agentEnv["NODE_OPTIONS"]; !hasNodeOpts {
+	// When the agent's runtime config explicitly sets NODE_OPTIONS (e.g., for
+	// memory tuning via --max-old-space-size in rc.toml [agents.X.env]), export
+	// that value so it survives handoff. Otherwise clear it.
+	// Note: agentEnv is intentionally nil when gtRole is empty (non-role handoffs),
+	// which causes the nil map lookup to return ("", false) — clearing NODE_OPTIONS.
+	if val, hasNodeOpts := agentEnv["NODE_OPTIONS"]; hasNodeOpts {
+		exports = append(exports, "NODE_OPTIONS="+val)
+	} else {
 		exports = append(exports, "NODE_OPTIONS=")
 	}
 

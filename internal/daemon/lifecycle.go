@@ -480,7 +480,10 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Topic:     "lifecycle-restart",
 	}, "Check your hook and begin work.")
 
-	// Build default command using the role-resolved runtime config
+	// Build default command using the role-resolved runtime config.
+	// PrependEnv produces "export K=V ... && exec cmd" which is safe for
+	// WaitForCommand/pane_current_command detection: exec replaces the shell,
+	// so tmux sees the agent process, not a shell running exports.
 	defaultEnv := map[string]string{}
 	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 		defaultEnv["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv

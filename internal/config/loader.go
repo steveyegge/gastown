@@ -1590,6 +1590,12 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 // SanitizeAgentEnv clears environment variables that are known to break agent
 // startup when inherited from the parent shell/tmux environment.
 //
+// This is a SUPPLEMENTAL guard for paths that don't use AgentEnv() (which is
+// the primary guard — see env.go). It protects: lifecycle.go's default path
+// (non-polecat/non-crew roles) and handoff.go's manual export building.
+// For callers that pass AgentEnv()-produced maps, this is a no-op since
+// AgentEnv() already sets NODE_OPTIONS="".
+//
 // callerEnv is the original env map from the caller (before rc.Env merging).
 // resolvedEnv is the post-merge map that may also contain values from rc.Env.
 // NODE_OPTIONS is only cleared if neither callerEnv nor resolvedEnv (via rc.Env)
