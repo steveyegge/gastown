@@ -33,12 +33,14 @@ log "Testing controller bead→pod lifecycle in namespace: $NS"
 # Timeouts
 POD_CREATE_TIMEOUT=120   # seconds to wait for pod to appear
 POD_READY_TIMEOUT=180    # seconds to wait for pod to become Ready
-POD_DELETE_TIMEOUT=60    # seconds to wait for pod to be deleted
+POD_DELETE_TIMEOUT=120   # seconds to wait for pod to be deleted (controller reconciles every 60s)
 
 # Test bead metadata
 TEST_BEAD_TITLE="e2e-lifecycle-test-$(date +%s)"
 TEST_BEAD_ID=""
 TEST_POD_NAME=""
+# Snapshot of existing gt-* pods BEFORE creating our test bead
+PRE_EXISTING_PODS=""
 
 # ── Discover daemon ──────────────────────────────────────────────────
 DAEMON_POD=""
@@ -55,15 +57,56 @@ discover_daemon() {
 }
 
 # Helper: call daemon HTTP API
+# Usage: daemon_api METHOD BODYFILE
+# BODYFILE must be a path to a file containing valid JSON.
+# Use write_json helper to create the body file safely.
 daemon_api() {
   local method="$1"
-  local body="${2:-{}}"
+  local bodyfile="${2:-}"
   [[ -n "$DAEMON_PORT" ]] || return 1
-  curl -sf --connect-timeout 10 -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $DAEMON_TOKEN" \
-    -d "$body" \
-    "http://127.0.0.1:${DAEMON_PORT}/bd.v1.BeadsService/${method}" 2>/dev/null
+
+  local respfile
+  respfile=$(mktemp)
+
+  local curl_args=(-s --connect-timeout 10 -o "$respfile" -w "%{http_code}" -X POST
+    -H "Content-Type: application/json"
+    -H "Authorization: Bearer $DAEMON_TOKEN")
+
+  if [[ -n "$bodyfile" && -f "$bodyfile" ]]; then
+    curl_args+=(-d "@${bodyfile}")
+  else
+    curl_args+=(-d '{}')
+  fi
+
+  curl_args+=("http://127.0.0.1:${DAEMON_PORT}/bd.v1.BeadsService/${method}")
+
+  local http_code
+  http_code=$(curl "${curl_args[@]}" 2>/dev/null)
+
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+    cat "$respfile"
+    rm -f "$respfile"
+  else
+    log "daemon_api $method: HTTP $http_code — $(cat "$respfile" 2>/dev/null)"
+    rm -f "$respfile"
+    return 1
+  fi
+}
+
+# Helper: write JSON to a temp file using python3 (avoids shell escaping issues)
+# Usage: bodyfile=$(write_json key1 val1 key2 val2 ...)
+# For complex JSON, pass a python3 expression: bodyfile=$(write_json_expr 'expr')
+write_json_expr() {
+  local expr="$1"
+  local tmpfile
+  tmpfile=$(mktemp)
+  python3 -c "
+import json
+data = $expr
+with open('$tmpfile', 'w') as f:
+    json.dump(data, f)
+" 2>/dev/null
+  echo "$tmpfile"
 }
 
 # ── Cleanup trap ─────────────────────────────────────────────────────
@@ -71,7 +114,10 @@ daemon_api() {
 _test_cleanup() {
   if [[ -n "$TEST_BEAD_ID" && -n "$DAEMON_PORT" && -n "$DAEMON_TOKEN" ]]; then
     log "Cleaning up test bead $TEST_BEAD_ID..."
-    daemon_api "Close" "{\"id\":\"$TEST_BEAD_ID\"}" >/dev/null 2>&1 || true
+    local bf
+    bf=$(write_json_expr "{'id': '$TEST_BEAD_ID'}")
+    daemon_api "Close" "$bf" >/dev/null 2>&1 || true
+    rm -f "$bf"
     # Give controller time to delete the pod
     sleep 5
   fi
@@ -104,27 +150,42 @@ fi
 
 # ── Test 2: Create test bead with agent labels ───────────────────────
 test_create_bead() {
-  local resp
-  resp=$(daemon_api "Create" "{
-    \"title\": \"$TEST_BEAD_TITLE\",
-    \"issue_type\": \"agent\",
-    \"priority\": 2,
-    \"description\": \"E2E lifecycle test — auto-created, will be auto-deleted\",
-    \"labels\": [\"gt:agent\", \"execution_target:k8s\", \"rig:e2e-test\", \"role:test\", \"agent:lifecycle\"]
+  log "Calling daemon API: Create (port=$DAEMON_PORT, token=${DAEMON_TOKEN:0:10}...)"
+
+  # Snapshot existing gt-* pods so we can detect newly-created ones
+  PRE_EXISTING_PODS=$(kube get pods --no-headers 2>/dev/null | { grep "^gt-" || true; } | awk '{print $1}' | sort)
+
+  # Build JSON body with python3 to avoid shell escaping issues
+  local bodyfile
+  bodyfile=$(write_json_expr "{
+    'title': '$TEST_BEAD_TITLE',
+    'issue_type': 'agent',
+    'priority': 2,
+    'description': 'E2E lifecycle test',
+    'labels': ['gt:agent', 'execution_target:k8s', 'rig:e2e-test', 'role:test', 'agent:lifecycle']
   }")
+
+  local resp
+  resp=$(daemon_api "Create" "$bodyfile")
+  rm -f "$bodyfile"
+  log "Create response: ${resp:0:200}"
   [[ -n "$resp" ]] || return 1
 
-  # Extract the created bead ID
-  TEST_BEAD_ID=$(echo "$resp" | python3 -c "
-import sys, json
+  # Extract the created bead ID (write resp to temp file to avoid pipe issues)
+  local respfile
+  respfile=$(mktemp)
+  printf '%s' "$resp" > "$respfile"
+  TEST_BEAD_ID=$(python3 -c "
+import json
 try:
-    d = json.load(sys.stdin)
-    # Response may have id directly or in a nested field
+    with open('$respfile') as f:
+        d = json.load(f)
     bid = d.get('id', d.get('issue_id', d.get('data', {}).get('id', '')))
     print(bid)
 except:
     pass
 " 2>/dev/null)
+  rm -f "$respfile"
 
   log "Created test bead: $TEST_BEAD_ID"
   [[ -n "$TEST_BEAD_ID" ]]
@@ -144,7 +205,9 @@ if [[ -z "$TEST_BEAD_ID" ]]; then
 fi
 
 # Set bead to in_progress (controller watches for in_progress agent beads)
-daemon_api "Update" "{\"id\":\"$TEST_BEAD_ID\", \"status\":\"in_progress\"}" >/dev/null 2>&1 || true
+_update_bf=$(write_json_expr "{'id': '$TEST_BEAD_ID', 'status': 'in_progress'}")
+daemon_api "Update" "$_update_bf" >/dev/null 2>&1 || true
+rm -f "$_update_bf"
 
 # ── Test 3: Controller creates agent pod ──────────────────────────────
 test_controller_creates_pod() {
@@ -152,23 +215,15 @@ test_controller_creates_pod() {
   local deadline=$((SECONDS + POD_CREATE_TIMEOUT))
 
   while [[ $SECONDS -lt $deadline ]]; do
-    # Look for pod with bead ID in name or labels
-    TEST_POD_NAME=$(kube get pods --no-headers 2>/dev/null | { grep -i "lifecycle\|$TEST_BEAD_ID" || true; } | head -1 | awk '{print $1}')
+    # Strategy 1: Check for pods with the gastown.io/bead-id label (most reliable)
+    TEST_POD_NAME=$(kube get pods -l "gastown.io/bead-id=$TEST_BEAD_ID" --no-headers 2>/dev/null | head -1 | awk '{print $1}')
 
-    # Also check for pods with the gastown.io/bead-id label
+    # Strategy 2: Look for NEW gt-* pods that weren't in our pre-existing snapshot
     if [[ -z "$TEST_POD_NAME" ]]; then
-      TEST_POD_NAME=$(kube get pods -l "gastown.io/bead-id=$TEST_BEAD_ID" --no-headers 2>/dev/null | head -1 | awk '{print $1}')
-    fi
-
-    # Also look for newest gt-* pod (created after our bead)
-    if [[ -z "$TEST_POD_NAME" ]]; then
-      TEST_POD_NAME=$(kube get pods --no-headers --sort-by='.metadata.creationTimestamp' 2>/dev/null | { grep "^gt-" || true; } | tail -1 | awk '{print $1}')
-      # Verify this pod was created recently (within our timeout window)
-      if [[ -n "$TEST_POD_NAME" ]]; then
-        local age
-        age=$(kube get pod "$TEST_POD_NAME" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null)
-        # Simple check: if we can't verify age, accept it
-      fi
+      local current_pods
+      current_pods=$(kube get pods --no-headers 2>/dev/null | { grep "^gt-" || true; } | awk '{print $1}' | sort)
+      # Find pods in current but not in pre-existing (comm -13 = lines only in file 2)
+      TEST_POD_NAME=$(comm -13 <(echo "$PRE_EXISTING_PODS") <(echo "$current_pods") | head -1)
     fi
 
     if [[ -n "$TEST_POD_NAME" ]]; then
@@ -243,8 +298,11 @@ run_test "Coop health endpoint responds on new agent pod" test_new_pod_coop_heal
 
 # ── Test 7: Close bead via daemon API ─────────────────────────────────
 test_close_bead() {
+  local bodyfile
+  bodyfile=$(write_json_expr "{'id': '$TEST_BEAD_ID'}")
   local resp
-  resp=$(daemon_api "Close" "{\"id\":\"$TEST_BEAD_ID\"}")
+  resp=$(daemon_api "Close" "$bodyfile")
+  rm -f "$bodyfile"
   # Clear TEST_BEAD_ID so cleanup trap doesn't try to close again
   local closed_id="$TEST_BEAD_ID"
   TEST_BEAD_ID=""
