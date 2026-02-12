@@ -446,10 +446,53 @@ exit 1
 	if err != nil {
 		t.Fatalf("reading config.yaml: %v", err)
 	}
-	if string(config) != "prefix: gt\n" {
-		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
+	want := "prefix: gt\nissue-prefix: gt\n"
+	if string(config) != want {
+		t.Fatalf("config.yaml = %q, want %q", string(config), want)
 	}
 	assertBeadsDirLog(t, beadsDirLog, beadsDir)
+}
+
+func TestInitBeadsSetsIssuePrefix(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
+	// Verify that initBeads calls 'bd config set issue_prefix <prefix>'
+	// when bd init succeeds (Dolt database is available).
+	rigPath := t.TempDir()
+
+	// Create mayor/rig directory WITHOUT .beads (no tracked beads)
+	mayorRigDir := filepath.Join(rigPath, "mayor", "rig")
+	if err := os.MkdirAll(mayorRigDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Track all commands received by fake bd
+	cmdLog := filepath.Join(t.TempDir(), "bd-cmds.log")
+	script := `#!/usr/bin/env bash
+set -e
+echo "$@" >> "$BD_CMD_LOG"
+exit 0
+`
+	windowsScript := "@echo off\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BD_CMD_LOG", cmdLog)
+
+	manager := &Manager{}
+	if err := manager.initBeads(rigPath, "myrig"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Read logged commands
+	logData, err := os.ReadFile(cmdLog)
+	if err != nil {
+		t.Fatalf("reading command log: %v", err)
+	}
+	cmds := string(logData)
+
+	// Verify bd config set issue_prefix was called with the correct prefix
+	if !strings.Contains(cmds, "config set issue_prefix myrig") {
+		t.Errorf("expected 'bd config set issue_prefix myrig' in commands log, got:\n%s", cmds)
+	}
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {

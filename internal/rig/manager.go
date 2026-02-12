@@ -433,6 +433,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+
+			// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
+			prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", opts.BeadsPrefix)
+			prefixSetCmd.Dir = mayorRigPath
+			if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
+				fmt.Printf("  Warning: Could not set issue_prefix: %v (%s)\n", prefixErr, strings.TrimSpace(string(prefixOutput)))
+			}
 		}
 	}
 
@@ -664,24 +671,35 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt")
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
-	_, err := cmd.CombinedOutput()
-	if err != nil {
+	_, bdInitErr := cmd.CombinedOutput()
+	if bdInitErr != nil {
 		// bd might not be installed or failed, create minimal structure
 		// Note: beads currently expects YAML format for config
 		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\n", prefix)
+		configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\n", prefix, prefix)
 		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
 			return writeErr
 		}
-	}
+	} else {
+		// bd init succeeded - configure the Dolt database
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy).
-	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-	configCmd.Dir = rigPath
-	configCmd.Env = filteredEnv
-	// Ignore errors - older beads versions don't need this
-	_, _ = configCmd.CombinedOutput()
+		// Configure custom types for Gas Town (agent, role, rig, convoy).
+		// These were extracted from beads core in v0.46.0 and now require explicit config.
+		configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+		configCmd.Dir = rigPath
+		configCmd.Env = filteredEnv
+		// Ignore errors - older beads versions don't need this
+		_, _ = configCmd.CombinedOutput()
+
+		// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
+		// Without this, bd create and gt sling fail with "issue_prefix config is missing".
+		prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+		prefixSetCmd.Dir = rigPath
+		prefixSetCmd.Env = filteredEnv
+		if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
+			return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
+		}
+	}
 
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
