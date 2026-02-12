@@ -41,6 +41,36 @@
 #
 #   # Run only one module:
 #   ./scripts/e2e-formula.sh --namespace gastown-next --keep --only daemon-health
+#
+# Known Issues & Lessons Learned (2026-02-12):
+#
+#   INFRASTRUCTURE:
+#   - StorageClass: Cluster has gp2 only (not gp3). values-e2e.yaml pins gp2.
+#   - Mixed-arch cluster (amd64+arm64): beads, Dolt, Redis images are amd64-only.
+#     values-e2e.yaml adds nodeSelector kubernetes.io/arch: amd64 where needed.
+#   - Docker Hub rate limits (429): Dolt/Redis images use ECR mirrors.
+#     Requires docker-hub-registry imagePullSecret via registrySecrets.
+#   - ExternalSecrets race: Pods may start before secrets sync. K8s retries
+#     handle this naturally (CrashLoopBackOff → Running).
+#
+#   DAEMON / NATS:
+#   - NATS startup race (bd-9d2xo, FIXED in beads fix/nats-connect-retry):
+#     Daemon only attempted NATS connect once. If NATS pod wasn't ready,
+#     JetStream was disabled for entire daemon lifecycle. Fix adds retry
+#     loop (15 attempts, 2s interval) matching the Dolt retry pattern.
+#   - Tests 4-7 in test-nats-health.sh skip gracefully when daemon didn't
+#     connect to NATS (references bd-9d2xo).
+#
+#   SLACK-BOT:
+#   - Slack-bot sidecar requires SLACK_CHANNEL from Dolt config table
+#     (deploy.slack_channel). Not available in fresh namespace.
+#     Disabled in values-e2e.yaml; test-slack-bot-health.sh skips all
+#     when sidecar not deployed.
+#
+#   TEST TOLERANCE:
+#   - All 10 test modules are tolerant of fresh namespaces (no agents,
+#     no seeded config, optional components). Tests skip rather than fail
+#     when expected resources don't exist.
 
 set -euo pipefail
 
