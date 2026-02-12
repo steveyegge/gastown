@@ -277,11 +277,12 @@ K8s-specific configuration lives in the Dolt config table under `deploy.*` keys:
 
 ## 4. Agent Controller: The Reactive Bridge
 
-**Location**: `gastown/controller/`
+**Location**: `gastown/controller/` (lives entirely in the gastown repo, not beads)
 
 The controller is a standalone Go binary that bridges beads state to K8s pod operations.
 It is intentionally thin -- no CRDs, no controller-runtime, no informers. All intelligence
-lives in beads.
+lives in beads. The beads repo provides the daemon API that the controller calls into;
+the controller itself, its pod manager, reconciler, and status reporter all live in gastown.
 
 ### Architecture
 
