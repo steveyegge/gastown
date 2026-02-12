@@ -67,6 +67,7 @@ type issueJSON struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
+	Notes       string   `json:"notes"`
 	Status      string   `json:"status"`
 	Type        string   `json:"type"`
 	Labels      []string `json:"labels"`
@@ -138,6 +139,7 @@ func (c *DaemonClient) ListAgentBeads(ctx context.Context) ([]AgentBead, error) 
 			Rig:       rig,
 			Role:      role,
 			AgentName: name,
+			Metadata:  parseNotes(issue.Notes),
 		})
 	}
 
@@ -303,6 +305,28 @@ func parseAgentBeadID(id string) (rig, role, name string) {
 	}
 
 	return "", "", id
+}
+
+// parseNotes parses "key: value" lines from a bead's notes field into a map.
+func parseNotes(notes string) map[string]string {
+	if notes == "" {
+		return nil
+	}
+	m := make(map[string]string)
+	for _, line := range strings.Split(notes, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			m[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // normalizeRole converts plural role names to singular.
