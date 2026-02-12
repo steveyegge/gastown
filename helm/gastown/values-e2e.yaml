@@ -49,6 +49,8 @@ bd-daemon:
     image:
       repository: 909418727440.dkr.ecr.us-east-1.amazonaws.com/external/dolthub/dolt-sql-server
       tag: "1.81.6"
+    nodeSelector:
+      kubernetes.io/arch: amd64
     persistence:
       storageClass: "gp3"
       size: 5Gi
@@ -79,6 +81,9 @@ bd-daemon:
     priorityClassName: ""  # E2E doesn't need priority
     http:
       enabled: true
+    nodeSelector:
+      kubernetes.io/arch: amd64
+    affinity: {}  # Override default per-mr anti-affinity for E2E
     resources:
       requests:
         cpu: 250m
@@ -164,6 +169,8 @@ coopBroker:
     repository: ghcr.io/groblegark/gastown/gastown-agent
     tag: "latest"
     pullPolicy: Always
+  nodeSelector:
+    kubernetes.io/arch: amd64
   persistence:
     enabled: true
     storageClass: "gp3"
