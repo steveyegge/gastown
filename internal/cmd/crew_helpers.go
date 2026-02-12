@@ -73,14 +73,23 @@ func getCrewManager(rigName string) (*crew.Manager, *rig.Rig, error) {
 	return crewMgr, r, nil
 }
 
-// newDaemonRPCClient creates an RPC client from the BD_DAEMON_HOST and
-// BD_DAEMON_TOKEN environment variables. Returns nil if not in daemon mode.
-// This detects K8s pod mode where BD_DAEMON_HOST is set by the controller.
+// newDaemonRPCClient creates an RPC client from daemon environment variables.
+// Returns nil if not in daemon mode.
+// Prefers BD_DAEMON_HTTP_URL (set by the controller with scheme+port),
+// falling back to constructing a URL from BD_DAEMON_HOST + BD_DAEMON_HTTP_PORT.
 func newDaemonRPCClient() *rpcclient.Client {
 	if !beads.IsDaemonMode() {
 		return nil
 	}
-	host := os.Getenv("BD_DAEMON_HOST")
+	baseURL := os.Getenv("BD_DAEMON_HTTP_URL")
+	if baseURL == "" {
+		host := os.Getenv("BD_DAEMON_HOST")
+		port := os.Getenv("BD_DAEMON_HTTP_PORT")
+		if port == "" {
+			port = "9080"
+		}
+		baseURL = "http://" + host + ":" + port
+	}
 	token := os.Getenv("BD_DAEMON_TOKEN")
 	townName := os.Getenv("GT_TOWN")
 	var opts []rpcclient.Option
@@ -90,7 +99,7 @@ func newDaemonRPCClient() *rpcclient.Client {
 	if townName != "" {
 		opts = append(opts, rpcclient.WithTownName(townName))
 	}
-	return rpcclient.NewClient(host, opts...)
+	return rpcclient.NewClient(baseURL, opts...)
 }
 
 // newConnectedDaemonClient creates an RPC client from either BD_DAEMON_HOST
