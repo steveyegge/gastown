@@ -396,14 +396,68 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// bypassing the MR/refinery flow (G20 root cause).
 		fmt.Printf("Pushing branch to remote...\n")
 		refspec := branch + ":" + branch
-		if err := g.Push("origin", refspec, false); err != nil {
-			// Non-fatal: record the error and skip to notifyWitness.
-			// The deferred session kill ensures the session still terminates.
+		pushErr := g.Push("origin", refspec, false)
+		if pushErr != nil {
+			// Primary push failed — try fallback from the bare repo (GH #1348).
+			// When polecat sessions are reused or worktrees are stale, the worktree's
+			// git context may be broken. But the branch always exists in the bare repo
+			// (.repo.git) because worktree commits share the same object database.
+			style.PrintWarning("primary push failed: %v — trying bare repo fallback...", pushErr)
+			rigPath := filepath.Join(townRoot, rigName)
+			bareRepoPath := filepath.Join(rigPath, ".repo.git")
+			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+				bareGit := git.NewGitWithDir(bareRepoPath, "")
+				pushErr = bareGit.Push("origin", refspec, false)
+				if pushErr != nil {
+					style.PrintWarning("bare repo push also failed: %v", pushErr)
+				} else {
+					fmt.Printf("%s Branch pushed via bare repo fallback\n", style.Bold.Render("✓"))
+				}
+			} else {
+				// No bare repo — try mayor/rig as last resort
+				mayorPath := filepath.Join(rigPath, "mayor", "rig")
+				if _, statErr := os.Stat(mayorPath); statErr == nil {
+					mayorGit := git.NewGit(mayorPath)
+					pushErr = mayorGit.Push("origin", refspec, false)
+					if pushErr != nil {
+						style.PrintWarning("mayor/rig push also failed: %v", pushErr)
+					} else {
+						fmt.Printf("%s Branch pushed via mayor/rig fallback\n", style.Bold.Render("✓"))
+					}
+				}
+			}
+		}
+
+		if pushErr != nil {
+			// All push attempts failed
 			pushFailed = true
-			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, err)
+			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, pushErr)
 			doneErrors = append(doneErrors, errMsg)
 			style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
 			goto notifyWitness
+		}
+
+		// Verify the branch actually exists on remote (GH #1348).
+		// Push can return exit 0 without actually pushing (e.g., stale refs,
+		// worktree/bare-repo state mismatch). Verify before creating MR bead.
+		if exists, verifyErr := g.RemoteBranchExists("origin", branch); verifyErr != nil {
+			style.PrintWarning("could not verify push: %v (proceeding optimistically)", verifyErr)
+		} else if !exists {
+			// Push "succeeded" but branch not on remote — try bare repo verification
+			// (worktree git may not see the pushed ref)
+			rigPath := filepath.Join(townRoot, rigName)
+			bareRepoPath := filepath.Join(rigPath, ".repo.git")
+			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+				bareGit := git.NewGitWithDir(bareRepoPath, "")
+				exists, verifyErr = bareGit.RemoteBranchExists("origin", branch)
+			}
+			if verifyErr != nil || !exists {
+				pushFailed = true
+				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on remote", branch)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nThis may indicate a stale git context. Witness will be notified.", errMsg)
+				goto notifyWitness
+			}
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
 
