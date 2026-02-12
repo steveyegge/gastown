@@ -2,6 +2,7 @@ package podmanager
 
 import (
 	"log/slog"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -49,6 +50,44 @@ func ClampResources(reqs corev1.ResourceRequirements, caps ResourceCaps, logger 
 	}
 
 	return *result
+}
+
+// SidecarPullPolicy returns the appropriate image pull policy for a sidecar.
+// Custom images (no profile) always pull to pick up agent-pushed tags.
+// Profile images with :latest or no tag always pull. Pinned tags use IfNotPresent.
+func SidecarPullPolicy(tc *ToolchainSidecarSpec) corev1.PullPolicy {
+	if tc.Profile == "" {
+		return corev1.PullAlways
+	}
+	if hasLatestOrNoTag(tc.Image) {
+		return corev1.PullAlways
+	}
+	return corev1.PullIfNotPresent
+}
+
+// hasLatestOrNoTag returns true if the image ref has no tag, has :latest,
+// or uses a digest (sha256:...) — all cases where we want PullAlways
+// except digests which are immutable and use IfNotPresent.
+func hasLatestOrNoTag(image string) bool {
+	// Strip registry prefix to find tag portion.
+	// Image refs: "registry/repo:tag", "registry/repo@sha256:...", "registry/repo"
+	if strings.Contains(image, "@") {
+		// Digest reference — immutable, no need to always pull.
+		return false
+	}
+	// Find tag after last colon that's not part of a port (port is before /).
+	lastSlash := strings.LastIndex(image, "/")
+	tagPart := image
+	if lastSlash >= 0 {
+		tagPart = image[lastSlash:]
+	}
+	colonIdx := strings.LastIndex(tagPart, ":")
+	if colonIdx < 0 {
+		// No tag at all — treated as :latest by container runtime.
+		return true
+	}
+	tag := tagPart[colonIdx+1:]
+	return tag == "latest"
 }
 
 // clampQuantity clamps a single resource in a resource list to the given max.

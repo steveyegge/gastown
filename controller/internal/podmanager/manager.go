@@ -914,7 +914,7 @@ func (m *K8sManager) buildToolchainSidecar(spec AgentPodSpec) corev1.Container {
 			{Name: VolumeTmp, MountPath: MountTmp},
 		},
 		Resources:       resources,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: SidecarPullPolicy(tc),
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                intPtr(AgentUID),
 			RunAsGroup:               intPtr(AgentGID),

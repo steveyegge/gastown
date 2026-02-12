@@ -232,3 +232,88 @@ func TestClampResources_DoesNotMutateOriginal(t *testing.T) {
 		t.Errorf("original limits were mutated: got %s", reqs.Limits.Cpu())
 	}
 }
+
+func TestSidecarPullPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		spec   ToolchainSidecarSpec
+		expect corev1.PullPolicy
+	}{
+		{
+			name:   "custom image always pulls",
+			spec:   ToolchainSidecarSpec{Image: "myregistry.io/custom-tools:v1"},
+			expect: corev1.PullAlways,
+		},
+		{
+			name:   "profile with latest tag always pulls",
+			spec:   ToolchainSidecarSpec{Profile: "toolchain-full", Image: "ghcr.io/org/toolchain:latest"},
+			expect: corev1.PullAlways,
+		},
+		{
+			name:   "profile with no tag always pulls",
+			spec:   ToolchainSidecarSpec{Profile: "toolchain-full", Image: "ghcr.io/org/toolchain"},
+			expect: corev1.PullAlways,
+		},
+		{
+			name:   "profile with pinned tag uses IfNotPresent",
+			spec:   ToolchainSidecarSpec{Profile: "toolchain-full", Image: "ghcr.io/org/toolchain:v1.2.3"},
+			expect: corev1.PullIfNotPresent,
+		},
+		{
+			name:   "profile with digest uses IfNotPresent",
+			spec:   ToolchainSidecarSpec{Profile: "toolchain-full", Image: "ghcr.io/org/toolchain@sha256:abc123def456"},
+			expect: corev1.PullIfNotPresent,
+		},
+		{
+			name:   "profile with port in registry and pinned tag",
+			spec:   ToolchainSidecarSpec{Profile: "custom", Image: "registry.local:5000/tools:v2.0"},
+			expect: corev1.PullIfNotPresent,
+		},
+		{
+			name:   "profile with port in registry and latest tag",
+			spec:   ToolchainSidecarSpec{Profile: "custom", Image: "registry.local:5000/tools:latest"},
+			expect: corev1.PullAlways,
+		},
+		{
+			name:   "profile with port in registry and no tag",
+			spec:   ToolchainSidecarSpec{Profile: "custom", Image: "registry.local:5000/tools"},
+			expect: corev1.PullAlways,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SidecarPullPolicy(&tt.spec)
+			if got != tt.expect {
+				t.Errorf("SidecarPullPolicy() = %s, want %s", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestHasLatestOrNoTag(t *testing.T) {
+	tests := []struct {
+		image string
+		want  bool
+	}{
+		{"nginx", true},
+		{"nginx:latest", true},
+		{"nginx:1.21", false},
+		{"ghcr.io/org/img:latest", true},
+		{"ghcr.io/org/img:v1.0", false},
+		{"ghcr.io/org/img", true},
+		{"ghcr.io/org/img@sha256:abc123", false},
+		{"registry.local:5000/img", true},
+		{"registry.local:5000/img:latest", true},
+		{"registry.local:5000/img:v1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			got := hasLatestOrNoTag(tt.image)
+			if got != tt.want {
+				t.Errorf("hasLatestOrNoTag(%q) = %v, want %v", tt.image, got, tt.want)
+			}
+		})
+	}
+}
