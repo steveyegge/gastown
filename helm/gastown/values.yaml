@@ -441,13 +441,13 @@ agentController:
   # Toolchain sidecar profiles
   sidecarProfiles:
     toolchain-full:
-      image: "ghcr.io/groblegark/gastown-toolchain:latest"
+      image: "ghcr.io/groblegark/gastown/gastown-toolchain:latest"
       cpuRequest: "250m"
       cpuLimit: "2"
       memoryRequest: "512Mi"
       memoryLimit: "4Gi"
     toolchain-minimal:
-      image: "ghcr.io/groblegark/gastown-toolchain:minimal"
+      image: "ghcr.io/groblegark/gastown/gastown-toolchain:minimal"
       cpuRequest: "50m"
       cpuLimit: "500m"
       memoryRequest: "128Mi"
