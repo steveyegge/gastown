@@ -534,7 +534,7 @@ func TestSparseCheckoutCheck_FixFailsWithUntrackedClaudeDir(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
