@@ -35,6 +35,9 @@ const (
 
 	// AgentKill means an agent should be terminated (lifecycle shutdown).
 	AgentKill EventType = "agent_kill"
+
+	// AgentUpdate means agent bead metadata was changed (e.g., sidecar profile).
+	AgentUpdate EventType = "agent_update"
 )
 
 // Event represents a beads lifecycle event that requires a pod operation.
@@ -287,8 +290,11 @@ func (w *SSEWatcher) mapMutation(raw mutationEvent) (Event, bool) {
 		return w.mapStatusChange(raw)
 	case "delete":
 		return w.buildEvent(AgentKill, raw)
+	case "update":
+		// Metadata change on agent bead → may need pod update (e.g., sidecar change).
+		return w.buildEvent(AgentUpdate, raw)
 	default:
-		// "update", "comment", "bonded", etc. — not lifecycle events
+		// "comment", "bonded", etc. — not lifecycle events
 		return Event{}, false
 	}
 }

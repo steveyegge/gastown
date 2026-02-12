@@ -15,8 +15,9 @@ import (
 	"github.com/steveyegge/gastown/controller/internal/podmanager"
 )
 
-// SpecBuilder constructs an AgentPodSpec from config and bead identity.
-type SpecBuilder func(cfg *config.Config, rig, role, agentName string) podmanager.AgentPodSpec
+// SpecBuilder constructs an AgentPodSpec from config, bead identity, and metadata.
+// The metadata map may contain sidecar_profile, sidecar_image, etc.
+type SpecBuilder func(cfg *config.Config, rig, role, agentName string, metadata map[string]string) podmanager.AgentPodSpec
 
 // Reconciler diffs desired state (agent beads) against actual state (K8s pods)
 // and creates/deletes pods to converge.
@@ -109,7 +110,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				// Fall through to create.
 			} else {
 				// Pod is Running or Pending. Check if sidecar spec has drifted.
-				desiredSpec := r.specBuilder(r.cfg, bead.Rig, bead.Role, bead.AgentName)
+				desiredSpec := r.specBuilder(r.cfg, bead.Rig, bead.Role, bead.AgentName, bead.Metadata)
 				if sidecarChanged(desiredSpec.ToolchainSidecar, &pod) {
 					r.logger.Info("toolchain sidecar changed, recreating pod",
 						"pod", name,
@@ -125,7 +126,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		}
 
 		// Create the pod.
-		spec := r.specBuilder(r.cfg, bead.Rig, bead.Role, bead.AgentName)
+		spec := r.specBuilder(r.cfg, bead.Rig, bead.Role, bead.AgentName, bead.Metadata)
 		r.logger.Info("creating pod", "pod", name)
 		if err := r.pods.CreateAgentPod(ctx, spec); err != nil {
 			return fmt.Errorf("creating pod %s: %w", name, err)

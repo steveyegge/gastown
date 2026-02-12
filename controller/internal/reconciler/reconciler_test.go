@@ -46,7 +46,7 @@ func testCfg() *config.Config {
 
 // testSpecBuilder returns a minimal AgentPodSpec. The reconciler delegates
 // pod construction to this function; we only need enough for the fake client.
-func testSpecBuilder(cfg *config.Config, rig, role, agentName string) podmanager.AgentPodSpec {
+func testSpecBuilder(cfg *config.Config, rig, role, agentName string, _ map[string]string) podmanager.AgentPodSpec {
 	return podmanager.AgentPodSpec{
 		Rig:       rig,
 		Role:      role,
@@ -516,7 +516,7 @@ func TestReconcile_SidecarChangeTriggersPodRecreation(t *testing.T) {
 	}
 
 	// Spec builder returns a spec with toolchain sidecar v2 (changed).
-	specBuilder := func(cfg *config.Config, rig, role, agentName string) podmanager.AgentPodSpec {
+	specBuilder := func(cfg *config.Config, rig, role, agentName string, _ map[string]string) podmanager.AgentPodSpec {
 		return podmanager.AgentPodSpec{
 			Rig:       rig,
 			Role:      role,

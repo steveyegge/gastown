@@ -296,9 +296,12 @@ func TestMapMutation_Delete(t *testing.T) {
 func TestMapMutation_Update(t *testing.T) {
 	w := NewSSEWatcher(Config{}, slog.Default())
 	raw := mutationEvent{Type: "update", Actor: "gastown/polecats/rictus"}
-	_, ok := w.mapMutation(raw)
-	if ok {
-		t.Error("mapMutation should return false for update (not a lifecycle event)")
+	event, ok := w.mapMutation(raw)
+	if !ok {
+		t.Error("mapMutation should return true for update on agent bead")
+	}
+	if event.Type != AgentUpdate {
+		t.Errorf("event type = %q, want %q", event.Type, AgentUpdate)
 	}
 }
 

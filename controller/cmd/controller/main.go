@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -226,6 +228,55 @@ func handleEvent(ctx context.Context, logger *slog.Logger, cfg *config.Config, e
 		})
 		return err
 
+	case beadswatcher.AgentUpdate:
+		// Metadata change — check if sidecar spec has drifted and recreate pod if so.
+		podName := fmt.Sprintf("gt-%s-%s-%s", event.Rig, event.Role, event.AgentName)
+		ns := namespaceFromEvent(event, cfg.Namespace)
+		desiredSpec := buildAgentPodSpec(cfg, event)
+		// Resolve sidecar from event metadata (may include sidecar_profile/sidecar_image).
+		resolveSidecar(cfg, event.Metadata, &desiredSpec)
+
+		// Get current pod to compare sidecar.
+		currentPods, err := pods.ListAgentPods(ctx, ns, map[string]string{
+			podmanager.LabelAgent: podName,
+		})
+		if err != nil || len(currentPods) == 0 {
+			logger.Debug("no running pod found for update event", "pod", podName)
+			return nil
+		}
+		currentPod := currentPods[0]
+		currentImage := ""
+		for _, c := range currentPod.Spec.InitContainers {
+			if c.Name == podmanager.ToolchainContainerName {
+				currentImage = c.Image
+				break
+			}
+		}
+		desiredImage := ""
+		if desiredSpec.ToolchainSidecar != nil {
+			desiredImage = desiredSpec.ToolchainSidecar.Image
+		}
+		if currentImage == desiredImage {
+			logger.Debug("sidecar unchanged, skipping pod recreation", "pod", podName)
+			return nil
+		}
+		logger.Info("sidecar changed via metadata update, recreating pod",
+			"pod", podName, "old_image", currentImage, "new_image", desiredImage)
+		if err := pods.DeleteAgentPod(ctx, podName, ns); err != nil {
+			return fmt.Errorf("deleting pod for sidecar update %s: %w", podName, err)
+		}
+		if err := pods.CreateAgentPod(ctx, desiredSpec); err != nil {
+			return fmt.Errorf("recreating pod after sidecar update %s: %w", podName, err)
+		}
+		_ = status.ReportPodStatus(ctx, agentBeadID, statusreporter.PodStatus{
+			PodName:   desiredSpec.PodName(),
+			Namespace: ns,
+			Phase:     "Pending",
+			Ready:     false,
+			Message:   "recreated for sidecar update",
+		})
+		return nil
+
 	case beadswatcher.AgentStuck:
 		// Delete and recreate the pod to restart the agent.
 		podName := fmt.Sprintf("gt-%s-%s-%s", event.Rig, event.Role, event.AgentName)
@@ -256,7 +307,8 @@ func handleEvent(ctx context.Context, logger *slog.Logger, cfg *config.Config, e
 // BuildSpecFromBeadInfo constructs an AgentPodSpec from config and bead identity,
 // without an SSE event. Used by the reconciler to produce specs identical to
 // those created by handleEvent, using controller config for all metadata.
-func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string) podmanager.AgentPodSpec {
+// The metadata map may contain sidecar_profile, sidecar_image, etc.
+func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string, metadata map[string]string) podmanager.AgentPodSpec {
 	spec := podmanager.AgentPodSpec{
 		Rig:       rig,
 		Role:      role,
@@ -281,6 +333,11 @@ func BuildSpecFromBeadInfo(cfg *config.Config, rig, role, agentName string) podm
 	applyRigDefaults(cfg, &spec)
 
 	applyCommonConfig(cfg, &spec)
+
+	// Resolve toolchain sidecar from bead metadata via profile registry.
+	if metadata != nil {
+		resolveSidecar(cfg, metadata, &spec)
+	}
 
 	return spec
 }
@@ -479,6 +536,46 @@ func applyCommonConfig(cfg *config.Config, spec *podmanager.AgentPodSpec) {
 	// on startup so they appear in the aggregated dashboard.
 	if cfg.CoopMuxURL != "" {
 		spec.Env["COOP_MUX_URL"] = cfg.CoopMuxURL
+	}
+}
+
+// resolveSidecar resolves a toolchain sidecar spec from bead metadata and config.
+// Uses ProfileRegistry to map sidecar_profile/sidecar_image metadata into a
+// ToolchainSidecarSpec. Only sets spec.ToolchainSidecar if sidecar is requested.
+func resolveSidecar(cfg *config.Config, metadata map[string]string, spec *podmanager.AgentPodSpec) {
+	if len(cfg.SidecarProfiles) == 0 && metadata["sidecar_image"] == "" {
+		return
+	}
+	profiles := make(map[string]podmanager.SidecarProfile)
+	for name, p := range cfg.SidecarProfiles {
+		sp := podmanager.SidecarProfile{
+			Name:  name,
+			Image: p.Image,
+		}
+		if p.CPURequest != "" || p.CPULimit != "" || p.MemoryRequest != "" || p.MemoryLimit != "" {
+			reqs := &corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{},
+				Limits:   corev1.ResourceList{},
+			}
+			if p.CPURequest != "" {
+				reqs.Requests[corev1.ResourceCPU] = resource.MustParse(p.CPURequest)
+			}
+			if p.CPULimit != "" {
+				reqs.Limits[corev1.ResourceCPU] = resource.MustParse(p.CPULimit)
+			}
+			if p.MemoryRequest != "" {
+				reqs.Requests[corev1.ResourceMemory] = resource.MustParse(p.MemoryRequest)
+			}
+			if p.MemoryLimit != "" {
+				reqs.Limits[corev1.ResourceMemory] = resource.MustParse(p.MemoryLimit)
+			}
+			sp.Resources = reqs
+		}
+		profiles[name] = sp
+	}
+	registry := podmanager.NewProfileRegistry(profiles)
+	if resolved := registry.Resolve(metadata); resolved != nil {
+		spec.ToolchainSidecar = resolved
 	}
 }
 
