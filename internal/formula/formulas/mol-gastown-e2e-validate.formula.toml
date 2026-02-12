@@ -118,6 +118,23 @@ OnFail:
 needs = ["verify-spawn"]
 
 [[steps]]
+id = "verify-lifecycle"
+title = "Verify agent lifecycle via controller in {{namespace}}"
+description = """
+Run the agent-lifecycle test module.
+
+Action:
+  E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/test-agent-lifecycle.sh
+
+Verify:
+  All 8 tests pass (controller ready, SA, watches, owner labels, image, restarts, resources, reconcile).
+
+OnFail:
+  bd create --type=bug --title='E2E FAIL: gastown-e2e-validate:verify-lifecycle in {{namespace}}' --priority=1
+"""
+needs = ["verify-spawn"]
+
+[[steps]]
 id = "verify-cleanup"
 title = "Verify agent cleanup expectations in {{namespace}}"
 description = """
@@ -166,7 +183,7 @@ Action:
 Verify:
   All agent capability modules report PASS.
 """
-needs = ["verify-state", "verify-io", "verify-credentials", "verify-resume", "verify-multi", "verify-cleanup", "verify-mux"]
+needs = ["verify-state", "verify-io", "verify-credentials", "verify-resume", "verify-multi", "verify-lifecycle", "verify-cleanup", "verify-mux"]
 
 # ── Variables ────────────────────────────────────────────────────────
 

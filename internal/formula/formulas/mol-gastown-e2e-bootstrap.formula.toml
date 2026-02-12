@@ -2,7 +2,8 @@ formula = "mol-gastown-e2e-bootstrap"
 description = """
 Gastown E2E Infrastructure Bootstrap — Validates a gastown K8s namespace has
 all infrastructure components healthy. Runs the Phase 1 health test modules
-(dolt, redis, daemon, broker, controller, git-mirror) and reports results.
+(dolt, redis, daemon, nats, broker, controller, git-mirror) plus advanced
+health checks (dolt-s3-sync, controller-failsafe, slack-bot-health).
 
 If a step fails, it auto-files a bug linked to the E2E test epic.
 
@@ -116,6 +117,74 @@ OnFail:
 needs = ["verify-daemon"]
 
 [[steps]]
+id = "verify-nats"
+title = "Verify NATS event bus health in {{namespace}}"
+description = """
+Run the nats-health test module against {{namespace}}.
+
+Action:
+  E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/test-nats-health.sh
+
+Verify:
+  All 10 tests pass (pod ready, ports, monitoring API, JetStream, consumers, daemon connected, bus status, handlers, throughput, error rate).
+
+OnFail:
+  File bug: bd create --type=bug --title='E2E FAIL: gastown-e2e-bootstrap:verify-nats in {{namespace}}' --priority=1
+"""
+needs = ["verify-daemon"]
+
+[[steps]]
+id = "verify-dolt-s3"
+title = "Verify Dolt S3 sync health in {{namespace}}"
+description = """
+Run the dolt-s3-sync test module against {{namespace}}.
+
+Action:
+  E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/test-dolt-s3-sync.sh
+
+Verify:
+  All 8 tests pass (s3-sync container, running, credentials, commit history, dolt status, S3 remote, activity, no crashes).
+
+OnFail:
+  File bug: bd create --type=bug --title='E2E FAIL: gastown-e2e-bootstrap:verify-dolt-s3 in {{namespace}}' --priority=1
+"""
+needs = ["verify-dolt"]
+
+[[steps]]
+id = "verify-controller-failsafe"
+title = "Verify controller fail-safe in {{namespace}}"
+description = """
+Run the controller-failsafe test module against {{namespace}}.
+
+Action:
+  E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/test-controller-failsafe.sh
+
+Verify:
+  All 7 tests pass (daemon reachable, reconcile interval, no orphans, fail-safe, managed labels, RBAC, health).
+
+OnFail:
+  File bug: bd create --type=bug --title='E2E FAIL: gastown-e2e-bootstrap:verify-controller-failsafe in {{namespace}}' --priority=1
+"""
+needs = ["verify-controller"]
+
+[[steps]]
+id = "verify-slack-bot"
+title = "Verify Slack bot sidecar health in {{namespace}}"
+description = """
+Run the slack-bot-health test module against {{namespace}}.
+
+Action:
+  E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/test-slack-bot-health.sh
+
+Verify:
+  All 8 tests pass (container exists, running, no crashes, NATS config, Slack credentials, NATS connection, subscription, no errors).
+
+OnFail:
+  File bug: bd create --type=bug --title='E2E FAIL: gastown-e2e-bootstrap:verify-slack-bot in {{namespace}}' --priority=1
+"""
+needs = ["verify-daemon"]
+
+[[steps]]
 id = "verify-git-mirror"
 title = "Verify git mirror health in {{namespace}}"
 description = """
@@ -140,13 +209,13 @@ description = """
 Produce the final infrastructure health report.
 
 Action:
-  Summarize: How many of the 6 infrastructure modules passed?
+  Summarize: How many of the 10 infrastructure modules passed?
   Report any failures and their associated bug IDs.
 
 Verify:
   All infrastructure modules report PASS (skips are acceptable for optional components).
 """
-needs = ["verify-dolt", "verify-redis", "verify-daemon", "verify-broker", "verify-controller", "verify-git-mirror"]
+needs = ["verify-dolt", "verify-redis", "verify-daemon", "verify-nats", "verify-broker", "verify-controller", "verify-git-mirror", "verify-dolt-s3", "verify-controller-failsafe", "verify-slack-bot"]
 
 # ── Variables ────────────────────────────────────────────────────────
 

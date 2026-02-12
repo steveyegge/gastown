@@ -63,6 +63,7 @@ MODULES=(
   "dolt-health"
   "redis-health"
   "daemon-health"
+  "nats-health"
   "coop-broker-health"
   "controller-health"
   "git-mirror-health"
@@ -75,6 +76,11 @@ MODULES=(
   "agent-multi"
   "agent-coordination"
   "agent-cleanup"
+  # Phase 3: Advanced health
+  "agent-lifecycle"
+  "dolt-s3-sync"
+  "controller-failsafe"
+  "slack-bot-health"
 )
 
 should_skip() {

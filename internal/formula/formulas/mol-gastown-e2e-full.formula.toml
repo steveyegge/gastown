@@ -7,8 +7,8 @@ This is the single formula an agent runs to execute the complete E2E suite:
   gt formula run mol-gastown-e2e-full --var namespace=gastown-next
 
 Steps:
-  1. Verify infrastructure health (dolt, redis, daemon, broker, controller)
-  2. Verify agent capabilities (spawn, state, I/O, credentials, multi-agent)
+  1. Verify infrastructure health (dolt, redis, daemon, nats, broker, controller, s3-sync, failsafe, slack-bot)
+  2. Verify agent capabilities (spawn, state, I/O, credentials, lifecycle, multi-agent)
   3. Run Playwright mux dashboard tests
   4. Produce final summary with pass/fail counts
 
@@ -54,7 +54,7 @@ Action:
   controller-health, git-mirror-health.
 
 Verify:
-  All 6 infrastructure modules pass (44+ tests). Git-mirror may skip if not deployed.
+  All 10 infrastructure modules pass (79+ tests). Git-mirror may skip if not deployed.
 
 OnFail:
   For each failed module, file a bug:
@@ -78,7 +78,7 @@ Action:
   agent-resume, agent-multi, agent-coordination, agent-cleanup.
 
 Verify:
-  All 8 agent modules pass (55+ tests).
+  All 9 agent modules pass (63+ tests).
 
 OnFail:
   For each failed module, file a bug:
@@ -117,8 +117,8 @@ Action:
   E2E_NAMESPACE={{namespace}} ./tests/e2e/scripts/run-suite.sh --json
 
   Summarize results from all phases:
-  - Phase 1 (Infrastructure): X/6 modules passed
-  - Phase 2 (Agent Capabilities): X/8 modules passed
+  - Phase 1 (Infrastructure): X/10 modules passed
+  - Phase 2 (Agent Capabilities): X/9 modules passed
   - Phase 3 (Mux Dashboard): X/29 Playwright tests passed
   - Total: X tests passed, Y failed, Z skipped
 
