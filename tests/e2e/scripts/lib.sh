@@ -66,6 +66,13 @@ skip_test() {
   skip "$name${reason:+ ($reason)}"
 }
 
+# Usage: skip_all "reason" — mark entire module as skipped and print summary
+skip_all() {
+  local reason="${1:-}"
+  skip "All tests in $_MODULE_NAME${reason:+: $reason}"
+  print_summary
+}
+
 # ── Assertions ───────────────────────────────────────────────────────
 assert_eq() {
   local actual="$1" expected="$2"

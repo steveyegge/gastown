@@ -1,0 +1,112 @@
+name: E2E Tests
+
+# Runs the full E2E formula: provision → validate → teardown
+# Requires K8s cluster access and ExternalSecret remoteRefs.
+#
+# Triggered manually or by workflow_call from other CI pipelines.
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'K8s namespace (leave empty for ephemeral)'
+        required: false
+        default: ''
+      keep:
+        description: 'Keep namespace after tests (for debugging)'
+        required: false
+        default: 'false'
+        type: boolean
+      only:
+        description: 'Run only this test module (e.g. daemon-health)'
+        required: false
+        default: ''
+      skip:
+        description: 'Comma-separated modules to skip'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      namespace:
+        type: string
+        required: false
+        default: ''
+      keep:
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: e2e-${{ inputs.namespace || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFIG: /tmp/kubeconfig
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      id-token: write   # OIDC for AWS/K8s auth
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.E2E_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ secrets.E2E_EKS_CLUSTER }} --region us-east-1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to GHCR (for OCI chart + images)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build helm dependencies
+        run: helm dependency build helm/gastown/
+
+      - name: Run E2E formula
+        id: e2e
+        run: |
+          ARGS=()
+          NS="${{ inputs.namespace }}"
+          if [[ -n "$NS" ]]; then
+            ARGS+=("--namespace" "$NS")
+          fi
+          if [[ "${{ inputs.keep }}" == "true" ]]; then
+            ARGS+=("--keep")
+          fi
+          ONLY="${{ inputs.only }}"
+          if [[ -n "$ONLY" ]]; then
+            ARGS+=("--only" "$ONLY")
+          fi
+          SKIP="${{ inputs.skip }}"
+          if [[ -n "$SKIP" ]]; then
+            IFS=',' read -ra SKIP_MODULES <<< "$SKIP"
+            for mod in "${SKIP_MODULES[@]}"; do
+              ARGS+=("--skip" "$(echo "$mod" | xargs)")
+            done
+          fi
+          ARGS+=("--json")
+          ARGS+=("--set" "bd-daemon.externalSecrets.doltRootPassword.remoteRef=${{ secrets.E2E_DOLT_ROOT_PASSWORD_REF }}")
+          ARGS+=("--set" "bd-daemon.externalSecrets.daemonToken.remoteRef=${{ secrets.E2E_DAEMON_TOKEN_REF }}")
+          ARGS+=("--set" "bd-daemon.externalSecrets.doltS3Credentials.remoteRef=${{ secrets.E2E_DOLT_S3_CREDENTIALS_REF }}")
+
+          ./tests/e2e/scripts/e2e-formula.sh "${ARGS[@]}"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ github.run_id }}
+          path: tests/e2e/test-results/
+          retention-days: 7
