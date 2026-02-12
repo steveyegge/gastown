@@ -72,12 +72,14 @@ MODULES=(
   "agent-state"
   "agent-io"
   "agent-credentials"
+  "agent-claude-auth"
   "agent-resume"
   "agent-multi"
   "agent-coordination"
   "agent-cleanup"
-  # Phase 3: Advanced health
+  # Phase 3: Advanced health & lifecycle
   "agent-lifecycle"
+  "controller-create-pod"
   "session-persistence"
   "dolt-s3-sync"
   "controller-failsafe"
