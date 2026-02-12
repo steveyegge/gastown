@@ -829,6 +829,121 @@
 
 
     // ============================================
+    // SLING BUTTON HANDLER
+    // ============================================
+    var activeSlingDropdown = null;
+
+    function closeSlingDropdown() {
+        if (activeSlingDropdown) {
+            activeSlingDropdown.parentNode.removeChild(activeSlingDropdown);
+            activeSlingDropdown = null;
+        }
+    }
+
+    // Close dropdown on outside click or Escape
+    document.addEventListener('click', function(e) {
+        if (activeSlingDropdown && !e.target.closest('.sling-dropdown') && !e.target.closest('.sling-btn')) {
+            closeSlingDropdown();
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && activeSlingDropdown) {
+            closeSlingDropdown();
+        }
+    });
+
+    // Sling button click - show rig picker dropdown
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.sling-btn');
+        if (!btn) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        var beadId = btn.getAttribute('data-bead-id');
+        if (!beadId) return;
+
+        // Close any existing dropdown
+        closeSlingDropdown();
+
+        // Create dropdown positioned near the button
+        var dropdown = document.createElement('div');
+        dropdown.className = 'sling-dropdown';
+        dropdown.innerHTML = '<div class="sling-dropdown-header">Sling ' + escapeHtml(beadId) + ' to:</div>' +
+            '<div class="sling-dropdown-loading">Loading rigs...</div>';
+
+        // Position relative to button
+        var rect = btn.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+        dropdown.style.left = rect.left + 'px';
+        dropdown.style.zIndex = '9999';
+        document.body.appendChild(dropdown);
+        activeSlingDropdown = dropdown;
+
+        // Fetch rig options
+        fetch('/api/options')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!activeSlingDropdown) return; // Closed while loading
+                var rigs = data.rigs || [];
+                if (rigs.length === 0) {
+                    dropdown.innerHTML = '<div class="sling-dropdown-header">Sling ' + escapeHtml(beadId) + ' to:</div>' +
+                        '<div class="sling-dropdown-empty">No rigs available</div>';
+                    return;
+                }
+                var optionsHtml = '<div class="sling-dropdown-header">Sling ' + escapeHtml(beadId) + ' to:</div>';
+                rigs.forEach(function(rig) {
+                    optionsHtml += '<button class="sling-dropdown-item" data-rig="' + escapeHtml(rig) + '">' + escapeHtml(rig) + '</button>';
+                });
+                dropdown.innerHTML = optionsHtml;
+            })
+            .catch(function() {
+                if (!activeSlingDropdown) return;
+                dropdown.innerHTML = '<div class="sling-dropdown-header">Sling ' + escapeHtml(beadId) + '</div>' +
+                    '<div class="sling-dropdown-empty">Failed to load rigs</div>';
+            });
+
+        // Handle rig selection
+        dropdown.addEventListener('click', function(ev) {
+            var item = ev.target.closest('.sling-dropdown-item');
+            if (!item) return;
+
+            var rig = item.getAttribute('data-rig');
+            if (!rig) return;
+
+            closeSlingDropdown();
+
+            // Execute sling via API
+            var cmdStr = 'sling ' + beadId + ' ' + rig;
+            showToast('info', 'Slinging...', 'gt ' + cmdStr);
+
+            fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmdStr })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (resp.success) {
+                    showToast('success', 'Slung!', beadId + ' → ' + rig);
+                    if (resp.output && resp.output.trim()) {
+                        showOutput(cmdStr, resp.output);
+                    }
+                } else {
+                    showToast('error', 'Sling failed', resp.error || 'Unknown error');
+                    if (resp.output) {
+                        showOutput(cmdStr, resp.output);
+                    }
+                }
+            })
+            .catch(function(err) {
+                showToast('error', 'Error', err.message || 'Request failed');
+            });
+        });
+    });
+
+    // ============================================
     // ISSUE CREATION MODAL
     // ============================================
     function openIssueModal() {
@@ -1003,7 +1118,8 @@
                             '<td>' + priBadge + '</td>' +
                             '<td><span class="ready-id">' + escapeHtml(item.id) + '</span></td>' +
                             '<td><span class="ready-title">' + escapeHtml(item.title || '') + '</span></td>' +
-                            '<td><span class="' + sourceClass + '">' + escapeHtml(item.source) + '</span></td>';
+                            '<td><span class="' + sourceClass + '">' + escapeHtml(item.source) + '</span></td>' +
+                            '<td><button class="sling-btn" data-bead-id="' + escapeHtml(item.id) + '" title="Sling to rig">🏹 Sling</button></td>';
                         tbody.appendChild(tr);
                     });
 

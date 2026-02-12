@@ -389,6 +389,67 @@
             color: var(--bg-primary);
         }
 
+        .sling-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--orange);
+            cursor: pointer;
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .sling-btn:hover {
+            background: var(--orange);
+            border-color: var(--orange);
+            color: var(--bg-primary);
+        }
+
+        .sling-dropdown {
+            background: var(--bg-card);
+            border: 1px solid var(--border-accent);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            min-width: 180px;
+            overflow: hidden;
+        }
+
+        .sling-dropdown-header {
+            padding: 8px 12px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sling-dropdown-loading,
+        .sling-dropdown-empty {
+            padding: 12px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .sling-dropdown-item {
+            display: block;
+            width: 100%;
+            background: none;
+            border: none;
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            cursor: pointer;
+            text-align: left;
+            font-family: inherit;
+            transition: background 0.1s ease;
+        }
+
+        .sling-dropdown-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--orange);
+        }
+
         /* Toast notifications */
         #toast-container {
             position: fixed;

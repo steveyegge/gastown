@@ -724,6 +724,7 @@
                                     <th>Title</th>
                                     <th>Status</th>
                                     <th>Age</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -741,6 +742,7 @@
                                         {{if .Assignee}}<span class="badge badge-blue" title="{{.Assignee}}">{{.Assignee}}</span>{{else}}<span class="badge badge-green">Ready</span>{{end}}
                                     </td>
                                     <td>{{.Age}}</td>
+                                    <td>{{if not .Assignee}}<button class="sling-btn" data-bead-id="{{.ID}}" title="Sling to rig">🏹 Sling</button>{{end}}</td>
                                 </tr>
                                 {{end}}
                             </tbody>
