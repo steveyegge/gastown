@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // cyclePolecatSession switches to the next or previous polecat session in the same rig.
@@ -131,14 +132,11 @@ func parsePolecatSessionName(sessionName string) (rigName, polecatName string, o
 }
 
 // findRigPolecatSessions returns all polecat sessions for a given rig.
-// Uses tmux list-sessions to find sessions matching gt-<rig>-<name> pattern,
+// Uses SessionRegistry to find sessions matching gt-<rig>-<name> pattern,
 // excluding crew, witness, and refinery sessions.
 func findRigPolecatSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
-	allSessions, err := tmux.NewTmux().ListSessions()
-	if err != nil {
-		// No tmux server or no sessions
-		return nil, nil
-	}
+	townRoot, _ := workspace.FindFromCwd()
+	allSessions := discoverSessionNames(townRoot)
 
 	prefix := fmt.Sprintf("gt-%s-", rigName)
 	var sessions []string

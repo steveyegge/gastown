@@ -46,6 +46,7 @@ func NewManager(r *rig.Rig) *Manager {
 		workDir: r.Path,
 		output:  os.Stdout,
 		config:  DefaultMergeQueueConfig(), // Use defaults until LoadConfig is called
+		backend: terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -54,13 +55,9 @@ func (m *Manager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (m *Manager) hasSession(sessionID string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionID)
-	}
-	t := tmux.NewTmux()
-	return t.HasSession(sessionID)
+	return m.backend.HasSession(sessionID)
 }
 
 // LoadConfig loads merge queue configuration from the rig's config.json.

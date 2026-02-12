@@ -447,11 +447,8 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 	// Find workspace root for polecat cleanup
 	townRoot, _ := workspace.FindFromCwd()
 
-	// Collect sessions to show what will be stopped
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
-	}
+	// Discover sessions to show what will be stopped
+	sessions := discoverSessionNames(townRoot)
 
 	// Get session names for categorization
 	mayorSession := getMayorSessionName()
@@ -748,7 +745,7 @@ func cleanupPolecats(townRoot string) {
 
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
-		polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing, not allocating
+		polecatMgr := polecat.NewManager(r, polecatGit)
 
 		polecats, err := polecatMgr.List()
 		if err != nil {

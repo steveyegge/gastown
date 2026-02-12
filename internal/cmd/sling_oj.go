@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // ojSlingEnabled returns true when OJ dispatch is active.
@@ -52,8 +51,7 @@ func dispatchToOj(rigName string, opts SlingSpawnOptions, beadID, instructions, 
 
 	// Allocate a polecat name (GT owns name allocation)
 	polecatGit := git.NewGit(r.Path)
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(r, polecatGit)
 
 	polecatName, err := polecatMgr.AllocateName()
 	if err != nil {

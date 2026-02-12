@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 const (
@@ -206,11 +207,9 @@ func autoDetectSession(tmuxClient *tmux.Tmux) (string, error) {
 		}
 	}
 
-	// Fallback: list all sessions and pick first Gas Town session
-	sessions, err := tmuxClient.ListSessions()
-	if err != nil {
-		return "", fmt.Errorf("listing tmux sessions: %w", err)
-	}
+	// Fallback: discover sessions via SessionRegistry and pick first Gas Town session
+	townRoot, _ := workspace.FindFromCwd()
+	sessions := discoverSessionNames(townRoot)
 
 	for _, session := range sessions {
 		if strings.HasPrefix(session, "gt-") || strings.HasPrefix(session, "hq-") {

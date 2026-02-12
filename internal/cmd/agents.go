@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/registry"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -195,15 +194,12 @@ func categorizeSession(name string) *AgentSession {
 }
 
 // getAgentSessions returns all categorized Gas Town sessions.
-// Discovers both local tmux sessions and K8s agents via the SessionRegistry.
+// Discovers agents via the SessionRegistry (K8s + local).
 func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return nil, err
-	}
+	townRoot, _ := workspace.FindFromCwd()
+	sessions := discoverSessionNames(townRoot)
 
-	// Categorize local tmux sessions
+	// Categorize sessions
 	seen := make(map[string]bool) // track session names to avoid duplicates
 	var agents []*AgentSession
 	for _, name := range sessions {
@@ -579,12 +575,8 @@ func buildCollisionReport(townRoot string) (*CollisionReport, error) {
 		Locks: make(map[string]*lock.LockInfo),
 	}
 
-	// Get all tmux sessions
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
-	if err != nil {
-		sessions = []string{} // Continue even if tmux not running
-	}
+	// Discover all agent sessions via SessionRegistry
+	sessions := discoverSessionNames(townRoot)
 
 	// Filter to gt- sessions
 	var gtSessions []string

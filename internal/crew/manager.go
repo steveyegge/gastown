@@ -103,8 +103,9 @@ type Manager struct {
 // NewManager creates a new crew manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	return &Manager{
-		rig: r,
-		git: g,
+		rig:     r,
+		git:     g,
+		backend: terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -113,13 +114,9 @@ func (m *Manager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (m *Manager) hasSession(sessionID string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionID)
-	}
-	t := tmux.NewTmux()
-	return t.HasSession(sessionID)
+	return m.backend.HasSession(sessionID)
 }
 
 // crewDir returns the directory for a crew worker.

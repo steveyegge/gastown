@@ -34,13 +34,9 @@ type SessionManager struct {
 // NewSessionManager creates a new dog session manager.
 func NewSessionManager(t *tmux.Tmux, townRoot string) *SessionManager {
 	townName, _ := workspace.GetTownName(townRoot)
-	var backend terminal.Backend
-	if t != nil {
-		backend = terminal.NewCoopBackend(terminal.CoopConfig{})
-	}
 	return &SessionManager{
 		tmux:     t,
-		backend:  backend,
+		backend:  terminal.NewCoopBackend(terminal.CoopConfig{}),
 		townRoot: townRoot,
 		townName: townName,
 	}
@@ -51,15 +47,9 @@ func (m *SessionManager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (m *SessionManager) hasSession(sessionID string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionID)
-	}
-	if m.tmux != nil {
-		return m.tmux.HasSession(sessionID)
-	}
-	return false, fmt.Errorf("no terminal backend available")
+	return m.backend.HasSession(sessionID)
 }
 
 // SessionStartOptions configures dog session startup.

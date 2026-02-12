@@ -327,7 +327,7 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 			continue
 		}
 
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr := polecat.NewSessionManager(r)
 		infos, err := polecatMgr.List()
 		if err != nil {
 			continue
@@ -416,12 +416,9 @@ func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
 func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	var respawned []string
 
-	sessions, err := t.ListSessions()
-	if err == nil {
-		for _, sess := range sessions {
-			if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
-				respawned = append(respawned, fmt.Sprintf("tmux session %s", sess))
-			}
+	for _, sess := range discoverSessionNames(townRoot) {
+		if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
+			respawned = append(respawned, fmt.Sprintf("agent session %s", sess))
 		}
 	}
 

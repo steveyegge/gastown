@@ -2,34 +2,20 @@ package polecat
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
-
-func requireTmux(t *testing.T) {
-	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("tmux not supported on Windows")
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not installed")
-	}
-}
 
 func TestSessionName(t *testing.T) {
 	r := &rig.Rig{
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	name := m.SessionName("Toast")
 	if name != "gt-gastown-Toast" {
@@ -43,7 +29,7 @@ func TestSessionManagerPolecatDir(t *testing.T) {
 		Path:     "/home/user/ai/gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/gastown/polecats/Toast"
@@ -66,7 +52,7 @@ func TestHasPolecat(t *testing.T) {
 		Path:     root,
 		Polecats: []string{"Toast", "Cheedo"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	if !m.hasPolecat("Toast") {
 		t.Error("expected hasPolecat(Toast) = true")
@@ -84,7 +70,7 @@ func TestStartPolecatNotFound(t *testing.T) {
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	err := m.Start("Unknown", SessionStartOptions{})
 	if err == nil {
@@ -93,13 +79,11 @@ func TestStartPolecatNotFound(t *testing.T) {
 }
 
 func TestIsRunningNoSession(t *testing.T) {
-	requireTmux(t)
-
 	r := &rig.Rig{
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	running, err := m.IsRunning("Toast")
 	if err != nil {
@@ -111,13 +95,13 @@ func TestIsRunningNoSession(t *testing.T) {
 }
 
 func TestSessionManagerListEmpty(t *testing.T) {
-	requireTmux(t)
-
+	root := t.TempDir()
 	r := &rig.Rig{
 		Name:     "test-rig-unlikely-name",
+		Path:     root,
 		Polecats: []string{},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	infos, err := m.List()
 	if err != nil {
@@ -129,13 +113,11 @@ func TestSessionManagerListEmpty(t *testing.T) {
 }
 
 func TestStopNotFound(t *testing.T) {
-	requireTmux(t)
-
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	err := m.Stop("Toast", false)
 	if err != ErrSessionNotFound {
@@ -144,13 +126,11 @@ func TestStopNotFound(t *testing.T) {
 }
 
 func TestCaptureNotFound(t *testing.T) {
-	requireTmux(t)
-
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	_, err := m.Capture("Toast", 50)
 	if err != ErrSessionNotFound {
@@ -159,13 +139,11 @@ func TestCaptureNotFound(t *testing.T) {
 }
 
 func TestInjectNotFound(t *testing.T) {
-	requireTmux(t)
-
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewSessionManager(tmux.NewTmux(), r)
+	m := NewSessionManager(r)
 
 	err := m.Inject("Toast", "hello")
 	if err != ErrSessionNotFound {
@@ -175,8 +153,7 @@ func TestInjectNotFound(t *testing.T) {
 
 // TestPolecatCommandFormat verifies the polecat session command exports
 // GT_ROLE, GT_RIG, GT_POLECAT, and BD_ACTOR inline before starting Claude.
-// This is a regression test for gt-y41ep - env vars must be exported inline
-// because tmux SetEnvironment only affects new panes, not the current shell.
+// This is a regression test for gt-y41ep - env vars must be exported inline.
 func TestPolecatCommandFormat(t *testing.T) {
 	// This test verifies the expected command format.
 	// The actual command is built in Start() but we test the format here
@@ -219,7 +196,7 @@ func TestPolecatStartPassesBDDaemonHostFromEnvironment(t *testing.T) {
 	// This test verifies that polecat Start() reads BD_DAEMON_HOST from the environment
 	// and passes it to AgentEnv for inclusion in the agent's environment variables.
 	//
-	// We can't easily test the full Start() flow without a real tmux session,
+	// We can't easily test the full Start() flow without a running coop server,
 	// but we can verify the config.AgentEnv call pattern that Start() uses.
 
 	testCases := []struct {

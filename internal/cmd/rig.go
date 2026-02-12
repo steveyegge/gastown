@@ -21,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -1253,7 +1252,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	// Check all polecats for uncommitted work (unless nuclear)
 	if !rigShutdownNuclear {
 		polecatGit := git.NewGit(r.Path)
-		polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
+		polecatMgr := polecat.NewManager(r, polecatGit)
 		polecats, err := polecatMgr.List()
 		if err == nil && len(polecats) > 0 {
 			var problemPolecats []struct {
@@ -1288,8 +1287,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	var errors []string
 
 	// 1. Stop all polecat sessions
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatMgr := polecat.NewSessionManager(r)
 	infos, err := polecatMgr.List()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
@@ -1373,7 +1371,6 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	t := tmux.NewTmux()
 
 	// Header
 	fmt.Printf("%s\n", style.Bold.Render(rigName))
@@ -1423,7 +1420,7 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 	// Polecats
 	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(r, polecatGit)
 	polecats, err := polecatMgr.List()
 	fmt.Printf("%s", style.Bold.Render("Polecats"))
 	if err != nil || len(polecats) == 0 {
@@ -1518,7 +1515,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		// Check all polecats for uncommitted work (unless nuclear)
 		if !rigStopNuclear {
 			polecatGit := git.NewGit(r.Path)
-			polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
+			polecatMgr := polecat.NewManager(r, polecatGit)
 			polecats, err := polecatMgr.List()
 			if err == nil && len(polecats) > 0 {
 				var problemPolecats []struct {
@@ -1553,8 +1550,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		var errors []string
 
 		// 1. Stop all polecat sessions
-		t := tmux.NewTmux()
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr := polecat.NewSessionManager(r)
 		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
@@ -1626,7 +1622,6 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
 	}
 
-	t := tmux.NewTmux()
 	g := git.NewGit(townRoot)
 	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
 
@@ -1648,7 +1643,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		// Check all polecats for uncommitted work (unless nuclear)
 		if !rigRestartNuclear {
 			polecatGit := git.NewGit(r.Path)
-			polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
+			polecatMgr := polecat.NewManager(r, polecatGit)
 			polecats, err := polecatMgr.List()
 			if err == nil && len(polecats) > 0 {
 				var problemPolecats []struct {
@@ -1685,7 +1680,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Stopping...\n")
 
 		// 1. Stop all polecat sessions
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr := polecat.NewSessionManager(r)
 		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))

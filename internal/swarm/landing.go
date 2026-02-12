@@ -9,7 +9,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // LandingConfig configures the landing protocol.
@@ -58,8 +57,7 @@ func (m *Manager) ExecuteLanding(swarmID string, config LandingConfig) (*Landing
 	}
 
 	// Phase 1: Stop all polecat sessions
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, m.rig)
+	polecatMgr := polecat.NewSessionManager(m.rig)
 
 	for _, worker := range swarm.Workers {
 		running, _ := polecatMgr.IsRunning(worker)

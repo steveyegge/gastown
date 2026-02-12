@@ -78,12 +78,9 @@ func (b *Boot) SetBackend(be terminal.Backend) {
 	b.backend = be
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (b *Boot) hasSession(sessionID string) (bool, error) {
-	if b.backend != nil {
-		return b.backend.HasSession(sessionID)
-	}
-	return b.tmux.HasSession(sessionID)
+	return b.backend.HasSession(sessionID)
 }
 
 // EnsureDir ensures the Boot directory exists.

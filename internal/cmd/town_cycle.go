@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // townCycleSession is the --session flag for town next/prev commands.
@@ -144,11 +145,9 @@ func cycleTownSession(direction int, sessionOverride string) error {
 
 // findRunningTownSessions returns a list of currently running town-level sessions.
 func findRunningTownSessions() ([]string, error) {
-	// Get all tmux sessions
-	allSessions, err := tmux.NewTmux().ListSessions()
-	if err != nil {
-		return nil, fmt.Errorf("listing tmux sessions: %w", err)
-	}
+	// Discover all agent sessions via SessionRegistry
+	townRoot, _ := workspace.FindFromCwd()
+	allSessions := discoverSessionNames(townRoot)
 
 	// Get town-level session names
 	townLevelSessions := getTownLevelSessions()

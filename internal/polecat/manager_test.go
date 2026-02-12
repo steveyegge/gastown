@@ -74,7 +74,7 @@ func TestListEmpty(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	polecats, err := m.List()
 	if err != nil {
@@ -91,7 +91,7 @@ func TestGetNotFound(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	_, err := m.Get("nonexistent")
 	if err != ErrPolecatNotFound {
@@ -105,7 +105,7 @@ func TestRemoveNotFound(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	err := m.Remove("nonexistent", false)
 	if err != ErrPolecatNotFound {
@@ -118,7 +118,7 @@ func TestPolecatDir(t *testing.T) {
 		Name: "test-rig",
 		Path: "/home/user/ai/test-rig",
 	}
-	m := NewManager(r, git.NewGit(r.Path), nil)
+	m := NewManager(r, git.NewGit(r.Path))
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/test-rig/polecats/Toast"
@@ -132,7 +132,7 @@ func TestAssigneeID(t *testing.T) {
 		Name: "test-rig",
 		Path: "/home/user/ai/test-rig",
 	}
-	m := NewManager(r, git.NewGit(r.Path), nil)
+	m := NewManager(r, git.NewGit(r.Path))
 
 	id := m.assigneeID("Toast")
 	expected := "test-rig/polecats/Toast"
@@ -170,7 +170,7 @@ func TestGetReturnsWorkingWithoutBeads(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	// Get should return polecat with StateWorking (assume active if beads unavailable)
 	polecat, err := m.Get("Test")
@@ -209,7 +209,7 @@ func TestListWithPolecats(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	polecats, err := m.List()
 	if err != nil {
@@ -242,7 +242,7 @@ func TestSetStateWithoutBeads(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	// SetState should succeed (no-op when no issue assigned)
 	err := m.SetState("Test", StateActive)
@@ -268,7 +268,7 @@ func TestClearIssueWithoutAssignment(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	// ClearIssue should succeed even when no issue assigned
 	err := m.ClearIssue("Test")
@@ -336,7 +336,7 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	// Create polecat via AddWithOptions
 	polecat, err := m.AddWithOptions("TestAgent", AddOptions{})
@@ -421,7 +421,7 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(r, git.NewGit(root))
 
 	// Create polecat via AddWithOptions
 	polecat, err := m.AddWithOptions("TestFallback", AddOptions{})
@@ -535,13 +535,13 @@ func TestReconcilePoolWith(t *testing.T) {
 			}
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
-			// Create rig and manager (nil tmux for unit test)
+			// Create rig and manager
 			// Use "myrig" which hashes to mad-max theme
 			r := &rig.Rig{
 				Name: "myrig",
 				Path: tmpDir,
 			}
-			m := NewManager(r, nil, nil)
+			m := NewManager(r, nil)
 
 			// Call ReconcilePoolWith
 			m.ReconcilePoolWith(tt.namesWithDirs, tt.namesWithSessions)
@@ -604,7 +604,7 @@ func TestReconcilePoolWith_Allocation(t *testing.T) {
 		Name: "myrig",
 		Path: tmpDir,
 	}
-	m := NewManager(r, nil, nil)
+	m := NewManager(r, nil)
 
 	// Mark first few pool names as in-use via directories
 	// (furiosa, nux, slit are first 3 in mad-max theme)
@@ -641,7 +641,7 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 		Name: "myrig",
 		Path: tmpDir,
 	}
-	m := NewManager(r, nil, nil)
+	m := NewManager(r, nil)
 
 	// furiosa has orphan session (no dir) - should NOT block allocation
 	m.ReconcilePoolWith([]string{}, []string{"furiosa"})
@@ -736,7 +736,7 @@ func TestBuildBranchName(t *testing.T) {
 			}
 
 			g := git.NewGit(tmpDir)
-			m := NewManager(r, g, nil)
+			m := NewManager(r, g)
 
 			got := m.buildBranchName("alpha", tt.issue)
 

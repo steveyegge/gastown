@@ -131,12 +131,9 @@ func (d *Daemon) SetBackend(b terminal.Backend) {
 	d.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (d *Daemon) hasSession(sessionName string) (bool, error) {
-	if d.backend != nil {
-		return d.backend.HasSession(sessionName)
-	}
-	return d.tmux.HasSession(sessionName)
+	return d.backend.HasSession(sessionName)
 }
 
 // Run starts the daemon main loop.

@@ -23,7 +23,6 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -677,8 +676,7 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	if err != nil {
 		return started, errors
 	}
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatMgr := polecat.NewSessionManager(r)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {

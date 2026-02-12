@@ -137,11 +137,9 @@ func runTheme(cmd *cobra.Command, args []string) error {
 func runThemeApply(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 
-	// Get all sessions
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
-	}
+	// Discover all agent sessions via SessionRegistry
+	townRoot, _ := workspace.FindFromCwd()
+	sessions := discoverSessionNames(townRoot)
 
 	// Determine current rig
 	rigName := detectCurrentRig()

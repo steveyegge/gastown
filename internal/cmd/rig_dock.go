@@ -9,7 +9,6 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
 )
 
@@ -151,9 +150,8 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Stop polecat sessions if any (polecat is inherently local/tmux)
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	// Stop polecat sessions if any
+	polecatMgr := polecat.NewSessionManager(r)
 	polecatInfos, err := polecatMgr.List()
 	if err == nil && len(polecatInfos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(polecatInfos))

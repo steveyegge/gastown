@@ -248,11 +248,9 @@ func runCosts(cmd *cobra.Command, args []string) error {
 func runLiveCosts() error {
 	t := tmux.NewTmux()
 
-	// Get all tmux sessions
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
-	}
+	// Discover all agent sessions via SessionRegistry
+	townRoot, _ := workspace.FindFromCwd()
+	sessions := discoverSessionNames(townRoot)
 
 	var costs []SessionCost
 	var total float64

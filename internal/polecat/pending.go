@@ -3,14 +3,11 @@ package polecat
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // PendingSpawn represents a polecat that has been spawned but not yet triggered.
@@ -22,7 +19,7 @@ type PendingSpawn struct {
 	// Polecat is the polecat name (e.g., "p-abc123")
 	Polecat string `json:"polecat"`
 
-	// Session is the tmux session name
+	// Session is the session name
 	Session string `json:"session"`
 
 	// Issue is the assigned issue ID
@@ -117,7 +114,6 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 	}
 
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
-	t := tmux.NewTmux()
 	var results []TriggerResult
 
 	for _, ps := range pending {
@@ -141,11 +137,9 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 			continue
 		}
 
-		// Check if runtime is ready (non-blocking poll)
-		rigPath := filepath.Join(townRoot, ps.Rig)
-		runtimeConfig := config.LoadRuntimeConfig(rigPath)
-		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
-		if err != nil {
+		// Check if agent is ready (non-blocking poll via backend)
+		agentRunning, agentErr := backend.IsAgentRunning(ps.Session)
+		if agentErr != nil || !agentRunning {
 			// Not ready yet - leave mail in inbox for next poll
 			continue
 		}

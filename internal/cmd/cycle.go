@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // cycleSession is the --session flag for cycle next/prev commands.
@@ -131,10 +132,7 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rig)
 
 	var sessions []string
-	allSessions, err := listTmuxSessions()
-	if err != nil {
-		return err
-	}
+	allSessions := listGTSessions()
 
 	for _, s := range allSessions {
 		if s == witnessSession || s == refinerySession {
@@ -173,7 +171,8 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 	return tmux.NewTmux().SwitchClient(sessions[targetIdx])
 }
 
-// listTmuxSessions returns all tmux session names.
-func listTmuxSessions() ([]string, error) {
-	return tmux.NewTmux().ListSessions()
+// listGTSessions returns all agent session names via the SessionRegistry.
+func listGTSessions() []string {
+	townRoot, _ := workspace.FindFromCwd()
+	return discoverSessionNames(townRoot)
 }

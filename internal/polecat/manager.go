@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -51,7 +50,6 @@ type Manager struct {
 	git      *git.Git
 	beads    *beads.Beads // Rig-level beads for issue and agent bead operations
 	namePool *NamePool
-	tmux     *tmux.Tmux
 	backend  terminal.Backend
 
 	// allocMu protects name allocation within a single process.
@@ -60,7 +58,7 @@ type Manager struct {
 }
 
 // NewManager creates a new polecat manager.
-func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
+func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	// Use the resolved beads directory to find where bd commands should run.
 	// For tracked beads: rig/.beads/redirect -> mayor/rig/.beads, so use mayor/rig
 	// For local beads: rig/.beads is the database, so use rig root
@@ -87,18 +85,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	}
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
-	var backend terminal.Backend
-	if t != nil {
-		backend = terminal.NewCoopBackend(terminal.CoopConfig{})
-	}
-
 	return &Manager{
 		rig:      r,
 		git:      g,
 		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
 		namePool: pool,
-		tmux:     t,
-		backend:  backend,
+		backend:  terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -107,15 +99,9 @@ func (m *Manager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the configured backend.
 func (m *Manager) hasSession(sessionName string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionName)
-	}
-	if m.tmux != nil {
-		return m.tmux.HasSession(sessionName)
-	}
-	return false, fmt.Errorf("no terminal backend available")
+	return m.backend.HasSession(sessionName)
 }
 
 // assigneeID returns the beads assignee identifier for a polecat.
@@ -993,11 +979,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 }
 
 // ReconcilePool derives pool InUse state from existing polecat directories and active sessions.
-// This implements ZFC: InUse is discovered from filesystem and tmux, not tracked separately.
+// This implements ZFC: InUse is discovered from filesystem and backend, not tracked separately.
 // Called before each allocation to ensure InUse reflects reality.
 //
 // In addition to directory checks, this also:
-// - Kills orphaned tmux sessions (sessions without directories are broken)
+// - Kills orphaned sessions (sessions without directories are broken)
 func (m *Manager) ReconcilePool() {
 	// Get polecats with existing directories
 	polecats, err := m.List()
@@ -1010,16 +996,14 @@ func (m *Manager) ReconcilePool() {
 		namesWithDirs = append(namesWithDirs, p.Name)
 	}
 
-	// Get names with active sessions (tmux or coop)
+	// Get names with active sessions (via coop backend)
 	var namesWithSessions []string
-	if m.backend != nil || m.tmux != nil {
-		poolNames := m.namePool.getNames()
-		for _, name := range poolNames {
-			sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
-			has, _ := m.hasSession(sessionName)
-			if has {
-				namesWithSessions = append(namesWithSessions, name)
-			}
+	poolNames := m.namePool.getNames()
+	for _, name := range poolNames {
+		sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+		has, _ := m.hasSession(sessionName)
+		if has {
+			namesWithSessions = append(namesWithSessions, name)
 		}
 	}
 
@@ -1035,7 +1019,7 @@ func (m *Manager) ReconcilePool() {
 // This is the testable core of ReconcilePool.
 //
 // - namesWithDirs: names that have existing worktree directories (in use)
-// - namesWithSessions: names that have tmux sessions
+// - namesWithSessions: names that have active sessions
 //
 // Names with sessions but no directories are orphans and their sessions are killed.
 // Only namesWithDirs are marked as in-use for allocation.
@@ -1046,13 +1030,10 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 	}
 
 	// Kill orphaned sessions (session exists but no directory).
-	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-	if m.tmux != nil {
-		for _, name := range namesWithSessions {
-			if !dirSet[name] {
-				sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
-				_ = m.tmux.KillSessionWithProcesses(sessionName)
-			}
+	for _, name := range namesWithSessions {
+		if !dirSet[name] {
+			sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+			_ = m.backend.KillSession(sessionName)
 		}
 	}
 
@@ -1513,7 +1494,7 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 type StalenessInfo struct {
 	Name               string
 	CommitsBehind      int    // How many commits behind origin/main
-	HasActiveSession   bool   // Whether tmux session is running
+	HasActiveSession   bool   // Whether session is running
 	HasUncommittedWork bool   // Whether there's uncommitted or unpushed work
 	AgentState         string // From agent bead (empty if no bead)
 	IsStale            bool   // Overall assessment: safe to clean up
@@ -1522,7 +1503,7 @@ type StalenessInfo struct {
 
 // DetectStalePolecats identifies polecats that are candidates for cleanup.
 // A polecat is considered stale if:
-// - No active tmux session AND
+// - No active session AND
 // - Either: way behind main (>threshold commits) OR no agent bead/activity
 // - Has no uncommitted work that could be lost
 //
@@ -1601,7 +1582,7 @@ func countCommitsBehind(g *git.Git, defaultBranch string) int {
 }
 
 // assessStaleness determines if a polecat should be cleaned up.
-// Per gt-zecmc: uses tmux state (HasActiveSession) rather than agent_state
+// Per gt-zecmc: uses session state (HasActiveSession) rather than agent_state
 // since observable states (running, done, idle) are no longer recorded in beads.
 func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 	// Never clean up if there's uncommitted work
@@ -1609,7 +1590,7 @@ func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 		return false, "has uncommitted work"
 	}
 
-	// If session is active, not stale (tmux is source of truth for liveness)
+	// If session is active, not stale (session is source of truth for liveness)
 	if info.HasActiveSession {
 		return false, "session active"
 	}

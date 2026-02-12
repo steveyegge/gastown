@@ -14,13 +14,11 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/ratelimit"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // debugSession logs non-fatal errors during session startup when GT_DEBUG_SESSION=1.
@@ -40,22 +38,16 @@ var (
 
 // SessionManager handles polecat session lifecycle.
 type SessionManager struct {
-	tmux    *tmux.Tmux
 	rig     *rig.Rig
 	backend terminal.Backend
 }
 
 // NewSessionManager creates a new polecat session manager for a rig.
-// The backend defaults to local tmux; use SetBackend to override for coop/SSH.
-func NewSessionManager(t *tmux.Tmux, r *rig.Rig) *SessionManager {
-	var backend terminal.Backend
-	if t != nil {
-		backend = terminal.NewCoopBackend(terminal.CoopConfig{})
-	}
+// Uses CoopBackend by default; use SetBackend to override.
+func NewSessionManager(r *rig.Rig) *SessionManager {
 	return &SessionManager{
-		tmux:    t,
 		rig:     r,
-		backend: backend,
+		backend: terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -65,17 +57,9 @@ func (m *SessionManager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the
-// configured backend (coop, SSH, or local tmux).
+// hasSession checks if a terminal session exists via the configured backend.
 func (m *SessionManager) hasSession(sessionID string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionID)
-	}
-	// Fallback to direct tmux if no backend configured
-	if m.tmux != nil {
-		return m.tmux.HasSession(sessionID)
-	}
-	return false, fmt.Errorf("no terminal backend available")
+	return m.backend.HasSession(sessionID)
 }
 
 // SessionStartOptions configures polecat session startup.
@@ -110,7 +94,7 @@ type SessionInfo struct {
 	// Polecat is the polecat name.
 	Polecat string `json:"polecat"`
 
-	// SessionID is the tmux session identifier.
+	// SessionID is the session identifier.
 	SessionID string `json:"session_id"`
 
 	// Running indicates if the session is currently active.
@@ -125,14 +109,14 @@ type SessionInfo struct {
 	// Created is when the session was created.
 	Created time.Time `json:"created,omitempty"`
 
-	// Windows is the number of tmux windows.
+	// Windows is the number of session windows.
 	Windows int `json:"windows,omitempty"`
 
 	// LastActivity is when the session last had activity.
 	LastActivity time.Time `json:"last_activity,omitempty"`
 }
 
-// SessionName generates the tmux session name for a polecat.
+// SessionName generates the session name for a polecat.
 func (m *SessionManager) SessionName(polecat string) string {
 	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
 }
@@ -267,28 +251,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		command = config.PrependEnv(command, prependEnvVars)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
+	// Send command to coop backend to start the agent session.
+	if err := m.backend.SendInput(sessionID, command, true); err != nil {
 		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "polecat",
-		Rig:              m.rig.Name,
-		AgentName:        polecat,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.RuntimeConfigDir,
-		BeadsNoDaemon:    true,
-		AuthToken:        opts.AuthToken,
-		BaseURL:          opts.BaseURL,
-		BDDaemonHost:     os.Getenv("BD_DAEMON_HOST"),
-	})
-	for k, v := range envVars {
-		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
 
 	// Hook the issue to the polecat if provided via --issue flag
@@ -299,20 +264,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Apply theme (non-fatal)
-	theme := tmux.AssignTheme(m.rig.Name)
-	debugSession("ConfigureGasTownSession", m.tmux.ConfigureGasTownSession(sessionID, theme, m.rig.Name, polecat, "polecat"))
-
-	// Set pane-died hook for crash detection (non-fatal)
-	agentID := fmt.Sprintf("%s/%s", m.rig.Name, polecat)
-	debugSession("SetPaneDiedHook", m.tmux.SetPaneDiedHook(sessionID, agentID))
-
-	// Wait for Claude to start (non-fatal)
-	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
-
-	// Accept bypass permissions warning dialog if it appears
-	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
-
 	// Wait for runtime to be fully ready at the prompt (not just started)
 	runtime.SleepForReadyDelay(runtimeConfig)
 
@@ -321,11 +272,11 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
 		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
 		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		debugSession("SendCombinedNudge", m.tmux.NudgeSession(sessionID, combined))
+		debugSession("SendCombinedNudge", m.backend.NudgeSession(sessionID, combined))
 	} else {
 		if fallbackInfo.SendBeaconNudge {
 			// Agent doesn't support CLI prompt - send beacon via nudge
-			debugSession("SendBeaconNudge", m.tmux.NudgeSession(sessionID, beacon))
+			debugSession("SendBeaconNudge", m.backend.NudgeSession(sessionID, beacon))
 		}
 
 		if fallbackInfo.StartupNudgeDelayMs > 0 {
@@ -335,31 +286,23 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 		if fallbackInfo.SendStartupNudge {
 			// Send work instructions via nudge
-			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
+			debugSession("SendStartupNudge", m.backend.NudgeSession(sessionID, runtime.StartupNudgeContent()))
 		}
 	}
 
-	// Legacy fallback for other startup paths (non-fatal)
-	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
-
-	// Verify session survived startup - if the command crashed, the session may have died.
-	// Without this check, Start() would return success even if the pane died during initialization.
-	//
-	// With remain-on-exit enabled, if the command crashes the pane stays around, allowing
-	// us to capture diagnostic output. We check for this "zombie pane" state specifically.
+	// Verify session survived startup
 	running, err = m.hasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("verifying session: %w", err)
 	}
 
 	if running {
-		// Session exists - check if pane is dead (command exited but pane preserved)
-		dead, err := m.tmux.IsPaneDead(sessionID)
-		if err == nil && dead {
-			// Capture diagnostic output before cleanup
-			diagnosticOutput := m.tmux.CaptureDeadPaneOutput(sessionID, 50)
-			// Kill the zombie session
-			_ = m.tmux.KillSession(sessionID)
+		// Check if agent is still running
+		agentRunning, agentErr := m.backend.IsAgentRunning(sessionID)
+		if agentErr == nil && !agentRunning {
+			// Agent exited - capture diagnostic output
+			diagnosticOutput, _ := m.backend.CapturePane(sessionID, 50)
+			_ = m.backend.KillSession(sessionID)
 
 			// Check for rate limit in diagnostic output
 			if ratelimit.DetectRateLimit(diagnosticOutput) {
@@ -370,19 +313,15 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 				return fmt.Errorf("%w: session %s died due to rate limiting. Diagnostic output:\n%s", ErrRateLimited, sessionID, diagnosticOutput)
 			}
 
-			// Return error with diagnostics
 			if diagnosticOutput != "" {
 				return fmt.Errorf("session %s died during startup. Diagnostic output:\n%s", sessionID, diagnosticOutput)
 			}
-			return fmt.Errorf("session %s died during startup (pane dead, no diagnostic output - check agent binary and credentials)", sessionID)
+			return fmt.Errorf("session %s died during startup (no diagnostic output - check agent binary and credentials)", sessionID)
 		}
-		// Session is alive and pane is not dead - success
 		return nil
 	}
 
-	// Session doesn't exist at all (remain-on-exit may not have taken effect)
-	// This is a different failure mode than pane death - the session was destroyed entirely
-	return fmt.Errorf("session %s died during startup (session destroyed, remain-on-exit may have failed - check tmux version)", sessionID)
+	return fmt.Errorf("session %s died during startup (session destroyed)", sessionID)
 }
 
 // Stop terminates a polecat session.
@@ -399,13 +338,11 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 
 	// Try graceful shutdown first
 	if !force {
-		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
+		_ = m.backend.SendKeys(sessionID, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
-	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+	if err := m.backend.KillSession(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -438,59 +375,37 @@ func (m *SessionManager) Status(polecat string) (*SessionInfo, error) {
 		return info, nil
 	}
 
-	tmuxInfo, err := m.tmux.GetSessionInfo(sessionID)
-	if err != nil {
-		return info, nil
-	}
-
-	info.Attached = tmuxInfo.Attached
-	info.Windows = tmuxInfo.Windows
-
-	if tmuxInfo.Created != "" {
-		formats := []string{
-			"Mon Jan 2 15:04:05 2006",
-			"Mon Jan _2 15:04:05 2006",
-			time.ANSIC,
-			time.UnixDate,
-		}
-		for _, format := range formats {
-			if t, err := time.Parse(format, tmuxInfo.Created); err == nil {
-				info.Created = t
-				break
-			}
-		}
-	}
-
-	if tmuxInfo.Activity != "" {
-		var activityUnix int64
-		if _, err := fmt.Sscanf(tmuxInfo.Activity, "%d", &activityUnix); err == nil && activityUnix > 0 {
-			info.LastActivity = time.Unix(activityUnix, 0)
-		}
-	}
-
+	// Session details are available through the backend's session info
+	// For coop backends, detailed info may be limited; return basic running status.
 	return info, nil
 }
 
 // List returns information about all polecat sessions for this rig.
+// Discovers polecats from filesystem and checks liveness via backend.
 func (m *SessionManager) List() ([]SessionInfo, error) {
-	sessions, err := m.tmux.ListSessions()
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading polecats dir: %w", err)
 	}
 
-	prefix := fmt.Sprintf("gt-%s-", m.rig.Name)
 	var infos []SessionInfo
-
-	for _, sessionID := range sessions {
-		if !strings.HasPrefix(sessionID, prefix) {
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
-		polecat := strings.TrimPrefix(sessionID, prefix)
+		polecat := entry.Name()
+		sessionID := m.SessionName(polecat)
+		running, _ := m.hasSession(sessionID)
+
 		infos = append(infos, SessionInfo{
 			Polecat:   polecat,
 			SessionID: sessionID,
-			Running:   true,
+			Running:   running,
 			RigName:   m.rig.Name,
 		})
 	}
@@ -510,7 +425,7 @@ func (m *SessionManager) Attach(polecat string) error {
 		return ErrSessionNotFound
 	}
 
-	return m.tmux.AttachSession(sessionID)
+	return m.backend.AttachSession(sessionID)
 }
 
 // Capture returns the recent output from a polecat session.
@@ -525,10 +440,7 @@ func (m *SessionManager) Capture(polecat string, lines int) (string, error) {
 		return "", ErrSessionNotFound
 	}
 
-	if m.backend != nil {
-		return m.backend.CapturePane(sessionID, lines)
-	}
-	return m.tmux.CapturePane(sessionID, lines)
+	return m.backend.CapturePane(sessionID, lines)
 }
 
 // CaptureSession returns the recent output from a session by raw session ID.
@@ -541,10 +453,7 @@ func (m *SessionManager) CaptureSession(sessionID string, lines int) (string, er
 		return "", ErrSessionNotFound
 	}
 
-	if m.backend != nil {
-		return m.backend.CapturePane(sessionID, lines)
-	}
-	return m.tmux.CapturePane(sessionID, lines)
+	return m.backend.CapturePane(sessionID, lines)
 }
 
 // Inject sends a message to a polecat session.
@@ -559,12 +468,7 @@ func (m *SessionManager) Inject(polecat, message string) error {
 		return ErrSessionNotFound
 	}
 
-	debounceMs := 200 + (len(message)/1024)*100
-	if debounceMs > 1500 {
-		debounceMs = 1500
-	}
-
-	return m.tmux.SendKeysDebounced(sessionID, message, debounceMs)
+	return m.backend.NudgeSession(sessionID, message)
 }
 
 // StopAll terminates all polecat sessions for this rig.

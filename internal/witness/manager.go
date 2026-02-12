@@ -35,7 +35,8 @@ type Manager struct {
 // NewManager creates a new witness manager for a rig.
 func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
-		rig: r,
+		rig:     r,
+		backend: terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -44,13 +45,9 @@ func (m *Manager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }
 
-// hasSession checks if a terminal session exists, routing through the backend.
+// hasSession checks if a terminal session exists via the CoopBackend.
 func (m *Manager) hasSession(sessionID string) (bool, error) {
-	if m.backend != nil {
-		return m.backend.HasSession(sessionID)
-	}
-	t := tmux.NewTmux()
-	return t.HasSession(sessionID)
+	return m.backend.HasSession(sessionID)
 }
 
 // IsRunning checks if the witness session is active.

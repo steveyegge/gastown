@@ -102,7 +102,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	polecatGit := git.NewGit(r.Path)
 	t := tmux.NewTmux()
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(r, polecatGit)
 
 	// Allocate a new polecat name
 	polecatName, err := polecatMgr.AllocateName()
@@ -230,7 +230,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	// Get session manager for session name (session start is deferred)
-	polecatSessMgr := polecat.NewSessionManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(r)
 
 	// Check if already running
 	running, _ := polecatSessMgr.IsRunning(polecatName)
@@ -362,7 +362,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 
 	// Start session
 	t := tmux.NewTmux()
-	polecatSessMgr := polecat.NewSessionManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(r)
 
 	fmt.Printf("Starting session for %s/%s...\n", s.RigName, s.PolecatName)
 	startOpts := polecat.SessionStartOptions{
@@ -387,7 +387,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 
 	// Update agent state
 	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(r, polecatGit)
 	if err := polecatMgr.SetAgentState(s.PolecatName, "working"); err != nil {
 		fmt.Printf("Warning: could not update agent state: %v\n", err)
 	}
@@ -599,8 +599,7 @@ func spawnPolecatForK8sCMD(townRoot, rigName string, r *rig.Rig, opts SlingSpawn
 	if _, err := os.Stat(rigBeadsDir); err == nil {
 		// Full rig: use polecat Manager for proper pool + reconciliation.
 		polecatGit := git.NewGit(r.Path)
-		t := tmux.NewTmux()
-		polecatMgr := polecat.NewManager(r, polecatGit, t)
+		polecatMgr := polecat.NewManager(r, polecatGit)
 		name, err := polecatMgr.AllocateName()
 		if err != nil {
 			return nil, fmt.Errorf("allocating polecat name: %w", err)

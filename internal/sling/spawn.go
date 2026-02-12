@@ -85,7 +85,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 
 	polecatGit := git.NewGit(r.Path)
 	t := tmux.NewTmux()
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(r, polecatGit)
 
 	polecatName, err := polecatMgr.AllocateName()
 	if err != nil {
@@ -186,7 +186,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 		}
 	}
 
-	polecatSessMgr := polecat.NewSessionManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(r)
 	running, _ := polecatSessMgr.IsRunning(polecatName)
 
 	if running {
@@ -377,8 +377,7 @@ func notifyWitnessRateLimit(rigName, polecatName, account string) {
 // with agent_state=spawning and execution_target:k8s label, then creates pods.
 func spawnPolecatForK8s(townRoot, rigName string, r *rig.Rig, opts SpawnOptions) (*SpawnResult, error) {
 	g := git.NewGit(r.Path)
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewManager(r, g, t)
+	polecatMgr := polecat.NewManager(r, g)
 
 	polecatName, err := polecatMgr.AllocateName()
 	if err != nil {

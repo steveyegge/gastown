@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Polecat identity command flags
@@ -222,8 +221,7 @@ func runPolecatIdentityAdd(cmd *cobra.Command, args []string) error {
 	// Generate name if not provided
 	if polecatName == "" {
 		polecatGit := git.NewGit(r.Path)
-		t := tmux.NewTmux()
-		mgr := polecat.NewManager(r, polecatGit, t)
+		mgr := polecat.NewManager(r, polecatGit)
 		polecatName, err = mgr.AllocateName()
 		if err != nil {
 			return fmt.Errorf("generating polecat name: %w", err)
@@ -277,7 +275,6 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 
 	// Filter for polecat beads in this rig
 	identities := []IdentityInfo{} // Initialize to empty slice (not nil) for JSON
-	t := tmux.NewTmux()
 
 	for id, issue := range agentBeads {
 		// Parse the bead ID to check if it's a polecat for this rig
@@ -295,7 +292,7 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 
 		// Check if worktree exists
 		worktreeExists := false
-		mgr := polecat.NewManager(r, nil, t)
+		mgr := polecat.NewManager(r, nil)
 		if p, err := mgr.Get(name); err == nil && p != nil {
 			worktreeExists = true
 		}
@@ -397,8 +394,7 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check worktree and session
-	t := tmux.NewTmux()
-	mgr := polecat.NewManager(r, nil, t)
+	mgr := polecat.NewManager(r, nil)
 
 	worktreeExists := false
 	var p *polecat.Polecat

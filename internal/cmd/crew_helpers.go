@@ -450,13 +450,10 @@ func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool
 }
 
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
-// Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
+// Uses SessionRegistry to find sessions matching gt-<rig>-crew-* pattern.
 func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
-	allSessions, err := tmux.NewTmux().ListSessions()
-	if err != nil {
-		// No tmux server or no sessions
-		return nil, nil
-	}
+	townRoot, _ := workspace.FindFromCwd()
+	allSessions := discoverSessionNames(townRoot)
 
 	prefix := fmt.Sprintf("gt-%s-crew-", rigName)
 	var sessions []string

@@ -166,12 +166,6 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 func runMayorStatusLine(t *tmux.Tmux) error {
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
-	// Count active sessions by listing tmux sessions
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return nil // Silent fail
-	}
-
 	// Get town root from mayor pane's working directory
 	var townRoot string
 	mayorSession := getMayorSessionName()
@@ -179,6 +173,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
+	if townRoot == "" {
+		townRoot, _ = workspace.FindFromCwd()
+	}
+
+	// Discover active sessions via SessionRegistry
+	sessions := discoverSessionNames(townRoot)
 
 	// Load registered rigs to validate against
 	registeredRigs := make(map[string]bool)
@@ -405,12 +405,6 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 // runDeaconStatusLine outputs status for the deacon session.
 // Shows: active rigs, polecat count, hook or mail preview
 func runDeaconStatusLine(t *tmux.Tmux) error {
-	// Count active rigs and polecats
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return nil // Silent fail
-	}
-
 	// Get town root from deacon pane's working directory
 	var townRoot string
 	deaconSession := getDeaconSessionName()
@@ -418,6 +412,12 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
+	if townRoot == "" {
+		townRoot, _ = workspace.FindFromCwd()
+	}
+
+	// Discover active sessions via SessionRegistry
+	sessions := discoverSessionNames(townRoot)
 
 	// Load registered rigs to validate against
 	registeredRigs := make(map[string]bool)
@@ -490,11 +490,11 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		townRoot, _ = workspace.Find(paneDir)
 	}
 
-	// Count crew in this rig (crew are persistent, worth tracking)
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return nil // Silent fail
+	// Count crew in this rig via SessionRegistry
+	if townRoot == "" {
+		townRoot, _ = workspace.FindFromCwd()
 	}
+	sessions := discoverSessionNames(townRoot)
 
 	crewCount := 0
 	for _, s := range sessions {

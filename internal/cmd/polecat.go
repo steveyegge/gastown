@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/witness"
 )
@@ -375,8 +374,7 @@ func getPolecatManager(rigName string) (*polecat.Manager, *rig.Rig, error) {
 	}
 
 	polecatGit := git.NewGit(r.Path)
-	t := tmux.NewTmux()
-	mgr := polecat.NewManager(r, polecatGit, t)
+	mgr := polecat.NewManager(r, polecatGit)
 
 	return mgr, r, nil
 }
@@ -404,13 +402,12 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect polecats from all rigs
-	t := tmux.NewTmux()
 	var allPolecats []PolecatListItem
 
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
-		mgr := polecat.NewManager(r, polecatGit, t)
-		polecatMgr := polecat.NewSessionManager(t, r)
+		mgr := polecat.NewManager(r, polecatGit)
+		polecatMgr := polecat.NewSessionManager(r)
 
 		// Track local polecat names to avoid duplicates with K8s discovery
 		localPolecatNames := make(map[string]bool)
@@ -553,14 +550,13 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Remove each polecat
-	t := tmux.NewTmux()
 	var removeErrors []string
 	removed := 0
 
 	for _, p := range targets {
 		// Check if session is running
 		if !polecatForce {
-			polecatMgr := polecat.NewSessionManager(t, p.r)
+			polecatMgr := polecat.NewSessionManager(p.r)
 			running, _ := polecatMgr.IsRunning(p.polecatName)
 			if running {
 				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: session is running (stop first or use --force)", p.rigName, p.polecatName))
@@ -649,8 +645,7 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get session info (resolve backend for remote support)
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatMgr := polecat.NewSessionManager(r)
 	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 	pcBackend, _ := resolveBackendForSession(sessionName)
 	polecatMgr.SetBackend(pcBackend)
@@ -1250,7 +1245,6 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 	}
 
 	// Nuke each polecat
-	t := tmux.NewTmux()
 	var nukeErrors []string
 	nuked := 0
 
@@ -1309,7 +1303,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 1: Kill session (force mode - no graceful shutdown)
-		polecatMgr := polecat.NewSessionManager(t, p.r)
+		polecatMgr := polecat.NewSessionManager(p.r)
 		running, _ := polecatMgr.IsRunning(p.polecatName)
 		if running {
 			if err := polecatMgr.Stop(p.polecatName, true); err != nil {
