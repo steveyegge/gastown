@@ -100,6 +100,8 @@ bd-daemon:
       repository: external/bitnami/redis
       tag: "latest"
     master:
+      nodeSelector:
+        kubernetes.io/arch: amd64
       persistence:
         storageClass: "gp2"
         size: 1Gi
@@ -141,13 +143,10 @@ bd-daemon:
     slackBotCredentials:
       enabled: true
 
-  # Slack bot — enabled for full E2E coverage
+  # Slack bot — disabled for E2E (requires SLACK_CHANNEL in Dolt config table)
+  # Enable once seed-config step populates deploy.slack_channel
   slackBot:
-    enabled: true
-    image:
-      repository: ghcr.io/groblegark/beads
-      tag: "0.57.17"
-      pullPolicy: Always
+    enabled: false
 
 # Agent Controller — enabled for agent pod lifecycle tests
 agentController:
