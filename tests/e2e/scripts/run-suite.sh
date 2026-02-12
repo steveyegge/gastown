@@ -80,6 +80,8 @@ MODULES=(
   "agent-multi"
   "agent-coordination"
   "agent-cleanup"
+  # Phase 2.5: Decision flow
+  "decision-flow"
   # Phase 3: Advanced health & lifecycle
   "agent-lifecycle"
   "controller-create-pod"
