@@ -2619,7 +2619,7 @@ func (c *Client) SpawnPolecat(ctx context.Context, req SpawnPolecatRequest) (*Ag
 	}
 
 	title := fmt.Sprintf("Polecat %s in %s", name, req.Rig)
-	labels := fmt.Sprintf("gt:agent,role:polecat,rig:%s,agent:%s", req.Rig, name)
+	labels := []string{"gt:agent", "role:polecat", fmt.Sprintf("rig:%s", req.Rig), fmt.Sprintf("agent:%s", name)}
 	description := fmt.Sprintf("Polecat agent %s in %s - ephemeral worker.", name, req.Rig)
 
 	createBody := map[string]interface{}{
@@ -2677,7 +2677,7 @@ type CreateCrewResponse struct {
 func (c *Client) CreateCrew(ctx context.Context, req CreateCrewRequest) (*CreateCrewResponse, error) {
 	beadID := crewBeadID(c.townName, req.Rig, req.Name)
 	title := fmt.Sprintf("Crew worker %s in %s", req.Name, req.Rig)
-	labels := fmt.Sprintf("gt:agent,role:crew,rig:%s,agent:%s", req.Rig, req.Name)
+	labels := []string{"gt:agent", "role:crew", fmt.Sprintf("rig:%s", req.Rig), fmt.Sprintf("agent:%s", req.Name)}
 	description := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", req.Name, req.Rig)
 
 	createBody := map[string]interface{}{
