@@ -84,6 +84,10 @@ func TestRunCrewList_AllWithRigErrors(t *testing.T) {
 }
 
 func TestRunCrewList_AllAggregatesJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // Prevent daemon config from being found
+	t.Setenv("BD_DAEMON_HOST", "")
+	t.Setenv("GT_DAEMON_HOST", "")
+
 	townRoot := setupTestTownForCrewList(t, map[string][]string{
 		"rig-a": {"alice"},
 		"rig-b": {"bob"},

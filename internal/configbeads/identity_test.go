@@ -3,6 +3,7 @@ package configbeads
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,6 +42,16 @@ func setupTestTown(t *testing.T) string {
 // Returns nil if bd CLI is unavailable or has known write bugs.
 func setupTestBeads(t *testing.T, dir string) *beads.Beads {
 	t.Helper()
+	// Prevent daemon/config leakage so both isolated and non-isolated
+	// Beads instances (e.g. SeedRigRegistryBead) use the local temp DB.
+	t.Setenv("BD_DAEMON_HOST", "")
+	t.Setenv("BD_DAEMON_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	// Initialize git repo to suppress "No git repository" warnings in bd stdout
+	// (bd writes warnings to stdout which breaks JSON parsing).
+	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
+		t.Logf("warning: git init failed: %v: %s", err, out)
+	}
 	bd := beads.NewIsolated(dir)
 	if err := bd.Init("hq-"); err != nil {
 		t.Skipf("cannot initialize beads repo (bd not available?): %v", err)

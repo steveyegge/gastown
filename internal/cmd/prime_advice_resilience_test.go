@@ -456,10 +456,10 @@ echo '[]'
 func TestQueryAdviceForAgent_LargeBinaryOutput(t *testing.T) {
 	// Generate a large valid JSON response
 	mockScript := `#!/bin/sh
-echo -n '['
+printf '['
 for i in $(seq 1 100); do
-    if [ $i -gt 1 ]; then echo -n ','; fi
-    echo -n '{"id":"test-'$i'","title":"Test Advice '$i'","description":"This is a longer description for test advice number '$i' to simulate more realistic data."}'
+    if [ $i -gt 1 ]; then printf ','; fi
+    printf '{"id":"test-%s","title":"Test Advice %s","description":"This is a longer description for test advice number %s to simulate more realistic data."}' "$i" "$i" "$i"
 done
 echo ']'
 `

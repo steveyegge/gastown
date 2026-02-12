@@ -34,6 +34,16 @@ func init() {
 	resolvedBdPath = resolveBdPath()
 }
 
+// SetBdPathForTest overrides the cached bd path for testing purposes.
+// Returns a cleanup function that restores the original path.
+func SetBdPathForTest(path string) func() {
+	original := resolvedBdPath
+	resolvedBdPath = path
+	return func() {
+		resolvedBdPath = original
+	}
+}
+
 // resolveBdPath finds the bd binary, preferring ~/.local/bin/bd over system PATH.
 func resolveBdPath() string {
 	home, err := os.UserHomeDir()

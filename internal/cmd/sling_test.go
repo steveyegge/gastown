@@ -8,7 +8,25 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/bdcmd"
 )
+
+// isolateFromDaemon prevents tests from reaching the real beads daemon.
+// It overrides HOME (so ~/.beads/config.yaml is not found) and redirects
+// the bdcmd cached binary path to the stub bd in binDir.
+func isolateFromDaemon(t *testing.T, binDir string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BD_DAEMON_HOST", "")
+	t.Setenv("BD_DAEMON_TOKEN", "")
+	bdPath := filepath.Join(binDir, "bd")
+	if runtime.GOOS == "windows" {
+		bdPath = filepath.Join(binDir, "bd.cmd")
+	}
+	cleanup := bdcmd.SetBdPathForTest(bdPath)
+	t.Cleanup(cleanup)
+}
 
 func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
 	t.Helper()
@@ -388,6 +406,7 @@ if "%cmd%"=="mol" (
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
@@ -580,6 +599,7 @@ if "%cmd%"=="mol" (
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
@@ -714,6 +734,7 @@ echo [{"title":"Test bead","status":"open","assignee":""}]
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -811,6 +832,7 @@ if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "crew")
@@ -1082,6 +1104,7 @@ if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -1296,6 +1319,7 @@ if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
@@ -1437,6 +1461,7 @@ if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -1542,6 +1567,7 @@ esac
 exit 0
 `
 	_ = writeBDStub(t, binDir, bdScript, "")
+	isolateFromDaemon(t, binDir)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")

@@ -106,6 +106,7 @@ if "%cmd%"=="update" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -214,6 +215,7 @@ if "%cmd%"=="mol" (
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -263,6 +265,7 @@ echo CMD:%*>>"%BD_LOG%"
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -412,6 +415,7 @@ if "%cmd%"=="mol" (
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	isolateFromDaemon(t, binDir)
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
