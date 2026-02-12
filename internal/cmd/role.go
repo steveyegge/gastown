@@ -419,6 +419,8 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 			return ""
 		}
 		return filepath.Join(townRoot, rig, "crew", polecat)
+	case RoleBoot:
+		return filepath.Join(townRoot, "deacon", "dogs", "boot")
 	default:
 		return ""
 	}
