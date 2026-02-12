@@ -1,0 +1,73 @@
+name: Build Toolchain Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/toolchain/**'
+      - '.github/workflows/toolchain-image.yml'
+  pull_request:
+    paths:
+      - 'docker/toolchain/**'
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 'Push images to registry'
+        type: boolean
+        default: false
+
+concurrency:
+  group: toolchain-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/gastown-toolchain
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        target: [full, minimal]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ matrix.target }},enable={{is_default_branch}}
+            type=raw,value=${{ matrix.target }}-{{sha}},enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ matrix.target == 'full' && github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/toolchain
+          file: docker/toolchain/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' || inputs.push == true }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
