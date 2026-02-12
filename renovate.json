@@ -1,0 +1,50 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies", "toolchain"],
+  "packageRules": [
+    {
+      "description": "Toolchain Dockerfile dependency updates",
+      "matchFileNames": ["docker/toolchain/Dockerfile"],
+      "groupName": "toolchain-deps",
+      "automerge": false
+    },
+    {
+      "description": "GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "automerge": true
+    }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["^docker/toolchain/Dockerfile$"],
+      "matchStrings": ["ARG GO_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
+    },
+    {
+      "fileMatch": ["^docker/toolchain/Dockerfile$"],
+      "matchStrings": ["ARG NODE_MAJOR=(?<currentValue>\\d+)"],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
+    },
+    {
+      "fileMatch": ["^docker/toolchain/Dockerfile$"],
+      "matchStrings": ["ARG DOCKER_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "docker/cli",
+      "datasourceTemplate": "github-releases",
+      "lookupNameTemplate": "moby/moby",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "fileMatch": ["^docker/toolchain/Dockerfile$"],
+      "matchStrings": ["kaniko-project/executor:v(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "gcr.io/kaniko-project/executor",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
+    }
+  ]
+}
