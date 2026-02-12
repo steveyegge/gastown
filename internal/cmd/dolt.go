@@ -957,9 +957,11 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 			if startErr := doltserver.Start(townRoot); startErr != nil {
 				fmt.Printf("%s Failed to restart Dolt server: %v\n", style.Bold.Render("✗"), startErr)
 				fmt.Printf("  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
-			} else {
-				fmt.Printf("%s Dolt server restarted\n", style.Bold.Render("✓"))
+				return
 			}
+			// Start() now verifies the server is accepting connections,
+			// so if we get here it's genuinely ready.
+			fmt.Printf("%s Dolt server restarted (accepting connections)\n", style.Bold.Render("✓"))
 		}()
 	}
 

@@ -426,18 +426,29 @@ func Start(townRoot string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", err)
 	}
 
-	// Wait briefly and verify it started
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the server to be accepting connections, not just alive.
+	// IsRunning only checks PID — we need CheckServerReachable to confirm
+	// the port is listening. Retry with backoff since startup takes time.
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		time.Sleep(500 * time.Millisecond)
 
-	running, _, err = IsRunning(townRoot)
-	if err != nil {
-		return fmt.Errorf("verifying server started: %w", err)
-	}
-	if !running {
-		return fmt.Errorf("Dolt server failed to start (check logs with 'gt dolt logs')")
+		running, _, err = IsRunning(townRoot)
+		if err != nil {
+			return fmt.Errorf("verifying server started: %w", err)
+		}
+		if !running {
+			return fmt.Errorf("Dolt server failed to start (check logs with 'gt dolt logs')")
+		}
+
+		if err := CheckServerReachable(townRoot); err == nil {
+			return nil // Server is up and accepting connections
+		} else {
+			lastErr = err
+		}
 	}
 
-	return nil
+	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after 5s: %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, lastErr)
 }
 
 // cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.
