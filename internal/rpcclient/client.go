@@ -2591,14 +2591,12 @@ func (c *Client) ListAgents(ctx context.Context, rig string, agentType string, i
 func (c *Client) GetAgent(ctx context.Context, agentAddr string) (*Agent, []string, error) {
 	beadID := c.agentBeadID(agentAddr)
 
-	var result struct {
-		Issue beadIssue `json:"issue"`
-	}
-	if err := c.postBeads(ctx, "Show", map[string]interface{}{"id": beadID}, &result); err != nil {
+	var issue beadIssue
+	if err := c.postBeads(ctx, "Show", map[string]interface{}{"id": beadID}, &issue); err != nil {
 		return nil, nil, err
 	}
 
-	agent := agentFromBead(result.Issue)
+	agent := agentFromBead(issue)
 	return &agent, nil, nil
 }
 
