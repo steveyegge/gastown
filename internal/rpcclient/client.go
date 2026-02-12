@@ -2564,9 +2564,6 @@ func (c *Client) ListAgents(ctx context.Context, rig string, agentType string, i
 		"labels":     labels,
 		"issue_type": "agent",
 	}
-	if !includeStopped {
-		body["status"] = "open"
-	}
 
 	var issues []beadIssue
 	if err := c.postBeads(ctx, "List", body, &issues); err != nil {
@@ -2576,6 +2573,10 @@ func (c *Client) ListAgents(ctx context.Context, rig string, agentType string, i
 	var agents []Agent
 	running := 0
 	for _, iss := range issues {
+		// Skip closed beads unless includeStopped is set.
+		if !includeStopped && iss.Status == "closed" {
+			continue
+		}
 		a := agentFromBead(iss)
 		agents = append(agents, a)
 		if a.State == "running" || a.State == "working" || a.State == "spawning" {
