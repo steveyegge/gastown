@@ -73,6 +73,7 @@ MODULES=(
   "agent-io"
   "agent-credentials"
   "agent-claude-auth"
+  "agent-roundtrip"
   "agent-resume"
   "agent-multi"
   "agent-coordination"
