@@ -1488,42 +1488,57 @@ func TestCreateDecisionWithPredecessor(t *testing.T) {
 	}
 }
 
+// TestCreateCrew tests creating a crew workspace via the beads API.
+// CreateCrew sends Create then Update (in_progress) to bd.v1.BeadsService.
 func TestCreateCrew(t *testing.T) {
+	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/gastown.v1.AgentService/CreateCrew" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
+		callCount++
 
-		// Verify auth header
-		if r.Header.Get("X-GT-API-Key") != "test-token" {
-			t.Errorf("X-GT-API-Key = %q, want test-token", r.Header.Get("X-GT-API-Key"))
+		// Verify auth header (Bearer token for beads API)
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want Bearer test-token", r.Header.Get("Authorization"))
 		}
 
 		var req map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&req)
 
-		if req["name"] != "dave" {
-			t.Errorf("name = %v, want dave", req["name"])
-		}
-		if req["rig"] != "gastown" {
-			t.Errorf("rig = %v, want gastown", req["rig"])
-		}
-		if req["branch"] != true {
-			t.Errorf("branch = %v, want true", req["branch"])
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"beadId": "hq-gastown-crew-dave",
-			"agent": map[string]interface{}{
-				"address": "gastown/crew/dave",
-				"name":    "dave",
-				"rig":     "gastown",
-				"type":    "AGENT_TYPE_CREW",
-				"state":   "AGENT_STATE_IDLE",
-			},
-			"reopened": false,
-		})
+
+		switch r.URL.Path {
+		case "/bd.v1.BeadsService/Create":
+			// First call: create the agent bead
+			if req["id"] != "hq-gastown-crew-dave" {
+				t.Errorf("id = %v, want hq-gastown-crew-dave", req["id"])
+			}
+			if req["issue_type"] != "agent" {
+				t.Errorf("issue_type = %v, want agent", req["issue_type"])
+			}
+			if req["role_type"] != "crew" {
+				t.Errorf("role_type = %v, want crew", req["role_type"])
+			}
+			if req["rig"] != "gastown" {
+				t.Errorf("rig = %v, want gastown", req["rig"])
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":        "hq-gastown-crew-dave",
+				"status":    "open",
+				"role_type": "crew",
+				"rig":       "gastown",
+			})
+		case "/bd.v1.BeadsService/Update":
+			// Second call: set status to in_progress
+			if req["id"] != "hq-gastown-crew-dave" {
+				t.Errorf("update id = %v, want hq-gastown-crew-dave", req["id"])
+			}
+			if req["status"] != "in_progress" {
+				t.Errorf("status = %v, want in_progress", req["status"])
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -1546,22 +1561,38 @@ func TestCreateCrew(t *testing.T) {
 	if resp.Agent.Type != "crew" {
 		t.Errorf("Agent.Type = %q, want crew", resp.Agent.Type)
 	}
-	if resp.Agent.State != "idle" {
-		t.Errorf("Agent.State = %q, want idle", resp.Agent.State)
+	if resp.Agent.State != "running" {
+		t.Errorf("Agent.State = %q, want running", resp.Agent.State)
 	}
 	if resp.Reopened {
 		t.Error("Reopened = true, want false")
 	}
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls (Create + Update), got %d", callCount)
+	}
 }
 
+// TestCreateCrewReopened tests reopening an existing crew bead.
 func TestCreateCrewReopened(t *testing.T) {
+	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"beadId":   "hq-gastown-crew-emma",
-			"agent":    map[string]interface{}{"name": "emma", "rig": "gastown"},
-			"reopened": true,
-		})
+
+		switch r.URL.Path {
+		case "/bd.v1.BeadsService/Create":
+			// Simulate already-exists error
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "UNIQUE constraint failed: already exists",
+			})
+		case "/bd.v1.BeadsService/Update":
+			// Reopen (first Update sets status=open, second sets in_progress)
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -1578,6 +1609,7 @@ func TestCreateCrewReopened(t *testing.T) {
 	}
 }
 
+// TestCreateCrewError tests error handling for crew creation.
 func TestCreateCrewError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1592,43 +1624,60 @@ func TestCreateCrewError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Errorf("error = %q, want to contain 500", err.Error())
+}
+
+// TestCreateCrewWithTownName tests that town name is included in bead ID.
+func TestCreateCrewWithTownName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.URL.Path == "/bd.v1.BeadsService/Create" {
+			if req["id"] != "hq-mytown-gastown-crew-dave" {
+				t.Errorf("id = %v, want hq-mytown-gastown-crew-dave", req["id"])
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, WithTownName("mytown"))
+	resp, err := c.CreateCrew(context.Background(), CreateCrewRequest{
+		Name: "dave",
+		Rig:  "gastown",
+	})
+	if err != nil {
+		t.Fatalf("CreateCrew failed: %v", err)
+	}
+	if resp.BeadID != "hq-mytown-gastown-crew-dave" {
+		t.Errorf("BeadID = %q, want hq-mytown-gastown-crew-dave", resp.BeadID)
 	}
 }
 
+// TestStartCrew tests starting a crew worker via beads API (Update to in_progress).
 func TestStartCrew(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/gastown.v1.AgentService/StartCrew" {
+		if r.URL.Path != "/bd.v1.BeadsService/Update" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("method = %s, want POST", r.Method)
 		}
 
 		var req map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&req)
 
-		if req["name"] != "grip" {
-			t.Errorf("name = %v, want grip", req["name"])
+		if req["id"] != "hq-beads-crew-grip" {
+			t.Errorf("id = %v, want hq-beads-crew-grip", req["id"])
 		}
-		if req["rig"] != "beads" {
-			t.Errorf("rig = %v, want beads", req["rig"])
-		}
-		if req["create"] != true {
-			t.Errorf("create = %v, want true", req["create"])
+		if req["status"] != "in_progress" {
+			t.Errorf("status = %v, want in_progress", req["status"])
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"agent": map[string]interface{}{
-				"address": "beads/crew/grip",
-				"name":    "grip",
-				"rig":     "beads",
-				"type":    "AGENT_TYPE_CREW",
-				"state":   "AGENT_STATE_RUNNING",
-				"session": "gt-beads-crew-grip",
-			},
-			"session": "gt-beads-crew-grip",
-			"created": true,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{})
 	}))
 	defer server.Close()
 
@@ -1648,51 +1697,13 @@ func TestStartCrew(t *testing.T) {
 	if resp.Agent.State != "running" {
 		t.Errorf("Agent.State = %q, want running", resp.Agent.State)
 	}
-	if resp.Session != "gt-beads-crew-grip" {
-		t.Errorf("Session = %q, want gt-beads-crew-grip", resp.Session)
-	}
-	if !resp.Created {
-		t.Error("Created = false, want true")
-	}
 }
 
-func TestStartCrewOptionalFields(t *testing.T) {
-	var receivedReq map[string]interface{}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&receivedReq)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"agent":   map[string]interface{}{"name": "fang"},
-			"session": "gt-beads-crew-fang",
-		})
-	}))
-	defer server.Close()
-
-	c := NewClient(server.URL)
-	_, err := c.StartCrew(context.Background(), StartCrewRequest{
-		Name:          "fang",
-		Rig:           "beads",
-		Account:       "pro-account",
-		AgentOverride: "gemini",
-	})
-	if err != nil {
-		t.Fatalf("StartCrew failed: %v", err)
-	}
-
-	if receivedReq["account"] != "pro-account" {
-		t.Errorf("account = %v, want pro-account", receivedReq["account"])
-	}
-	if receivedReq["agentOverride"] != "gemini" {
-		t.Errorf("agentOverride = %v, want gemini", receivedReq["agentOverride"])
-	}
-}
-
+// TestRemoveCrew tests removing a crew workspace via beads API.
 func TestRemoveCrew(t *testing.T) {
 	t.Run("soft close", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/gastown.v1.AgentService/RemoveCrew" {
+			if r.URL.Path != "/bd.v1.BeadsService/Close" {
 				t.Errorf("unexpected path: %s", r.URL.Path)
 			}
 			if r.Method != "POST" {
@@ -1702,25 +1713,12 @@ func TestRemoveCrew(t *testing.T) {
 			var req map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&req)
 
-			if req["name"] != "emma" {
-				t.Errorf("name = %v, want emma", req["name"])
-			}
-			if req["rig"] != "gastown" {
-				t.Errorf("rig = %v, want gastown", req["rig"])
-			}
-			// purge and force should not be present for soft close
-			if _, ok := req["purge"]; ok {
-				t.Error("purge should not be set for soft close")
-			}
-			if _, ok := req["force"]; ok {
-				t.Error("force should not be set for soft close")
+			if req["id"] != "hq-gastown-crew-emma" {
+				t.Errorf("id = %v, want hq-gastown-crew-emma", req["id"])
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"beadId":  "hq-gastown-crew-emma",
-				"deleted": false,
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}))
 		defer server.Close()
 
@@ -1742,16 +1740,12 @@ func TestRemoveCrew(t *testing.T) {
 	})
 
 	t.Run("purge delete", func(t *testing.T) {
-		var receivedReq map[string]interface{}
+		var paths []string
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewDecoder(r.Body).Decode(&receivedReq)
-
+			paths = append(paths, r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"beadId":  "hq-gastown-crew-dave",
-				"deleted": true,
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}))
 		defer server.Close()
 
@@ -1770,27 +1764,34 @@ func TestRemoveCrew(t *testing.T) {
 		if !resp.Deleted {
 			t.Error("Deleted = false, want true for purge")
 		}
-		if receivedReq["purge"] != true {
-			t.Errorf("purge = %v, want true", receivedReq["purge"])
+
+		// Should have called LabelAdd (gt:purge) then Delete
+		hasLabel := false
+		hasDelete := false
+		for _, p := range paths {
+			if p == "/bd.v1.BeadsService/LabelAdd" {
+				hasLabel = true
+			}
+			if p == "/bd.v1.BeadsService/Delete" {
+				hasDelete = true
+			}
 		}
-		if receivedReq["force"] != true {
-			t.Errorf("force = %v, want true", receivedReq["force"])
+		if !hasLabel {
+			t.Error("expected LabelAdd call for purge label")
 		}
-		if receivedReq["reason"] != "cleanup old workspace" {
-			t.Errorf("reason = %v, want 'cleanup old workspace'", receivedReq["reason"])
+		if !hasDelete {
+			t.Error("expected Delete call for purge")
 		}
 	})
 
 	t.Run("with API key", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			apiKey := r.Header.Get("X-GT-API-Key")
-			if apiKey != "secret-token" {
-				t.Errorf("X-GT-API-Key = %q, want secret-token", apiKey)
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer secret-token" {
+				t.Errorf("Authorization = %q, want Bearer secret-token", auth)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"beadId": "hq-test-crew-x",
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}))
 		defer server.Close()
 
@@ -1818,9 +1819,6 @@ func TestRemoveCrew(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "500") {
-			t.Errorf("error = %q, want to contain 500", err.Error())
-		}
 	})
 
 	t.Run("connection refused", func(t *testing.T) {
@@ -1835,10 +1833,11 @@ func TestRemoveCrew(t *testing.T) {
 	})
 }
 
+// TestStopAgent tests stopping an agent via beads API (Update agent_state=stopping).
 func TestStopAgent(t *testing.T) {
 	t.Run("successful stop", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/gastown.v1.AgentService/StopAgent" {
+			if r.URL.Path != "/bd.v1.BeadsService/Update" {
 				t.Errorf("unexpected path: %s", r.URL.Path)
 			}
 			if r.Method != "POST" {
@@ -1848,23 +1847,15 @@ func TestStopAgent(t *testing.T) {
 			var req map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&req)
 
-			if req["agent"] != "gastown/crew/emma" {
-				t.Errorf("agent = %v, want gastown/crew/emma", req["agent"])
+			if req["id"] != "hq-gastown-crew-emma" {
+				t.Errorf("id = %v, want hq-gastown-crew-emma", req["id"])
 			}
-			// force and reason should not be present for default stop
-			if _, ok := req["force"]; ok {
-				t.Error("force should not be set for default stop")
+			if req["agent_state"] != "stopping" {
+				t.Errorf("agent_state = %v, want stopping", req["agent_state"])
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"agent": map[string]interface{}{
-					"address": "gastown/crew/emma",
-					"name":    "emma",
-					"state":   "AGENT_STATE_STOPPED",
-				},
-				"hadIncompleteWork": false,
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}))
 		defer server.Close()
 
@@ -1877,59 +1868,22 @@ func TestStopAgent(t *testing.T) {
 		if agent.Name != "emma" {
 			t.Errorf("Agent.Name = %q, want emma", agent.Name)
 		}
-		if agent.State != "stopped" {
-			t.Errorf("Agent.State = %q, want stopped", agent.State)
+		if agent.State != "stopping" {
+			t.Errorf("Agent.State = %q, want stopping", agent.State)
 		}
 		if hadIncomplete {
 			t.Error("hadIncompleteWork = true, want false")
 		}
 	})
 
-	t.Run("force stop with reason", func(t *testing.T) {
-		var receivedReq map[string]interface{}
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewDecoder(r.Body).Decode(&receivedReq)
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"agent": map[string]interface{}{
-					"address": "beads/crew/grip",
-					"name":    "grip",
-					"state":   "AGENT_STATE_STOPPED",
-				},
-				"hadIncompleteWork": true,
-			})
-		}))
-		defer server.Close()
-
-		c := NewClient(server.URL)
-		_, hadIncomplete, err := c.StopAgent(context.Background(), "beads/crew/grip", true, "maintenance shutdown")
-		if err != nil {
-			t.Fatalf("StopAgent failed: %v", err)
-		}
-
-		if !hadIncomplete {
-			t.Error("hadIncompleteWork = false, want true")
-		}
-		if receivedReq["force"] != true {
-			t.Errorf("force = %v, want true", receivedReq["force"])
-		}
-		if receivedReq["reason"] != "maintenance shutdown" {
-			t.Errorf("reason = %v, want 'maintenance shutdown'", receivedReq["reason"])
-		}
-	})
-
 	t.Run("with API key", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			apiKey := r.Header.Get("X-GT-API-Key")
-			if apiKey != "my-key" {
-				t.Errorf("X-GT-API-Key = %q, want my-key", apiKey)
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer my-key" {
+				t.Errorf("Authorization = %q, want Bearer my-key", auth)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"agent": map[string]interface{}{"name": "x"},
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}))
 		defer server.Close()
 
@@ -1951,9 +1905,6 @@ func TestStopAgent(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "404") {
-			t.Errorf("error = %q, want to contain 404", err.Error())
-		}
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -1969,6 +1920,27 @@ func TestStopAgent(t *testing.T) {
 		_, _, err := c.StopAgent(ctx, "gastown/crew/emma", false, "")
 		if err == nil {
 			t.Error("expected error for cancelled context")
+		}
+	})
+
+	t.Run("with town name in bead ID", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&req)
+
+			if req["id"] != "hq-mytown-gastown-crew-emma" {
+				t.Errorf("id = %v, want hq-mytown-gastown-crew-emma", req["id"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL, WithTownName("mytown"))
+		_, _, err := c.StopAgent(context.Background(), "gastown/crew/emma", false, "")
+		if err != nil {
+			t.Fatalf("StopAgent failed: %v", err)
 		}
 	})
 }
