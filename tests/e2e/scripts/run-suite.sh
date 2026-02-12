@@ -59,12 +59,22 @@ export E2E_NAMESPACE
 # ── Module list ──────────────────────────────────────────────────────
 # Order matters: foundational services first, then dependent services
 MODULES=(
+  # Phase 1: Infrastructure health
   "dolt-health"
   "redis-health"
   "daemon-health"
   "coop-broker-health"
   "controller-health"
   "git-mirror-health"
+  # Phase 2: Agent capabilities
+  "agent-spawn"
+  "agent-state"
+  "agent-io"
+  "agent-credentials"
+  "agent-resume"
+  "agent-multi"
+  "agent-coordination"
+  "agent-cleanup"
 )
 
 should_skip() {
