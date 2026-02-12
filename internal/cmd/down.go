@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -53,6 +54,7 @@ Infrastructure agents stopped:
   • Boot       - Deacon's watchdog
   • Deacon     - Health orchestrator
   • Daemon     - Go background process
+  • Dolt       - Shared SQL database server
 
 This is a "pause" operation - use 'gt start' to bring everything back up.
 For permanent cleanup (removing worktrees), use 'gt shutdown' instead.
@@ -229,6 +231,31 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 4b: Stop Dolt server
+	doltCfg := doltserver.DefaultConfig(townRoot)
+	if _, statErr := os.Stat(doltCfg.DataDir); statErr == nil {
+		doltRunning, doltPid, doltErr := doltserver.IsRunning(townRoot)
+		if doltErr != nil {
+			printDownStatus("Dolt", false, fmt.Sprintf("status check failed: %v", doltErr))
+			allOK = false
+		} else if downDryRun {
+			if doltRunning {
+				printDownStatus("Dolt", true, fmt.Sprintf("would stop (PID %d)", doltPid))
+			}
+		} else {
+			if doltRunning {
+				if err := doltserver.Stop(townRoot); err != nil {
+					printDownStatus("Dolt", false, err.Error())
+					allOK = false
+				} else {
+					printDownStatus("Dolt", true, fmt.Sprintf("stopped (was PID %d)", doltPid))
+				}
+			} else {
+				printDownStatus("Dolt", true, "not running")
+			}
+		}
+	}
+
 	// Phase 5: Orphan cleanup and verification (--all or --force)
 	if (downAll || downForce) && !downDryRun {
 		fmt.Println()
@@ -295,7 +322,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	if allOK {
 		fmt.Printf("%s All services stopped\n", style.Bold.Render("✓"))
-		stoppedServices := []string{"daemon", "deacon", "boot", "mayor"}
+		stoppedServices := []string{"dolt", "daemon", "deacon", "boot", "mayor"}
 		for _, rigName := range rigs {
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/refinery", rigName))
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))

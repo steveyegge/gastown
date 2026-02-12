@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -46,6 +47,7 @@ var upCmd = &cobra.Command{
 This is the idempotent "boot" command for Gas Town. It ensures all
 infrastructure agents are running:
 
+  • Dolt       - Shared SQL database server for beads
   • Daemon     - Go background process that pokes agents
   • Deacon     - Health orchestrator (monitors Mayor/Witnesses)
   • Mayor      - Global work coordinator
@@ -92,9 +94,34 @@ func runUp(cmd *cobra.Command, args []string) error {
 	var deaconResult, mayorResult agentStartResult
 	var prefetchedRigs map[string]*rig.Rig
 	var rigErrors map[string]error
+	var doltOK bool
+	var doltDetail string
+	var doltSkipped bool
 
 	var startupWg sync.WaitGroup
-	startupWg.Add(4)
+	startupWg.Add(5)
+
+	// 0. Dolt server (if configured)
+	go func() {
+		defer startupWg.Done()
+		cfg := doltserver.DefaultConfig(townRoot)
+		if _, err := os.Stat(cfg.DataDir); os.IsNotExist(err) {
+			doltSkipped = true
+			return
+		}
+		running, _, _ := doltserver.IsRunning(townRoot)
+		if running {
+			doltOK = true
+			doltDetail = "already running"
+			return
+		}
+		if err := doltserver.Start(townRoot); err != nil {
+			doltDetail = err.Error()
+		} else {
+			doltOK = true
+			doltDetail = fmt.Sprintf("started (port %d)", doltserver.DefaultPort)
+		}
+	}()
 
 	// 1. Daemon (Go process)
 	go func() {
@@ -147,7 +174,17 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	startupWg.Wait()
 
-	// Print daemon/deacon/mayor results
+	// Print Dolt/daemon/deacon/mayor results
+	if !doltSkipped {
+		printStatus("Dolt", doltOK, doltDetail)
+		if !doltOK {
+			allOK = false
+		}
+		// Ensure beads metadata points to the Dolt server
+		if doltOK {
+			_, _ = doltserver.EnsureAllMetadata(townRoot)
+		}
+	}
 	if daemonErr != nil {
 		printStatus("Daemon", false, daemonErr.Error())
 		allOK = false
@@ -214,7 +251,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if allOK {
 		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
 		// Log boot event with started services
-		startedServices := []string{"daemon", "deacon", "mayor"}
+		startedServices := []string{"dolt", "daemon", "deacon", "mayor"}
 		for _, rigName := range rigs {
 			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
 			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))
