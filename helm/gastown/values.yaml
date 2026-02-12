@@ -450,14 +450,23 @@ coopBroker:
   # NATS connection (auto-wired from bd-daemon NATS if empty)
   natsURL: ""
 
+  # Persistence: write credentials to PVC so they survive restarts
+  persistence:
+    enabled: true
+    size: 100Mi
+    storageClass: ""
+    path: "/var/lib/coop/credentials/credentials.json"
+
   # OAuth credential configuration
   credentials:
     accountName: "claude-max"
     provider: "claude"
-    clientId: ""
+    clientId: "9d1c"
     tokenUrl: "https://console.anthropic.com/v1/oauth/token"
     deviceAuthUrl: "https://console.anthropic.com/v1/oauth/device/code"
     refreshMarginSecs: 300
+  # Additional accounts (list of {name, provider, clientId, tokenUrl, deviceAuthUrl, refreshMarginSecs})
+  extraAccounts: []
 
   # ExternalSecret for OAuth refresh token
   externalSecret:

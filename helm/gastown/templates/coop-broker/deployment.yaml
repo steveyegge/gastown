@@ -97,6 +97,10 @@ spec:
             - name: broker-config
               mountPath: /etc/coop-broker
               readOnly: true
+            {{- if .Values.coopBroker.persistence.enabled }}
+            - name: credentials-data
+              mountPath: {{ dir .Values.coopBroker.persistence.path }}
+            {{- end }}
           resources:
             {{- toYaml .Values.coopBroker.resources | nindent 12 }}
         {{- if .Values.coopBroker.credentialsSecret }}
@@ -111,54 +115,92 @@ spec:
               until curl -sf http://localhost:8080/api/v1/health >/dev/null 2>&1; do
                 sleep 2
               done
-              echo "[seeder] Broker healthy, seeding credentials..."
+              echo "[seeder] Broker healthy, checking credentials..."
 
-              # Read Claude credentials from mounted secret
-              CREDS_FILE="/tmp/claude-credentials/credentials.json"
-              if [ ! -f "$CREDS_FILE" ]; then
-                echo "[seeder] ERROR: credentials file not found at $CREDS_FILE"
-                exit 1
+              # Check if broker already has healthy credentials (loaded from PVC)
+              STATUS=$(curl -sf http://localhost:8080/api/v1/credentials/status \
+                -H "Authorization: Bearer $COOP_AUTH_TOKEN" 2>/dev/null || echo "{}")
+              HEALTHY=$(echo "$STATUS" | python3 -c "
+              import json, sys
+              try:
+                  data = json.load(sys.stdin)
+                  healthy = [a['name'] for a in data.get('accounts', []) if a.get('status') == 'healthy']
+                  print(','.join(healthy))
+              except: print('')
+              " 2>/dev/null)
+
+              if [ -n "$HEALTHY" ]; then
+                echo "[seeder] Broker already has healthy credentials from PVC: $HEALTHY"
+                echo "[seeder] Skipping K8s secret seed, entering watch loop..."
+              else
+                echo "[seeder] No healthy credentials from PVC, seeding from K8s secret..."
+
+                # Read Claude credentials from mounted secret
+                CREDS_FILE="/tmp/claude-credentials/credentials.json"
+                if [ ! -f "$CREDS_FILE" ]; then
+                  echo "[seeder] WARNING: credentials file not found at $CREDS_FILE"
+                  echo "[seeder] Use 'coop cred add' to seed credentials manually"
+                else
+                  # Extract tokens from Claude credentials JSON
+                  ACCESS_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null)
+                  REFRESH_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('refreshToken',''))" 2>/dev/null)
+                  EXPIRES_AT=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null)
+
+                  if [ -n "$REFRESH_TOKEN" ]; then
+                    # Calculate expires_in from expiresAt (ms epoch)
+                    NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
+                    EXPIRES_IN=$(python3 -c "print(max(0, ($EXPIRES_AT - $NOW_MS) // 1000))")
+
+                    # Seed the broker account
+                    ACCOUNT_NAME="{{ .Values.coopBroker.credentials.accountName }}"
+                    echo "[seeder] Seeding account '$ACCOUNT_NAME' (expires_in=${EXPIRES_IN}s)..."
+
+                    RESULT=$(curl -sf -X POST http://localhost:8080/api/v1/credentials/seed \
+                      -H "Content-Type: application/json" \
+                      -H "Authorization: Bearer $COOP_AUTH_TOKEN" \
+                      -d "{\"account\":\"$ACCOUNT_NAME\",\"access_token\":\"$ACCESS_TOKEN\",\"refresh_token\":\"$REFRESH_TOKEN\",\"expires_in\":$EXPIRES_IN}")
+
+                    echo "[seeder] Seed result: $RESULT"
+                  else
+                    echo "[seeder] WARNING: no refresh token in K8s secret"
+                    echo "[seeder] Use 'coop cred add' to seed credentials manually"
+                  fi
+                fi
               fi
 
-              # Extract tokens from Claude credentials JSON
-              ACCESS_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null)
-              REFRESH_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('refreshToken',''))" 2>/dev/null)
-              EXPIRES_AT=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null)
-
-              if [ -z "$REFRESH_TOKEN" ]; then
-                echo "[seeder] ERROR: no refresh token found in credentials"
-                exit 1
-              fi
-
-              # Calculate expires_in from expiresAt (ms epoch)
-              NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
-              EXPIRES_IN=$(python3 -c "print(max(0, ($EXPIRES_AT - $NOW_MS) // 1000))")
-
-              # Seed the broker account
-              ACCOUNT_NAME="{{ .Values.coopBroker.credentials.accountName }}"
-              echo "[seeder] Seeding account '$ACCOUNT_NAME' (expires_in=${EXPIRES_IN}s)..."
-
-              RESULT=$(curl -sf -X POST http://localhost:8080/api/v1/credentials/seed \
-                -H "Content-Type: application/json" \
-                -H "Authorization: Bearer $COOP_AUTH_TOKEN" \
-                -d "{\"account\":\"$ACCOUNT_NAME\",\"access_token\":\"$ACCESS_TOKEN\",\"refresh_token\":\"$REFRESH_TOKEN\",\"expires_in\":$EXPIRES_IN}")
-
-              echo "[seeder] Seed result: $RESULT"
-
-              # Stay alive — re-seed if credentials secret is rotated
-              echo "[seeder] Entering watch loop (re-seed every 6h)..."
+              # Stay alive — re-seed from K8s secret every 6h if broker has no healthy creds
+              echo "[seeder] Entering watch loop (check every 6h)..."
               while true; do
                 sleep 21600
-                echo "[seeder] Re-seeding credentials..."
-                ACCESS_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null)
-                REFRESH_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('refreshToken',''))" 2>/dev/null)
-                EXPIRES_AT=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null)
-                NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
-                EXPIRES_IN=$(python3 -c "print(max(0, ($EXPIRES_AT - $NOW_MS) // 1000))")
-                curl -sf -X POST http://localhost:8080/api/v1/credentials/seed \
-                  -H "Content-Type: application/json" \
-                  -H "Authorization: Bearer $COOP_AUTH_TOKEN" \
-                  -d "{\"account\":\"$ACCOUNT_NAME\",\"access_token\":\"$ACCESS_TOKEN\",\"refresh_token\":\"$REFRESH_TOKEN\",\"expires_in\":$EXPIRES_IN}" || true
+                # Only re-seed if broker has no healthy credentials
+                STATUS=$(curl -sf http://localhost:8080/api/v1/credentials/status \
+                  -H "Authorization: Bearer $COOP_AUTH_TOKEN" 2>/dev/null || echo "{}")
+                HEALTHY=$(echo "$STATUS" | python3 -c "
+              import json, sys
+              try:
+                  data = json.load(sys.stdin)
+                  healthy = [a['name'] for a in data.get('accounts', []) if a.get('status') == 'healthy']
+                  print(','.join(healthy))
+              except: print('')
+                " 2>/dev/null)
+                if [ -n "$HEALTHY" ]; then
+                  echo "[seeder] Broker healthy ($HEALTHY), skipping re-seed"
+                  continue
+                fi
+                echo "[seeder] No healthy credentials, re-seeding from K8s secret..."
+                CREDS_FILE="/tmp/claude-credentials/credentials.json"
+                if [ -f "$CREDS_FILE" ]; then
+                  ACCESS_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null)
+                  REFRESH_TOKEN=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('refreshToken',''))" 2>/dev/null)
+                  EXPIRES_AT=$(python3 -c "import json; c=json.load(open('$CREDS_FILE')); print(c.get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null)
+                  NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
+                  EXPIRES_IN=$(python3 -c "print(max(0, ($EXPIRES_AT - $NOW_MS) // 1000))")
+                  ACCOUNT_NAME="{{ .Values.coopBroker.credentials.accountName }}"
+                  curl -sf -X POST http://localhost:8080/api/v1/credentials/seed \
+                    -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer $COOP_AUTH_TOKEN" \
+                    -d "{\"account\":\"$ACCOUNT_NAME\",\"access_token\":\"$ACCESS_TOKEN\",\"refresh_token\":\"$REFRESH_TOKEN\",\"expires_in\":$EXPIRES_IN}" || true
+                fi
               done
           env:
             - name: COOP_AUTH_TOKEN
@@ -182,6 +224,11 @@ spec:
         - name: broker-config
           configMap:
             name: {{ include "gastown.coopBroker.fullname" . }}-config
+        {{- if .Values.coopBroker.persistence.enabled }}
+        - name: credentials-data
+          persistentVolumeClaim:
+            claimName: {{ include "gastown.coopBroker.fullname" . }}-credentials
+        {{- end }}
         {{- if .Values.coopBroker.credentialsSecret }}
         - name: claude-creds
           secret:

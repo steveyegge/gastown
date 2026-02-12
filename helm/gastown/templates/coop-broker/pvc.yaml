@@ -1,0 +1,18 @@
+{{- if and .Values.coopBroker.enabled .Values.coopBroker.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "gastown.coopBroker.fullname" . }}-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gastown.coopBroker.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.coopBroker.persistence.storageClass }}
+  storageClassName: {{ .Values.coopBroker.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.coopBroker.persistence.size }}
+{{- end }}

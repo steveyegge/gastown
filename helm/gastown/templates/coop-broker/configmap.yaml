@@ -10,6 +10,9 @@ data:
   config.json: |
     {
       "credentials": {
+        {{- if and .Values.coopBroker.persistence .Values.coopBroker.persistence.enabled }}
+        "persist_path": {{ .Values.coopBroker.persistence.path | quote }},
+        {{- end }}
         "accounts": [
           {
             "name": {{ .Values.coopBroker.credentials.accountName | quote }},
@@ -20,6 +23,17 @@ data:
             "static": false,
             "refresh_margin_secs": {{ .Values.coopBroker.credentials.refreshMarginSecs }}
           }
+          {{- range .Values.coopBroker.extraAccounts }}
+          ,{
+            "name": {{ .name | quote }},
+            "provider": {{ .provider | default "claude" | quote }},
+            "token_url": {{ .tokenUrl | default "https://console.anthropic.com/v1/oauth/token" | quote }},
+            "client_id": {{ .clientId | default "9d1c" | quote }},
+            "device_auth_url": {{ .deviceAuthUrl | default "https://console.anthropic.com/v1/oauth/device/code" | quote }},
+            "static": false,
+            "refresh_margin_secs": {{ .refreshMarginSecs | default 300 }}
+          }
+          {{- end }}
         ]
       }
     }
