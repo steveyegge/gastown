@@ -1,7 +1,7 @@
 apiVersion: v2
 name: gastown
 description: Gas Town platform stack - Dolt database, bd-daemon, and Redis
-version: 0.5.1
+version: 0.5.2
 appVersion: "0.57.17"
 type: application
 keywords:
