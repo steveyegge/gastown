@@ -438,6 +438,23 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
 		}
 
+	// For rig-level roles (polecats, crew), also check TOWN beads
+	// This handles HQ-prefixed beads assigned to polecats (hq-* routes to TOWN, not RIG)
+	if len(hookedBeads) == 0 && !isTownLevelRole(target) {
+		townBeadsDir := filepath.Join(townRoot, ".beads")
+		if stat, err := os.Stat(townBeadsDir); err == nil && stat.IsDir() {
+			townBeads := beads.New(townBeadsDir)
+			townHooked, err := townBeads.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Assignee: target,
+				Priority: -1,
+			})
+			if err == nil && len(townHooked) > 0 {
+				hookedBeads = townHooked
+			}
+		}
+	}
+
 		status.HasWork = len(hookedBeads) > 0
 
 		if len(hookedBeads) > 0 {
