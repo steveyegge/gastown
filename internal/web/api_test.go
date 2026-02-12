@@ -2,9 +2,11 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -671,5 +673,28 @@ func TestParseIssueShowJSON_InvalidInputs(t *testing.T) {
 				t.Errorf("parseIssueShowJSON(%q) returned ok=true, want false", tt.input)
 			}
 		})
+	}
+}
+
+func TestAPIHandler_SSE_ContentType(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	// Cancel context quickly so the SSE handler returns instead of blocking
+	ctx, cancel := context.WithTimeout(req.Context(), 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/event-stream" {
+		t.Errorf("GET /api/events Content-Type = %q, want %q", contentType, "text/event-stream")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "event: connected") {
+		t.Error("SSE response should contain initial 'connected' event")
 	}
 }

@@ -2,6 +2,69 @@
     'use strict';
 
     // ============================================
+    // SSE (Server-Sent Events) CONNECTION
+    // ============================================
+    window.sseConnected = false;
+    var evtSource = null;
+    var sseReconnectDelay = 1000;
+    var sseMaxReconnectDelay = 30000;
+
+    function connectSSE() {
+        if (evtSource) {
+            evtSource.close();
+        }
+
+        evtSource = new EventSource('/api/events');
+
+        evtSource.addEventListener('connected', function() {
+            window.sseConnected = true;
+            sseReconnectDelay = 1000;
+            updateConnectionStatus('live');
+        });
+
+        evtSource.addEventListener('dashboard-update', function(e) {
+            if (window.pauseRefresh) return;
+            // Trigger HTMX to re-fetch the dashboard
+            var dashboard = document.getElementById('dashboard-main');
+            if (dashboard && typeof htmx !== 'undefined') {
+                htmx.trigger(dashboard, 'sse:dashboard-update');
+            }
+        });
+
+        evtSource.onerror = function() {
+            window.sseConnected = false;
+            updateConnectionStatus('reconnecting');
+            evtSource.close();
+            // Exponential backoff reconnect
+            setTimeout(function() {
+                sseReconnectDelay = Math.min(sseReconnectDelay * 2, sseMaxReconnectDelay);
+                connectSSE();
+            }, sseReconnectDelay);
+        };
+    }
+
+    function updateConnectionStatus(state) {
+        var el = document.getElementById('connection-status');
+        if (!el) return;
+        switch (state) {
+            case 'live':
+                el.textContent = 'Live';
+                el.className = 'connection-live';
+                break;
+            case 'reconnecting':
+                el.textContent = 'Reconnecting...';
+                el.className = 'connection-reconnecting';
+                break;
+            default:
+                el.textContent = 'Connecting...';
+                el.className = '';
+        }
+    }
+
+    // Start SSE connection
+    connectSSE();
+
+    // ============================================
     // EXPAND BUTTON HANDLER
     // ============================================
     document.addEventListener('click', function(e) {
@@ -49,6 +112,8 @@
         // Reload dynamic panels after swap (handled via window functions)
         if (window.refreshCrewPanel) window.refreshCrewPanel();
         if (window.refreshReadyPanel) window.refreshReadyPanel();
+        // Update connection status indicator after morph
+        updateConnectionStatus(window.sseConnected ? 'live' : 'reconnecting');
     });
 
     // ============================================

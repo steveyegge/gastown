@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="every 10s [!window.pauseRefresh]" hx-swap="morph:outerHTML" hx-ext="morph">
+    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="sse:dashboard-update, every 30s [!window.pauseRefresh && !window.sseConnected]" hx-swap="morph:outerHTML" hx-ext="morph">
         <header>
             <pre class="ascii-title">  __  __    __   _____ __  _   _  __  _    ___ __  __  _ _____ ___  __  _      ______ __  _ _____ ___ ___ 
  / _]/  \ /' _| |_   _/__\| | | ||  \| |  / _//__\|  \| |_   _| _ \/__\| |    / _/ __|  \| |_   _| __| _ \
@@ -19,8 +19,8 @@
                 <button class="cmd-btn" id="open-palette-btn">
                     <span>⌘</span> Commands <kbd>⌘K</kbd>
                 </button>
-                <span class="refresh-info">
-                    Auto-refresh: 10s
+                <span class="refresh-info" id="refresh-info">
+                    <span id="connection-status">Connecting...</span>
                     <span class="htmx-indicator">⟳</span>
                 </span>
             </div>
@@ -894,6 +894,6 @@
         <div id="output-panel-content" class="output-panel-content"></div>
     </div>
 
-    <script src="/static/dashboard.js?v=2"></script>
+    <script src="/static/dashboard.js?v=3"></script>
 </body>
 </html>

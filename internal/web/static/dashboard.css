@@ -68,6 +68,19 @@
             font-size: 0.75rem;
         }
 
+        .connection-live {
+            color: var(--green);
+        }
+        .connection-live::before {
+            content: "● ";
+        }
+        .connection-reconnecting {
+            color: var(--yellow);
+        }
+        .connection-reconnecting::before {
+            content: "○ ";
+        }
+
         /* Grid layout for panels - auto-fit responsive */
         .panels {
             display: grid;
