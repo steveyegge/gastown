@@ -94,7 +94,7 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		crewPrefix := fmt.Sprintf("%s-%s-crew-", prefix, rigName)
 		polecatPrefix := fmt.Sprintf("%s-%s-polecat-", prefix, rigName)
 		allBeads, err := bd.List(beads.ListOptions{
-			Status:   "all",
+			Status:   "open",
 			Priority: -1,
 			Label:    "gt:agent",
 		})
