@@ -135,7 +135,7 @@ bd-daemon:
   # =============================================================================
   image:
     repository: ghcr.io/groblegark/beads
-    tag: "0.50.0-0ff2583c"
+    tag: "0.57.17"
     pullPolicy: Always
 
   daemon:
@@ -350,13 +350,13 @@ agentController:
   enabled: false
 
   image:
-    repository: ghcr.io/groblegark/agent-controller
+    repository: ghcr.io/groblegark/gastown/agent-controller
     tag: "latest"
     pullPolicy: Always
 
   # Image used for agent pods spawned by the controller
   agentImage:
-    repository: ghcr.io/groblegark/gastown-agent
+    repository: ghcr.io/groblegark/gastown/gastown-agent
     tag: "latest"
 
   replicaCount: 1
