@@ -185,14 +185,26 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 				}
 			}
 		case "witness":
-			witnessPath := filepath.Join(rigPath, "witness")
-			if _, err := os.Stat(witnessPath); err == nil {
-				targets = append(targets, witnessPath)
+			// Working directory is witness/rig/ if it exists, else witness/
+			witnessRigPath := filepath.Join(rigPath, "witness", "rig")
+			if _, err := os.Stat(witnessRigPath); err == nil {
+				targets = append(targets, witnessRigPath)
+			} else {
+				witnessPath := filepath.Join(rigPath, "witness")
+				if _, err := os.Stat(witnessPath); err == nil {
+					targets = append(targets, witnessPath)
+				}
 			}
 		case "refinery":
-			refineryPath := filepath.Join(rigPath, "refinery")
-			if _, err := os.Stat(refineryPath); err == nil {
-				targets = append(targets, refineryPath)
+			// Working directory is refinery/rig/ if it exists, else refinery/
+			refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
+			if _, err := os.Stat(refineryRigPath); err == nil {
+				targets = append(targets, refineryRigPath)
+			} else {
+				refineryPath := filepath.Join(rigPath, "refinery")
+				if _, err := os.Stat(refineryPath); err == nil {
+					targets = append(targets, refineryPath)
+				}
 			}
 		}
 	}

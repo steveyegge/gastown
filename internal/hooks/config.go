@@ -289,22 +289,30 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			}
 		}
 
-		// Witness
+		// Witness — working directory is witness/rig/ if it exists, else witness/
 		witnessDir := filepath.Join(rigPath, "witness")
 		if info, err := os.Stat(witnessDir); err == nil && info.IsDir() {
+			witnessWorkDir := filepath.Join(witnessDir, "rig")
+			if _, err := os.Stat(witnessWorkDir); err != nil {
+				witnessWorkDir = witnessDir
+			}
 			targets = append(targets, Target{
-				Path: filepath.Join(witnessDir, ".claude", "settings.local.json"),
+				Path: filepath.Join(witnessWorkDir, ".claude", "settings.local.json"),
 				Key:  rigName + "/witness",
 				Rig:  rigName,
 				Role: "witness",
 			})
 		}
 
-		// Refinery
+		// Refinery — working directory is refinery/rig/ if it exists, else refinery/
 		refineryDir := filepath.Join(rigPath, "refinery")
 		if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
+			refineryWorkDir := filepath.Join(refineryDir, "rig")
+			if _, err := os.Stat(refineryWorkDir); err != nil {
+				refineryWorkDir = refineryDir
+			}
 			targets = append(targets, Target{
-				Path: filepath.Join(refineryDir, ".claude", "settings.local.json"),
+				Path: filepath.Join(refineryWorkDir, ".claude", "settings.local.json"),
 				Key:  rigName + "/refinery",
 				Rig:  rigName,
 				Role: "refinery",

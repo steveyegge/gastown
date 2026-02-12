@@ -274,13 +274,15 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 		}
 
 		// Check for witness settings
-		// STALE: witness/.claude/settings.json (parent directory - Claude doesn't traverse)
-		// STALE: witness/.claude/settings.local.json (parent directory)
-		// STALE: witness/rig/.claude/settings.json (old filename)
-		// CORRECT: witness/rig/.claude/settings.local.json
+		// Working directory is witness/rig/ if it exists, otherwise witness/
+		witnessWorkDir := filepath.Join(rigPath, "witness", "rig")
+		witnessHasRigDir := dirExists(witnessWorkDir)
+		if !witnessHasRigDir {
+			witnessWorkDir = filepath.Join(rigPath, "witness")
+		}
+		// Always-stale paths: old filename at any location
 		for _, staleWitnessPath := range []string{
 			filepath.Join(rigPath, "witness", ".claude", "settings.json"),
-			filepath.Join(rigPath, "witness", ".claude", "settings.local.json"),
 			filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"),
 		} {
 			if fileExists(staleWitnessPath) {
@@ -290,35 +292,54 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 					rigName:       rigName,
 					sessionName:   fmt.Sprintf("gt-%s-witness", rigName),
 					wrongLocation: true,
+					missing:       []string{fmt.Sprintf("stale settings (should be %s/.claude/settings.local.json)", filepath.Base(witnessWorkDir))},
+				})
+			}
+		}
+		// If witness/rig/ exists, witness/.claude/settings.local.json is stale (wrong dir)
+		if witnessHasRigDir {
+			witnessParentSettings := filepath.Join(rigPath, "witness", ".claude", "settings.local.json")
+			if fileExists(witnessParentSettings) {
+				files = append(files, staleSettingsInfo{
+					path:          witnessParentSettings,
+					agentType:     "witness",
+					rigName:       rigName,
+					sessionName:   fmt.Sprintf("gt-%s-witness", rigName),
+					wrongLocation: true,
 					missing:       []string{"stale settings (should be witness/rig/.claude/settings.local.json)"},
 				})
 			}
 		}
-		witnessCorrectSettings := filepath.Join(rigPath, "witness", "rig", ".claude", "settings.local.json")
-		witnessWorkDir := filepath.Join(rigPath, "witness", "rig")
-		if fileExists(witnessCorrectSettings) {
-			files = append(files, staleSettingsInfo{
-				path:        witnessCorrectSettings,
-				agentType:   "witness",
-				rigName:     rigName,
-				sessionName: fmt.Sprintf("gt-%s-witness", rigName),
-			})
-		} else if dirExists(witnessWorkDir) {
-			// Working directory exists but settings.local.json is missing
-			// Report this even if there's a stale settings.json - user needs to know both issues
-			files = append(files, staleSettingsInfo{
-				path:        witnessCorrectSettings,
-				agentType:   "witness",
-				rigName:     rigName,
-				sessionName: fmt.Sprintf("gt-%s-witness", rigName),
-				missingFile: true,
-			})
+		witnessCorrectSettings := filepath.Join(witnessWorkDir, ".claude", "settings.local.json")
+		if dirExists(witnessWorkDir) {
+			if fileExists(witnessCorrectSettings) {
+				files = append(files, staleSettingsInfo{
+					path:        witnessCorrectSettings,
+					agentType:   "witness",
+					rigName:     rigName,
+					sessionName: fmt.Sprintf("gt-%s-witness", rigName),
+				})
+			} else {
+				files = append(files, staleSettingsInfo{
+					path:        witnessCorrectSettings,
+					agentType:   "witness",
+					rigName:     rigName,
+					sessionName: fmt.Sprintf("gt-%s-witness", rigName),
+					missingFile: true,
+				})
+			}
 		}
 
-		// Check for refinery settings (same pattern as witness)
+		// Check for refinery settings
+		// Working directory is refinery/rig/ if it exists, otherwise refinery/
+		refineryWorkDir := filepath.Join(rigPath, "refinery", "rig")
+		refineryHasRigDir := dirExists(refineryWorkDir)
+		if !refineryHasRigDir {
+			refineryWorkDir = filepath.Join(rigPath, "refinery")
+		}
+		// Always-stale paths: old filename at any location
 		for _, staleRefineryPath := range []string{
 			filepath.Join(rigPath, "refinery", ".claude", "settings.json"),
-			filepath.Join(rigPath, "refinery", ".claude", "settings.local.json"),
 			filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"),
 		} {
 			if fileExists(staleRefineryPath) {
@@ -328,28 +349,42 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 					rigName:       rigName,
 					sessionName:   fmt.Sprintf("gt-%s-refinery", rigName),
 					wrongLocation: true,
+					missing:       []string{fmt.Sprintf("stale settings (should be %s/.claude/settings.local.json)", filepath.Base(refineryWorkDir))},
+				})
+			}
+		}
+		// If refinery/rig/ exists, refinery/.claude/settings.local.json is stale (wrong dir)
+		if refineryHasRigDir {
+			refineryParentSettings := filepath.Join(rigPath, "refinery", ".claude", "settings.local.json")
+			if fileExists(refineryParentSettings) {
+				files = append(files, staleSettingsInfo{
+					path:          refineryParentSettings,
+					agentType:     "refinery",
+					rigName:       rigName,
+					sessionName:   fmt.Sprintf("gt-%s-refinery", rigName),
+					wrongLocation: true,
 					missing:       []string{"stale settings (should be refinery/rig/.claude/settings.local.json)"},
 				})
 			}
 		}
-		refineryCorrectSettings := filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.local.json")
-		refineryWorkDir := filepath.Join(rigPath, "refinery", "rig")
-		if fileExists(refineryCorrectSettings) {
-			files = append(files, staleSettingsInfo{
-				path:        refineryCorrectSettings,
-				agentType:   "refinery",
-				rigName:     rigName,
-				sessionName: fmt.Sprintf("gt-%s-refinery", rigName),
-			})
-		} else if dirExists(refineryWorkDir) {
-			// Working directory exists but settings.local.json is missing
-			files = append(files, staleSettingsInfo{
-				path:        refineryCorrectSettings,
-				agentType:   "refinery",
-				rigName:     rigName,
-				sessionName: fmt.Sprintf("gt-%s-refinery", rigName),
-				missingFile: true,
-			})
+		refineryCorrectSettings := filepath.Join(refineryWorkDir, ".claude", "settings.local.json")
+		if dirExists(refineryWorkDir) {
+			if fileExists(refineryCorrectSettings) {
+				files = append(files, staleSettingsInfo{
+					path:        refineryCorrectSettings,
+					agentType:   "refinery",
+					rigName:     rigName,
+					sessionName: fmt.Sprintf("gt-%s-refinery", rigName),
+				})
+			} else {
+				files = append(files, staleSettingsInfo{
+					path:        refineryCorrectSettings,
+					agentType:   "refinery",
+					rigName:     rigName,
+					sessionName: fmt.Sprintf("gt-%s-refinery", rigName),
+					missingFile: true,
+				})
+			}
 		}
 
 		// Check for crew settings
