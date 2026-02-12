@@ -29,8 +29,8 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 
 	// Create routes.jsonl
 	routes := []beads.Route{
-		{Prefix: "hq-", Path: "."},                     // Town-level beads
-		{Prefix: "gt-", Path: "gastown/mayor/rig"},     // Gastown rig
+		{Prefix: "hq-", Path: "."},                 // Town-level beads
+		{Prefix: "gt-", Path: "gastown/mayor/rig"}, // Gastown rig
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -74,7 +74,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 func initBeadsDB(t *testing.T, dir string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--no-daemon", "init")
+	cmd := exec.Command("bd", "init", "--backend", "dolt")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, output)

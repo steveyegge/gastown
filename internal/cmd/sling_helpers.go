@@ -1,16 +1,19 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -76,7 +79,7 @@ type beadInfo struct {
 // Checks bead existence using bd show.
 // Resolves the rig directory from the bead's prefix for correct dolt access.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = resolveBeadDir(beadID)
 	out, err := cmd.Output()
 	if err != nil {
@@ -91,7 +94,7 @@ func verifyBeadExists(beadID string) error {
 // getBeadInfo returns status and assignee for a bead.
 // Resolves the rig directory from the bead's prefix for correct dolt access.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = resolveBeadDir(beadID)
 	out, err := cmd.Output()
 	if err != nil {
@@ -131,7 +134,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Read the bead once
-		showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+		showCmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 		showCmd.Dir = resolveBeadDir(beadID)
 		out, err := showCmd.Output()
 		if err != nil {
@@ -181,7 +184,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
-	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -214,7 +217,7 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	} else if subject != "" {
 		prompt = fmt.Sprintf("Work slung: %s (%s). Start working on it now - no questions, just begin.", beadID, subject)
 	} else {
-		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `" + cli.Name() + " hook` to see the hook, then begin.", beadID)
+		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `"+cli.Name()+" hook` to see the hook, then begin.", beadID)
 	}
 
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
@@ -249,14 +252,18 @@ func getSessionFromPane(pane string) string {
 func ensureAgentReady(sessionName string) error {
 	t := tmux.NewTmux()
 
-	// If an agent is already running, assume it's ready (session was started earlier)
 	if t.IsAgentRunning(sessionName) {
-		return nil
-	}
-
-	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for agent to start: %w", err)
+		// Agent process is detected, but it may have just started (fresh spawn).
+		// Check session age — if < 15s old, the agent likely isn't ready for input yet.
+		if !isSessionYoung(sessionName, 15*time.Second) {
+			return nil
+		}
+		// Fall through to apply startup delay for young sessions.
+	} else {
+		// Agent not running yet - wait for it to start (shell → program transition)
+		if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+			return fmt.Errorf("waiting for agent to start: %w", err)
+		}
 	}
 
 	// Claude-only: accept bypass permissions warning if present
@@ -272,6 +279,19 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	return nil
+}
+
+// isSessionYoung returns true if the tmux session was created less than maxAge ago.
+func isSessionYoung(sessionName string, maxAge time.Duration) bool {
+	out, err := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{session_created}").Output()
+	if err != nil {
+		return false
+	}
+	createdUnix, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return false
+	}
+	return time.Since(time.Unix(createdUnix, 0)) < maxAge
 }
 
 // detectCloneRoot finds the root of the current git clone.
@@ -467,7 +487,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 1: Cook the formula (ensures proto exists)
 	if !skipCook {
-		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+		cookCmd := exec.Command("bd", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 		cookCmd.Stderr = os.Stderr
@@ -527,7 +547,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 // This is useful for batch mode where we cook once before processing multiple beads.
 // townRoot is required for GT_ROOT so bd can find town-level formulas.
 func CookFormula(formulaName, workDir, townRoot string) error {
-	cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+	cookCmd := exec.Command("bd", "cook", formulaName)
 	cookCmd.Dir = workDir
 	cookCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 	cookCmd.Stderr = os.Stderr
@@ -549,4 +569,105 @@ func isHookedAgentDead(assignee string) bool {
 		return false // tmux not available or error, be conservative
 	}
 	return !alive
+}
+
+// hookBeadWithRetry hooks a bead to a target agent with exponential backoff retry
+// and post-hook verification. This ensures the hook sticks even under Dolt concurrency.
+// Fails fast on configuration/initialization errors (gt-2ra).
+// See: https://github.com/steveyegge/gastown/issues/148
+func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
+	const maxRetries = 10
+	const baseBackoff = 500 * time.Millisecond
+	const maxBackoff = 30 * time.Second
+	skipVerify := os.Getenv("GT_TEST_SKIP_HOOK_VERIFY") != ""
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd.Dir = hookDir
+		hookCmd.Stderr = os.Stderr
+		if err := hookCmd.Run(); err != nil {
+			lastErr = err
+			// Fail fast on config/init errors — retrying won't help (gt-2ra)
+			if isSlingConfigError(err) {
+				return fmt.Errorf("hooking bead failed (DB not initialized — not retrying): %w", err)
+			}
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hooking bead after %d attempts: %w", maxRetries, err)
+		}
+
+		if skipVerify {
+			break
+		}
+
+		verifyInfo, verifyErr := getBeadInfo(beadID)
+		if verifyErr != nil {
+			lastErr = fmt.Errorf("verifying hook: %w", verifyErr)
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s Hook verification failed, retrying in %v...\n", style.Warning.Render("⚠"), backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("verifying hook after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		if verifyInfo.Status != "hooked" || verifyInfo.Assignee != targetAgent {
+			lastErr = fmt.Errorf("hook did not stick: status=%s, assignee=%s (expected hooked, %s)",
+				verifyInfo.Status, verifyInfo.Assignee, targetAgent)
+			if attempt < maxRetries {
+				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
+				fmt.Printf("%s %v, retrying in %v...\n", style.Warning.Render("⚠"), lastErr, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hook failed after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		break
+	}
+
+	return nil
+}
+
+// slingBackoff calculates exponential backoff with ±25% jitter for a given attempt (1-indexed).
+// Formula: base * 2^(attempt-1) * (1 ± 25% random), capped at max.
+func slingBackoff(attempt int, base, max time.Duration) time.Duration { //nolint:unparam // base is parameterized for testability
+	backoff := base
+	for i := 1; i < attempt; i++ {
+		backoff *= 2
+		if backoff > max {
+			backoff = max
+			break
+		}
+	}
+	// Apply ±25% jitter
+	jitter := 1.0 + (rand.Float64()-0.5)*0.5 // range [0.75, 1.25]
+	result := time.Duration(float64(backoff) * jitter)
+	if result > max {
+		result = max
+	}
+	return result
+}
+
+// isSlingConfigError returns true if the error indicates a configuration or
+// initialization problem rather than a transient failure. Config errors should
+// NOT be retried because they will fail identically on every attempt (gt-2ra).
+func isSlingConfigError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not initialized") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "table not found") ||
+		strings.Contains(msg, "issue_prefix") ||
+		strings.Contains(msg, "no database") ||
+		strings.Contains(msg, "database not found") ||
+		strings.Contains(msg, "connection refused")
 }

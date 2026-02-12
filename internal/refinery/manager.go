@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -119,13 +120,19 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
-	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
-	// write into the source repo. Runtime walks up the tree to find settings.
-	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
+	// Ensure runtime settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
+	// so settings.local.json doesn't dirty the source repo worktree.
+	if err := rig.EnsureGitignorePatterns(refineryRigDir); err != nil {
+		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
 	}
 
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
@@ -154,10 +161,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "refinery",
-		Rig:           m.rig.Name,
-		TownRoot:      townRoot,
-		BeadsNoDaemon: true,
+		Role:     "refinery",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
 	})
 
 	// Add refinery-specific flag
@@ -231,6 +237,10 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 	scored := make([]scoredIssue, 0, len(issues))
 	for _, issue := range issues {
+		// Defensive filter: bd status filters can drift; queue must only include open MRs.
+		if issue == nil || issue.Status != "open" {
+			continue
+		}
 		score := m.calculateIssueScore(issue, now)
 		scored = append(scored, scoredIssue{issue: issue, score: score})
 	}
@@ -463,7 +473,9 @@ Please review the feedback and address the issues before resubmitting.`,
 			mr.Branch, mr.IssueID, reason),
 		Priority: mail.PriorityNormal,
 	}
-	_ = router.Send(msg) // best-effort notification
+	if err := router.Send(msg); err != nil {
+		log.Printf("warning: notifying worker of rejection for %s: %v", mr.IssueID, err)
+	}
 }
 
 // findTownRoot walks up directories to find the town root.

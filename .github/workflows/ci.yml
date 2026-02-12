@@ -235,8 +235,10 @@ jobs:
           git config --global user.email "ci@gastown.test"
 
       - name: Install beads (bd)
-        # Pin to v0.47.1 - v0.47.2 has routing defaults that cause prefix mismatch errors
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.47.1
+        # Clone and build to handle replace directives that break go install @version
+        run: |
+          git clone --depth 1 https://github.com/steveyegge/beads /tmp/beads
+          cd /tmp/beads && go install ./cmd/bd
 
       - name: Build gt
         run: |

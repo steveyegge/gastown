@@ -105,7 +105,21 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	var runtimeConfig *config.RuntimeConfig
+	if crewAgentOverride != "" {
+		rc, _, resolveErr := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		if resolveErr != nil {
+			style.PrintWarning("could not resolve agent override %q: %v, falling back to default", crewAgentOverride, resolveErr)
+			runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+		} else {
+			runtimeConfig = rc
+		}
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	}
+	if runtimeConfig == nil {
+		runtimeConfig = config.DefaultRuntimeConfig()
+	}
 	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
@@ -128,7 +142,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// Before creating a new session, check if there's already a runtime session
 	// running in this crew's directory (might have been started manually or via
 	// a different mechanism)
-	if !hasSession {
+	if !hasSession && runtimeConfig.Tmux != nil {
 		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, runtimeConfig.Tmux.ProcessNames)
 		if err == nil && len(existingSessions) > 0 {
 			// Found an existing session with runtime running in this directory
@@ -170,7 +184,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			AgentName:        name,
 			TownRoot:         townRoot,
 			RuntimeConfigDir: claudeConfigDir,
-			BeadsNoDaemon:    true,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)

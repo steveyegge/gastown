@@ -642,53 +642,8 @@ func isSessionWorking(t *tmux.Tmux, session string) bool {
 	return false
 }
 
-// getUnreadMailCount returns unread mail count for an identity.
-// Fast path - returns 0 on any error.
-func getUnreadMailCount(identity string) int {
-	// Find workspace
-	workDir, err := findMailWorkDir()
-	if err != nil {
-		return 0
-	}
-
-	// Create mailbox using beads
-	mailbox := mail.NewMailboxBeads(identity, workDir)
-
-	// Get count
-	_, unread, err := mailbox.Count()
-	if err != nil {
-		return 0
-	}
-
-	return unread
-}
-
-// getMailPreview returns unread count and a truncated subject of the first unread message.
-// Returns (count, subject) where subject is empty if no unread mail.
-func getMailPreview(identity string, maxLen int) (int, string) {
-	workDir, err := findMailWorkDir()
-	if err != nil {
-		return 0, ""
-	}
-
-	mailbox := mail.NewMailboxBeads(identity, workDir)
-
-	// Get unread messages
-	messages, err := mailbox.ListUnread()
-	if err != nil || len(messages) == 0 {
-		return 0, ""
-	}
-
-	// Get first message subject, truncated
-	subject := messages[0].Subject
-	if len(subject) > maxLen {
-		subject = subject[:maxLen-1] + "…"
-	}
-
-	return len(messages), subject
-}
-
-// getMailPreviewWithRoot is like getMailPreview but uses an explicit town root.
+// getMailPreviewWithRoot returns unread count and a truncated subject of the first unread message,
+// using an explicit town root.
 func getMailPreviewWithRoot(identity string, maxLen int, townRoot string) (int, string) {
 	// Use NewMailboxFromAddress to normalize identity (e.g., gastown/crew/gus -> gastown/gus)
 	mailbox := mail.NewMailboxFromAddress(identity, townRoot)

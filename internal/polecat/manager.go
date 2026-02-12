@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -65,6 +66,25 @@ func isDoltOptimisticLockError(err error) bool {
 		strings.Contains(msg, "try restarting transaction") ||
 		strings.Contains(msg, "database is read only") ||
 		strings.Contains(msg, "cannot update manifest")
+}
+
+// isDoltConfigError returns true if the error indicates a configuration or initialization
+// problem rather than a transient failure. Config errors should NOT be retried because
+// they will fail identically on every attempt, wasting ~3 minutes in the retry loop.
+// See gt-2ra: polecat spawn hang when Dolt DB not initialized.
+func isDoltConfigError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not initialized") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "table not found") ||
+		strings.Contains(msg, "issue_prefix") ||
+		strings.Contains(msg, "no database") ||
+		strings.Contains(msg, "database not found") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "configure custom types")
 }
 
 // Common errors
@@ -175,6 +195,7 @@ func (m *Manager) lockPool() (*flock.Flock, error) {
 // Returns an error if Dolt exists but is unhealthy after retries.
 // Returns nil if beads is not configured (test/setup environments).
 // If read-only errors persist after retries, attempts server recovery (gt-chx92).
+// Fails fast on configuration/initialization errors (gt-2ra).
 func (m *Manager) CheckDoltHealth() error {
 	var lastErr error
 	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
@@ -191,6 +212,10 @@ func (m *Manager) CheckDoltHealth() error {
 		// If beads isn't configured at all, skip the health check
 		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
 			return nil
+		}
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("%w: DB not initialized (not retrying): %v", ErrDoltUnhealthy, err)
 		}
 		lastErr = err
 		if attempt < doltMaxRetries {
@@ -249,6 +274,8 @@ func (m *Manager) CheckDoltServerCapacity() error {
 // and fails hard — a polecat without an agent bead is untrackable.
 // If beads is not configured (no .beads directory), warns and returns nil
 // since this indicates a test/setup environment, not a Dolt failure.
+// Fails fast on configuration/initialization errors (gt-2ra) — these are not
+// transient and retrying them wastes ~3 minutes for identical failures.
 func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFields) error {
 	var lastErr error
 	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
@@ -261,6 +288,10 @@ func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFi
 		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
 			fmt.Printf("Warning: could not create agent bead (beads not configured): %v\n", err)
 			return nil
+		}
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("agent bead creation failed (DB not initialized — not retrying): %w", err)
 		}
 		if attempt < doltMaxRetries {
 			backoff := doltBackoff(attempt)
@@ -276,6 +307,7 @@ func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFi
 // rather than fail — e.g., in StartSession where the tmux session is already
 // running and failing hard would orphan it. Agent state is a monitoring
 // concern, not a correctness requirement.
+// Fails fast on configuration/initialization errors (gt-2ra).
 func (m *Manager) SetAgentStateWithRetry(name string, state string) error {
 	var lastErr error
 	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
@@ -284,6 +316,10 @@ func (m *Manager) SetAgentStateWithRetry(name string, state string) error {
 			return nil
 		}
 		lastErr = err
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("setting agent state failed (DB not initialized — not retrying): %w", err)
+		}
 		if attempt < doltMaxRetries {
 			backoff := doltBackoff(attempt)
 			fmt.Printf("Warning: SetAgentState attempt %d failed, retrying in %v: %v\n", attempt, backoff, err)
@@ -616,22 +652,9 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
-	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
-	// Writing to CLAUDE.md would overwrite project instructions and could leak
-	// Gas Town internals into the project repo if merged.
+	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
+	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
+	// Full context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
@@ -659,6 +682,16 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
+	// Install runtime settings INSIDE the worktree so Claude Code can find hooks.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(clonePath, "polecat", runtimeConfig); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
 
 	// Run setup hooks from .runtime/setup-hooks/.
@@ -1079,20 +1112,9 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		return nil, fmt.Errorf("moving repaired worktree to final path: %w", err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
-	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
+	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
+	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
+	// Full context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads
 	if err := m.setupSharedBeads(newClonePath); err != nil {

@@ -188,10 +188,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 
-	// Ensure runtime settings exist in the polecat's git worktree (polecats/<name>/<rigname>/).
-	// Claude Code discovers project settings at the git root's .claude/settings.json,
-	// not at intermediate parent directories. The .claude/ directory is already in
-	// the worktree's .gitignore (via EnsureGitignorePatterns), so this is safe.
+	// Ensure runtime settings exist INSIDE the worktree so Claude Code can find them.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
@@ -246,7 +245,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		AgentName:        polecat,
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.RuntimeConfigDir,
-		BeadsNoDaemon:    true,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))

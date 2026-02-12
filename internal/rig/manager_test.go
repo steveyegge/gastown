@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 )
 
@@ -212,6 +214,8 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 		{"my.rig", `rig name "my.rig" contains invalid characters`},
 		{"my rig", `rig name "my rig" contains invalid characters`},
 		{"op-baby-test", `rig name "op-baby-test" contains invalid characters`},
+		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
+		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
 	}
 
 	for _, tt := range tests {
@@ -446,10 +450,53 @@ exit 1
 	if err != nil {
 		t.Fatalf("reading config.yaml: %v", err)
 	}
-	if string(config) != "prefix: gt\n" {
-		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
+	want := "prefix: gt\nissue-prefix: gt\n"
+	if string(config) != want {
+		t.Fatalf("config.yaml = %q, want %q", string(config), want)
 	}
 	assertBeadsDirLog(t, beadsDirLog, beadsDir)
+}
+
+func TestInitBeadsSetsIssuePrefix(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
+	// Verify that initBeads calls 'bd config set issue_prefix <prefix>'
+	// when bd init succeeds (Dolt database is available).
+	rigPath := t.TempDir()
+
+	// Create mayor/rig directory WITHOUT .beads (no tracked beads)
+	mayorRigDir := filepath.Join(rigPath, "mayor", "rig")
+	if err := os.MkdirAll(mayorRigDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Track all commands received by fake bd
+	cmdLog := filepath.Join(t.TempDir(), "bd-cmds.log")
+	script := `#!/usr/bin/env bash
+set -e
+echo "$@" >> "$BD_CMD_LOG"
+exit 0
+`
+	windowsScript := "@echo off\r\nif defined BD_CMD_LOG echo %* >> \"%BD_CMD_LOG%\"\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BD_CMD_LOG", cmdLog)
+
+	manager := &Manager{}
+	if err := manager.initBeads(rigPath, "myrig"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Read logged commands
+	logData, err := os.ReadFile(cmdLog)
+	if err != nil {
+		t.Fatalf("reading command log: %v", err)
+	}
+	cmds := string(logData)
+
+	// Verify bd config set issue_prefix was called with the correct prefix
+	if !strings.Contains(cmds, "config set issue_prefix myrig") {
+		t.Errorf("expected 'bd config set issue_prefix myrig' in commands log, got:\n%s", cmds)
+	}
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
@@ -476,9 +523,6 @@ func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
 set -e
 if [[ -n "$BEADS_DIR_LOG" ]]; then
   echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
-fi
-if [[ "$1" == "--no-daemon" ]]; then
-  shift
 fi
 if [[ "$1" == "--allow-stale" ]]; then
   shift
@@ -515,7 +559,7 @@ case "$cmd" in
     ;;
 esac
 `
-	windowsScript := "@echo off\r\nsetlocal enabledelayedexpansion\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nset \"cmd=%1\"\r\nset \"arg2=%2\"\r\nset \"arg3=%3\"\r\nif \"%cmd%\"==\"--no-daemon\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"--allow-stale\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"show\" (\r\n  echo []\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"create\" (\r\n  set \"id=\"\r\n  set \"title=\"\r\n  for %%A in (%*) do (\r\n    set \"arg=%%~A\"\r\n    if /i \"!arg:~0,5!\"==\"--id=\" set \"id=!arg:~5!\"\r\n    if /i \"!arg:~0,8!\"==\"--title=\" set \"title=!arg:~8!\"\r\n  )\r\n  if defined AGENT_LOG (\r\n    echo !id!>>\"%AGENT_LOG%\"\r\n  )\r\n  echo {\"id\":\"!id!\",\"title\":\"!title!\",\"description\":\"\",\"issue_type\":\"agent\"}\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"slot\" exit /b 0\r\nif \"%cmd%\"==\"config\" exit /b 0\r\nexit /b 1\r\n"
+	windowsScript := "@echo off\r\nsetlocal enabledelayedexpansion\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nset \"cmd=%1\"\r\nset \"arg2=%2\"\r\nset \"arg3=%3\"\r\nif \"%cmd%\"==\"--allow-stale\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"show\" (\r\n  echo []\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"create\" (\r\n  set \"id=\"\r\n  set \"title=\"\r\n  for %%A in (%*) do (\r\n    set \"arg=%%~A\"\r\n    if /i \"!arg:~0,5!\"==\"--id=\" set \"id=!arg:~5!\"\r\n    if /i \"!arg:~0,8!\"==\"--title=\" set \"title=!arg:~8!\"\r\n  )\r\n  if defined AGENT_LOG (\r\n    echo !id!>>\"%AGENT_LOG%\"\r\n  )\r\n  echo {\"id\":\"!id!\",\"title\":\"!title!\",\"description\":\"\",\"issue_type\":\"agent\"}\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"slot\" exit /b 0\r\nif \"%cmd%\"==\"config\" exit /b 0\r\nexit /b 1\r\n"
 
 	binDir := writeFakeBD(t, script, windowsScript)
 	agentLog := filepath.Join(t.TempDir(), "agents.log")
@@ -829,14 +873,14 @@ func TestDetectBeadsPrefixFromConfig_FallbackIssuesJSONL(t *testing.T) {
 			want: "gt",
 		},
 		{
-			name: "skips agent bead when only entry",
+			name:       "skips agent bead when only entry",
 			issuesJSON: `{"id":"gt-demo-witness","title":"agent"}`,
-			want: "",
+			want:       "",
 		},
 		{
-			name: "multi-hyphen prefix with regular hash",
+			name:       "multi-hyphen prefix with regular hash",
 			issuesJSON: `{"id":"baseball-v3-abc12","title":"test"}`,
-			want: "baseball-v3",
+			want:       "baseball-v3",
 		},
 		{
 			name: "multiple regular issues agree on prefix",
@@ -896,11 +940,11 @@ func TestIsStandardBeadHash(t *testing.T) {
 		{"z0ixd", true},
 		{"00000", true},
 		{"abcde", true},
-		{"witness", false},  // too long (agent role)
-		{"abc", false},      // too short
-		{"ABC12", false},    // uppercase
-		{"abc-1", false},    // contains hyphen
-		{"", false},         // empty
+		{"witness", false},    // too long (agent role)
+		{"abc", false},        // too short
+		{"ABC12", false},      // uppercase
+		{"abc-1", false},      // contains hyphen
+		{"", false},           // empty
 		{"abc1234567", false}, // 10 chars (MR hash)
 	}
 
@@ -911,5 +955,78 @@ func TestIsStandardBeadHash(t *testing.T) {
 				t.Errorf("isStandardBeadHash(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRegisterRig_RejectsReservedNames(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	tests := []struct {
+		name      string
+		wantError string
+	}{
+		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
+		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := manager.RegisterRig(RegisterRigOptions{
+				Name: tt.name,
+			})
+			if err == nil {
+				t.Errorf("RegisterRig(%q) succeeded, want error containing %q", tt.name, tt.wantError)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("RegisterRig(%q) error = %q, want error containing %q", tt.name, err.Error(), tt.wantError)
+			}
+		})
+	}
+}
+
+func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {
+	// Verify that EnsureMetadata writes the fields that AddRig depends on:
+	// dolt_mode=server, dolt_database=<rigName>, backend=dolt
+	// This guards against the regression fixed in PR #1343.
+	townRoot := t.TempDir()
+	rigName := "myrig"
+
+	// Create the beads directory structure that EnsureMetadata expects
+	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+
+	if err := doltserver.EnsureMetadata(townRoot, rigName); err != nil {
+		t.Fatalf("EnsureMetadata: %v", err)
+	}
+
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("read metadata.json: %v", err)
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parse metadata.json: %v", err)
+	}
+
+	checks := map[string]string{
+		"backend":       "dolt",
+		"dolt_mode":     "server",
+		"dolt_database": rigName,
+	}
+	for key, want := range checks {
+		got, ok := meta[key].(string)
+		if !ok {
+			t.Errorf("metadata.json missing %q field", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("metadata.json %q = %q, want %q", key, got, want)
+		}
 	}
 }

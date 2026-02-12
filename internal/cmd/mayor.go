@@ -172,13 +172,11 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	} else {
-		// Session exists - check if runtime is still running (hq-95xfq)
-		// If runtime exited or sitting at shell, restart with proper context
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, townRoot, mayorAgentOverride)
-		if err != nil {
-			return fmt.Errorf("resolving agent: %w", err)
-		}
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		// Session exists - check if runtime is still running (hq-95xfq, gt-7zl)
+		// If runtime exited or sitting at shell, restart with proper context.
+		// Use IsAgentAlive (checks descendant processes) instead of IsAgentRunning
+		// (pane command only), since mayor launches via bash wrapper.
+		if !t.IsAgentAlive(sessionID) {
 			// Runtime has exited, restart it with proper context
 			fmt.Println("Runtime exited, restarting with context...")
 

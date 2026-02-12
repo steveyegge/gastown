@@ -614,7 +614,7 @@ func TestParseIssueShowJSON_ValidOutput(t *testing.T) {
 		"depends_on": ["gt-dep1"],
 		"blocks": ["gt-blk1", "gt-blk2"]
 	}]`
-	resp, ok := parseIssueShowJSON(input, "gt-abc")
+	resp, ok := parseIssueShowJSON(input)
 	if !ok {
 		t.Fatal("parseIssueShowJSON returned ok=false for valid input")
 	}
@@ -646,7 +646,7 @@ func TestParseIssueShowJSON_ValidOutput(t *testing.T) {
 
 func TestParseIssueShowJSON_ZeroPriority(t *testing.T) {
 	input := `[{"id": "gt-abc", "title": "No priority", "priority": 0}]`
-	resp, ok := parseIssueShowJSON(input, "gt-abc")
+	resp, ok := parseIssueShowJSON(input)
 	if !ok {
 		t.Fatal("parseIssueShowJSON returned ok=false")
 	}
@@ -666,7 +666,7 @@ func TestParseIssueShowJSON_InvalidInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, ok := parseIssueShowJSON(tt.input, "gt-abc")
+			_, ok := parseIssueShowJSON(tt.input)
 			if ok {
 				t.Errorf("parseIssueShowJSON(%q) returned ok=true, want false", tt.input)
 			}

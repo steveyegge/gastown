@@ -3,12 +3,13 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/hooks"
 )
 
-// HooksSyncCheck verifies all settings.json files match what gt hooks sync would generate.
+// HooksSyncCheck verifies all settings.local.json files match what gt hooks sync would generate.
 type HooksSyncCheck struct {
 	FixableCheck
 	outOfSync []hooks.Target
@@ -20,14 +21,14 @@ func NewHooksSyncCheck() *HooksSyncCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "hooks-sync",
-				CheckDescription: "Verify hooks settings.json files are in sync",
+				CheckDescription: "Verify hooks settings.local.json files are in sync",
 				CheckCategory:    CategoryHooks,
 			},
 		},
 	}
 }
 
-// Run checks all managed settings.json files for sync status.
+// Run checks all managed settings.local.json files for sync status.
 func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 	c.outOfSync = nil
 
@@ -83,7 +84,7 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:   StatusWarning,
 		Message:  fmt.Sprintf("%d target(s) out of sync", len(c.outOfSync)),
 		Details:  details,
-		FixHint:  "Run 'gt hooks sync' to regenerate settings.json files",
+		FixHint:  "Run 'gt hooks sync' to regenerate settings.local.json files",
 		Category: c.Category(),
 	}
 }
@@ -115,7 +116,7 @@ func (c *HooksSyncCheck) Fix(ctx *CheckContext) error {
 		}
 		current.EnabledPlugins["beads@beads-marketplace"] = false
 
-		claudeDir := target.Path[:len(target.Path)-len("/settings.json")]
+		claudeDir := filepath.Dir(target.Path)
 		if err := os.MkdirAll(claudeDir, 0755); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: creating dir: %v", target.DisplayKey(), err))
 			continue

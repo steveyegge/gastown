@@ -103,7 +103,6 @@ export GIT_AUTHOR_NAME="gastown/polecats/toast"
 export GT_ROOT="/home/user/gt"
 export BEADS_DIR="/home/user/gt/gastown/.beads"
 export BEADS_AGENT_NAME="gastown/toast"
-export BEADS_NO_DAEMON="1"  # Polecats use isolated beads context
 ```
 
 ### Example: Crew Environment
@@ -118,7 +117,6 @@ export GIT_AUTHOR_NAME="gastown/crew/joe"
 export GT_ROOT="/home/user/gt"
 export BEADS_DIR="/home/user/gt/gastown/.beads"
 export BEADS_AGENT_NAME="gastown/joe"
-export BEADS_NO_DAEMON="1"  # Crew uses isolated beads context
 ```
 
 ### Manual Override

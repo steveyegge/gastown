@@ -104,6 +104,15 @@ func (f *Formula) validateConvoy() error {
 		}
 	}
 
+	// Validate RequiredUnless references point to existing input keys
+	for name, input := range f.Inputs {
+		for _, ref := range input.RequiredUnless {
+			if _, ok := f.Inputs[ref]; !ok {
+				return fmt.Errorf("input %q has required_unless referencing unknown input %q", name, ref)
+			}
+		}
+	}
+
 	return nil
 }
 

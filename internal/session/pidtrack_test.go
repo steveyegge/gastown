@@ -177,7 +177,7 @@ func TestKillTrackedPIDs_KillsSelf(t *testing.T) {
 
 func TestPidFile_Path(t *testing.T) {
 	got := pidFile("/home/user/gt", "gt-myrig-witness")
-	want := "/home/user/gt/.runtime/pids/gt-myrig-witness.pid"
+	want := filepath.Join("/home/user/gt", ".runtime", "pids", "gt-myrig-witness.pid")
 	if got != want {
 		t.Errorf("pidFile() = %q, want %q", got, want)
 	}

@@ -170,7 +170,7 @@ func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, err
 	args := []string{"list",
 		"--label", "queue:" + queueName,
 		"--status", "open",
-		"--type", "message",
+		"--label", "gt:message",
 		"--json",
 		"--limit", "0",
 	}

@@ -349,6 +349,23 @@ struggling, ping it. If Deacon seems stuck, notify Mayor.
 
 ---
 
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Message a polecat | `{{ cmd }} nudge {{ .RigName }}/<name> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Kill stuck polecat | `{{ cmd }} polecat nuke {{ .RigName }}/<name> --force` | ~~gt polecat kill~~ (not a command) |
+| View polecat output | `{{ cmd }} peek {{ .RigName }}/<name> 50` | |
+| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+
+**Rig lifecycle commands (for reference):**
+- `park/unpark` — Temporary pause. Daemon skips parked rigs.
+- `dock/undock` — Persistent disable. Survives daemon restarts.
+- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
+- `restart/reboot` — Stop then start rig agents.
+
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
 Your mail address: {{ .RigName }}/witness

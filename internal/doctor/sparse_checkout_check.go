@@ -4,20 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/git"
 )
 
-// SparseCheckoutCheck verifies that git clones/worktrees have sparse checkout configured
-// to exclude Claude Code context files from source repos. This ensures source repo settings
-// and instructions don't override Gas Town agent configuration.
-// Excluded files: .claude/, CLAUDE.md, CLAUDE.local.md
-// Note: .mcp.json is NOT excluded so worktrees inherit MCP server config.
+// SparseCheckoutCheck detects legacy sparse checkout configurations that should be removed.
+// Sparse checkout was previously used to exclude .claude/ from source repos, but this
+// prevented valid .claude/ files in rigged repos from being used. Now that gastown's
+// repo no longer has .claude/ files, sparse checkout is no longer needed.
+//
+// This check runs in both modes:
+//   - With --rig: checks only the specified rig
+//   - Without --rig: iterates over all rig directories in the town root
 type SparseCheckoutCheck struct {
 	FixableCheck
-	rigPath       string
-	affectedRepos []string // repos missing sparse checkout configuration
+	townRoot      string
+	affectedRepos []string // repos with legacy sparse checkout that should be removed
 }
 
 // NewSparseCheckoutCheck creates a new sparse checkout check.
@@ -26,34 +28,105 @@ func NewSparseCheckoutCheck() *SparseCheckoutCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "sparse-checkout",
-				CheckDescription: "Verify sparse checkout excludes Claude context files (.claude/, CLAUDE.md, etc.)",
+				CheckDescription: "Check for legacy sparse checkout configuration that should be removed",
 				CheckCategory:    CategoryRig,
 			},
 		},
 	}
 }
 
-// Run checks if sparse checkout is configured for all git repos in the rig.
+// Run checks if any git repos have legacy sparse checkout configured.
 func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
-	c.rigPath = ctx.RigPath()
-	if c.rigPath == "" {
+	c.townRoot = ctx.TownRoot
+	c.affectedRepos = nil
+
+	// Collect rig paths to check
+	var rigPaths []string
+	if ctx.RigPath() != "" {
+		// Single-rig mode
+		rigPaths = []string{ctx.RigPath()}
+	} else {
+		// Town-wide mode: discover all rig directories
+		rigPaths = c.discoverRigPaths(ctx.TownRoot)
+	}
+
+	if len(rigPaths) == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
-			Status:  StatusError,
-			Message: "No rig specified",
+			Status:  StatusOK,
+			Message: "No rigs found to check",
 		}
 	}
 
-	c.affectedRepos = nil
+	// Check all rigs for legacy sparse checkout
+	for _, rigPath := range rigPaths {
+		c.checkRig(rigPath)
+	}
 
-	// Check all git repo locations
+	if len(c.affectedRepos) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No legacy sparse checkout configurations found",
+		}
+	}
+
+	// Build details with relative paths from town root
+	var details []string
+	for _, repoPath := range c.affectedRepos {
+		relPath, _ := filepath.Rel(c.townRoot, repoPath)
+		if relPath == "" {
+			relPath = repoPath
+		}
+		details = append(details, relPath)
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d repo(s) have legacy sparse checkout that should be removed", len(c.affectedRepos)),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to remove sparse checkout and restore .claude/ files",
+	}
+}
+
+// discoverRigPaths finds all rig directories in the town root.
+// Skips known non-rig directories (mayor, deacon, daemon, .git, etc.).
+func (c *SparseCheckoutCheck) discoverRigPaths(townRoot string) []string {
+	entries, err := os.ReadDir(townRoot)
+	if err != nil {
+		return nil
+	}
+
+	var rigPaths []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Skip known non-rig directories
+		if name == "mayor" || name == "deacon" || name == "daemon" ||
+			name == ".git" || name == "docs" || name[0] == '.' {
+			continue
+		}
+		// A rig directory has a config.json
+		rigPath := filepath.Join(townRoot, name)
+		if _, err := os.Stat(filepath.Join(rigPath, "config.json")); err == nil {
+			rigPaths = append(rigPaths, rigPath)
+		}
+	}
+	return rigPaths
+}
+
+// checkRig checks all worktree repos within a single rig for legacy sparse checkout.
+func (c *SparseCheckoutCheck) checkRig(rigPath string) {
 	repoPaths := []string{
-		filepath.Join(c.rigPath, "mayor", "rig"),
-		filepath.Join(c.rigPath, "refinery", "rig"),
+		filepath.Join(rigPath, "mayor", "rig"),
+		filepath.Join(rigPath, "refinery", "rig"),
 	}
 
 	// Add crew clones
-	crewDir := filepath.Join(c.rigPath, "crew")
+	crewDir := filepath.Join(rigPath, "crew")
 	if entries, err := os.ReadDir(crewDir); err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() && entry.Name() != "README.md" {
@@ -62,11 +135,20 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Add polecat worktrees
-	polecatDir := filepath.Join(c.rigPath, "polecats")
+	// Add polecat worktrees (nested structure: polecats/<name>/<rigname>/)
+	polecatDir := filepath.Join(rigPath, "polecats")
 	if entries, err := os.ReadDir(polecatDir); err == nil {
+		rigName := filepath.Base(rigPath)
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if !entry.IsDir() {
+				continue
+			}
+			// The actual worktree is at polecats/<name>/<rigname>/
+			worktreePath := filepath.Join(polecatDir, entry.Name(), rigName)
+			if _, err := os.Stat(worktreePath); err == nil {
+				repoPaths = append(repoPaths, worktreePath)
+			} else {
+				// Fallback: legacy flat layout polecats/<name>/
 				repoPaths = append(repoPaths, filepath.Join(polecatDir, entry.Name()))
 			}
 		}
@@ -78,54 +160,19 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Check if sparse checkout is configured (not just if .claude/ exists)
-		if !git.IsSparseCheckoutConfigured(repoPath) {
+		// Check if sparse checkout is configured (legacy configuration to remove)
+		if git.IsSparseCheckoutConfigured(repoPath) {
 			c.affectedRepos = append(c.affectedRepos, repoPath)
 		}
 	}
-
-	if len(c.affectedRepos) == 0 {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "All repos have sparse checkout configured to exclude Claude context files",
-		}
-	}
-
-	// Build details with relative paths
-	var details []string
-	for _, repoPath := range c.affectedRepos {
-		relPath, _ := filepath.Rel(c.rigPath, repoPath)
-		if relPath == "" {
-			relPath = repoPath
-		}
-		details = append(details, relPath)
-	}
-
-	return &CheckResult{
-		Name:    c.Name(),
-		Status:  StatusError,
-		Message: fmt.Sprintf("%d repo(s) missing sparse checkout configuration", len(c.affectedRepos)),
-		Details: details,
-		FixHint: "Run 'gt doctor --fix' to configure sparse checkout",
-	}
 }
 
-// Fix configures sparse checkout for affected repos to exclude Claude context files.
+// Fix removes sparse checkout configuration from affected repos.
 func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) error {
 	for _, repoPath := range c.affectedRepos {
-		if err := git.ConfigureSparseCheckout(repoPath); err != nil {
-			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("failed to configure sparse checkout for %s: %w", relPath, err)
-		}
-
-		// Check if any excluded files remain (untracked or modified files won't be removed by git read-tree)
-		if remaining := git.CheckExcludedFilesExist(repoPath); len(remaining) > 0 {
-			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("sparse checkout configured for %s but these files still exist: %s\n"+
-				"These files are untracked or modified and were not removed by git.\n"+
-				"Please manually remove or revert these files in %s",
-				relPath, strings.Join(remaining, ", "), repoPath)
+		if err := git.RemoveSparseCheckout(repoPath); err != nil {
+			relPath, _ := filepath.Rel(c.townRoot, repoPath)
+			return fmt.Errorf("failed to remove sparse checkout for %s: %w", relPath, err)
 		}
 	}
 	return nil

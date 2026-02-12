@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -185,6 +186,10 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		return nil
 	}
 
+	// Collect errors instead of failing on first — one broken rig shouldn't
+	// block fixes for all other rigs.
+	var errs []error
+
 	// Fix global agents (Mayor, Deacon) in town beads
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
 	townBd := beads.New(townBeadsPath)
@@ -194,7 +199,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		"Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
 		&beads.AgentFields{RoleType: "deacon", AgentState: "idle"},
 	); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	mayorID := beads.MayorBeadIDTown()
@@ -202,7 +207,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		"Mayor - global coordinator, handles cross-rig communication and escalations.",
 		&beads.AgentFields{RoleType: "mayor", AgentState: "idle"},
 	); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	// Load routes to get prefixes for rig-level agents
@@ -227,7 +232,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(prefixToRig) == 0 {
-		return nil
+		return errors.Join(errs...)
 	}
 
 	// Fix agents for each rig
@@ -241,7 +246,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"},
 		); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
@@ -249,7 +254,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
 			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"},
 		); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
@@ -259,12 +264,12 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
 				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
 			); err != nil {
-				return err
+				errs = append(errs, err)
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // addLabelToBead adds a label to an existing bead via bd update.

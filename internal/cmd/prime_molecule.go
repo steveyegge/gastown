@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os/exec"
 	"strings"
 
@@ -32,7 +32,7 @@ type MoleculeCurrentOutput struct {
 // with execution instructions. This is the core of the Propulsion Principle.
 func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 	// Call bd mol current with JSON output
-	cmd := exec.Command("bd", "--no-daemon", "mol", "current", moleculeID, "--json")
+	cmd := exec.Command("bd", "mol", "current", moleculeID, "--json")
 	cmd.Dir = workDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -45,7 +45,7 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 		fmt.Printf("  Check status with: bd mol current %s\n", moleculeID)
 		return
 	}
-	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	// Handle bd exit 0 bug: empty stdout means not found
 	if stdout.Len() == 0 {
 		fmt.Println(style.Bold.Render("→ PROPULSION PRINCIPLE: Work is on your hook. RUN IT."))
 		fmt.Println("  Begin working on this molecule immediately.")
@@ -248,7 +248,6 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		RoleName:        "deacon",
 		PatrolMolName:   "mol-deacon-patrol",
 		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
-		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
 		HeaderTitle:     "Patrol Status (Wisp-based)",
@@ -271,7 +270,6 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		RoleName:        "witness",
 		PatrolMolName:   "mol-witness-patrol",
 		BeadsDir:        ctx.WorkDir,
-		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
@@ -295,7 +293,6 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		RoleName:        "refinery",
 		PatrolMolName:   "mol-refinery-patrol",
 		BeadsDir:        ctx.WorkDir,
-		TownRoot:        ctx.TownRoot, // For GT_ROOT in subprocess
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",

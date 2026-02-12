@@ -19,7 +19,6 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-
 // runCmd executes a command with a timeout and returns stdout.
 // Returns empty buffer on timeout or error.
 // Security: errors from this function are logged server-side only (via log.Printf
@@ -41,6 +40,8 @@ func runCmd(timeout time.Duration, name string, args ...string) (*bytes.Buffer, 
 	}
 	return &stdout, nil
 }
+
+var fetcherRunCmd = runCmd
 
 // runBdCmd executes a bd command with the configured cmdTimeout in the specified beads directory.
 func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
@@ -105,11 +106,11 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}
 
 	return &LiveConvoyFetcher{
-		townRoot:       townRoot,
-		townBeads:      filepath.Join(townRoot, ".beads"),
-		cmdTimeout:     config.ParseDurationOrDefault(webCfg.CmdTimeout, 15*time.Second),
-		ghCmdTimeout:   config.ParseDurationOrDefault(webCfg.GhCmdTimeout, 10*time.Second),
-		tmuxCmdTimeout: config.ParseDurationOrDefault(webCfg.TmuxCmdTimeout, 2*time.Second),
+		townRoot:                townRoot,
+		townBeads:               filepath.Join(townRoot, ".beads"),
+		cmdTimeout:              config.ParseDurationOrDefault(webCfg.CmdTimeout, 15*time.Second),
+		ghCmdTimeout:            config.ParseDurationOrDefault(webCfg.GhCmdTimeout, 10*time.Second),
+		tmuxCmdTimeout:          config.ParseDurationOrDefault(webCfg.TmuxCmdTimeout, 2*time.Second),
 		staleThreshold:          config.ParseDurationOrDefault(workerCfg.StaleThreshold, 5*time.Minute),
 		stuckThreshold:          config.ParseDurationOrDefault(workerCfg.StuckThreshold, 30*time.Minute),
 		heartbeatFreshThreshold: config.ParseDurationOrDefault(workerCfg.HeartbeatFreshThreshold, 5*time.Minute),
@@ -269,7 +270,10 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) ([]trackedIssueInf
 	}
 
 	// Batch fetch issue details
-	details := f.getIssueDetailsBatch(issueIDs)
+	details, err := f.getIssueDetailsBatch(issueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("fetching tracked issue details for %s: %w", convoyID, err)
+	}
 
 	// Get worker activity from tmux sessions based on assignees
 	workers := f.getWorkersFromAssignees(details)
@@ -309,18 +313,18 @@ type issueDetail struct {
 }
 
 // getIssueDetailsBatch fetches details for multiple issues.
-func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*issueDetail {
+func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) (map[string]*issueDetail, error) {
 	result := make(map[string]*issueDetail)
 	if len(issueIDs) == 0 {
-		return result
+		return result, nil
 	}
 
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	stdout, err := runCmd(f.cmdTimeout, "bd", args...)
+	stdout, err := fetcherRunCmd(f.cmdTimeout, "bd", args...)
 	if err != nil {
-		return result
+		return nil, fmt.Errorf("bd show failed (issue_count=%d): %w", len(issueIDs), err)
 	}
 
 	var issues []struct {
@@ -331,7 +335,7 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 		UpdatedAt string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
-		return result
+		return nil, fmt.Errorf("bd show returned invalid JSON (issue_count=%d): %w", len(issueIDs), err)
 	}
 
 	for _, issue := range issues {
@@ -350,7 +354,7 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 		result[issue.ID] = detail
 	}
 
-	return result
+	return result, nil
 }
 
 // workerDetail holds worker info including last activity.
@@ -817,7 +821,8 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 	// Query all in_progress issues (these are the ones being worked on)
 	stdout, err := f.runBdCmd(f.townRoot, "list", "--status=in_progress", "--json")
 	if err != nil {
-		return result // Return empty map on error
+		log.Printf("warning: bd list in_progress failed: %v", err)
+		return result
 	}
 
 	var issues []struct {
@@ -826,6 +831,7 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 		Assignee string `json:"assignee"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		log.Printf("warning: parsing bd list output: %v", err)
 		return result
 	}
 

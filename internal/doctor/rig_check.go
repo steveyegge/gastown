@@ -1179,7 +1179,6 @@ func RigChecks() []Check {
 		NewRigIsGitRepoCheck(),
 		NewGitExcludeConfiguredCheck(),
 		NewHooksPathConfiguredCheck(),
-		NewSparseCheckoutCheck(),
 		NewBareRepoRefspecCheck(),
 		NewWitnessExistsCheck(),
 		NewRefineryExistsCheck(),

@@ -463,7 +463,7 @@ func handleStepContinue(cwd, townRoot string, nextStep *beads.Issue, dryRun bool
 
 // handleParallelSteps handles executing multiple steps concurrently (fan-out pattern).
 // This function spawns goroutines to execute each step in parallel and waits for all to complete.
-func handleParallelSteps(cwd, townRoot, workDir string, steps []*beads.Issue, dryRun bool) error {
+func handleParallelSteps(cwd, townRoot, _ string, steps []*beads.Issue, dryRun bool) error {
 	fmt.Printf("\n%s Fan-out: %d parallel steps ready\n", style.Bold.Render("⚡"), len(steps))
 	for i, step := range steps {
 		fmt.Printf("  %d. %s: %s\n", i+1, step.ID, step.Title)

@@ -56,7 +56,7 @@ HOOK MODE (--hook):
   When called as an LLM runtime hook, use --hook to enable session ID handling.
   This reads session metadata from stdin and persists it for the session.
 
-  Claude Code integration (in .claude/settings.json):
+  Claude Code integration (in .claude/settings.local.json):
     "SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]
 
   Claude Code sends JSON on stdin:
@@ -85,88 +85,36 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
-	// Validate flag combinations: --state is exclusive (except --json)
-	if primeState && (primeHookMode || primeDryRun || primeExplain) {
-		return fmt.Errorf("--state cannot be combined with other flags (except --json)")
-	}
-	// --json requires --state
-	if primeStateJSON && !primeState {
-		return fmt.Errorf("--json requires --state")
+	if err := validatePrimeFlags(); err != nil {
+		return err
 	}
 
-	cwd, err := os.Getwd()
+	cwd, townRoot, err := resolvePrimeWorkspace()
 	if err != nil {
-		return fmt.Errorf("getting current directory: %w", err)
+		return err
 	}
-
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		return fmt.Errorf("finding workspace: %w", err)
-	}
-
-	// "Discover, Don't Track" principle:
-	// - If we're in a workspace, proceed - the workspace's existence IS the enable signal
-	// - If we're NOT in a workspace, check the global enabled state
-	// This ensures a missing/stale state file doesn't break workspace users
 	if townRoot == "" {
-		// Not in a workspace - check global enabled state
-		// (This matters for hooks that might run from random directories)
-		if !state.IsEnabled() {
-			return nil // Silent exit - not in workspace and not enabled
-		}
-		return fmt.Errorf("not in a Gas Town workspace")
+		return nil // Silent exit - not in workspace and not enabled
 	}
 
-	// Handle hook mode: read session ID from stdin and persist it
 	if primeHookMode {
-		sessionID, source := readHookSessionID()
-		if !primeDryRun {
-			persistSessionID(townRoot, sessionID)
-			if cwd != townRoot {
-				persistSessionID(cwd, sessionID)
-			}
-		}
-		// Set environment for this process (affects event emission below)
-		_ = os.Setenv("GT_SESSION_ID", sessionID)
-		_ = os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
-		// Output session beacon
-		explain(true, "Session beacon: hook mode enabled, session ID from stdin")
-		fmt.Printf("[session:%s]\n", sessionID)
-		if source != "" {
-			fmt.Printf("[source:%s]\n", source)
-		}
+		handlePrimeHookMode(townRoot, cwd)
 	}
 
 	// Check for handoff marker (prevents handoff loop bug)
-	// In dry-run mode, use the non-mutating version
 	if primeDryRun {
 		checkHandoffMarkerDryRun(cwd)
 	} else {
 		checkHandoffMarker(cwd)
 	}
 
-	// Get role using env-aware detection
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
 		return fmt.Errorf("detecting role: %w", err)
 	}
 
-	// Warn prominently if there's a role/cwd mismatch
-	if roleInfo.Mismatch {
-		fmt.Printf("\n%s\n", style.Bold.Render("⚠️  ROLE/LOCATION MISMATCH"))
-		fmt.Printf("You are %s (from $GT_ROLE) but your cwd suggests %s.\n",
-			style.Bold.Render(string(roleInfo.Role)),
-			style.Bold.Render(string(roleInfo.CwdRole)))
-		fmt.Printf("Expected home: %s\n", roleInfo.Home)
-		fmt.Printf("Actual cwd:    %s\n", cwd)
-		fmt.Println()
-		fmt.Println("This can cause commands to misbehave. Either:")
-		fmt.Println("  1. cd to your home directory, OR")
-		fmt.Println("  2. Use absolute paths for gt/bd commands")
-		fmt.Println()
-	}
+	warnRoleMismatch(roleInfo, cwd)
 
-	// Build RoleContext for compatibility with existing code
 	ctx := RoleContext{
 		Role:     roleInfo.Role,
 		Rig:      roleInfo.Rig,
@@ -181,75 +129,25 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check and acquire identity lock for worker roles
-	if !primeDryRun {
-		if err := acquireIdentityLock(ctx); err != nil {
-			return err
-		}
-	}
-
-	// Ensure beads redirect exists for worktree-based roles
-	// Skip if there's a role/location mismatch to avoid creating bad redirects
-	if !roleInfo.Mismatch && !primeDryRun {
-		ensureBeadsRedirect(ctx)
-	}
-
-	// Emit session_start event for seance discovery
-	if !primeDryRun {
-		emitSessionEvent(ctx)
-	}
-
-	// Output session metadata for seance discovery
-	explain(true, "Session metadata: always included for seance discovery")
-	outputSessionMetadata(ctx)
-
-	// Output context
-	explain(true, fmt.Sprintf("Role context: detected role is %s", ctx.Role))
-	if err := outputPrimeContext(ctx); err != nil {
+	if err := setupPrimeSession(ctx, roleInfo); err != nil {
 		return err
 	}
 
-	// Output custom context file if present
-	outputContextFile(ctx)
+	if err := outputRoleContext(ctx); err != nil {
+		return err
+	}
 
-	// Output handoff content if present
-	outputHandoffContent(ctx)
-
-	// Output attachment status (for autonomous work detection)
-	outputAttachmentStatus(ctx)
-
-	// Check for slung work on hook (from gt sling)
-	// If found, we're in autonomous mode - skip normal startup directive
 	hasSlungWork := checkSlungWork(ctx)
 	explain(hasSlungWork, "Autonomous mode: hooked/in-progress work detected")
 
-	// Output molecule context if working on a molecule step
 	outputMoleculeContext(ctx)
-
-	// Output previous session checkpoint for crash recovery
 	outputCheckpointContext(ctx)
+	runPrimeExternalTools(cwd)
 
-	// Run bd prime to output beads workflow context
-	if !primeDryRun {
-		runBdPrime(cwd)
-	} else {
-		explain(true, "bd prime: skipped in dry-run mode")
-	}
-
-	// Run gt mail check --inject to inject any pending mail
-	if !primeDryRun {
-		runMailCheckInject(cwd)
-	} else {
-		explain(true, "gt mail check --inject: skipped in dry-run mode")
-	}
-
-	// For Mayor, check for pending escalations
 	if ctx.Role == RoleMayor {
 		checkPendingEscalations(ctx)
 	}
 
-	// Output startup directive for roles that should announce themselves
-	// Skip if in autonomous mode (slung work provides its own directive)
 	if !hasSlungWork {
 		explain(true, "Startup directive: normal mode (no hooked work)")
 		outputStartupDirective(ctx)
@@ -258,89 +156,121 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func detectRole(cwd, townRoot string) RoleInfo {
-	ctx := RoleInfo{
-		Role:     RoleUnknown,
-		TownRoot: townRoot,
-		WorkDir:  cwd,
-		Source:   "cwd",
+// validatePrimeFlags checks that CLI flag combinations are valid.
+func validatePrimeFlags() error {
+	if primeState && (primeHookMode || primeDryRun || primeExplain) {
+		return fmt.Errorf("--state cannot be combined with other flags (except --json)")
 	}
+	if primeStateJSON && !primeState {
+		return fmt.Errorf("--json requires --state")
+	}
+	return nil
+}
 
-	// Get relative path from town root
-	relPath, err := filepath.Rel(townRoot, cwd)
+// resolvePrimeWorkspace finds the cwd and town root for prime.
+// Returns empty townRoot (not an error) when not in a workspace and not enabled.
+func resolvePrimeWorkspace() (cwd, townRoot string, err error) {
+	cwd, err = os.Getwd()
 	if err != nil {
-		return ctx
+		return "", "", fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// Normalize and split path
-	relPath = filepath.ToSlash(relPath)
-	parts := strings.Split(relPath, "/")
-
-	// Check for mayor role
-	// At town root, or in mayor/ or mayor/rig/
-	if relPath == "." || relPath == "" {
-		ctx.Role = RoleMayor
-		return ctx
-	}
-	if len(parts) >= 1 && parts[0] == "mayor" {
-		ctx.Role = RoleMayor
-		return ctx
+	townRoot, err = workspace.FindFromCwd()
+	if err != nil {
+		return "", "", fmt.Errorf("finding workspace: %w", err)
 	}
 
-	// Check for boot role: deacon/dogs/boot/
-	// Must check before deacon since boot is under deacon directory
-	if len(parts) >= 3 && parts[0] == "deacon" && parts[1] == "dogs" && parts[2] == "boot" {
-		ctx.Role = RoleBoot
-		return ctx
+	// "Discover, Don't Track" principle:
+	// If in a workspace, proceed. If not, check global enabled state.
+	if townRoot == "" {
+		if !state.IsEnabled() {
+			return cwd, "", nil // Signal caller to exit silently
+		}
+		return "", "", fmt.Errorf("not in a Gas Town workspace")
 	}
 
-	// Check for deacon role: deacon/
-	if len(parts) >= 1 && parts[0] == "deacon" {
-		ctx.Role = RoleDeacon
-		return ctx
+	return cwd, townRoot, nil
+}
+
+// handlePrimeHookMode reads session ID from stdin and persists it.
+// Called when --hook flag is set for LLM runtime hook integration.
+func handlePrimeHookMode(townRoot, cwd string) {
+	sessionID, source := readHookSessionID()
+	if !primeDryRun {
+		persistSessionID(townRoot, sessionID)
+		if cwd != townRoot {
+			persistSessionID(cwd, sessionID)
+		}
+	}
+	_ = os.Setenv("GT_SESSION_ID", sessionID)
+	_ = os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
+	explain(true, "Session beacon: hook mode enabled, session ID from stdin")
+	fmt.Printf("[session:%s]\n", sessionID)
+	if source != "" {
+		fmt.Printf("[source:%s]\n", source)
+	}
+}
+
+// warnRoleMismatch outputs a prominent warning if GT_ROLE disagrees with cwd detection.
+func warnRoleMismatch(roleInfo RoleInfo, cwd string) {
+	if !roleInfo.Mismatch {
+		return
+	}
+	fmt.Printf("\n%s\n", style.Bold.Render("⚠️  ROLE/LOCATION MISMATCH"))
+	fmt.Printf("You are %s (from $GT_ROLE) but your cwd suggests %s.\n",
+		style.Bold.Render(string(roleInfo.Role)),
+		style.Bold.Render(string(roleInfo.CwdRole)))
+	fmt.Printf("Expected home: %s\n", roleInfo.Home)
+	fmt.Printf("Actual cwd:    %s\n", cwd)
+	fmt.Println()
+	fmt.Println("This can cause commands to misbehave. Either:")
+	fmt.Println("  1. cd to your home directory, OR")
+	fmt.Println("  2. Use absolute paths for gt/bd commands")
+	fmt.Println()
+}
+
+// setupPrimeSession handles identity locking, beads redirect, and session events.
+// Skipped entirely in dry-run mode.
+func setupPrimeSession(ctx RoleContext, roleInfo RoleInfo) error {
+	if primeDryRun {
+		return nil
+	}
+	if err := acquireIdentityLock(ctx); err != nil {
+		return err
+	}
+	if !roleInfo.Mismatch {
+		ensureBeadsRedirect(ctx)
+	}
+	emitSessionEvent(ctx)
+	return nil
+}
+
+// outputRoleContext emits session metadata and all role/context output sections.
+func outputRoleContext(ctx RoleContext) error {
+	explain(true, "Session metadata: always included for seance discovery")
+	outputSessionMetadata(ctx)
+
+	explain(true, fmt.Sprintf("Role context: detected role is %s", ctx.Role))
+	if err := outputPrimeContext(ctx); err != nil {
+		return err
 	}
 
-	// At this point, first part should be a rig name
-	if len(parts) < 1 {
-		return ctx
-	}
-	rigName := parts[0]
-	ctx.Rig = rigName
+	outputContextFile(ctx)
+	outputHandoffContent(ctx)
+	outputAttachmentStatus(ctx)
+	return nil
+}
 
-	// Check for mayor: <rig>/mayor/ or <rig>/mayor/rig/
-	if len(parts) >= 2 && parts[1] == "mayor" {
-		ctx.Role = RoleMayor
-		return ctx
+// runPrimeExternalTools runs bd prime and gt mail check --inject.
+// Skipped in dry-run mode with explain output.
+func runPrimeExternalTools(cwd string) {
+	if primeDryRun {
+		explain(true, "bd prime: skipped in dry-run mode")
+		explain(true, "gt mail check --inject: skipped in dry-run mode")
+		return
 	}
-
-	// Check for witness: <rig>/witness/rig/
-	if len(parts) >= 2 && parts[1] == "witness" {
-		ctx.Role = RoleWitness
-		return ctx
-	}
-
-	// Check for refinery: <rig>/refinery/rig/
-	if len(parts) >= 2 && parts[1] == "refinery" {
-		ctx.Role = RoleRefinery
-		return ctx
-	}
-
-	// Check for polecat: <rig>/polecats/<name>/
-	if len(parts) >= 3 && parts[1] == "polecats" {
-		ctx.Role = RolePolecat
-		ctx.Polecat = parts[2]
-		return ctx
-	}
-
-	// Check for crew: <rig>/crew/<name>/
-	if len(parts) >= 3 && parts[1] == "crew" {
-		ctx.Role = RoleCrew
-		ctx.Polecat = parts[2] // Use Polecat field for crew member name
-		return ctx
-	}
-
-	// Default: could be rig root - treat as unknown
-	return ctx
+	runBdPrime(cwd)
+	runMailCheckInject(cwd)
 }
 
 // runBdPrime runs `bd prime` and outputs the result.
@@ -398,13 +328,34 @@ func runMailCheckInject(workDir string) {
 // If found, displays AUTONOMOUS WORK MODE and tells the agent to execute immediately.
 // Returns true if hooked work was found (caller should skip normal startup directive).
 func checkSlungWork(ctx RoleContext) bool {
-	// Determine agent identity
-	agentID := getAgentIdentity(ctx)
-	if agentID == "" {
+	hookedBead := findAgentWork(ctx)
+	if hookedBead == nil {
 		return false
 	}
 
-	// Check for hooked beads (work on the agent's hook)
+	attachment := beads.ParseAttachmentFields(hookedBead)
+	hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
+
+	outputAutonomousDirective(ctx, hookedBead, hasMolecule)
+	outputHookedBeadDetails(hookedBead)
+
+	if hasMolecule {
+		outputMoleculeWorkflow(ctx, attachment)
+	} else {
+		outputBeadPreview(hookedBead)
+	}
+
+	return true
+}
+
+// findAgentWork looks up hooked or in-progress beads assigned to this agent.
+// Returns nil if no work is found.
+func findAgentWork(ctx RoleContext) *beads.Issue {
+	agentID := getAgentIdentity(ctx)
+	if agentID == "" {
+		return nil
+	}
+
 	b := beads.New(ctx.WorkDir)
 	hookedBeads, err := b.List(beads.ListOptions{
 		Status:   beads.StatusHooked,
@@ -412,12 +363,10 @@ func checkSlungWork(ctx RoleContext) bool {
 		Priority: -1,
 	})
 	if err != nil {
-		return false
+		return nil
 	}
 
-	// If no hooked beads found, also check in_progress beads assigned to this agent.
-	// This handles the case where work was claimed (status changed to in_progress)
-	// but the session was interrupted before completion. The hook should persist.
+	// Fall back to in_progress beads (session interrupted before completion)
 	if len(hookedBeads) == 0 {
 		inProgressBeads, err := b.List(beads.ListOptions{
 			Status:   "in_progress",
@@ -425,23 +374,18 @@ func checkSlungWork(ctx RoleContext) bool {
 			Priority: -1,
 		})
 		if err != nil || len(inProgressBeads) == 0 {
-			return false
+			return nil
 		}
 		hookedBeads = inProgressBeads
 	}
 
-	// Use the first hooked bead (agents typically have one)
-	hookedBead := hookedBeads[0]
+	return hookedBeads[0]
+}
 
-	// Build the role announcement string
+// outputAutonomousDirective displays the AUTONOMOUS WORK MODE header and instructions.
+func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMolecule bool) {
 	roleAnnounce := buildRoleAnnouncement(ctx)
 
-	// Check for attached molecule FIRST - this determines the instruction flow
-	// With formula-on-bead, the base bead is hooked with attached_molecule pointing to wisp.
-	attachment := beads.ParseAttachmentFields(hookedBead)
-	hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
-
-	// Found hooked work! Display AUTONOMOUS MODE prominently
 	fmt.Println()
 	fmt.Printf("%s\n\n", style.Bold.Render("## 🚨 AUTONOMOUS WORK MODE 🚨"))
 	fmt.Println("Work is on your hook. After announcing your role, begin IMMEDIATELY.")
@@ -456,7 +400,6 @@ func checkSlungWork(ctx RoleContext) bool {
 	fmt.Println()
 	fmt.Println("1. Announce: \"" + roleAnnounce + "\" (ONE line, no elaboration)")
 
-	// Instructions differ based on whether molecule is attached
 	if hasMolecule {
 		fmt.Println("2. This bead has an ATTACHED MOLECULE (formula workflow)")
 		fmt.Println("3. Work through molecule steps in order - see CURRENT STEP below")
@@ -475,13 +418,14 @@ func checkSlungWork(ctx RoleContext) bool {
 		fmt.Println("- Skip molecule steps or work on the base bead directly")
 	}
 	fmt.Println()
+}
 
-	// Show the hooked work details
+// outputHookedBeadDetails displays the hooked bead's ID, title, and description summary.
+func outputHookedBeadDetails(hookedBead *beads.Issue) {
 	fmt.Printf("%s\n\n", style.Bold.Render("## Hooked Work"))
 	fmt.Printf("  Bead ID: %s\n", style.Bold.Render(hookedBead.ID))
 	fmt.Printf("  Title: %s\n", hookedBead.Title)
 	if hookedBead.Description != "" {
-		// Show first few lines of description
 		lines := strings.Split(hookedBead.Description, "\n")
 		maxLines := 5
 		if len(lines) > maxLines {
@@ -494,51 +438,50 @@ func checkSlungWork(ctx RoleContext) bool {
 		}
 	}
 	fmt.Println()
+}
 
-	// If molecule attached, show molecule context prominently INSTEAD of bd show
-	if hasMolecule {
-		fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED MOLECULE (FORMULA WORKFLOW)"))
-		fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
-		if attachment.AttachedArgs != "" {
-			fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
-			fmt.Printf("  %s\n", attachment.AttachedArgs)
-		}
-		fmt.Println()
-
-		// Show current step from molecule - THIS IS THE PRIMARY INSTRUCTION
-		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
-
-		fmt.Println()
-		fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
-		fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
-	} else {
-		// No molecule - show bead preview using bd show
-		fmt.Println("**Bead details:**")
-		cmd := exec.Command("bd", "show", hookedBead.ID)
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
-				fmt.Fprintf(os.Stderr, "  bd show %s: %s\n", hookedBead.ID, errMsg)
-			} else {
-				fmt.Fprintf(os.Stderr, "  bd show %s: %v\n", hookedBead.ID, err)
-			}
-		} else {
-			lines := strings.Split(stdout.String(), "\n")
-			maxLines := 15
-			if len(lines) > maxLines {
-				lines = lines[:maxLines]
-				lines = append(lines, "...")
-			}
-			for _, line := range lines {
-				fmt.Printf("  %s\n", line)
-			}
-		}
-		fmt.Println()
+// outputMoleculeWorkflow displays attached molecule context with current step.
+func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields) {
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED MOLECULE (FORMULA WORKFLOW)"))
+	fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
+	if attachment.AttachedArgs != "" {
+		fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
+		fmt.Printf("  %s\n", attachment.AttachedArgs)
 	}
+	fmt.Println()
 
-	return true
+	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+
+	fmt.Println()
+	fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
+	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
+}
+
+// outputBeadPreview runs `bd show` and displays a truncated preview of the bead.
+func outputBeadPreview(hookedBead *beads.Issue) {
+	fmt.Println("**Bead details:**")
+	cmd := exec.Command("bd", "show", hookedBead.ID)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			fmt.Fprintf(os.Stderr, "  bd show %s: %s\n", hookedBead.ID, errMsg)
+		} else {
+			fmt.Fprintf(os.Stderr, "  bd show %s: %v\n", hookedBead.ID, err)
+		}
+	} else {
+		lines := strings.Split(stdout.String(), "\n")
+		maxLines := 15
+		if len(lines) > maxLines {
+			lines = lines[:maxLines]
+			lines = append(lines, "...")
+		}
+		for _, line := range lines {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+	fmt.Println()
 }
 
 // buildRoleAnnouncement creates the role announcement string for autonomous mode.
@@ -699,8 +642,7 @@ func ensureBeadsRedirect(ctx RoleContext) {
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
 	if _, err := os.Stat(redirectPath); err == nil {
-		// Redirect exists, nothing to do
-		return
+		return // Redirect exists, nothing to do
 	}
 
 	// Use shared helper - silently ignore errors during prime

@@ -190,11 +190,9 @@ func (b *Beads) Init(prefix string) error {
 
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
-	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
-	// The daemon is primarily useful for write coalescing, not reads.
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
-	fullArgs := append([]string{"--no-daemon", "--allow-stale"}, args...)
+	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
@@ -235,8 +233,8 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}
 
-	// Handle bd --no-daemon exit code 0 bug: when issue not found,
-	// --no-daemon exits 0 but writes error to stderr with empty stdout.
+	// Handle bd exit code 0 bug: when issue not found,
+	// bd may exit 0 but write error to stderr with empty stdout.
 	// Detect this case and treat as error to avoid JSON parse failures.
 	if stdout.Len() == 0 && stderr.Len() > 0 {
 		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
@@ -405,6 +403,14 @@ func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
 
 // Show returns detailed information about an issue.
 func (b *Beads) Show(id string) (*Issue, error) {
+	// Route cross-rig queries via routes.jsonl so that rig-level bead IDs
+	// (e.g., "gt-abc123") resolve to the correct rig database.
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	if targetDir != b.getResolvedBeadsDir() {
+		target := NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+		return target.Show(id)
+	}
+
 	out, err := b.run("show", id, "--json")
 	if err != nil {
 		return nil, err

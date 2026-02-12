@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -874,9 +875,9 @@ func TestExpandAnnounceNoTownRoot(t *testing.T) {
 // ============ Recipient Validation Tests ============
 
 func TestValidateRecipient(t *testing.T) {
-	// Skip if bd CLI is not available (e.g., in CI environment)
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd CLI not available, skipping test")
+	// Skip if bd CLI is not available or not functional (e.g., missing DLLs on Windows CI)
+	if out, err := exec.Command("bd", "version").CombinedOutput(); err != nil {
+		t.Skipf("bd CLI not functional, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Create isolated beads environment for testing

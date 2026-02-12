@@ -168,6 +168,28 @@ for immediate recovery without waiting for the daemon's health check loop.`,
 	RunE: runDoltRecover,
 }
 
+var doltSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Push Dolt databases to DoltHub remotes",
+	Long: `Push all local Dolt databases to their configured DoltHub remotes.
+
+This command automates the tedious process of pushing each database individually:
+  1. Stops the Dolt server (required for CLI push)
+  2. Iterates databases in .dolt-data/
+  3. For each database with a configured remote, runs dolt push
+  4. Reports success/failure per database
+  5. Restarts the Dolt server
+
+Use --db to sync a single database, --dry-run to preview, or --force for force-push.
+
+Examples:
+  gt dolt sync                # Push all databases with remotes
+  gt dolt sync --dry-run      # Preview what would be pushed
+  gt dolt sync --db gastown   # Push only the gastown database
+  gt dolt sync --force        # Force-push all databases`,
+	RunE: runDoltSync,
+}
+
 var doltRollbackCmd = &cobra.Command{
 	Use:   "rollback [backup-dir]",
 	Short: "Restore .beads directories from a migration backup",
@@ -195,6 +217,9 @@ var (
 	doltMigrateDry   bool
 	doltRollbackDry  bool
 	doltRollbackList bool
+	doltSyncDry      bool
+	doltSyncForce    bool
+	doltSyncDB       string
 )
 
 func init() {
@@ -210,6 +235,7 @@ func init() {
 	doltCmd.AddCommand(doltFixMetadataCmd)
 	doltCmd.AddCommand(doltRecoverCmd)
 	doltCmd.AddCommand(doltRollbackCmd)
+	doltCmd.AddCommand(doltSyncCmd)
 
 	doltLogsCmd.Flags().IntVarP(&doltLogLines, "lines", "n", 50, "Number of lines to show")
 	doltLogsCmd.Flags().BoolVarP(&doltLogFollow, "follow", "f", false, "Follow log output")
@@ -218,6 +244,10 @@ func init() {
 
 	doltRollbackCmd.Flags().BoolVar(&doltRollbackDry, "dry-run", false, "Show what would be restored without making changes")
 	doltRollbackCmd.Flags().BoolVar(&doltRollbackList, "list", false, "List available backups and exit")
+
+	doltSyncCmd.Flags().BoolVar(&doltSyncDry, "dry-run", false, "Preview what would be pushed without pushing")
+	doltSyncCmd.Flags().BoolVar(&doltSyncForce, "force", false, "Force-push to remotes")
+	doltSyncCmd.Flags().StringVar(&doltSyncDB, "db", "", "Sync a single database instead of all")
 
 	rootCmd.AddCommand(doltCmd)
 }
@@ -861,6 +891,84 @@ func printBackupContents(backupPath, townRoot string) {
 			fmt.Printf("    From: %s\n", style.Dim.Render(beadsDir))
 		}
 	}
+}
+
+func runDoltSync(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Validate --db flag if set
+	if doltSyncDB != "" && !doltserver.DatabaseExists(townRoot, doltSyncDB) {
+		return fmt.Errorf("database %q not found in .dolt-data/\nRun 'gt dolt list' to see available databases", doltSyncDB)
+	}
+
+	// Check server state
+	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
+
+	if wasRunning {
+		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
+		if err := doltserver.Stop(townRoot); err != nil {
+			return fmt.Errorf("stopping Dolt server: %w", err)
+		}
+		fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
+
+		// Guarantee restart even if push fails
+		defer func() {
+			fmt.Printf("\nRestarting Dolt server...\n")
+			if startErr := doltserver.Start(townRoot); startErr != nil {
+				fmt.Printf("%s Failed to restart Dolt server: %v\n", style.Bold.Render("✗"), startErr)
+				fmt.Printf("  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
+			} else {
+				fmt.Printf("%s Dolt server restarted\n", style.Bold.Render("✓"))
+			}
+		}()
+	}
+
+	opts := doltserver.SyncOptions{
+		Force:  doltSyncForce,
+		DryRun: doltSyncDry,
+		Filter: doltSyncDB,
+	}
+
+	results := doltserver.SyncDatabases(townRoot, opts)
+
+	if len(results) == 0 {
+		fmt.Println("No databases to sync.")
+		return nil
+	}
+
+	fmt.Printf("\nSyncing %d database(s)...\n", len(results))
+
+	var pushed, skipped, failed int
+	for _, r := range results {
+		fmt.Println()
+		switch {
+		case r.Pushed:
+			fmt.Printf("  %s %s → origin main\n", style.Bold.Render("✓"), r.Database)
+			fmt.Printf("    %s\n", style.Dim.Render(r.Remote))
+			pushed++
+		case r.DryRun:
+			fmt.Printf("  %s %s → origin main (dry run)\n", style.Bold.Render("~"), r.Database)
+			fmt.Printf("    %s\n", style.Dim.Render(r.Remote))
+			pushed++ // count as would-push for summary
+		case r.Skipped:
+			fmt.Printf("  %s %s — no remote configured\n", style.Dim.Render("○"), r.Database)
+			skipped++
+		case r.Error != nil:
+			fmt.Printf("  %s %s → origin main\n", style.Bold.Render("✗"), r.Database)
+			fmt.Printf("    error: %v\n", r.Error)
+			failed++
+		}
+	}
+
+	fmt.Printf("\nSummary: %d pushed, %d skipped, %d failed\n", pushed, skipped, failed)
+
+	if failed > 0 {
+		return fmt.Errorf("%d database(s) failed to sync", failed)
+	}
+	return nil
 }
 
 // setSyncModeForAllRigs sets sync.mode=dolt-native in each rig's beads database.

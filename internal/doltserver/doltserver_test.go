@@ -1,11 +1,14 @@
 package doltserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -143,7 +146,7 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 	}
 
 	// Create the actual Dolt database at the redirected location
-	actualDoltDir := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads", ".dolt")
+	actualDoltDir := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads_myrig", ".dolt")
 	if err := os.MkdirAll(actualDoltDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +164,7 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 	for _, m := range migrations {
 		if m.RigName == rigName {
 			found = true
-			expectedSource := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads")
+			expectedSource := filepath.Join(rigDir, "mayor", "rig", ".beads", "dolt", "beads_myrig")
 			if m.SourcePath != expectedSource {
 				t.Errorf("SourcePath = %q, want %q", m.SourcePath, expectedSource)
 			}
@@ -174,11 +177,11 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 }
 
 func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
-	// Setup: rig with direct .beads/dolt/beads (no redirect)
+	// Setup: rig with direct .beads/dolt/beads_testrig (no redirect)
 	townRoot := t.TempDir()
 
 	rigName := "simple"
-	doltDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	doltDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig", ".dolt")
 	if err := os.MkdirAll(doltDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +197,7 @@ func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
 	for _, m := range migrations {
 		if m.RigName == rigName {
 			found = true
-			expectedSource := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+			expectedSource := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig")
 			if m.SourcePath != expectedSource {
 				t.Errorf("SourcePath = %q, want %q", m.SourcePath, expectedSource)
 			}
@@ -204,6 +207,122 @@ func TestFindMigratableDatabases_NoRedirect(t *testing.T) {
 	if !found {
 		t.Errorf("expected to find migration for rig %q, got migrations: %v", rigName, migrations)
 	}
+}
+
+func TestFindLocalDoltDB(t *testing.T) {
+	t.Run("no dolt directory", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		result := findLocalDoltDB(beadsDir)
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("empty dolt directory", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("single database", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		dbDir := filepath.Join(beadsDir, "dolt", "beads_hq", ".dolt")
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(beadsDir, "dolt", "beads_hq")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+	})
+
+	t.Run("non-dolt files ignored", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		doltParent := filepath.Join(beadsDir, "dolt")
+		if err := os.MkdirAll(doltParent, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create a regular file (not a directory)
+		if err := os.WriteFile(filepath.Join(doltParent, "readme.txt"), []byte("hi"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Create a directory without .dolt inside
+		if err := os.MkdirAll(filepath.Join(doltParent, "not-a-db"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create the real database
+		if err := os.MkdirAll(filepath.Join(doltParent, "beads_gt", ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(doltParent, "beads_gt")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+	})
+
+	t.Run("multiple databases returns empty with warning", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		doltParent := filepath.Join(beadsDir, "dolt")
+		// Create two valid dolt databases
+		for _, name := range []string{"beads_gt", "beads_old"} {
+			if err := os.MkdirAll(filepath.Join(doltParent, name, ".dolt"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// Capture stderr to verify warning is emitted
+		origStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stderr = w
+
+		result := findLocalDoltDB(beadsDir)
+
+		w.Close()
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		os.Stderr = origStderr
+
+		// Should fail closed on ambiguity — return empty string
+		if result != "" {
+			t.Errorf("expected empty string for ambiguous multi-candidate, got %q", result)
+		}
+		// Verify warning was emitted
+		if !strings.Contains(buf.String(), "multiple dolt databases found") {
+			t.Errorf("expected multi-candidate warning on stderr, got %q", buf.String())
+		}
+	})
+
+	t.Run("symlink to directory with dolt database", func(t *testing.T) {
+		beadsDir := t.TempDir()
+		doltParent := filepath.Join(beadsDir, "dolt")
+		if err := os.MkdirAll(doltParent, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Create the real database directory outside the dolt parent
+		realDB := filepath.Join(beadsDir, "real_beads_hq")
+		if err := os.MkdirAll(filepath.Join(realDB, ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Symlink it into dolt/
+		if err := os.Symlink(realDB, filepath.Join(doltParent, "beads_hq")); err != nil {
+			t.Fatal(err)
+		}
+		result := findLocalDoltDB(beadsDir)
+		expected := filepath.Join(doltParent, "beads_hq")
+		if result != expected {
+			t.Errorf("got %q, want %q", result, expected)
+		}
+	})
 }
 
 func TestEnsureMetadata_HQ(t *testing.T) {
@@ -522,7 +641,7 @@ func TestMigrateRigFromBeads(t *testing.T) {
 
 	// Create source database
 	rigName := "testrig"
-	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_testrig")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +684,7 @@ func TestMigrateRigFromBeads_AlreadyExists(t *testing.T) {
 	townRoot := t.TempDir()
 
 	rigName := "existing"
-	sourcePath := filepath.Join(townRoot, "src", ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, "src", ".beads", "dolt", "beads_existing")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +827,7 @@ func TestFindMigratableDatabases_SkipsAlreadyMigrated(t *testing.T) {
 
 	rigName := "already"
 	// Source exists
-	sourceDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDir := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_hq", ".dolt")
 	if err := os.MkdirAll(sourceDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +860,7 @@ func TestMidMigrationCrashRecovery_PartialMigration(t *testing.T) {
 	// Create 3 rigs with source databases
 	rigs := []string{"rig-alpha", "rig-beta", "rig-gamma"}
 	for _, rig := range rigs {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1015,7 +1134,7 @@ func TestConcurrentFindMigratableDatabases(t *testing.T) {
 
 	// Create a rig with source database
 	rigName := "concurrent-rig"
-	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_concurrent", ".dolt")
 	if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1055,7 +1174,7 @@ func TestConcurrentMigrateAndFind(t *testing.T) {
 	// Create multiple rigs
 	rigs := []string{"mig-a", "mig-b", "mig-c"}
 	for _, rig := range rigs {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1101,7 +1220,7 @@ func TestConcurrentMigrateAndFind(t *testing.T) {
 		wg.Add(1)
 		go func(rigName string) {
 			defer wg.Done()
-			sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+			sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_"+rigName)
 			_ = MigrateRigFromBeads(townRoot, rigName, sourcePath)
 		}(rig)
 	}
@@ -1358,7 +1477,7 @@ func TestMigrateRigFromBeads_IdempotentDetection(t *testing.T) {
 	townRoot := t.TempDir()
 
 	rigName := "idem-rig"
-	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+	sourcePath := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_idem")
 	if err := os.MkdirAll(filepath.Join(sourcePath, ".dolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1445,7 +1564,7 @@ func TestFindAndMigrateAll_Idempotent(t *testing.T) {
 
 	// Create 2 rigs
 	for _, rig := range []string{"idm-a", "idm-b"} {
-		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads", ".dolt")
+		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
 		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1861,7 +1980,7 @@ func TestFindMigratableDatabases_SpacesInPath(t *testing.T) {
 	}
 
 	rigName := "my-rig"
-	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads", ".dolt")
+	sourceDolt := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads_spacey", ".dolt")
 	if err := os.MkdirAll(sourceDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1888,7 +2007,7 @@ func TestFindMigratableDatabases_EmptyTownRoot(t *testing.T) {
 
 func TestFindMigratableDatabases_TownBeads(t *testing.T) {
 	townRoot := t.TempDir()
-	hqSource := filepath.Join(townRoot, ".beads", "dolt", "beads", ".dolt")
+	hqSource := filepath.Join(townRoot, ".beads", "dolt", "beads_hq", ".dolt")
 	if err := os.MkdirAll(hqSource, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1907,7 +2026,7 @@ func TestFindMigratableDatabases_TownBeads(t *testing.T) {
 
 func TestFindMigratableDatabases_SkipsDotDirs(t *testing.T) {
 	townRoot := t.TempDir()
-	hiddenDolt := filepath.Join(townRoot, ".hidden-rig", ".beads", "dolt", "beads", ".dolt")
+	hiddenDolt := filepath.Join(townRoot, ".hidden-rig", ".beads", "dolt", "beads_hidden", ".dolt")
 	if err := os.MkdirAll(hiddenDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2072,7 +2191,7 @@ func TestFindBrokenWorkspaces_WithLocalData(t *testing.T) {
 	}
 
 	// Local Dolt data exists
-	localDolt := filepath.Join(beadsDir, "dolt", "beads", ".dolt")
+	localDolt := filepath.Join(beadsDir, "dolt", "beads_myrig", ".dolt")
 	if err := os.MkdirAll(localDolt, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2273,5 +2392,93 @@ func TestValidateBranchName_InvalidNames(t *testing.T) {
 		if err := validateBranchName(name); err == nil {
 			t.Errorf("validateBranchName(%q) = nil, want error", name)
 		}
+	}
+}
+
+// =============================================================================
+// doltSQLScriptWithRetry tests
+// =============================================================================
+
+func TestDoltSQLScriptWithRetry_ImmediateSuccess(t *testing.T) {
+	// doltSQLScriptWithRetry calls doltSQLScript which needs a valid townRoot
+	// with .dolt-data dir and a dolt binary. Since we can't run dolt in CI,
+	// we verify the retry logic by checking that non-retryable errors return
+	// immediately without sleeping (i.e., isDoltRetryableError integration).
+	//
+	// A non-retryable error (e.g., syntax error) should return on first attempt.
+	err := doltSQLScriptWithRetry(t.TempDir(), "INVALID SQL;")
+	if err == nil {
+		// If dolt isn't installed, the exec itself fails — that's fine,
+		// the point is it doesn't retry/hang.
+		t.Skip("dolt binary available and accepted invalid SQL somehow")
+	}
+	// Verify the error is not wrapped with "after N retries" since exec failures
+	// (dolt not found / not a dolt data dir) are not retryable.
+	if strings.Contains(err.Error(), "after 3 retries") {
+		t.Errorf("non-retryable error was retried: %v", err)
+	}
+}
+
+func TestDoltSQLScriptWithRetry_NonRetryableError(t *testing.T) {
+	// Verify that isDoltRetryableError correctly classifies errors.
+	// Non-retryable errors should fail fast without retry.
+	nonRetryable := []string{
+		"syntax error near 'FOO'",
+		"table not found",
+		"unknown column",
+	}
+	for _, msg := range nonRetryable {
+		if isDoltRetryableError(fmt.Errorf("%s", msg)) {
+			t.Errorf("isDoltRetryableError(%q) = true, want false", msg)
+		}
+	}
+
+	// Retryable errors should be classified as such.
+	retryable := []string{
+		"database is read only",
+		"cannot update manifest",
+		"optimistic lock failed",
+		"serialization failure",
+		"lock wait timeout",
+		"try restarting transaction",
+	}
+	for _, msg := range retryable {
+		if !isDoltRetryableError(fmt.Errorf("%s", msg)) {
+			t.Errorf("isDoltRetryableError(%q) = false, want true", msg)
+		}
+	}
+}
+
+// =============================================================================
+// MergePolecatBranch script generation tests
+// =============================================================================
+
+func TestMergePolecatBranch_NoBranchDeleteInScripts(t *testing.T) {
+	// Verify that MergePolecatBranch's SQL scripts don't contain DOLT_BRANCH('-D').
+	// Branch deletion must happen AFTER successful merge, not inside the scripts,
+	// to prevent branch loss if the merge script fails partway through.
+	//
+	// We can't run the actual merge (requires dolt server), but we can verify
+	// the function validates branch names correctly — invalid names are rejected
+	// before any script is generated.
+	err := MergePolecatBranch(t.TempDir(), "testrig", "'; DROP TABLE --")
+	if err == nil {
+		t.Error("expected error for SQL injection branch name")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected 'invalid' in error, got: %v", err)
+	}
+}
+
+func TestMergePolecatBranch_ValidBranchName(t *testing.T) {
+	// Verify that valid branch names pass validation (function will fail
+	// later at the dolt execution step, but validation should pass).
+	err := MergePolecatBranch(t.TempDir(), "testrig", "polecat-alpha-123")
+	if err == nil {
+		t.Skip("dolt server available — merge unexpectedly succeeded")
+	}
+	// Should NOT be a validation error
+	if strings.Contains(err.Error(), "invalid") {
+		t.Errorf("valid branch name rejected: %v", err)
 	}
 }

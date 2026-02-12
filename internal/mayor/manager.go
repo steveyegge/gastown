@@ -122,6 +122,14 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("waiting for mayor to start: %w", err)
 	}
 
+	// Set auto-respawn hook so the mayor session survives tmux detach and crashes.
+	// When Claude exits (for any reason), tmux will automatically respawn it.
+	// This matches the deacon's resilience behavior (PATCH-010).
+	if err := t.SetAutoRespawnHook(sessionID); err != nil {
+		// Non-fatal: Mayor still works, just won't auto-respawn
+		fmt.Printf("warning: failed to set auto-respawn hook for mayor: %v\n", err)
+	}
+
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 

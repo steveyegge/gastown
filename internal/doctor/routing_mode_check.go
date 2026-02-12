@@ -59,7 +59,7 @@ func (c *RoutingModeCheck) Run(ctx *CheckContext) *CheckResult {
 // checkRoutingMode checks the routing mode in a specific beads directory.
 func (c *RoutingModeCheck) checkRoutingMode(beadsDir, location string) *CheckResult {
 	// Run bd config get routing.mode
-	cmd := exec.Command("bd", "--no-daemon", "config", "get", "routing.mode")
+	cmd := exec.Command("bd", "config", "get", "routing.mode")
 	cmd.Dir = filepath.Dir(beadsDir)
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 
@@ -71,8 +71,8 @@ func (c *RoutingModeCheck) checkRoutingMode(beadsDir, location string) *CheckRes
 		// If the config key doesn't exist, that means it defaults to "auto"
 		if strings.Contains(stderr.String(), "not found") || strings.Contains(stderr.String(), "not set") {
 			return &CheckResult{
-				Name:   c.Name(),
-				Status: StatusWarning,
+				Name:    c.Name(),
+				Status:  StatusWarning,
 				Message: fmt.Sprintf("routing.mode not set at %s (defaults to auto)", location),
 				Details: []string{
 					"Auto routing mode uses git remote URL to detect user role",
@@ -94,8 +94,8 @@ func (c *RoutingModeCheck) checkRoutingMode(beadsDir, location string) *CheckRes
 	mode := strings.TrimSpace(stdout.String())
 	if mode != "explicit" {
 		return &CheckResult{
-			Name:   c.Name(),
-			Status: StatusWarning,
+			Name:    c.Name(),
+			Status:  StatusWarning,
 			Message: fmt.Sprintf("routing.mode is '%s' at %s (should be 'explicit')", mode, location),
 			Details: []string{
 				"Auto routing mode uses git remote URL to detect user role",
@@ -135,7 +135,7 @@ func (c *RoutingModeCheck) Fix(ctx *CheckContext) error {
 
 // setRoutingMode sets routing.mode to "explicit" in the specified beads directory.
 func (c *RoutingModeCheck) setRoutingMode(beadsDir string) error {
-	cmd := exec.Command("bd", "--no-daemon", "config", "set", "routing.mode", "explicit")
+	cmd := exec.Command("bd", "config", "set", "routing.mode", "explicit")
 	cmd.Dir = filepath.Dir(beadsDir)
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 

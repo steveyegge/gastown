@@ -400,7 +400,7 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 
 	// Query messages in this channel (oldest first)
 	out, err := b.run("list",
-		"--type=message",
+		"--label=gt:message",
 		"--label=channel:"+name,
 		"--json",
 		"--limit=0",
@@ -471,7 +471,7 @@ func (b *Beads) PruneAllChannels() (int, error) {
 
 		// Get messages with timestamps
 		out, err := b.run("list",
-			"--type=message",
+			"--label=gt:message",
 			"--label=channel:"+name,
 			"--json",
 			"--limit=0",

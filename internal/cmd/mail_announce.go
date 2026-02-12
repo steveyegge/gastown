@@ -181,7 +181,7 @@ func listAnnounceMessages(townRoot, channelName string) ([]announceMessage, erro
 	// Query for messages with label announce_channel:<channel>
 	// Messages are stored with this label when sent via sendToAnnounce()
 	args := []string{"list",
-		"--type", "message",
+		"--label", "gt:message",
 		"--label", "announce_channel:" + channelName,
 		"--sort", "-created", // Newest first
 		"--limit", "0",       // No limit

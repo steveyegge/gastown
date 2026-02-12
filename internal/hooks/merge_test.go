@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -314,6 +315,10 @@ func TestLoadAllOverridesSkipsInvalidJSON(t *testing.T) {
 }
 
 func TestLoadAllOverridesReturnsReadDirError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.ReadDir on a file path does not reliably return an error on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	setTestHome(t, tmpDir)
 

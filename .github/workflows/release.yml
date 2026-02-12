@@ -109,6 +109,8 @@ jobs:
             version "${{ steps.release.outputs.version }}"
             license "MIT"
 
+            depends_on "tmux" => :recommended
+
             on_macos do
               if Hardware::CPU.arm?
                 url "https://github.com/steveyegge/gastown/releases/download/v#{version}/gastown_#{version}_darwin_arm64.tar.gz"

@@ -18,7 +18,7 @@ var (
 var hooksScanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan workspace for existing Claude Code hooks",
-	Long: `Scan for .claude/settings.json files and display hooks by type.
+	Long: `Scan for .claude/settings.local.json files and display hooks by type.
 
 Hook types:
   SessionStart     - Runs when Claude session starts
@@ -64,7 +64,7 @@ func runHooksScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Find all .claude/settings.json files via DiscoverTargets
+	// Find all .claude/settings.local.json files via DiscoverTargets
 	hookInfos, err := discoverHooks(townRoot)
 	if err != nil {
 		return fmt.Errorf("discovering hooks: %w", err)
@@ -129,7 +129,7 @@ func extractHookInfos(settings *hooks.SettingsJSON, path, agent string) []HookIn
 	return infos
 }
 
-// parseHooksFile parses a .claude/settings.json file and extracts hooks.
+// parseHooksFile parses a .claude/settings.local.json file and extracts hooks.
 func parseHooksFile(path, agent string) ([]HookInfo, error) {
 	settings, err := hooks.LoadSettings(path)
 	if err != nil {

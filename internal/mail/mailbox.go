@@ -131,11 +131,12 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 		return nil, fmt.Errorf("ensuring custom types: %w", err)
 	}
 
-	// Single bd query: fetch all non-closed messages of type "message",
+	// Single bd query: fetch all messages with gt:message label,
 	// then filter client-side for assignee/CC match. Process-spawn overhead
 	// dominates query time, so 1 broad call beats N narrow calls.
+	// NOTE: Uses --label instead of --type per migration in 221ff022.
 	args := []string{"list",
-		"--type", "message",
+		"--label", "gt:message",
 		"--json",
 		"--limit", "0",
 	}

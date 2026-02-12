@@ -393,6 +393,27 @@ But typically just exit and let the daemon respawn you with fresh context.
 
 ---
 
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Start rig agents | `{{ cmd }} rig start <rig>` | ~~gt rig boot~~ (starts without patrol) |
+| Stop rig agents | `{{ cmd }} rig stop <rig>` | ~~gt rig shutdown~~ (same thing) |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
+| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
+| Resume parked rig | `{{ cmd }} rig unpark <rig>` | |
+| Re-enable docked rig | `{{ cmd }} rig undock <rig>` | |
+| Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Restart Mayor | `{{ cmd }} mayor stop` then `{{ cmd }} mayor start` | |
+
+**Rig lifecycle commands (park vs dock vs stop):**
+- `park/unpark` — Temporary pause. Daemon skips parked rigs.
+- `dock/undock` — Persistent disable. Survives daemon restarts.
+- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
+- `restart/reboot` — Stop then start rig agents.
+
 State directory: {{ .TownRoot }}/deacon/
 Mail identity: deacon/
 Session: {{ .DeaconSession }}

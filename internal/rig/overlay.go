@@ -69,7 +69,8 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	// #966 re-added it). See overlay_test.go for a regression guard.
 	requiredPatterns := []string{
 		".runtime/",
-		".claude/",
+		".claude/settings.local.json",
+		".claude/commands/",
 		".logs/",
 	}
 
@@ -82,12 +83,10 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	// Find missing patterns
 	var missing []string
 	for _, pattern := range requiredPatterns {
-		// Check various forms: .runtime, .runtime/, /.runtime, etc.
 		found := false
 		for _, line := range strings.Split(existingContent, "\n") {
 			line = strings.TrimSpace(line)
-			if line == pattern || line == strings.TrimSuffix(pattern, "/") ||
-				line == "/"+pattern || line == "/"+strings.TrimSuffix(pattern, "/") {
+			if matchesGitignorePattern(line, pattern) {
 				found = true
 				break
 			}
@@ -127,6 +126,35 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	}
 
 	return nil
+}
+
+// matchesGitignorePattern checks if a gitignore line covers the required pattern.
+// Handles variant forms (with/without trailing slash, leading slash) and recognizes
+// that a broader directory pattern (e.g., ".claude/") covers more specific paths
+// (e.g., ".claude/settings.local.json").
+func matchesGitignorePattern(line, pattern string) bool {
+	// Strip leading slash for comparison
+	normLine := strings.TrimPrefix(line, "/")
+	normPattern := strings.TrimPrefix(pattern, "/")
+
+	// Exact match or trailing-slash variants
+	if normLine == normPattern ||
+		normLine == strings.TrimSuffix(normPattern, "/") ||
+		normLine+"/" == normPattern {
+		return true
+	}
+
+	// A broader directory pattern covers more specific paths underneath it.
+	// e.g., ".claude/" covers ".claude/settings.local.json"
+	if strings.HasSuffix(normLine, "/") && strings.HasPrefix(normPattern, normLine) {
+		return true
+	}
+	// Also handle directory pattern without trailing slash
+	if !strings.Contains(normLine, "/") && strings.HasPrefix(normPattern, normLine+"/") {
+		return true
+	}
+
+	return false
 }
 
 // copyFilePreserveMode copies a file from src to dst, preserving the source file's permissions.

@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"bytes"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,7 +18,6 @@ type PatrolConfig struct {
 	RoleName        string   // "deacon", "witness", "refinery"
 	PatrolMolName   string   // "mol-deacon-patrol", etc.
 	BeadsDir        string   // where to look for beads
-	TownRoot        string   // town root for GT_ROOT env var (needed for formula discovery)
 	Assignee        string   // agent identity for pinning
 	HeaderEmoji     string   // display emoji
 	HeaderTitle     string   // "Patrol Status", etc.
@@ -31,7 +30,7 @@ type PatrolConfig struct {
 func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool) {
 	// Check for in-progress patrol first (if configured)
 	if cfg.CheckInProgress {
-		cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
+		cmdList := exec.Command("bd", "list", "--status=in_progress", "--type=epic")
 		cmdList.Dir = cfg.BeadsDir
 		var stdoutList, stderrList bytes.Buffer
 		cmdList.Stdout = &stdoutList
@@ -70,7 +69,7 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 
 // findPatrolByStatus searches for a patrol molecule with the given status.
 func findPatrolByStatus(cfg PatrolConfig, status string) (patrolID, patrolLine string, found bool) {
-	cmdList := exec.Command("bd", "--no-daemon", "list", "--status="+status, "--type=epic")
+	cmdList := exec.Command("bd", "list", "--status="+status, "--type=epic")
 	cmdList.Dir = cfg.BeadsDir
 	var stdoutList, stderrList bytes.Buffer
 	cmdList.Stdout = &stdoutList
@@ -101,12 +100,6 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Find the proto ID for the patrol molecule
 	cmdCatalog := exec.Command("gt", "formula", "list")
 	cmdCatalog.Dir = cfg.BeadsDir
-	// Pass GT_ROOT to subprocess for formula discovery.
-	// Without this, gt formula list only searches local .beads/formulas/ and ~/.beads/formulas/,
-	// missing $GT_ROOT/.beads/formulas/ which contains the patrol molecules.
-	if cfg.TownRoot != "" {
-		cmdCatalog.Env = append(os.Environ(), "GT_ROOT="+cfg.TownRoot)
-	}
 	var stdoutCatalog, stderrCatalog bytes.Buffer
 	cmdCatalog.Stdout = &stdoutCatalog
 	cmdCatalog.Stderr = &stderrCatalog
@@ -138,12 +131,8 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	cmdSpawn := exec.Command("bd", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
-	// Pass GT_ROOT to subprocess for formula discovery during wisp creation
-	if cfg.TownRoot != "" {
-		cmdSpawn.Env = append(os.Environ(), "GT_ROOT="+cfg.TownRoot)
-	}
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
 	cmdSpawn.Stderr = &stderrSpawn
@@ -172,7 +161,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
-	cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
+	cmdPin := exec.Command("bd", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
 	cmdPin.Dir = cfg.BeadsDir
 	if err := cmdPin.Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)

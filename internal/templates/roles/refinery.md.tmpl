@@ -313,9 +313,10 @@ git branch -d polecat/<worker>           # Delete local polecat branch
 
 **generate-summary**: Summarize this patrol cycle.
 
-**context-check**: Check own context usage.
+**context-check**: Assess session health — check your own RSS (`ps -o rss= -p $$`),
+session age, context usage, and work done. Fresh sessions are cheap; memory bloat is not.
 
-**burn-or-loop**: Decision point (see below).
+**burn-or-loop**: Decision point — continue or handoff (see below).
 
 ### Close Steps as You Work
 ```bash
@@ -340,14 +341,20 @@ Then squash and decide:
 # Squash the wisp to a digest
 bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
 
-# Option A: Loop (low context, more branches)
+# Assess session health: RSS, session age, context, work done
+RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
+echo "RSS: ${RSS_MB} MB"
+
+# Option A: Continue (session is healthy and light)
 bd mol wisp mol-refinery-patrol
 bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 # Continue to inbox-check...
 
-# Option B: Exit (high context OR queue empty)
-# Just exit - daemon will respawn if needed
+# Option B: Hand off (session is getting heavy)
+gt handoff -s "Patrol complete" -m "RSS: ${RSS_MB}MB. Queue: ..."
 ```
+
+**NEVER sleep-poll manually** (e.g., `sleep 30 && bd list`). Use `gt mol step await-signal`.
 
 ## CRITICAL: Sequential Rebase Protocol
 
@@ -404,6 +411,22 @@ Do NOT use `git branch -r | grep polecat` or `git ls-remote | grep polecat` to c
 - `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` - Notify workers
 
 ---
+
+## ⚡ Command Quick-Reference
+
+**Commonly confused — use the right command:**
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Check merge queue | `{{ cmd }} mq list {{ .RigName }}` | ~~git branch -r \| grep polecat~~ (misses MRs) |
+| Message a polecat | `{{ cmd }} nudge {{ .RigName }}/<name> "msg"` | ~~tmux send-keys~~ (unreliable) |
+| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+
+**Rig lifecycle commands (for reference):**
+- `park/unpark` — Temporary pause. Daemon skips parked rigs.
+- `dock/undock` — Persistent disable. Survives daemon restarts.
+- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
+- `restart/reboot` — Stop then start rig agents.
 
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}

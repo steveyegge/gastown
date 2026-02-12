@@ -632,6 +632,59 @@ type Migration struct {
 	TargetPath string
 }
 
+// findLocalDoltDB scans beadsDir/dolt/ for a subdirectory containing a .dolt
+// directory (an embedded Dolt database). Returns the full path to the database
+// directory, or "" if none found.
+//
+// bd names the subdirectory based on internal conventions (e.g., beads_hq,
+// beads_gt) that have changed across versions. Scanning avoids hardcoding
+// assumptions about the naming scheme.
+//
+// If multiple databases are found, returns "" and logs a warning to stderr.
+// Callers should not silently pick one — ambiguity requires manual resolution.
+func findLocalDoltDB(beadsDir string) string {
+	doltParent := filepath.Join(beadsDir, "dolt")
+	entries, err := os.ReadDir(doltParent)
+	if err != nil {
+		return ""
+	}
+	var candidates []string
+	for _, e := range entries {
+		// Resolve symlinks: DirEntry.IsDir() returns false for symlinks-to-directories
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(filepath.Join(doltParent, e.Name()))
+			if err != nil {
+				continue
+			}
+			fi, err := os.Stat(resolved)
+			if err != nil || !fi.IsDir() {
+				continue
+			}
+		} else if !e.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(doltParent, e.Name())
+		if _, err := os.Stat(filepath.Join(candidate, ".dolt")); err == nil {
+			candidates = append(candidates, candidate)
+		}
+	}
+	if len(candidates) == 0 {
+		if len(entries) > 0 {
+			fmt.Fprintf(os.Stderr, "[doltserver] Warning: %s exists but contains no valid dolt database\n", doltParent)
+		}
+		return ""
+	}
+	if len(candidates) > 1 {
+		fmt.Fprintf(os.Stderr, "[doltserver] Warning: multiple dolt databases found in %s: %v — manual resolution required\n", doltParent, candidates)
+		return ""
+	}
+	return candidates[0]
+}
+
 // FindMigratableDatabases finds existing dolt databases that can be migrated.
 func FindMigratableDatabases(townRoot string) []Migration {
 	var migrations []Migration
@@ -639,8 +692,8 @@ func FindMigratableDatabases(townRoot string) []Migration {
 
 	// Check town-level beads database -> .dolt-data/hq
 	townBeadsDir := beads.ResolveBeadsDir(townRoot)
-	townSource := filepath.Join(townBeadsDir, "dolt", "beads")
-	if _, err := os.Stat(filepath.Join(townSource, ".dolt")); err == nil {
+	townSource := findLocalDoltDB(townBeadsDir)
+	if townSource != "" {
 		// Check target doesn't already have data
 		targetDir := filepath.Join(config.DataDir, "hq")
 		if _, err := os.Stat(filepath.Join(targetDir, ".dolt")); os.IsNotExist(err) {
@@ -666,9 +719,9 @@ func FindMigratableDatabases(townRoot string) []Migration {
 
 		rigName := entry.Name()
 		resolvedBeadsDir := beads.ResolveBeadsDir(filepath.Join(townRoot, rigName))
-		rigSource := filepath.Join(resolvedBeadsDir, "dolt", "beads")
+		rigSource := findLocalDoltDB(resolvedBeadsDir)
 
-		if _, err := os.Stat(filepath.Join(rigSource, ".dolt")); err == nil {
+		if rigSource != "" {
 			// Check target doesn't already have data
 			targetDir := filepath.Join(config.DataDir, rigName)
 			if _, err := os.Stat(filepath.Join(targetDir, ".dolt")); os.IsNotExist(err) {
@@ -685,7 +738,7 @@ func FindMigratableDatabases(townRoot string) []Migration {
 }
 
 // MigrateRigFromBeads migrates an existing beads Dolt database to the data directory.
-// This is used to migrate from the old per-rig .beads/dolt/beads layout to the new
+// This is used to migrate from the old per-rig .beads/dolt/<db_name> layout to the new
 // centralized .dolt-data/<rigname> layout.
 func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 	config := DefaultConfig(townRoot)
@@ -827,8 +880,8 @@ func checkWorkspace(townRoot, rigName, beadsDir string) *BrokenWorkspace {
 	}
 
 	// Check for local data that could be migrated
-	localDoltPath := filepath.Join(beadsDir, "dolt", "beads")
-	if _, err := os.Stat(filepath.Join(localDoltPath, ".dolt")); err == nil {
+	localDoltPath := findLocalDoltDB(beadsDir)
+	if localDoltPath != "" {
 		ws.HasLocalData = true
 		ws.LocalDataPath = localDoltPath
 	}
@@ -1218,20 +1271,36 @@ func RecoverReadOnly(townRoot string) error {
 		return fmt.Errorf("failed to restart Dolt server: %w", err)
 	}
 
-	// Wait for server to be ready
-	time.Sleep(2 * time.Second)
+	// Verify recovery with exponential backoff (server may need time to become writable)
+	const maxAttempts = 5
+	const baseBackoff = 500 * time.Millisecond
+	const maxBackoff = 8 * time.Second
 
-	// Verify recovery
-	readOnly, err = CheckReadOnly(townRoot)
-	if err != nil {
-		return fmt.Errorf("post-restart probe failed: %w", err)
-	}
-	if readOnly {
-		return fmt.Errorf("Dolt server still read-only after restart")
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		backoff := baseBackoff
+		for i := 1; i < attempt; i++ {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+				break
+			}
+		}
+		time.Sleep(backoff)
+
+		readOnly, err = CheckReadOnly(townRoot)
+		if err != nil {
+			if attempt == maxAttempts {
+				return fmt.Errorf("post-restart probe failed after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+		if !readOnly {
+			fmt.Printf("Dolt server recovered from read-only state\n")
+			return nil
+		}
 	}
 
-	fmt.Printf("Dolt server recovered from read-only state\n")
-	return nil
+	return fmt.Errorf("Dolt server still read-only after restart (%d verification attempts)", maxAttempts)
 }
 
 // doltSQLWithRecovery executes a SQL statement with retry logic and, if retries
@@ -1465,27 +1534,152 @@ func CreatePolecatBranch(townRoot, rigDB, branchName string) error {
 	return nil
 }
 
+// CommitServerWorkingSet stages all pending changes and commits them on the current branch via SQL.
+// This flushes the Dolt working set to HEAD so that DOLT_BRANCH (which forks from
+// HEAD, not the working set) will include all recent writes. Critical for the sling
+// flow where BD_DOLT_AUTO_COMMIT=off leaves writes in working set only.
+//
+// NOTE: This flushes ALL pending working set changes on the target branch, not just
+// those from a specific polecat. In batch sling, polecat B's flush may capture
+// polecat A's writes. This is benign because beads are keyed by unique ID, so
+// duplicate data across branches merges cleanly.
+func CommitServerWorkingSet(townRoot, rigDB, message string) error {
+	if err := doltSQLWithRecovery(townRoot, rigDB, "CALL DOLT_ADD('-A')"); err != nil {
+		return fmt.Errorf("staging working set in %s: %w", rigDB, err)
+	}
+	escaped := strings.ReplaceAll(message, "'", "''")
+	query := fmt.Sprintf("CALL DOLT_COMMIT('--allow-empty', '-m', '%s')", escaped)
+	if err := doltSQLWithRecovery(townRoot, rigDB, query); err != nil {
+		return fmt.Errorf("committing working set in %s: %w", rigDB, err)
+	}
+	return nil
+}
+
 // MergePolecatBranch merges a polecat's Dolt branch into main and deletes it.
 // Called at gt done time to make the polecat's beads changes visible.
-// Retries each step with exponential backoff on transient errors.
-// If read-only errors persist after retries, attempts server recovery (gt-chx92).
+//
+// CRITICAL: The entire operation runs as a single SQL script (one connection).
+// In Dolt server mode, each `dolt sql -q` call opens a new connection, and
+// DOLT_CHECKOUT only affects the current connection. Separate calls would
+// checkout the polecat branch on connection 1, then ADD/COMMIT on connection 2
+// (which defaults back to main), silently losing all polecat working set data.
+//
+// The script handles two scenarios:
+//  1. Fast-forward merge (no conflict): commit polecat working set, merge to main
+//  2. Conflict: disable autocommit, merge, resolve with --theirs (polecat wins), commit
+//
+// On conflict, a second script runs with autocommit disabled so conflicts can
+// be resolved rather than triggering an automatic rollback.
 func MergePolecatBranch(townRoot, rigDB, branchName string) error {
 	if err := validateBranchName(branchName); err != nil {
 		return fmt.Errorf("merging Dolt branch in %s: %w", rigDB, err)
 	}
-	// Checkout main, merge, delete branch — each as separate commands
-	// to avoid multi-statement parsing issues with dolt sql CLI.
-	if err := doltSQLWithRecovery(townRoot, rigDB, "CALL DOLT_CHECKOUT('main')"); err != nil {
-		return fmt.Errorf("checkout main in %s: %w", rigDB, err)
+
+	// Phase 1: Commit polecat working set and attempt merge.
+	// All in one connection so DOLT_CHECKOUT persists across statements.
+	// NOTE: DOLT_BRANCH('-D') is deliberately NOT in the merge scripts.
+	// If the merge fails (conflict), the branch must still exist for Phase 2.
+	// Branch deletion happens separately after successful merge.
+	escaped := strings.ReplaceAll(branchName, "'", "''")
+	script := fmt.Sprintf(`USE %s;
+CALL DOLT_CHECKOUT('%s');
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('--allow-empty', '-m', 'polecat %s final state');
+CALL DOLT_CHECKOUT('main');
+CALL DOLT_MERGE('%s');
+`, rigDB, escaped, escaped, escaped)
+
+	if err := doltSQLScriptWithRetry(townRoot, script); err != nil {
+		if !strings.Contains(err.Error(), "Merge conflict") {
+			return fmt.Errorf("merging %s to main in %s: %w", branchName, rigDB, err)
+		}
+
+		// Phase 2: Conflict detected. Re-run merge with autocommit disabled
+		// so conflicts are staged (not rolled back) and can be resolved.
+		// --theirs: polecat state wins (latest mutations, always authoritative).
+		fmt.Printf("Dolt merge conflict on %s, auto-resolving (--theirs)...\n", branchName)
+		conflictScript := fmt.Sprintf(`USE %s;
+SET @@autocommit = 0;
+CALL DOLT_CHECKOUT('main');
+CALL DOLT_MERGE('%s');
+CALL DOLT_CONFLICTS_RESOLVE('--theirs', '.');
+CALL DOLT_COMMIT('-m', 'merge %s (conflicts auto-resolved)');
+SET @@autocommit = 1;
+`, rigDB, escaped, escaped)
+
+		if err := doltSQLScriptWithRetry(townRoot, conflictScript); err != nil {
+			return fmt.Errorf("conflict-resolving merge of %s in %s: %w", branchName, rigDB, err)
+		}
 	}
-	if err := doltSQLWithRecovery(townRoot, rigDB, fmt.Sprintf("CALL DOLT_MERGE('%s')", branchName)); err != nil {
-		return fmt.Errorf("merging %s to main in %s: %w", branchName, rigDB, err)
+
+	// Delete branch only after successful merge (either phase).
+	// This prevents branch loss if the merge script fails partway through.
+	DeletePolecatBranch(townRoot, rigDB, branchName)
+	return nil
+}
+
+// doltSQLScript executes a multi-statement SQL script via a temp file.
+// Uses `dolt sql --file` for reliable multi-statement execution within a
+// single connection, preserving DOLT_CHECKOUT state across statements.
+func doltSQLScript(townRoot, script string) error {
+	config := DefaultConfig(townRoot)
+
+	tmpFile, err := os.CreateTemp("", "dolt-script-*.sql")
+	if err != nil {
+		return fmt.Errorf("creating temp SQL file: %w", err)
 	}
-	if err := doltSQLWithRecovery(townRoot, rigDB, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", branchName)); err != nil {
-		// Non-fatal: branch deletion failure doesn't lose data
-		fmt.Printf("Warning: could not delete Dolt branch %s: %v\n", branchName, err)
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(script); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing SQL script: %w", err)
+	}
+	tmpFile.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "dolt", "sql", "--file", tmpFile.Name())
+	cmd.Dir = config.DataDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// doltSQLScriptWithRetry executes a SQL script with exponential backoff on transient errors.
+// Callers must ensure scripts are idempotent, as partial execution may have occurred
+// before the retry. Uses the same retry classification as doltSQLWithRetry but with
+// fewer retries and shorter backoff since multi-statement scripts are more expensive.
+func doltSQLScriptWithRetry(townRoot, script string) error {
+	const maxRetries = 3
+	const baseBackoff = 500 * time.Millisecond
+	const maxBackoff = 8 * time.Second
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if err := doltSQLScript(townRoot, script); err != nil {
+			lastErr = err
+			if !isDoltRetryableError(err) {
+				return err
+			}
+			if attempt < maxRetries {
+				backoff := baseBackoff
+				for i := 1; i < attempt; i++ {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+						break
+					}
+				}
+				time.Sleep(backoff)
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
 
 // DeletePolecatBranch deletes a polecat's Dolt branch (cleanup/nuke).

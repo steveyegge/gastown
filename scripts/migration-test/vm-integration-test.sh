@@ -223,7 +223,7 @@ run_full_migration() {
 
         log "Migrating $rig_name..."
         cd "$rig_dir"
-        echo y | sudo -u ubuntu bd --no-daemon migrate dolt 2>&1 || warn "$rig_name: migrate returned non-zero"
+        echo y | sudo -u ubuntu bd migrate dolt 2>&1 || warn "$rig_name: migrate returned non-zero"
     done
 
     # Stop dolt server before consolidation (gt dolt migrate requires it stopped)
@@ -329,7 +329,7 @@ verify_bd_operations() {
         cd "$rig_dir"
 
         # bd list should work
-        local list_output=$(sudo -u ubuntu bd --no-daemon list 2>&1) || true
+        local list_output=$(sudo -u ubuntu bd list 2>&1) || true
         if echo "$list_output" | grep -qi "fatal\|panic\|SIGSEGV"; then
             fail_check "$test_name: bd list crashed for $rig_name"
         else
@@ -403,7 +403,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     rig_name=$(basename "$rig_dir")
     [[ -f "$rig_dir/.beads/metadata.json" ]] || continue
     cd "$rig_dir"
-    count=$(sudo -u ubuntu bd --no-daemon list 2>/dev/null | wc -l)
+    count=$(sudo -u ubuntu bd list 2>/dev/null | wc -l)
     PRE_COUNTS[$rig_name]=$count
     log "Pre-migration $rig_name: $count beads"
 done
@@ -420,7 +420,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     rig_name=$(basename "$rig_dir")
     [[ -f "$rig_dir/.beads/metadata.json" ]] || continue
     cd "$rig_dir"
-    post_count=$(sudo -u ubuntu bd --no-daemon list 2>/dev/null | wc -l)
+    post_count=$(sudo -u ubuntu bd list 2>/dev/null | wc -l)
     pre_count="${PRE_COUNTS[$rig_name]:-0}"
     log "Post-migration $rig_name: $post_count beads (was $pre_count)"
     if [[ "$pre_count" -gt 0 && "$post_count" -lt "$pre_count" ]]; then
@@ -471,7 +471,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     metadata="$rig_dir/.beads/metadata.json"
     [[ -f "$metadata" ]] || continue
     cd "$rig_dir"
-    output=$(echo y | sudo -u ubuntu bd --no-daemon migrate dolt 2>&1) || true
+    output=$(echo y | sudo -u ubuntu bd migrate dolt 2>&1) || true
     if echo "$output" | grep -qi "fatal\|panic\|SIGSEGV\|segfault"; then
         fail_check "Test3-jsonl-only: $rig_name crashed during JSONL-only migration attempt"
         JSONL_MIGRATION_CRASHED=true
@@ -533,7 +533,7 @@ if [[ ${#RIGS[@]} -ge 2 ]]; then
 
     log "Migrating only first rig ($FIRST_RIG), simulating crash..."
     cd "$TOWN_ROOT/$FIRST_RIG"
-    echo y | sudo -u ubuntu bd --no-daemon migrate dolt 2>&1 || warn "$FIRST_RIG: migrate returned non-zero"
+    echo y | sudo -u ubuntu bd migrate dolt 2>&1 || warn "$FIRST_RIG: migrate returned non-zero"
 
     # Verify partial state
     first_backend=$(sudo python3 -c "import json; print(json.load(open('$TOWN_ROOT/$FIRST_RIG/.beads/metadata.json')).get('backend','unknown'))" 2>/dev/null)
@@ -549,7 +549,7 @@ if [[ ${#RIGS[@]} -ge 2 ]]; then
     # Now "resume" — migrate remaining rigs
     log "Resuming migration for remaining rigs..."
     cd "$TOWN_ROOT/$SECOND_RIG"
-    echo y | sudo -u ubuntu bd --no-daemon migrate dolt 2>&1 || warn "$SECOND_RIG: migrate returned non-zero"
+    echo y | sudo -u ubuntu bd migrate dolt 2>&1 || warn "$SECOND_RIG: migrate returned non-zero"
 
     # Consolidate (stop server first)
     sudo killall dolt 2>/dev/null || true
@@ -563,7 +563,7 @@ if [[ ${#RIGS[@]} -ge 2 ]]; then
     # Verify both rigs work
     for rig_name in "${RIGS[@]}"; do
         cd "$TOWN_ROOT/$rig_name"
-        count=$(sudo -u ubuntu bd --no-daemon list 2>/dev/null | wc -l)
+        count=$(sudo -u ubuntu bd list 2>/dev/null | wc -l)
         if [[ "$count" -gt 0 ]]; then
             pass "Test4-partial-resume: $rig_name has $count beads after resume"
         else
@@ -590,7 +590,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     rig_name=$(basename "$rig_dir")
     [[ -f "$rig_dir/.beads/metadata.json" ]] || continue
     cd "$rig_dir"
-    count=$(sudo -u ubuntu bd --no-daemon list 2>/dev/null | wc -l)
+    count=$(sudo -u ubuntu bd list 2>/dev/null | wc -l)
     PASS1_COUNTS[$rig_name]=$count
     log "Before re-run $rig_name: $count beads"
 done
@@ -604,7 +604,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     [[ -f "$rig_dir/.beads/metadata.json" ]] || continue
 
     cd "$rig_dir"
-    output=$(echo y | sudo -u ubuntu bd --no-daemon migrate dolt 2>&1) || true
+    output=$(echo y | sudo -u ubuntu bd migrate dolt 2>&1) || true
     if echo "$output" | grep -qi "fatal\|panic\|corrupt\|segfault"; then
         fail_check "Test5-idempotent: $rig_name had fatal error on re-run"
         IDEM_ERRORS=$((IDEM_ERRORS + 1))
@@ -637,7 +637,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     rig_name=$(basename "$rig_dir")
     [[ -f "$rig_dir/.beads/metadata.json" ]] || continue
     cd "$rig_dir"
-    post_count=$(sudo -u ubuntu bd --no-daemon list 2>/dev/null | wc -l)
+    post_count=$(sudo -u ubuntu bd list 2>/dev/null | wc -l)
     pre_count="${PASS1_COUNTS[$rig_name]:-0}"
     if [[ "$pre_count" != "$post_count" ]]; then
         fail_check "Test5-idempotent: $rig_name count changed ($pre_count -> $post_count)"

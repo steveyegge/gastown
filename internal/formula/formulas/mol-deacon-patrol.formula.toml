@@ -16,13 +16,12 @@ This prevents flooding idle agents with health checks every few seconds.
 
 ## Second-Order Monitoring
 
-Witnesses passively monitor Deacon health by checking the Deacon's agent bead
-last_activity timestamp. This prevents the "who watches the watchers" problem —
-if the Deacon dies, Witnesses detect it and escalate to the Mayor.
+Witnesses send WITNESS_PING messages to verify the Deacon is alive. This
+prevents the "who watches the watchers" problem - if the Deacon dies,
+Witnesses detect it and escalate to the Mayor.
 
-No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
-timestamp instead, and only send an alert to the Mayor if the Deacon appears
-unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
+The Deacon's agent bead last_activity timestamp is updated during each patrol
+cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
 version = 10
 
@@ -48,6 +47,14 @@ gt mail inbox
 # For each message:
 gt mail read <id>
 # Handle based on message type
+```
+
+**WITNESS_PING**:
+Witnesses periodically ping to verify Deacon is alive. Simply acknowledge
+and archive - the fact that you're processing mail proves you're running.
+Your agent bead last_activity is updated automatically during patrol.
+```bash
+gt mail archive <message-id>
 ```
 
 **HELP / Escalation**:
@@ -296,8 +303,9 @@ Note which convoys were fed for observability:
 ```
 
 **If no idle dogs available:**
-Log warning and continue - the convoy will be detected again next cycle.
-Dog pool maintenance step ensures dogs are available.
+Pool dispatch auto-creates a dog when the pool is under capacity (max 4).
+If the pool is at capacity, log warning and continue - the convoy will be
+detected again next cycle when a dog becomes idle.
 
 **Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
 
@@ -752,38 +760,9 @@ If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
 **Exit criteria:** Wisps compacted (or nothing to compact)."""
 
 [[steps]]
-id = "compact-report"
-title = "Send compaction digest report"
-needs = ["wisp-compact"]
-description = """
-Generate and send the daily compaction digest.
-
-**Step 1: Send daily digest**
-```bash
-gt compact report
-```
-
-This runs compaction (capturing JSON results), queries active wisps,
-builds a per-category breakdown (Heartbeats, Patrols, Errors, Untyped),
-detects anomalies, and sends the digest to deacon/ (cc mayor/).
-
-A permanent event bead (wisp.compaction) is created for audit trail.
-
-**Step 2: Weekly rollup (Mondays only)**
-If today is Monday, also send the weekly rollup:
-```bash
-gt compact report --weekly
-```
-
-This aggregates the past 7 days of compaction event beads and sends
-trend data (totals, promotion rate, avg deleted/day) to mayor/.
-
-**Exit criteria:** Compaction digest sent (or nothing to report)."""
-
-[[steps]]
 id = "costs-digest"
 title = "Aggregate daily costs [DISABLED]"
-needs = ["compact-report"]
+needs = ["wisp-compact"]
 description = """
 **⚠️ DISABLED** - Skip this step entirely.
 
@@ -906,6 +885,7 @@ Inbox should be EMPTY or contain only just-arrived unprocessed messages.
 **Step 2: Archive any remaining processed messages**
 
 All message types should have been archived during inbox-check processing:
+- WITNESS_PING → archived after acknowledging
 - HELP/Escalation → archived after handling
 - LIFECYCLE → archived after processing
 

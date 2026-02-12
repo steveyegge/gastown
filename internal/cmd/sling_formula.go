@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,18 +51,18 @@ func trimJSONForError(jsonOutput []byte) string {
 
 // verifyFormulaExists checks that the formula exists using bd formula show.
 // Formulas are TOML files (.formula.toml).
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Uses --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
-	// when formula not found, --no-daemon may exit 0 but produce empty stdout.
-	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName, "--allow-stale")
+	// Use Output() instead of Run() to detect bd exit 0 bug:
+	// when formula not found, bd may exit 0 but produce empty stdout.
+	cmd := exec.Command("bd", "formula", "show", formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -82,98 +82,29 @@ func runSlingFormula(args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// Determine target (self or specified)
+	// Resolve target using shared dispatch logic
 	var target string
 	if len(args) > 1 {
 		target = args[1]
 	}
-
-	// Resolve target agent and pane
-	var targetAgent string
-	var targetPane string
-	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
-	var formulaWorkDir string            // Working directory for bd cook/wisp (routes to correct rig beads)
-	var isSelfSling bool                 // True if slinging to self (skip nudge - agent already knows)
-
-	if target != "" {
-		// Resolve "." to current agent identity (like git's "." meaning current directory)
-		if target == "." {
-			targetAgent, targetPane, formulaWorkDir, err = resolveSelfTarget()
-			if err != nil {
-				return fmt.Errorf("resolving self for '.' target: %w", err)
-			}
-			isSelfSling = true
-		} else if dogName, isDog := IsDogTarget(target); isDog {
-			if slingDryRun {
-				if dogName == "" {
-					fmt.Printf("Would dispatch to idle dog in kennel\n")
-				} else {
-					fmt.Printf("Would dispatch to dog '%s'\n", dogName)
-				}
-				targetAgent = fmt.Sprintf("deacon/dogs/%s", dogName)
-				if dogName == "" {
-					targetAgent = "deacon/dogs/<idle>"
-				}
-				targetPane = "<dog-pane>"
-			} else {
-				// Dispatch to dog with delayed session start
-				// Session starts after hook is set to avoid race condition
-				dispatchOpts := DogDispatchOptions{
-					Create:            slingCreate,
-					WorkDesc:          formulaName,
-					DelaySessionStart: true,
-				}
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, dispatchOpts)
-				if dispatchErr != nil {
-					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
-				}
-				targetAgent = dispatchInfo.AgentID
-				delayedDogInfo = dispatchInfo // Store for later session start
-				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
-			}
-		} else if rigName, isRig := IsRigName(target); isRig {
-			// Check if target is a rig name (auto-spawn polecat)
-			if slingDryRun {
-				// Dry run - just indicate what would happen
-				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
-				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
-				targetPane = "<new-pane>"
-			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:   slingForce,
-					Account: slingAccount,
-					Create:  slingCreate,
-					Agent:   slingAgent,
-				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				formulaWorkDir = spawnInfo.ClonePath // Route bd commands to rig beads
-
-				if !slingNoBoot {
-					wakeRigAgents(rigName)
-				}
-			}
-		} else {
-			// Slinging to an existing agent
-			targetAgent, targetPane, formulaWorkDir, err = resolveTargetAgent(target)
-			if err != nil {
-				return fmt.Errorf("resolving target: %w", err)
-			}
-		}
-	} else {
-		// Slinging to self
-		targetAgent, targetPane, formulaWorkDir, err = resolveSelfTarget()
-		if err != nil {
-			return err
-		}
-		isSelfSling = true
+	resolved, err := resolveTarget(target, ResolveTargetOptions{
+		DryRun:   slingDryRun,
+		Force:    slingForce,
+		Create:   slingCreate,
+		Account:  slingAccount,
+		Agent:    slingAgent,
+		NoBoot:   slingNoBoot,
+		WorkDesc: formulaName,
+		TownRoot: townRoot,
+	})
+	if err != nil {
+		return err
 	}
+	targetAgent := resolved.Agent
+	targetPane := resolved.Pane
+	formulaWorkDir := resolved.WorkDir
+	delayedDogInfo := resolved.DelayedDogInfo
+	isSelfSling := resolved.IsSelfSling
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
 
@@ -195,7 +126,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
-	cookArgs := []string{"--no-daemon", "cook", formulaName}
+	cookArgs := []string{"cook", formulaName}
 	cookCmd := exec.Command("bd", cookArgs...)
 	cookCmd.Dir = formulaWorkDir
 	cookCmd.Stderr = os.Stderr
@@ -205,7 +136,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
@@ -227,13 +158,11 @@ func runSlingFormula(args []string) error {
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
-	// Step 3: Hook the wisp bead using bd update.
+	// Step 3: Hook the wisp bead with retry and verification.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, wispRootID, "")
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking wisp bead: %w", err)
+	hookDir := beads.ResolveHookDir(townRoot, wispRootID, "")
+	if err := hookBeadWithRetry(wispRootID, targetAgent, hookDir); err != nil {
+		return err
 	}
 	fmt.Printf("%s Attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
@@ -272,6 +201,29 @@ func runSlingFormula(args []string) error {
 		targetPane = pane
 	}
 
+	// Create Dolt branch AFTER all sling writes (hook, formula, fields) are complete.
+	// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch forks
+	// from HEAD — ensuring the polecat's branch includes all writes.
+	if resolved.NewPolecatInfo != nil && resolved.NewPolecatInfo.DoltBranch != "" {
+		if err := resolved.NewPolecatInfo.CreateDoltBranch(); err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			return fmt.Errorf("creating Dolt branch: %w", err)
+		}
+	}
+
+	// Start spawned polecat session now that hook is set.
+	// This ensures polecat sees the wisp when gt prime runs on session start.
+	if resolved.NewPolecatInfo != nil {
+		pane, err := resolved.NewPolecatInfo.StartSession()
+		if err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			return fmt.Errorf("starting polecat session: %w", err)
+		}
+		targetPane = pane
+	}
+
 	// Step 4: Nudge to start (graceful if no tmux)
 	// Skip for self-sling - agent is currently processing the sling command and will see
 	// the hooked work on next turn. Nudging would inject text while agent is busy.
@@ -291,9 +243,9 @@ func runSlingFormula(args []string) error {
 
 	var prompt string
 	if slingArgs != "" {
-		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `" + cli.Name() + " hook` to see your hook, then execute using these args.", formulaName, slingArgs)
+		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `"+cli.Name()+" hook` to see your hook, then execute using these args.", formulaName, slingArgs)
 	} else {
-		prompt = fmt.Sprintf("Formula %s slung. Run `" + cli.Name() + " hook` to see your hook, then execute the steps.", formulaName)
+		prompt = fmt.Sprintf("Formula %s slung. Run `"+cli.Name()+" hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
 	if err := t.NudgePane(targetPane, prompt); err != nil {

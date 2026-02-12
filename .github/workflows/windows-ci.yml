@@ -27,12 +27,24 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Install MSYS2 packages (GCC + ICU for dolt CGo dependency)
+        run: C:\msys64\usr\bin\pacman.exe -Sy --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-icu
+
       - name: Install beads (bd)
-        # Pin to v0.47.1 - v0.47.2 has routing defaults that cause prefix mismatch errors
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.47.1
+        # Clone and build to handle replace directives that break go install @version
+        env:
+          CC: C:/msys64/mingw64/bin/gcc.exe
+          CGO_CFLAGS: -IC:/msys64/mingw64/include
+          CGO_LDFLAGS: -LC:/msys64/mingw64/lib
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          git clone --depth 1 https://github.com/steveyegge/beads $env:TEMP\beads
+          cd $env:TEMP\beads; go install ./cmd/bd
 
       - name: Add to PATH
-        run: echo "$(go env GOPATH)/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: |
+          echo "$(go env GOPATH)/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Generate embedded files
         run: go generate ./internal/formula/...

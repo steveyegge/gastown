@@ -1037,6 +1037,74 @@ func lookupAgentConfigIfExists(name string, townSettings *TownSettings, rigSetti
 // townRoot is the path to the town directory (e.g., ~/gt).
 // rigPath is the path to the rig directory (e.g., ~/gt/gastown), or empty for town-level roles.
 func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	rc := resolveRoleAgentConfigCore(role, townRoot, rigPath)
+	return withRoleSettingsFlag(rc, role, rigPath)
+}
+
+// isClaudeAgent returns true if the RuntimeConfig represents a Claude agent.
+// When Provider is explicitly set, it's authoritative. When empty, the Command
+// is checked: bare "claude", a path ending in "/claude" (or "\claude" on Windows),
+// or an empty command (the default) all indicate Claude.
+func isClaudeAgent(rc *RuntimeConfig) bool {
+	if rc.Provider != "" {
+		return rc.Provider == "claude"
+	}
+	if rc.Command == "" || rc.Command == "claude" {
+		return true
+	}
+	base := filepath.Base(rc.Command)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return base == "claude"
+}
+
+// withRoleSettingsFlag appends --settings to the Args for Claude agents whose
+// settings directory differs from the session working directory. Claude Code
+// resolves project-level settings from its working directory only; the --settings
+// flag tells it where to find them when they live in a parent directory.
+func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfig {
+	if rc == nil || rigPath == "" {
+		return rc
+	}
+
+	if !isClaudeAgent(rc) {
+		return rc
+	}
+
+	settingsDir := roleSettingsDir(role, rigPath)
+	if settingsDir == "" {
+		return rc
+	}
+
+	hooksDir := ".claude"
+	settingsFile := "settings.json"
+	if rc.Hooks != nil {
+		if rc.Hooks.Dir != "" {
+			hooksDir = rc.Hooks.Dir
+		}
+		if rc.Hooks.SettingsFile != "" {
+			settingsFile = rc.Hooks.SettingsFile
+		}
+	}
+
+	rc.Args = append(rc.Args, "--settings", filepath.Join(settingsDir, hooksDir, settingsFile))
+	return rc
+}
+
+// roleSettingsDir returns the shared settings directory for roles whose session
+// working directory differs from their settings location. Returns empty for
+// roles where settings and session directory are the same (mayor, deacon).
+func roleSettingsDir(role, rigPath string) string {
+	switch role {
+	case "crew", "witness", "refinery":
+		return filepath.Join(rigPath, role)
+	case "polecat":
+		return filepath.Join(rigPath, "polecats")
+	default:
+		return ""
+	}
+}
+
+func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 	// Load rig settings (may be nil for town-level roles like mayor/deacon)
 	var rigSettings *RigSettings
 	if rigPath != "" {
@@ -1268,7 +1336,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 			result.Hooks = &RuntimeHooksConfig{
 				Provider:     "claude",
 				Dir:          ".claude",
-				SettingsFile: "settings.json",
+				SettingsFile: defaultHooksFile("claude"),
 			}
 		case "opencode":
 			result.Hooks = &RuntimeHooksConfig{
@@ -1489,6 +1557,8 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		resolvedEnv[k] = v
 	}
 
+	SanitizeAgentEnv(resolvedEnv, envVars)
+
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
@@ -1515,6 +1585,31 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	}
 
 	return cmd
+}
+
+// SanitizeAgentEnv clears environment variables that are known to break agent
+// startup when inherited from the parent shell/tmux environment.
+//
+// This is a SUPPLEMENTAL guard for paths that don't use AgentEnv() (which is
+// the primary guard — see env.go). It protects: lifecycle.go's default path
+// (non-polecat/non-crew roles) and handoff.go's manual export building.
+// For callers that pass AgentEnv()-produced maps, this is a no-op since
+// AgentEnv() already sets NODE_OPTIONS="".
+//
+// callerEnv is the original env map from the caller (before rc.Env merging).
+// resolvedEnv is the post-merge map that may also contain values from rc.Env.
+// NODE_OPTIONS is only cleared if neither callerEnv nor resolvedEnv (via rc.Env)
+// explicitly provides it.
+func SanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
+	// NODE_OPTIONS may contain debugger flags (e.g., --inspect from VSCode)
+	// that cause Claude's Node.js runtime to crash with "Debugger attached" errors.
+	// Only clear if not explicitly provided by the caller or agent config (rc.Env).
+	if _, ok := callerEnv["NODE_OPTIONS"]; !ok {
+		// Inner guard: preserve if rc.Env already set it in resolvedEnv
+		if _, ok := resolvedEnv["NODE_OPTIONS"]; !ok {
+			resolvedEnv["NODE_OPTIONS"] = ""
+		}
+	}
 }
 
 // PrependEnv prepends export statements to a command string.
@@ -1613,6 +1708,8 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	for k, v := range rc.Env {
 		resolvedEnv[k] = v
 	}
+
+	SanitizeAgentEnv(resolvedEnv, envVars)
 
 	// Build environment export prefix
 	var exports []string

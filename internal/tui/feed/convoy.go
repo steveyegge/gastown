@@ -225,7 +225,7 @@ func refreshTrackedStatus(ctx context.Context, deps []struct {
 		return nil
 	}
 
-	args := []string{"--no-daemon", "show"}
+	args := []string{"show"}
 	for _, d := range deps {
 		args = append(args, d.ID)
 	}
@@ -376,4 +376,3 @@ func renderProgressBar(completed, total int) string {
 	bar := strings.Repeat("●", filled) + strings.Repeat("○", displayTotal-filled)
 	return ConvoyProgressStyle.Render(bar)
 }
-

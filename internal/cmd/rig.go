@@ -661,35 +661,65 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Detect prefix from issues.jsonl (prefix is stored in DB, not config.yaml)
-		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-		if f, readErr := os.Open(jsonlPath); readErr == nil {
-			scanner := bufio.NewScanner(f)
-			if scanner.Scan() {
-				var issue struct {
-					ID string `json:"id"`
-				}
-				if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
-					// Extract prefix: everything before the last "-" segment
-					if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
-						detected := issue.ID[:lastDash]
-						if detected != "" && rigAddPrefix != "" {
-							if strings.TrimSuffix(rigAddPrefix, "-") != detected {
-								f.Close()
-								return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
-							}
+		// Detect prefix: try dolt backend first, fall back to issues.jsonl.
+		// With dolt, metadata.json and the database survive clone, so we can
+		// query the prefix directly via "bd config get issue_prefix".
+		prefixDetected := false
+		metadataPath := filepath.Join(beadsDir, "metadata.json")
+		if metaBytes, readErr := os.ReadFile(metadataPath); readErr == nil {
+			var meta struct {
+				Backend string `json:"backend"`
+			}
+			if json.Unmarshal(metaBytes, &meta) == nil && meta.Backend == "dolt" {
+				workDir := filepath.Dir(beadsDir)
+				bdCmd := exec.Command("bd", "config", "get", "issue_prefix")
+				bdCmd.Dir = workDir
+				if out, bdErr := bdCmd.Output(); bdErr == nil {
+					detected := strings.TrimSpace(string(out))
+					if detected != "" {
+						if rigAddPrefix != "" && strings.TrimSuffix(rigAddPrefix, "-") != detected {
+							return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
 						}
-						if detected != "" && result.BeadsPrefix == "" {
+						if result.BeadsPrefix == "" {
 							result.BeadsPrefix = detected
 						}
+						prefixDetected = true
 					}
 				}
 			}
-			f.Close()
+		}
+
+		// Fall back to issues.jsonl for non-dolt backends or if dolt detection failed
+		if !prefixDetected {
+			jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+			if f, readErr := os.Open(jsonlPath); readErr == nil {
+				scanner := bufio.NewScanner(f)
+				if scanner.Scan() {
+					var issue struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
+						// Extract prefix: everything before the last "-" segment
+						if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
+							detected := issue.ID[:lastDash]
+							if detected != "" && rigAddPrefix != "" {
+								if strings.TrimSuffix(rigAddPrefix, "-") != detected {
+									f.Close()
+									return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
+								}
+							}
+							if detected != "" && result.BeadsPrefix == "" {
+								result.BeadsPrefix = detected
+							}
+						}
+					}
+				}
+				f.Close()
+			}
 		}
 
 		// Init database if metadata.json is missing (DB files are gitignored)
-		metadataPath := filepath.Join(beadsDir, "metadata.json")
+		metadataPath = filepath.Join(beadsDir, "metadata.json")
 		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
 			prefix := result.BeadsPrefix
 			if prefix == "" {
@@ -698,7 +728,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			workDir := filepath.Dir(beadsDir) // directory containing .beads/
 			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
 			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
-			initCmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix, "--backend", "dolt", "--server")
+			initCmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
 			initCmd.Dir = workDir
 			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
 				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
@@ -891,7 +921,8 @@ func runResetStale(bd *beads.Beads, dryRun bool) error {
 	return nil
 }
 
-// assigneeToSessionName converts an assignee (rig/name or rig/crew/name) to tmux session name.
+// assigneeToSessionName converts an assignee (rig/name, rig/crew/name, or rig/polecats/name)
+// to tmux session name.
 // Returns the session name and whether this is a persistent identity (crew).
 func assigneeToSessionName(assignee string) (sessionName string, isPersistent bool) {
 	parts := strings.Split(assignee, "/")
@@ -904,6 +935,10 @@ func assigneeToSessionName(assignee string) (sessionName string, isPersistent bo
 		// rig/crew/name -> gt-rig-crew-name
 		if parts[1] == "crew" {
 			return fmt.Sprintf("gt-%s-crew-%s", parts[0], parts[2]), true
+		}
+		// rig/polecats/name -> gt-rig-name
+		if parts[1] == "polecats" {
+			return fmt.Sprintf("gt-%s-%s", parts[0], parts[2]), false
 		}
 		// Other 3-part formats not recognized
 		return "", false

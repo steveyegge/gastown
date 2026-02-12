@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -116,20 +117,31 @@ func (h *SetupAPIHandler) handleInstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Expand ~ to home directory
-	if strings.HasPrefix(req.Path, "~/") {
-		home, _ := os.UserHomeDir()
-		req.Path = filepath.Join(home, req.Path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal).
+	// Absolute paths (e.g., /opt/workspace) are intentionally allowed —
+	// this is a localhost-only dashboard and users may install workspaces anywhere.
+	expanded, err := expandHomePath(req.Path)
+	if err != nil {
+		log.Printf("handleInstall: expandHomePath(%q) failed: %v", req.Path, err)
+		h.sendError(w, "Invalid path", http.StatusBadRequest)
+		return
 	}
+	req.Path = expanded
 
-	// Build gt install command
-	args := []string{"install", req.Path}
+	// Build gt install command. Flags go first, then -- to end flag parsing,
+	// then the positional path (prevents paths like "--help" being parsed as flags).
+	args := []string{"install"}
 	if req.Name != "" {
+		if !isValidID(req.Name) {
+			h.sendError(w, "Invalid workspace name format", http.StatusBadRequest)
+			return
+		}
 		args = append(args, "--name", req.Name)
 	}
 	if req.Git {
 		args = append(args, "--git")
 	}
+	args = append(args, "--", req.Path)
 
 	output, err := h.runGtCommand(r.Context(), 60*time.Second, args)
 	if err != nil {
@@ -159,8 +171,17 @@ func (h *SetupAPIHandler) handleRigAdd(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "Name and gitUrl are required", http.StatusBadRequest)
 		return
 	}
+	if !isValidRigName(req.Name) {
+		h.sendError(w, "Invalid rig name format (alphanumeric and underscores only, no hyphens or dots)", http.StatusBadRequest)
+		return
+	}
+	if !isValidGitURL(req.GitURL) {
+		h.sendError(w, "Git URL must be https://, http://, ssh://, git://, or git@host:path format", http.StatusBadRequest)
+		return
+	}
 
-	args := []string{"rig", "add", req.Name, req.GitURL}
+	// Flags before --, positional args after (consistent with handleInstall/handleIssueCreate).
+	args := []string{"rig", "add", "--", req.Name, req.GitURL}
 
 	output, err := h.runGtCommand(r.Context(), 120*time.Second, args)
 	if err != nil {
@@ -191,16 +212,22 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Expand ~ to home directory
-	path := req.Path
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal)
+	path, err := expandHomePath(req.Path)
+	if err != nil {
+		log.Printf("handleLaunch: expandHomePath(%q) failed: %v", req.Path, err)
+		h.sendError(w, "Invalid path", http.StatusBadRequest)
+		return
 	}
 
 	port := req.Port
 	if port == 0 {
 		port = 8080
+	}
+	// Upper bound is 65534 (not 65535) to reserve room for newPort = port + 1
+	if port < 1 || port > 65534 {
+		h.sendError(w, "Port must be between 1 and 65534", http.StatusBadRequest)
+		return
 	}
 
 	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
@@ -259,11 +286,14 @@ func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Expand ~ to home directory
-	path := req.Path
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
+	// Expand ~ to home directory (with path cleaning to prevent traversal)
+	path, err := expandHomePath(req.Path)
+	if err != nil {
+		// Return 200 with Valid:false (not 400) because this is a "check" endpoint
+		// that reports validity status, unlike mutating endpoints that return 400 on bad input.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(CheckWorkspaceResponse{Valid: false, Message: "Invalid path format"})
+		return
 	}
 
 	// Check if mayor/ directory exists (indicates a Gas Town HQ)

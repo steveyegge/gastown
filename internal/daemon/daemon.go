@@ -21,10 +21,10 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/polecat"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -39,12 +39,12 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config       *Config
-	patrolConfig *DaemonPatrolConfig
-	tmux         *tmux.Tmux
-	logger       *log.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
+	config        *Config
+	patrolConfig  *DaemonPatrolConfig
+	tmux          *tmux.Tmux
+	logger        *log.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
 	curator       *feed.Curator
 	convoyWatcher *ConvoyWatcher
 	doltServer    *DoltServerManager
@@ -246,6 +246,19 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Dolt health check ticker started (interval %v)", interval)
 	}
 
+	// Start dedicated Dolt remotes push ticker if configured.
+	// This runs at a lower frequency (default 15 min) than the heartbeat (3 min)
+	// to periodically push databases to their git remotes.
+	var doltRemotesTicker *time.Ticker
+	var doltRemotesChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "dolt_remotes") {
+		interval := doltRemotesInterval(d.patrolConfig)
+		doltRemotesTicker = time.NewTicker(interval)
+		doltRemotesChan = doltRemotesTicker.C
+		defer doltRemotesTicker.Stop()
+		d.logger.Printf("Dolt remotes push ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -274,6 +287,13 @@ func (d *Daemon) Run() error {
 			// of the 3-minute general heartbeat.
 			if !d.isShutdownInProgress() {
 				d.ensureDoltServerRunning()
+			}
+
+		case <-doltRemotesChan:
+			// Periodic Dolt remote push — pushes databases to their configured
+			// git remotes on a 15-minute cadence (independent of heartbeat).
+			if !d.isShutdownInProgress() {
+				d.pushDoltRemotes()
 			}
 
 		case <-timer.C:
@@ -1009,12 +1029,12 @@ func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
 	d.killBeadsDaemon(srcBeadsDir)
 
 	// Set up export command (reads from source)
-	exportCmd := exec.Command(d.bdPath, "export", "--no-daemon")
+	exportCmd := exec.Command(d.bdPath, "export")
 	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
 	exportCmd.Dir = filepath.Dir(srcBeadsDir)
 
 	// Set up import command (writes to destination)
-	importCmd := exec.Command(d.bdPath, "import", "--no-daemon")
+	importCmd := exec.Command(d.bdPath, "import")
 	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
 	importCmd.Dir = filepath.Dir(dstBeadsDir)
 
@@ -1577,11 +1597,10 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 
 	// Set environment variables using centralized AgentEnv
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "polecat",
-		Rig:           rigName,
-		AgentName:     polecatName,
-		TownRoot:      d.config.TownRoot,
-		BeadsNoDaemon: true,
+		Role:      "polecat",
+		Rig:       rigName,
+		AgentName: polecatName,
+		TownRoot:  d.config.TownRoot,
 	})
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude

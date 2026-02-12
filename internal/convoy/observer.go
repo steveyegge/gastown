@@ -179,7 +179,7 @@ func feedNextReadyIssue(townRoot, convoyID, observer string, logger func(format 
 // Uses bd dep list for the tracking relations, then bd show for current status.
 func getConvoyTrackedIssues(townRoot, convoyID string) []trackedIssue {
 	// Get tracked issue IDs from dependency graph
-	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
 	depCmd.Dir = townRoot
 	var stdout bytes.Buffer
 	depCmd.Stdout = &stdout
@@ -241,7 +241,7 @@ func batchShowIssues(townRoot string, issueIDs []string) map[string]trackedIssue
 		return result
 	}
 
-	args := append([]string{"--no-daemon", "show"}, issueIDs...)
+	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
 	cmd := exec.Command("bd", args...)

@@ -392,17 +392,36 @@ This becomes the digest when the patrol is squashed."""
 
 [[steps]]
 id = "context-check"
-title = "Check own context limit"
+title = "Assess session health"
 needs = ["generate-summary"]
 description = """
-Check own context usage.
+Assess whether this session should continue or hand off to a fresh one.
 
-If context is HIGH (>80%):
-- Write handoff summary
-- Prepare for burn/respawn
+**Gather signals:**
 
-If context is LOW:
-- Can continue processing"""
+1. **Process memory** — check your own RSS:
+```bash
+ps -o rss= -p $$   # KB — divide by 1024 for MB
+```
+
+2. **Session age** — how long has this tmux session been running:
+```bash
+CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
+echo "Session age: $(( ($(date +%s) - CREATED) / 3600 ))h"
+```
+
+3. **Context usage** — your internal sense of how much context you've consumed.
+Are you losing track of earlier conversation? Getting verbose? Repeating yourself?
+
+4. **Work done this cycle** — how many merges, how much complexity processed.
+
+**The principle:** Fresh sessions are cheap. Memory bloat compounds over time and
+affects the entire system — other agents, Dolt, and the OS all share the same RAM.
+An idle session at 1.5 GB is worse than cycling and restarting at 200 MB.
+
+**Make a judgment call.** If multiple signals suggest you're getting heavy
+(high RSS, long session, substantial context consumed), hand off. If you're
+light and there's active work in the queue, continue."""
 
 [[steps]]
 id = "patrol-cleanup"
@@ -459,21 +478,9 @@ id = "burn-or-loop"
 title = "Burn and respawn or loop"
 needs = ["patrol-cleanup"]
 description = """
-End of patrol cycle decision.
+End of patrol cycle decision. Use the signals from context-check to decide.
 
-**Step 1: Estimate remaining context**
-
-Ask yourself:
-- Have I processed many branches this cycle?
-- Is the conversation getting long?
-- Am I starting to lose track of earlier context?
-
-Rule of thumb: If you've done 3+ merges or processed significant cleanup work,
-it's time for a fresh session.
-
-**Step 2: Decision tree**
-
-If context LOW (can continue patrolling):
+**If you decide to continue patrolling:**
 
 Use await-signal with exponential backoff to wait for MQ activity:
 
@@ -503,31 +510,33 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
 
 After await-signal returns (either by signal or timeout):
-1. Generate a brief summary of this patrol cycle
+1. **Re-assess session health** (check RSS, context, age again — conditions change)
 2. Squash the current wisp:
 ```bash
 bd mol squash <mol-id> --summary "<patrol-summary>"
 ```
-3. Create a new patrol wisp:
+3. Create and hook a new patrol wisp:
 ```bash
-bd mol wisp mol-refinery-patrol
+NEW_WISP=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=<rig>/refinery
 ```
 4. Continue executing from the inbox-check step of the new wisp
 
-If context HIGH (approaching limit):
-- Squash wisp with summary digest
-- Use `gt handoff` for clean session transition:
+**If you decide to hand off:**
+
+Squash wisp with summary digest, then use `gt handoff` for clean session transition:
 
 ```bash
 gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
 Queue: empty/N remaining
+RSS: X MB, Session age: Xh
 Next: [any notes for successor]"
 ```
 
-**Why gt handoff?**
-- Sends handoff mail to yourself with context
-- Respawns with fresh Claude instance
-- SessionStart hook runs gt prime
-- Successor picks up from your hook
+`gt handoff` sends handoff mail to yourself, respawns with a fresh Claude instance,
+SessionStart hook runs gt prime, and your successor picks up from the hook.
 
-**DO NOT just exit.** Always use `gt handoff` for proper lifecycle."""
+**DO NOT just exit.** Always use `gt handoff` for proper lifecycle.
+
+**IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
+Always use `gt mol step await-signal` — it's event-driven and tracks backoff state."""
