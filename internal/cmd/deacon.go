@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -98,6 +99,7 @@ Stops the current session (if running) and starts a fresh one.`,
 }
 
 var deaconAgentOverride string
+var deaconTarget string
 
 var deaconHeartbeatCmd = &cobra.Command{
 	Use:   "heartbeat [action]",
@@ -360,6 +362,7 @@ func init() {
 		"List zombies without killing them")
 
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
+	deaconStartCmd.Flags().StringVar(&deaconTarget, "target", "", "Execution target: 'k8s' to run in Kubernetes (default: local tmux)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconRestartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 
@@ -367,6 +370,10 @@ func init() {
 }
 
 func runDeaconStart(cmd *cobra.Command, args []string) error {
+	if deaconTarget == "k8s" {
+		return runDeaconStartK8s()
+	}
+
 	sessionName := getDeaconSessionName()
 	backend, sessionKey := resolveBackendForSession(sessionName)
 
@@ -459,6 +466,66 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	return nil
 }
 
+// runDeaconStartK8s creates an agent bead for the deacon that the K8s controller
+// will detect and translate into a pod creation.
+func runDeaconStartK8s() error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	fmt.Println("Dispatching Deacon to Kubernetes...")
+
+	beadsClient := beads.New(townRoot)
+	agentBeadID := beads.DeaconBeadIDTown() // "hq-deacon"
+	_, err = beadsClient.CreateOrReopenAgentBead(agentBeadID, agentBeadID, &beads.AgentFields{
+		RoleType:   "deacon",
+		AgentState: "spawning",
+	})
+	if err != nil {
+		return fmt.Errorf("creating deacon agent bead: %w", err)
+	}
+
+	if err := beadsClient.AddLabel(agentBeadID, "execution_target:k8s"); err != nil {
+		fmt.Printf("Warning: could not add execution_target label: %v\n", err)
+	}
+
+	_ = events.LogFeed(events.TypeSpawn, "deacon", map[string]interface{}{
+		"rig":   "town",
+		"role":  "deacon",
+		"agent": "hq",
+	})
+
+	fmt.Printf("%s Deacon dispatched to K8s (agent_state=spawning, bead=%s)\n",
+		style.Bold.Render("✓"), agentBeadID)
+	fmt.Printf("  The controller will create a deacon pod when it detects this bead.\n")
+	fmt.Printf("  Attach with: %s\n", style.Dim.Render("gt deacon attach"))
+
+	return nil
+}
+
+// detectDeaconK8sPod checks if the deacon is running as a K8s pod.
+// Returns (podName, namespace) if found, or ("", "") if not.
+func detectDeaconK8sPod() (string, string) {
+	podName := "gt-town-deacon-hq"
+
+	ns := os.Getenv("GT_K8S_NAMESPACE")
+	if ns == "" {
+		return "", ""
+	}
+
+	out, err := exec.Command("kubectl", "get", "pod", podName, "-n", ns,
+		"-o", "jsonpath={.status.phase}").Output()
+	if err != nil {
+		return "", ""
+	}
+	if strings.TrimSpace(string(out)) != "Running" {
+		return "", ""
+	}
+
+	return podName, ns
+}
+
 func runDeaconStop(cmd *cobra.Command, args []string) error {
 	sessionName := getDeaconSessionName()
 	backend, sessionKey := resolveBackendForSession(sessionName)
@@ -488,6 +555,15 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 }
 
 func runDeaconAttach(cmd *cobra.Command, args []string) error {
+	// When GT_K8S_NAMESPACE is set, try K8s attach first.
+	if os.Getenv("GT_K8S_NAMESPACE") != "" {
+		if podName, ns := detectDeaconK8sPod(); podName != "" {
+			fmt.Printf("%s Attaching to K8s Deacon pod via coop...\n",
+				style.Bold.Render("☸"))
+			return attachToCoopPod(podName, ns)
+		}
+	}
+
 	sessionName := getDeaconSessionName()
 	backend, sessionKey := resolveBackendForSession(sessionName)
 
@@ -505,7 +581,6 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	// Session uses a respawn loop, so Claude restarts automatically if it exits
 
 	// Attach via Backend (supports tmux switch-client and coop attach)
 	return backend.AttachSession(sessionKey)
@@ -558,6 +633,16 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 				style.Bold.Render("running"))
 		}
 	} else {
+		// Check for K8s pod.
+		if podName, ns := detectDeaconK8sPod(); podName != "" {
+			fmt.Printf("%s Deacon is running in %s\n",
+				style.Bold.Render("☸"),
+				style.Bold.Render("Kubernetes"))
+			fmt.Printf("  Pod: %s (namespace: %s, coop)\n", podName, ns)
+			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
+			return nil
+		}
+
 		fmt.Printf("%s Deacon session is %s\n",
 			style.Dim.Render("○"),
 			"not running")
