@@ -439,7 +439,6 @@ func ValidTarget(target string) bool {
 	validRoles := map[string]bool{
 		"crew": true, "witness": true, "refinery": true,
 		"polecats": true, "mayor": true, "deacon": true,
-		"rig": true,
 	}
 
 	// Simple role target

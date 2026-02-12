@@ -126,6 +126,12 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns (including .claude/)
+	// so settings.local.json doesn't dirty the source repo worktree.
+	if err := rig.EnsureGitignorePatterns(witnessDir); err != nil {
+		fmt.Printf("Warning: could not update witness .gitignore: %v\n", err)
+	}
+
 	roleConfig, err := m.roleConfig()
 	if err != nil {
 		return err

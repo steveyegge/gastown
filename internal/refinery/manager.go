@@ -129,6 +129,12 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns (including .claude/)
+	// so settings.local.json doesn't dirty the source repo worktree.
+	if err := rig.EnsureGitignorePatterns(refineryRigDir); err != nil {
+		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
+	}
+
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
 		Sender:    "deacon",
