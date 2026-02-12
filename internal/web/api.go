@@ -104,6 +104,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCrew(w, r)
 	case path == "/ready" && r.Method == http.MethodGet:
 		h.handleReady(w, r)
+	case path == "/session/preview" && r.Method == http.MethodGet:
+		h.handleSessionPreview(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -1631,6 +1633,60 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SessionPreviewResponse is the response for /api/session/preview.
+type SessionPreviewResponse struct {
+	Session   string `json:"session"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// handleSessionPreview returns the last N lines of tmux capture-pane output for a session.
+func (h *APIHandler) handleSessionPreview(w http.ResponseWriter, r *http.Request) {
+	sessionName := r.URL.Query().Get("session")
+	if sessionName == "" {
+		h.sendError(w, "Missing session parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Validate session name: must start with "gt-" and contain only safe characters
+	if !strings.HasPrefix(sessionName, "gt-") {
+		h.sendError(w, "Invalid session name: must start with gt-", http.StatusBadRequest)
+		return
+	}
+	for _, c := range sessionName {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			h.sendError(w, "Invalid session name: contains invalid characters", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Run tmux capture-pane to get the last 30 lines
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", sessionName, "-p", "-J", "-S", "-30")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			h.sendError(w, "tmux capture-pane timed out", http.StatusGatewayTimeout)
+			return
+		}
+		h.sendError(w, "Failed to capture pane: "+stderr.String(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(SessionPreviewResponse{
+		Session:   sessionName,
+		Content:   stdout.String(),
+		Timestamp: time.Now().Format(time.RFC3339),
+	})
 }
 
 // parseCommandArgs splits a command string into args, respecting quotes.

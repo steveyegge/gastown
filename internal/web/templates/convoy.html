@@ -290,7 +290,7 @@
                         </thead>
                         <tbody>
                             {{range .Sessions}}
-                            <tr>
+                            <tr class="session-row" data-session-name="{{.Name}}">
                                 <td>
                                     <span class="role-{{.Role}}">{{.Role}}</span>
                                 </td>
@@ -306,6 +306,15 @@
                         <p>No active sessions</p>
                     </div>
                     {{end}}
+                    <!-- Session terminal preview -->
+                    <div id="session-preview" style="display:none;">
+                        <div class="session-preview-header">
+                            <button id="session-preview-back" class="mail-back-btn">← Back</button>
+                            <span id="session-preview-name" class="session-preview-title"></span>
+                            <span id="session-preview-status" class="session-preview-refresh-status"></span>
+                        </div>
+                        <pre id="session-preview-content" class="session-preview-content">Loading...</pre>
+                    </div>
                 </div>
             </div>
 

@@ -2255,6 +2255,54 @@
             color: var(--text-primary);
         }
 
+        /* Session row clickable */
+        .session-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .session-row:hover {
+            background: rgba(138, 180, 248, 0.12);
+        }
+
+        /* Session terminal preview */
+        .session-preview-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .session-preview-title {
+            font-weight: 600;
+            color: var(--cyan);
+            font-size: 0.9rem;
+        }
+
+        .session-preview-refresh-status {
+            margin-left: auto;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .session-preview-content {
+            margin: 0;
+            padding: 12px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            min-height: 100px;
+        }
+
         @keyframes slideIn {
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
