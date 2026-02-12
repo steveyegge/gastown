@@ -1,9 +1,10 @@
 apiVersion: v2
 name: agent-pod
-description: Gas Town agent pod - runs Claude Code in a screen session for autonomous agent execution
+description: "[DEPRECATED] Gas Town agent pod - use agent controller instead (gastown chart with agentController.enabled=true)"
 version: 0.1.0
 appVersion: "0.1.0"
 type: application
+deprecated: true
 keywords:
   - gastown
   - agent

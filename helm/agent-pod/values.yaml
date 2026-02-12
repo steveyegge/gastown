@@ -1,4 +1,8 @@
-# Agent Pod Helm Chart Configuration
+# DEPRECATED: Use the gastown chart with agentController.enabled=true instead.
+# The agent controller creates pods dynamically from agent beads.
+# This standalone agent-pod chart is retained for reference only.
+#
+# Agent Pod Helm Chart Configuration (legacy)
 # Deploys Gas Town agent pods running Claude Code via coop terminal manager
 
 nameOverride: ""
