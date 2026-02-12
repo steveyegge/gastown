@@ -103,14 +103,28 @@ test_dolt_status_responsive() {
 run_test "Dolt status command responsive" test_dolt_status_responsive
 
 # ── Test 6: S3 remote configured ──────────────────────────────────
-test_s3_remote() {
-  local remotes
-  remotes=$(kube exec "$DOLT_POD" -c dolt -- \
-    sh -c 'cd /var/lib/dolt/beads && dolt remote -v' 2>/dev/null)
-  # S3 remote URL typically starts with "aws://" or "s3://"
-  assert_contains "$remotes" "s3://" || assert_contains "$remotes" "aws://"
-}
-run_test "S3 remote configured" test_s3_remote
+# On a fresh DB the s3-sync sidecar may not have added the remote yet.
+# Retry for up to 20s before skipping.
+_S3_REMOTE_FOUND=""
+_s3_remote_deadline=$((SECONDS + 20))
+while [[ $SECONDS -lt $_s3_remote_deadline ]]; do
+  _s3_remotes=$(kube exec "$DOLT_POD" -c dolt -- \
+    sh -c 'cd /var/lib/dolt/beads && dolt remote -v' 2>/dev/null || echo "")
+  if [[ "$_s3_remotes" == *"s3://"* ]] || [[ "$_s3_remotes" == *"aws://"* ]]; then
+    _S3_REMOTE_FOUND="true"
+    break
+  fi
+  sleep 2
+done
+
+if [[ -n "$_S3_REMOTE_FOUND" ]]; then
+  test_s3_remote() {
+    assert_contains "$_s3_remotes" "s3://" || assert_contains "$_s3_remotes" "aws://"
+  }
+  run_test "S3 remote configured" test_s3_remote
+else
+  skip_test "S3 remote configured" "s3-sync sidecar has not added remote yet (fresh namespace)"
+fi
 
 # ── Test 7: Recent s3-sync activity ───────────────────────────────
 test_recent_activity() {

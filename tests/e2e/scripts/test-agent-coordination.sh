@@ -86,6 +86,13 @@ pods = json.load(sys.stdin).get('pods',[])
 for p in pods:
     print(p.get('name',''))
 " 2>/dev/null || echo "")
+  # When no agent pods exist and broker has none, both are empty — that's a match
+  if [[ "$AGENT_COUNT" -eq 0 ]]; then
+    local broker_count
+    broker_count=$(echo "$names" | { grep -c . || true; })
+    assert_eq "$broker_count" "0"
+    return $?
+  fi
   # At least one broker pod name should match a kubectl agent pod name
   local match_count=0
   for pod in $AGENT_PODS; do

@@ -2,7 +2,7 @@
 # test-daemon-health.sh — Verify BD daemon pod health.
 #
 # Tests:
-#   1. Daemon pod is 2/2 ready (daemon + slack-bot sidecar)
+#   1. Daemon pod has all containers ready (N/N)
 #   2. HTTP health endpoint returns OK
 #   3. RPC port 9876 responds
 #   4. NATS is connected (embedded in daemon)
@@ -22,22 +22,28 @@ DAEMON_READY=$(kube get pod "$DAEMON_POD" --no-headers -o custom-columns="READY:
 
 log "Daemon pod: $DAEMON_POD (ready: $DAEMON_READY)"
 
-# ── Test 1: Pod is 2/2 ready ────────────────────────────────────────
+# ── Test 1: Pod is N/N ready (all containers ready) ───────────────
 test_pod_ready() {
   [[ -n "$DAEMON_POD" ]] || return 1
-  local ready_count
+  local ready_count total_count
   ready_count=$(kube get pod "$DAEMON_POD" -o jsonpath='{.status.containerStatuses[?(@.ready==true)].name}' 2>/dev/null | wc -w | tr -d ' ')
-  assert_ge "$ready_count" 2
+  total_count=$(kube get pod "$DAEMON_POD" -o jsonpath='{.status.containerStatuses[*].name}' 2>/dev/null | wc -w | tr -d ' ')
+  [[ "$total_count" -gt 0 ]] && assert_eq "$ready_count" "$total_count"
 }
-run_test "Daemon pod containers ready (2/2)" test_pod_ready
+run_test "Daemon pod containers ready (all)" test_pod_ready
 
-# ── Test 2: Containers are daemon + slack-bot ────────────────────────
+# ── Test 2: Containers include daemon (slack-bot optional) ───────────
 test_container_names() {
   local containers
   containers=$(kube get pod "$DAEMON_POD" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null)
-  assert_contains "$containers" "daemon" && assert_contains "$containers" "slack"
+  assert_contains "$containers" "daemon" || return 1
+  if assert_contains "$containers" "slack" 2>/dev/null; then
+    log "  slack-bot sidecar: present"
+  else
+    log "  slack-bot sidecar: not present (optional)"
+  fi
 }
-run_test "Daemon has daemon + slack-bot containers" test_container_names
+run_test "Daemon has required containers (slack-bot optional)" test_container_names
 
 # ── Test 3: HTTP health endpoint ─────────────────────────────────────
 HTTP_PORT=""

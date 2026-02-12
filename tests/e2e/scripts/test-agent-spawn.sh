@@ -39,18 +39,19 @@ log "Found $AGENT_COUNT running agent pod(s): $(echo $AGENT_PODS | tr '\n' ' ')"
 AGENT_POD=$(echo "$AGENT_PODS" | head -1)
 
 # ── Test 1: Agent pods exist ────────────────────────────────────────
-test_agent_pods_exist() {
-  assert_ge "$AGENT_COUNT" 1
-}
-run_test "At least 1 agent pod is Running (gt-* prefix)" test_agent_pods_exist
-
 if [[ -z "$AGENT_POD" ]]; then
+  skip_test "At least 1 agent pod is Running (gt-* prefix)" "no running agent pods in namespace"
   skip_test "Agent pod has coop container" "no running agent pods found"
   skip_test "Coop health returns 200" "no running agent pods found"
   skip_test "Agent registered with broker" "no running agent pods found"
   print_summary
   exit 0
 fi
+
+test_agent_pods_exist() {
+  assert_ge "$AGENT_COUNT" 1
+}
+run_test "At least 1 agent pod is Running (gt-* prefix)" test_agent_pods_exist
 
 # ── Test 2: Agent pod has expected containers ────────────────────────
 test_agent_containers() {

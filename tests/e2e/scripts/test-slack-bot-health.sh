@@ -26,6 +26,18 @@ DAEMON_POD=$(kube get pods --no-headers 2>/dev/null | grep "daemon" | grep -v "d
 
 log "Daemon pod: ${DAEMON_POD:-none}"
 
+# ── Early exit: skip all if slack-bot sidecar not deployed ────────────
+if [[ -z "$DAEMON_POD" ]]; then
+  skip_all "no daemon pod found"
+  exit 0
+fi
+
+CONTAINERS=$(kube get pod "$DAEMON_POD" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null)
+if [[ "$CONTAINERS" != *"slack-bot"* ]]; then
+  skip_all "slack-bot sidecar not deployed"
+  exit 0
+fi
+
 # ── Discover NATS service ───────────────────────────────────────────
 NATS_SVC=$(kube get svc --no-headers 2>/dev/null | grep "nats" | head -1 | awk '{print $1}')
 

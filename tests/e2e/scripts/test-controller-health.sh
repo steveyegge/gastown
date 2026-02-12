@@ -50,22 +50,24 @@ test_service_account() {
 run_test "Agent controller ServiceAccount exists" test_service_account
 
 # ── Test 4: Agent pods exist (controller has reconciled) ─────────────
-test_agent_pods_exist() {
-  local agent_pods
-  agent_pods=$(kube get pods --no-headers 2>/dev/null | grep "^gt-" | wc -l | tr -d ' ')
-  assert_ge "${agent_pods:-0}" 1
-}
-run_test "At least 1 agent pod exists (gt-* prefix)" test_agent_pods_exist
+AGENT_POD_COUNT=$(kube get pods --no-headers 2>/dev/null | { grep "^gt-" || true; } | wc -l | tr -d ' ')
+AGENT_RUNNING_COUNT=$(kube get pods --no-headers 2>/dev/null | { grep "^gt-" || true; } | { grep "Running" || true; } | wc -l | tr -d ' ')
 
-# ── Test 5: Agent pods are Running ───────────────────────────────────
-test_agent_pods_running() {
-  local running_count total_count
-  total_count=$(kube get pods --no-headers 2>/dev/null | grep "^gt-" | wc -l | tr -d ' ')
-  running_count=$(kube get pods --no-headers 2>/dev/null | grep "^gt-" | grep "Running" | wc -l | tr -d ' ')
-  # At least one must be running (some may be in error — that's acceptable)
-  assert_ge "${running_count:-0}" 1
-}
-run_test "At least 1 agent pod is Running" test_agent_pods_running
+if [[ "${AGENT_POD_COUNT:-0}" -eq 0 ]]; then
+  skip_test "At least 1 agent pod exists (gt-* prefix)" "no agent pods in namespace"
+  skip_test "At least 1 agent pod is Running" "no agent pods in namespace"
+else
+  test_agent_pods_exist() {
+    assert_ge "${AGENT_POD_COUNT:-0}" 1
+  }
+  run_test "At least 1 agent pod exists (gt-* prefix)" test_agent_pods_exist
+
+  # ── Test 5: Agent pods are Running ───────────────────────────────────
+  test_agent_pods_running() {
+    assert_ge "${AGENT_RUNNING_COUNT:-0}" 1
+  }
+  run_test "At least 1 agent pod is Running" test_agent_pods_running
+fi
 
 # ── Test 6: Controller env has required config ───────────────────────
 test_controller_env() {

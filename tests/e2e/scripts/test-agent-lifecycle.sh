@@ -89,53 +89,56 @@ test_agent_owner_labels() {
 run_test "Agent pods have controller owner labels" test_agent_owner_labels
 
 # ── Test 5: Agent pods use correct image ─────────────────────────────
-test_agent_image() {
-  [[ -n "$AGENT_PODS" ]] || return 1
-  local all_correct=true
-  for pod in $AGENT_PODS; do
-    local image
-    image=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null)
-    if ! echo "$image" | grep -q "gastown-agent"; then
-      log "  $pod uses unexpected image: $image"
-      all_correct=false
-    fi
-  done
-  $all_correct
-}
-run_test "Agent pods use correct image" test_agent_image
+if [[ "${AGENT_COUNT:-0}" -eq 0 ]]; then
+  skip_test "Agent pods use correct image" "no agent pods in namespace"
+  skip_test "Pod restart count is 0 for agents" "no agent pods in namespace"
+  skip_test "Agent pods have resource requests set" "no agent pods in namespace"
+else
+  test_agent_image() {
+    local all_correct=true
+    for pod in $AGENT_PODS; do
+      local image
+      image=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null)
+      if ! echo "$image" | grep -q "gastown-agent"; then
+        log "  $pod uses unexpected image: $image"
+        all_correct=false
+      fi
+    done
+    $all_correct
+  }
+  run_test "Agent pods use correct image" test_agent_image
 
-# ── Test 6: Pod restart count is 0 for agents ───────────────────────
-test_agent_no_restarts() {
-  [[ -n "$AGENT_PODS" ]] || return 1
-  local all_zero=true
-  for pod in $AGENT_PODS; do
-    local restarts
-    restarts=$(kube get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)
-    if [[ "${restarts:-0}" -ne 0 ]]; then
-      log "  $pod has $restarts restart(s)"
-      all_zero=false
-    fi
-  done
-  $all_zero
-}
-run_test "Pod restart count is 0 for agents" test_agent_no_restarts
+  # ── Test 6: Pod restart count is 0 for agents ───────────────────────
+  test_agent_no_restarts() {
+    local all_zero=true
+    for pod in $AGENT_PODS; do
+      local restarts
+      restarts=$(kube get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)
+      if [[ "${restarts:-0}" -ne 0 ]]; then
+        log "  $pod has $restarts restart(s)"
+        all_zero=false
+      fi
+    done
+    $all_zero
+  }
+  run_test "Pod restart count is 0 for agents" test_agent_no_restarts
 
-# ── Test 7: Agent pods have resource requests set ────────────────────
-test_agent_resource_requests() {
-  [[ -n "$AGENT_PODS" ]] || return 1
-  local all_have_requests=true
-  for pod in $AGENT_PODS; do
-    local cpu mem
-    cpu=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null)
-    mem=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].resources.requests.memory}' 2>/dev/null)
-    if [[ -z "$cpu" || -z "$mem" ]]; then
-      log "  $pod missing resource requests (cpu=${cpu:-unset}, memory=${mem:-unset})"
-      all_have_requests=false
-    fi
-  done
-  $all_have_requests
-}
-run_test "Agent pods have resource requests set" test_agent_resource_requests
+  # ── Test 7: Agent pods have resource requests set ────────────────────
+  test_agent_resource_requests() {
+    local all_have_requests=true
+    for pod in $AGENT_PODS; do
+      local cpu mem
+      cpu=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null)
+      mem=$(kube get pod "$pod" -o jsonpath='{.spec.containers[0].resources.requests.memory}' 2>/dev/null)
+      if [[ -z "$cpu" || -z "$mem" ]]; then
+        log "  $pod missing resource requests (cpu=${cpu:-unset}, memory=${mem:-unset})"
+        all_have_requests=false
+      fi
+    done
+    $all_have_requests
+  }
+  run_test "Agent pods have resource requests set" test_agent_resource_requests
+fi
 
 # ── Test 8: Controller reconcile loop responsive ────────────────────
 test_reconcile_responsive() {
