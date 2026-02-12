@@ -469,6 +469,11 @@ func (m *K8sManager) buildEnvVars(spec AgentPodSpec) []corev1.EnvVar {
 		// Session persistence: point XDG_STATE_HOME to the PVC so Claude
 		// session logs and coop session artifacts survive pod restarts.
 		{Name: "XDG_STATE_HOME", Value: MountStateDir},
+		// POD_IP via downward API — used by coop to advertise its reachable URL
+		// to the broker (COOP_BROKER_URL registration).
+		{Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
+		}},
 	}
 
 	// Enable session resume for persistent roles (those with workspace PVC).
