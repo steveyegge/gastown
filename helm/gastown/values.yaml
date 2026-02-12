@@ -1,5 +1,10 @@
 # Gas Town Unified Helm Chart Configuration
 # Components: Dolt SQL Server + BD Daemon + Redis (optional)
+#
+# DO NOT add environment-specific values files here (values/gastown-next.yaml, etc).
+# This chart is published to OCI and env values bundled here will override the
+# correct values in the fics-helm-chart deployment repo. All per-environment
+# config belongs in fics-helm-chart/charts/gastown/values/.
 
 nameOverride: ""
 fullnameOverride: ""
