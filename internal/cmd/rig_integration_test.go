@@ -53,12 +53,12 @@ var agentAllowlist = map[string][]string{
 	// Crew workers are user-managed worktrees for human developers.
 	"crew": {
 		"?? state.json", // crew/manager.go: Gas Town metadata (TODO: migrate to beads like polecats)
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json and .runtime/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
 	},
 
 	// Polecats are ephemeral worktrees for autonomous agents.
 	"polecat": {
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json and .runtime/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
 	},
 }
 

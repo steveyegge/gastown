@@ -70,6 +70,7 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	requiredPatterns := []string{
 		".runtime/",
 		".claude/settings.local.json",
+		".claude/commands/",
 		".logs/",
 	}
 
