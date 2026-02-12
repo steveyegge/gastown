@@ -29,6 +29,11 @@ install: build
 	@rm -f $(INSTALL_DIR)/$(BINARY)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@# Note: Run 'gt doctor --fix' from your HQ to update formulas after rebuild
+	@if [ -n "$$GT_TOWN_ROOT" ]; then \
+		echo ""; \
+		echo "💡 Run 'gt doctor --fix' from $$GT_TOWN_ROOT to update formulas"; \
+	fi
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
