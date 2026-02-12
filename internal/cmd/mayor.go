@@ -39,6 +39,7 @@ Role shortcuts: "mayor" in mail/nudge addresses resolves to this agent.`,
 
 var mayorAgentOverride string
 var mayorTarget string
+var mayorBrowser bool
 
 var mayorStartCmd = &cobra.Command{
 	Use:   "start",
@@ -96,6 +97,7 @@ func init() {
 	mayorStartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
 	mayorStartCmd.Flags().StringVar(&mayorTarget, "target", "", "Execution target: 'k8s' to run in Kubernetes (default: local tmux)")
 	mayorAttachCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorAttachCmd.Flags().BoolVarP(&mayorBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 	mayorRestartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
 
 	rootCmd.AddCommand(mayorCmd)
@@ -210,7 +212,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		if podName, ns := detectMayorK8sPod(""); podName != "" {
 			fmt.Printf("%s Attaching to K8s Mayor pod via coop...\n",
 				style.Bold.Render("☸"))
-			return attachToCoopPod(podName, ns)
+			return attachToCoopPodWithBrowser(podName, ns, mayorBrowser)
 		}
 	}
 

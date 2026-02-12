@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -100,6 +101,7 @@ Stops the current session (if running) and starts a fresh one.`,
 }
 
 var deaconAgentOverride string
+var deaconBrowser bool
 var deaconTarget string
 
 var deaconHeartbeatCmd = &cobra.Command{
@@ -365,6 +367,7 @@ func init() {
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconStartCmd.Flags().StringVar(&deaconTarget, "target", "", "Execution target: 'k8s' to run in Kubernetes (default: local tmux)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
+	deaconAttachCmd.Flags().BoolVarP(&deaconBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 	deaconRestartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 
 	rootCmd.AddCommand(deaconCmd)
@@ -561,7 +564,7 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 		if podName, ns := detectDeaconK8sPod(); podName != "" {
 			fmt.Printf("%s Attaching to K8s Deacon pod via coop...\n",
 				style.Bold.Render("☸"))
-			return attachToCoopPod(podName, ns)
+			return attachToCoopPodWithBrowser(podName, ns, deaconBrowser)
 		}
 	}
 
@@ -580,6 +583,18 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 		t := tmux.NewTmux()
 		if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
 			return err
+		}
+	}
+
+	// If --browser and using coop backend, open in browser instead
+	if deaconBrowser {
+		if _, ok := backend.(*terminal.CoopBackend); ok {
+			podName := "gt-town-deacon-hq"
+			ns := os.Getenv("GT_K8S_NAMESPACE")
+			if ns == "" {
+				ns = "gastown"
+			}
+			return attachToCoopPodWithBrowser(podName, ns, true)
 		}
 	}
 

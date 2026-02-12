@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -19,6 +20,7 @@ var (
 	refineryStatusJSON    bool
 	refineryQueueJSON     bool
 	refineryAgentOverride string
+	refineryBrowser       bool
 )
 
 var refineryCmd = &cobra.Command{
@@ -248,6 +250,7 @@ func init() {
 
 	// Attach flags
 	refineryAttachCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+	refineryAttachCmd.Flags().BoolVarP(&refineryBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 
 	// Restart flags
 	refineryRestartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
@@ -533,6 +536,18 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("starting refinery: %w", err)
 		}
 		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
+	}
+
+	// If --browser and using coop backend, open in browser instead
+	if refineryBrowser {
+		if _, ok := backend.(*terminal.CoopBackend); ok {
+			podName := fmt.Sprintf("gt-%s-refinery-hq", rigName)
+			ns := os.Getenv("GT_K8S_NAMESPACE")
+			if ns == "" {
+				ns = "gastown"
+			}
+			return attachToCoopPodWithBrowser(podName, ns, true)
+		}
 	}
 
 	// Attach to session

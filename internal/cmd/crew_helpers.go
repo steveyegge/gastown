@@ -289,11 +289,12 @@ func attachToTmuxSession(sessionID string) error {
 // It starts kubectl port-forward in the background, waits for coop to respond,
 // then execs into `coop attach` which takes over the terminal.
 func attachToCoopPod(podName, namespace string) error {
-	coopPath, err := findCoopBinary()
-	if err != nil {
-		return err
-	}
+	return attachToCoopPodWithBrowser(podName, namespace, false)
+}
 
+// attachToCoopPodWithBrowser attaches to a K8s pod via port-forward.
+// If browser is true, opens the web terminal in a browser instead of using coop attach.
+func attachToCoopPodWithBrowser(podName, namespace string, browser bool) error {
 	// Create and open the coop connection (port-forward).
 	conn := terminal.NewCoopPodConnection(terminal.CoopPodConnectionConfig{
 		PodName:   podName,
@@ -306,19 +307,42 @@ func attachToCoopPod(podName, namespace string) error {
 	if err := conn.Open(ctx); err != nil {
 		return fmt.Errorf("connecting to pod: %w", err)
 	}
-
-	// On interrupt/exit, clean up port-forward.
-	// We register cleanup before exec because exec replaces the process,
-	// so this only fires if exec fails.
 	defer conn.Close()
 
 	localURL := conn.LocalURL()
-
 	fmt.Printf("  Port-forward: localhost:%d → %s:8080\n", conn.LocalPort(), podName)
+
+	if browser {
+		return openBrowserAndBlock(localURL)
+	}
+
+	coopPath, err := findCoopBinary()
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("  Detach: Ctrl+]\n\n")
 
 	// Exec into coop attach — replaces this process.
 	return syscall.Exec(coopPath, []string{"coop", "attach", localURL}, os.Environ())
+}
+
+// openBrowserAndBlock opens the given URL in a browser and blocks until interrupted.
+func openBrowserAndBlock(localURL string) error {
+	opener := "xdg-open"
+	if _, err := exec.LookPath("open"); err == nil {
+		opener = "open"
+	}
+	fmt.Printf("  Opening %s\n", localURL)
+	openCmd := exec.Command(opener, localURL)
+	if err := openCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "  Failed to open browser: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Open manually: %s\n", localURL)
+	}
+	fmt.Fprintf(os.Stderr, "  Press Ctrl+C to stop port-forward\n")
+	sigCh := make(chan os.Signal, 1)
+	<-sigCh
+	return nil
 }
 
 // findCoopBinary locates the coop binary on the system.

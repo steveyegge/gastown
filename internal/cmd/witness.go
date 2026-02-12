@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -18,6 +19,7 @@ var (
 	witnessStatusJSON    bool
 	witnessAgentOverride string
 	witnessEnvOverrides  []string
+	witnessBrowser       bool
 )
 
 var witnessCmd = &cobra.Command{
@@ -137,6 +139,7 @@ func init() {
 	witnessCmd.AddCommand(witnessRestartCmd)
 	witnessCmd.AddCommand(witnessStatusCmd)
 	witnessCmd.AddCommand(witnessAttachCmd)
+	witnessAttachCmd.Flags().BoolVarP(&witnessBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 
 	rootCmd.AddCommand(witnessCmd)
 }
@@ -304,6 +307,18 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 		rigName, err = inferRigFromCwd(townRoot)
 		if err != nil {
 			return fmt.Errorf("could not determine rig: %w\nUsage: gt witness attach <rig>", err)
+		}
+	}
+
+	// When GT_K8S_NAMESPACE is set, try K8s attach first.
+	if os.Getenv("GT_K8S_NAMESPACE") != "" {
+		podName := fmt.Sprintf("gt-%s-witness-hq", rigName)
+		ns := os.Getenv("GT_K8S_NAMESPACE")
+		if out, err := exec.Command("kubectl", "get", "pod", podName, "-n", ns,
+			"-o", "jsonpath={.status.phase}").Output(); err == nil && strings.TrimSpace(string(out)) == "Running" {
+			fmt.Printf("%s Attaching to K8s Witness pod via coop...\n",
+				style.Bold.Render("☸"))
+			return attachToCoopPodWithBrowser(podName, ns, witnessBrowser)
 		}
 	}
 

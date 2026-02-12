@@ -22,6 +22,7 @@ var (
 	crewListAll       bool
 	crewDryRun        bool
 	crewDebug         bool
+	crewBrowser       bool
 	crewSync          bool // Sync from origin before starting (default: true)
 	crewNoSync        bool // Disable sync before starting
 	crewTUI           bool // Launch TUI wizard for crew add
@@ -363,6 +364,7 @@ func init() {
 	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
 	crewAtCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 	crewAtCmd.Flags().BoolVar(&crewDebug, "debug", false, "Show debug output for troubleshooting")
+	crewAtCmd.Flags().BoolVarP(&crewBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")

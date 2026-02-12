@@ -30,6 +30,7 @@ var (
 	sessionFile      string
 	sessionRigFilter string
 	sessionListJSON  bool
+	sessionBrowser   bool
 )
 
 var sessionCmd = &cobra.Command{
@@ -191,6 +192,7 @@ func init() {
 	sessionCmd.AddCommand(sessionStartCmd)
 	sessionCmd.AddCommand(sessionStopCmd)
 	sessionCmd.AddCommand(sessionAtCmd)
+	sessionAtCmd.Flags().BoolVarP(&sessionBrowser, "browser", "b", false, "Open web terminal in browser instead of attaching")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionCaptureCmd)
 	sessionCmd.AddCommand(sessionInjectCmd)
@@ -324,6 +326,15 @@ func runSessionAttach(cmd *cobra.Command, args []string) error {
 	rigName, polecatName, err := parseAddress(args[0])
 	if err != nil {
 		return err
+	}
+
+	// When GT_K8S_NAMESPACE is set and --browser, try K8s attach.
+	if sessionBrowser && os.Getenv("GT_K8S_NAMESPACE") != "" {
+		podName := fmt.Sprintf("gt-%s-polecat-%s", rigName, polecatName)
+		ns := os.Getenv("GT_K8S_NAMESPACE")
+		fmt.Printf("%s Attaching to K8s polecat pod via coop...\n",
+			style.Bold.Render("☸"))
+		return attachToCoopPodWithBrowser(podName, ns, true)
 	}
 
 	polecatMgr, _, err := getSessionManager(rigName)

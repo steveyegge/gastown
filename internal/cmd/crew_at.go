@@ -386,7 +386,7 @@ func tryRemoteCrewAt(rigName, crewName string) (handled bool, err error) {
 			namespace = "gastown"
 		}
 		fmt.Printf("Attaching to remote crew %s/%s...\n", rigName, crewName)
-		return true, attachToCoopPod(podName, namespace)
+		return true, attachToCoopPodWithBrowser(podName, namespace, crewBrowser)
 	case *terminal.SSHBackend:
 		return true, fmt.Errorf("SSH backend not supported for crew at")
 	}

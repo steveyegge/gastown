@@ -90,22 +90,7 @@ func runCoop(cmd *cobra.Command, args []string) error {
 	}
 
 	if coopBrowser {
-		// Open browser.
-		opener := "xdg-open"
-		if _, err := exec.LookPath("open"); err == nil {
-			opener = "open"
-		}
-		fmt.Printf("  Opening %s\n", localURL)
-		openCmd := exec.Command(opener, localURL)
-		if err := openCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "  Failed to open browser: %v\n", err)
-			fmt.Fprintf(os.Stderr, "  Open manually: %s\n", localURL)
-		}
-		fmt.Fprintf(os.Stderr, "  Press Ctrl+C to stop port-forward\n")
-		// Keep port-forward alive until interrupted.
-		sigCh := make(chan os.Signal, 1)
-		<-sigCh
-		return nil
+		return openBrowserAndBlock(localURL)
 	}
 
 	// Default: coop attach (interactive terminal).
