@@ -14,8 +14,9 @@ import (
 )
 
 // StateChangeEvent is emitted when an agent transitions between states.
+// Coop sends these as {"event":"transition",...} over WebSocket.
 type StateChangeEvent struct {
-	Type          string         `json:"type"`
+	Event         string         `json:"event"`
 	Prev          string         `json:"prev"`
 	Next          string         `json:"next"`
 	Seq           uint64         `json:"seq"`
@@ -25,8 +26,9 @@ type StateChangeEvent struct {
 }
 
 // ExitEvent is emitted when the agent process exits.
+// Coop sends these as {"event":"exit",...} over WebSocket.
 type ExitEvent struct {
-	Type   string `json:"type"`
+	Event  string `json:"event"`
 	Code   *int   `json:"code,omitempty"`
 	Signal *int   `json:"signal,omitempty"`
 }
@@ -236,7 +238,7 @@ func (w *CoopStateWatcher) wsURL() (string, error) {
 
 	u.Path = "/ws"
 	q := u.Query()
-	q.Set("mode", "state")
+	q.Set("subscribe", "state")
 	if w.token != "" {
 		q.Set("token", w.token)
 	}
@@ -245,17 +247,18 @@ func (w *CoopStateWatcher) wsURL() (string, error) {
 }
 
 // dispatch routes a raw WebSocket message to the appropriate channel.
+// Coop uses {"event": "<type>", ...} as its wire format.
 func (w *CoopStateWatcher) dispatch(msg []byte) {
-	// Peek at the "type" field.
+	// Peek at the "event" field (coop's discriminator tag).
 	var envelope struct {
-		Type string `json:"type"`
+		Event string `json:"event"`
 	}
 	if err := json.Unmarshal(msg, &envelope); err != nil {
 		return
 	}
 
-	switch envelope.Type {
-	case "state_change":
+	switch envelope.Event {
+	case "transition":
 		var evt StateChangeEvent
 		if err := json.Unmarshal(msg, &evt); err != nil {
 			return
@@ -276,6 +279,6 @@ func (w *CoopStateWatcher) dispatch(msg []byte) {
 		default:
 		}
 
-	// Ignore pong, screen, output, error, resize — we only subscribed to state mode.
+	// Ignore pong, screen, output, error, resize — we only subscribed to state.
 	}
 }

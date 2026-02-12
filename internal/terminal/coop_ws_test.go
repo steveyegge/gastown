@@ -18,8 +18,8 @@ func TestCoopStateWatcher_ReceivesStateChange(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			return
 		}
-		if r.URL.Query().Get("mode") != "state" {
-			t.Errorf("expected mode=state, got %s", r.URL.Query().Get("mode"))
+		if r.URL.Query().Get("subscribe") != "state" {
+			t.Errorf("expected subscribe=state, got %s", r.URL.Query().Get("subscribe"))
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -29,10 +29,10 @@ func TestCoopStateWatcher_ReceivesStateChange(t *testing.T) {
 		defer conn.Close()
 
 		evt := StateChangeEvent{
-			Type: "state_change",
-			Prev: "working",
-			Next: "waiting_for_input",
-			Seq:  42,
+			Event: "transition",
+			Prev:  "working",
+			Next:  "idle",
+			Seq:   42,
 		}
 		data, _ := json.Marshal(evt)
 		conn.WriteMessage(websocket.TextMessage, data)
@@ -56,8 +56,8 @@ func TestCoopStateWatcher_ReceivesStateChange(t *testing.T) {
 		if evt.Prev != "working" {
 			t.Errorf("prev = %q, want %q", evt.Prev, "working")
 		}
-		if evt.Next != "waiting_for_input" {
-			t.Errorf("next = %q, want %q", evt.Next, "waiting_for_input")
+		if evt.Next != "idle" {
+			t.Errorf("next = %q, want %q", evt.Next, "idle")
 		}
 		if evt.Seq != 42 {
 			t.Errorf("seq = %d, want 42", evt.Seq)
@@ -77,7 +77,7 @@ func TestCoopStateWatcher_ReceivesExitEvent(t *testing.T) {
 		defer conn.Close()
 
 		code := 0
-		evt := ExitEvent{Type: "exit", Code: &code}
+		evt := ExitEvent{Event: "exit", Code: &code}
 		data, _ := json.Marshal(evt)
 		conn.WriteMessage(websocket.TextMessage, data)
 		time.Sleep(200 * time.Millisecond)
@@ -113,10 +113,10 @@ func TestCoopStateWatcher_StateChangeWithPrompt(t *testing.T) {
 		defer conn.Close()
 
 		evt := StateChangeEvent{
-			Type: "state_change",
-			Prev: "working",
-			Next: "permission_prompt",
-			Seq:  100,
+			Event: "transition",
+			Prev:  "working",
+			Next:  "prompt",
+			Seq:   100,
 			Prompt: &PromptContext{
 				Type:    "permission",
 				Message: "Bash: npm install",
@@ -136,8 +136,8 @@ func TestCoopStateWatcher_StateChangeWithPrompt(t *testing.T) {
 
 	select {
 	case evt := <-w.StateCh():
-		if evt.Next != "permission_prompt" {
-			t.Errorf("next = %q, want %q", evt.Next, "permission_prompt")
+		if evt.Next != "prompt" {
+			t.Errorf("next = %q, want %q", evt.Next, "prompt")
 		}
 		if evt.Prompt == nil {
 			t.Fatal("expected prompt context")
@@ -229,11 +229,11 @@ func TestCoopStateWatcher_IgnoresUnknownTypes(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Send unknown type, then state_change.
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"screen","lines":["test"]}`))
+		// Send unknown type, then transition.
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"event":"pong"}`))
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"event":"screen","lines":["test"]}`))
 
-		evt := StateChangeEvent{Type: "state_change", Prev: "starting", Next: "working", Seq: 1}
+		evt := StateChangeEvent{Event: "transition", Prev: "starting", Next: "working", Seq: 1}
 		data, _ := json.Marshal(evt)
 		conn.WriteMessage(websocket.TextMessage, data)
 		time.Sleep(200 * time.Millisecond)
@@ -291,10 +291,10 @@ func TestCoopStateWatcher_WsURL(t *testing.T) {
 		token   string
 		want    string
 	}{
-		{"http://localhost:8080", "", "ws://localhost:8080/ws?mode=state"},
-		{"https://coop.example.com", "", "wss://coop.example.com/ws?mode=state"},
-		{"http://localhost:8080", "tok", "ws://localhost:8080/ws?mode=state&token=tok"},
-		{"http://localhost:8080/", "", "ws://localhost:8080/ws?mode=state"},
+		{"http://localhost:8080", "", "ws://localhost:8080/ws?subscribe=state"},
+		{"https://coop.example.com", "", "wss://coop.example.com/ws?subscribe=state"},
+		{"http://localhost:8080", "tok", "ws://localhost:8080/ws?subscribe=state&token=tok"},
+		{"http://localhost:8080/", "", "ws://localhost:8080/ws?subscribe=state"},
 	}
 
 	for _, tt := range tests {
@@ -319,7 +319,7 @@ func TestCoopBackend_WatchState(t *testing.T) {
 		}
 		defer conn.Close()
 
-		evt := StateChangeEvent{Type: "state_change", Prev: "working", Next: "waiting_for_input", Seq: 5}
+		evt := StateChangeEvent{Event: "transition", Prev: "working", Next: "idle", Seq: 5}
 		data, _ := json.Marshal(evt)
 		conn.WriteMessage(websocket.TextMessage, data)
 		time.Sleep(200 * time.Millisecond)
@@ -337,8 +337,8 @@ func TestCoopBackend_WatchState(t *testing.T) {
 
 	select {
 	case evt := <-w.StateCh():
-		if evt.Next != "waiting_for_input" {
-			t.Errorf("next = %q, want %q", evt.Next, "waiting_for_input")
+		if evt.Next != "idle" {
+			t.Errorf("next = %q, want %q", evt.Next, "idle")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out")
