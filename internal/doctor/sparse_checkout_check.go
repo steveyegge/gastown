@@ -60,11 +60,20 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Add polecat worktrees
+	// Add polecat worktrees (nested structure: polecats/<name>/<rigname>/)
 	polecatDir := filepath.Join(c.rigPath, "polecats")
 	if entries, err := os.ReadDir(polecatDir); err == nil {
+		rigName := filepath.Base(c.rigPath)
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if !entry.IsDir() {
+				continue
+			}
+			// The actual worktree is at polecats/<name>/<rigname>/
+			worktreePath := filepath.Join(polecatDir, entry.Name(), rigName)
+			if _, err := os.Stat(worktreePath); err == nil {
+				repoPaths = append(repoPaths, worktreePath)
+			} else {
+				// Fallback: legacy flat layout polecats/<name>/
 				repoPaths = append(repoPaths, filepath.Join(polecatDir, entry.Name()))
 			}
 		}

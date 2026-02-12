@@ -445,6 +445,38 @@ func TestEnsureGitignorePatterns_NarrowPatternPresent(t *testing.T) {
 	}
 }
 
+func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate an existing installation that has the old broad .claude/ pattern
+	// plus other Gas Town patterns. After upgrade, the broad pattern should be
+	// preserved (it's a superset) and no narrow pattern should be added.
+	existing := "# Gas Town (added by gt)\n.runtime/\n.claude/\n.logs/\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	err := EnsureGitignorePatterns(tmpDir)
+	if err != nil {
+		t.Fatalf("EnsureGitignorePatterns() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("Failed to read .gitignore: %v", err)
+	}
+
+	// File should be unchanged — broad .claude/ covers the narrow requirement
+	if string(content) != existing {
+		t.Errorf("File was modified during upgrade.\nGot: %q\nWant: %q", string(content), existing)
+	}
+
+	// Narrow pattern should NOT be added (superset already present)
+	if containsLine(string(content), ".claude/settings.local.json") {
+		t.Error(".claude/settings.local.json should not be added when .claude/ already covers it")
+	}
+}
+
 // Helper functions
 
 func containsLine(content, pattern string) bool {

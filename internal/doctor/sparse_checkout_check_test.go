@@ -179,7 +179,8 @@ func TestSparseCheckoutCheck_MultipleReposWithLegacySparseCheckout(t *testing.T)
 	initGitRepo(t, crewAgent)
 	configureLegacySparseCheckout(t, crewAgent)
 
-	polecat := filepath.Join(rigDir, "polecats", "pc1")
+	// Polecat worktrees use nested layout: polecats/<name>/<rigname>/
+	polecat := filepath.Join(rigDir, "polecats", "pc1", "testrig")
 	initGitRepo(t, polecat)
 	configureLegacySparseCheckout(t, polecat)
 
@@ -226,6 +227,55 @@ func TestSparseCheckoutCheck_MixedRepos(t *testing.T) {
 	}
 	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "mayor/rig") {
 		t.Errorf("expected details to contain only mayor/rig, got %v", result.Details)
+	}
+}
+
+func TestSparseCheckoutCheck_PolecatNestedWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Polecat worktrees use nested layout: polecats/<name>/<rigname>/
+	polecatWorktree := filepath.Join(rigDir, "polecats", "pc1", rigName)
+	initGitRepo(t, polecatWorktree)
+	configureLegacySparseCheckout(t, polecatWorktree)
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning for polecat nested worktree, got %v", result.Status)
+	}
+	if !strings.Contains(result.Message, "1 repo(s) have legacy") {
+		t.Errorf("expected message about 1 legacy repo, got %q", result.Message)
+	}
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "polecats/pc1/"+rigName) {
+		t.Errorf("expected details to contain polecats/pc1/%s, got %v", rigName, result.Details)
+	}
+}
+
+func TestSparseCheckoutCheck_PolecatLegacyFlatLayout(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Legacy flat layout: polecats/<name>/ is the worktree directly
+	polecatFlat := filepath.Join(rigDir, "polecats", "pc1")
+	initGitRepo(t, polecatFlat)
+	configureLegacySparseCheckout(t, polecatFlat)
+
+	check := NewSparseCheckoutCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning for polecat flat layout, got %v", result.Status)
+	}
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "polecats/pc1") {
+		t.Errorf("expected details to contain polecats/pc1, got %v", result.Details)
 	}
 }
 
