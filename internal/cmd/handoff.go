@@ -489,7 +489,7 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Note: agentEnv is intentionally nil when gtRole is empty (non-role handoffs),
 	// which causes the nil map lookup to return ("", false) — clearing NODE_OPTIONS.
 	if val, hasNodeOpts := agentEnv["NODE_OPTIONS"]; hasNodeOpts {
-		exports = append(exports, "NODE_OPTIONS="+val)
+		exports = append(exports, fmt.Sprintf("NODE_OPTIONS=%q", val))
 	} else {
 		exports = append(exports, "NODE_OPTIONS=")
 	}
