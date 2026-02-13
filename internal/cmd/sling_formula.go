@@ -218,7 +218,7 @@ func runSlingFormula(args []string) error {
 	if resolved.NewPolecatInfo != nil && resolved.NewPolecatInfo.DoltBranch != "" {
 		if err := resolved.NewPolecatInfo.CreateDoltBranch(); err != nil {
 			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
-			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "")
 			return fmt.Errorf("creating Dolt branch: %w", err)
 		}
 	}
@@ -229,7 +229,7 @@ func runSlingFormula(args []string) error {
 		pane, err := resolved.NewPolecatInfo.StartSession()
 		if err != nil {
 			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
-			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane

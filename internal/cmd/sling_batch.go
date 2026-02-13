@@ -150,6 +150,8 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if formulaCooked {
 			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true, slingVars)
 			if err != nil {
+				// Best-effort: in batch mode, a formula instantiation failure should not abort or rollback the
+				// spawned polecat. We still hook the raw bead so work can proceed (e.g., missing required vars).
 				fmt.Printf("  %s Could not apply formula: %v (hooking raw bead)\n", style.Dim.Render("Warning:"), err)
 			} else {
 				fmt.Printf("  %s Formula %s applied\n", style.Bold.Render("✓"), formulaName)
