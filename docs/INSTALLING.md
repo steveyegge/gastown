@@ -99,11 +99,11 @@ export PATH="$PATH:$HOME/go/bin"
 
 ```bash
 # Create a Gas Town workspace (HQ)
-gt install ~/gt
+gt install ~/gt --shell
 
 # This creates:
 #   ~/gt/
-#   ├── CLAUDE.md          # Mayor role context
+#   ├── CLAUDE.md          # Identity anchor (run gt prime)
 #   ├── mayor/             # Mayor config and state
 #   ├── rigs/              # Project containers (initially empty)
 #   └── .beads/            # Town-level issue tracking
@@ -128,6 +128,11 @@ gt rig add myproject https://github.com/you/repo.git
 
 ```bash
 cd ~/gt
+
+gt enable              # enable Gas Town system-wide
+gt git-init            # initialize a git repo for your HQ
+gt up                  # Start all services. Use gt down or gt shutdown for stopping. 
+
 gt doctor              # Run health checks
 gt status              # Show workspace status
 ```
@@ -268,13 +273,13 @@ ssh -T git@github.com
 git config --global credential.helper cache
 ```
 
-### Beads sync issues
+### Beads issues
 
-If beads aren't syncing across clones:
+If experiencing beads problems:
 
 ```bash
 cd ~/gt/myproject/mayor/rig
-bd sync --status           # Check sync status
+bd status                  # Check database health
 bd doctor                  # Run beads health check
 ```
 

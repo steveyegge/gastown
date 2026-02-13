@@ -206,3 +206,11 @@ Dog returns to available state in the pool.
 [vars.resolved_issue]
 description = "The issue ID that just closed and needs propagation"
 required = true
+
+[vars.dependent_count]
+description = "Number of cross-rig dependents found (computed during execution)"
+default = ""
+
+[vars.witness_list]
+description = "List of Witnesses notified (computed during execution)"
+default = ""

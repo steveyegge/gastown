@@ -3,456 +3,897 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gas Town Dashboard</title>
+    <title>Gas Town Control Center</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <style>
-        :root {
-            --bg-dark: #1a1a2e;
-            --bg-card: #16213e;
-            --text-primary: #eee;
-            --text-secondary: #aaa;
-            --border: #0f3460;
-            --green: #4ade80;
-            --yellow: #facc15;
-            --red: #f87171;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            padding: 20px;
-            min-height: 100vh;
-        }
-
-        .dashboard {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .refresh-info {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-        }
-
-        .convoy-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--bg-card);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .convoy-table th,
-        .convoy-table td {
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .convoy-table th {
-            background: var(--bg-dark);
-            font-weight: 500;
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .convoy-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .convoy-table tr:hover {
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        /* Status indicators */
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-
-        .status-open .status-indicator {
-            background: var(--yellow);
-        }
-
-        .status-closed .status-indicator {
-            background: var(--green);
-        }
-
-        /* Work status badges */
-        .work-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-
-        .work-complete .work-status {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .work-active .work-status {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .work-stale .work-status {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .work-stuck .work-status {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .work-waiting .work-status {
-            background: var(--text-secondary);
-            color: var(--bg-dark);
-        }
-
-        /* Activity colors */
-        .activity-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-
-        .activity-green .activity-dot {
-            background: var(--green);
-            box-shadow: 0 0 8px var(--green);
-        }
-
-        .activity-yellow .activity-dot {
-            background: var(--yellow);
-            box-shadow: 0 0 8px var(--yellow);
-        }
-
-        .activity-red .activity-dot {
-            background: var(--red);
-            box-shadow: 0 0 8px var(--red);
-        }
-
-        .activity-unknown .activity-dot {
-            background: var(--text-secondary);
-        }
-
-        .convoy-id {
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        .convoy-title {
-            color: var(--text-secondary);
-            margin-left: 8px;
-        }
-
-        .progress {
-            font-variant-numeric: tabular-nums;
-        }
-
-        .progress-bar {
-            width: 60px;
-            height: 4px;
-            background: var(--border);
-            border-radius: 2px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: var(--green);
-            border-radius: 2px;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 48px;
-            color: var(--text-secondary);
-        }
-
-        .empty-state h2 {
-            font-size: 1.25rem;
-            margin-bottom: 8px;
-        }
-
-        .empty-state p {
-            font-size: 0.875rem;
-        }
-
-        .empty-state-inline {
-            text-align: center;
-            padding: 24px;
-            color: var(--text-secondary);
-            background: var(--bg-card);
-            border-radius: 8px;
-        }
-
-        .empty-state-inline p {
-            font-size: 0.875rem;
-            margin: 0;
-        }
-
-        .status-hint {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-            max-width: 300px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .section-header {
-            margin-top: 32px;
-            margin-bottom: 16px;
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        /* Merge queue colors */
-        .mq-green {
-            background: rgba(74, 222, 128, 0.1);
-        }
-
-        .mq-yellow {
-            background: rgba(250, 204, 21, 0.1);
-        }
-
-        .mq-red {
-            background: rgba(248, 113, 113, 0.1);
-        }
-
-        .ci-status, .merge-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-
-        .ci-pass {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .ci-fail {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .ci-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .merge-ready {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .merge-conflict {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .merge-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .pr-link {
-            color: var(--text-primary);
-            text-decoration: none;
-        }
-
-        .pr-link:hover {
-            text-decoration: underline;
-        }
-
-        .pr-title {
-            color: var(--text-secondary);
-            margin-left: 8px;
-            max-width: 400px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            display: inline-block;
-            vertical-align: middle;
-        }
-
-        /* htmx loading indicator */
-        .htmx-request .htmx-indicator {
-            opacity: 1;
-        }
-
-        .htmx-indicator {
-            opacity: 0;
-            transition: opacity 200ms ease-in;
-        }
-    </style>
+    <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
+    <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-    <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
+    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="every 10s [!window.pauseRefresh]" hx-swap="morph:outerHTML" hx-ext="morph">
         <header>
-            <h1>🚚 Gas Town Convoys</h1>
-            <span class="refresh-info">
-                Auto-refresh: every 10s
-                <span class="htmx-indicator">⟳</span>
-            </span>
+            <pre class="ascii-title">  __  __    __   _____ __  _   _  __  _    ___ __  __  _ _____ ___  __  _      ______ __  _ _____ ___ ___ 
+ / _]/  \ /' _| |_   _/__\| | | ||  \| |  / _//__\|  \| |_   _| _ \/__\| |    / _/ __|  \| |_   _| __| _ \
+| [/\ /\ |`._`.   | || \/ | 'V' || | ' | | \_| \/ | | ' | | | | v / \/ | |_  | \_| _|| | ' | | | | _|| v /
+ \__/_||_||___/   |_| \__/!_/ \_!|_|\__|  \__/\__/|_|\__| |_| |_|_\\__/|___|  \__/___|_|\__| |_| |___|_|_\</pre>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="cmd-btn" id="open-palette-btn">
+                    <span>⌘</span> Commands <kbd>⌘K</kbd>
+                </button>
+                <span class="refresh-info">
+                    Auto-refresh: 10s
+                    <span class="htmx-indicator">⟳</span>
+                </span>
+            </div>
         </header>
 
-        {{if .Convoys}}
-        <table class="convoy-table">
-            <thead>
-                <tr>
-                    <th>Status</th>
-                    <th>Convoy</th>
-                    <th>Progress</th>
-                    <th>Last Activity</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
-                    <td>
-                        <span class="work-status">{{.WorkStatus}}</span>
-                    </td>
-                    <td>
-                        <span class="convoy-id">{{.ID}}</span>
-                        <span class="convoy-title">{{.Title}}</span>
-                    </td>
-                    <td class="progress">
-                        {{.Progress}}
-                        {{if .Total}}
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+        <!-- Mayor Status Banner -->
+        <div class="mayor-banner {{if .Mayor}}{{if .Mayor.IsAttached}}attached{{else}}detached{{end}}{{else}}detached{{end}}">
+            <div class="mayor-info">
+                <span class="mayor-icon">🎩</span>
+                <span class="mayor-title">The Mayor</span>
+                {{if .Mayor}}
+                    {{if .Mayor.IsAttached}}
+                    <span class="badge badge-green">Attached</span>
+                    {{else}}
+                    <span class="badge badge-muted">Detached</span>
+                    {{end}}
+                {{else}}
+                <span class="badge badge-muted">Unknown</span>
+                {{end}}
+            </div>
+            {{if .Mayor}}{{if .Mayor.IsAttached}}
+            <div class="mayor-status">
+                <div class="mayor-stat">
+                    <span class="mayor-stat-label">Activity</span>
+                    <span class="mayor-stat-value {{if .Mayor.IsActive}}active{{else}}idle{{end}}">
+                        {{.Mayor.LastActivity}}
+                    </span>
+                </div>
+                <div class="mayor-stat">
+                    <span class="mayor-stat-label">Runtime</span>
+                    <span class="mayor-stat-value">{{.Mayor.Runtime}}</span>
+                </div>
+            </div>
+            {{end}}{{end}}
+        </div>
+
+        <!-- Summary & Alerts Banner -->
+        {{if .Summary}}
+        <div class="summary-banner">
+            <div class="summary-stats">
+                {{if .Health}}
+                <div class="stat health-stat {{if .Health.HeartbeatFresh}}healthy{{else}}unhealthy{{end}}">
+                    <span class="stat-value">{{if .Health.HeartbeatFresh}}✓{{else}}⚠{{end}}</span>
+                    <span class="stat-label">💓 {{.Health.DeaconHeartbeat}}</span>
+                </div>
+                {{end}}
+                <div class="stat">
+                    <span class="stat-value">{{.Summary.PolecatCount}}</span>
+                    <span class="stat-label">⚙️ Workers</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">{{.Summary.HookCount}}</span>
+                    <span class="stat-label">🪝 Hooks</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">{{.Summary.IssueCount}}</span>
+                    <span class="stat-label">📋 Work</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">{{.Summary.ConvoyCount}}</span>
+                    <span class="stat-label">🚚 Convoys</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">{{.Summary.EscalationCount}}</span>
+                    <span class="stat-label">⚠️ Escalations</span>
+                </div>
+            </div>
+            {{if .Summary.HasAlerts}}
+            <div class="summary-alerts">
+                {{if .Summary.StuckPolecats}}
+                <span class="alert-item alert-red">💀 {{.Summary.StuckPolecats}} stuck</span>
+                {{end}}
+                {{if .Summary.StaleHooks}}
+                <span class="alert-item alert-yellow">⏰ {{.Summary.StaleHooks}} stale hooks</span>
+                {{end}}
+                {{if .Summary.UnackedEscalations}}
+                <span class="alert-item alert-orange">🔔 {{.Summary.UnackedEscalations}} unacked</span>
+                {{end}}
+                {{if .Summary.HighPriorityIssues}}
+                <span class="alert-item alert-red">🔥 {{.Summary.HighPriorityIssues}} P1/P2</span>
+                {{end}}
+                {{if .Summary.DeadSessions}}
+                <span class="alert-item alert-red">☠️ {{.Summary.DeadSessions}} dead</span>
+                {{end}}
+            </div>
+            {{else}}
+            <div class="summary-alerts">
+                <span class="alert-item alert-green">✓ All clear</span>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+
+        <div class="panels">
+            <!-- Row 1: Convoys, Polecats, Sessions -->
+
+            <!-- Convoys Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🚚 Convoys</h2>
+                    <span class="count">{{len .Convoys}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Convoys}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Convoy</th>
+                                <th>Progress</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Convoys}}
+                            <tr class="convoy-row">
+                                <td>
+                                    {{if eq .WorkStatus "complete"}}
+                                    <span class="badge badge-green">✓</span>
+                                    {{else if eq .WorkStatus "active"}}
+                                    <span class="badge badge-green">Active</span>
+                                    {{else if eq .WorkStatus "stale"}}
+                                    <span class="badge badge-yellow">Stale</span>
+                                    {{else if eq .WorkStatus "stuck"}}
+                                    <span class="badge badge-red">Stuck</span>
+                                    {{else}}
+                                    <span class="badge badge-muted">Wait</span>
+                                    {{end}}
+                                </td>
+                                <td>
+                                    <span class="convoy-id">{{.ID}}</span>
+                                    {{if .Title}}<div class="convoy-title">{{.Title}}</div>{{end}}
+                                </td>
+                                <td>
+                                    {{.Progress}}
+                                    {{if .Total}}
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                                    </div>
+                                    {{end}}
+                                </td>
+                                <td class="{{activityClass .LastActivity}}">
+                                    <span class="activity-dot"></span>
+                                    {{.LastActivity.FormattedAge}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No active convoys</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Crew Panel (named, long-lived workers) -->
+            <div class="panel" id="crew-panel">
+                <div class="panel-header">
+                    <h2>👨‍💼 Crew</h2>
+                    <span class="count" id="crew-count">0</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <div class="loading-state" id="crew-loading">Loading crew...</div>
+                    <table id="crew-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Rig</th>
+                                <th>State</th>
+                                <th>Hook</th>
+                                <th>Activity</th>
+                                <th>Session</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="crew-tbody">
+                        </tbody>
+                    </table>
+                    <div class="empty-state" id="crew-empty" style="display: none;">
+                        <p>No crew configured</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workers Panel (polecats + refinery) -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>⚙️ Workers</h2>
+                    <span class="count">{{len .Workers}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Workers}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Worker</th>
+                                <th>Type</th>
+                                <th>Rig</th>
+                                <th>Working On</th>
+                                <th>Status</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Workers}}
+                            <tr class="{{polecatStatusClass .WorkStatus}}">
+                                <td><span class="polecat-name">{{.Name}}</span></td>
+                                <td>{{if eq .AgentType "refinery"}}<span class="badge badge-blue">refinery</span>{{else}}<span class="badge badge-muted">polecat</span>{{end}}</td>
+                                <td><span class="polecat-rig">{{.Rig}}</span></td>
+                                <td class="polecat-issue">
+                                    {{if .IssueID}}
+                                    <span class="issue-id">{{.IssueID}}</span>
+                                    <span class="issue-title">{{.IssueTitle}}</span>
+                                    {{else}}
+                                    <span class="no-issue">—</span>
+                                    {{end}}
+                                </td>
+                                <td>
+                                    {{if eq .WorkStatus "working"}}
+                                    <span class="badge badge-green">Working</span>
+                                    {{else if eq .WorkStatus "stale"}}
+                                    <span class="badge badge-yellow">Stale</span>
+                                    {{else if eq .WorkStatus "stuck"}}
+                                    <span class="badge badge-red">Stuck</span>
+                                    {{else}}
+                                    <span class="badge badge-muted">Idle</span>
+                                    {{end}}
+                                </td>
+                                <td class="{{activityClass .LastActivity}}">
+                                    <span class="activity-dot"></span>
+                                    {{.LastActivity.FormattedAge}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No polecats</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Sessions Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>📟 Sessions</h2>
+                    <span class="count">{{len .Sessions}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Sessions}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Role</th>
+                                <th>Rig</th>
+                                <th>Worker</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Sessions}}
+                            <tr>
+                                <td>
+                                    <span class="role-{{.Role}}">{{.Role}}</span>
+                                </td>
+                                <td>{{.Rig}}</td>
+                                <td>{{.Worker}}</td>
+                                <td>{{.Activity}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No active sessions</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Activity Feed Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>📜 Activity</h2>
+                    <span class="count">{{len .Activity}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body activity-feed">
+                    {{if .Activity}}
+                    <div class="feed-list">
+                        {{range .Activity}}
+                        <div class="feed-item">
+                            <span class="feed-icon">{{.Icon}}</span>
+                            <span class="feed-summary">{{.Summary}}</span>
+                            <span class="feed-time">{{.Time}}</span>
                         </div>
                         {{end}}
-                    </td>
-                    <td class="{{activityClass .LastActivity}}">
-                        <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
-                    </td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-        {{else}}
-        <div class="empty-state">
-            <h2>No convoys found</h2>
-            <p>Create a convoy with: gt convoy create &lt;name&gt; [issues...]</p>
-        </div>
-        {{end}}
+                    </div>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No recent activity</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
 
-        <h2 class="section-header">🔀 Refinery Merge Queue</h2>
-        {{if .MergeQueue}}
-        <table class="convoy-table">
-            <thead>
-                <tr>
-                    <th>PR #</th>
-                    <th>Repo</th>
-                    <th>Title</th>
-                    <th>CI Status</th>
-                    <th>Mergeable</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .MergeQueue}}
-                <tr class="{{.ColorClass}}">
-                    <td>
-                        <a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a>
-                    </td>
-                    <td>{{.Repo}}</td>
-                    <td>
-                        <span class="pr-title">{{.Title}}</span>
-                    </td>
-                    <td>
-                        {{if eq .CIStatus "pass"}}
-                        <span class="ci-status ci-pass">✓ Pass</span>
-                        {{else if eq .CIStatus "fail"}}
-                        <span class="ci-status ci-fail">✗ Fail</span>
-                        {{else}}
-                        <span class="ci-status ci-pending">⏳ Pending</span>
-                        {{end}}
-                    </td>
-                    <td>
-                        {{if eq .Mergeable "ready"}}
-                        <span class="merge-status merge-ready">Ready</span>
-                        {{else if eq .Mergeable "conflict"}}
-                        <span class="merge-status merge-conflict">Conflict</span>
-                        {{else}}
-                        <span class="merge-status merge-pending">Pending</span>
-                        {{end}}
-                    </td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-        {{else}}
-        <div class="empty-state-inline">
-            <p>No PRs in queue</p>
-        </div>
-        {{end}}
+            <!-- Row 2: Mail, Merge Queue, Escalations -->
 
-        {{if .Polecats}}
-        <h2 class="section-header">🐾 Polecat Workers</h2>
-        <table class="convoy-table">
-            <thead>
-                <tr>
-                    <th>Polecat</th>
-                    <th>Rig</th>
-                    <th>Last Activity</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Polecats}}
-                <tr>
-                    <td>
-                        <span class="convoy-id">{{.Name}}</span>
-                    </td>
-                    <td>{{.Rig}}</td>
-                    <td class="{{activityClass .LastActivity}}">
-                        <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
-                    </td>
-                    <td class="status-hint">{{.StatusHint}}</td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-        {{end}}
+            <!-- Mail Panel -->
+            <div class="panel" id="mail-panel">
+                <div class="panel-header">
+                    <h2>✉️ Mail</h2>
+                    <span class="count" id="mail-count">{{len .Mail}}</span>
+                    <div class="mail-tabs">
+                        <button class="mail-tab active" data-tab="inbox">Inbox</button>
+                        <button class="mail-tab" data-tab="all">All Traffic</button>
+                    </div>
+                    <button class="compose-btn" id="compose-mail-btn" title="Compose new message">✎</button>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <!-- Inbox view (overseer inbox via API) -->
+                    <div id="mail-list">
+                        <div class="loading-state" id="mail-loading">Loading inbox...</div>
+                        <table id="mail-table" style="display: none;">
+                            <thead>
+                                <tr>
+                                    <th>From</th>
+                                    <th>Subject</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mail-tbody">
+                            </tbody>
+                        </table>
+                        <div class="empty-state" id="mail-empty" style="display: none;">
+                            <p>No mail in inbox</p>
+                        </div>
+                    </div>
+                    <!-- All Mail view (all traffic from beads) -->
+                    <div id="mail-all" style="display: none;">
+                        {{if .Mail}}
+                        <table class="mail-all-table">
+                            <thead>
+                                <tr>
+                                    <th>From</th>
+                                    <th>To</th>
+                                    <th>Subject</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Mail}}
+                                <tr class="mail-row {{if not .Read}}mail-unread{{end}}" data-msg-id="{{.ID}}" data-from="{{.FromRaw}}">
+                                    <td class="mail-from">{{.From}}</td>
+                                    <td class="mail-to">{{.To}}</td>
+                                    <td>
+                                        {{if eq .Priority "urgent"}}<span class="priority-urgent">⚡</span>{{end}}
+                                        {{if eq .Priority "high"}}<span class="priority-high">!</span>{{end}}
+                                        <span class="mail-subject">{{.Subject}}</span>
+                                    </td>
+                                    <td class="mail-time">{{.Age}}</td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No mail traffic</p>
+                        </div>
+                        {{end}}
+                    </div>
+                    <!-- Message detail view (hidden by default) -->
+                    <div id="mail-detail" class="mail-detail" style="display: none;">
+                        <div class="mail-detail-header">
+                            <button class="mail-back-btn" id="mail-back-btn">← Back</button>
+                            <span class="mail-detail-subject" id="mail-detail-subject"></span>
+                        </div>
+                        <div class="mail-detail-meta">
+                            <span class="mail-detail-from">From: <strong id="mail-detail-from"></strong></span>
+                            <span class="mail-detail-time" id="mail-detail-time"></span>
+                        </div>
+                        <div class="mail-detail-body" id="mail-detail-body"></div>
+                        <div class="mail-detail-actions">
+                            <button class="mail-reply-btn" id="mail-reply-btn">↩ Reply</button>
+                        </div>
+                    </div>
+                    <!-- Compose form (hidden by default) -->
+                    <div id="mail-compose" class="mail-compose" style="display: none;">
+                        <div class="mail-compose-header">
+                            <button class="mail-back-btn" id="compose-back-btn">← Back</button>
+                            <span class="mail-compose-title" id="mail-compose-title">New Message</span>
+                        </div>
+                        <div class="mail-compose-form">
+                            <div class="mail-compose-field">
+                                <label for="compose-to">To:</label>
+                                <select id="compose-to" class="mail-compose-input"></select>
+                            </div>
+                            <div class="mail-compose-field">
+                                <label for="compose-subject">Subject:</label>
+                                <input type="text" id="compose-subject" class="mail-compose-input" placeholder="Enter subject...">
+                            </div>
+                            <div class="mail-compose-field">
+                                <label for="compose-body">Message:</label>
+                                <textarea id="compose-body" class="mail-compose-textarea" placeholder="Enter message..." rows="4"></textarea>
+                            </div>
+                            <input type="hidden" id="compose-reply-to" value="">
+                            <div class="mail-compose-actions">
+                                <button class="mail-send-btn" id="mail-send-btn">Send</button>
+                                <button class="mail-cancel-btn" id="compose-cancel-btn">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Merge Queue Panel -->
+            <div class="panel" id="merge-queue-panel">
+                <div class="panel-header">
+                    <h2>🔀 Merge Queue</h2>
+                    <span class="count">{{len .MergeQueue}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <!-- PR List View -->
+                    <div id="pr-list">
+                        {{if .MergeQueue}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>PR</th>
+                                    <th>Repo</th>
+                                    <th>Title</th>
+                                    <th>CI</th>
+                                    <th>Merge</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .MergeQueue}}
+                                <tr class="pr-row {{.ColorClass}}" data-pr-url="{{.URL}}" data-pr-repo="{{.Repo}}" data-pr-number="{{.Number}}">
+                                    <td><span class="pr-link">#{{.Number}}</span></td>
+                                    <td>{{.Repo}}</td>
+                                    <td class="pr-title">{{.Title}}</td>
+                                    <td>
+                                        {{if eq .CIStatus "pass"}}<span class="badge badge-green">CI Pass</span>
+                                        {{else if eq .CIStatus "fail"}}<span class="badge badge-red">CI Fail</span>
+                                        {{else}}<span class="badge badge-yellow">CI Running</span>{{end}}
+                                    </td>
+                                    <td>
+                                        {{if eq .Mergeable "ready"}}<span class="badge badge-green">Ready</span>
+                                        {{else if eq .Mergeable "conflict"}}<span class="badge badge-red">Conflict</span>
+                                        {{else}}<span class="badge badge-muted">Pending</span>{{end}}
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No PRs in queue</p>
+                        </div>
+                        {{end}}
+                    </div>
+                    <!-- PR Detail View (hidden by default) -->
+                    <div id="pr-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="pr-back-btn" class="btn-back">← Back</button>
+                            <a id="pr-detail-link" href="#" target="_blank" class="btn-link">Open in GitHub ↗</a>
+                        </div>
+                        <div class="pr-detail-content">
+                            <div class="pr-detail-title">
+                                <span id="pr-detail-state" class="pr-state"></span>
+                                <span id="pr-detail-number" class="pr-number"></span>
+                            </div>
+                            <h3 id="pr-detail-title-text"></h3>
+                            <div class="pr-detail-meta">
+                                <span id="pr-detail-author"></span>
+                                <span id="pr-detail-branches"></span>
+                                <span id="pr-detail-created"></span>
+                            </div>
+                            <div class="pr-detail-stats">
+                                <span id="pr-detail-additions" class="stat-additions"></span>
+                                <span id="pr-detail-deletions" class="stat-deletions"></span>
+                                <span id="pr-detail-files"></span>
+                            </div>
+                            <div class="pr-detail-section">
+                                <h4>Description</h4>
+                                <pre id="pr-detail-body"></pre>
+                            </div>
+                            <div id="pr-detail-labels-section" class="pr-detail-section" style="display: none;">
+                                <h4>Labels</h4>
+                                <div id="pr-detail-labels"></div>
+                            </div>
+                            <div id="pr-detail-checks-section" class="pr-detail-section" style="display: none;">
+                                <h4>Checks</h4>
+                                <div id="pr-detail-checks"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Escalations Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🚨 Escalations</h2>
+                    <span class="count{{if .Escalations}} count-alert{{end}}">{{len .Escalations}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Escalations}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Severity</th>
+                                <th>Issue</th>
+                                <th>From</th>
+                                <th>Age</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Escalations}}
+                            <tr>
+                                <td>
+                                    {{if eq .Severity "critical"}}<span class="badge badge-red">CRIT</span>
+                                    {{else if eq .Severity "high"}}<span class="badge badge-orange">HIGH</span>
+                                    {{else if eq .Severity "medium"}}<span class="badge badge-yellow">MED</span>
+                                    {{else}}<span class="badge badge-muted">LOW</span>{{end}}
+                                </td>
+                                <td>
+                                    <span class="severity-{{.Severity}}">{{.Title}}</span>
+                                    {{if .Acked}}<span class="badge badge-cyan" style="margin-left: 4px;">ACK</span>{{end}}
+                                </td>
+                                <td>{{.EscalatedBy}}</td>
+                                <td>{{.Age}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No escalations</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Row 3: Rigs, Dogs, Health -->
+
+            <!-- Rigs Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🏗️ Rigs</h2>
+                    <span class="count">{{len .Rigs}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Rigs}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Polecats</th>
+                                <th>Crew</th>
+                                <th>Agents</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Rigs}}
+                            <tr>
+                                <td><span class="rig-name">{{.Name}}</span></td>
+                                <td>{{.PolecatCount}}</td>
+                                <td>{{.CrewCount}}</td>
+                                <td class="agent-icons">
+                                    <span class="agent-icon{{if .HasWitness}} active{{end}}" title="Witness">👁</span>
+                                    <span class="agent-icon{{if .HasRefinery}} active{{end}}" title="Refinery">⚗️</span>
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No rigs configured</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Dogs Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🐕 Dogs</h2>
+                    <span class="count">{{len .Dogs}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Dogs}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>State</th>
+                                <th>Work</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Dogs}}
+                            <tr>
+                                <td><span class="polecat-name">{{.Name}}</span></td>
+                                <td>
+                                    {{if eq .State "idle"}}<span class="badge badge-green">Idle</span>
+                                    {{else}}<span class="badge badge-yellow">Working</span>{{end}}
+                                </td>
+                                <td class="status-hint">{{.Work}}</td>
+                                <td>{{.LastActive}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No dogs in kennel</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Queues Panel (optional, only show if there are queues) -->
+            {{if .Queues}}
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>📋 Queues</h2>
+                    <span class="count">{{len .Queues}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Queue</th>
+                                <th>Status</th>
+                                <th>Avail</th>
+                                <th>Proc</th>
+                                <th>Done</th>
+                                <th>Fail</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Queues}}
+                            <tr>
+                                <td>{{.Name}}</td>
+                                <td>
+                                    {{if eq .Status "active"}}<span class="badge badge-green">Active</span>
+                                    {{else if eq .Status "paused"}}<span class="badge badge-yellow">Paused</span>
+                                    {{else}}<span class="badge badge-muted">Closed</span>{{end}}
+                                </td>
+                                <td>{{.Available}}</td>
+                                <td>{{.Processing}}</td>
+                                <td>{{.Completed}}</td>
+                                <td>{{if .Failed}}<span class="severity-high">{{.Failed}}</span>{{else}}0{{end}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {{end}}
+
+            <!-- Work Panel (Combined Issues + Ready Work) -->
+            <div class="panel" id="work-panel">
+                <div class="panel-header">
+                    <h2>📋 Work</h2>
+                    <span class="count">{{len .Issues}}</span>
+                    <button class="new-issue-btn" onclick="openIssueModal()">+ New</button>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-tabs">
+                    <button class="tab-btn active" data-tab="ready" onclick="switchWorkTab('ready')">Ready</button>
+                    <button class="tab-btn" data-tab="progress" onclick="switchWorkTab('progress')">In Progress</button>
+                    <button class="tab-btn" data-tab="all" onclick="switchWorkTab('all')">All</button>
+                </div>
+                <div class="panel-body">
+                    <!-- Issues List View -->
+                    <div id="issues-list">
+                        {{if .Issues}}
+                        <table id="work-table">
+                            <thead>
+                                <tr>
+                                    <th>Pri</th>
+                                    <th>ID</th>
+                                    <th>Title</th>
+                                    <th>Status</th>
+                                    <th>Age</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Issues}}
+                                <tr class="issue-row priority-{{.Priority}}" data-issue-id="{{.ID}}" data-status="{{if .Assignee}}progress{{else}}ready{{end}}">
+                                    <td>
+                                        {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
+                                        {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
+                                        {{else if eq .Priority 3}}<span class="badge badge-yellow">P3</span>
+                                        {{else}}<span class="badge badge-muted">P4</span>{{end}}
+                                    </td>
+                                    <td><span class="issue-id">{{.ID}}</span></td>
+                                    <td class="issue-title">{{.Title}}</td>
+                                    <td class="issue-status">
+                                        {{if .Assignee}}<span class="badge badge-blue" title="{{.Assignee}}">{{.Assignee}}</span>{{else}}<span class="badge badge-green">Ready</span>{{end}}
+                                    </td>
+                                    <td>{{.Age}}</td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No work items</p>
+                        </div>
+                        {{end}}
+                    </div>
+                    <!-- Issue Detail View (hidden by default) -->
+                    <div id="issue-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="issue-back-btn" class="btn-back">← Back</button>
+                        </div>
+                        <div class="issue-detail-content">
+                            <div class="issue-detail-title">
+                                <span id="issue-detail-priority" class="badge"></span>
+                                <span id="issue-detail-id" class="issue-id"></span>
+                                <span id="issue-detail-status" class="issue-status"></span>
+                            </div>
+                            <h3 id="issue-detail-title-text"></h3>
+                            <div class="issue-detail-meta">
+                                <span id="issue-detail-type"></span>
+                                <span id="issue-detail-created"></span>
+                            </div>
+                            <div class="issue-detail-section">
+                                <h4>Description</h4>
+                                <pre id="issue-detail-description"></pre>
+                            </div>
+                            <div id="issue-detail-deps" class="issue-detail-section" style="display: none;">
+                                <h4>Dependencies</h4>
+                                <div id="issue-detail-depends-on"></div>
+                            </div>
+                            <div id="issue-detail-blocks-section" class="issue-detail-section" style="display: none;">
+                                <h4>Blocks</h4>
+                                <div id="issue-detail-blocks"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hooks Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🪝 Hooks</h2>
+                    <span class="count{{if .Hooks}} {{end}}">{{len .Hooks}}</span>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    {{if .Hooks}}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Bead</th>
+                                <th>Title</th>
+                                <th>Agent</th>
+                                <th>Hooked</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Hooks}}
+                            <tr class="{{if .IsStale}}hook-stale{{end}}">
+                                <td><span class="hook-id">{{.ID}}</span></td>
+                                <td class="hook-title">{{.Title}}</td>
+                                <td class="hook-agent">{{.Agent}}</td>
+                                <td>
+                                    {{if .IsStale}}
+                                    <span class="badge badge-yellow">{{.Age}}</span>
+                                    {{else}}
+                                    {{.Age}}
+                                    {{end}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="empty-state">
+                        <p>No hooked work</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+        </div>
     </div>
+
+    <!-- Command Palette (outside HTMX-refreshed area) -->
+    <div id="command-palette-overlay" class="command-palette-overlay">
+        <div class="command-palette">
+            <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Search commands..." autocomplete="off">
+            <div id="command-palette-results" class="command-palette-results"></div>
+            <div class="command-palette-footer">
+                <span><kbd>↑↓</kbd> navigate</span>
+                <span><kbd>↵</kbd> execute</span>
+                <span><kbd>esc</kbd> close</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Output Panel -->
+    <!-- Issue Creation Modal -->
+    <div id="issue-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closeIssueModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📿 Create New Issue</h3>
+                <button class="modal-close" onclick="closeIssueModal()">✕</button>
+            </div>
+            <form id="issue-form" onsubmit="submitIssue(event)">
+                <div class="form-group">
+                    <label for="issue-title">Title *</label>
+                    <input type="text" id="issue-title" placeholder="What needs to be done?" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="issue-priority">Priority</label>
+                    <select id="issue-priority">
+                        <option value="1">🔴 P1 - Critical</option>
+                        <option value="2" selected>🟠 P2 - High (default)</option>
+                        <option value="3">🟡 P3 - Medium</option>
+                        <option value="4">⚪ P4 - Low</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="issue-description">Description (optional)</label>
+                    <textarea id="issue-description" rows="3" placeholder="Additional context or details..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeIssueModal()">Cancel</button>
+                    <button type="submit" class="btn-primary" id="issue-submit-btn">Create Issue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="output-panel" class="output-panel">
+        <div class="output-panel-header">
+            <span class="output-panel-title">
+                <span>📋</span>
+                <span id="output-panel-cmd">Command Output</span>
+            </span>
+            <div class="output-panel-actions">
+                <button id="output-copy-btn" class="output-panel-btn">Copy</button>
+                <button id="output-close-btn" class="output-panel-btn">Close</button>
+            </div>
+        </div>
+        <div id="output-panel-content" class="output-panel-content"></div>
+    </div>
+
+    <script src="/static/dashboard.js?v=2"></script>
 </body>
 </html>

@@ -20,7 +20,19 @@ import (
 func setupRoutingTestTown(t *testing.T) string {
 	t.Helper()
 
-	townRoot := t.TempDir()
+	townRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	// Create mayor/town.json so FindTownRoot() can detect this as a Gas Town root
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
 
 	// Create town-level .beads directory
 	townBeadsDir := filepath.Join(townRoot, ".beads")
@@ -30,9 +42,9 @@ func setupRoutingTestTown(t *testing.T) string {
 
 	// Create routes.jsonl with multiple rigs
 	routes := []beads.Route{
-		{Prefix: "hq-", Path: "."},                      // Town-level beads
-		{Prefix: "gt-", Path: "gastown/mayor/rig"},      // Gastown rig
-		{Prefix: "tr-", Path: "testrig/mayor/rig"},      // Test rig
+		{Prefix: "hq-", Path: "."},                 // Town-level beads
+		{Prefix: "gt-", Path: "gastown/mayor/rig"}, // Gastown rig
+		{Prefix: "tr-", Path: "testrig/mayor/rig"}, // Test rig
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -107,7 +119,7 @@ func setupRoutingTestTown(t *testing.T) string {
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "--no-daemon", "init", "--quiet", "--prefix", prefix)
+	cmd := exec.Command("bd", "init", "--quiet", "--prefix", prefix, "--backend", "dolt")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
@@ -125,7 +137,7 @@ func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 func createTestIssue(t *testing.T, dir, title string) *beads.Issue {
 	t.Helper()
 
-	args := []string{"--no-daemon", "create", "--json", "--title", title, "--type", "task",
+	args := []string{"create", "--json", "--title", title, "--type", "task",
 		"--description", "Integration test issue"}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir

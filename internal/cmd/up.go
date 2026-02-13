@@ -337,13 +337,6 @@ type agentResultMsg struct {
 	result    agentStartResult
 }
 
-// startRigAgentsParallel starts all Witnesses and Refineries concurrently.
-// Discovers and prefetches rigs internally. For use when rigs aren't pre-loaded.
-func startRigAgentsParallel(rigNames []string) (witnessResults, refineryResults map[string]agentStartResult) {
-	prefetchedRigs, rigErrors := prefetchRigs(rigNames)
-	return startRigAgentsWithPrefetch(rigNames, prefetchedRigs, rigErrors)
-}
-
 // startRigAgentsWithPrefetch starts all Witnesses and Refineries using pre-loaded rig configs.
 // Uses a worker pool with fixed goroutine count to limit concurrency and reduce overhead.
 func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*rig.Rig, rigErrors map[string]error) (witnessResults, refineryResults map[string]agentStartResult) {

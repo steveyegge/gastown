@@ -60,9 +60,21 @@ The Refinery owns the merge queue. Once `gt done` submits work:
 
 | Layer | Component | Lifecycle | Persistence |
 |-------|-----------|-----------|-------------|
-| **Session** | Claude (tmux pane) | Ephemeral | Cycles per step/handoff |
-| **Sandbox** | Git worktree | Persistent | Until nuke |
-| **Slot** | Name from pool | Persistent | Until nuke |
+| **Identity** | Agent bead, CV chain, work history | Permanent | Never dies |
+| **Sandbox** | Git worktree, branch, hook assignment | Ephemeral per assignment | Created on sling, nuked on done |
+| **Session** | Claude (tmux pane), context window | Ephemeral per step | Cycles per step/handoff |
+
+### Identity Layer
+
+The polecat's **identity is permanent**. It includes:
+
+- Agent bead (created once, never deleted)
+- CV chain (work history accumulates across all assignments)
+- Mailbox and attribution record
+
+Identity survives all session cycles and sandbox nukes. In the HOP model, this IS
+the polecat — everything else is infrastructure that comes and goes. See
+[Polecat Identity](#polecat-identity) below for details.
 
 ### Session Layer
 

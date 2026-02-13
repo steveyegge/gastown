@@ -11,17 +11,32 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// maxDogPoolSize is the maximum number of dogs allowed in the pool.
+// Pool dispatch auto-creates dogs up to this limit.
+const maxDogPoolSize = 4
+
 // IsDogTarget checks if target is a dog target pattern.
 // Returns the dog name (or empty for pool dispatch) and true if it's a dog target.
 // Patterns:
 //   - "deacon/dogs" -> ("", true) - dispatch to any idle dog
 //   - "deacon/dogs/alpha" -> ("alpha", true) - dispatch to specific dog
+//   - "dog:" -> ("", true) - dispatch to any idle dog (shorthand)
+//   - "dog:alpha" -> ("alpha", true) - dispatch to specific dog (shorthand)
 func IsDogTarget(target string) (dogName string, isDog bool) {
 	target = strings.ToLower(target)
 
 	// Check for exact "deacon/dogs" (pool dispatch)
-	if target == "deacon/dogs" {
+	if target == "deacon/dogs" || target == "dog:" {
 		return "", true
+	}
+
+	// Check for "dog:<name>" shorthand (like rig:polecat syntax)
+	if strings.HasPrefix(target, "dog:") {
+		name := strings.TrimPrefix(target, "dog:")
+		if name != "" && !strings.Contains(name, "/") {
+			return name, true
+		}
+		return "", true // "dog:" without name = pool dispatch
 	}
 
 	// Check for "deacon/dogs/<name>" (specific dog)
@@ -35,18 +50,33 @@ func IsDogTarget(target string) (dogName string, isDog bool) {
 	return "", false
 }
 
+// DogDispatchOptions contains options for dispatching work to a dog.
+type DogDispatchOptions struct {
+	Create            bool   // Create dog if it doesn't exist
+	WorkDesc          string // Work description (formula or bead ID)
+	DelaySessionStart bool   // If true, don't start session (caller will start later)
+}
+
 // DogDispatchInfo contains information about a dog dispatch.
 type DogDispatchInfo struct {
 	DogName string // Name of the dog
 	AgentID string // Agent ID format (deacon/dogs/<name>)
-	Pane    string // Tmux pane (empty if no session)
+	Pane    string // Tmux pane (empty if session start was delayed)
 	Spawned bool   // True if dog was spawned (new)
+
+	// Internal fields for delayed session start
+	sessionDelayed bool
+	townRoot       string
+	workDesc       string
+	rigsConfig     *config.RigsConfig
 }
 
 // DispatchToDog finds or spawns a dog for work dispatch.
 // If dogName is empty, finds an idle dog from the pool.
-// If create is true and no dogs exist, creates one.
-func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
+// If opts.Create is true and no dogs exist, creates one.
+// opts.WorkDesc is recorded in the dog's state so we know what it's working on.
+// If opts.DelaySessionStart is true, the session is not started (caller must call StartDelayedSession).
+func DispatchToDog(dogName string, opts DogDispatchOptions) (*DogDispatchInfo, error) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return nil, fmt.Errorf("finding town root: %w", err)
@@ -67,7 +97,7 @@ func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
 		// Specific dog requested
 		targetDog, err = mgr.Get(dogName)
 		if err != nil {
-			if create {
+			if opts.Create {
 				// Create the dog if it doesn't exist
 				targetDog, err = mgr.Add(dogName)
 				if err != nil {
@@ -87,38 +117,62 @@ func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
 		}
 
 		if targetDog == nil {
-			if create {
-				// No idle dogs - create one
-				newName := generateDogName(mgr)
-				targetDog, err = mgr.Add(newName)
-				if err != nil {
-					return nil, fmt.Errorf("creating dog %s: %w", newName, err)
-				}
-				fmt.Printf("✓ Created dog %s (pool was empty)\n", newName)
-				spawned = true
-			} else {
-				return nil, fmt.Errorf("no idle dogs available (use --create to add)")
+			// No idle dogs - auto-create one if pool is under max size.
+			// Pool dispatch means "send to any available dog" - if none exist,
+			// spawning one is the natural behavior (see mol-deacon-patrol:
+			// "Spawn on demand when pool is empty").
+			dogs, listErr := mgr.List()
+			if listErr != nil {
+				return nil, fmt.Errorf("listing dogs: %w", listErr)
 			}
+			if len(dogs) >= maxDogPoolSize {
+				return nil, fmt.Errorf("no idle dogs available (pool at max %d, all busy)", maxDogPoolSize)
+			}
+			newName := generateDogName(mgr)
+			targetDog, err = mgr.Add(newName)
+			if err != nil {
+				return nil, fmt.Errorf("creating dog %s: %w", newName, err)
+			}
+			fmt.Printf("✓ Auto-created dog %s (no idle dogs, pool %d/%d)\n", newName, len(dogs)+1, maxDogPoolSize)
+			spawned = true
 		}
 	}
 
-	// Mark dog as working
-	if err := mgr.SetState(targetDog.Name, dog.StateWorking); err != nil {
-		return nil, fmt.Errorf("setting dog state: %w", err)
+	// Mark dog as working with the assigned work
+	if err := mgr.AssignWork(targetDog.Name, opts.WorkDesc); err != nil {
+		return nil, fmt.Errorf("assigning work to dog: %w", err)
 	}
 
 	// Build agent ID
 	agentID := fmt.Sprintf("deacon/dogs/%s", targetDog.Name)
 
-	// Try to find tmux session for the dog (dogs may run in tmux like polecats)
-	// Dogs use the pattern gt-{town}-deacon-{name}
-	townName, _ := workspace.GetTownName(townRoot)
-	sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, targetDog.Name)
+	// If delayed start, return info for later session start
+	if opts.DelaySessionStart {
+		fmt.Printf("Dog %s assigned (session start delayed)\n", targetDog.Name)
+		return &DogDispatchInfo{
+			DogName:        targetDog.Name,
+			AgentID:        agentID,
+			Pane:           "", // No pane yet
+			Spawned:        spawned,
+			sessionDelayed: true,
+			townRoot:       townRoot,
+			workDesc:       opts.WorkDesc,
+			rigsConfig:     rigsConfig,
+		}, nil
+	}
+
+	// Ensure dog session is running (start if needed)
 	t := tmux.NewTmux()
-	var pane string
-	if has, _ := t.HasSession(sessionName); has {
-		// Get the pane from the session
-		pane, _ = getSessionPane(sessionName)
+	sessMgr := dog.NewSessionManager(t, townRoot, mgr)
+
+	sessOpts := dog.SessionStartOptions{
+		WorkDesc: opts.WorkDesc,
+	}
+	pane, err := sessMgr.EnsureRunning(targetDog.Name, sessOpts)
+	if err != nil {
+		// Log but don't fail - dog state is set, session may start later
+		fmt.Printf("Warning: could not start dog session: %v\n", err)
+		pane = ""
 	}
 
 	return &DogDispatchInfo{
@@ -127,6 +181,30 @@ func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
 		Pane:    pane,
 		Spawned: spawned,
 	}, nil
+}
+
+// StartDelayedSession starts the dog session after bead setup is complete.
+// This should only be called when DelaySessionStart was true during dispatch.
+func (d *DogDispatchInfo) StartDelayedSession() (string, error) {
+	if !d.sessionDelayed {
+		return d.Pane, nil // Session was already started
+	}
+
+	t := tmux.NewTmux()
+	mgr := dog.NewManager(d.townRoot, d.rigsConfig)
+	sessMgr := dog.NewSessionManager(t, d.townRoot, mgr)
+
+	opts := dog.SessionStartOptions{
+		WorkDesc: d.workDesc,
+	}
+	pane, err := sessMgr.EnsureRunning(d.DogName, opts)
+	if err != nil {
+		return "", fmt.Errorf("starting dog session: %w", err)
+	}
+
+	d.Pane = pane
+	d.sessionDelayed = false
+	return pane, nil
 }
 
 // generateDogName creates a unique dog name for pool expansion.

@@ -12,6 +12,7 @@ import (
 // Returns the created issue or an error.
 func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 	title := fmt.Sprintf("Dog: %s", name)
+	beadID := DogBeadIDTown(name) // Use canonical ID: hq-dog-<name>
 	labels := []string{
 		"gt:agent",
 		"role_type:dog",
@@ -21,6 +22,8 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 
 	args := []string{
 		"create", "--json",
+		"--id=" + beadID,
+		"--type=agent",
 		"--role-type=dog",
 		"--title=" + title,
 		"--labels=" + strings.Join(labels, ","),
@@ -74,9 +77,12 @@ func (b *Beads) FindDogAgentBead(name string) (*Issue, error) {
 	return nil, nil
 }
 
-// DeleteDogAgentBead finds and deletes the agent bead for a dog.
+// ResetDogAgentBead finds and resets the agent bead for a dog, preserving
+// persistent identity. Dogs, like polecats, have persistent agent beads that
+// accumulate work history across assignments. Removal transitions state to
+// "nuked" rather than deleting the bead.
 // Returns nil if the bead doesn't exist (idempotent).
-func (b *Beads) DeleteDogAgentBead(name string) error {
+func (b *Beads) ResetDogAgentBead(name string) error {
 	issue, err := b.FindDogAgentBead(name)
 	if err != nil {
 		return fmt.Errorf("finding dog bead: %w", err)
@@ -85,9 +91,10 @@ func (b *Beads) DeleteDogAgentBead(name string) error {
 		return nil // Already doesn't exist - idempotent
 	}
 
-	err = b.DeleteAgentBead(issue.ID)
+	err = b.ResetAgentBeadForReuse(issue.ID, "dog removed")
 	if err != nil {
-		return fmt.Errorf("deleting bead %s: %w", issue.ID, err)
+		return fmt.Errorf("resetting bead %s: %w", issue.ID, err)
 	}
 	return nil
 }
+

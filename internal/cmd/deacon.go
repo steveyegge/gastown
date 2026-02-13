@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -408,14 +407,18 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		return fmt.Errorf("creating deacon settings: %w", err)
+	// Ensure runtime settings exist (autonomous role needs mail in SessionStart)
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", townRoot, deaconDir)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", "", agentOverride)
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon. First run `gt deacon heartbeat`. Then check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
@@ -446,27 +449,16 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	// This prevents hangs on systems where Claude prompts for permissions.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	runtimeConfig := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}); err != nil {
-		style.PrintWarning("failed to send startup nudge: %v", err)
-	}
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
-		return fmt.Errorf("sending propulsion nudge: %w", err)
-	}
+	deaconTownRoot, _ := workspace.FindFromCwdOrError()
+	runtimeCfg := config.ResolveRoleAgentConfig("deacon", deaconTownRoot, "")
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
 
 	return nil
 }
@@ -748,19 +740,24 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get current bead update time
-	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-	if err != nil {
-		// Bead might not exist yet - that's okay
-		baselineTime = time.Time{}
-	}
-
 	// Record ping
 	agentState.RecordPing()
 
 	// Send health check nudge
 	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
 		return fmt.Errorf("sending nudge: %w", err)
+	}
+
+	// Get baseline time AFTER sending nudge to avoid false positives.
+	// If we get the time before the nudge and the bead doesn't exist (time.Time{}),
+	// any subsequent update would incorrectly appear as a response.
+	// By getting the baseline after the nudge, we ensure we're only detecting
+	// activity that happens in response to our health check.
+	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+	if err != nil {
+		// Bead might not exist yet - use current time as baseline
+		// This way only updates AFTER this point count as responses
+		baselineTime = time.Now()
 	}
 
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
@@ -1091,6 +1088,31 @@ func runDeaconStaleHooks(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("  %s %s: %s (age: %s, assignee: %s)\n",
 			status, r.BeadID, action, r.Age, r.Assignee)
+
+		// Surface partial work warnings
+		if r.PartialWork {
+			var details []string
+			if r.WorktreeDirty {
+				details = append(details, "uncommitted changes")
+			}
+			if r.UnpushedCount > 0 {
+				details = append(details, fmt.Sprintf("%d unpushed commit(s)", r.UnpushedCount))
+			}
+			fmt.Printf("    %s partial work detected: %s\n",
+				style.Bold.Render("⚠"), strings.Join(details, ", "))
+		}
+		if r.WorktreeError != "" {
+			fmt.Printf("    %s worktree check failed: %s\n",
+				style.Dim.Render("⚠"), r.WorktreeError)
+		}
+	}
+
+	// Count beads with partial work
+	partialWorkCount := 0
+	for _, r := range result.Results {
+		if r.PartialWork {
+			partialWorkCount++
+		}
 	}
 
 	// Summary
@@ -1100,6 +1122,10 @@ func runDeaconStaleHooks(cmd *cobra.Command, args []string) error {
 	} else if result.Unhooked > 0 {
 		fmt.Printf("\n%s Unhooked %d stale bead(s)\n",
 			style.Bold.Render("✓"), result.Unhooked)
+	}
+	if partialWorkCount > 0 {
+		fmt.Printf("%s %d bead(s) had partial work in worktree\n",
+			style.Bold.Render("⚠"), partialWorkCount)
 	}
 
 	return nil

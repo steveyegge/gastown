@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -73,9 +73,6 @@ const (
 // EventsFile is the name of the raw events log.
 const EventsFile = ".events.jsonl"
 
-// mutex protects concurrent writes to the events file.
-var mutex sync.Mutex
-
 // Log writes an event to the events log.
 // The event is appended to ~/gt/.events.jsonl.
 // Returns nil if logging fails (events are best-effort).
@@ -102,6 +99,8 @@ func LogAudit(eventType, actor string, payload map[string]interface{}) error {
 }
 
 // write appends an event to the events file.
+// Uses flock for cross-process synchronization — sync.Mutex only protects
+// intra-process goroutines, but multiple gt processes write concurrently.
 func write(event Event) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwd()
@@ -119,9 +118,12 @@ func write(event Event) error {
 	}
 	data = append(data, '\n')
 
-	// Append to file with proper locking
-	mutex.Lock()
-	defer mutex.Unlock()
+	// Acquire cross-process file lock
+	fl := flock.New(eventsPath + ".lock")
+	if err := fl.Lock(); err != nil {
+		return fmt.Errorf("acquiring events file lock: %w", err)
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
 
 	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: events file is non-sensitive operational data
 	if err != nil {

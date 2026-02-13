@@ -3,6 +3,7 @@ package beads
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -21,6 +22,7 @@ type AttachmentFields struct {
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
+	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -65,6 +67,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "dispatched_by", "dispatched-by", "dispatchedby":
 			fields.DispatchedBy = value
 			hasFields = true
+		case "no_merge", "no-merge", "nomerge":
+			fields.NoMerge = strings.ToLower(value) == "true"
+			hasFields = true
 		}
 	}
 
@@ -95,6 +100,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.DispatchedBy != "" {
 		lines = append(lines, "dispatched_by: "+fields.DispatchedBy)
 	}
+	if fields.NoMerge {
+		lines = append(lines, "no_merge: true")
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -117,6 +125,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"dispatched_by":     true,
 		"dispatched-by":     true,
 		"dispatchedby":      true,
+		"no_merge":          true,
+		"no-merge":          true,
+		"nomerge":           true,
 	}
 
 	// Collect non-attachment lines from existing description
@@ -547,13 +558,20 @@ type RoleConfig struct {
 	// StuckThreshold is how long a wisp can be in_progress before considered stuck.
 	// Format: duration string (e.g., "1h", "30m"). Default: 1h.
 	StuckThreshold string
+
+	// WispTTLs maps wisp types to their TTL duration strings.
+	// Stored as "wisp_ttl_<type>: <duration>" in the role bead description.
+	// Examples: wisp_ttl_patrol: 48h, wisp_ttl_error: 336h, wisp_ttl_gc_report: 24h
+	// These override rig config and hardcoded defaults for compaction policy.
+	WispTTLs map[string]string
 }
 
 // ParseRoleConfig extracts RoleConfig from a role bead's description.
 // Fields are expected as "key: value" lines. Returns nil if no config found.
 func ParseRoleConfig(description string) *RoleConfig {
 	config := &RoleConfig{
-		EnvVars: make(map[string]string),
+		EnvVars:  make(map[string]string),
+		WispTTLs: make(map[string]string),
 	}
 	hasFields := false
 
@@ -610,6 +628,13 @@ func ParseRoleConfig(description string) *RoleConfig {
 		case "stuck_threshold", "stuck-threshold", "stuckthreshold":
 			config.StuckThreshold = value
 			hasFields = true
+		default:
+			// Check for wisp_ttl_* pattern (e.g., wisp_ttl_patrol, wisp-ttl-error)
+			lowerKey := strings.ToLower(key)
+			if wispType, ok := ParseWispTTLKey(lowerKey); ok {
+				config.WispTTLs[wispType] = value
+				hasFields = true
+			}
 		}
 	}
 
@@ -617,6 +642,21 @@ func ParseRoleConfig(description string) *RoleConfig {
 		return nil
 	}
 	return config
+}
+
+// ParseWispTTLKey checks if a lowercase key matches the wisp_ttl_* pattern
+// and returns the wisp type suffix. Supports underscore, hyphen, and camelCase variants.
+// Examples: "wisp_ttl_patrol" → "patrol", "wisp-ttl-gc_report" → "gc_report"
+func ParseWispTTLKey(key string) (string, bool) {
+	for _, prefix := range []string{"wisp_ttl_", "wisp-ttl-", "wispttl"} {
+		if strings.HasPrefix(key, prefix) {
+			wispType := key[len(prefix):]
+			if wispType != "" {
+				return wispType, true
+			}
+		}
+	}
+	return "", false
 }
 
 // parseIntValue parses an integer from a string value.
@@ -649,6 +689,15 @@ func FormatRoleConfig(config *RoleConfig) string {
 	}
 	for k, v := range config.EnvVars {
 		lines = append(lines, "env_var: "+k+"="+v)
+	}
+	// Sort wisp TTL keys for deterministic output
+	wispTypes := make([]string, 0, len(config.WispTTLs))
+	for k := range config.WispTTLs {
+		wispTypes = append(wispTypes, k)
+	}
+	sort.Strings(wispTypes)
+	for _, wt := range wispTypes {
+		lines = append(lines, "wisp_ttl_"+wt+": "+config.WispTTLs[wt])
 	}
 
 	return strings.Join(lines, "\n")

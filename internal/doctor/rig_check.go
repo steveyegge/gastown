@@ -844,46 +844,19 @@ func (c *BeadsConfigValidCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Check sync status
-	cmd = exec.Command("bd", "sync", "--status")
-	cmd.Dir = c.rigPath
-	output, err := cmd.CombinedOutput()
-	c.needsSync = false
-	if err != nil {
-		// sync --status may exit non-zero if out of sync
-		outputStr := string(output)
-		if strings.Contains(outputStr, "out of sync") || strings.Contains(outputStr, "behind") {
-			c.needsSync = true
-			return &CheckResult{
-				Name:    c.Name(),
-				Status:  StatusWarning,
-				Message: "Beads out of sync",
-				Details: []string{strings.TrimSpace(outputStr)},
-				FixHint: "Run 'gt doctor --fix' or 'bd sync' to synchronize",
-			}
-		}
-	}
+	// Note: With Dolt backend, there's no sync status to check.
+	// Beads changes are persisted immediately.
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusOK,
-		Message: "Beads configured and in sync",
+		Message: "Beads configured and accessible",
 	}
 }
 
-// Fix runs bd sync if needed.
+// Fix is a no-op with Dolt backend (no sync needed).
 func (c *BeadsConfigValidCheck) Fix(ctx *CheckContext) error {
-	if !c.needsSync {
-		return nil
-	}
-
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = c.rigPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("bd sync failed: %s", string(output))
-	}
-
+	// With Dolt backend, beads changes are persisted immediately - no sync needed
 	return nil
 }
 
@@ -1042,8 +1015,10 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			return fmt.Errorf("creating .beads directory: %w", err)
 		}
 
-		// Run bd init with the configured prefix
-		cmd := exec.Command("bd", "init", "--prefix", prefix)
+		// Run bd init with the configured prefix and Dolt backend.
+		// IMPORTANT: Must pass --backend dolt --server to prevent SQLite creation.
+		// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
+		cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			// bd might not be installed - create minimal config.yaml
@@ -1204,7 +1179,6 @@ func RigChecks() []Check {
 		NewRigIsGitRepoCheck(),
 		NewGitExcludeConfiguredCheck(),
 		NewHooksPathConfiguredCheck(),
-		NewSparseCheckoutCheck(),
 		NewBareRepoRefspecCheck(),
 		NewWitnessExistsCheck(),
 		NewRefineryExistsCheck(),

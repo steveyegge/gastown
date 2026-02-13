@@ -584,11 +584,11 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		if indexModified {
 			// Acquire lock for read-modify-write operation
 			cleanupLock, lockErr := lockSessionsIndex(targetIndexPath)
-			if lockErr != nil {
-				// Best effort cleanup - proceed without lock
-				return
+			if lockErr == nil {
+				defer func() { _ = cleanupLock.Unlock() }()
 			}
-			defer func() { _ = cleanupLock.Unlock() }()
+			// Proceed with best-effort cleanup even without lock,
+			// to avoid leaving stale entries in sessions-index.json
 
 			// Re-read index, remove our entry, write it back
 			if data, err := os.ReadFile(targetIndexPath); err == nil {

@@ -7,14 +7,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"text/template"
+
+	"github.com/steveyegge/gastown/internal/templates/commands"
 )
+
+var (
+	cmdName     string
+	cmdNameOnce sync.Once
+)
+
+// CmdName returns the Gas Town CLI command name.
+// Defaults to "gt", but can be overridden with GT_COMMAND env var.
+// This allows coexistence with other tools that use "gt" (e.g., Graphite).
+func CmdName() string {
+	cmdNameOnce.Do(func() {
+		cmdName = os.Getenv("GT_COMMAND")
+		if cmdName == "" {
+			cmdName = "gt"
+		}
+	})
+	return cmdName
+}
+
+// templateFuncs provides custom functions for templates.
+var templateFuncs = template.FuncMap{
+	"cmd": CmdName, // {{ cmd }} returns the CLI command name
+}
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
-
-//go:embed commands/*.md
-var commandsFS embed.FS
 
 // Templates manages role and message templates.
 type Templates struct {
@@ -85,15 +108,15 @@ type HandoffData struct {
 func New() (*Templates, error) {
 	t := &Templates{}
 
-	// Parse role templates
-	roleTempl, err := template.ParseFS(templateFS, "roles/*.md.tmpl")
+	// Parse role templates with custom functions
+	roleTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "roles/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing role templates: %w", err)
 	}
 	t.roleTemplates = roleTempl
 
-	// Parse message templates
-	msgTempl, err := template.ParseFS(templateFS, "messages/*.md.tmpl")
+	// Parse message templates with custom functions
+	msgTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "messages/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing message templates: %w", err)
 	}
@@ -128,7 +151,7 @@ func (t *Templates) RenderMessage(name string, data interface{}) (string, error)
 
 // RoleNames returns the list of available role templates.
 func (t *Templates) RoleNames() []string {
-	return []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon"}
+	return []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon", "boot"}
 }
 
 // MessageNames returns the list of available message templates.
@@ -138,10 +161,22 @@ func (t *Templates) MessageNames() []string {
 
 // CreateMayorCLAUDEmd creates the Mayor's CLAUDE.md file at the specified directory.
 // This is used by both gt install and gt doctor --fix.
-func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations.
+func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) (bool, error) {
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	tmpl, err := New()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	data := RoleData{
@@ -155,11 +190,10 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 
 	content, err := tmpl.RenderRole("mayor", data)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(content), 0644)
+	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
 // GetAllRoleTemplates returns all role templates as a map of filename to content.
@@ -189,84 +223,35 @@ func GetAllRoleTemplates() (map[string][]byte, error) {
 // even if the source repo doesn't have them tracked.
 // If a command already exists, it is skipped (no overwrite).
 func ProvisionCommands(workspacePath string) error {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return fmt.Errorf("reading commands directory: %w", err)
-	}
+	return commands.ProvisionFor(workspacePath, "claude")
+}
 
-	// Create .claude/commands/ directory
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	if err := os.MkdirAll(commandsDir, 0755); err != nil {
-		return fmt.Errorf("creating commands directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		destPath := filepath.Join(commandsDir, entry.Name())
-
-		// Skip if command already exists (don't overwrite user customizations)
-		if _, err := os.Stat(destPath); err == nil {
-			continue
-		}
-
-		content, err := commandsFS.ReadFile("commands/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
-
-		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
-			return fmt.Errorf("writing %s: %w", entry.Name(), err)
-		}
-	}
-
-	return nil
+// ProvisionCommandsFor provisions commands for a specific agent.
+func ProvisionCommandsFor(workspacePath, agent string) error {
+	return commands.ProvisionFor(workspacePath, agent)
 }
 
 // CommandNames returns the list of embedded slash commands.
-func CommandNames() ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
-
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			names = append(names, entry.Name())
-		}
-	}
-	return names, nil
+func CommandNames() []string {
+	return commands.Names()
 }
 
 // HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
 func HasCommands(workspacePath string) bool {
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	info, err := os.Stat(commandsDir)
-	return err == nil && info.IsDir()
+	return HasCommandsFor(workspacePath, "claude")
+}
+
+// HasCommandsFor checks if a workspace has commands provisioned for an agent.
+func HasCommandsFor(workspacePath, agent string) bool {
+	return len(commands.MissingFor(workspacePath, agent)) == 0
 }
 
 // MissingCommands returns the list of embedded commands missing from the workspace.
-func MissingCommands(workspacePath string) ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
+func MissingCommands(workspacePath string) []string {
+	return commands.MissingFor(workspacePath, "claude")
+}
 
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	var missing []string
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		destPath := filepath.Join(commandsDir, entry.Name())
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			missing = append(missing, entry.Name())
-		}
-	}
-
-	return missing, nil
+// MissingCommandsFor returns missing commands for a specific agent.
+func MissingCommandsFor(workspacePath, agent string) []string {
+	return commands.MissingFor(workspacePath, agent)
 }

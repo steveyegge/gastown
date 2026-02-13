@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/google/uuid"
 )
 
@@ -96,6 +97,7 @@ func Load() (*State, error) {
 }
 
 // Save writes the state to disk atomically.
+// Uses util.EnsureDirAndWriteJSONWithPerm with 0600 permissions for security.
 func Save(s *State) error {
 	dir := StateDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -104,17 +106,7 @@ func Save(s *State) error {
 
 	s.UpdatedAt = time.Now()
 
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Atomic write via temp file
-	tmp := StatePath() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, StatePath())
+	return util.AtomicWriteJSONWithPerm(StatePath(), s, 0600)
 }
 
 // Enable enables Gas Town globally.

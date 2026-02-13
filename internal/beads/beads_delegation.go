@@ -140,14 +140,24 @@ func (b *Beads) ListDelegationsFrom(parent string) ([]*Delegation, error) {
 		return nil, fmt.Errorf("listing issues: %w", err)
 	}
 
+	// Read delegation slots directly instead of calling GetDelegation per issue,
+	// which would redundantly call Show on each issue (already listed above).
 	var delegations []*Delegation
 	for _, issue := range issues {
-		d, err := b.GetDelegation(issue.ID)
+		out, err := b.run("slot", "get", issue.ID, "delegated_from")
 		if err != nil {
-			continue // Skip issues with errors
+			continue // No delegation slot or error — skip
 		}
-		if d != nil && d.Parent == parent {
-			delegations = append(delegations, d)
+		slotValue := strings.TrimSpace(string(out))
+		if slotValue == "" || slotValue == "null" {
+			continue
+		}
+		var d Delegation
+		if err := json.Unmarshal([]byte(slotValue), &d); err != nil {
+			continue
+		}
+		if d.Parent == parent {
+			delegations = append(delegations, &d)
 		}
 	}
 

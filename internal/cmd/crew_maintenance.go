@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -41,6 +42,9 @@ func runCrewRename(cmd *cobra.Command, args []string) error {
 
 	// Perform the rename
 	if err := crewMgr.Rename(oldName, newName); err != nil {
+		if errors.Is(err, crew.ErrInvalidCrewName) {
+			return fmt.Errorf("invalid new name '%s': %w", newName, err)
+		}
 		if err == crew.ErrCrewNotFound {
 			return fmt.Errorf("crew workspace '%s' not found", oldName)
 		}
@@ -121,12 +125,6 @@ func runCrewPristine(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s git pull\n", style.Dim.Render("✓"))
 		} else if result.PullError != "" {
 			fmt.Printf("  %s git pull: %s\n", style.Bold.Render("✗"), result.PullError)
-		}
-
-		if result.Synced {
-			fmt.Printf("  %s bd sync\n", style.Dim.Render("✓"))
-		} else if result.SyncError != "" {
-			fmt.Printf("  %s bd sync: %s\n", style.Bold.Render("✗"), result.SyncError)
 		}
 	}
 

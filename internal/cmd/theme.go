@@ -379,10 +379,11 @@ func saveRigTheme(rigName, themeName string) error {
 		}
 	}
 
-	// Set theme
-	settings.Theme = &config.ThemeConfig{
-		Name: themeName,
+	// Update theme name, preserving existing RoleThemes and Custom
+	if settings.Theme == nil {
+		settings.Theme = &config.ThemeConfig{}
 	}
+	settings.Theme.Name = themeName
 
 	// Save
 	if err := config.SaveRigSettings(settingsPath, settings); err != nil {

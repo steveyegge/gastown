@@ -27,8 +27,16 @@ type DetachOptions struct {
 }
 
 // DetachMoleculeWithAudit removes molecule attachment from a pinned bead and logs the operation.
+// Uses advisory file locking to prevent concurrent read-modify-write races.
 // Returns the updated issue.
 func (b *Beads) DetachMoleculeWithAudit(pinnedBeadID string, opts DetachOptions) (*Issue, error) {
+	// Acquire per-bead lock to serialize concurrent attach/detach operations
+	unlock, err := b.lockBead(pinnedBeadID)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring bead lock: %w", err)
+	}
+	defer unlock()
+
 	// Fetch the pinned bead first to get previous state
 	issue, err := b.Show(pinnedBeadID)
 	if err != nil {
@@ -73,9 +81,10 @@ func (b *Beads) DetachMoleculeWithAudit(pinnedBeadID string, opts DetachOptions)
 }
 
 // LogDetachAudit appends an audit entry to the audit log file.
-// The audit log is stored in .beads/audit.log as JSONL format.
+// The audit log is stored in the resolved .beads directory as audit.log in JSONL format.
+// This follows any beads redirect so audit entries go to the correct location.
 func (b *Beads) LogDetachAudit(entry DetachAuditEntry) error {
-	auditPath := filepath.Join(b.workDir, ".beads", "audit.log")
+	auditPath := filepath.Join(b.getResolvedBeadsDir(), "audit.log")
 
 	// Marshal entry to JSON
 	data, err := json.Marshal(entry)

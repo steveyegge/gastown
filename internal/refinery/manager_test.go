@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -79,6 +80,54 @@ func TestManager_Queue_NoBeads(t *testing.T) {
 	}
 	// Error is expected when beads isn't initialized
 	t.Logf("Queue() returned error (expected without beads): %v", err)
+}
+
+func TestManager_Queue_FiltersClosedMergeRequests(t *testing.T) {
+	mgr, rigPath := setupTestManager(t)
+	b := beads.New(rigPath)
+	if err := b.Init("gt"); err != nil {
+		t.Skipf("bd init unavailable in test environment: %v", err)
+	}
+
+	openIssue, err := b.Create(beads.CreateOptions{
+		Title: "Open MR",
+		Type:  "merge-request",
+	})
+	if err != nil {
+		t.Fatalf("create open merge-request issue: %v", err)
+	}
+	closedIssue, err := b.Create(beads.CreateOptions{
+		Title: "Closed MR",
+		Type:  "merge-request",
+	})
+	if err != nil {
+		t.Fatalf("create closed merge-request issue: %v", err)
+	}
+	closedStatus := "closed"
+	if err := b.Update(closedIssue.ID, beads.UpdateOptions{Status: &closedStatus}); err != nil {
+		t.Fatalf("close merge-request issue: %v", err)
+	}
+
+	queue, err := mgr.Queue()
+	if err != nil {
+		t.Fatalf("Queue() error: %v", err)
+	}
+
+	var sawOpen bool
+	for _, item := range queue {
+		if item.MR == nil {
+			continue
+		}
+		if item.MR.ID == closedIssue.ID {
+			t.Fatalf("queue contains closed merge-request %s", closedIssue.ID)
+		}
+		if item.MR.ID == openIssue.ID {
+			sawOpen = true
+		}
+	}
+	if !sawOpen {
+		t.Fatalf("queue missing expected open merge-request %s", openIssue.ID)
+	}
 }
 
 func TestManager_FindMR_NoBeads(t *testing.T) {

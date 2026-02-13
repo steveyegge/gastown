@@ -41,6 +41,7 @@ type HealthReport struct {
 	Missing   int // file was deleted
 	New       int // new formula not yet installed
 	Untracked int // file exists but not in .installed.json (safe to update)
+	Error     int // file could not be read (e.g. permission denied)
 }
 
 // computeHash computes SHA256 hash of data.
@@ -148,8 +149,7 @@ func ProvisionFormulas(beadsPath string) (int, error) {
 		if _, err := os.Stat(destPath); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
-			// Log unexpected errors but continue
-			continue
+			return count, fmt.Errorf("checking %s: %w", entry.Name(), err)
 		}
 
 		content, err := formulasFS.ReadFile("formulas/" + entry.Name())
@@ -216,8 +216,9 @@ func CheckFormulaHealth(beadsPath string) (*HealthReport, error) {
 				report.New++
 			}
 		} else if err != nil {
-			// Some other error reading file
+			// Some other error reading file (e.g. permission denied)
 			status.Status = "error"
+			report.Error++
 		} else {
 			status.CurrentHash = currentHash
 

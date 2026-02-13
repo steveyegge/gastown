@@ -137,8 +137,8 @@ bd cook mol-polecat-work@latest   # Explicit latest
 
 ### Current State
 
-Crew directories (`gastown/crew/max/`) are sparse checkouts of gastown. They have:
-- Their own `.beads/formulas/` (from the checkout)
+Crew directories (`gastown/crew/max/`) are git worktrees of the rigged repo. They have:
+- Their own `.beads/formulas/` (from the worktree)
 - These can diverge from `mayor/rig/.beads/formulas/`
 
 ### The Fix
@@ -156,8 +156,8 @@ Crew directories don't have `.beads/formulas/`. Resolution falls through to:
 1. Town-level (~/gt/.beads/formulas/)
 2. System (embedded)
 
-**Option C: Sparse Checkout Exclusion**
-Exclude `.beads/formulas/` from crew sparse checkouts entirely.
+**Option C: Gitignore Exclusion**
+Exclude `.beads/formulas/` from crew worktrees via `.gitignore`.
 
 **Recommendation: Option B** - Crew shouldn't need project-level formulas. They work on the project, they don't define its workflows.
 

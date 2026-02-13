@@ -214,7 +214,7 @@ needs = ["b"]
 	}
 
 	// Output:
-	// Validation error: cycle detected involving step: a
+	// Validation error: cycle detected involving: a
 }
 
 func ExampleFormula_GetStep() {

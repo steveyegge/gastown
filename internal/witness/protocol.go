@@ -25,6 +25,9 @@ var (
 	// MERGE_FAILED <name> - refinery reporting merge failure
 	PatternMergeFailed = regexp.MustCompile(`^MERGE_FAILED\s+(\S+)`)
 
+	// MERGE_READY <polecat-name> - witness notifying refinery that work is ready
+	PatternMergeReady = regexp.MustCompile(`^MERGE_READY\s+(\S+)`)
+
 	// HANDOFF - session continuity message
 	PatternHandoff = regexp.MustCompile(`^🤝\s*HANDOFF`)
 
@@ -41,6 +44,7 @@ const (
 	ProtoHelp              ProtocolType = "help"
 	ProtoMerged            ProtocolType = "merged"
 	ProtoMergeFailed       ProtocolType = "merge_failed"
+	ProtoMergeReady        ProtocolType = "merge_ready"
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
 	ProtoUnknown           ProtocolType = "unknown"
@@ -74,6 +78,16 @@ type MergedPayload struct {
 	MergedAt    time.Time
 }
 
+// MergeReadyPayload contains parsed data from a MERGE_READY message.
+// This is sent by Witness to Refinery when a polecat completes work with a pending MR.
+type MergeReadyPayload struct {
+	PolecatName string
+	Branch      string
+	IssueID     string
+	MRID        string
+	ReadyAt     time.Time
+}
+
 // MergeFailedPayload contains parsed data from a MERGE_FAILED message.
 type MergeFailedPayload struct {
 	PolecatName string
@@ -105,6 +119,8 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoMerged
 	case PatternMergeFailed.MatchString(subject):
 		return ProtoMergeFailed
+	case PatternMergeReady.MatchString(subject):
+		return ProtoMergeReady
 	case PatternHandoff.MatchString(subject):
 		return ProtoHandoff
 	case PatternSwarmStart.MatchString(subject):
@@ -254,6 +270,41 @@ func ParseMergeFailed(subject, body string) (*MergeFailedPayload, error) {
 			payload.FailureType = strings.TrimSpace(strings.TrimPrefix(line, "FailureType:"))
 		case strings.HasPrefix(line, "Error:"):
 			payload.Error = strings.TrimSpace(strings.TrimPrefix(line, "Error:"))
+		}
+	}
+
+	return payload, nil
+}
+
+// ParseMergeReady extracts payload from a MERGE_READY message.
+// Subject format: MERGE_READY <polecat-name>
+// Body format:
+//
+//	Branch: <branch>
+//	Issue: <issue-id>
+//	MR: <mr-id>
+//	Verified: clean git state
+func ParseMergeReady(subject, body string) (*MergeReadyPayload, error) {
+	matches := PatternMergeReady.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid MERGE_READY subject: %s", subject)
+	}
+
+	payload := &MergeReadyPayload{
+		PolecatName: matches[1],
+		ReadyAt:     time.Now(),
+	}
+
+	// Parse body for structured fields
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Branch:"):
+			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		case strings.HasPrefix(line, "Issue:"):
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
+		case strings.HasPrefix(line, "MR:"):
+			payload.MRID = strings.TrimSpace(strings.TrimPrefix(line, "MR:"))
 		}
 	}
 

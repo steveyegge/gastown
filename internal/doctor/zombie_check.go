@@ -72,7 +72,7 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Check if Claude is running in this session
-		if t.IsClaudeRunning(sess) {
+		if t.IsAgentAlive(sess) {
 			healthyCount++
 		} else {
 			zombies = append(zombies, sess)
@@ -121,6 +121,13 @@ func (c *ZombieSessionCheck) Fix(ctx *CheckContext) error {
 	for _, sess := range c.zombieSessions {
 		// SAFEGUARD: Never auto-kill crew sessions (double-check)
 		if isCrewSession(sess) {
+			continue
+		}
+
+		// TOCTOU guard: re-verify Claude is still dead in this session.
+		// Between Run() identifying zombies and Fix() killing them,
+		// a Claude process may have started (e.g., session was restarted).
+		if t.IsAgentAlive(sess) {
 			continue
 		}
 

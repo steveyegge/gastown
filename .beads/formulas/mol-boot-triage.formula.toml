@@ -148,9 +148,9 @@ If you're making progress, please update your agent bead to reflect activity."
 
 **START**
 ```bash
-# Deacon is dead - daemon will restart it
-# Just log that we detected this
-echo "Boot detected dead Deacon session - daemon will restart"
+# Deacon is dead - start it immediately
+gt deacon start
+echo "Boot started Deacon session"
 ```
 
 Record action taken for status update.

@@ -204,10 +204,23 @@ func TestPrefixMismatchCheck_Mismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
 	mayorDir := filepath.Join(tmpDir, "mayor")
+	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
+	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
+	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create redirect file so ResolveBeadsDir follows it
+	if err := os.WriteFile(filepath.Join(rigRootBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,10 +266,23 @@ func TestPrefixMismatchCheck_Fix(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
 	mayorDir := filepath.Join(tmpDir, "mayor")
+	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
+	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
+	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create redirect file so ResolveBeadsDir follows it
+	if err := os.WriteFile(filepath.Join(rigRootBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -610,5 +636,82 @@ func TestRoleLabelCheck_FixMultiple(t *testing.T) {
 		if call.label != "gt:role" {
 			t.Errorf("expected label 'gt:role', got %q", call.label)
 		}
+	}
+}
+
+func TestNewDatabasePrefixCheck(t *testing.T) {
+	check := NewDatabasePrefixCheck()
+
+	if check.Name() != "database-prefix" {
+		t.Errorf("expected name 'database-prefix', got %q", check.Name())
+	}
+
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestDatabasePrefixCheck_NoRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewDatabasePrefixCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for no routes, got %v", result.Status)
+	}
+}
+
+func TestDatabasePrefixCheck_EmptyRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create empty routes.jsonl
+	routesPath := filepath.Join(beadsDir, "routes.jsonl")
+	if err := os.WriteFile(routesPath, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewDatabasePrefixCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for empty routes, got %v", result.Status)
+	}
+}
+
+func TestDatabasePrefixCheck_NoBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create routes.jsonl with a route to a non-existent beads directory
+	routesPath := filepath.Join(beadsDir, "routes.jsonl")
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}`
+	if err := os.WriteFile(routesPath, []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewDatabasePrefixCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should be OK - no beads dir for the rig is fine
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when rig beads dir doesn't exist, got %v", result.Status)
 	}
 }

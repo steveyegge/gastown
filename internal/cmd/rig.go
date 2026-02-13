@@ -2,8 +2,11 @@
 package cmd
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -60,10 +64,16 @@ The command also:
   - Creates ~/gt/plugins/ (town-level) if it doesn't exist
   - Creates <rig>/plugins/ (rig-level)
 
+Use --adopt to register an existing directory instead of creating new:
+  - Reads existing config.json if present
+  - Auto-detects git URL from origin remote (git-url argument not required)
+  - Adds entry to mayor/rigs.json
+
 Example:
   gt rig add gastown https://github.com/steveyegge/gastown
-  gt rig add my-project git@github.com:user/repo.git --prefix mp`,
-	Args: cobra.ExactArgs(2),
+  gt rig add my-project git@github.com:user/repo.git --prefix mp
+  gt rig add existing-rig --adopt`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runRigAdd,
 }
 
@@ -256,6 +266,9 @@ var (
 	rigAddPrefix       string
 	rigAddLocalRepo    string
 	rigAddBranch       string
+	rigAddAdopt        bool
+	rigAddAdoptURL     string
+	rigAddAdoptForce   bool
 	rigResetHandoff    bool
 	rigResetMail       bool
 	rigResetStale      bool
@@ -263,6 +276,8 @@ var (
 	rigResetRole       string
 	rigShutdownForce   bool
 	rigShutdownNuclear bool
+	rigRebootForce     bool
+	rigRebootNuclear   bool
 	rigStopForce       bool
 	rigStopNuclear     bool
 	rigRestartForce    bool
@@ -286,6 +301,9 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
+	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
+	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
+	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -296,7 +314,8 @@ func init() {
 	rigShutdownCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown")
 	rigShutdownCmd.Flags().BoolVar(&rigShutdownNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 
-	rigRebootCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown during reboot")
+	rigRebootCmd.Flags().BoolVarP(&rigRebootForce, "force", "f", false, "Force immediate shutdown during reboot")
+	rigRebootCmd.Flags().BoolVar(&rigRebootNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks during reboot (loses uncommitted work!)")
 
 	rigStopCmd.Flags().BoolVarP(&rigStopForce, "force", "f", false, "Force immediate shutdown")
 	rigStopCmd.Flags().BoolVar(&rigStopNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
@@ -307,7 +326,21 @@ func init() {
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// Handle --adopt mode: register existing directory
+	if rigAddAdopt {
+		return runRigAdopt(cmd, args)
+	}
+
+	// Normal add mode requires git URL
+	if len(args) < 2 {
+		return fmt.Errorf("git-url is required (or use --adopt to register an existing directory)")
+	}
 	gitURL := args[1]
+
+	if !isGitRemoteURL(gitURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
+	}
 
 	// Ensure beads (bd) is available before proceeding
 	if err := deps.EnsureBeads(true); err != nil {
@@ -360,6 +393,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving rigs config: %w", err)
 	}
 
+	// Add new rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		// Non-fatal: daemon will still work, just won't auto-manage this rig
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
 	// Add route to town-level routes.jsonl for prefix-based routing.
 	// Route points to the canonical beads location:
 	// - If source repo has .beads/ tracked in git, route to mayor/rig
@@ -390,18 +429,23 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// Create rig identity bead
 	if newRig.Config.Prefix != "" && beadsWorkDir != "" {
 		bd := beads.New(beadsWorkDir)
-		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
 		fields := &beads.RigFields{
 			Repo:   gitURL,
 			Prefix: newRig.Config.Prefix,
-			State:  "active",
+			State:  beads.RigStateActive,
 		}
-		if _, err := bd.CreateRigBead(rigBeadID, name, fields); err != nil {
+		if _, err := bd.CreateRigBead(name, fields); err != nil {
 			// Non-fatal: rig is functional without the identity bead
 			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
 		} else {
+			rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
 			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
+	}
+
+	// Sync hooks for the new rig's targets
+	if err := syncRigHooks(townRoot, name); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
 	}
 
 	elapsed := time.Since(startTime)
@@ -535,6 +579,176 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Rig %s removed from registry\n", style.Success.Render("✓"), name)
 	fmt.Printf("\nNote: Files at %s were NOT deleted.\n", filepath.Join(townRoot, name))
 	fmt.Printf("To delete: %s\n", style.Dim.Render(fmt.Sprintf("rm -rf %s", filepath.Join(townRoot, name))))
+
+	return nil
+}
+
+func runRigAdopt(_ *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rigs config
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{
+			Version: 1,
+			Rigs:    make(map[string]config.RigEntry),
+		}
+	}
+
+	// Create rig manager
+	g := git.NewGit(townRoot)
+	mgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	fmt.Printf("Adopting existing rig %s...\n", style.Bold.Render(name))
+
+	// Validate --url if provided
+	if rigAddAdoptURL != "" && !isGitRemoteURL(rigAddAdoptURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
+	}
+
+	// Register the existing rig
+	result, err := mgr.RegisterRig(rig.RegisterRigOptions{
+		Name:        name,
+		GitURL:      rigAddAdoptURL,
+		BeadsPrefix: rigAddPrefix,
+		Force:       rigAddAdoptForce,
+	})
+	if err != nil {
+		return fmt.Errorf("adopting rig: %w", err)
+	}
+
+	// Save updated config
+	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+		return fmt.Errorf("saving rigs config: %w", err)
+	}
+
+	// Add adopted rig to daemon.json patrol config (witness + refinery rigs arrays)
+	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
+		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
+	// Add route to town-level routes.jsonl for prefix-based routing
+	if result.BeadsPrefix != "" {
+		routePath := name
+		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			routePath = name + "/mayor/rig"
+		}
+		route := beads.Route{
+			Prefix: result.BeadsPrefix + "-",
+			Path:   routePath,
+		}
+		if err := beads.AppendRoute(townRoot, route); err != nil {
+			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Check for tracked beads and initialize database if missing (Issue #72)
+	rigPath := filepath.Join(townRoot, name)
+	beadsDirCandidates := []string{
+		filepath.Join(rigPath, ".beads"),
+		filepath.Join(rigPath, "mayor", "rig", ".beads"),
+	}
+	for _, beadsDir := range beadsDirCandidates {
+		if _, err := os.Stat(beadsDir); err != nil {
+			continue
+		}
+
+		// Detect prefix: try dolt backend first, fall back to issues.jsonl.
+		// With dolt, metadata.json and the database survive clone, so we can
+		// query the prefix directly via "bd config get issue_prefix".
+		prefixDetected := false
+		metadataPath := filepath.Join(beadsDir, "metadata.json")
+		if metaBytes, readErr := os.ReadFile(metadataPath); readErr == nil {
+			var meta struct {
+				Backend string `json:"backend"`
+			}
+			if json.Unmarshal(metaBytes, &meta) == nil && meta.Backend == "dolt" {
+				workDir := filepath.Dir(beadsDir)
+				bdCmd := exec.Command("bd", "config", "get", "issue_prefix")
+				bdCmd.Dir = workDir
+				if out, bdErr := bdCmd.Output(); bdErr == nil {
+					detected := strings.TrimSpace(string(out))
+					if detected != "" {
+						if rigAddPrefix != "" && strings.TrimSuffix(rigAddPrefix, "-") != detected {
+							return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
+						}
+						if result.BeadsPrefix == "" {
+							result.BeadsPrefix = detected
+						}
+						prefixDetected = true
+					}
+				}
+			}
+		}
+
+		// Fall back to issues.jsonl for non-dolt backends or if dolt detection failed
+		if !prefixDetected {
+			jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+			if f, readErr := os.Open(jsonlPath); readErr == nil {
+				scanner := bufio.NewScanner(f)
+				if scanner.Scan() {
+					var issue struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
+						// Extract prefix: everything before the last "-" segment
+						if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
+							detected := issue.ID[:lastDash]
+							if detected != "" && rigAddPrefix != "" {
+								if strings.TrimSuffix(rigAddPrefix, "-") != detected {
+									f.Close()
+									return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
+								}
+							}
+							if detected != "" && result.BeadsPrefix == "" {
+								result.BeadsPrefix = detected
+							}
+						}
+					}
+				}
+				f.Close()
+			}
+		}
+
+		// Init database if metadata.json is missing (DB files are gitignored)
+		metadataPath = filepath.Join(beadsDir, "metadata.json")
+		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+			prefix := result.BeadsPrefix
+			if prefix == "" {
+				break
+			}
+			workDir := filepath.Dir(beadsDir) // directory containing .beads/
+			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
+			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
+			initCmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
+			initCmd.Dir = workDir
+			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
+				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
+			} else {
+				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
+			}
+		}
+		break
+	}
+
+	// Print results
+	fmt.Printf("\n%s Rig %s adopted\n", style.Success.Render("✓"), name)
+	if result.FromConfig {
+		fmt.Printf("  %s Read configuration from existing config.json\n", style.Dim.Render("ℹ"))
+	}
+	fmt.Printf("  Repository: %s\n", result.GitURL)
+	fmt.Printf("  Prefix: %s\n", result.BeadsPrefix)
+	if result.DefaultBranch != "" {
+		fmt.Printf("  Default branch: %s\n", result.DefaultBranch)
+	}
 
 	return nil
 }
@@ -707,7 +921,8 @@ func runResetStale(bd *beads.Beads, dryRun bool) error {
 	return nil
 }
 
-// assigneeToSessionName converts an assignee (rig/name or rig/crew/name) to tmux session name.
+// assigneeToSessionName converts an assignee (rig/name, rig/crew/name, or rig/polecats/name)
+// to tmux session name.
 // Returns the session name and whether this is a persistent identity (crew).
 func assigneeToSessionName(assignee string) (sessionName string, isPersistent bool) {
 	parts := strings.Split(assignee, "/")
@@ -720,6 +935,10 @@ func assigneeToSessionName(assignee string) (sessionName string, isPersistent bo
 		// rig/crew/name -> gt-rig-crew-name
 		if parts[1] == "crew" {
 			return fmt.Sprintf("gt-%s-crew-%s", parts[0], parts[2]), true
+		}
+		// rig/polecats/name -> gt-rig-name
+		if parts[1] == "polecats" {
+			return fmt.Sprintf("gt-%s-%s", parts[0], parts[2]), false
 		}
 		// Other 3-part formats not recognized
 		return "", false
@@ -981,7 +1200,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
-	infos, err := polecatMgr.List()
+	infos, err := polecatMgr.ListPolecats()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
@@ -1023,6 +1242,10 @@ func runRigReboot(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
 	fmt.Printf("Rebooting rig %s...\n\n", style.Bold.Render(rigName))
+
+	// Propagate reboot flags to shutdown globals
+	rigShutdownForce = rigRebootForce
+	rigShutdownNuclear = rigRebootNuclear
 
 	// Shutdown first
 	if err := runRigShutdown(cmd, args); err != nil {
@@ -1130,9 +1353,20 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 				sessionIcon = style.Success.Render("●")
 			}
 
-			stateStr := string(p.State)
+			// Reconcile display state with tmux session liveness.
+			// Per gt-zecmc design: tmux is ground truth for observable states.
+			// If session is running but beads says done, the polecat is still alive.
+			// If session is dead but beads says working, the polecat is actually done.
+			displayState := p.State
+			if hasSession && displayState == polecat.StateDone {
+				displayState = polecat.StateWorking
+			} else if !hasSession && displayState.IsActive() {
+				displayState = polecat.StateDone
+			}
+
+			stateStr := string(displayState)
 			if p.Issue != "" {
-				stateStr = fmt.Sprintf("%s → %s", p.State, p.Issue)
+				stateStr = fmt.Sprintf("%s → %s", displayState, p.Issue)
 			}
 
 			fmt.Printf("  %s %s: %s\n", sessionIcon, p.Name, stateStr)
@@ -1244,7 +1478,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigStopForce); err != nil {
@@ -1375,7 +1609,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 1. Stop all polecat sessions
 		polecatMgr := polecat.NewSessionManager(t, r)
-		infos, err := polecatMgr.List()
+		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
 			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
@@ -1532,4 +1766,73 @@ func getRigOperationalState(townRoot, rigName string) (state string, source stri
 
 	// Default: operational
 	return "OPERATIONAL", "default"
+}
+
+// syncRigHooks syncs hooks for a specific rig's targets after rig creation.
+func syncRigHooks(townRoot, rigName string) error {
+	targets, err := hooks.DiscoverTargets(townRoot)
+	if err != nil {
+		return err
+	}
+
+	synced := 0
+	for _, target := range targets {
+		if target.Rig != rigName {
+			continue
+		}
+		if _, err := syncTarget(target, false); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: failed to sync hooks for %s: %v\n", target.DisplayKey(), err)
+			continue
+		}
+		synced++
+	}
+
+	if synced > 0 {
+		fmt.Printf("  Synced hooks for %d target(s)\n", synced)
+	}
+	return nil
+}
+
+// isGitRemoteURL returns true if s looks like a remote git URL
+// (https, http, ssh, git protocol, or SCP-style) rather than a local path.
+func isGitRemoteURL(s string) bool {
+	// Reject flag-like strings (defense-in-depth against argument injection)
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	// Reject absolute paths
+	if strings.HasPrefix(s, "/") {
+		return false
+	}
+	// Reject Windows-style paths (C:\...)
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
+		return false
+	}
+	// Reject relative paths
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		return false
+	}
+	// Reject home-relative paths
+	if strings.HasPrefix(s, "~/") {
+		return false
+	}
+	// Reject file:// URIs (local filesystem access)
+	if strings.HasPrefix(s, "file://") {
+		return false
+	}
+	// Accept known remote URL schemes
+	if strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "git://") {
+		return true
+	}
+	// Accept SCP-style SSH URLs (user@host:path) where user and host are non-empty
+	// and host contains no slashes (distinguishes from file:// or path-like strings)
+	atIdx := strings.Index(s, "@")
+	colonIdx := strings.Index(s, ":")
+	if atIdx > 0 && colonIdx > atIdx+1 && !strings.Contains(s[:colonIdx], "/") {
+		return true
+	}
+	return false
 }

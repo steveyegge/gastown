@@ -10,6 +10,30 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// determineRigBeadsPath returns the correct route path for a rig based on its actual layout.
+// Uses ResolveBeadsDir to follow any redirects (e.g., rig/.beads/redirect -> mayor/rig/.beads).
+// Falls back to the default mayor layout path if the resolved path is invalid or escapes the town root.
+func determineRigBeadsPath(townRoot, rigName string) string {
+	defaultPath := rigName + "/mayor/rig"
+	rigPath := filepath.Join(townRoot, rigName)
+	resolved := beads.ResolveBeadsDir(rigPath)
+
+	rel, err := filepath.Rel(townRoot, resolved)
+	if err != nil {
+		return defaultPath
+	}
+
+	// Normalize to forward slashes for consistent string operations on all platforms
+	rel = filepath.ToSlash(rel)
+
+	// Validate the resolved path stays within the town root
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return defaultPath
+	}
+
+	return strings.TrimSuffix(rel, "/.beads")
+}
+
 // RoutesCheck verifies that beads routing is properly configured.
 // It checks that routes.jsonl exists, all rigs have routing entries,
 // and all routes point to valid locations.
@@ -111,7 +135,8 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Check each rig has a route (by path, not just prefix from rigs.json)
 	for rigName, rigEntry := range rigsConfig.Rigs {
-		expectedPath := rigName + "/mayor/rig"
+		// Determine the correct path based on actual rig layout
+		expectedPath := determineRigBeadsPath(ctx.TownRoot, rigName)
 
 		// Check if there's already a route for this rig (by path)
 		if _, hasRoute := routeByPath[expectedPath]; hasRoute {
@@ -286,12 +311,13 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 		}
 
 		if prefix != "" && !routeMap[prefix] {
-			// Verify the rig path exists before adding
-			rigPath := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
+			// Determine the correct path based on actual rig layout
+			rigRoutePath := determineRigBeadsPath(ctx.TownRoot, rigName)
+			rigPath := filepath.Join(ctx.TownRoot, rigRoutePath)
 			if _, err := os.Stat(rigPath); err == nil {
 				route := beads.Route{
 					Prefix: prefix,
-					Path:   rigName + "/mayor/rig",
+					Path:   rigRoutePath,
 				}
 				routes = append(routes, route)
 				routeMap[prefix] = true

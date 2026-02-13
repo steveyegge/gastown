@@ -7,9 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -54,17 +51,11 @@ func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
-	// Check if session already exists
-	running, _ := t.HasSession(sessionID)
-	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
-			return ErrAlreadyRunning
-		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing zombie session: %w", err)
-		}
+	// Kill any existing zombie session (tmux alive but agent dead).
+	// Returns error if session is healthy and already running.
+	_, err := session.KillExistingSession(t, sessionID, true)
+	if err != nil {
+		return ErrAlreadyRunning
 	}
 
 	// Ensure mayor directory exists (for Claude settings)
@@ -73,61 +64,31 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
-	}
-
-	// Build startup beacon with explicit instructions (matches gt handoff behavior)
-	// This ensures the agent has clear context immediately, not after nudges arrive
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
-	})
-
-	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session in townRoot (not mayorDir) to match gt handoff behavior
-	// This ensures Mayor works from the town root where all tools work correctly
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "mayor",
-		TownRoot: m.townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
-	// Apply Mayor theming (non-fatal: theming failure doesn't affect operation)
+	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.MayorTheme()
-	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
-
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Kill the zombie session before returning error
-		_ = t.KillSessionWithProcesses(sessionID)
-		return fmt.Errorf("waiting for mayor to start: %w", err)
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID: sessionID,
+		WorkDir:   mayorDir,
+		Role:      "mayor",
+		TownRoot:  m.townRoot,
+		AgentName: "Mayor",
+		Beacon: session.BeaconConfig{
+			Recipient: "mayor",
+			Sender:    "human",
+			Topic:     "cold-start",
+		},
+		AgentOverride: agentOverride,
+		Theme:         &theme,
+		WaitForAgent:  true,
+		WaitFatal:     true,
+		AutoRespawn:   true,
+		AcceptBypass:  true,
+	})
+	if err != nil {
+		return err
 	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
-
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
+	time.Sleep(session.ShutdownDelay())
 
 	return nil
 }

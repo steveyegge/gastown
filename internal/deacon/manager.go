@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -20,15 +20,33 @@ var (
 	ErrAlreadyRunning = errors.New("deacon already running")
 )
 
+// tmuxOps abstracts tmux operations for testing.
+type tmuxOps interface {
+	HasSession(name string) (bool, error)
+	IsAgentAlive(session string) bool
+	KillSessionWithProcesses(name string) error
+	NewSessionWithCommand(name, workDir, command string) error
+	SetRemainOnExit(pane string, on bool) error
+	SetEnvironment(session, key, value string) error
+	ConfigureGasTownSession(session string, theme tmux.Theme, rig, worker, role string) error
+	WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error
+	SetAutoRespawnHook(session string) error
+	AcceptBypassPermissionsWarning(session string) error
+	SendKeysRaw(session, keys string) error
+	GetSessionInfo(name string) (*tmux.SessionInfo, error)
+}
+
 // Manager handles deacon lifecycle operations.
 type Manager struct {
 	townRoot string
+	tmux     tmuxOps
 }
 
 // NewManager creates a new deacon manager for a town.
 func NewManager(townRoot string) *Manager {
 	return &Manager{
 		townRoot: townRoot,
+		tmux:     tmux.NewTmux(),
 	}
 }
 
@@ -52,17 +70,17 @@ func (m *Manager) deaconDir() string {
 // agentOverride allows specifying an alternate agent alias (e.g., for testing).
 // Restarts are handled by daemon via ensureDeaconRunning on each heartbeat.
 func (m *Manager) Start(agentOverride string) error {
-	t := tmux.NewTmux()
+	t := m.tmux
 	sessionID := m.SessionName()
 
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -75,15 +93,17 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist in deaconDir where session runs.
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command with initial prompt for autonomous patrol.
-	// The prompt triggers GUPP: deacon starts patrol immediately without waiting for input.
-	// This prevents the agent from sitting idle at the prompt after SessionStart hooks run.
-	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -94,6 +114,11 @@ func (m *Manager) Start(agentOverride string) error {
 	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
+
+	// PATCH-010: Set remain-on-exit IMMEDIATELY after session creation.
+	// This ensures the pane stays if Claude exits before hooks are fully set.
+	// The pane will show "[Exited]" status but remain available for respawn.
+	_ = t.SetRemainOnExit(sessionID, true)
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
@@ -116,30 +141,32 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 
+	// Track PID for defense-in-depth orphan cleanup (non-fatal)
+	if realTmux, ok := t.(*tmux.Tmux); ok {
+		_ = session.TrackSessionPID(m.townRoot, sessionID, realTmux)
+	}
+
+	// PATCH-010: Set auto-respawn hook for Deacon resilience.
+	// When Claude exits (for any reason), tmux will automatically respawn it.
+	// This prevents the crash loop where daemon repeatedly restarts Deacon.
+	// Note: SetAutoRespawnHook calls SetRemainOnExit again (harmless, already set above).
+	if err := t.SetAutoRespawnHook(sessionID); err != nil {
+		// Non-fatal: Deacon still works, just won't auto-respawn on crash
+		// Daemon will still restart it, but with a delay
+		fmt.Printf("warning: failed to set auto-respawn hook for deacon: %v\n", err)
+	}
+
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
 
 	return nil
 }
 
 // Stop stops the deacon session.
 func (m *Manager) Stop() error {
-	t := tmux.NewTmux()
+	t := m.tmux
 	sessionID := m.SessionName()
 
 	// Check if session exists
@@ -167,13 +194,12 @@ func (m *Manager) Stop() error {
 
 // IsRunning checks if the deacon session is active.
 func (m *Manager) IsRunning() (bool, error) {
-	t := tmux.NewTmux()
-	return t.HasSession(m.SessionName())
+	return m.tmux.HasSession(m.SessionName())
 }
 
 // Status returns information about the deacon session.
 func (m *Manager) Status() (*tmux.SessionInfo, error) {
-	t := tmux.NewTmux()
+	t := m.tmux
 	sessionID := m.SessionName()
 
 	running, err := t.HasSession(sessionID)

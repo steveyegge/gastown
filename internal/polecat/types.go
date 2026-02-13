@@ -43,6 +43,11 @@ const (
 	// StateActive is deprecated: use StateWorking.
 	// Kept only for backward compatibility with existing data.
 	StateActive State = "active"
+
+	// StateZombie means a tmux session exists but has no corresponding worktree directory.
+	// This is a detected condition: the polecat was incompletely nuked or has a
+	// session naming mismatch, leaving an orphaned tmux session.
+	StateZombie State = "zombie"
 )
 
 // IsWorking returns true if the polecat is currently working.

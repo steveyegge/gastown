@@ -33,7 +33,12 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
+
+[vars]
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
 
 [[steps]]
 id = "inbox-check"
@@ -224,16 +229,48 @@ If tests FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on main?
 2. If branch caused it:
    - Abort merge
-   - Notify polecat: "Tests failing. Please fix and resubmit."
+   - **REOPEN the source issue** so it returns to the ready queue:
+     ```bash
+     bd update <issue-id> --status=open --assignee=""
+     bd sync
+     ```
+   - Notify witness of rejection using the MERGE_FAILED protocol:
+     ```bash
+     gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" -m "Branch: <branch>
+     Issue: <issue-id>
+     Polecat: <polecat-name>
+     Rig: <rig>
+     FailureType: tests
+     Error: <failure description>"
+     ```
+   - Close the MR bead as rejected:
+     ```bash
+     bd close <mr-bead-id> --reason "Rejected: <failure description>"
+     ```
+   - Delete the rejected branch (a new polecat will create a fresh one):
+     ```bash
+     git push origin --delete <polecat-branch>
+     ```
+   - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on main:
-   - Option A: Fix it yourself (you're the Engineer!)
-   - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
+   - File a bead: bd create --type=bug --priority=1 --title="..."
+   - FORBIDDEN: Writing code to fix test failures. You merge branches, you do not develop.
+   - Proceed with the merge if the failure is pre-existing (not caused by the branch).
+
+**REJECTION CHECKLIST** (all required before skipping to loop-check):
+- [ ] Source issue reopened (bd update <issue-id> --status=open --assignee="")
+- [ ] MERGE_FAILED notification sent to witness
+- [ ] MR bead closed with rejection reason
+- [ ] Rejected branch deleted from remote
+- [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - Tests passing, OR
-- Fix committed, OR
-- Bead filed for the failure
+- Bead filed for the pre-existing failure
+
+FORBIDDEN: Writing application code, exploring polecat implementations, or
+re-implementing fixes. You are a mechanical merge processor.
 
 This is non-negotiable. Never disavow. Never "note and proceed." """
 
@@ -251,7 +288,27 @@ git merge --ff-only temp
 git push origin main
 ```
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 2-3 COMPLETE**
+**Step 1.5: VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
+
+Push can fail silently (network, auth, hooks). IMMEDIATELY verify:
+```bash
+git fetch origin
+LOCAL_SHA=$(git rev-parse main)
+REMOTE_SHA=$(git rev-parse origin/main)
+echo "Local:  $LOCAL_SHA"
+echo "Remote: $REMOTE_SHA"
+```
+
+**If SHAs match**: Push succeeded. Continue to Step 2.
+
+**If SHAs differ**: STOP. Push failed silently.
+- DO NOT send MERGED notification
+- DO NOT close MR bead
+- DO NOT delete branch
+- Debug the push failure (check `git push` output, network, auth)
+- Retry push and verify again before proceeding
+
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
@@ -364,17 +421,36 @@ This becomes the digest when the patrol is squashed."""
 
 [[steps]]
 id = "context-check"
-title = "Check own context limit"
+title = "Assess session health"
 needs = ["generate-summary"]
 description = """
-Check own context usage.
+Assess whether this session should continue or hand off to a fresh one.
 
-If context is HIGH (>80%):
-- Write handoff summary
-- Prepare for burn/respawn
+**Gather signals:**
 
-If context is LOW:
-- Can continue processing"""
+1. **Process memory** — check your own RSS:
+```bash
+ps -o rss= -p $$   # KB — divide by 1024 for MB
+```
+
+2. **Session age** — how long has this tmux session been running:
+```bash
+CREATED=$(tmux display-message -t $(tmux display-message -p '#S') -p '#{session_created}')
+echo "Session age: $(( ($(date +%s) - CREATED) / 3600 ))h"
+```
+
+3. **Context usage** — your internal sense of how much context you've consumed.
+Are you losing track of earlier conversation? Getting verbose? Repeating yourself?
+
+4. **Work done this cycle** — how many merges, how much complexity processed.
+
+**The principle:** Fresh sessions are cheap. Memory bloat compounds over time and
+affects the entire system — other agents, Dolt, and the OS all share the same RAM.
+An idle session at 1.5 GB is worse than cycling and restarting at 200 MB.
+
+**Make a judgment call.** If multiple signals suggest you're getting heavy
+(high RSS, long session, substantial context consumed), hand off. If you're
+light and there's active work in the queue, continue."""
 
 [[steps]]
 id = "patrol-cleanup"
@@ -431,39 +507,65 @@ id = "burn-or-loop"
 title = "Burn and respawn or loop"
 needs = ["patrol-cleanup"]
 description = """
-End of patrol cycle decision.
+End of patrol cycle decision. Use the signals from context-check to decide.
 
-**Step 1: Estimate remaining context**
+**If you decide to continue patrolling:**
 
-Ask yourself:
-- Have I processed many branches this cycle?
-- Is the conversation getting long?
-- Am I starting to lose track of earlier context?
+Use await-signal with exponential backoff to wait for MQ activity:
 
-Rule of thumb: If you've done 3+ merges or processed significant cleanup work,
-it's time for a fresh session.
+```bash
+gt mol step await-signal --agent-bead gt-<rig>-refinery \
+  --backoff-base 30s --backoff-mult 2 --backoff-max 5m
+```
 
-**Step 2: Decision tree**
+This command:
+1. Subscribes to `bd activity --follow` (beads activity feed)
+2. Returns IMMEDIATELY when any beads activity occurs (e.g., MR submission)
+3. If no activity, times out with exponential backoff:
+   - First timeout: 30s
+   - Second timeout: 60s
+   - Third timeout: 120s
+   - ...capped at 5 minutes max
+4. Tracks `idle:N` label on refinery agent bead for backoff state
 
-If queue non-empty AND context LOW:
-- Squash this wisp to digest
-- Spawn fresh patrol wisp
-- Return to inbox-check
+**On signal received** (activity detected):
+Reset the idle counter and start next patrol cycle:
+```bash
+gt agent state gt-<rig>-refinery --set idle=0
+```
 
-If queue empty OR context HIGH OR good stopping point:
-- Squash wisp with summary digest
-- Use `gt handoff` for clean session transition:
+**On timeout** (no activity):
+The idle counter was auto-incremented. Continue to next patrol cycle
+(the longer backoff will apply next time).
+
+After await-signal returns (either by signal or timeout):
+1. **Re-assess session health** (check RSS, context, age again — conditions change)
+2. Squash the current wisp:
+```bash
+bd mol squash <mol-id> --summary "<patrol-summary>"
+```
+3. Create and hook a new patrol wisp:
+```bash
+NEW_WISP=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=<rig>/refinery
+```
+4. Continue executing from the inbox-check step of the new wisp
+
+**If you decide to hand off:**
+
+Squash wisp with summary digest, then use `gt handoff` for clean session transition:
 
 ```bash
 gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
 Queue: empty/N remaining
+RSS: X MB, Session age: Xh
 Next: [any notes for successor]"
 ```
 
-**Why gt handoff?**
-- Sends handoff mail to yourself with context
-- Respawns with fresh Claude instance
-- SessionStart hook runs gt prime
-- Successor picks up from your hook
+`gt handoff` sends handoff mail to yourself, respawns with a fresh Claude instance,
+SessionStart hook runs gt prime, and your successor picks up from the hook.
 
-**DO NOT just exit.** Always use `gt handoff` for proper lifecycle."""
+**DO NOT just exit.** Always use `gt handoff` for proper lifecycle.
+
+**IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
+Always use `gt mol step await-signal` — it's event-driven and tracks backoff state."""

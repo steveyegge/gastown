@@ -109,7 +109,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentClaude,
 		Command:             "claude",
 		Args:                []string{"--dangerously-skip-permissions"},
-		ProcessNames:        []string{"node"}, // Claude runs as Node.js
+		ProcessNames:        []string{"node", "claude"}, // Claude runs as Node.js
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -192,7 +192,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
-		ProcessNames:        []string{"opencode", "node"}, // Runs as Node.js
+		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
 		SessionIDEnv:        "",                           // OpenCode manages sessions internally
 		ResumeFlag:          "",                           // No resume support yet
 		ResumeStyle:         "",
@@ -253,7 +253,8 @@ func loadAgentRegistryFromPathLocked(path string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			loadedPaths[path] = true
+			// Don't cache non-existent paths — the file may be created later
+			// and we need to pick it up on the next load call.
 			return nil
 		}
 		return err
@@ -363,6 +364,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	rc := &RuntimeConfig{
+		Provider: string(info.Name),
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
 		Env:     envCopy,
@@ -374,7 +376,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		rc.Command = resolveClaudePath()
 	}
 
-	return rc
+	return normalizeRuntimeConfig(rc)
 }
 
 // BuildResumeCommand builds a command to resume an agent session.
@@ -429,8 +431,8 @@ func GetSessionIDEnvVar(agentName string) string {
 func GetProcessNames(agentName string) []string {
 	info := GetAgentPresetByName(agentName)
 	if info == nil || len(info.ProcessNames) == 0 {
-		// Default to Claude's process name for backwards compatibility
-		return []string{"node"}
+		// Default to Claude's process names for backwards compatibility
+		return []string{"node", "claude"}
 	}
 	return info.ProcessNames
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -15,7 +16,8 @@ import (
 var (
 	installRole    string
 	installAllRigs bool
-	installDryRun  bool
+	installDryRun    bool
+	hooksInstForce   bool
 )
 
 var hooksInstallCmd = &cobra.Command{
@@ -40,6 +42,7 @@ func init() {
 	hooksInstallCmd.Flags().StringVar(&installRole, "role", "", "Install to all worktrees of this role (crew, polecat, witness, refinery)")
 	hooksInstallCmd.Flags().BoolVar(&installAllRigs, "all-rigs", false, "Install across all rigs (requires --role)")
 	hooksInstallCmd.Flags().BoolVar(&installDryRun, "dry-run", false, "Preview changes without writing files")
+	hooksInstallCmd.Flags().BoolVar(&hooksInstForce, "force", false, "Install even if hook is disabled in registry")
 }
 
 func runHooksInstall(cmd *cobra.Command, args []string) error {
@@ -63,7 +66,10 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if !hookDef.Enabled {
-		fmt.Printf("%s Hook %q is disabled in registry. Use --force to install anyway.\n",
+		if !hooksInstForce {
+			return fmt.Errorf("hook %q is disabled in registry; use --force to install anyway", hookName)
+		}
+		fmt.Printf("%s Hook %q is disabled in registry, installing with --force.\n",
 			style.Warning.Render("Warning:"), hookName)
 	}
 
@@ -168,19 +174,37 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 			if entries, err := os.ReadDir(polecatsDir); err == nil {
 				for _, e := range entries {
 					if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-						targets = append(targets, filepath.Join(polecatsDir, e.Name()))
+						// New layout: polecats/<name>/<rigname>/ is the worktree
+						// Fall back to polecats/<name>/ for legacy layout
+						polecatWorkDir := filepath.Join(polecatsDir, e.Name(), rig)
+						if _, err := os.Stat(polecatWorkDir); err != nil {
+							polecatWorkDir = filepath.Join(polecatsDir, e.Name())
+						}
+						targets = append(targets, polecatWorkDir)
 					}
 				}
 			}
 		case "witness":
-			witnessPath := filepath.Join(rigPath, "witness")
-			if _, err := os.Stat(witnessPath); err == nil {
-				targets = append(targets, witnessPath)
+			// Working directory is witness/rig/ if it exists, else witness/
+			witnessRigPath := filepath.Join(rigPath, "witness", "rig")
+			if _, err := os.Stat(witnessRigPath); err == nil {
+				targets = append(targets, witnessRigPath)
+			} else {
+				witnessPath := filepath.Join(rigPath, "witness")
+				if _, err := os.Stat(witnessPath); err == nil {
+					targets = append(targets, witnessPath)
+				}
 			}
 		case "refinery":
-			refineryPath := filepath.Join(rigPath, "refinery")
-			if _, err := os.Stat(refineryPath); err == nil {
-				targets = append(targets, refineryPath)
+			// Working directory is refinery/rig/ if it exists, else refinery/
+			refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
+			if _, err := os.Stat(refineryRigPath); err == nil {
+				targets = append(targets, refineryRigPath)
+			} else {
+				refineryPath := filepath.Join(rigPath, "refinery")
+				if _, err := os.Stat(refineryPath); err == nil {
+					targets = append(targets, refineryPath)
+				}
 			}
 		}
 	}
@@ -190,45 +214,28 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 
 // installHookTo installs a hook to a specific worktree.
 func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) error {
-	settingsPath := filepath.Join(worktreePath, ".claude", "settings.json")
+	settingsPath := filepath.Join(worktreePath, ".claude", "settings.local.json")
 
 	// Load existing settings or create new
-	var settings ClaudeSettings
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parsing existing settings: %w", err)
-		}
+	settings, err := hooks.LoadSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading existing settings: %w", err)
 	}
 
-	// Initialize maps if needed
-	if settings.Hooks == nil {
-		settings.Hooks = make(map[string][]ClaudeHookMatcher)
-	}
+	// Initialize enabledPlugins if needed
 	if settings.EnabledPlugins == nil {
 		settings.EnabledPlugins = make(map[string]bool)
 	}
 
-	// Build the hook entries
+	// Build and add hook entries for each matcher
 	for _, matcher := range hookDef.Matchers {
-		hookEntry := ClaudeHookMatcher{
+		entry := hooks.HookEntry{
 			Matcher: matcher,
-			Hooks: []ClaudeHook{
+			Hooks: []hooks.Hook{
 				{Type: "command", Command: hookDef.Command},
 			},
 		}
-
-		// Check if this exact matcher already exists
-		exists := false
-		for _, existing := range settings.Hooks[hookDef.Event] {
-			if existing.Matcher == matcher {
-				exists = true
-				break
-			}
-		}
-
-		if !exists {
-			settings.Hooks[hookDef.Event] = append(settings.Hooks[hookDef.Event], hookEntry)
-		}
+		settings.Hooks.AddEntry(hookDef.Event, entry)
 	}
 
 	// Ensure beads plugin is disabled (standard for Gas Town)
@@ -257,8 +264,9 @@ func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) err
 	if err != nil {
 		return fmt.Errorf("marshaling settings: %w", err)
 	}
+	data = append(data, '\n')
 
-	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
+	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
 		return fmt.Errorf("writing settings: %w", err)
 	}
 

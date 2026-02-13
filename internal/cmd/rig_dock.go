@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -23,6 +25,7 @@ var rigDockCmd = &cobra.Command{
 Docking a rig:
   - Stops the witness if running
   - Stops the refinery if running
+  - Stops all polecat sessions if running
   - Sets status:docked label on the rig identity bead
   - Syncs via git so all clones see the docked status
 
@@ -70,8 +73,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	branchCmd := exec.Command("git", "branch", "--show-current")
 	branchOutput, err := branchCmd.Output()
 	if err == nil {
-		currentBranch := string(branchOutput)
-		currentBranch = currentBranch[:len(currentBranch)-1] // trim newline
+		currentBranch := strings.TrimSpace(string(branchOutput))
 		if currentBranch != "main" && currentBranch != "master" {
 			return fmt.Errorf("cannot dock: must be on main branch (currently on %s)\n"+
 				"Docking on other branches won't persist. Run: git checkout main", currentBranch)
@@ -99,10 +101,10 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// Rig identity bead doesn't exist (legacy rig) - create it
 		fmt.Printf("  Creating rig identity bead %s...\n", rigBeadID)
-		rigBead, err = bd.CreateRigBead(rigBeadID, rigName, &beads.RigFields{
+		rigBead, err = bd.CreateRigBead(rigName, &beads.RigFields{
 			Repo:   r.GitURL,
 			Prefix: prefix,
-			State:  "active",
+			State:  beads.RigStateActive,
 		})
 		if err != nil {
 			return fmt.Errorf("creating rig identity bead: %w", err)
@@ -149,19 +151,23 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Stop polecat sessions if any
+	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatInfos, err := polecatMgr.List()
+	if err == nil && len(polecatInfos) > 0 {
+		fmt.Printf("  Stopping %d polecat session(s)...\n", len(polecatInfos))
+		if err := polecatMgr.StopAll(false); err != nil {
+			fmt.Printf("  %s Failed to stop polecat sessions: %v\n", style.Warning.Render("!"), err)
+		} else {
+			stoppedAgents = append(stoppedAgents, fmt.Sprintf("%d polecat session(s) stopped", len(polecatInfos)))
+		}
+	}
+
 	// Set docked label on rig identity bead
 	if err := bd.Update(rigBeadID, beads.UpdateOptions{
 		AddLabels: []string{RigDockedLabel},
 	}); err != nil {
 		return fmt.Errorf("setting docked label: %w", err)
-	}
-
-	// Sync beads to propagate to other clones
-	fmt.Printf("  Syncing beads...\n")
-	syncCmd := exec.Command("bd", "sync")
-	syncCmd.Dir = r.BeadsPath()
-	if output, err := syncCmd.CombinedOutput(); err != nil {
-		fmt.Printf("  %s bd sync warning: %v\n%s", style.Warning.Render("!"), err, string(output))
 	}
 
 	// Output
@@ -170,7 +176,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	for _, msg := range stoppedAgents {
 		fmt.Printf("  %s\n", msg)
 	}
-	fmt.Printf("  Run '%s' to propagate to other clones\n", style.Dim.Render("bd sync"))
+	fmt.Printf("  Beads changes persisted via Dolt\n")
 
 	return nil
 }
@@ -182,8 +188,7 @@ func runRigUndock(cmd *cobra.Command, args []string) error {
 	branchCmd := exec.Command("git", "branch", "--show-current")
 	branchOutput, err := branchCmd.Output()
 	if err == nil {
-		currentBranch := string(branchOutput)
-		currentBranch = currentBranch[:len(currentBranch)-1] // trim newline
+		currentBranch := strings.TrimSpace(string(branchOutput))
 		if currentBranch != "main" && currentBranch != "master" {
 			return fmt.Errorf("cannot undock: must be on main branch (currently on %s)\n"+
 				"Undocking on other branches won't persist. Run: git checkout main", currentBranch)
@@ -232,14 +237,6 @@ func runRigUndock(cmd *cobra.Command, args []string) error {
 		RemoveLabels: []string{RigDockedLabel},
 	}); err != nil {
 		return fmt.Errorf("removing docked label: %w", err)
-	}
-
-	// Sync beads to propagate to other clones
-	fmt.Printf("  Syncing beads...\n")
-	syncCmd := exec.Command("bd", "sync")
-	syncCmd.Dir = r.BeadsPath()
-	if output, err := syncCmd.CombinedOutput(); err != nil {
-		fmt.Printf("  %s bd sync warning: %v\n%s", style.Warning.Render("!"), err, string(output))
 	}
 
 	fmt.Printf("%s Rig %s undocked\n", style.Success.Render("✓"), rigName)

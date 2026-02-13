@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,14 +15,14 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName      string   // "deacon", "witness", "refinery"
-	PatrolMolName string   // "mol-deacon-patrol", etc.
-	BeadsDir      string   // where to look for beads
-	Assignee      string   // agent identity for pinning
-	HeaderEmoji   string   // display emoji
-	HeaderTitle   string   // "Patrol Status", etc.
-	WorkLoopSteps []string // role-specific instructions
-	CheckInProgress bool   // whether to check in_progress status first (witness/refinery do, deacon doesn't)
+	RoleName        string   // "deacon", "witness", "refinery"
+	PatrolMolName   string   // "mol-deacon-patrol", etc.
+	BeadsDir        string   // where to look for beads
+	Assignee        string   // agent identity for pinning
+	HeaderEmoji     string   // display emoji
+	HeaderTitle     string   // "Patrol Status", etc.
+	WorkLoopSteps   []string // role-specific instructions
+	CheckInProgress bool     // whether to check in_progress status first (witness/refinery do, deacon doesn't)
 }
 
 // findActivePatrol finds an active patrol molecule for the role.
@@ -29,7 +30,7 @@ type PatrolConfig struct {
 func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool) {
 	// Check for in-progress patrol first (if configured)
 	if cfg.CheckInProgress {
-		cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
+		cmdList := exec.Command("bd", "list", "--status=in_progress", "--type=epic")
 		cmdList.Dir = cfg.BeadsDir
 		var stdoutList, stderrList bytes.Buffer
 		cmdList.Stdout = &stdoutList
@@ -52,50 +53,44 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 		}
 	}
 
-	// Check for open patrols with open children (active wisp)
-	cmdOpen := exec.Command("bd", "--no-daemon", "list", "--status=open", "--type=epic")
-	cmdOpen.Dir = cfg.BeadsDir
-	var stdoutOpen, stderrOpen bytes.Buffer
-	cmdOpen.Stdout = &stdoutOpen
-	cmdOpen.Stderr = &stderrOpen
+	// Check for hooked patrols first — autoSpawnPatrol sets status to hooked,
+	// so this is the most common state for an active patrol molecule.
+	if id, line, ok := findPatrolByStatus(cfg, "hooked"); ok {
+		return id, line, true
+	}
 
-	if err := cmdOpen.Run(); err != nil {
-		if errMsg := strings.TrimSpace(stderrOpen.String()); errMsg != "" {
+	// Check for open patrols with open children (active wisp)
+	if id, line, ok := findPatrolByStatus(cfg, "open"); ok {
+		return id, line, true
+	}
+
+	return "", "", false
+}
+
+// findPatrolByStatus searches for a patrol molecule with the given status.
+func findPatrolByStatus(cfg PatrolConfig, status string) (patrolID, patrolLine string, found bool) {
+	cmdList := exec.Command("bd", "list", "--status="+status, "--type=epic")
+	cmdList.Dir = cfg.BeadsDir
+	var stdoutList, stderrList bytes.Buffer
+	cmdList.Stdout = &stdoutList
+	cmdList.Stderr = &stderrList
+
+	if err := cmdList.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderrList.String()); errMsg != "" {
 			fmt.Fprintf(os.Stderr, "bd list: %s\n", errMsg)
 		}
-	} else {
-		lines := strings.Split(stdoutOpen.String(), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					molID := parts[0]
-					// Check if this molecule has open children
-					cmdShow := exec.Command("bd", "--no-daemon", "show", molID)
-					cmdShow.Dir = cfg.BeadsDir
-					var stdoutShow, stderrShow bytes.Buffer
-					cmdShow.Stdout = &stdoutShow
-					cmdShow.Stderr = &stderrShow
-					if err := cmdShow.Run(); err != nil {
-						if errMsg := strings.TrimSpace(stderrShow.String()); errMsg != "" {
-							fmt.Fprintf(os.Stderr, "bd show: %s\n", errMsg)
-						}
-					} else {
-						showOutput := stdoutShow.String()
-						// Deacon only checks "- open]", witness/refinery also check "- in_progress]"
-						hasOpenChildren := strings.Contains(showOutput, "- open]")
-						if cfg.CheckInProgress {
-							hasOpenChildren = hasOpenChildren || strings.Contains(showOutput, "- in_progress]")
-						}
-						if hasOpenChildren {
-							return molID, line, true
-						}
-					}
-				}
+		return "", "", false
+	}
+
+	lines := strings.Split(stdoutList.String(), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
+			parts := strings.Fields(line)
+			if len(parts) > 0 {
+				return parts[0], line, true
 			}
 		}
 	}
-
 	return "", "", false
 }
 
@@ -136,7 +131,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	cmdSpawn := exec.Command("bd", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -166,7 +161,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
-	cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
+	cmdPin := exec.Command("bd", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
 	cmdPin.Dir = cfg.BeadsDir
 	if err := cmdPin.Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
@@ -196,7 +191,7 @@ func outputPatrolContext(cfg PatrolConfig) {
 				fmt.Printf("⚠ %s\n", err.Error())
 			} else {
 				fmt.Println(style.Dim.Render(err.Error()))
-				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `gt formula list` to troubleshoot.")))
+				fmt.Println(style.Dim.Render("Run `" + cli.Name() + " formula list` to troubleshoot."))
 				return
 			}
 		} else {

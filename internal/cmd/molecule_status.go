@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -331,6 +330,11 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+		if roleCtx.Role == RoleUnknown {
+			// Fall back to GT_ROLE when cwd doesn't identify an agent
+			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
+			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
+		}
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -357,8 +361,17 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	var hookBead *beads.Issue
 
 	if agentBeadID != "" {
+		// Resolve the correct beads directory for the agent bead using prefix-based
+		// routing. This matches how updateAgentHookBead resolves the directory when
+		// setting the hook (via beads.ResolveHookDir).
+		agentBeadPath := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
+		agentB := b
+		if agentBeadPath != workDir {
+			agentB = beads.New(agentBeadPath)
+		}
+
 		// Try to fetch the agent bead
-		agentBead, err := b.Show(agentBeadID)
+		agentBead, err := agentB.Show(agentBeadID)
 		if err == nil && agentBead != nil && agentBead.Type == "agent" {
 			status.AgentBeadID = agentBeadID
 
@@ -367,8 +380,14 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			// IMPORTANT: Don't use ParseAgentFieldsFromDescription - the description
 			// field may contain stale data, causing the wrong issue to be hooked.
 			if agentBead.HookBead != "" {
-				// Fetch the bead on the hook
-				hookBead, err = b.Show(agentBead.HookBead)
+				// The hooked bead may be in a different database than the agent bead.
+				// Resolve its path using prefix-based routing.
+				hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
+				hookB := b
+				if hookBeadPath != workDir {
+					hookB = beads.New(hookBeadPath)
+				}
+				hookBead, err = hookB.Show(agentBead.HookBead)
 				if err != nil {
 					// Hook bead referenced but not found - report error but continue
 					hookBead = nil
@@ -487,6 +506,8 @@ func buildAgentIdentity(ctx RoleContext) string {
 		return "mayor/"
 	case RoleDeacon:
 		return "deacon/"
+	case RoleBoot:
+		return "deacon/boot"
 	case RoleWitness:
 		return ctx.Rig + "/witness"
 	case RoleRefinery:
@@ -760,6 +781,11 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+		if roleCtx.Role == RoleUnknown {
+			// Fall back to GT_ROLE when cwd doesn't identify an agent
+			// (e.g., at rig root like ~/gt/beads instead of ~/gt/beads/witness)
+			roleCtx, _ = GetRoleWithContext(cwd, townRoot)
+		}
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -952,23 +978,14 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 	return nil
 }
 
-// getGitRootForMolStatus returns the git root for hook file lookup.
-func getGitRootForMolStatus() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // isTownLevelRole returns true if the agent ID is a town-level role.
 // Town-level roles (Mayor, Deacon) operate from the town root and may have
 // pinned beads in any rig's beads directory.
 // Accepts both "mayor" and "mayor/" formats for compatibility.
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "mayor/" ||
-		agentID == "deacon" || agentID == "deacon/"
+		agentID == "deacon" || agentID == "deacon/" ||
+		agentID == "boot" || agentID == "deacon/boot"
 }
 
 // extractMailSender extracts the sender from mail bead labels.
@@ -995,7 +1012,14 @@ func scanAllRigsForHookedBeads(townRoot, target string) []*beads.Issue {
 
 	// Scan each rig's beads directory
 	for _, route := range routes {
-		rigBeadsDir := filepath.Join(townRoot, route.Path)
+		// Handle both absolute and relative paths in routes.jsonl
+		// Go's filepath.Join doesn't replace with absolute paths like Python
+		var rigBeadsDir string
+		if filepath.IsAbs(route.Path) {
+			rigBeadsDir = route.Path
+		} else {
+			rigBeadsDir = filepath.Join(townRoot, route.Path)
+		}
 		if _, err := os.Stat(rigBeadsDir); os.IsNotExist(err) {
 			continue
 		}

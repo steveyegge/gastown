@@ -263,8 +263,8 @@ func TestEnsureGitignorePatterns_CreatesNewFile(t *testing.T) {
 		t.Fatalf("Failed to read .gitignore: %v", err)
 	}
 
-	// Check all required patterns are present
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	// Check all required patterns are present (.beads/ intentionally excluded — see overlay.go)
+	patterns := []string{".runtime/", ".claude/settings.local.json", ".claude/commands/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -301,8 +301,8 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 		t.Error("Missing Gas Town header comment")
 	}
 
-	// Should add required patterns
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	// Should add required patterns (.beads/ intentionally excluded — see overlay.go)
+	patterns := []string{".runtime/", ".claude/settings.local.json", ".claude/commands/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -313,7 +313,9 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create existing .gitignore with some Gas Town patterns already
+	// Create existing .gitignore with some Gas Town patterns already.
+	// The broader ".claude/" covers ".claude/settings.local.json", so it should
+	// not add the narrower pattern.
 	existing := ".runtime/\n.claude/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
@@ -335,19 +337,30 @@ func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 		t.Errorf(".runtime/ appears %d times, expected 1", count)
 	}
 
-	// Should add missing patterns
-	if !containsLine(string(content), ".beads/") {
-		t.Error(".gitignore missing pattern .beads/")
+	// Broader .claude/ covers .claude/settings.local.json — no duplicate needed
+	if containsLine(string(content), ".claude/settings.local.json") {
+		t.Error(".claude/settings.local.json should not be added when .claude/ already exists (superset)")
 	}
+
+	// Should add missing patterns
 	if !containsLine(string(content), ".logs/") {
 		t.Error(".gitignore missing pattern .logs/")
+	}
+
+	// Regression guard: .beads/ must NOT be in required patterns.
+	// Beads manages its own .beads/.gitignore via bd init.
+	// Adding .beads/ here breaks bd sync. This has regressed twice
+	// (PR #753, #966). If this test fails, you're about to break polecats.
+	if containsLine(string(content), ".beads/") {
+		t.Error(".gitignore must NOT contain .beads/ - beads manages its own .gitignore (see overlay.go comment)")
 	}
 }
 
 func TestEnsureGitignorePatterns_RecognizesVariants(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create existing .gitignore with variant patterns (without trailing slash)
+	// Create existing .gitignore with variant patterns (without trailing slash).
+	// ".claude" (no trailing slash) should be recognized as covering ".claude/settings.local.json".
 	existing := ".runtime\n/.claude\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
@@ -365,19 +378,22 @@ func TestEnsureGitignorePatterns_RecognizesVariants(t *testing.T) {
 
 	// Should recognize variants and not add duplicates
 	// .runtime (no slash) should count as .runtime/
-	if containsLine(string(content), ".runtime/") && containsLine(string(content), ".runtime") {
-		// Only one should be present unless they're the same line
-		runtimeCount := countOccurrences(string(content), ".runtime")
-		if runtimeCount > 1 {
-			t.Errorf(".runtime appears %d times (variant detection failed)", runtimeCount)
-		}
+	runtimeCount := countOccurrences(string(content), ".runtime")
+	if runtimeCount > 1 {
+		t.Errorf(".runtime appears %d times (variant detection failed)", runtimeCount)
+	}
+
+	// /.claude (leading slash, no trailing slash) should cover .claude/settings.local.json
+	if containsLine(string(content), ".claude/settings.local.json") {
+		t.Error(".claude/settings.local.json should not be added when /.claude already covers it")
 	}
 }
 
 func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create existing .gitignore with all required patterns
+	// Create existing .gitignore with all required patterns.
+	// .claude/ is a superset of .claude/settings.local.json, so it covers the requirement.
 	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
@@ -401,6 +417,63 @@ func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 	// Content should match original
 	if string(content) != existing {
 		t.Errorf("File was modified when it shouldn't be.\nGot: %q\nWant: %q", string(content), existing)
+	}
+}
+
+func TestEnsureGitignorePatterns_NarrowPatternPresent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .gitignore with the exact narrow patterns
+	existing := ".runtime/\n.claude/settings.local.json\n.claude/commands/\n.logs/\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	err := EnsureGitignorePatterns(tmpDir)
+	if err != nil {
+		t.Fatalf("EnsureGitignorePatterns() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("Failed to read .gitignore: %v", err)
+	}
+
+	// File should be unchanged
+	if string(content) != existing {
+		t.Errorf("File was modified when it shouldn't be.\nGot: %q\nWant: %q", string(content), existing)
+	}
+}
+
+func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate an existing installation that has the old broad .claude/ pattern
+	// plus other Gas Town patterns. After upgrade, the broad pattern should be
+	// preserved (it's a superset) and no narrow pattern should be added.
+	existing := "# Gas Town (added by gt)\n.runtime/\n.claude/\n.logs/\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	err := EnsureGitignorePatterns(tmpDir)
+	if err != nil {
+		t.Fatalf("EnsureGitignorePatterns() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("Failed to read .gitignore: %v", err)
+	}
+
+	// File should be unchanged — broad .claude/ covers the narrow requirement
+	if string(content) != existing {
+		t.Errorf("File was modified during upgrade.\nGot: %q\nWant: %q", string(content), existing)
+	}
+
+	// Narrow pattern should NOT be added (superset already present)
+	if containsLine(string(content), ".claude/settings.local.json") {
+		t.Error(".claude/settings.local.json should not be added when .claude/ already covers it")
 	}
 }
 

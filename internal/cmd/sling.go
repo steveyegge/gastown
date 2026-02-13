@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -57,6 +59,17 @@ Natural Language Args:
 The --args string is stored in the bead and shown via gt prime. Since the
 executor is an LLM, it interprets these instructions naturally.
 
+Stdin Mode (for shell-quoting-safe multi-line content):
+  echo "review for security issues" | gt sling gt-abc gastown --stdin
+  gt sling gt-abc gastown --stdin <<'EOF'
+  Focus on:
+  1. SQL injection in query builders
+  2. XSS in template rendering
+  EOF
+
+  # With --args on CLI, stdin goes to --message:
+  echo "Extra context here" | gt sling gt-abc gastown --args "patch release" --stdin
+
 Formula Slinging:
   gt sling mol-release mayor/           # Cook + wisp + attach + nudge
   gt sling towers-of-hanoi --var disks=3
@@ -74,9 +87,11 @@ The propulsion principle: if it's on your hook, YOU RUN IT.
 
 Batch Slinging:
   gt sling gt-abc gt-def gt-ghi gastown   # Sling multiple beads to a rig
+  gt sling gt-abc gt-def gastown --max-concurrent 3  # Limit concurrent spawns
 
   When multiple beads are provided with a rig target, each bead gets its own
-  polecat. This parallelizes work dispatch without running gt sling N times.`,
+  polecat. This parallelizes work dispatch without running gt sling N times.
+  Use --max-concurrent to throttle spawn rate and prevent Dolt server overload.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runSling,
 }
@@ -88,14 +103,18 @@ var (
 	slingOnTarget    string   // --on flag: target bead when slinging a formula
 	slingVars        []string // --var flag: formula variables (key=value)
 	slingArgs        string   // --args flag: natural language instructions for executor
+	slingStdin       bool     // --stdin: read --message and/or --args from stdin
 	slingHookRawBead bool     // --hook-raw-bead: hook raw bead without default formula (expert mode)
 
 	// Flags migrated for polecat spawning (used by sling for work assignment)
-	slingCreate   bool   // --create: create polecat if it doesn't exist
-	slingForce    bool   // --force: force spawn even if polecat has unread mail
-	slingAccount  string // --account: Claude Code account handle to use
-	slingAgent    string // --agent: override runtime agent for this sling/spawn
-	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingCreate        bool   // --create: create polecat if it doesn't exist
+	slingForce         bool   // --force: force spawn even if polecat has unread mail
+	slingAccount       string // --account: Claude Code account handle to use
+	slingAgent         string // --agent: override runtime agent for this sling/spawn
+	slingNoConvoy      bool   // --no-convoy: skip auto-convoy creation
+	slingNoMerge       bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
+	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
+	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 )
 
 func init() {
@@ -105,6 +124,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingOnTarget, "on", "", "Apply formula to existing bead (implies wisp scaffolding)")
 	slingCmd.Flags().StringArrayVar(&slingVars, "var", nil, "Formula variable (key=value), can be repeated")
 	slingCmd.Flags().StringVarP(&slingArgs, "args", "a", "", "Natural language instructions for the executor (e.g., 'patch release')")
+	slingCmd.Flags().BoolVar(&slingStdin, "stdin", false, "Read --message and/or --args from stdin (avoids shell quoting issues)")
 
 	// Flags for polecat spawning (when target is a rig)
 	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
@@ -113,6 +133,9 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
+	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
+	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
+	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -123,6 +146,31 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
 	}
 
+	// Disable Dolt auto-commit for all bd commands run during sling (gt-u6n6a).
+	// Under concurrent load (batch slinging), auto-commits from individual bd writes
+	// cause manifest contention and 'database is read only' errors. The Dolt server
+	// handles commits — individual auto-commits are unnecessary.
+	os.Setenv("BD_DOLT_AUTO_COMMIT", "off")
+
+	// Handle --stdin: read message/args from stdin (avoids shell quoting issues)
+	if slingStdin {
+		if slingMessage != "" && slingArgs != "" {
+			return fmt.Errorf("cannot use --stdin when both --message and --args are already provided")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		stdinContent := strings.TrimRight(string(data), "\n")
+		if slingArgs == "" {
+			// Default: stdin populates --args (the primary instruction channel)
+			slingArgs = stdinContent
+		} else {
+			// --args already set on CLI, stdin goes to --message
+			slingMessage = stdinContent
+		}
+	}
+
 	// Get town root early - needed for BEADS_DIR when running bd commands
 	// This ensures hq-* beads are accessible even when running from polecat worktree
 	townRoot, err := workspace.FindFromCwd()
@@ -131,9 +179,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// --var is only for standalone formula mode, not formula-on-bead mode
-	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+	// Normalize target arguments: trim trailing slashes from target to handle tab-completion
+	// artifacts like "gt sling sl-123 slingshot/" → "gt sling sl-123 slingshot"
+	// This makes sling more forgiving without breaking existing functionality.
+	// Note: Internal agent IDs like "mayor/" are outputs, not user inputs.
+	for i := range args {
+		args[i] = strings.TrimRight(args[i], "/")
 	}
 
 	// Batch mode detection: multiple beads with rig target
@@ -188,125 +239,39 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine target agent (self or specified)
-	var targetAgent string
-	var targetPane string
-	var hookWorkDir string        // Working directory for running bd hook commands
-	var hookSetAtomically bool    // True if hook was set during polecat spawn (skip redundant update)
-
+	// Resolve target agent using shared dispatch logic
+	var target string
 	if len(args) > 1 {
-		target := args[1]
+		target = args[1]
+	}
+	resolved, err := resolveTarget(target, ResolveTargetOptions{
+		DryRun:   slingDryRun,
+		Force:    slingForce,
+		Create:   slingCreate,
+		Account:  slingAccount,
+		Agent:    slingAgent,
+		NoBoot:   slingNoBoot,
+		HookBead: beadID,
+		BeadID:   beadID,
+		TownRoot: townRoot,
+	})
+	if err != nil {
+		return err
+	}
+	targetAgent := resolved.Agent
+	targetPane := resolved.Pane
+	hookWorkDir := resolved.WorkDir
+	hookSetAtomically := resolved.HookSetAtomically
+	delayedDogInfo := resolved.DelayedDogInfo
+	newPolecatInfo := resolved.NewPolecatInfo
+	isSelfSling := resolved.IsSelfSling
 
-		// Resolve "." to current agent identity (like git's "." meaning current directory)
-		if target == "." {
-			targetAgent, targetPane, _, err = resolveSelfTarget()
-			if err != nil {
-				return fmt.Errorf("resolving self for '.' target: %w", err)
-			}
-		} else if dogName, isDog := IsDogTarget(target); isDog {
-			if slingDryRun {
-				if dogName == "" {
-					fmt.Printf("Would dispatch to idle dog in kennel\n")
-				} else {
-					fmt.Printf("Would dispatch to dog '%s'\n", dogName)
-				}
-				targetAgent = fmt.Sprintf("deacon/dogs/%s", dogName)
-				if dogName == "" {
-					targetAgent = "deacon/dogs/<idle>"
-				}
-				targetPane = "<dog-pane>"
-			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
-				if dispatchErr != nil {
-					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
-				}
-				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
-			}
-		} else if rigName, isRig := IsRigName(target); isRig {
-			// Check if target is a rig name (auto-spawn polecat)
-			if slingDryRun {
-				// Dry run - just indicate what would happen
-				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
-				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
-				targetPane = "<new-pane>"
-			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
-				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
-				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
-
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
-			}
-		} else {
-			// Slinging to an existing agent
-			var targetWorkDir string
-			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
-			if err != nil {
-				// Check if this is a dead polecat (no active session)
-				// If so, spawn a fresh polecat instead of failing
-				if isPolecatTarget(target) {
-					// Extract rig name from polecat target (format: rig/polecats/name)
-					parts := strings.Split(target, "/")
-					if len(parts) >= 3 && parts[1] == "polecats" {
-						rigName := parts[0]
-						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
-						spawnOpts := SlingSpawnOptions{
-							Force:    slingForce,
-							Account:  slingAccount,
-							Create:   slingCreate,
-							HookBead: beadID,
-							Agent:    slingAgent,
-						}
-						spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-						if spawnErr != nil {
-							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
-						}
-						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
-						hookWorkDir = spawnInfo.ClonePath
-						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
-
-						// Wake witness and refinery to monitor the new polecat
-						wakeRigAgents(rigName)
-					} else {
-						return fmt.Errorf("resolving target: %w", err)
-					}
-				} else {
-					return fmt.Errorf("resolving target: %w", err)
-				}
-			}
-			// Use target's working directory for bd commands (needed for redirect-based routing)
-			if targetWorkDir != "" {
-				hookWorkDir = targetWorkDir
-			}
-		}
-	} else {
-		// Slinging to self
-		var selfWorkDir string
-		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
-		if err != nil {
+	// Cross-rig guard: prevent slinging beads to polecats in the wrong rig (gt-myecw).
+	// Polecats work in their rig's worktree and cannot fix code owned by another rig.
+	// Skip for self-sling (user knows what they're doing) and --force overrides.
+	if strings.Contains(targetAgent, "/polecats/") && !slingForce && !isSelfSling {
+		if err := checkCrossRigGuard(beadID, targetAgent, townRoot); err != nil {
 			return err
-		}
-		// Use self's working directory for bd commands
-		if selfWorkDir != "" {
-			hookWorkDir = selfWorkDir
 		}
 	}
 
@@ -323,11 +288,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking bead status: %w", err)
 	}
 	if (info.Status == "pinned" || info.Status == "hooked") && !slingForce {
-		assignee := info.Assignee
-		if assignee == "" {
-			assignee = "(unknown)"
+		// Auto-force when hooked agent's session is confirmed dead (gt-pqf9x).
+		// This eliminates the #1 friction in convoy feeding: stale hooks from
+		// dead polecats blocking re-sling without --force.
+		if info.Status == "hooked" && info.Assignee != "" && isHookedAgentDead(info.Assignee) {
+			fmt.Printf("%s Hooked agent %s has no active session, auto-forcing re-sling...\n",
+				style.Warning.Render("⚠"), info.Assignee)
+			slingForce = true
+		} else {
+			assignee := info.Assignee
+			if assignee == "" {
+				assignee = "(unknown)"
+			}
+			return fmt.Errorf("bead %s is already %s to %s\nUse --force to re-sling", beadID, info.Status, assignee)
 		}
-		return fmt.Errorf("bead %s is already %s to %s\nUse --force to re-sling", beadID, info.Status, assignee)
 	}
 
 	// Handle --force when bead is already hooked: send shutdown to old polecat and unhook
@@ -369,7 +343,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 
 		// Unhook the bead from old owner (set status back to open)
-		unhookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=open", "--assignee=")
+		unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
 		unhookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, "")
 		if err := unhookCmd.Run(); err != nil {
 			fmt.Printf("%s Could not unhook bead from old owner: %v\n", style.Dim.Render("Warning:"), err)
@@ -434,7 +408,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false)
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
 			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
@@ -460,13 +434,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// - Base bead left orphaned after gt done
 	}
 
-	// Hook the bead using bd update.
+	// Hook the bead with retry and verification.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking bead: %w", err)
+	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
+		return err
 	}
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
@@ -483,36 +455,72 @@ func runSling(cmd *cobra.Command, args []string) error {
 		updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 	}
 
-	// Store dispatcher in bead description (enables completion notification to dispatcher)
-	if err := storeDispatcherInBead(beadID, actor); err != nil {
-		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+	// Store all attachment fields in a single read-modify-write cycle.
+	// This eliminates the race condition where sequential independent updates
+	// (dispatcher, args, no_merge, attached_molecule) could overwrite each other.
+	fieldUpdates := beadFieldUpdates{
+		Dispatcher:       actor,
+		Args:             slingArgs,
+		AttachedMolecule: attachedMoleculeID,
+		NoMerge:          slingNoMerge,
 	}
-
-	// Store args in bead description (no-tmux mode: beads as data plane)
-	if slingArgs != "" {
-		if err := storeArgsInBead(beadID, slingArgs); err != nil {
-			// Warn but don't fail - args will still be in the nudge prompt
-			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
-		} else {
+	if err := storeFieldsInBead(beadID, fieldUpdates); err != nil {
+		// Warn but don't fail - polecat will still complete work
+		fmt.Printf("%s Could not store fields in bead: %v\n", style.Dim.Render("Warning:"), err)
+	} else {
+		if slingArgs != "" {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 		}
+		if slingNoMerge {
+			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
+		}
 	}
 
-	// Record the attached molecule in the BASE bead's description.
-	// This field points to the wisp (compound root) and enables:
-	// - gt hook/gt prime: follow attached_molecule to show molecule steps
-	// - gt done: close attached_molecule (wisp) before closing hooked bead
-	// - Compound resolution: base bead -> attached_molecule -> wisp
-	if attachedMoleculeID != "" {
-		if err := storeAttachedMoleculeInBead(beadID, attachedMoleculeID); err != nil {
-			// Warn but don't fail - polecat can still work through steps
-			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
 		}
+		targetPane = pane
+	}
+
+	// Create Dolt branch AFTER all sling writes (hook, formula, fields) are complete.
+	// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch forks
+	// from HEAD — ensuring the polecat's branch includes all writes.
+	if newPolecatInfo != nil && newPolecatInfo.DoltBranch != "" {
+		if err := newPolecatInfo.CreateDoltBranch(); err != nil {
+			rollbackSlingArtifacts(newPolecatInfo, beadID, hookWorkDir)
+			return fmt.Errorf("creating Dolt branch: %w", err)
+		}
+	}
+
+	// Start polecat session now that attached_molecule is set.
+	// This ensures polecat sees the molecule when gt prime runs on session start.
+	freshlySpawned := newPolecatInfo != nil
+	if freshlySpawned {
+		pane, err := newPolecatInfo.StartSession()
+		if err != nil {
+			// Rollback: session failed, clean up zombie artifacts (worktree, hooked bead).
+			// Without rollback, next sling attempt fails with "bead already hooked" (gt-jn40ft).
+			fmt.Printf("%s Session failed, rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
+			rollbackSlingArtifacts(newPolecatInfo, beadID, hookWorkDir)
+			return fmt.Errorf("starting polecat session: %w", err)
+		}
+		targetPane = pane
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
-	if targetPane == "" {
+	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Skip for self-sling - agent is currently processing the sling command and will see
+	// the hooked work on next turn. Nudging would inject text while agent is busy.
+	if freshlySpawned {
+		// Fresh polecat already got StartupNudge from SessionManager.Start()
+	} else if isSelfSling {
+		// Self-sling: agent already knows about the work (just slung it)
+		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
+	} else if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
 		// Ensure agent is ready before nudging (prevents race condition where
@@ -535,4 +543,62 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// checkCrossRigGuard validates that a bead's prefix matches the target rig.
+// Polecats work in their rig's worktree and cannot fix code owned by another rig.
+// Returns an error if the bead belongs to a different rig than the target polecat.
+// Skips the check for town-level beads (hq-*) or beads with unknown prefixes.
+func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
+	beadPrefix := beads.ExtractPrefix(beadID)
+	if beadPrefix == "" {
+		return nil // Can't determine prefix, skip check
+	}
+
+	beadRig := beads.GetRigNameForPrefix(townRoot, beadPrefix)
+	if beadRig == "" {
+		return nil // Town-level or unknown prefix, skip check
+	}
+
+	// Extract target rig from agent path (e.g., "gastown/polecats/Toast" → "gastown")
+	targetRig := strings.SplitN(targetAgent, "/", 2)[0]
+	if targetRig == "" {
+		return nil
+	}
+
+	if targetRig != beadRig {
+		return fmt.Errorf("cross-rig mismatch: bead %s (prefix %q) belongs to rig %q, but target is rig %q\n"+
+			"Polecats work in their rig's worktree and cannot fix code from another rig.\n"+
+			"Use --force to override this check", beadID, strings.TrimSuffix(beadPrefix, "-"), beadRig, targetRig)
+	}
+
+	return nil
+}
+
+// rollbackSlingArtifacts cleans up artifacts left by a partial sling when session start fails.
+// This prevents zombie polecats that block subsequent sling attempts with "bead already hooked".
+// Cleanup is best-effort: each step logs warnings but continues to clean as much as possible.
+func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+	// 1. Unhook the bead (set status back to open so it can be re-slung)
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		fmt.Printf("  %s Could not find workspace to unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
+	} else {
+		unhookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+		unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
+		unhookCmd.Dir = unhookDir
+		if err := unhookCmd.Run(); err != nil {
+			fmt.Printf("  %s Could not unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
+		} else {
+			fmt.Printf("  %s Unhooked bead %s\n", style.Dim.Render("○"), beadID)
+		}
+	}
+
+	// 2. Clean up Dolt branch if it was created
+	if spawnInfo.DoltBranch != "" && townRoot != "" {
+		doltserver.DeletePolecatBranch(townRoot, spawnInfo.RigName, spawnInfo.DoltBranch)
+	}
+
+	// 3. Clean up the spawned polecat (worktree, agent bead, etc.)
+	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName)
 }

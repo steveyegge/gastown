@@ -14,12 +14,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 )
 
@@ -40,34 +42,46 @@ type FeedEvent struct {
 // Curator manages the feed curation process.
 // ZFC: State is derived from the events file, not cached in memory.
 type Curator struct {
-	townRoot string
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	townRoot        string
+	maxFeedFileSize int64
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+
+	// Configurable deduplication/aggregation settings (from TownSettings.FeedCurator)
+	doneDedupeWindow     time.Duration
+	slingAggregateWindow time.Duration
+	minAggregateCount    int
 }
 
-// Deduplication/aggregation settings
-const (
-	// Dedupe window for repeated done events from same actor
-	doneDedupeWindow = 10 * time.Second
-
-	// Aggregation window for sling events
-	slingAggregateWindow = 30 * time.Second
-
-	// Mail aggregation window
-	mailAggregateWindow = 30 * time.Second
-
-	// Minimum events to trigger aggregation
-	minAggregateCount = 3
-)
-
 // NewCurator creates a new feed curator.
+// Loads FeedCurator config from TownSettings; falls back to defaults if missing.
 func NewCurator(townRoot string) *Curator {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	cfg := config.DefaultFeedCuratorConfig()
+	if townRoot != "" {
+		if ts, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil && ts.FeedCurator != nil {
+			// Replace entire default — individual fields fall back below.
+			// Duration fields get fallbacks via ParseDurationOrDefault (empty string → default).
+			// Non-duration fields need explicit zero-value guards.
+			cfg = ts.FeedCurator
+		}
+	}
+
+	minAgg := cfg.MinAggregateCount
+	if minAgg <= 0 {
+		minAgg = 3 // default: aggregate after 3+ events
+	}
+
 	return &Curator{
-		townRoot: townRoot,
-		ctx:      ctx,
-		cancel:   cancel,
+		townRoot:             townRoot,
+		maxFeedFileSize:      maxFeedFileSize,
+		ctx:                  ctx,
+		cancel:               cancel,
+		doneDedupeWindow:     config.ParseDurationOrDefault(cfg.DoneDedupeWindow, 10*time.Second),
+		slingAggregateWindow: config.ParseDurationOrDefault(cfg.SlingAggregateWindow, 30*time.Second),
+		minAggregateCount:    minAgg,
 	}
 }
 
@@ -76,7 +90,7 @@ func (c *Curator) Start() error {
 	eventsPath := filepath.Join(c.townRoot, events.EventsFile)
 
 	// Open events file, creating if needed
-	file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0644) //nolint:gosec // G302: events file is non-sensitive operational data
+	file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return fmt.Errorf("opening events file: %w", err)
 	}
@@ -160,7 +174,7 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 	case events.TypeDone:
 		// Dedupe repeated done events from same actor within window
 		// Check if we've already written a done event for this actor to the feed
-		recentFeedEvents := c.readRecentFeedEvents(doneDedupeWindow)
+		recentFeedEvents := c.readRecentFeedEvents(c.doneDedupeWindow)
 		for _, e := range recentFeedEvents {
 			if e.Type == events.TypeDone && e.Actor == event.Actor {
 				return true // Skip duplicate (already in feed)
@@ -173,93 +187,114 @@ func (c *Curator) shouldDedupe(event *events.Event) bool {
 	return false
 }
 
+// maxFeedFileSize is the maximum .feed.jsonl size before truncation.
+// When exceeded, the file is truncated to keep the newest half.
+const maxFeedFileSize int64 = 10 * 1024 * 1024 // 10MB
+
+// tailReadSize is the max bytes to read from the end of a file when
+// scanning for recent events. 1MB covers any realistic time window.
+const tailReadSize int64 = 1 << 20
+
 // readRecentFeedEvents reads feed events from the feed file within the given time window.
 // ZFC: The feed file is the observable state of what we've already output.
+// Reads at most tailReadSize bytes from the end to bound memory usage.
 func (c *Curator) readRecentFeedEvents(window time.Duration) []FeedEvent {
 	feedPath := filepath.Join(c.townRoot, FeedFile)
 
-	data, err := os.ReadFile(feedPath)
+	// Acquire shared read lock to prevent partial reads during concurrent writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.RLock(); err != nil {
+		return nil
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
+	f, err := os.Open(feedPath)
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
 
-	now := time.Now()
-	cutoff := now.Add(-window)
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return nil
+	}
+
+	// Seek to at most tailReadSize bytes before EOF
+	seekTo := info.Size() - tailReadSize
+	if seekTo < 0 {
+		seekTo = 0
+	}
+	if _, err := f.Seek(seekTo, io.SeekStart); err != nil {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(f)
+	if seekTo > 0 {
+		scanner.Scan() // skip potential partial first line at cut point
+	}
+
+	cutoff := time.Now().Add(-window)
 	var result []FeedEvent
-
-	// Parse lines from the end (most recent first) for efficiency
-	lines := strings.Split(string(data), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-
+	for scanner.Scan() {
 		var event FeedEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			continue
 		}
-
-		// Parse timestamp
 		ts, err := time.Parse(time.RFC3339, event.Timestamp)
 		if err != nil {
 			continue
 		}
-
-		// Stop if we've gone past the window
-		if ts.Before(cutoff) {
-			break
+		if !ts.Before(cutoff) {
+			result = append(result, event)
 		}
-
-		result = append(result, event)
 	}
-
 	return result
 }
 
 // readRecentEvents reads events from the events file within the given time window.
 // ZFC: This is the observable state that replaces in-memory caching.
-// Uses tail-like reading for performance (reads last N lines).
+// Reads at most tailReadSize bytes from the end to bound memory usage.
 func (c *Curator) readRecentEvents(window time.Duration) []events.Event {
 	eventsPath := filepath.Join(c.townRoot, events.EventsFile)
-
-	// Read the file (for small files, this is fine; for large files, consider tail-like reading)
-	data, err := os.ReadFile(eventsPath)
+	f, err := os.Open(eventsPath)
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
 
-	now := time.Now()
-	cutoff := now.Add(-window)
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return nil
+	}
+
+	seekTo := info.Size() - tailReadSize
+	if seekTo < 0 {
+		seekTo = 0
+	}
+	if _, err := f.Seek(seekTo, io.SeekStart); err != nil {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(f)
+	if seekTo > 0 {
+		scanner.Scan() // skip potential partial first line at cut point
+	}
+
+	cutoff := time.Now().Add(-window)
 	var result []events.Event
-
-	// Parse lines from the end (most recent first) for efficiency
-	lines := strings.Split(string(data), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-
+	for scanner.Scan() {
 		var event events.Event
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			continue
 		}
-
-		// Parse timestamp
 		ts, err := time.Parse(time.RFC3339, event.Timestamp)
 		if err != nil {
 			continue
 		}
-
-		// Stop if we've gone past the window
-		if ts.Before(cutoff) {
-			break
+		if !ts.Before(cutoff) {
+			result = append(result, event)
 		}
-
-		result = append(result, event)
 	}
-
 	return result
 }
 
@@ -290,8 +325,8 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 
 	// Check for aggregation opportunity (ZFC: derive from events file)
 	if event.Type == events.TypeSling {
-		slingCount := c.countRecentSlings(event.Actor, slingAggregateWindow)
-		if slingCount >= minAggregateCount {
+		slingCount := c.countRecentSlings(event.Actor, c.slingAggregateWindow)
+		if slingCount >= c.minAggregateCount {
 			feedEvent.Count = slingCount
 			feedEvent.Summary = fmt.Sprintf("%s dispatching work to %d agents", event.Actor, slingCount)
 		}
@@ -299,18 +334,84 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 
 	data, err := json.Marshal(feedEvent)
 	if err != nil {
+		log.Printf("warning: marshaling feed event: %v", err)
 		return
 	}
 	data = append(data, '\n')
 
 	feedPath := filepath.Join(c.townRoot, FeedFile)
-	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: feed file is non-sensitive operational data
+
+	// Acquire cross-process file lock to prevent interleaved writes
+	fl := flock.New(feedPath + ".lock")
+	if err := fl.Lock(); err != nil {
+		log.Printf("warning: acquiring feed file lock: %v", err)
+		return
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
+	// Truncate if file exceeds max size (keep newest half to avoid thrashing)
+	if info, err := os.Stat(feedPath); err == nil && info.Size() > c.maxFeedFileSize {
+		c.truncateFeedFile(feedPath, info.Size())
+	}
+
+	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Printf("warning: opening feed file: %v", err)
+		return
+	}
+	defer f.Close()
+
+	_, _ = f.Write(data) //nolint:errcheck // best-effort append under flock
+}
+
+// truncateFeedFile keeps the newest half of the feed file using atomic rename.
+// Must be called under the feed file flock.
+func (c *Curator) truncateFeedFile(feedPath string, currentSize int64) {
+	keepBytes := currentSize / 2
+
+	f, err := os.Open(feedPath)
 	if err != nil {
 		return
 	}
 	defer f.Close()
 
-	_, _ = f.Write(data)
+	// Seek to the start of the portion we want to keep
+	startOffset := currentSize - keepBytes
+	if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+		return
+	}
+
+	reader := bufio.NewReader(f)
+
+	// Skip to the first complete line (discard partial line at the cut point)
+	if _, err := reader.ReadString('\n'); err != nil {
+		return // no complete line found in the kept portion
+	}
+
+	// Write retained content to a temp file
+	tmpPath := feedPath + ".truncate.tmp"
+	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return
+	}
+
+	if _, err := io.Copy(tmp, reader); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return
+	}
+	tmp.Close()
+
+	// Close the read handle before rename — Windows cannot rename over open files.
+	f.Close()
+
+	// Atomic replace
+	os.Rename(tmpPath, feedPath) //nolint:errcheck // best-effort truncation
 }
 
 // generateSummary creates a human-readable summary of an event.

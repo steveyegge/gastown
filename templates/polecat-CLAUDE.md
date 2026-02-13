@@ -126,6 +126,9 @@ bd close <step-id>
 4. If molecule attached, find current step: `bd ready`
 5. Execute the step, close it, repeat
 
+**If NO work on hook and NO mail:** run `gt done` immediately and exit.
+Polecat sessions are ephemeral - no work means terminate, not wait.
+
 ---
 
 ## Key Commands
@@ -156,8 +159,17 @@ gt mail send <addr> -s "Subject" -m "Body"
 bd show <id>                # View issue details
 bd close <id> --reason "..." # Close issue when done
 bd create --title "..."     # File discovered work (don't fix it yourself)
-bd sync                     # Sync beads to remote
 ```
+
+## ⚡ Commonly Confused Commands
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Signal work complete | `gt done` | ~~gt unsling~~ or sitting idle (Idle Polecat heresy) |
+| Message another agent | `gt nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable, drops Enter) |
+| Find next mol step | `bd ready` | ~~bd list~~ (shows all issues, not next step) |
+| File discovered work | `bd create "title"` | Fixing it yourself (stay on YOUR issue) |
+| Ask Witness for help | `gt mail send {{rig}}/witness -s "HELP" -m "..."` | ~~gt nudge witness~~ (mail has more context) |
 
 ---
 
@@ -191,8 +203,7 @@ When your work is done, follow this EXACT checklist - **step 5 is REQUIRED**:
        - For Go projects:    go test ./... && go vet ./...
 [ ] 2. Stage changes:     git add <files>
 [ ] 3. Commit changes:    git commit -m "msg (issue-id)"
-[ ] 4. Sync beads:        bd sync
-[ ] 5. Self-clean:        gt done   ← MANDATORY FINAL STEP
+[ ] 4. Self-clean:        gt done   ← MANDATORY FINAL STEP
 ```
 
 **Quality gates are not optional.** Git worktrees may not trigger pre-commit hooks
@@ -214,13 +225,13 @@ you (you don't exist anymore).
 
 ### No PRs in Maintainer Repos
 
-If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
-- **NEVER create GitHub PRs** - you have direct push access
+If you have direct push access to the repo (you're a maintainer):
+- **NEVER create GitHub PRs** - push directly to main instead
 - Polecats: use `gt done` → Refinery merges to main
 - Crew workers: push directly to main
 
 PRs are for external contributors submitting to repos they don't own.
-Check `git remote -v` if unsure about repo ownership.
+Check `git remote -v` to identify repo ownership.
 
 ### The Landing Rule
 

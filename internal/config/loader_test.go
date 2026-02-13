@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +27,11 @@ func skipIfAgentBinaryMissing(t *testing.T, agents ...string) {
 
 // isClaudeCommand checks if a command is claude (either "claude" or a path ending in "/claude").
 // This handles the case where resolveClaudePath returns the full path to the claude binary.
+// Also handles Windows paths with .exe extension.
 func isClaudeCommand(cmd string) bool {
-	return cmd == "claude" || strings.HasSuffix(cmd, "/claude")
+	base := filepath.Base(cmd)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return base == "claude"
 }
 
 func TestTownConfigRoundTrip(t *testing.T) {
@@ -985,8 +989,8 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	if !strings.Contains(cmd, "exec env") {
 		t.Error("expected 'exec env' in command")
 	}
-	if !strings.Contains(cmd, "GT_ROLE=witness") {
-		t.Error("expected GT_ROLE=witness in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/witness") {
+		t.Error("expected GT_ROLE=gastown/witness in command")
 	}
 	if !strings.Contains(cmd, "BD_ACTOR=gastown/witness") {
 		t.Error("expected BD_ACTOR in command")
@@ -1000,8 +1004,8 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 	t.Parallel()
 	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
 
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
-		t.Error("expected GT_ROLE=polecat in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/polecats/toast") {
+		t.Error("expected GT_ROLE=gastown/polecats/toast in command")
 	}
 	if !strings.Contains(cmd, "GT_RIG=gastown") {
 		t.Error("expected GT_RIG=gastown in command")
@@ -1018,8 +1022,8 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 	t.Parallel()
 	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
 
-	if !strings.Contains(cmd, "GT_ROLE=crew") {
-		t.Error("expected GT_ROLE=crew in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/crew/max") {
+		t.Error("expected GT_ROLE=gastown/crew/max in command")
 	}
 	if !strings.Contains(cmd, "GT_RIG=gastown") {
 		t.Error("expected GT_RIG=gastown in command")
@@ -1126,7 +1130,7 @@ func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
 	}
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+	if !strings.Contains(cmd, "GT_ROLE=testrig/polecats/toast") {
 		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
 	}
 	if !strings.Contains(cmd, "GT_RIG=testrig") {
@@ -1209,7 +1213,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCrewStartupCommandWithAgentOverride: %v", err)
 	}
-	if !strings.Contains(cmd, "GT_ROLE=crew") {
+	if !strings.Contains(cmd, "GT_ROLE=testrig/crew/max") {
 		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
 	}
 	if !strings.Contains(cmd, "GT_RIG=testrig") {
@@ -1374,13 +1378,13 @@ func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	// BuildAgentStartupCommand passes role via GT_ROLE env var
+	// BuildAgentStartupCommand passes role via GT_ROLE env var (compound format)
 	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig", townRoot, rigPath, "")
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected codex for refinery role, got: %q", cmd)
 	}
-	if !strings.Contains(cmd, "GT_ROLE="+constants.RoleRefinery) {
-		t.Fatalf("expected GT_ROLE=%s in command: %q", constants.RoleRefinery, cmd)
+	if !strings.Contains(cmd, "GT_ROLE=testrig/refinery") {
+		t.Fatalf("expected GT_ROLE=testrig/refinery in command: %q", cmd)
 	}
 }
 
@@ -1494,11 +1498,12 @@ func TestExpectedPaneCommands(t *testing.T) {
 	})
 }
 
-func TestLoadRuntimeConfigFromSettings(t *testing.T) {
+func TestResolveRoleAgentConfigFromRigSettings(t *testing.T) {
 	t.Parallel()
-	// Create temp rig with custom runtime config
-	dir := t.TempDir()
-	settingsDir := filepath.Join(dir, "settings")
+	// Create temp town with rig containing custom runtime config
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
 	if err := os.MkdirAll(settingsDir, 0755); err != nil {
 		t.Fatalf("creating settings dir: %v", err)
 	}
@@ -1512,8 +1517,8 @@ func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 		t.Fatalf("saving settings: %v", err)
 	}
 
-	// Load and verify
-	rc := LoadRuntimeConfig(dir)
+	// Load and verify using ResolveRoleAgentConfig
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
 	if rc.Command != "aider" {
 		t.Errorf("Command = %q, want %q", rc.Command, "aider")
 	}
@@ -1527,12 +1532,94 @@ func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
+func TestResolveRoleAgentConfigFallsBackToDefaults(t *testing.T) {
 	t.Parallel()
-	// Non-existent path should use defaults
-	rc := LoadRuntimeConfig("/nonexistent/path")
+	// Non-existent paths should use defaults
+	rc := ResolveRoleAgentConfig("polecat", "/nonexistent/town", "/nonexistent/rig")
 	if !isClaudeCommand(rc.Command) {
 		t.Errorf("Command = %q, want claude or path ending in /claude (default)", rc.Command)
+	}
+}
+
+func TestIsClaudeAgent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		rc       *RuntimeConfig
+		expected bool
+	}{
+		{"empty provider and command (defaults)", &RuntimeConfig{}, true},
+		{"explicit claude provider", &RuntimeConfig{Provider: "claude", Command: "anything"}, true},
+		{"explicit codex provider", &RuntimeConfig{Provider: "codex", Command: "claude"}, false},
+		{"bare claude command", &RuntimeConfig{Command: "claude"}, true},
+		{"path to claude binary", &RuntimeConfig{Command: "/usr/local/bin/claude"}, true},
+		{"aider command no provider", &RuntimeConfig{Command: "aider"}, false},
+		{"generic provider", &RuntimeConfig{Provider: "generic"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isClaudeAgent(tt.rc); got != tt.expected {
+				t.Errorf("isClaudeAgent(%+v) = %v, want %v", tt.rc, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWithRoleSettingsFlag_SkipsNonClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	// Configure aider (non-Claude agent) for polecat role
+	settings := NewRigSettings()
+	settings.Runtime = &RuntimeConfig{
+		Command: "aider",
+		Args:    []string{"--no-git", "--model", "claude-3"},
+	}
+	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	// Should NOT contain --settings since aider is not a Claude agent
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			t.Errorf("non-Claude agent 'aider' should not get --settings flag, but Args = %v", rc.Args)
+			break
+		}
+	}
+}
+
+func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	// Default config (Claude agent) for polecat role
+	settings := NewRigSettings()
+	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	// Should contain --settings since default agent is Claude
+	found := false
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("default Claude agent should get --settings flag for polecat role, but Args = %v", rc.Args)
 	}
 }
 
@@ -1748,6 +1835,184 @@ func TestNewDaemonPatrolConfig(t *testing.T) {
 			t.Errorf("%s patrol Agent = %q, want %q", name, patrol.Agent, name)
 		}
 	}
+}
+
+func TestAddRigToDaemonPatrols(t *testing.T) {
+	t.Parallel()
+
+	t.Run("adds rig to witness and refinery", func(t *testing.T) {
+		t.Parallel()
+		townRoot := t.TempDir()
+		mayorDir := filepath.Join(townRoot, "mayor")
+		if err := os.MkdirAll(mayorDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Write a daemon.json with existing rigs
+		daemonJSON := `{
+  "type": "daemon-patrol-config",
+  "version": 1,
+  "heartbeat": {"enabled": true, "interval": "3m"},
+  "patrols": {
+    "witness": {"enabled": true, "interval": "5m", "agent": "witness", "rigs": ["gastown"]},
+    "refinery": {"enabled": true, "interval": "5m", "agent": "refinery", "rigs": ["gastown"]},
+    "deacon": {"enabled": true, "interval": "5m", "agent": "deacon"}
+  }
+}`
+		if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := AddRigToDaemonPatrols(townRoot, "newrig"); err != nil {
+			t.Fatalf("AddRigToDaemonPatrols: %v", err)
+		}
+
+		// Reload and verify
+		cfg, err := LoadDaemonPatrolConfig(DaemonPatrolConfigPath(townRoot))
+		if err != nil {
+			t.Fatalf("LoadDaemonPatrolConfig: %v", err)
+		}
+
+		witness := cfg.Patrols["witness"]
+		if len(witness.Rigs) != 2 || witness.Rigs[0] != "gastown" || witness.Rigs[1] != "newrig" {
+			t.Errorf("witness rigs = %v, want [gastown newrig]", witness.Rigs)
+		}
+
+		refinery := cfg.Patrols["refinery"]
+		if len(refinery.Rigs) != 2 || refinery.Rigs[0] != "gastown" || refinery.Rigs[1] != "newrig" {
+			t.Errorf("refinery rigs = %v, want [gastown newrig]", refinery.Rigs)
+		}
+
+		// Deacon should be untouched
+		deacon := cfg.Patrols["deacon"]
+		if len(deacon.Rigs) != 0 {
+			t.Errorf("deacon rigs = %v, want empty", deacon.Rigs)
+		}
+	})
+
+	t.Run("skips duplicate rig", func(t *testing.T) {
+		t.Parallel()
+		townRoot := t.TempDir()
+		mayorDir := filepath.Join(townRoot, "mayor")
+		if err := os.MkdirAll(mayorDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		daemonJSON := `{
+  "type": "daemon-patrol-config",
+  "version": 1,
+  "patrols": {
+    "witness": {"enabled": true, "rigs": ["gastown", "beads"]},
+    "refinery": {"enabled": true, "rigs": ["gastown", "beads"]}
+  }
+}`
+		if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := AddRigToDaemonPatrols(townRoot, "gastown"); err != nil {
+			t.Fatalf("AddRigToDaemonPatrols: %v", err)
+		}
+
+		cfg, err := LoadDaemonPatrolConfig(DaemonPatrolConfigPath(townRoot))
+		if err != nil {
+			t.Fatalf("LoadDaemonPatrolConfig: %v", err)
+		}
+
+		witness := cfg.Patrols["witness"]
+		if len(witness.Rigs) != 2 {
+			t.Errorf("witness rigs = %v, want [gastown beads] (no duplicate)", witness.Rigs)
+		}
+	})
+
+	t.Run("preserves dolt_server fields", func(t *testing.T) {
+		t.Parallel()
+		townRoot := t.TempDir()
+		mayorDir := filepath.Join(townRoot, "mayor")
+		if err := os.MkdirAll(mayorDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		daemonJSON := `{
+  "type": "daemon-patrol-config",
+  "version": 1,
+  "patrols": {
+    "dolt_server": {"enabled": true, "port": 3307, "host": "127.0.0.1", "data_dir": "/tmp/dolt"},
+    "witness": {"enabled": true, "rigs": ["gastown"]},
+    "refinery": {"enabled": true, "rigs": ["gastown"]}
+  }
+}`
+		path := filepath.Join(mayorDir, "daemon.json")
+		if err := os.WriteFile(path, []byte(daemonJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := AddRigToDaemonPatrols(townRoot, "newrig"); err != nil {
+			t.Fatalf("AddRigToDaemonPatrols: %v", err)
+		}
+
+		// Read raw JSON to verify dolt_server fields are preserved
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+
+		var patrols map[string]json.RawMessage
+		if err := json.Unmarshal(raw["patrols"], &patrols); err != nil {
+			t.Fatal(err)
+		}
+
+		var doltServer map[string]interface{}
+		if err := json.Unmarshal(patrols["dolt_server"], &doltServer); err != nil {
+			t.Fatal(err)
+		}
+
+		if doltServer["port"].(float64) != 3307 {
+			t.Errorf("dolt_server port = %v, want 3307", doltServer["port"])
+		}
+		if doltServer["host"].(string) != "127.0.0.1" {
+			t.Errorf("dolt_server host = %v, want 127.0.0.1", doltServer["host"])
+		}
+		if doltServer["data_dir"].(string) != "/tmp/dolt" {
+			t.Errorf("dolt_server data_dir = %v, want /tmp/dolt", doltServer["data_dir"])
+		}
+	})
+
+	t.Run("no-op when daemon.json missing", func(t *testing.T) {
+		t.Parallel()
+		townRoot := t.TempDir()
+
+		if err := AddRigToDaemonPatrols(townRoot, "newrig"); err != nil {
+			t.Fatalf("AddRigToDaemonPatrols: %v", err)
+		}
+		// Should not create the file
+		if _, err := os.Stat(filepath.Join(townRoot, "mayor", "daemon.json")); !os.IsNotExist(err) {
+			t.Error("expected daemon.json to not exist")
+		}
+	})
+
+	t.Run("no-op when no patrols section", func(t *testing.T) {
+		t.Parallel()
+		townRoot := t.TempDir()
+		mayorDir := filepath.Join(townRoot, "mayor")
+		if err := os.MkdirAll(mayorDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		daemonJSON := `{"type": "daemon-patrol-config", "version": 1}`
+		if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := AddRigToDaemonPatrols(townRoot, "newrig"); err != nil {
+			t.Fatalf("AddRigToDaemonPatrols: %v", err)
+		}
+	})
 }
 
 func TestSaveTownSettings(t *testing.T) {
@@ -2017,6 +2282,746 @@ func TestLookupAgentConfigWithRigSettings(t *testing.T) {
 	}
 }
 
+// TestFillRuntimeDefaults tests the fillRuntimeDefaults function comprehensively.
+func TestFillRuntimeDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("preserves all fields", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Provider:      "codex",
+			Command:       "opencode",
+			Args:          []string{"-m", "gpt-5"},
+			Env:           map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
+			InitialPrompt: "test prompt",
+			PromptMode:    "none",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "OPENCODE_SESSION_ID",
+			},
+			Hooks: &RuntimeHooksConfig{
+				Provider: "opencode",
+			},
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"opencode", "node"},
+			},
+			Instructions: &RuntimeInstructionsConfig{
+				File: "OPENCODE.md",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Provider != input.Provider {
+			t.Errorf("Provider: got %q, want %q", result.Provider, input.Provider)
+		}
+		if result.Command != input.Command {
+			t.Errorf("Command: got %q, want %q", result.Command, input.Command)
+		}
+		if len(result.Args) != len(input.Args) {
+			t.Errorf("Args: got %v, want %v", result.Args, input.Args)
+		}
+		if result.Env["OPENCODE_PERMISSION"] != input.Env["OPENCODE_PERMISSION"] {
+			t.Errorf("Env: got %v, want %v", result.Env, input.Env)
+		}
+		if result.InitialPrompt != input.InitialPrompt {
+			t.Errorf("InitialPrompt: got %q, want %q", result.InitialPrompt, input.InitialPrompt)
+		}
+		if result.PromptMode != input.PromptMode {
+			t.Errorf("PromptMode: got %q, want %q", result.PromptMode, input.PromptMode)
+		}
+		if result.Session == nil || result.Session.SessionIDEnv != input.Session.SessionIDEnv {
+			t.Errorf("Session: got %+v, want %+v", result.Session, input.Session)
+		}
+		if result.Hooks == nil || result.Hooks.Provider != input.Hooks.Provider {
+			t.Errorf("Hooks: got %+v, want %+v", result.Hooks, input.Hooks)
+		}
+		if result.Tmux == nil || len(result.Tmux.ProcessNames) != len(input.Tmux.ProcessNames) {
+			t.Errorf("Tmux: got %+v, want %+v", result.Tmux, input.Tmux)
+		}
+		if result.Instructions == nil || result.Instructions.File != input.Instructions.File {
+			t.Errorf("Instructions: got %+v, want %+v", result.Instructions, input.Instructions)
+		}
+	})
+
+	t.Run("nil input returns defaults", func(t *testing.T) {
+		t.Parallel()
+		result := fillRuntimeDefaults(nil)
+
+		if result == nil {
+			t.Fatal("fillRuntimeDefaults(nil) returned nil")
+		}
+		if result.Command == "" {
+			t.Error("Command should have default value")
+		}
+	})
+
+	t.Run("empty command defaults to claude", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "",
+			Args:    []string{"--custom-flag"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Use isClaudeCommand to handle resolved paths (e.g., /opt/homebrew/bin/claude)
+		if !isClaudeCommand(result.Command) {
+			t.Errorf("Command: got %q, want claude or path ending in claude", result.Command)
+		}
+		// Args should be preserved, not overwritten
+		if len(result.Args) != 1 || result.Args[0] != "--custom-flag" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("nil args defaults to skip-permissions", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Args:    nil,
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Args == nil || len(result.Args) == 0 {
+			t.Error("Args should have default value")
+		}
+		if result.Args[0] != "--dangerously-skip-permissions" {
+			t.Errorf("Args: got %v, want [--dangerously-skip-permissions]", result.Args)
+		}
+	})
+
+	t.Run("empty args slice is preserved", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Args:    []string{}, // Explicitly empty, not nil
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Empty slice means "no args", not "use defaults"
+		// This is intentional per RuntimeConfig docs
+		if result.Args == nil {
+			t.Error("Empty Args slice should be preserved as empty, not nil")
+		}
+	})
+
+	t.Run("env map is copied not shared", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Env:     map[string]string{"KEY": "value"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's env
+		result.Env["NEW_KEY"] = "new_value"
+
+		// Original should be unchanged
+		if _, ok := input.Env["NEW_KEY"]; ok {
+			t.Error("Env map was not copied - modifications affect original")
+		}
+	})
+
+	t.Run("prompt_mode none is preserved for custom agents", func(t *testing.T) {
+		t.Parallel()
+		// This is the specific bug that was fixed - opencode needs prompt_mode: "none"
+		// to prevent the startup beacon from being passed as an argument
+		input := &RuntimeConfig{
+			Provider:   "opencode",
+			Command:    "opencode",
+			Args:       []string{"-m", "gpt-5"},
+			PromptMode: "none",
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.PromptMode != "none" {
+			t.Errorf("PromptMode: got %q, want %q - custom prompt_mode was not preserved", result.PromptMode, "none")
+		}
+	})
+
+	t.Run("args slice is deep copied not shared", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Args:    []string{"original-arg"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's args
+		result.Args[0] = "modified-arg"
+
+		// Original should be unchanged
+		if input.Args[0] != "original-arg" {
+			t.Errorf("Args slice was not deep copied - modifications affect original: got %q, want %q",
+				input.Args[0], "original-arg")
+		}
+	})
+
+	t.Run("session struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "ORIGINAL_SESSION_ID",
+				ConfigDirEnv: "ORIGINAL_CONFIG_DIR",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's session
+		result.Session.SessionIDEnv = "MODIFIED_SESSION_ID"
+
+		// Original should be unchanged
+		if input.Session.SessionIDEnv != "ORIGINAL_SESSION_ID" {
+			t.Errorf("Session struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Session.SessionIDEnv, "ORIGINAL_SESSION_ID")
+		}
+	})
+
+	t.Run("hooks struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Hooks: &RuntimeHooksConfig{
+				Provider:     "original-provider",
+				Dir:          "original-dir",
+				SettingsFile: "original-file",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's hooks
+		result.Hooks.Provider = "modified-provider"
+
+		// Original should be unchanged
+		if input.Hooks.Provider != "original-provider" {
+			t.Errorf("Hooks struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Hooks.Provider, "original-provider")
+		}
+	})
+
+	t.Run("tmux struct and process_names are deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames:      []string{"original-process"},
+				ReadyPromptPrefix: "original-prefix",
+				ReadyDelayMs:      5000,
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's tmux
+		result.Tmux.ProcessNames[0] = "modified-process"
+		result.Tmux.ReadyPromptPrefix = "modified-prefix"
+
+		// Original should be unchanged
+		if input.Tmux.ProcessNames[0] != "original-process" {
+			t.Errorf("Tmux.ProcessNames was not deep copied - modifications affect original: got %q, want %q",
+				input.Tmux.ProcessNames[0], "original-process")
+		}
+		if input.Tmux.ReadyPromptPrefix != "original-prefix" {
+			t.Errorf("Tmux struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Tmux.ReadyPromptPrefix, "original-prefix")
+		}
+	})
+
+	t.Run("instructions struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Instructions: &RuntimeInstructionsConfig{
+				File: "ORIGINAL.md",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's instructions
+		result.Instructions.File = "MODIFIED.md"
+
+		// Original should be unchanged
+		if input.Instructions.File != "ORIGINAL.md" {
+			t.Errorf("Instructions struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Instructions.File, "ORIGINAL.md")
+		}
+	})
+
+	t.Run("nil nested structs remain nil except auto-filled Hooks", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			// All nested structs left nil
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Nil nested structs should remain nil (not get zero-value structs)
+		if result.Session != nil {
+			t.Error("Session should remain nil when input has nil Session")
+		}
+		// Hooks is auto-filled for known agents (claude, opencode) to ensure
+		// EnsureSettingsForRole creates the correct settings files
+		if result.Hooks == nil {
+			t.Error("Hooks should be auto-filled for claude command")
+		} else if result.Hooks.Provider != "claude" {
+			t.Errorf("Hooks.Provider = %q, want %q", result.Hooks.Provider, "claude")
+		}
+		if result.Tmux != nil {
+			t.Error("Tmux should remain nil when input has nil Tmux")
+		}
+		if result.Instructions != nil {
+			t.Error("Instructions should remain nil when input has nil Instructions")
+		}
+	})
+
+	t.Run("partial nested struct is copied without defaults", func(t *testing.T) {
+		t.Parallel()
+		// User defines partial Tmux config - only ProcessNames, no other fields
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"opencode"},
+				// ReadyPromptPrefix and ReadyDelayMs left at zero values
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// ProcessNames should be copied
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "opencode" {
+			t.Errorf("Tmux.ProcessNames not copied correctly: got %v", result.Tmux.ProcessNames)
+		}
+		// Zero values should remain zero (fillRuntimeDefaults doesn't fill nested defaults)
+		if result.Tmux.ReadyDelayMs != 0 {
+			t.Errorf("Tmux.ReadyDelayMs should be 0 (unfilled), got %d", result.Tmux.ReadyDelayMs)
+		}
+	})
+}
+
+// TestLookupAgentConfigPreservesCustomFields verifies that custom agents
+// have all their settings preserved through the lookup chain.
+func TestLookupAgentConfigPreservesCustomFields(t *testing.T) {
+	t.Parallel()
+
+	townSettings := &TownSettings{
+		Type:         "town-settings",
+		Version:      1,
+		DefaultAgent: "claude",
+		Agents: map[string]*RuntimeConfig{
+			"opencode-mayor": {
+				Command:    "opencode",
+				Args:       []string{"-m", "gpt-5"},
+				PromptMode: "none",
+				Env:        map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
+				Tmux: &RuntimeTmuxConfig{
+					ProcessNames: []string{"opencode", "node"},
+				},
+			},
+		},
+	}
+
+	rc := lookupAgentConfig("opencode-mayor", townSettings, nil)
+
+	if rc == nil {
+		t.Fatal("lookupAgentConfig returned nil for custom agent")
+	}
+	if rc.PromptMode != "none" {
+		t.Errorf("PromptMode: got %q, want %q - setting was lost in lookup chain", rc.PromptMode, "none")
+	}
+	if rc.Command != "opencode" {
+		t.Errorf("Command: got %q, want %q", rc.Command, "opencode")
+	}
+	if rc.Env["OPENCODE_PERMISSION"] != `{"*":"allow"}` {
+		t.Errorf("Env was not preserved: got %v", rc.Env)
+	}
+	if rc.Tmux == nil || len(rc.Tmux.ProcessNames) != 2 {
+		t.Errorf("Tmux.ProcessNames not preserved: got %+v", rc.Tmux)
+	}
+}
+
+// TestBuildCommandWithPromptRespectsPromptModeNone verifies that when PromptMode
+// is "none", the prompt is not appended to the command.
+func TestBuildCommandWithPromptRespectsPromptModeNone(t *testing.T) {
+	t.Parallel()
+
+	rc := &RuntimeConfig{
+		Command:    "opencode",
+		Args:       []string{"-m", "gpt-5"},
+		PromptMode: "none",
+	}
+
+	// Build command with a prompt that should be ignored
+	cmd := rc.BuildCommandWithPrompt("This prompt should not appear")
+
+	if strings.Contains(cmd, "This prompt should not appear") {
+		t.Errorf("prompt_mode=none should prevent prompt from being added, got: %s", cmd)
+	}
+	if !strings.HasPrefix(cmd, "opencode") {
+		t.Errorf("Command should start with opencode, got: %s", cmd)
+	}
+}
+
+// TestRoleAgentConfigWithCustomAgent tests role-based agent resolution with
+// custom agents that have special settings like prompt_mode: "none".
+//
+// This test mirrors manual verification using settings/config.json:
+//
+//	{
+//	  "type": "town-settings",
+//	  "version": 1,
+//	  "default_agent": "claude-opus",
+//	  "agents": {
+//	    "amp-yolo": {
+//	      "command": "amp",
+//	      "args": ["--dangerously-allow-all"]
+//	    },
+//	    "opencode-mayor": {
+//	      "command": "opencode",
+//	      "args": ["-m", "openai/gpt-5.2-codex"],
+//	      "prompt_mode": "none",
+//	      "process_names": ["opencode", "node"],
+//	      "env": {
+//	        "OPENCODE_PERMISSION": "{\"*\":\"allow\"}"
+//	      }
+//	    }
+//	  },
+//	  "role_agents": {
+//	    "crew": "claude-sonnet",
+//	    "deacon": "claude-haiku",
+//	    "mayor": "opencode-mayor",
+//	    "polecat": "claude-opus",
+//	    "refinery": "claude-opus",
+//	    "witness": "claude-sonnet"
+//	  }
+//	}
+//
+// Manual test procedure:
+//  1. Set role_agents.mayor to each agent (claude, gemini, codex, cursor, auggie, amp, opencode)
+//  2. Run: gt start
+//  3. Verify mayor starts with correct agent config
+//  4. Run: GT_NUKE_ACKNOWLEDGED=1 gt down --nuke
+//  5. Repeat for all 7 built-in agents
+func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "opencode", "claude")
+	t.Parallel()
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create town settings mirroring the manual test config
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude-opus"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleMayor:    "opencode-mayor",
+		constants.RoleDeacon:   "claude-haiku",
+		constants.RolePolecat:  "claude-opus",
+		constants.RoleRefinery: "claude-opus",
+		constants.RoleWitness:  "claude-sonnet",
+		constants.RoleCrew:     "claude-sonnet",
+	}
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"opencode-mayor": {
+			Command:    "opencode",
+			Args:       []string{"-m", "openai/gpt-5.2-codex"},
+			PromptMode: "none",
+			Env:        map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"opencode", "node"},
+			},
+		},
+		"amp-yolo": {
+			Command: "amp",
+			Args:    []string{"--dangerously-allow-all"},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create minimal rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// Test mayor role gets opencode-mayor with prompt_mode: none
+	t.Run("mayor gets opencode-mayor config", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig(constants.RoleMayor, townRoot, rigPath)
+		if rc == nil {
+			t.Fatal("ResolveRoleAgentConfig returned nil for mayor")
+		}
+		if rc.Command != "opencode" {
+			t.Errorf("Command: got %q, want %q", rc.Command, "opencode")
+		}
+		if rc.PromptMode != "none" {
+			t.Errorf("PromptMode: got %q, want %q - critical for opencode", rc.PromptMode, "none")
+		}
+		if rc.Env["OPENCODE_PERMISSION"] != `{"*":"allow"}` {
+			t.Errorf("Env not preserved: got %v", rc.Env)
+		}
+
+		// Verify startup beacon is NOT added to command
+		cmd := rc.BuildCommandWithPrompt("[GAS TOWN] mayor <- human • cold-start")
+		if strings.Contains(cmd, "GAS TOWN") {
+			t.Errorf("prompt_mode=none should prevent beacon, got: %s", cmd)
+		}
+	})
+
+	// Test other roles get their configured agents
+	t.Run("deacon gets claude-haiku", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig(constants.RoleDeacon, townRoot, rigPath)
+		if rc == nil {
+			t.Fatal("ResolveRoleAgentConfig returned nil for deacon")
+		}
+		// claude-haiku is a built-in preset
+		if !strings.Contains(rc.Command, "claude") && rc.Command != "claude" {
+			t.Errorf("Command: got %q, want claude-based command", rc.Command)
+		}
+	})
+
+	t.Run("polecat gets claude-opus", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig(constants.RolePolecat, townRoot, rigPath)
+		if rc == nil {
+			t.Fatal("ResolveRoleAgentConfig returned nil for polecat")
+		}
+		if !strings.Contains(rc.Command, "claude") && rc.Command != "claude" {
+			t.Errorf("Command: got %q, want claude-based command", rc.Command)
+		}
+	})
+}
+
+// TestMultipleAgentTypes tests that various built-in agent presets work correctly.
+// NOTE: Only these are actual built-in presets: claude, gemini, codex, cursor, auggie, amp, opencode.
+// Variants like "claude-opus", "claude-haiku", "claude-sonnet" are NOT built-in - they need
+// to be defined as custom agents in TownSettings.Agents if specific model selection is needed.
+func TestMultipleAgentTypes(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		agentName     string
+		expectCommand string
+		isBuiltIn     bool // true if this is an actual built-in preset
+	}{
+		{
+			name:          "claude built-in preset",
+			agentName:     "claude",
+			expectCommand: "claude",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "codex built-in preset",
+			agentName:     "codex",
+			expectCommand: "codex",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "gemini built-in preset",
+			agentName:     "gemini",
+			expectCommand: "gemini",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "amp built-in preset",
+			agentName:     "amp",
+			expectCommand: "amp",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "opencode built-in preset",
+			agentName:     "opencode",
+			expectCommand: "opencode",
+			isBuiltIn:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Skip if agent binary not installed (prevents flaky CI failures)
+			skipIfAgentBinaryMissing(t, tc.agentName)
+
+			// Verify it's actually a built-in preset
+			if tc.isBuiltIn {
+				preset := GetAgentPresetByName(tc.agentName)
+				if preset == nil {
+					t.Errorf("%s should be a built-in preset but GetAgentPresetByName returned nil", tc.agentName)
+					return
+				}
+			}
+
+			townRoot := t.TempDir()
+			rigPath := filepath.Join(townRoot, "testrig")
+
+			townSettings := NewTownSettings()
+			townSettings.DefaultAgent = "claude"
+			townSettings.RoleAgents = map[string]string{
+				constants.RoleMayor: tc.agentName,
+			}
+			if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+				t.Fatalf("SaveTownSettings: %v", err)
+			}
+
+			rigSettings := NewRigSettings()
+			if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+				t.Fatalf("SaveRigSettings: %v", err)
+			}
+
+			rc := ResolveRoleAgentConfig(constants.RoleMayor, townRoot, rigPath)
+			if rc == nil {
+				t.Fatalf("ResolveRoleAgentConfig returned nil for %s", tc.agentName)
+			}
+
+			// Allow path-based commands (e.g., /opt/homebrew/bin/claude)
+			if !strings.Contains(rc.Command, tc.expectCommand) {
+				t.Errorf("Command: got %q, want command containing %q", rc.Command, tc.expectCommand)
+			}
+		})
+	}
+}
+
+// TestCustomClaudeVariants tests that Claude model variants (opus, sonnet, haiku) need
+// to be explicitly defined as custom agents since they are NOT built-in presets.
+func TestCustomClaudeVariants(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "claude")
+	t.Parallel()
+
+	// Verify that claude-opus/sonnet/haiku are NOT built-in presets
+	variants := []string{"claude-opus", "claude-sonnet", "claude-haiku"}
+	for _, variant := range variants {
+		if preset := GetAgentPresetByName(variant); preset != nil {
+			t.Errorf("%s should NOT be a built-in preset (only 'claude' is), but GetAgentPresetByName returned non-nil", variant)
+		}
+	}
+
+	// Test that custom claude variants work when explicitly defined
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleMayor:  "claude-opus",
+		constants.RoleDeacon: "claude-haiku",
+	}
+	// Define the custom variants
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-opus": {
+			Command: "claude",
+			Args:    []string{"--model", "claude-opus-4", "--dangerously-skip-permissions"},
+		},
+		"claude-haiku": {
+			Command: "claude",
+			Args:    []string{"--model", "claude-haiku-3", "--dangerously-skip-permissions"},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// Test claude-opus custom agent
+	rc := ResolveRoleAgentConfig(constants.RoleMayor, townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("ResolveRoleAgentConfig returned nil for claude-opus")
+	}
+	if !strings.Contains(rc.Command, "claude") {
+		t.Errorf("claude-opus Command: got %q, want claude", rc.Command)
+	}
+	foundModel := false
+	for _, arg := range rc.Args {
+		if arg == "claude-opus-4" {
+			foundModel = true
+			break
+		}
+	}
+	if !foundModel {
+		t.Errorf("claude-opus Args should contain model flag: got %v", rc.Args)
+	}
+
+	// Test claude-haiku custom agent
+	rc = ResolveRoleAgentConfig(constants.RoleDeacon, townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("ResolveRoleAgentConfig returned nil for claude-haiku")
+	}
+	foundModel = false
+	for _, arg := range rc.Args {
+		if arg == "claude-haiku-3" {
+			foundModel = true
+			break
+		}
+	}
+	if !foundModel {
+		t.Errorf("claude-haiku Args should contain model flag: got %v", rc.Args)
+	}
+}
+
+// TestCustomAgentWithAmp tests custom agent configuration for amp.
+// This mirrors the manual test: amp-yolo started successfully with custom args.
+func TestCustomAgentWithAmp(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "amp")
+	t.Parallel()
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleMayor: "amp-yolo",
+	}
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"amp-yolo": {
+			Command: "amp",
+			Args:    []string{"--dangerously-allow-all"},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig(constants.RoleMayor, townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("ResolveRoleAgentConfig returned nil for amp-yolo")
+	}
+
+	if rc.Command != "amp" {
+		t.Errorf("Command: got %q, want %q", rc.Command, "amp")
+	}
+	if len(rc.Args) != 1 || rc.Args[0] != "--dangerously-allow-all" {
+		t.Errorf("Args: got %v, want [--dangerously-allow-all]", rc.Args)
+	}
+
+	// Verify command generation
+	cmd := rc.BuildCommand()
+	if !strings.Contains(cmd, "amp") {
+		t.Errorf("BuildCommand should contain amp, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--dangerously-allow-all") {
+		t.Errorf("BuildCommand should contain custom args, got: %s", cmd)
+	}
+}
+
 func TestResolveRoleAgentConfig(t *testing.T) {
 	skipIfAgentBinaryMissing(t, "gemini", "codex")
 	t.Parallel()
@@ -2243,7 +3248,7 @@ func TestEscalationConfigRoundTrip(t *testing.T) {
 			HumanSMS:   "+15551234567",
 		},
 		StaleThreshold:   "2h",
-		MaxReescalations: 3,
+		MaxReescalations: intPtr(3),
 	}
 
 	if err := SaveEscalationConfig(path, original); err != nil {
@@ -2264,8 +3269,8 @@ func TestEscalationConfigRoundTrip(t *testing.T) {
 	if loaded.StaleThreshold != original.StaleThreshold {
 		t.Errorf("StaleThreshold = %q, want %q", loaded.StaleThreshold, original.StaleThreshold)
 	}
-	if loaded.MaxReescalations != original.MaxReescalations {
-		t.Errorf("MaxReescalations = %d, want %d", loaded.MaxReescalations, original.MaxReescalations)
+	if *loaded.MaxReescalations != *original.MaxReescalations {
+		t.Errorf("MaxReescalations = %d, want %d", *loaded.MaxReescalations, *original.MaxReescalations)
 	}
 	if loaded.Contacts.HumanEmail != original.Contacts.HumanEmail {
 		t.Errorf("Contacts.HumanEmail = %q, want %q", loaded.Contacts.HumanEmail, original.Contacts.HumanEmail)
@@ -2303,8 +3308,8 @@ func TestEscalationConfigDefaults(t *testing.T) {
 	if cfg.StaleThreshold != "4h" {
 		t.Errorf("StaleThreshold = %q, want %q", cfg.StaleThreshold, "4h")
 	}
-	if cfg.MaxReescalations != 2 {
-		t.Errorf("MaxReescalations = %d, want %d", cfg.MaxReescalations, 2)
+	if cfg.MaxReescalations == nil || *cfg.MaxReescalations != 2 {
+		t.Errorf("MaxReescalations = %v, want %d", cfg.MaxReescalations, 2)
 	}
 
 	// Check default routes
@@ -2384,7 +3389,7 @@ func TestEscalationConfigValidation(t *testing.T) {
 			config: &EscalationConfig{
 				Type:             "escalation",
 				Version:          1,
-				MaxReescalations: -1,
+				MaxReescalations: intPtr(-1),
 			},
 			wantErr: true,
 			errMsg:  "max_reescalations must be non-negative",
@@ -2500,23 +3505,30 @@ func TestEscalationConfigGetMaxReescalations(t *testing.T) {
 		expected int
 	}{
 		{
-			name:     "default when zero",
+			name:     "default when nil",
 			config:   &EscalationConfig{},
 			expected: 2,
 		},
 		{
+			name: "explicit zero means never re-escalate",
+			config: &EscalationConfig{
+				MaxReescalations: intPtr(0),
+			},
+			expected: 0,
+		},
+		{
 			name: "custom value",
 			config: &EscalationConfig{
-				MaxReescalations: 5,
+				MaxReescalations: intPtr(5),
 			},
 			expected: 5,
 		},
 		{
-			name: "default when negative (should not happen after validation)",
+			name: "negative returns negative (should not happen after validation)",
 			config: &EscalationConfig{
-				MaxReescalations: -1,
+				MaxReescalations: intPtr(-1),
 			},
-			expected: 2,
+			expected: -1,
 		},
 	}
 
@@ -2749,6 +3761,56 @@ func TestBuildStartupCommandWithAgentOverride_SetsGTAgent(t *testing.T) {
 	}
 }
 
+// TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot tests that
+// agentOverride is respected even when findTownRootFromCwd fails.
+// This is a regression test for the bug where `gt deacon start --agent codex`
+// would still launch Claude if run from outside the town directory.
+func TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+
+	// Change to a directory that is definitely NOT in a Gas Town workspace
+	// by using a temp directory with no mayor/town.json
+	tmpDir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWd)
+	})
+
+	// Call with rigPath="" (like deacon does) and agentOverride="codex"
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "deacon"},
+		"",      // rigPath is empty for town-level roles
+		"",      // no prompt
+		"codex", // agent override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use codex, NOT claude (the default)
+	if !strings.Contains(cmd, "codex") {
+		t.Errorf("expected command to contain 'codex' but got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("expected command to NOT contain 'claude' but got: %q", cmd)
+	}
+	// Should have the codex YOLO flag
+	if !strings.Contains(cmd, "--yolo") {
+		t.Errorf("expected command to contain '--yolo' (codex flag) but got: %q", cmd)
+	}
+	// Should set GT_AGENT=codex
+	if !strings.Contains(cmd, "GT_AGENT=codex") {
+		t.Errorf("expected command to contain 'GT_AGENT=codex' but got: %q", cmd)
+	}
+}
+
 func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()
@@ -2776,5 +3838,73 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 	// Should NOT include GT_AGENT when no override is used
 	if strings.Contains(cmd, "GT_AGENT=") {
 		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
+	}
+}
+
+// TestBuildStartupCommand_UsesGTRootFromEnvVars verifies that when rigPath is empty
+// but GT_ROOT is provided in envVars, the function uses GT_ROOT to resolve town
+// settings and respects role_agents configuration. This is the path hit when the
+// daemon spawns town-level agents (deacon, mayor) where rigPath is always empty.
+// Fixes #433
+func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd := BuildStartupCommand(envVars, "", "")
+
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, "", "", "")
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
 	}
 }

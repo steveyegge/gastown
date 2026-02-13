@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/hooks"
 )
 
 func TestParseHooksFile(t *testing.T) {
@@ -15,20 +17,20 @@ func TestParseHooksFile(t *testing.T) {
 		t.Fatalf("failed to create .claude dir: %v", err)
 	}
 
-	settings := ClaudeSettings{
-		Hooks: map[string][]ClaudeHookMatcher{
-			"SessionStart": {
+	settings := hooks.SettingsJSON{
+		Hooks: hooks.HooksConfig{
+			SessionStart: []hooks.HookEntry{
 				{
 					Matcher: "",
-					Hooks: []ClaudeHook{
+					Hooks: []hooks.Hook{
 						{Type: "command", Command: "gt prime"},
 					},
 				},
 			},
-			"UserPromptSubmit": {
+			UserPromptSubmit: []hooks.HookEntry{
 				{
 					Matcher: "*.go",
-					Hooks: []ClaudeHook{
+					Hooks: []hooks.Hook{
 						{Type: "command", Command: "go fmt"},
 						{Type: "command", Command: "go vet"},
 					},
@@ -37,7 +39,7 @@ func TestParseHooksFile(t *testing.T) {
 		},
 	}
 
-	data, err := json.Marshal(settings)
+	data, err := hooks.MarshalSettings(&settings)
 	if err != nil {
 		t.Fatalf("failed to marshal settings: %v", err)
 	}
@@ -48,24 +50,24 @@ func TestParseHooksFile(t *testing.T) {
 	}
 
 	// Parse the file
-	hooks, err := parseHooksFile(settingsPath, "test/agent")
+	hookInfos, err := parseHooksFile(settingsPath, "test/agent")
 	if err != nil {
 		t.Fatalf("parseHooksFile failed: %v", err)
 	}
 
 	// Verify results
-	if len(hooks) != 2 {
-		t.Errorf("expected 2 hooks, got %d", len(hooks))
+	if len(hookInfos) != 2 {
+		t.Errorf("expected 2 hooks, got %d", len(hookInfos))
 	}
 
 	// Find the SessionStart hook
 	var sessionStart, userPrompt *HookInfo
-	for i := range hooks {
-		switch hooks[i].Type {
+	for i := range hookInfos {
+		switch hookInfos[i].Type {
 		case "SessionStart":
-			sessionStart = &hooks[i]
+			sessionStart = &hookInfos[i]
 		case "UserPromptSubmit":
-			userPrompt = &hooks[i]
+			userPrompt = &hookInfos[i]
 		}
 	}
 
@@ -91,9 +93,14 @@ func TestParseHooksFile(t *testing.T) {
 }
 
 func TestParseHooksFileMissing(t *testing.T) {
-	_, err := parseHooksFile("/nonexistent/settings.json", "test")
-	if err == nil {
-		t.Error("expected error for missing file")
+	// parseHooksFile now returns empty results for missing files (via LoadSettings),
+	// not an error. This matches the updated semantics.
+	infos, err := parseHooksFile("/nonexistent/settings.json", "test")
+	if err != nil {
+		t.Errorf("unexpected error for missing file: %v", err)
+	}
+	if len(infos) != 0 {
+		t.Errorf("expected 0 hooks for missing file, got %d", len(infos))
 	}
 }
 
@@ -115,22 +122,20 @@ func TestParseHooksFileEmptyHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 	settingsPath := filepath.Join(tmpDir, "settings.json")
 
-	settings := ClaudeSettings{
-		Hooks: map[string][]ClaudeHookMatcher{},
-	}
+	settings := hooks.SettingsJSON{}
 
 	data, _ := json.Marshal(settings)
 	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	hooks, err := parseHooksFile(settingsPath, "test")
+	hookInfos, err := parseHooksFile(settingsPath, "test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(hooks) != 0 {
-		t.Errorf("expected 0 hooks, got %d", len(hooks))
+	if len(hookInfos) != 0 {
+		t.Errorf("expected 0 hooks, got %d", len(hookInfos))
 	}
 }
 
@@ -138,65 +143,66 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 	// Create a temp directory structure simulating a Gas Town workspace
 	tmpDir := t.TempDir()
 
-	// Create rig structure with crew-level and polecats-level settings
+	// Create rig structure with individual crew member and polecat worktree settings
+	// (DiscoverTargets only targets individual worktrees, not parent crew/ or polecats/ dirs)
 	rigName := "testrig"
 	rigDir := filepath.Join(tmpDir, rigName)
 
-	// Create crew-level settings (inherited by all crew members)
-	crewClaudeDir := filepath.Join(rigDir, "crew", ".claude")
-	if err := os.MkdirAll(crewClaudeDir, 0755); err != nil {
-		t.Fatalf("failed to create crew/.claude dir: %v", err)
+	// Create individual crew member settings (crew/alice/.claude/settings.local.json)
+	crewMemberClaudeDir := filepath.Join(rigDir, "crew", "alice", ".claude")
+	if err := os.MkdirAll(crewMemberClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create crew/alice/.claude dir: %v", err)
 	}
 
-	crewSettings := ClaudeSettings{
-		Hooks: map[string][]ClaudeHookMatcher{
-			"SessionStart": {
+	crewSettings := hooks.SettingsJSON{
+		Hooks: hooks.HooksConfig{
+			SessionStart: []hooks.HookEntry{
 				{
 					Matcher: "",
-					Hooks: []ClaudeHook{
+					Hooks: []hooks.Hook{
 						{Type: "command", Command: "crew-level-hook"},
 					},
 				},
 			},
 		},
 	}
-	crewData, _ := json.Marshal(crewSettings)
-	if err := os.WriteFile(filepath.Join(crewClaudeDir, "settings.json"), crewData, 0644); err != nil {
+	crewData, _ := hooks.MarshalSettings(&crewSettings)
+	if err := os.WriteFile(filepath.Join(crewMemberClaudeDir, "settings.local.json"), crewData, 0644); err != nil {
 		t.Fatalf("failed to write crew settings: %v", err)
 	}
 
-	// Create polecats-level settings (inherited by all polecats)
-	polecatsClaudeDir := filepath.Join(rigDir, "polecats", ".claude")
-	if err := os.MkdirAll(polecatsClaudeDir, 0755); err != nil {
-		t.Fatalf("failed to create polecats/.claude dir: %v", err)
+	// Create individual polecat worktree settings (polecats/toast/.claude/settings.local.json)
+	polecatClaudeDir := filepath.Join(rigDir, "polecats", "toast", ".claude")
+	if err := os.MkdirAll(polecatClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create polecats/toast/.claude dir: %v", err)
 	}
 
-	polecatsSettings := ClaudeSettings{
-		Hooks: map[string][]ClaudeHookMatcher{
-			"PreToolUse": {
+	polecatsSettings := hooks.SettingsJSON{
+		Hooks: hooks.HooksConfig{
+			PreToolUse: []hooks.HookEntry{
 				{
 					Matcher: "",
-					Hooks: []ClaudeHook{
+					Hooks: []hooks.Hook{
 						{Type: "command", Command: "polecats-level-hook"},
 					},
 				},
 			},
 		},
 	}
-	polecatsData, _ := json.Marshal(polecatsSettings)
-	if err := os.WriteFile(filepath.Join(polecatsClaudeDir, "settings.json"), polecatsData, 0644); err != nil {
+	polecatsData, _ := hooks.MarshalSettings(&polecatsSettings)
+	if err := os.WriteFile(filepath.Join(polecatClaudeDir, "settings.local.json"), polecatsData, 0644); err != nil {
 		t.Fatalf("failed to write polecats settings: %v", err)
 	}
 
 	// Discover hooks
-	hooks, err := discoverHooks(tmpDir)
+	hookInfos, err := discoverHooks(tmpDir)
 	if err != nil {
 		t.Fatalf("discoverHooks failed: %v", err)
 	}
 
-	// Verify crew-level hook was discovered
+	// Verify individual crew member and polecat hooks were discovered
 	var foundCrewLevel, foundPolecatsLevel bool
-	for _, h := range hooks {
+	for _, h := range hookInfos {
 		if h.Agent == "testrig/crew" && len(h.Commands) > 0 && h.Commands[0] == "crew-level-hook" {
 			foundCrewLevel = true
 		}
@@ -206,9 +212,9 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 	}
 
 	if !foundCrewLevel {
-		t.Error("expected crew-level hook to be discovered (testrig/crew)")
+		t.Error("expected crew member hook to be discovered (testrig/crew)")
 	}
 	if !foundPolecatsLevel {
-		t.Error("expected polecats-level hook to be discovered (testrig/polecats)")
+		t.Error("expected polecat hook to be discovered (testrig/polecats)")
 	}
 }

@@ -16,6 +16,7 @@ var (
 	escalateStaleJSON   bool
 	escalateDryRun      bool
 	escalateCloseReason string
+	escalateStdin       bool // Read reason from stdin
 )
 
 var escalateCmd = &cobra.Command{
@@ -143,6 +144,7 @@ func init() {
 	escalateCmd.Flags().StringVar(&escalateRelatedBead, "related", "", "Related bead ID (task, bug, etc.)")
 	escalateCmd.Flags().BoolVar(&escalateJSON, "json", false, "Output as JSON")
 	escalateCmd.Flags().BoolVarP(&escalateDryRun, "dry-run", "n", false, "Show what would be done without executing")
+	escalateCmd.Flags().BoolVar(&escalateStdin, "stdin", false, "Read reason from stdin (avoids shell quoting issues)")
 
 	// List subcommand flags
 	escalateListCmd.Flags().BoolVar(&escalateListJSON, "json", false, "Output as JSON")

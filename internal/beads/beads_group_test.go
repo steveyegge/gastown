@@ -158,6 +158,26 @@ members: a, b , c`,
 	}
 }
 
+func TestGroupBeadIDWithPrefix(t *testing.T) {
+	tests := []struct {
+		prefix string
+		name   string
+		want   string
+	}{
+		{"hq", "ops-team", "hq-group-ops-team"},
+		{"gt", "ops-team", "gt-group-ops-team"},
+		{"bd", "all", "bd-group-all"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix+"-"+tt.name, func(t *testing.T) {
+			if got := GroupBeadIDWithPrefix(tt.prefix, tt.name); got != tt.want {
+				t.Errorf("GroupBeadIDWithPrefix(%q, %q) = %q, want %q", tt.prefix, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGroupBeadID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -205,5 +225,63 @@ func TestRoundTrip(t *testing.T) {
 		if parsed.Members[i] != m {
 			t.Errorf("Members[%d]: got %q, want %q", i, parsed.Members[i], m)
 		}
+	}
+}
+
+func TestValidateGroupName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		// Valid names
+		{"ops-team", false},
+		{"all", false},
+		{"crew-leads", false},
+		{"a", false},
+		{"abc_def", false},
+		{"team123", false},
+		{"a-b_c-d", false},
+
+		// Invalid: empty
+		{"", true},
+
+		// Invalid: leading/trailing whitespace
+		{" ops-team", true},
+		{"ops-team ", true},
+		{" ops ", true},
+
+		// Invalid: uppercase
+		{"Ops-Team", true},
+		{"ALL", true},
+
+		// Invalid: special characters
+		{"ops team", true},
+		{"ops.team", true},
+		{"ops/team", true},
+		{"ops@team", true},
+		{"ops:team", true},
+
+		// Invalid: starts with hyphen or underscore
+		{"-ops", true},
+		{"_ops", true},
+
+		// Invalid: too long (65 chars)
+		{strings.Repeat("a", 65), true},
+
+		// Valid: exactly at limit (64 chars)
+		{strings.Repeat("a", 64), false},
+	}
+
+	for _, tt := range tests {
+		label := tt.name
+		if label == "" {
+			label = "(empty)"
+		}
+		t.Run(label, func(t *testing.T) {
+			err := ValidateGroupName(tt.name)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGroupName(%q) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+			}
+		})
 	}
 }

@@ -167,6 +167,16 @@ gt mail send {{RIG}}/refinery -s "MERGE_READY <polecat>" -m "..."
 gt mail send mayor/ -s "RECOVERY_NEEDED {{RIG}}/<polecat>" -m "..."  # Escalate
 ```
 
+## ⚡ Commonly Confused Commands
+
+| Want to... | Correct command | Common mistake |
+|------------|----------------|----------------|
+| Message a polecat | `gt nudge {{RIG}}/<name> "msg"` | ~~tmux send-keys~~ (unreliable, drops Enter) |
+| Kill stuck polecat | `gt polecat nuke {{RIG}}/<name> --force` | ~~gt polecat kill~~ (not a command) |
+| View polecat output | `gt peek {{RIG}}/<name> 50` | ~~tmux capture-pane~~ (gt peek is simpler) |
+| Check merge queue | `gt mq list {{RIG}}` | ~~git branch -r \| grep polecat~~ (misses MRs) |
+| Create issue | `bd create "title"` | ~~gt issue create~~ (not a command) |
+
 ---
 
 ## Do NOT

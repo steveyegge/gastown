@@ -192,8 +192,9 @@ The Refinery will retry the merge after rebase is complete.`, targetBranch, targ
 }
 
 // ParseMergeReadyPayload parses a MERGE_READY message body into a payload.
-func ParseMergeReadyPayload(body string) *MergeReadyPayload {
-	return &MergeReadyPayload{
+// Returns an error if required fields (Branch, Polecat, Rig) are missing.
+func ParseMergeReadyPayload(body string) (*MergeReadyPayload, error) {
+	payload := &MergeReadyPayload{
 		Branch:    parseField(body, "Branch"),
 		Issue:     parseField(body, "Issue"),
 		Polecat:   parseField(body, "Polecat"),
@@ -201,10 +202,27 @@ func ParseMergeReadyPayload(body string) *MergeReadyPayload {
 		Verified:  parseField(body, "Verified"),
 		Timestamp: time.Now(), // Use current time if not parseable
 	}
+
+	var errs []string
+	if payload.Branch == "" {
+		errs = append(errs, "Branch")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid MERGE_READY payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
 }
 
 // ParseMergedPayload parses a MERGED message body into a payload.
-func ParseMergedPayload(body string) *MergedPayload {
+// Returns an error if required fields (Branch, Polecat, Rig) are missing.
+func ParseMergedPayload(body string) (*MergedPayload, error) {
 	payload := &MergedPayload{
 		Branch:       parseField(body, "Branch"),
 		Issue:        parseField(body, "Issue"),
@@ -221,11 +239,26 @@ func ParseMergedPayload(body string) *MergedPayload {
 		}
 	}
 
-	return payload
+	var errs []string
+	if payload.Branch == "" {
+		errs = append(errs, "Branch")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid MERGED payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
 }
 
 // ParseMergeFailedPayload parses a MERGE_FAILED message body into a payload.
-func ParseMergeFailedPayload(body string) *MergeFailedPayload {
+// Returns an error if required fields (Branch, Polecat, Rig) are missing.
+func ParseMergeFailedPayload(body string) (*MergeFailedPayload, error) {
 	payload := &MergeFailedPayload{
 		Branch:       parseField(body, "Branch"),
 		Issue:        parseField(body, "Issue"),
@@ -243,11 +276,26 @@ func ParseMergeFailedPayload(body string) *MergeFailedPayload {
 		}
 	}
 
-	return payload
+	var errs []string
+	if payload.Branch == "" {
+		errs = append(errs, "Branch")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid MERGE_FAILED payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
 }
 
 // ParseReworkRequestPayload parses a REWORK_REQUEST message body into a payload.
-func ParseReworkRequestPayload(body string) *ReworkRequestPayload {
+// Returns an error if required fields (Branch, Polecat, Rig) are missing.
+func ParseReworkRequestPayload(body string) (*ReworkRequestPayload, error) {
 	payload := &ReworkRequestPayload{
 		Branch:       parseField(body, "Branch"),
 		Issue:        parseField(body, "Issue"),
@@ -268,7 +316,21 @@ func ParseReworkRequestPayload(body string) *ReworkRequestPayload {
 		payload.ConflictFiles = strings.Split(files, ", ")
 	}
 
-	return payload
+	var errs []string
+	if payload.Branch == "" {
+		errs = append(errs, "Branch")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid REWORK_REQUEST payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
 }
 
 // parseField extracts a field value from a key-value body format.

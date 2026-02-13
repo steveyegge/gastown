@@ -74,7 +74,10 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	total, unread, _ := mailbox.Count()
+	total, unread, err := mailbox.Count()
+	if err != nil {
+		style.PrintWarning("could not count messages: %v", err)
+	}
 	fmt.Printf("%s Inbox: %s (%d messages, %d unread)\n\n",
 		style.Bold.Render("📬"), address, total, unread)
 
@@ -149,9 +152,13 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting message: %w", err)
 	}
 
-	// Note: We intentionally do NOT mark as read/ack on read.
-	// User must explicitly delete/ack the message.
-	// This preserves handoff messages for reference.
+	// Mark as read when viewed (adds "read" label, does not close/archive).
+	// Handoff messages are preserved via the hook mechanism, so marking
+	// read here is safe — hooked mail is found via gt hook, not the inbox.
+	if err := mailbox.MarkReadOnly(msgID); err != nil {
+		// Non-fatal: message was retrieved, just couldn't mark
+		style.PrintWarning("could not mark message as read: %v", err)
+	}
 
 	// JSON output
 	if mailReadJSON {

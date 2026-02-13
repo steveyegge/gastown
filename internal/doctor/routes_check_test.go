@@ -224,6 +224,185 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 	})
 }
 
+func TestRoutesCheck_DirectLayoutRig(t *testing.T) {
+	t.Run("Run matches direct-layout rig correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create town-level .beads
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create direct-layout rig: .beads at rig root, no redirect
+		rigBeadsDir := filepath.Join(tmpDir, "myrig", ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// No redirect file — this is a direct layout
+
+		// Create mayor dir and rigs.json
+		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		rigsPath := filepath.Join(tmpDir, "mayor", "rigs.json")
+		rigsContent := `{
+			"version": 1,
+			"rigs": {
+				"myrig": {
+					"git_url": "https://github.com/example/myrig",
+					"beads": { "prefix": "mr" }
+				}
+			}
+		}`
+		if err := os.WriteFile(rigsPath, []byte(rigsContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create routes.jsonl with the direct-layout path (myrig, not myrig/mayor/rig)
+		routesPath := filepath.Join(beadsDir, "routes.jsonl")
+		routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
+{"prefix":"mr-","path":"myrig"}
+`
+		if err := os.WriteFile(routesPath, []byte(routesContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewRoutesCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+		result := check.Run(ctx)
+
+		if result.Status != StatusOK {
+			t.Errorf("expected StatusOK for direct-layout rig, got %v: %s (details: %v)", result.Status, result.Message, result.Details)
+		}
+	})
+
+	t.Run("Fix writes direct-layout path for rig without redirect", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create town-level .beads with empty routes
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		routesPath := filepath.Join(beadsDir, "routes.jsonl")
+		if err := os.WriteFile(routesPath, []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create direct-layout rig: .beads at rig root, no redirect
+		rigDir := filepath.Join(tmpDir, "myrig")
+		rigBeadsDir := filepath.Join(rigDir, ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create mayor dir and rigs.json
+		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		rigsPath := filepath.Join(tmpDir, "mayor", "rigs.json")
+		rigsContent := `{
+			"version": 1,
+			"rigs": {
+				"myrig": {
+					"git_url": "https://github.com/example/myrig",
+					"beads": { "prefix": "mr" }
+				}
+			}
+		}`
+		if err := os.WriteFile(rigsPath, []byte(rigsContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewRoutesCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		if err := check.Fix(ctx); err != nil {
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		content, err := os.ReadFile(routesPath)
+		if err != nil {
+			t.Fatalf("Failed to read routes.jsonl: %v", err)
+		}
+
+		contentStr := string(content)
+		// Should use "myrig" path (direct layout), not "myrig/mayor/rig"
+		expected := `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
+{"prefix":"mr-","path":"myrig"}
+`
+		if contentStr != expected {
+			t.Errorf("unexpected routes.jsonl content:\ngot:  %s\nwant: %s", contentStr, expected)
+		}
+	})
+}
+
+func TestDetermineRigBeadsPath_Containment(t *testing.T) {
+	t.Run("redirect escaping town root falls back to default", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create rig with redirect that escapes the town root
+		rigDir := filepath.Join(tmpDir, "myrig")
+		rigBeadsDir := filepath.Join(rigDir, ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Write a redirect that escapes via ..
+		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("../../outside/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result := determineRigBeadsPath(tmpDir, "myrig")
+		expected := "myrig/mayor/rig"
+		if result != expected {
+			t.Errorf("expected fallback %q for escaped redirect, got %q", expected, result)
+		}
+	})
+
+	t.Run("valid redirect within town root resolves correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create rig with redirect to mayor/rig/.beads
+		rigDir := filepath.Join(tmpDir, "myrig")
+		rigBeadsDir := filepath.Join(rigDir, ".beads")
+		mayorBeadsDir := filepath.Join(rigDir, "mayor", "rig", ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result := determineRigBeadsPath(tmpDir, "myrig")
+		expected := "myrig/mayor/rig"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("direct layout with no redirect returns rig name", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create direct-layout rig
+		rigBeadsDir := filepath.Join(tmpDir, "myrig", ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		result := determineRigBeadsPath(tmpDir, "myrig")
+		expected := "myrig"
+		if result != expected {
+			t.Errorf("expected %q for direct layout, got %q", expected, result)
+		}
+	})
+}
+
 func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 	t.Run("corrupted routes.jsonl results in empty routes", func(t *testing.T) {
 		tmpDir := t.TempDir()

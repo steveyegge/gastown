@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -40,6 +42,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		roleName = "polecat"
 	case RoleCrew:
 		roleName = "crew"
+	case RoleBoot:
+		roleName = "boot"
 	default:
 		// Unknown role - use fallback
 		return outputPrimeContextFallback(ctx)
@@ -92,6 +96,8 @@ func outputPrimeContextFallback(ctx RoleContext) error {
 		outputPolecatContext(ctx)
 	case RoleCrew:
 		outputCrewContext(ctx)
+	case RoleBoot:
+		outputBootContext(ctx)
 	default:
 		outputUnknownContext(ctx)
 	}
@@ -108,19 +114,20 @@ func outputMayorContext(ctx RoleContext) {
 	fmt.Println("- Monitor overall system health")
 	fmt.Println()
 	fmt.Println("## Key Commands")
-	fmt.Println("- `gt mail inbox` - Check your messages")
-	fmt.Println("- `gt mail read <id>` - Read a specific message")
-	fmt.Println("- `gt status` - Show overall town status")
-	fmt.Println("- `gt rig list` - List all rigs")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your messages")
+	fmt.Println("- `" + cli.Name() + " mail read <id>` - Read a specific message")
+	fmt.Println("- `" + cli.Name() + " status` - Show overall town status")
+	fmt.Println("- `" + cli.Name() + " rig list` - List all rigs")
 	fmt.Println("- `bd ready` - Issues ready to work")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
-	fmt.Println("Mail can be hooked for ad-hoc instructions: `gt hook attach <mail-id>`")
+	fmt.Println("Mail can be hooked for ad-hoc instructions: `" + cli.Name() + " hook attach <mail-id>`")
 	fmt.Println("If mail is on your hook, read and execute its instructions (GUPP applies).")
 	fmt.Println()
 	fmt.Println("## Startup")
 	fmt.Println("Check for handoff messages with 🤝 HANDOFF in subject - continue predecessor's work.")
 	fmt.Println()
+	outputCommandQuickReference(ctx)
 	fmt.Printf("Town root: %s\n", style.Dim.Render(ctx.TownRoot))
 }
 
@@ -133,13 +140,14 @@ func outputWitnessContext(ctx RoleContext) {
 	fmt.Println("- Report rig status to Mayor")
 	fmt.Println()
 	fmt.Println("## Key Commands")
-	fmt.Println("- `gt witness status` - Show witness status")
-	fmt.Println("- `gt polecat list` - List polecats in this rig")
+	fmt.Println("- `" + cli.Name() + " witness status` - Show witness status")
+	fmt.Println("- `" + cli.Name() + " polecat list` - List polecats in this rig")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
-	fmt.Println("Mail can be hooked for ad-hoc instructions: `gt hook attach <mail-id>`")
+	fmt.Println("Mail can be hooked for ad-hoc instructions: `" + cli.Name() + " hook attach <mail-id>`")
 	fmt.Println("If mail is on your hook, read and execute its instructions (GUPP applies).")
 	fmt.Println()
+	outputCommandQuickReference(ctx)
 	fmt.Printf("Rig: %s\n", style.Dim.Render(ctx.Rig))
 }
 
@@ -153,13 +161,14 @@ func outputRefineryContext(ctx RoleContext) {
 	fmt.Println("- Land completed swarms to main")
 	fmt.Println()
 	fmt.Println("## Key Commands")
-	fmt.Println("- `gt merge queue` - Show pending merges")
-	fmt.Println("- `gt merge next` - Process next merge")
+	fmt.Println("- `" + cli.Name() + " merge queue` - Show pending merges")
+	fmt.Println("- `" + cli.Name() + " merge next` - Process next merge")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
-	fmt.Println("Mail can be hooked for ad-hoc instructions: `gt hook attach <mail-id>`")
+	fmt.Println("Mail can be hooked for ad-hoc instructions: `" + cli.Name() + " hook attach <mail-id>`")
 	fmt.Println("If mail is on your hook, read and execute its instructions (GUPP applies).")
 	fmt.Println()
+	outputCommandQuickReference(ctx)
 	fmt.Printf("Rig: %s\n", style.Dim.Render(ctx.Rig))
 }
 
@@ -168,21 +177,22 @@ func outputPolecatContext(ctx RoleContext) {
 	fmt.Printf("You are polecat **%s** in rig: %s\n\n",
 		style.Bold.Render(ctx.Polecat), style.Bold.Render(ctx.Rig))
 	fmt.Println("## Startup Protocol")
-	fmt.Println("1. Run `gt prime` - loads context and checks mail automatically")
-	fmt.Println("2. Check inbox - if mail shown, read with `gt mail read <id>`")
+	fmt.Println("1. Run `" + cli.Name() + " prime` - loads context and checks mail automatically")
+	fmt.Println("2. Check inbox - if mail shown, read with `" + cli.Name() + " mail read <id>`")
 	fmt.Println("3. Look for '📋 Work Assignment' messages for your task")
 	fmt.Println("4. If no mail, check `bd list --status=in_progress` for existing work")
 	fmt.Println()
 	fmt.Println("## Key Commands")
-	fmt.Println("- `gt mail inbox` - Check your inbox for work assignments")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox for work assignments")
 	fmt.Println("- `bd show <issue>` - View your assigned issue")
 	fmt.Println("- `bd close <issue>` - Mark issue complete")
-	fmt.Println("- `gt done` - Signal work ready for merge")
+	fmt.Println("- `" + cli.Name() + " done` - Signal work ready for merge")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
-	fmt.Println("Mail can be hooked for ad-hoc instructions: `gt hook attach <mail-id>`")
+	fmt.Println("Mail can be hooked for ad-hoc instructions: `" + cli.Name() + " hook attach <mail-id>`")
 	fmt.Println("If mail is on your hook, read and execute its instructions (GUPP applies).")
 	fmt.Println()
+	outputCommandQuickReference(ctx)
 	fmt.Printf("Polecat: %s | Rig: %s\n",
 		style.Dim.Render(ctx.Polecat), style.Dim.Render(ctx.Rig))
 }
@@ -197,17 +207,36 @@ func outputCrewContext(ctx RoleContext) {
 	fmt.Println("- Long-lived identity across sessions")
 	fmt.Println()
 	fmt.Println("## Key Commands")
-	fmt.Println("- `gt mail inbox` - Check your inbox")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox")
 	fmt.Println("- `bd ready` - Available issues")
 	fmt.Println("- `bd show <issue>` - View issue details")
 	fmt.Println("- `bd close <issue>` - Mark issue complete")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
-	fmt.Println("Mail can be hooked for ad-hoc instructions: `gt hook attach <mail-id>`")
+	fmt.Println("Mail can be hooked for ad-hoc instructions: `" + cli.Name() + " hook attach <mail-id>`")
 	fmt.Println("If mail is on your hook, read and execute its instructions (GUPP applies).")
 	fmt.Println()
+	outputCommandQuickReference(ctx)
 	fmt.Printf("Crew: %s | Rig: %s\n",
 		style.Dim.Render(ctx.Polecat), style.Dim.Render(ctx.Rig))
+}
+
+func outputBootContext(ctx RoleContext) {
+	fmt.Printf("%s\n\n", style.Bold.Render("# Boot Watchdog Context"))
+	fmt.Println("You are the **Boot Watchdog** - the daemon's entry point for Deacon triage.")
+	fmt.Println()
+	fmt.Println("## Responsibilities")
+	fmt.Println("- Observe Deacon session health")
+	fmt.Println("- Decide whether to wake, nudge, or restart the Deacon")
+	fmt.Println("- Run triage and exit (ephemeral - fresh each spawn)")
+	fmt.Println()
+	fmt.Println("## Key Commands")
+	fmt.Println("- `" + cli.Name() + " boot triage` - Run triage directly")
+	fmt.Println("- `" + cli.Name() + " boot status` - Show Boot status")
+	fmt.Println("- `" + cli.Name() + " deacon status` - Check Deacon health")
+	fmt.Println()
+	outputCommandQuickReference(ctx)
+	fmt.Printf("Town root: %s\n", style.Dim.Render(ctx.TownRoot))
 }
 
 func outputUnknownContext(ctx RoleContext) {
@@ -224,6 +253,99 @@ func outputUnknownContext(ctx RoleContext) {
 	fmt.Println("- Town root or `mayor/` - Mayor role")
 	fmt.Println()
 	fmt.Printf("Town root: %s\n", style.Dim.Render(ctx.TownRoot))
+}
+
+// outputCommandQuickReference outputs a compact role-aware cheatsheet of commonly
+// confused commands. This helps agents avoid guessing wrong commands.
+func outputCommandQuickReference(ctx RoleContext) {
+	c := cli.Name()
+	fmt.Println("## ⚡ Command Quick-Reference")
+	fmt.Println()
+	fmt.Println("**Commonly confused — use the right command:**")
+	fmt.Println()
+
+	switch ctx.Role {
+	case RoleMayor:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Dispatch work to polecat | `%s sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |\n", c)
+		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
+		fmt.Printf("| Kill stuck polecat | `%s polecat nuke <rig>/<name> --force` | ~~gt polecat kill~~ (not a command) |\n", c)
+		fmt.Printf("| Pause rig (daemon won't restart) | `%s rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |\n", c)
+		fmt.Printf("| Permanently disable rig | `%s rig dock <rig>` | ~~gt rig park~~ (temporary only) |\n", c)
+		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
+
+	case RoleCrew:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
+		fmt.Printf("| Dispatch work to polecat | `%s sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |\n", c)
+		fmt.Printf("| Stop my session | `%s crew stop %s` | ~~gt rig stop~~ (stops rig agents, not crew) |\n", c, ctx.Polecat)
+		fmt.Printf("| Pause rig (daemon won't restart) | `%s rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |\n", c)
+		fmt.Printf("| Permanently disable rig | `%s rig dock <rig>` | ~~gt rig park~~ (temporary only) |\n", c)
+
+	case RolePolecat:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Signal work complete | `%s done` | ~~bd close <root-issue>~~ (Refinery closes it) |\n", c)
+		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
+		fmt.Println("| Check workflow steps | `bd ready` | ~~gt mol status~~ (less useful) |")
+		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
+		fmt.Printf("| Escalate blocker | `%s escalate \"desc\" -s HIGH` | ~~waiting for human~~ (never wait) |\n", c)
+
+	case RoleWitness:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Message a polecat | `%s nudge %s/<name> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c, ctx.Rig)
+		fmt.Printf("| Kill stuck polecat | `%s polecat nuke %s/<name> --force` | ~~gt polecat kill~~ (not a command) |\n", c, ctx.Rig)
+		fmt.Printf("| View polecat output | `%s peek %s/<name> 50` | |\n", c, ctx.Rig)
+		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
+
+	case RoleRefinery:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Check merge queue | `%s mq list %s` | ~~git branch -r \\| grep polecat~~ (misses MRs) |\n", c, ctx.Rig)
+		fmt.Printf("| Message a polecat | `%s nudge %s/<name> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c, ctx.Rig)
+		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
+
+	case RoleDeacon:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Start rig agents | `%s rig start <rig>` | ~~gt rig boot~~ (starts without patrol) |\n", c)
+		fmt.Printf("| Pause rig (daemon won't restart) | `%s rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |\n", c)
+		fmt.Printf("| Permanently disable rig | `%s rig dock <rig>` | ~~gt rig park~~ (temporary only) |\n", c)
+		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
+
+	case RoleBoot:
+		fmt.Println("| Want to... | Correct command | Common mistake |")
+		fmt.Println("|------------|----------------|----------------|")
+		fmt.Printf("| Run triage | `%s boot triage` | ~~gt deacon heartbeat~~ (that's Deacon's job) |\n", c)
+		fmt.Printf("| Check Deacon health | `%s deacon status` | ~~gt status~~ (town-wide, not Deacon-specific) |\n", c)
+		fmt.Printf("| Nudge the Deacon | `%s nudge deacon \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
+	}
+
+	fmt.Println()
+	fmt.Println("**Rig lifecycle commands (park vs dock vs stop):**")
+	fmt.Println("- `park/unpark` — Temporary pause. Daemon skips parked rigs.")
+	fmt.Println("- `dock/undock` — Persistent disable. Survives daemon restarts.")
+	fmt.Println("- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).")
+	fmt.Println("- `restart/reboot` — Stop then start rig agents.")
+	fmt.Println()
+}
+
+// outputContextFile reads and displays the CONTEXT.md file from the town root.
+// This provides a simple plugin point for operators to inject custom instructions
+// that all agents (including polecats) will see during priming.
+func outputContextFile(ctx RoleContext) {
+	contextPath := filepath.Join(ctx.TownRoot, "CONTEXT.md")
+	data, err := os.ReadFile(contextPath)
+	if err != nil {
+		explain(true, "CONTEXT.md: not found at "+contextPath)
+		return
+	}
+	explain(true, "CONTEXT.md: found at "+contextPath+", injecting contents")
+	fmt.Println()
+	fmt.Print(string(data))
 }
 
 // outputHandoffContent reads and displays the pinned handoff bead for the role.
@@ -263,9 +385,10 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Mayor. Please:")
-		fmt.Println("1. Announce: \"Mayor, checking in.\"")
-		fmt.Println("2. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached work: `gt hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Mayor, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached work: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no mol → await user instruction")
 	case RoleWitness:
@@ -273,30 +396,35 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Witness. Please:")
-		fmt.Println("1. Announce: \"Witness, checking in.\"")
-		fmt.Println("2. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached patrol: `gt hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Witness, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-witness-patrol`")
 	case RolePolecat:
 		fmt.Println()
 		fmt.Println("---")
 		fmt.Println()
-		fmt.Println("**STARTUP PROTOCOL**: You are a polecat. Please:")
-		fmt.Printf("1. Announce: \"%s Polecat %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
-		fmt.Println("2. Check mail: `gt mail inbox`")
-		fmt.Println("3. If there's a 🤝 HANDOFF message, read it for context")
-		fmt.Println("4. Check for attached work: `gt hook`")
-		fmt.Println("   - If mol attached → **RUN IT** (you were spawned with this work)")
-		fmt.Println("   - If no mol → ERROR: polecats must have work attached; escalate to Witness")
+		fmt.Println("**STARTUP PROTOCOL**: You are a polecat with NO WORK on your hook.")
+		fmt.Println()
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Check if any mail was injected above in this output")
+		fmt.Println("3. If you have mail with work instructions → execute that work")
+		fmt.Println("4. If NO mail → run `" + cli.Name() + " done` IMMEDIATELY")
+		fmt.Println()
+		fmt.Println("Polecat sessions are ephemeral. No work on hook + no mail = terminate.")
+		fmt.Println("DO NOT wait. DO NOT escalate. DO NOT send idle alerts.")
+		fmt.Println("Just run `" + cli.Name() + " done` and exit.")
 	case RoleRefinery:
 		fmt.Println()
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Refinery. Please:")
-		fmt.Println("1. Announce: \"Refinery, checking in.\"")
-		fmt.Println("2. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("3. Check for attached patrol: `gt hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Refinery, checking in.\"")
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-refinery-patrol`")
 	case RoleCrew:
@@ -304,10 +432,11 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are a crew worker. Please:")
-		fmt.Printf("1. Announce: \"%s Crew %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
-		fmt.Println("2. Check mail: `gt mail inbox`")
-		fmt.Println("3. If there's a 🤝 HANDOFF message, read it and continue the work")
-		fmt.Println("4. Check for attached work: `gt hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Printf("2. Announce: \"%s Crew %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
+		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox`")
+		fmt.Println("4. If there's a 🤝 HANDOFF message, read it and continue the work")
+		fmt.Println("5. Check for attached work: `" + cli.Name() + " hook`")
 		fmt.Println("   - If attachment found → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no attachment → await user instruction")
 	case RoleDeacon:
@@ -320,12 +449,21 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("---")
 		fmt.Println()
 		fmt.Println("**STARTUP PROTOCOL**: You are the Deacon. Please:")
-		fmt.Println("1. Announce: \"Deacon, checking in.\"")
-		fmt.Println("2. Signal awake: `gt deacon heartbeat \"starting patrol\"`")
-		fmt.Println("3. Check mail: `gt mail inbox` - look for 🤝 HANDOFF messages")
-		fmt.Println("4. Check for attached patrol: `gt hook`")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Announce: \"Deacon, checking in.\"")
+		fmt.Println("3. Signal awake: `" + cli.Name() + " deacon heartbeat \"starting patrol\"`")
+		fmt.Println("4. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
+		fmt.Println("5. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
 		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-deacon-patrol`")
+	case RoleBoot:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are Boot. Please:")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context)")
+		fmt.Println("2. Run `" + cli.Name() + " boot triage` immediately")
+		fmt.Println("3. When triage completes, exit cleanly")
 	}
 }
 
@@ -398,7 +536,7 @@ func outputHandoffWarning(prevSession string) {
 	fmt.Println(style.Bold.Render("⚠️  DO NOT run /handoff - that was your predecessor's action."))
 	fmt.Println("   The /handoff you see in context is NOT a request for you.")
 	fmt.Println()
-	fmt.Println("Instead: Check your hook (`gt mol status`) and mail (`gt mail inbox`).")
+	fmt.Println("Instead: Check your hook (`" + cli.Name() + " mol status`) and mail (`" + cli.Name() + " mail inbox`).")
 	fmt.Println()
 }
 
@@ -522,7 +660,7 @@ func outputDeaconPausedMessage(state *deacon.PauseState) {
 		fmt.Printf("Paused by: %s\n", state.PausedBy)
 	}
 	fmt.Println()
-	fmt.Println("Wait for human to run `gt deacon resume` before working.")
+	fmt.Println("Wait for human to run `" + cli.Name() + " deacon resume` before working.")
 	fmt.Println()
 	fmt.Println("**DO NOT:**")
 	fmt.Println("- Create patrol molecules")

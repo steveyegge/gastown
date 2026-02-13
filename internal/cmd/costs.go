@@ -2,8 +2,10 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,22 +46,11 @@ var (
 var costsCmd = &cobra.Command{
 	Use:     "costs",
 	GroupID: GroupDiag,
-	Short:   "Show costs for running Claude sessions [DISABLED]",
+	Short:   "Show costs for running Claude sessions",
 	Long: `Display costs for Claude Code sessions in Gas Town.
 
-⚠️  COST TRACKING IS CURRENTLY DISABLED
-
-Claude Code displays costs in the TUI status bar, which cannot be captured
-via tmux. All sessions will show $0.00 until Claude Code exposes cost data
-through an API or environment variable.
-
-What we need from Claude Code:
-  - Stop hook env var (e.g., $CLAUDE_SESSION_COST)
-  - Or queryable file/API endpoint
-
-See: GH#24, gt-7awfj
-
-The infrastructure remains in place and will work once cost data is available.
+Costs are calculated from Claude Code transcript files at ~/.claude/projects/
+by summing token usage from assistant messages and applying model-specific pricing.
 
 Examples:
   gt costs              # Live costs from running sessions
@@ -68,6 +59,7 @@ Examples:
   gt costs --by-role    # Breakdown by role (polecat, witness, etc.)
   gt costs --by-rig     # Breakdown by rig
   gt costs --json       # Output as JSON
+  gt costs -v           # Show debug output for failures
 
 Subcommands:
   gt costs record       # Record session cost to local log file (Stop hook)
@@ -81,7 +73,8 @@ var costsRecordCmd = &cobra.Command{
 	Long: `Record the final cost of a session to a local log file.
 
 This command is intended to be called from a Claude Code Stop hook.
-It captures the final cost from the tmux session and appends it to
+It reads token usage from the Claude Code transcript file (~/.claude/projects/...)
+and calculates the cost based on model pricing, then appends it to
 ~/.gt/costs.jsonl. This is a simple append operation that never fails
 due to database availability.
 
@@ -193,6 +186,56 @@ type CostsOutput struct {
 // costRegex matches cost patterns like "$1.23" or "$12.34"
 var costRegex = regexp.MustCompile(`\$(\d+\.\d{2})`)
 
+// TranscriptMessage represents a message from a Claude Code transcript file.
+type TranscriptMessage struct {
+	Type      string                 `json:"type"`
+	SessionID string                 `json:"sessionId"`
+	CWD       string                 `json:"cwd"`
+	Message   *TranscriptMessageBody `json:"message,omitempty"`
+}
+
+// TranscriptMessageBody contains the message content and usage info.
+type TranscriptMessageBody struct {
+	Model string          `json:"model"`
+	Role  string          `json:"role"`
+	Usage *TranscriptUsage `json:"usage,omitempty"`
+}
+
+// TranscriptUsage contains token usage information.
+type TranscriptUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+}
+
+// TokenUsage aggregates token usage across a session.
+type TokenUsage struct {
+	Model                    string
+	InputTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	OutputTokens             int
+}
+
+// Model pricing per million tokens (as of Jan 2025).
+// See: https://www.anthropic.com/pricing
+var modelPricing = map[string]struct {
+	InputPerMillion       float64
+	OutputPerMillion      float64
+	CacheReadPerMillion   float64 // 90% discount on input price
+	CacheCreatePerMillion float64 // 25% premium on input price
+}{
+	// Claude Opus 4.5
+	"claude-opus-4-5-20251101": {15.0, 75.0, 1.5, 18.75},
+	// Claude Sonnet 4
+	"claude-sonnet-4-20250514": {3.0, 15.0, 0.3, 3.75},
+	// Claude Haiku 3.5
+	"claude-3-5-haiku-20241022": {1.0, 5.0, 0.1, 1.25},
+	// Fallback for unknown models (use Sonnet pricing)
+	"default": {3.0, 15.0, 0.3, 3.75},
+}
+
 func runCosts(cmd *cobra.Command, args []string) error {
 	// If querying ledger, use ledger functions
 	if costsToday || costsWeek || costsByRole || costsByRig {
@@ -204,11 +247,6 @@ func runCosts(cmd *cobra.Command, args []string) error {
 }
 
 func runLiveCosts() error {
-	// Warn that cost tracking is disabled
-	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
-		style.Warning.Render("⚠"))
-	fmt.Fprintf(os.Stderr, "   All sessions will show $0.00. See: GH#24, gt-7awfj\n\n")
-
 	t := tmux.NewTmux()
 
 	// Get all tmux sessions
@@ -229,14 +267,24 @@ func runLiveCosts() error {
 		// Parse session name to get role/rig/worker
 		role, rig, worker := parseSessionName(session)
 
-		// Capture pane content
-		content, err := t.CapturePaneAll(session)
+		// Get working directory of the session
+		workDir, err := getTmuxSessionWorkDir(session)
 		if err != nil {
-			continue // Skip sessions we can't capture
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
+			}
+			continue
 		}
 
-		// Extract cost from content
-		cost := extractCost(content)
+		// Extract cost from Claude transcript
+		cost, err := extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost for %s: %v\n", session, err)
+			}
+			// Still include the session with zero cost
+			cost = 0.0
+		}
 
 		// Check if an agent appears to be running
 		running := t.IsAgentRunning(session)
@@ -268,11 +316,6 @@ func runLiveCosts() error {
 }
 
 func runCostsFromLedger() error {
-	// Warn that cost tracking is disabled
-	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
-		style.Warning.Render("⚠"))
-	fmt.Fprintf(os.Stderr, "   Historical data may show $0.00 for all sessions. See: GH#24, gt-7awfj\n\n")
-
 	now := time.Now()
 	var entries []CostEntry
 	var err error
@@ -295,8 +338,15 @@ func runCostsFromLedger() error {
 		// Also include today's wisps (not yet digested)
 		todayEntries, _ := querySessionCostEntries(now)
 		entries = append(entries, todayEntries...)
+	} else if costsByRole || costsByRig {
+		// When using --by-role or --by-rig without time filter, default to today
+		// (querying all historical events would be expensive and likely empty)
+		entries, err = querySessionCostEntries(now)
+		if err != nil {
+			return fmt.Errorf("querying session cost entries: %w", err)
+		}
 	} else {
-		// No time filter: query both digests and legacy session.ended events
+		// No time filter and no breakdown flags: query both digests and legacy session.ended events
 		// (for backwards compatibility during migration)
 		entries = querySessionEvents()
 	}
@@ -637,7 +687,9 @@ func parseSessionName(session string) (role, rig, worker string) {
 }
 
 // extractCost finds the most recent cost value in pane content.
-// Claude Code displays cost in the format "$X.XX" in the status area.
+// DEPRECATED: Claude Code no longer displays cost in a scrapable format.
+// This is kept for backwards compatibility but always returns 0.0.
+// Use extractCostFromTranscript instead.
 func extractCost(content string) float64 {
 	matches := costRegex.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
@@ -653,6 +705,156 @@ func extractCost(content string) float64 {
 	var cost float64
 	_, _ = fmt.Sscanf(lastMatch[1], "%f", &cost)
 	return cost
+}
+
+// getClaudeProjectDir returns the Claude Code project directory for a working directory.
+// Claude Code stores transcripts in ~/.claude/projects/<path-with-dashes-instead-of-slashes>/
+func getClaudeProjectDir(workDir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Convert path to Claude's directory naming: replace / with -
+	// Keep leading slash - it becomes a leading dash in Claude's encoding
+	projectName := strings.ReplaceAll(workDir, "/", "-")
+	return filepath.Join(home, ".claude", "projects", projectName), nil
+}
+
+// findLatestTranscript finds the most recently modified .jsonl file in a directory.
+func findLatestTranscript(projectDir string) (string, error) {
+	var latestPath string
+	var latestTime time.Time
+
+	err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != projectDir {
+			return fs.SkipDir // Don't recurse into subdirectories
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			info, err := d.Info()
+			if err != nil {
+				return nil // Skip files we can't stat
+			}
+			if info.ModTime().After(latestTime) {
+				latestTime = info.ModTime()
+				latestPath = path
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	if latestPath == "" {
+		return "", fmt.Errorf("no transcript files found in %s", projectDir)
+	}
+	return latestPath, nil
+}
+
+// parseTranscriptUsage reads a transcript file and sums token usage from assistant messages.
+func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
+	file, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	usage := &TokenUsage{}
+	scanner := bufio.NewScanner(file)
+	// Increase buffer for potentially large JSON lines
+	buf := make([]byte, 0, 256*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg TranscriptMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			continue // Skip malformed lines
+		}
+
+		// Only process assistant messages with usage info
+		if msg.Type != "assistant" || msg.Message == nil || msg.Message.Usage == nil {
+			continue
+		}
+
+		// Capture the model (use first one found, they should all be the same)
+		if usage.Model == "" && msg.Message.Model != "" {
+			usage.Model = msg.Message.Model
+		}
+
+		// Sum token usage
+		u := msg.Message.Usage
+		usage.InputTokens += u.InputTokens
+		usage.CacheCreationInputTokens += u.CacheCreationInputTokens
+		usage.CacheReadInputTokens += u.CacheReadInputTokens
+		usage.OutputTokens += u.OutputTokens
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return usage, nil
+}
+
+// calculateCost converts token usage to USD cost based on model pricing.
+func calculateCost(usage *TokenUsage) float64 {
+	if usage == nil {
+		return 0.0
+	}
+
+	// Look up pricing for the model
+	pricing, ok := modelPricing[usage.Model]
+	if !ok {
+		pricing = modelPricing["default"]
+	}
+
+	// Calculate cost (prices are per million tokens)
+	inputCost := float64(usage.InputTokens) / 1_000_000 * pricing.InputPerMillion
+	cacheReadCost := float64(usage.CacheReadInputTokens) / 1_000_000 * pricing.CacheReadPerMillion
+	cacheCreateCost := float64(usage.CacheCreationInputTokens) / 1_000_000 * pricing.CacheCreatePerMillion
+	outputCost := float64(usage.OutputTokens) / 1_000_000 * pricing.OutputPerMillion
+
+	return inputCost + cacheReadCost + cacheCreateCost + outputCost
+}
+
+// extractCostFromWorkDir extracts cost from Claude Code transcript for a working directory.
+// This reads the most recent transcript file and sums all token usage.
+func extractCostFromWorkDir(workDir string) (float64, error) {
+	projectDir, err := getClaudeProjectDir(workDir)
+	if err != nil {
+		return 0, fmt.Errorf("getting project dir: %w", err)
+	}
+
+	transcriptPath, err := findLatestTranscript(projectDir)
+	if err != nil {
+		return 0, fmt.Errorf("finding transcript: %w", err)
+	}
+
+	usage, err := parseTranscriptUsage(transcriptPath)
+	if err != nil {
+		return 0, fmt.Errorf("parsing transcript: %w", err)
+	}
+
+	return calculateCost(usage), nil
+}
+
+// getTmuxSessionWorkDir gets the current working directory of a tmux session.
+func getTmuxSessionWorkDir(session string) (string, error) {
+	cmd := exec.Command("tmux", "display-message", "-t", session, "-p", "#{pane_current_path}")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func outputCostsJSON(output CostsOutput) error {
@@ -780,17 +982,31 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
 	}
 
-	t := tmux.NewTmux()
-
-	// Capture pane content
-	content, err := t.CapturePaneAll(session)
-	if err != nil {
-		// Session may already be gone - that's OK, we'll record with zero cost
-		content = ""
+	// Get working directory from environment or tmux session
+	workDir := os.Getenv("GT_CWD")
+	if workDir == "" {
+		// Try to get from tmux session
+		var err error
+		workDir, err = getTmuxSessionWorkDir(session)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
+			}
+		}
 	}
 
-	// Extract cost
-	cost := extractCost(content)
+	// Extract cost from Claude transcript
+	var cost float64
+	if workDir != "" {
+		var err error
+		cost, err = extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost from transcript: %v\n", err)
+			}
+			cost = 0.0
+		}
+	}
 
 	// Parse session name
 	role, rig, worker := parseSessionName(session)

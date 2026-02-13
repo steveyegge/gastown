@@ -202,6 +202,7 @@ const (
 	IconFail = "✖"
 	IconSkip = "-"
 	IconInfo = "ℹ"
+	IconFix  = "🔧"
 )
 
 // Issue status icons - used consistently across all commands
@@ -305,6 +306,11 @@ func RenderInfoIcon() string {
 	return AccentStyle.Render(IconInfo)
 }
 
+// RenderFixIcon renders the fix icon (wrench emoji, double-width)
+func RenderFixIcon() string {
+	return IconFix
+}
+
 // === Issue Component Renderers ===
 
 // RenderID renders an issue ID with semantic styling
@@ -352,47 +358,6 @@ func RenderStatusIcon(status string) string {
 	}
 }
 
-// GetStatusIcon returns just the icon character without styling
-// Useful when you need to apply custom styling or for non-TTY output
-func GetStatusIcon(status string) string {
-	switch status {
-	case "open":
-		return StatusIconOpen
-	case "in_progress":
-		return StatusIconInProgress
-	case "blocked":
-		return StatusIconBlocked
-	case "closed":
-		return StatusIconClosed
-	case "deferred":
-		return StatusIconDeferred
-	case "pinned":
-		return StatusIconPinned
-	default:
-		return "?"
-	}
-}
-
-// GetStatusStyle returns the lipgloss style for a given status
-// Use this when you need to apply the semantic color to custom text
-func GetStatusStyle(status string) lipgloss.Style {
-	switch status {
-	case "in_progress":
-		return StatusInProgressStyle
-	case "blocked":
-		return StatusBlockedStyle
-	case "closed":
-		return StatusClosedStyle
-	case "deferred":
-		return MutedStyle
-	case "pinned":
-		return StatusPinnedStyle
-	case "hooked":
-		return StatusHookedStyle
-	default: // open and others - no special styling
-		return lipgloss.NewStyle()
-	}
-}
 
 // RenderPriority renders a priority level with semantic styling
 // Format: "● P0" (icon + label)
@@ -455,42 +420,3 @@ func RenderType(issueType string) string {
 	}
 }
 
-// RenderIssueCompact renders a compact one-line issue summary
-// Format: ID [Priority] [Type] Status - Title
-// When status is "closed", the entire line is dimmed to show it's done
-func RenderIssueCompact(id string, priority int, issueType, status, title string) string {
-	line := fmt.Sprintf("%s [P%d] [%s] %s - %s",
-		id, priority, issueType, status, title)
-	if status == "closed" {
-		// entire line is dimmed - visually shows "done"
-		return StatusClosedStyle.Render(line)
-	}
-	return fmt.Sprintf("%s [%s] [%s] %s - %s",
-		RenderID(id),
-		RenderPriority(priority),
-		RenderType(issueType),
-		RenderStatus(status),
-		title,
-	)
-}
-
-// RenderPriorityForStatus renders priority with color only if not closed
-func RenderPriorityForStatus(priority int, status string) string {
-	if status == "closed" {
-		return fmt.Sprintf("P%d", priority)
-	}
-	return RenderPriority(priority)
-}
-
-// RenderTypeForStatus renders type with color only if not closed
-func RenderTypeForStatus(issueType, status string) string {
-	if status == "closed" {
-		return issueType
-	}
-	return RenderType(issueType)
-}
-
-// RenderClosedLine renders an entire line in the closed/dimmed style
-func RenderClosedLine(line string) string {
-	return StatusClosedStyle.Render(line)
-}

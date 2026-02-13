@@ -31,10 +31,6 @@ type AgentEnvConfig struct {
 	// SessionIDEnv is the environment variable name that holds the session ID.
 	// Sets GT_SESSION_ID_ENV so the runtime knows where to find the session ID.
 	SessionIDEnv string
-
-	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
-	// Used for polecats that should bypass the beads daemon
-	BeadsNoDaemon bool
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -42,39 +38,51 @@ type AgentEnvConfig struct {
 func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	env := make(map[string]string)
 
-	env["GT_ROLE"] = cfg.Role
-
 	// Set role-specific variables
+	// GT_ROLE is set in compound format (e.g., "beads/crew/jane") so that
+	// beads can parse it without knowing about Gas Town role types.
 	switch cfg.Role {
 	case "mayor":
+		env["GT_ROLE"] = "mayor"
 		env["BD_ACTOR"] = "mayor"
 		env["GIT_AUTHOR_NAME"] = "mayor"
 
 	case "deacon":
+		env["GT_ROLE"] = "deacon"
 		env["BD_ACTOR"] = "deacon"
 		env["GIT_AUTHOR_NAME"] = "deacon"
 
 	case "boot":
+		env["GT_ROLE"] = "deacon/boot"
 		env["BD_ACTOR"] = "deacon-boot"
 		env["GIT_AUTHOR_NAME"] = "boot"
 
 	case "witness":
+		env["GT_ROLE"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/witness", cfg.Rig)
 
 	case "refinery":
+		env["GT_ROLE"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 
 	case "polecat":
+		env["GT_ROLE"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_POLECAT"] = cfg.AgentName
 		env["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		// Disable Dolt auto-commit for polecats. With branch-per-polecat,
+		// individual commits are pointless — all changes merge at gt done time
+		// via DOLT_MERGE. Without this, concurrent polecats cause manifest
+		// contention leading to Dolt read-only mode (gt-5cc2p).
+		env["BD_DOLT_AUTO_COMMIT"] = "off"
 
 	case "crew":
+		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_CREW"] = cfg.AgentName
 		env["BD_ACTOR"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
@@ -85,15 +93,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Empty values would override tmux session environment
 	if cfg.TownRoot != "" {
 		env["GT_ROOT"] = cfg.TownRoot
+		// Prevent git from walking up to umbrella repo when running in rig worktrees.
+		// This stops accidental commits to the umbrella when running git commands from
+		// intermediate directories (e.g., polecats/) that don't have their own .git.
+		env["GIT_CEILING_DIRECTORIES"] = cfg.TownRoot
 	}
 
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)
 	if cfg.Role == "polecat" || cfg.Role == "crew" {
 		env["BEADS_AGENT_NAME"] = fmt.Sprintf("%s/%s", cfg.Rig, cfg.AgentName)
-	}
-
-	if cfg.BeadsNoDaemon {
-		env["BEADS_NO_DAEMON"] = "1"
 	}
 
 	// Add optional runtime config directory
@@ -105,6 +113,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
+
+	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
+	// from being inherited through tmux into Claude's Node.js runtime.
+	// This is the PRIMARY guard: setting it here (the single source of truth
+	// for agent env) protects all AgentEnv-based paths automatically — tmux
+	// SetEnvironment, EnvForExecCommand, PrependEnv. SanitizeAgentEnv provides
+	// a SUPPLEMENTAL guard for non-AgentEnv paths (lifecycle default, handoff).
+	// In BuildStartupCommand, rc.Env is merged after AgentEnv and can override
+	// this empty value with intentional settings like --max-old-space-size.
+	env["NODE_OPTIONS"] = ""
 
 	return env
 }
@@ -121,7 +139,7 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 
 // ShellQuote returns a shell-safe quoted string.
 // Values containing special characters are wrapped in single quotes.
-// Single quotes within the value are escaped using the '\'' idiom.
+// Single quotes within the value are escaped using the '\” idiom.
 func ShellQuote(s string) string {
 	// Check if quoting is needed (contains shell special chars)
 	needsQuoting := false

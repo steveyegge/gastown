@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -22,7 +22,7 @@ type TownSession struct {
 func TownSessions() []TownSession {
 	return []TownSession{
 		{"Mayor", MayorSessionName()},
-		{"Boot", boot.SessionName},
+		{"Boot", BootSessionName()},
 		{"Deacon", DeaconSessionName()},
 	}
 }
@@ -57,7 +57,7 @@ func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, er
 	// Try graceful shutdown first (unless forced)
 	if !force {
 		_ = t.SendKeysRaw(ts.SessionID, "C-c")
-		time.Sleep(100 * time.Millisecond)
+		WaitForSessionExit(t, ts.SessionID, constants.GracefulShutdownTimeout)
 	}
 
 	// Log pre-death event for crash investigation (before killing)
@@ -75,4 +75,20 @@ func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, er
 	}
 
 	return true, nil
+}
+
+// WaitForSessionExit polls for a session's process to exit within the given timeout.
+// Returns true if the process exited on its own, false if the timeout was reached.
+// This allows graceful shutdown (e.g., after Ctrl-C) to actually complete before
+// falling through to forceful termination.
+func WaitForSessionExit(t *tmux.Tmux, sessionID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		running, err := t.HasSession(sessionID)
+		if err != nil || !running {
+			return true
+		}
+		time.Sleep(constants.PollInterval)
+	}
+	return false
 }

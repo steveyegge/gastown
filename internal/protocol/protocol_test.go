@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,10 @@ func TestParseMessageType(t *testing.T) {
 		{"Unknown subject", ""},
 		{"", ""},
 		{"  MERGE_READY nux  ", TypeMergeReady}, // with whitespace
+		{"MERGEDFOO", ""},                       // prefix without space delimiter
+		{"MERGE_READYBAR", ""},                  // prefix without space delimiter
+		{"MERGE_FAILEDX", ""},                   // prefix without space delimiter
+		{"REWORK_REQUESTZ", ""},                 // prefix without space delimiter
 	}
 
 	for _, tt := range tests {
@@ -158,7 +163,10 @@ Polecat: nux
 Rig: gastown
 Verified: clean git state`
 
-	payload := ParseMergeReadyPayload(body)
+	payload, err := ParseMergeReadyPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if payload.Branch != "polecat/nux/gt-abc" {
 		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
@@ -174,6 +182,31 @@ Verified: clean git state`
 	}
 }
 
+func TestParseMergeReadyPayload_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing all fields", "Hello: world"},
+		{"missing branch", "Polecat: nux\nRig: gastown"},
+		{"missing polecat", "Branch: polecat/nux\nRig: gastown"},
+		{"missing rig", "Branch: polecat/nux\nPolecat: nux"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := ParseMergeReadyPayload(tt.body)
+			if err == nil {
+				t.Errorf("expected error for body %q, got payload: %+v", tt.body, payload)
+			}
+			if payload != nil {
+				t.Errorf("expected nil payload on error, got: %+v", payload)
+			}
+		})
+	}
+}
+
 func TestParseMergedPayload(t *testing.T) {
 	ts := time.Now().Format(time.RFC3339)
 	body := `Branch: polecat/nux/gt-abc
@@ -184,7 +217,10 @@ Target: main
 Merged-At: ` + ts + `
 Merge-Commit: abc123`
 
-	payload := ParseMergedPayload(body)
+	payload, err := ParseMergedPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if payload.Branch != "polecat/nux/gt-abc" {
 		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
@@ -194,6 +230,98 @@ Merge-Commit: abc123`
 	}
 	if payload.TargetBranch != "main" {
 		t.Errorf("TargetBranch = %q, want %q", payload.TargetBranch, "main")
+	}
+}
+
+func TestParseMergedPayload_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing polecat", "Branch: polecat/nux\nRig: gastown"},
+		{"missing rig", "Branch: polecat/nux\nPolecat: nux"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := ParseMergedPayload(tt.body)
+			if err == nil {
+				t.Errorf("expected error for body %q, got payload: %+v", tt.body, payload)
+			}
+			if payload != nil {
+				t.Errorf("expected nil payload on error, got: %+v", payload)
+			}
+		})
+	}
+}
+
+func TestParseMergeFailedPayload(t *testing.T) {
+	body := `Branch: polecat/nux/gt-abc
+Issue: gt-abc
+Polecat: nux
+Rig: gastown
+Target: main
+Failure-Type: tests
+Error: Test failed`
+
+	payload, err := ParseMergeFailedPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if payload.Branch != "polecat/nux/gt-abc" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
+	}
+	if payload.FailureType != "tests" {
+		t.Errorf("FailureType = %q, want %q", payload.FailureType, "tests")
+	}
+	if payload.Error != "Test failed" {
+		t.Errorf("Error = %q, want %q", payload.Error, "Test failed")
+	}
+}
+
+func TestParseMergeFailedPayload_InvalidInput(t *testing.T) {
+	payload, err := ParseMergeFailedPayload("")
+	if err == nil {
+		t.Errorf("expected error for empty body, got payload: %+v", payload)
+	}
+	if payload != nil {
+		t.Errorf("expected nil payload on error, got: %+v", payload)
+	}
+}
+
+func TestParseReworkRequestPayload(t *testing.T) {
+	body := `Branch: polecat/nux/gt-abc
+Issue: gt-abc
+Polecat: nux
+Rig: gastown
+Target: main
+Conflict-Files: file1.go, file2.go`
+
+	payload, err := ParseReworkRequestPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if payload.Branch != "polecat/nux/gt-abc" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
+	}
+	if payload.TargetBranch != "main" {
+		t.Errorf("TargetBranch = %q, want %q", payload.TargetBranch, "main")
+	}
+	if len(payload.ConflictFiles) != 2 {
+		t.Errorf("ConflictFiles length = %d, want 2", len(payload.ConflictFiles))
+	}
+}
+
+func TestParseReworkRequestPayload_InvalidInput(t *testing.T) {
+	payload, err := ParseReworkRequestPayload("")
+	if err == nil {
+		t.Errorf("expected error for empty body, got payload: %+v", payload)
+	}
+	if payload != nil {
+		t.Errorf("expected nil payload on error, got: %+v", payload)
 	}
 }
 
@@ -224,6 +352,44 @@ func TestHandlerRegistry(t *testing.T) {
 	unknownMsg := &mail.Message{Subject: "UNKNOWN message"}
 	if registry.CanHandle(unknownMsg) {
 		t.Error("Registry should not handle unknown message type")
+	}
+}
+
+func TestProcessProtocolMessage(t *testing.T) {
+	registry := NewHandlerRegistry()
+
+	handled := false
+	registry.Register(TypeMergeReady, func(msg *mail.Message) error {
+		handled = true
+		return nil
+	})
+
+	// Test 1: Non-protocol message returns (false, nil)
+	nonProto := &mail.Message{Subject: "Hello world"}
+	isProto, err := registry.ProcessProtocolMessage(nonProto)
+	if isProto || err != nil {
+		t.Errorf("Non-protocol message: got (%v, %v), want (false, nil)", isProto, err)
+	}
+
+	// Test 2: Recognized protocol message with handler returns (true, nil)
+	readyMsg := &mail.Message{Subject: "MERGE_READY nux"}
+	isProto, err = registry.ProcessProtocolMessage(readyMsg)
+	if !isProto || err != nil {
+		t.Errorf("Handled protocol message: got (%v, %v), want (true, nil)", isProto, err)
+	}
+	if !handled {
+		t.Error("Handler was not called for MERGE_READY")
+	}
+
+	// Test 3: Recognized protocol message WITHOUT handler returns (true, ErrNoHandler)
+	// MERGED is a valid protocol type but no handler is registered for it
+	misrouted := &mail.Message{Subject: "MERGED nux"}
+	isProto, err = registry.ProcessProtocolMessage(misrouted)
+	if !isProto {
+		t.Error("Recognized protocol message should return isProtocol=true even without handler")
+	}
+	if !errors.Is(err, ErrNoHandler) {
+		t.Errorf("Unhandled protocol message: got error %v, want ErrNoHandler", err)
 	}
 }
 
@@ -282,6 +448,50 @@ func TestWrapRefineryHandlers(t *testing.T) {
 	}
 	if !handler.readyCalled {
 		t.Error("HandleMergeReady was not called")
+	}
+}
+
+func TestWrapWitnessHandlers_InvalidPayload(t *testing.T) {
+	handler := &mockWitnessHandler{}
+	registry := WrapWitnessHandlers(handler)
+
+	// Empty body should produce parse error for all message types
+	tests := []struct {
+		name    string
+		subject string
+	}{
+		{"MERGED empty body", "MERGED nux"},
+		{"MERGE_FAILED empty body", "MERGE_FAILED nux"},
+		{"REWORK_REQUEST empty body", "REWORK_REQUEST nux"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &mail.Message{Subject: tt.subject, Body: ""}
+			err := registry.Handle(msg)
+			if err == nil {
+				t.Errorf("expected error for %s with empty body", tt.subject)
+			}
+		})
+	}
+
+	// Handlers should NOT have been called
+	if handler.mergedCalled || handler.failedCalled || handler.reworkCalled {
+		t.Error("handlers should not be called when parse fails")
+	}
+}
+
+func TestWrapRefineryHandlers_InvalidPayload(t *testing.T) {
+	handler := &mockRefineryHandler{}
+	registry := WrapRefineryHandlers(handler)
+
+	msg := &mail.Message{Subject: "MERGE_READY nux", Body: ""}
+	err := registry.Handle(msg)
+	if err == nil {
+		t.Error("expected error for MERGE_READY with empty body")
+	}
+	if handler.readyCalled {
+		t.Error("handler should not be called when parse fails")
 	}
 }
 

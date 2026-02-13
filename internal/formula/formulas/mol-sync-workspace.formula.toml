@@ -308,9 +308,9 @@ description = """
 Ensure the codebase compiles.
 
 ```bash
-{{ build_command }}
+{{build_command}}
 # Default: go build ./...
-# Configure via build_command variable for non-Go projects
+# Configured per-rig in settings/config.json
 ```
 
 **If build succeeds:** Continue to next step.
@@ -344,9 +344,9 @@ description = """
 Verify tests pass on current baseline.
 
 ```bash
-{{ test_command }}
+{{test_command}}
 # Default: go test ./...
-# Configure via test_command variable for non-Go projects
+# Configured per-rig in settings/config.json
 ```
 
 **If tests pass:** Continue to next step.
@@ -489,3 +489,12 @@ gt mail send --human -s "SYNC_FAILED $(hostname)" -m "<report with failure detai
 ```
 
 **Exit criteria:** Readiness signaled, molecule complete."""
+
+[vars]
+[vars.test_command]
+description = "Command to run tests (auto-detected from rig settings)"
+default = "go test ./..."
+
+[vars.build_command]
+description = "Command to run build (auto-detected from rig settings)"
+default = "go build ./..."

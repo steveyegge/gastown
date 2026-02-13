@@ -81,18 +81,6 @@ func TestSemaphoreLimitsConcurrency(t *testing.T) {
 	}
 }
 
-func TestStartRigAgentsParallel_EmptyRigs(t *testing.T) {
-	// Test with empty rig list - should return empty maps without error
-	witnessResults, refineryResults := startRigAgentsParallel([]string{})
-
-	if len(witnessResults) != 0 {
-		t.Errorf("witnessResults should be empty, got %d entries", len(witnessResults))
-	}
-	if len(refineryResults) != 0 {
-		t.Errorf("refineryResults should be empty, got %d entries", len(refineryResults))
-	}
-}
-
 func TestStartRigAgentsWithPrefetch_EmptyRigs(t *testing.T) {
 	// Test with empty inputs
 	witnessResults, refineryResults := startRigAgentsWithPrefetch(

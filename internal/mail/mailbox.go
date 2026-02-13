@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
 )
@@ -84,6 +84,17 @@ func (m *Mailbox) Path() string {
 	return m.path
 }
 
+// lockLegacy acquires an exclusive flock for legacy mailbox operations.
+// Callers must defer Unlock on the returned flock. The lock file is
+// separate from the data file to avoid interfering with reads.
+func (m *Mailbox) lockLegacy() (*flock.Flock, error) {
+	fl := flock.New(m.path + ".lock")
+	if err := fl.Lock(); err != nil {
+		return nil, fmt.Errorf("acquiring mailbox lock: %w", err)
+	}
+	return fl, nil
+}
+
 // List returns all open messages in the mailbox.
 func (m *Mailbox) List() ([]*Message, error) {
 	if m.legacy {
@@ -108,87 +119,71 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 	return messages, nil
 }
 
-// queryResult holds the result of a single query.
-type queryResult struct {
-	messages []*Message
-	err      error
-}
-
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
 // Includes both open and hooked messages (hooked = auto-assigned handoff mail).
-// If all queries fail, returns the last error encountered.
-// Queries are parallelized for performance (~6x speedup).
+// Uses a single bd list call and filters client-side, replacing the previous
+// approach of N parallel queries (2-3 per identity variant).
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
-	// Get all identity variants to query (handles legacy vs normalized formats)
 	identities := m.identityVariants()
 
-	// Build list of queries to run in parallel
-	type querySpec struct {
-		filterFlag  string
-		filterValue string
-		status      string
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return nil, fmt.Errorf("ensuring custom types: %w", err)
 	}
-	var queries []querySpec
 
-	// Assignee queries for each identity variant in both open and hooked statuses
-	for _, identity := range identities {
-		for _, status := range []string{"open", "hooked"} {
-			queries = append(queries, querySpec{
-				filterFlag:  "--assignee",
-				filterValue: identity,
-				status:      status,
-			})
+	// Single bd query: fetch all messages with gt:message label,
+	// then filter client-side for assignee/CC match. Process-spawn overhead
+	// dominates query time, so 1 broad call beats N narrow calls.
+	// NOTE: Uses --label instead of --type per migration in 221ff022.
+	args := []string{"list",
+		"--label", "gt:message",
+		"--json",
+		"--limit", "0",
+	}
+
+	ctx, cancel := bdReadCtx()
+	defer cancel()
+	stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var allMsgs []BeadsMessage
+	if err := json.Unmarshal(stdout, &allMsgs); err != nil {
+		if len(stdout) == 0 || string(stdout) == "null" {
+			return nil, nil
 		}
+		return nil, err
 	}
 
-	// CC queries for each identity variant (open only)
-	for _, identity := range identities {
-		queries = append(queries, querySpec{
-			filterFlag:  "--label",
-			filterValue: "cc:" + identity,
-			status:      "open",
-		})
+	// Build identity lookup sets for O(1) matching
+	identitySet := make(map[string]bool, len(identities))
+	ccLabelSet := make(map[string]bool, len(identities))
+	for _, id := range identities {
+		identitySet[id] = true
+		ccLabelSet["cc:"+id] = true
 	}
 
-	// Execute all queries in parallel
-	results := make([]queryResult, len(queries))
-	var wg sync.WaitGroup
-	wg.Add(len(queries))
-
-	for i, q := range queries {
-		go func(idx int, spec querySpec) {
-			defer wg.Done()
-			msgs, err := m.queryMessages(beadsDir, spec.filterFlag, spec.filterValue, spec.status)
-			results[idx] = queryResult{messages: msgs, err: err}
-		}(i, q)
-	}
-
-	wg.Wait()
-
-	// Collect results
-	seen := make(map[string]bool)
+	// Filter: assignee match (open/hooked) OR CC match (open only)
 	var messages []*Message
-	var lastErr error
-	anySucceeded := false
+	for i := range allMsgs {
+		bm := &allMsgs[i]
 
-	for _, r := range results {
-		if r.err != nil {
-			lastErr = r.err
-		} else {
-			anySucceeded = true
-			for _, msg := range r.messages {
-				if !seen[msg.ID] {
-					seen[msg.ID] = true
-					messages = append(messages, msg)
+		// Assignee match: open or hooked status
+		if identitySet[bm.Assignee] && (bm.Status == "open" || bm.Status == "hooked") {
+			messages = append(messages, bm.ToMessage())
+			continue
+		}
+
+		// CC match: open status only
+		if bm.Status == "open" {
+			for _, label := range bm.Labels {
+				if ccLabelSet[label] {
+					messages = append(messages, bm.ToMessage())
+					break
 				}
 			}
 		}
-	}
-
-	// If ALL queries failed, return the last error
-	if !anySucceeded && lastErr != nil {
-		return nil, fmt.Errorf("all mailbox queries failed: %w", lastErr)
 	}
 
 	return messages, nil
@@ -210,38 +205,6 @@ func (m *Mailbox) identityVariants() []string {
 	return variants
 }
 
-// queryMessages runs a bd list query with the given filter flag and value.
-func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue, status string) ([]*Message, error) {
-	args := []string{"list",
-		"--type", "message",
-		filterFlag, filterValue,
-		"--status", status,
-		"--json",
-	}
-
-	stdout, err := runBdCommand(args, m.workDir, beadsDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON output
-	var beadsMsgs []BeadsMessage
-	if err := json.Unmarshal(stdout, &beadsMsgs); err != nil {
-		// Empty inbox returns empty array or nothing
-		if len(stdout) == 0 || string(stdout) == "null" {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	// Convert to GGT messages - wisp status comes from beads issue.wisp field
-	var messages []*Message
-	for _, bm := range beadsMsgs {
-		messages = append(messages, bm.ToMessage())
-	}
-
-	return messages, nil
-}
 
 func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)
@@ -255,7 +218,9 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 
 	var messages []*Message
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			continue
@@ -263,7 +228,7 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 
 		var msg Message
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue // Skip malformed lines
+			return nil, fmt.Errorf("corrupt mailbox %s line %d: %w", m.path, lineNum, err)
 		}
 		messages = append(messages, &msg)
 	}
@@ -313,7 +278,9 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
 	args := []string{"show", id, "--json"}
 
-	stdout, err := runBdCommand(args, m.workDir, beadsDir)
+	ctx, cancel := bdReadCtx()
+	defer cancel()
+	stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return nil, ErrMessageNotFound
@@ -368,7 +335,9 @@ func (m *Mailbox) closeInDir(id, beadsDir string) error {
 		args = append(args, "--session="+sessionID)
 	}
 
-	_, err := runBdCommand(args, m.workDir, beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err := runBdCommand(ctx, args, m.workDir, beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -380,6 +349,12 @@ func (m *Mailbox) closeInDir(id, beadsDir string) error {
 }
 
 func (m *Mailbox) markReadLegacy(id string) error {
+	fl, err := m.lockLegacy()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	messages, err := m.List()
 	if err != nil {
 		return err
@@ -415,7 +390,9 @@ func (m *Mailbox) markReadOnlyBeads(id string) error {
 	// Add "read" label to mark as read without closing
 	args := []string{"label", "add", id, "read"}
 
-	_, err := runBdCommand(args, m.workDir, m.beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -440,7 +417,9 @@ func (m *Mailbox) markUnreadOnlyBeads(id string) error {
 	// Remove "read" label to mark as unread
 	args := []string{"label", "remove", id, "read"}
 
-	_, err := runBdCommand(args, m.workDir, m.beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -466,7 +445,9 @@ func (m *Mailbox) MarkUnread(id string) error {
 func (m *Mailbox) markUnreadBeads(id string) error {
 	args := []string{"reopen", id}
 
-	_, err := runBdCommand(args, m.workDir, m.beadsDir)
+	ctx, cancel := bdWriteCtx()
+	defer cancel()
+	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -478,6 +459,12 @@ func (m *Mailbox) markUnreadBeads(id string) error {
 }
 
 func (m *Mailbox) markUnreadLegacy(id string) error {
+	fl, err := m.lockLegacy()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	messages, err := m.List()
 	if err != nil {
 		return err
@@ -507,6 +494,12 @@ func (m *Mailbox) Delete(id string) error {
 }
 
 func (m *Mailbox) deleteLegacy(id string) error {
+	fl, err := m.lockLegacy()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	messages, err := m.List()
 	if err != nil {
 		return err
@@ -531,19 +524,58 @@ func (m *Mailbox) deleteLegacy(id string) error {
 
 // Archive moves a message to the archive file and removes it from inbox.
 func (m *Mailbox) Archive(id string) error {
-	// Get the message first
+	if m.legacy {
+		return m.archiveLegacy(id)
+	}
+	// Beads mode: append to archive then close
 	msg, err := m.Get(id)
 	if err != nil {
 		return err
 	}
-
-	// Append to archive file
 	if err := m.appendToArchive(msg); err != nil {
 		return err
 	}
-
-	// Delete from inbox
 	return m.Delete(id)
+}
+
+// archiveLegacy moves a message to the archive file atomically.
+// A single flock covers the entire read-archive-rewrite cycle so that
+// a crash between appendToArchive and the inbox rewrite cannot lose the
+// message (worst case: duplicate in both archive and inbox).
+func (m *Mailbox) archiveLegacy(id string) error {
+	fl, err := m.lockLegacy()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	// Read inbox
+	messages, err := m.listLegacy()
+	if err != nil {
+		return err
+	}
+
+	// Find and extract target
+	var target *Message
+	var remaining []*Message
+	for _, msg := range messages {
+		if msg.ID == id {
+			target = msg
+		} else {
+			remaining = append(remaining, msg)
+		}
+	}
+	if target == nil {
+		return ErrMessageNotFound
+	}
+
+	// Append to archive first (safe failure mode: duplicate, not loss)
+	if err := m.appendToArchive(target); err != nil {
+		return err
+	}
+
+	// Rewrite inbox without the target
+	return m.rewriteLegacy(remaining)
 }
 
 // ArchivePath returns the path to the archive file.
@@ -595,7 +627,9 @@ func (m *Mailbox) ListArchived() ([]*Message, error) {
 
 	var messages []*Message
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			continue
@@ -603,7 +637,7 @@ func (m *Mailbox) ListArchived() ([]*Message, error) {
 
 		var msg Message
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue // Skip malformed lines
+			return nil, fmt.Errorf("corrupt archive %s line %d: %w", archivePath, lineNum, err)
 		}
 		messages = append(messages, &msg)
 	}
@@ -618,6 +652,14 @@ func (m *Mailbox) ListArchived() ([]*Message, error) {
 // PurgeArchive removes messages from the archive, optionally filtering by age.
 // If olderThanDays is 0, removes all archived messages.
 func (m *Mailbox) PurgeArchive(olderThanDays int) (int, error) {
+	if m.legacy {
+		fl, err := m.lockLegacy()
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = fl.Unlock() }()
+	}
+
 	messages, err := m.ListArchived()
 	if err != nil {
 		return 0, err
@@ -678,7 +720,11 @@ func (m *Mailbox) rewriteArchive(messages []*Message) error {
 			_ = os.Remove(tmpPath)
 			return err
 		}
-		_, _ = file.WriteString(string(data) + "\n")
+		if _, err := file.WriteString(string(data) + "\n"); err != nil {
+			_ = file.Close()
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("writing archive: %w", err)
+		}
 	}
 
 	if err := file.Close(); err != nil {
@@ -790,11 +836,17 @@ func (m *Mailbox) Append(msg *Message) error {
 }
 
 func (m *Mailbox) appendLegacy(msg *Message) error {
-	// Ensure directory exists
+	// Ensure directory exists before acquiring lock (lock file is in same dir)
 	dir := filepath.Dir(m.path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+
+	fl, err := m.lockLegacy()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
 
 	// Open for append
 	file, err := os.OpenFile(m.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
@@ -829,11 +881,15 @@ func (m *Mailbox) rewriteLegacy(messages []*Message) error {
 	for _, msg := range messages {
 		data, err := json.Marshal(msg)
 		if err != nil {
-			_ = file.Close()         // best-effort cleanup
-			_ = os.Remove(tmpPath)   // best-effort cleanup
+			_ = file.Close()       // best-effort cleanup
+			_ = os.Remove(tmpPath) // best-effort cleanup
 			return err
 		}
-		_, _ = file.WriteString(string(data) + "\n") // non-fatal: partial write is acceptable
+		if _, err := file.WriteString(string(data) + "\n"); err != nil {
+			_ = file.Close()
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("writing mailbox: %w", err)
+		}
 	}
 
 	if err := file.Close(); err != nil {
@@ -856,7 +912,9 @@ func (m *Mailbox) ListByThread(threadID string) ([]*Message, error) {
 func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
 	args := []string{"message", "thread", threadID, "--json"}
 
-	stdout, err := runBdCommand(args, m.workDir, m.beadsDir, "BD_IDENTITY="+m.identity)
+	ctx, cancel := bdReadCtx()
+	defer cancel()
+	stdout, err := runBdCommand(ctx, args, m.workDir, m.beadsDir, "BD_IDENTITY="+m.identity)
 	if err != nil {
 		return nil, err
 	}

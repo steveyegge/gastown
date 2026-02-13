@@ -478,7 +478,7 @@ func listChannelMessages(townRoot, channelName string) ([]channelMessage, error)
 
 	// Query for messages with label channel:<name>
 	args := []string{"list",
-		"--type", "message",
+		"--label", "gt:message",
 		"--label", "channel:" + channelName,
 		"--sort", "-created",
 		"--limit", "0",

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,7 @@ var (
 	// Reject flags
 	mqRejectReason string
 	mqRejectNotify bool
+	mqRejectStdin  bool // Read reason from stdin
 
 	// List command flags
 	mqListReady  bool
@@ -288,9 +290,9 @@ func init() {
 	mqListCmd.Flags().BoolVar(&mqListJSON, "json", false, "Output as JSON")
 
 	// Reject flags
-	mqRejectCmd.Flags().StringVarP(&mqRejectReason, "reason", "r", "", "Reason for rejection (required)")
+	mqRejectCmd.Flags().StringVarP(&mqRejectReason, "reason", "r", "", "Reason for rejection (required unless --stdin)")
 	mqRejectCmd.Flags().BoolVar(&mqRejectNotify, "notify", false, "Send mail notification to worker")
-	_ = mqRejectCmd.MarkFlagRequired("reason") // cobra flags: error only at runtime if missing
+	mqRejectCmd.Flags().BoolVar(&mqRejectStdin, "stdin", false, "Read reason from stdin (avoids shell quoting issues)")
 
 	// Status flags
 	mqStatusCmd.Flags().BoolVar(&mqStatusJSON, "json", false, "Output as JSON")
@@ -405,6 +407,23 @@ func runMQRetry(cmd *cobra.Command, args []string) error {
 }
 
 func runMQReject(cmd *cobra.Command, args []string) error {
+	// Handle --stdin: read reason from stdin (avoids shell quoting issues)
+	if mqRejectStdin {
+		if mqRejectReason != "" {
+			return fmt.Errorf("cannot use --stdin with --reason/-r")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+		mqRejectReason = strings.TrimRight(string(data), "\n")
+	}
+
+	// Require reason via --reason or --stdin
+	if mqRejectReason == "" {
+		return fmt.Errorf("required flag \"reason\" not set (use --reason/-r or --stdin)")
+	}
+
 	rigName := args[0]
 	mrIDOrBranch := args[1]
 

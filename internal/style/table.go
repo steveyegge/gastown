@@ -2,7 +2,7 @@
 package style
 
 import (
-	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -149,127 +149,11 @@ func (t *Table) pad(styledText, plainText string, width int, align Alignment) st
 	}
 }
 
+// ansiRegex matches CSI escape sequences: ESC [ <params> <final byte>
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
 // stripAnsi removes ANSI escape sequences from a string.
 func stripAnsi(s string) string {
-	var result strings.Builder
-	inEscape := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			if s[i] == 'm' {
-				inEscape = false
-			}
-			continue
-		}
-		result.WriteByte(s[i])
-	}
-	return result.String()
+	return ansiRegex.ReplaceAllString(s, "")
 }
 
-// PhaseTable renders the molecule phase transition table.
-func PhaseTable() string {
-	return `
-  Phase Flow:
-    discovery ──┬──→ structural ──→ tactical ──→ synthesis
-                │    (sequential)   (parallel)   (single)
-                └─── (parallel)
-
-  ┌─────────────┬─────────────┬─────────────┬─────────────────────┐
-  │ Phase       │ Parallelism │ Blocks      │ Purpose             │
-  ├─────────────┼─────────────┼─────────────┼─────────────────────┤
-  │ discovery   │ full        │ (nothing)   │ Inventory, gather   │
-  │ structural  │ sequential  │ discovery   │ Big-picture review  │
-  │ tactical    │ parallel    │ structural  │ Detailed work       │
-  │ synthesis   │ single      │ tactical    │ Aggregate results   │
-  └─────────────┴─────────────┴─────────────┴─────────────────────┘`
-}
-
-// MoleculeLifecycleASCII renders the molecule lifecycle diagram.
-func MoleculeLifecycleASCII() string {
-	return `
-  Proto (template)
-       │
-       ▼ bond
-  ┌─────────────────┐
-  │ Mol (durable)   │
-  │ Wisp (ephemeral)│
-  └────────┬────────┘
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-  burn         squash
-  (no record)  (→ digest)`
-}
-
-// DAGProgress renders a DAG progress visualization.
-// steps is a map of step name to status (done, in_progress, ready, blocked).
-func DAGProgress(steps map[string]string, phases []string) string {
-	var sb strings.Builder
-
-	icons := map[string]string{
-		"done":        "✓",
-		"in_progress": "⧖",
-		"ready":       "○",
-		"blocked":     "◌",
-	}
-
-	colors := map[string]lipgloss.Style{
-		"done":        Success,
-		"in_progress": Warning,
-		"ready":       Info,
-		"blocked":     Dim,
-	}
-
-	for _, phase := range phases {
-		sb.WriteString(fmt.Sprintf("  %s\n", Bold.Render(phase)))
-		for name, status := range steps {
-			if strings.HasPrefix(name, phase+"-") || strings.HasPrefix(name, phase+"/") {
-				icon := icons[status]
-				style := colors[status]
-				stepName := strings.TrimPrefix(strings.TrimPrefix(name, phase+"-"), phase+"/")
-				sb.WriteString(fmt.Sprintf("    %s %s\n", style.Render(icon), stepName))
-			}
-		}
-	}
-
-	return sb.String()
-}
-
-// SuggestionBox renders a "did you mean" suggestion box.
-func SuggestionBox(message string, suggestions []string, hint string) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("\n%s %s\n", ErrorPrefix, message))
-
-	if len(suggestions) > 0 {
-		sb.WriteString("\n  Did you mean?\n")
-		for _, s := range suggestions {
-			sb.WriteString(fmt.Sprintf("    • %s\n", s))
-		}
-	}
-
-	if hint != "" {
-		sb.WriteString(fmt.Sprintf("\n  %s\n", Dim.Render(hint)))
-	}
-
-	return sb.String()
-}
-
-// ProgressBar renders a simple progress bar.
-func ProgressBar(percent int, width int) string {
-	if percent < 0 {
-		percent = 0
-	}
-	if percent > 100 {
-		percent = 100
-	}
-
-	filled := (percent * width) / 100
-	empty := width - filled
-
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
-	return fmt.Sprintf("[%s] %d%%", bar, percent)
-}

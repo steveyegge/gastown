@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,10 +16,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// convoyIDPattern validates convoy IDs to prevent SQL injection.
+// convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
 
-// subprocessTimeout is the timeout for bd and sqlite3 calls.
+// subprocessTimeout is the timeout for bd subprocess calls.
 const subprocessTimeout = 5 * time.Second
 
 // IssueItem represents a tracked issue within a convoy.
@@ -88,7 +87,7 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	defer cancel()
 
 	// Get list of open convoys
-	listArgs := []string{"list", "--type=convoy", "--json"}
+	listArgs := []string{"list", "--label=gt:convoy", "--json"}
 	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
@@ -123,9 +122,22 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	return convoys, nil
 }
 
+// extractIssueID strips the external:prefix:id wrapper from bead IDs.
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
+// but consumers need the raw bead ID for display and lookups.
+func extractIssueID(id string) string {
+	if strings.HasPrefix(id, "external:") {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return id
+}
+
 // loadTrackedIssues loads issues tracked by a convoy.
 func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
-	// Validate convoy ID to prevent SQL injection
+	// Validate convoy ID for safety
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil, 0, 0
 	}
@@ -133,16 +145,9 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
 	defer cancel()
 
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query tracked issues from SQLite (ID validated above)
-	query := fmt.Sprintf(`
-		SELECT d.depends_on_id
-		FROM dependencies d
-		WHERE d.issue_id = '%s' AND d.type = 'tracks'
-	`, convoyID)
-
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query) //nolint:gosec // G204: sqlite3 with controlled query
+	// Query tracked issues using bd dep list (returns full issue details)
+	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	cmd.Dir = townBeads
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -150,37 +155,37 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 		return nil, 0, 0
 	}
 
-	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
+	var tracked []struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &tracked); err != nil {
 		return nil, 0, 0
 	}
 
-	// Collect issue IDs, handling external references
-	issueIDs := make([]string, 0, len(deps))
-	for _, dep := range deps {
-		issueID := dep.DependsOnID
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				issueID = parts[2]
-			}
-		}
-		issueIDs = append(issueIDs, issueID)
+	// Extract raw issue IDs and refresh status via cross-rig lookup.
+	// bd dep list returns status from the dependency record in HQ beads
+	// which is never updated when cross-rig issues are closed in their rig.
+	for i := range tracked {
+		tracked[i].ID = extractIssueID(tracked[i].ID)
 	}
+	freshStatus := refreshIssueStatus(ctx, tracked)
 
-	// Batch fetch all issue details in one call
-	detailsMap := getIssueDetailsBatch(townBeads, issueIDs)
-
-	issues := make([]IssueItem, 0, len(deps))
+	issues := make([]IssueItem, 0, len(tracked))
 	completed := 0
-	for _, id := range issueIDs {
-		if issue, ok := detailsMap[id]; ok {
-			issues = append(issues, issue)
-			if issue.Status == "closed" {
-				completed++
-			}
+	for _, t := range tracked {
+		status := t.Status
+		if fresh, ok := freshStatus[t.ID]; ok {
+			status = fresh
+		}
+		issues = append(issues, IssueItem{
+			ID:     t.ID,
+			Title:  t.Title,
+			Status: status,
+		})
+		if status == "closed" {
+			completed++
 		}
 	}
 
@@ -195,47 +200,43 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	return issues, completed, len(issues)
 }
 
-// getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
-// Returns a map from issue ID to details.
-func getIssueDetailsBatch(townBeads string, issueIDs []string) map[string]IssueItem {
-	result := make(map[string]IssueItem)
-	if len(issueIDs) == 0 {
-		return result
+// refreshIssueStatus does a batch bd show to get current status for tracked issues.
+// Returns a map from issue ID to current status.
+func refreshIssueStatus(ctx context.Context, tracked []struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}) map[string]string {
+	if len(tracked) == 0 {
+		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
-	defer cancel()
-
-	// Build args: bd show id1 id2 id3 ... --json
-	args := append([]string{"show"}, issueIDs...)
+	args := []string{"show"}
+	for _, t := range tracked {
+		args = append(args, t.ID)
+	}
 	args = append(args, "--json")
 
-	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = townBeads
+	cmd := exec.CommandContext(ctx, "bd", args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
 	if err := cmd.Run(); err != nil {
-		return result // Return empty map on error
+		return nil
 	}
 
 	var issues []struct {
 		ID     string `json:"id"`
-		Title  string `json:"title"`
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
-		return result
+		return nil
 	}
 
+	result := make(map[string]string, len(issues))
 	for _, issue := range issues {
-		result[issue.ID] = IssueItem{
-			ID:     issue.ID,
-			Title:  issue.Title,
-			Status: issue.Status,
-		}
+		result[issue.ID] = issue.Status
 	}
-
 	return result
 }
 

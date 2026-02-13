@@ -60,12 +60,14 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 	// Look up rig path for this prefix
 	rigPath := GetRigPathForPrefix(townRoot, prefix)
 	if rigPath == "" {
+		fmt.Fprintf(os.Stderr, "Warning: no route found for prefix %q (bead %s), falling back to %s\n", prefix, beadID, fallbackDir)
 		return fallbackDir
 	}
 
 	// Resolve redirects and get final beads directory
 	beadsDir := ResolveBeadsDir(rigPath)
 	if beadsDir == "" {
+		fmt.Fprintf(os.Stderr, "Warning: could not resolve beads dir for rig %s (bead %s), falling back to %s\n", rigPath, beadID, fallbackDir)
 		return fallbackDir
 	}
 

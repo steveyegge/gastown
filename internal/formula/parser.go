@@ -3,6 +3,7 @@ package formula
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/BurntSushi/toml"
 )
@@ -103,6 +104,15 @@ func (f *Formula) validateConvoy() error {
 		}
 	}
 
+	// Validate RequiredUnless references point to existing input keys
+	for name, input := range f.Inputs {
+		for _, ref := range input.RequiredUnless {
+			if _, ok := f.Inputs[ref]; !ok {
+				return fmt.Errorf("input %q has required_unless referencing unknown input %q", name, ref)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -166,6 +176,11 @@ func (f *Formula) validateExpansion() error {
 		}
 	}
 
+	// Check for cycles
+	if err := f.checkExpansionCycles(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -191,20 +206,31 @@ func (f *Formula) validateAspect() error {
 
 // checkCycles detects circular dependencies in steps.
 func (f *Formula) checkCycles() error {
-	// Build adjacency list
 	deps := make(map[string][]string)
 	for _, step := range f.Steps {
 		deps[step.ID] = step.Needs
 	}
+	return checkDependencyCycles(deps)
+}
 
-	// DFS for cycle detection
+// checkExpansionCycles detects circular dependencies in expansion templates.
+func (f *Formula) checkExpansionCycles() error {
+	deps := make(map[string][]string)
+	for _, tmpl := range f.Template {
+		deps[tmpl.ID] = tmpl.Needs
+	}
+	return checkDependencyCycles(deps)
+}
+
+// checkDependencyCycles detects cycles in a dependency graph.
+func checkDependencyCycles(deps map[string][]string) error {
 	visited := make(map[string]bool)
 	inStack := make(map[string]bool)
 
 	var visit func(id string) error
 	visit = func(id string) error {
 		if inStack[id] {
-			return fmt.Errorf("cycle detected involving step: %s", id)
+			return fmt.Errorf("cycle detected involving: %s", id)
 		}
 		if visited[id] {
 			return nil
@@ -222,8 +248,15 @@ func (f *Formula) checkCycles() error {
 		return nil
 	}
 
-	for _, step := range f.Steps {
-		if err := visit(step.ID); err != nil {
+	// Sort keys for deterministic cycle detection order
+	ids := make([]string, 0, len(deps))
+	for id := range deps {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		if err := visit(id); err != nil {
 			return err
 		}
 	}
@@ -387,6 +420,47 @@ func (f *Formula) GetStep(id string) *Step {
 		}
 	}
 	return nil
+}
+
+// ParallelReadySteps returns ready steps grouped by whether they can run in parallel.
+// Returns (parallelSteps, sequentialStep) where:
+// - parallelSteps: steps marked with parallel=true that share the same needs
+// - sequentialStep: the first non-parallel ready step, or nil if all are parallel
+// If multiple parallel steps are ready, they should all be executed concurrently.
+func (f *Formula) ParallelReadySteps(completed map[string]bool) (parallel []string, sequential string) {
+	ready := f.ReadySteps(completed)
+	if len(ready) == 0 {
+		return nil, ""
+	}
+
+	// For non-workflow formulas, return all as parallel (convoy/aspect are inherently parallel)
+	if f.Type != TypeWorkflow {
+		return ready, ""
+	}
+
+	// Group by parallel flag
+	var parallelIDs []string
+	var sequentialIDs []string
+	for _, id := range ready {
+		step := f.GetStep(id)
+		if step != nil && step.Parallel {
+			parallelIDs = append(parallelIDs, id)
+		} else {
+			sequentialIDs = append(sequentialIDs, id)
+		}
+	}
+
+	// If we have parallel steps, return them all for concurrent execution
+	if len(parallelIDs) > 0 {
+		return parallelIDs, ""
+	}
+
+	// Otherwise return the first sequential step
+	if len(sequentialIDs) > 0 {
+		return nil, sequentialIDs[0]
+	}
+
+	return nil, ""
 }
 
 // GetLeg returns a leg by ID, or nil if not found.

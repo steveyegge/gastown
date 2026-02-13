@@ -46,6 +46,11 @@ func init() {
 }
 
 func runCommit(cmd *cobra.Command, args []string) error {
+	// Handle --help since DisableFlagParsing bypasses Cobra's help handling
+	if helped, err := checkHelpFlag(cmd, args); helped || err != nil {
+		return err
+	}
+
 	// Detect agent identity
 	identity := detectSender()
 

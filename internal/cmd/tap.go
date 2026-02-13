@@ -19,7 +19,7 @@ Subcommands:
   inject  - Modify tool inputs (PreToolUse, updatedInput) [planned]
   check   - Validate after execution (PostToolUse) [planned]
 
-Hook configuration in .claude/settings.json:
+Hook configuration in .claude/settings.local.json:
   {
     "PreToolUse": [{
       "matcher": "Bash(gh pr create*)",

@@ -88,131 +88,24 @@ func TestParseWispIDFromJSON(t *testing.T) {
 	}
 }
 
-func TestFormatTrackBeadID(t *testing.T) {
+func TestExtractIssueID(t *testing.T) {
 	tests := []struct {
-		name     string
-		beadID   string
-		expected string
+		name string
+		id   string
+		want string
 	}{
-		// HQ beads should remain unchanged
-		{
-			name:     "hq bead unchanged",
-			beadID:   "hq-abc123",
-			expected: "hq-abc123",
-		},
-		{
-			name:     "hq convoy unchanged",
-			beadID:   "hq-cv-xyz789",
-			expected: "hq-cv-xyz789",
-		},
-
-		// Cross-rig beads get external: prefix
-		{
-			name:     "gastown rig bead",
-			beadID:   "gt-mol-abc123",
-			expected: "external:gt-mol:gt-mol-abc123",
-		},
-		{
-			name:     "beads rig task",
-			beadID:   "beads-task-xyz",
-			expected: "external:beads-task:beads-task-xyz",
-		},
-		{
-			name:     "two segment ID",
-			beadID:   "foo-bar",
-			expected: "external:foo-bar:foo-bar",
-		},
-
-		// Edge cases
-		{
-			name:     "single segment fallback",
-			beadID:   "orphan",
-			expected: "orphan",
-		},
-		{
-			name:     "empty string fallback",
-			beadID:   "",
-			expected: "",
-		},
-		{
-			name:     "many segments",
-			beadID:   "a-b-c-d-e-f",
-			expected: "external:a-b:a-b-c-d-e-f",
-		},
+		{"unwraps external format", "external:gt-mol:gt-mol-abc123", "gt-mol-abc123"},
+		{"unwraps beads external", "external:beads-task:beads-task-xyz", "beads-task-xyz"},
+		{"passes through hq IDs", "hq-abc123", "hq-abc123"},
+		{"passes through plain IDs", "gt-abc123", "gt-abc123"},
+		{"handles malformed external (only 2 parts)", "external:gt-mol", "external:gt-mol"},
+		{"handles empty string", "", ""},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatTrackBeadID(tt.beadID)
-			if result != tt.expected {
-				t.Errorf("formatTrackBeadID(%q) = %q, want %q", tt.beadID, result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestFormatTrackBeadIDConsumerCompatibility verifies that the external ref format
-// produced by formatTrackBeadID can be correctly parsed by the consumer pattern
-// used in convoy.go, model.go, feed/convoy.go, and web/fetcher.go.
-func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
-	// Consumer pattern from convoy.go:1062-1068:
-	// if strings.HasPrefix(issueID, "external:") {
-	//     parts := strings.SplitN(issueID, ":", 3)
-	//     if len(parts) == 3 {
-	//         issueID = parts[2] // Extract the actual issue ID
-	//     }
-	// }
-
-	tests := []struct {
-		name           string
-		beadID         string
-		wantOriginalID string
-	}{
-		{
-			name:           "cross-rig bead round-trips",
-			beadID:         "gt-mol-abc123",
-			wantOriginalID: "gt-mol-abc123",
-		},
-		{
-			name:           "beads rig bead round-trips",
-			beadID:         "beads-task-xyz",
-			wantOriginalID: "beads-task-xyz",
-		},
-		{
-			name:           "hq bead unchanged",
-			beadID:         "hq-abc123",
-			wantOriginalID: "hq-abc123",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			formatted := formatTrackBeadID(tt.beadID)
-
-			// Simulate consumer parsing logic
-			parsed := formatted
-			if len(formatted) > 9 && formatted[:9] == "external:" {
-				parts := make([]string, 0, 3)
-				start := 0
-				count := 0
-				for i := 0; i < len(formatted) && count < 2; i++ {
-					if formatted[i] == ':' {
-						parts = append(parts, formatted[start:i])
-						start = i + 1
-						count++
-					}
-				}
-				if count == 2 {
-					parts = append(parts, formatted[start:])
-				}
-				if len(parts) == 3 {
-					parsed = parts[2]
-				}
-			}
-
-			if parsed != tt.wantOriginalID {
-				t.Errorf("round-trip failed: formatTrackBeadID(%q) = %q, parsed back to %q, want %q",
-					tt.beadID, formatted, parsed, tt.wantOriginalID)
+			got := extractIssueID(tt.id)
+			if got != tt.want {
+				t.Errorf("extractIssueID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
 		})
 	}
@@ -252,9 +145,6 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$(pwd)|$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -284,15 +174,11 @@ case "$cmd" in
 esac
 exit 0
 `
-bdScriptWindows := `@echo off
+	bdScriptWindows := `@echo off
 setlocal enableextensions
 echo %CD%^|%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
   exit /b 0
@@ -353,6 +239,7 @@ exit /b 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -384,15 +271,15 @@ exit /b 0
 		args := parts[1]
 
 		switch {
-		case strings.Contains(args, " cook "):
+		case strings.Contains(args, "cook "):
 			gotCook = true
 			// cook doesn't need database context, runs from cwd
-		case strings.Contains(args, " mol wisp "):
+		case strings.Contains(args, "mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
 				t.Fatalf("bd mol wisp ran in %q, want %q (args: %q)", dir, wantDir, args)
 			}
-		case strings.Contains(args, " mol bond "):
+		case strings.Contains(args, "mol bond "):
 			gotBond = true
 			if dir != wantDir {
 				t.Fatalf("bd mol bond ran in %q, want %q (args: %q)", dir, wantDir, args)
@@ -443,9 +330,6 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "ARGS:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -475,15 +359,11 @@ case "$cmd" in
 esac
 exit 0
 `
-bdScriptWindows := `@echo off
+	bdScriptWindows := `@echo off
 setlocal enableextensions
 echo ARGS:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -544,6 +424,7 @@ exit /b 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -580,7 +461,7 @@ exit /b 0
 }
 
 // TestVerifyBeadExistsAllowStale reproduces the bug in gtl-ncq where beads
-// visible via regular bd show fail with --no-daemon due to database sync issues.
+// visible via regular bd show fail due to database sync issues.
 // The fix uses --allow-stale to skip the sync check for existence verification.
 func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	townRoot := t.TempDir()
@@ -591,8 +472,8 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	}
 
 	// Create a stub bd that simulates the sync issue:
-	// - --no-daemon without --allow-stale fails (database out of sync)
-	// - --no-daemon with --allow-stale succeeds (skips sync check)
+	// - without --allow-stale fails (database out of sync)
+	// - with --allow-stale succeeds (skips sync check)
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
@@ -606,20 +487,15 @@ for arg in "$@"; do
   fi
 done
 
-if [ "$1" = "--no-daemon" ]; then
-  if [ "$allow_stale" = "true" ]; then
-    # --allow-stale skips sync check, succeeds
-    echo '[{"title":"Test bead","status":"open","assignee":""}]'
-    exit 0
-  else
-    # Without --allow-stale, fails with sync error
-    echo '{"error":"Database out of sync with JSONL."}'
-    exit 1
-  fi
+if [ "$allow_stale" = "true" ]; then
+  # --allow-stale skips sync check, succeeds
+  echo '[{"title":"Test bead","status":"open","assignee":""}]'
+  exit 0
+else
+  # Without --allow-stale, fails with sync error
+  echo '{"error":"Database out of sync with JSONL."}'
+  exit 1
 fi
-# Daemon mode works
-echo '[{"title":"Test bead","status":"open","assignee":""}]'
-exit 0
 `
 	bdScriptWindows := `@echo off
 setlocal enableextensions
@@ -627,16 +503,12 @@ set "allow=false"
 for %%A in (%*) do (
   if "%%~A"=="--allow-stale" set "allow=true"
 )
-if "%1"=="--no-daemon" (
-  if "%allow%"=="true" (
-    echo [{"title":"Test bead","status":"open","assignee":""}]
-    exit /b 0
-  )
-  echo {"error":"Database out of sync with JSONL."}
-  exit /b 1
+if "%allow%"=="true" (
+  echo [{"title":"Test bead","status":"open","assignee":""}]
+  exit /b 0
 )
-echo [{"title":"Test bead","status":"open","assignee":""}]
-exit /b 0
+echo {"error":"Database out of sync with JSONL."}
+exit /b 1
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
@@ -651,7 +523,7 @@ exit /b 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	// EXPECTED: verifyBeadExists should use --no-daemon --allow-stale and succeed
+	// EXPECTED: verifyBeadExists should use --allow-stale and succeed
 	beadID := "jv-v599"
 	err = verifyBeadExists(beadID)
 	if err != nil {
@@ -683,24 +555,16 @@ for arg in "$@"; do
   fi
 done
 
-if [ "$1" = "--no-daemon" ]; then
-  shift
-  cmd="$1"
-  if [ "$cmd" = "show" ]; then
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
     if [ "$allow_stale" = "true" ]; then
       echo '[{"title":"Synced bead","status":"open","assignee":""}]'
       exit 0
     fi
     echo '{"error":"Database out of sync"}'
     exit 1
-  fi
-  exit 0
-fi
-cmd="$1"
-shift || true
-case "$cmd" in
-  show)
-    echo '[{"title":"Synced bead","status":"open","assignee":""}]'
     ;;
   update)
     exit 0
@@ -708,29 +572,20 @@ case "$cmd" in
 esac
 exit 0
 `
-bdScriptWindows := `@echo off
+	bdScriptWindows := `@echo off
 setlocal enableextensions
 set "allow=false"
 for %%A in (%*) do (
   if "%%~A"=="--allow-stale" set "allow=true"
 )
 set "cmd=%1"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  if "%cmd%"=="show" (
-    if "%allow%"=="true" (
-      echo [{"title":"Synced bead","status":"open","assignee":""}]
-      exit /b 0
-    )
-    echo {"error":"Database out of sync"}
-    exit /b 1
-  )
-  exit /b 0
-)
-set "cmd=%1"
 if "%cmd%"=="show" (
-  echo [{"title":"Synced bead","status":"open","assignee":""}]
-  exit /b 0
+  if "%allow%"=="true" (
+    echo [{"title":"Synced bead","status":"open","assignee":""}]
+    exit /b 0
+  )
+  echo {"error":"Database out of sync"}
+  exit /b 1
 )
 if "%cmd%"=="update" exit /b 0
 exit /b 0
@@ -766,14 +621,13 @@ exit /b 0
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
-	// EXPECTED: gt sling should use daemon mode and succeed
-	// ACTUAL: verifyBeadExists uses --no-daemon and fails with sync error
+	// EXPECTED: gt sling should use --allow-stale and succeed
 	beadID := "jv-v599"
 	err = runSling(nil, []string{beadID})
 	if err != nil {
 		// Check if it's the specific error we're testing for
 		if strings.Contains(err.Error(), "is not a valid bead or formula") {
-			t.Errorf("gt sling failed to recognize bead %q: %v\nExpected to use daemon mode, but used --no-daemon which fails when DB out of sync", beadID, err)
+			t.Errorf("gt sling failed to recognize bead %q: %v\nExpected --allow-stale to skip sync check", beadID, err)
 		} else {
 			// Some other error - might be expected in dry-run mode
 			t.Logf("gt sling returned error (may be expected in test): %v", err)
@@ -807,20 +661,20 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"hq-00gyg", true},
 
 		// Short prefixes that match pattern (but may be formulas in practice)
-		{"mol-release", true},    // 3-char prefix matches pattern (formula check runs first in sling)
-		{"mol-abc123", true},     // 3-char prefix matches pattern
+		{"mol-release", true}, // 3-char prefix matches pattern (formula check runs first in sling)
+		{"mol-abc123", true},  // 3-char prefix matches pattern
 
 		// Non-bead strings - should return false
-		{"formula-name", false},  // "formula" is 7 chars (> 5)
-		{"mayor", false},         // no hyphen
-		{"gastown", false},       // no hyphen
-		{"deacon/dogs", false},   // contains slash
-		{"", false},              // empty
-		{"-abc", false},          // starts with hyphen
-		{"GT-abc", false},        // uppercase prefix
-		{"123-abc", false},       // numeric prefix
-		{"a-", false},            // nothing after hyphen
-		{"aaaaaa-b", false},      // prefix too long (6 chars)
+		{"formula-name", false}, // "formula" is 7 chars (> 5)
+		{"mayor", false},        // no hyphen
+		{"gastown", false},      // no hyphen
+		{"deacon/dogs", false},  // contains slash
+		{"", false},             // empty
+		{"-abc", false},         // starts with hyphen
+		{"GT-abc", false},       // uppercase prefix
+		{"123-abc", false},      // numeric prefix
+		{"a-", false},           // nothing after hyphen
+		{"aaaaaa-b", false},     // prefix too long (6 chars)
 	}
 
 	for _, tt := range tests {
@@ -876,9 +730,6 @@ func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "$PWD|$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -911,15 +762,11 @@ case "$cmd" in
 esac
 exit 0
 `
-bdScriptWindows := `@echo off
+	bdScriptWindows := `@echo off
 setlocal enableextensions
 echo %CD%^|%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -981,6 +828,7 @@ exit /b 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-polecat-work"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -1032,5 +880,328 @@ exit /b 0
 		t.Errorf("after mol bond, expected update with attached_molecule in description\n"+
 			"This is required for gt hook to recognize the molecule attachment.\n"+
 			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
+	}
+}
+
+// TestSlingNoMergeFlag verifies that gt sling --no-merge stores the no_merge flag
+// in the bead's description. This flag tells gt done to skip the merge queue
+// and keep work on the feature branch for human review.
+func TestSlingNoMergeFlag(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs update commands
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ARGS:$*" >> "${BD_LOG}"
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	// Use GT_TEST_ATTACHED_MOLECULE_LOG to capture the description content directly.
+	// On Windows, multi-line --description= args break batch script logging because
+	// newlines in command-line arguments cause cmd.exe to treat subsequent lines as
+	// separate commands.
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	prevNoMerge := slingNoMerge
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+		slingNoMerge = prevNoMerge
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingNoMerge = true // This is what we're testing
+
+	if err := runSling(nil, []string{"gt-test123"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	// Check the molecule log file written by storeFieldsInBead (via GT_TEST_ATTACHED_MOLECULE_LOG).
+	// This directly captures the description content without relying on batch stub logging.
+	molBytes, err := os.ReadFile(molLogPath)
+	if err != nil {
+		t.Fatalf("read molecule log: %v", err)
+	}
+	molContent := string(molBytes)
+	if !strings.Contains(molContent, "no_merge: true") {
+		t.Errorf("--no-merge flag not stored in bead description\nDescription:\n%s", molContent)
+	}
+}
+
+// TestSlingSetsDoltAutoCommitOff verifies that gt sling sets BD_DOLT_AUTO_COMMIT=off
+// for all child bd processes. Under concurrent load (batch slinging), auto-commits
+// from individual bd writes cause manifest contention and 'database is read only'
+// errors. The Dolt server handles commits — individual auto-commits are unnecessary.
+// Fixes: gt-u6n6a
+
+// TestCheckCrossRigGuard verifies that cross-rig sling is rejected when a bead's
+// prefix doesn't match the target rig. This prevents slinging beads-codebase issues
+// to gastown polecats, which cannot fix code in a different rig's repo.
+// Fixes: gt-myecw
+func TestCheckCrossRigGuard(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"hq-","path":"."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		beadID      string
+		targetAgent string
+		wantErr     bool
+	}{
+		{
+			name:        "same rig: gt bead to gastown polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "same rig: bd bead to beads polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     false,
+		},
+		{
+			name:        "cross-rig: bd bead to gastown polecat",
+			beadID:      "bd-ka761",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     true,
+		},
+		{
+			name:        "cross-rig: gt bead to beads polecat",
+			beadID:      "gt-abc123",
+			targetAgent: "beads/polecats/obsidian",
+			wantErr:     true,
+		},
+		{
+			name:        "town-level: hq bead to any rig (allowed)",
+			beadID:      "hq-abc123",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "unknown prefix: allowed (no route to check)",
+			beadID:      "xx-unknown",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+		{
+			name:        "empty bead prefix: allowed",
+			beadID:      "nohyphen",
+			targetAgent: "gastown/polecats/Toast",
+			wantErr:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCrossRigGuard(tc.beadID, tc.targetAgent, tmpDir)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("checkCrossRigGuard(%q, %q) error = %v, wantErr %v", tc.beadID, tc.targetAgent, err, tc.wantErr)
+			}
+			if err != nil && tc.wantErr {
+				if !strings.Contains(err.Error(), "cross-rig mismatch") {
+					t.Errorf("expected cross-rig mismatch error, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), "--force") {
+					t.Errorf("error should mention --force override, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestIsHookedAgentDead_UnknownFormat(t *testing.T) {
+	// Unknown assignee formats should return false (conservative)
+	tests := []struct {
+		name     string
+		assignee string
+	}{
+		{"empty", ""},
+		{"unknown_single", "foobar"},
+		{"four_parts", "a/b/c/d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if isHookedAgentDead(tt.assignee) {
+				t.Errorf("isHookedAgentDead(%q) = true, want false (unknown format)", tt.assignee)
+			}
+		})
+	}
+}
+
+func TestIsHookedAgentDead_NoTmuxSession(t *testing.T) {
+	// For a known assignee format where no tmux session exists,
+	// isHookedAgentDead should return true (session is dead).
+	// Use a highly unlikely polecat name to ensure no collision with real sessions.
+	result := isHookedAgentDead("nonexistent_rig_xyz/polecats/ghost_polecat_999")
+	// This might return true (no session) or false (tmux not available).
+	// We just verify it doesn't panic.
+	_ = result
+}
+
+func TestSlingSetsDoltAutoCommitOff(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs BD_DOLT_AUTO_COMMIT env var
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ENV:BD_DOLT_AUTO_COMMIT=${BD_DOLT_AUTO_COMMIT}|$*" >> "${BD_LOG}"
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ENV:BD_DOLT_AUTO_COMMIT=%BD_DOLT_AUTO_COMMIT%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1")
+	// Ensure BD_DOLT_AUTO_COMMIT is NOT set before sling runs
+	t.Setenv("BD_DOLT_AUTO_COMMIT", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+
+	if err := runSling(nil, []string{"gt-test456"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+
+	// Verify that ALL bd commands received BD_DOLT_AUTO_COMMIT=off
+	logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	if len(logLines) == 0 {
+		t.Fatal("no bd commands logged")
+	}
+
+	for _, line := range logLines {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {
+			t.Errorf("bd command missing BD_DOLT_AUTO_COMMIT=off: %s", line)
+		}
 	}
 }

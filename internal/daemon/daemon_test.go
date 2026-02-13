@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -272,5 +274,81 @@ func TestLifecycleRequest_Serialization(t *testing.T) {
 	}
 	if loaded.Action != request.Action {
 		t.Errorf("Action mismatch: got %q, want %q", loaded.Action, request.Action)
+	}
+}
+
+func TestIsShutdownInProgress_NoLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config: &Config{TownRoot: tmpDir},
+	}
+
+	// No lock file exists - should return false
+	if d.isShutdownInProgress() {
+		t.Error("expected false when lock file doesn't exist")
+	}
+}
+
+func TestIsShutdownInProgress_StaleLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "daemon")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(lockDir, "shutdown.lock")
+
+	// Create a stale lock file (not actually locked)
+	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Daemon{
+		config: &Config{TownRoot: tmpDir},
+	}
+
+	// File exists but not locked - should return false
+	if d.isShutdownInProgress() {
+		t.Error("expected false when lock file exists but is not locked")
+	}
+
+	// File should still exist - flock files are never removed to prevent
+	// a race where concurrent callers lock different inodes
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Error("expected lock file to be preserved (flock files should not be removed)")
+	}
+}
+
+func TestIsShutdownInProgress_ActiveLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "daemon")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(lockDir, "shutdown.lock")
+
+	// Create and hold the lock (simulating active shutdown)
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	if !locked {
+		t.Fatal("expected to acquire lock")
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	d := &Daemon{
+		config: &Config{TownRoot: tmpDir},
+	}
+
+	// File exists and is locked - should return true
+	if !d.isShutdownInProgress() {
+		t.Error("expected true when lock file is actively held")
+	}
+
+	// File should still exist (we're still holding the lock)
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("lock file should still exist: %v", err)
 	}
 }

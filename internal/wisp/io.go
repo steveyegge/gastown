@@ -1,10 +1,11 @@
 package wisp
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // EnsureDir ensures the .beads directory exists in the given root.
@@ -22,22 +23,10 @@ func WispPath(root, filename string) string {
 }
 
 // writeJSON is a helper to write JSON files atomically.
+// Uses the shared util.AtomicWriteJSON for consistent atomic write behavior.
 func writeJSON(path string, v interface{}) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal json: %w", err)
+	if err := util.AtomicWriteJSON(path, v); err != nil {
+		return fmt.Errorf("write json: %w", err)
 	}
-
-	// Write to temp file then rename for atomicity
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil { //nolint:gosec // G306: wisp messages are non-sensitive operational data
-		return fmt.Errorf("write temp: %w", err)
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp) // cleanup on failure
-		return fmt.Errorf("rename: %w", err)
-	}
-
 	return nil
 }

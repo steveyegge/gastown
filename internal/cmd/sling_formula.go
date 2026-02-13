@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,18 +51,18 @@ func trimJSONForError(jsonOutput []byte) string {
 
 // verifyFormulaExists checks that the formula exists using bd formula show.
 // Formulas are TOML files (.formula.toml).
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Uses --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
-	// when formula not found, --no-daemon may exit 0 but produce empty stdout.
-	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName, "--allow-stale")
+	// Use Output() instead of Run() to detect bd exit 0 bug:
+	// when formula not found, bd may exit 0 but produce empty stdout.
+	cmd := exec.Command("bd", "formula", "show", formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -81,90 +82,29 @@ func runSlingFormula(args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// Determine target (self or specified)
+	// Resolve target using shared dispatch logic
 	var target string
 	if len(args) > 1 {
 		target = args[1]
 	}
-
-	// Resolve target agent and pane
-	var targetAgent string
-	var targetPane string
-
-	if target != "" {
-		// Resolve "." to current agent identity (like git's "." meaning current directory)
-		if target == "." {
-			targetAgent, targetPane, _, err = resolveSelfTarget()
-			if err != nil {
-				return fmt.Errorf("resolving self for '.' target: %w", err)
-			}
-		} else if dogName, isDog := IsDogTarget(target); isDog {
-			if slingDryRun {
-				if dogName == "" {
-					fmt.Printf("Would dispatch to idle dog in kennel\n")
-				} else {
-					fmt.Printf("Would dispatch to dog '%s'\n", dogName)
-				}
-				targetAgent = fmt.Sprintf("deacon/dogs/%s", dogName)
-				if dogName == "" {
-					targetAgent = "deacon/dogs/<idle>"
-				}
-				targetPane = "<dog-pane>"
-			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
-				if dispatchErr != nil {
-					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
-				}
-				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
-			}
-		} else if rigName, isRig := IsRigName(target); isRig {
-			// Check if target is a rig name (auto-spawn polecat)
-			if slingDryRun {
-				// Dry run - just indicate what would happen
-				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
-				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
-				targetPane = "<new-pane>"
-			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:   slingForce,
-					Account: slingAccount,
-					Create:  slingCreate,
-					Agent:   slingAgent,
-				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
-			}
-		} else {
-			// Slinging to an existing agent
-			var targetWorkDir string
-			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
-			if err != nil {
-				return fmt.Errorf("resolving target: %w", err)
-			}
-			// Use target's working directory for bd commands (needed for redirect-based routing)
-			_ = targetWorkDir // Formula sling doesn't need hookWorkDir
-		}
-	} else {
-		// Slinging to self
-		var selfWorkDir string
-		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
-		if err != nil {
-			return err
-		}
-		_ = selfWorkDir // Formula sling doesn't need hookWorkDir
+	resolved, err := resolveTarget(target, ResolveTargetOptions{
+		DryRun:   slingDryRun,
+		Force:    slingForce,
+		Create:   slingCreate,
+		Account:  slingAccount,
+		Agent:    slingAgent,
+		NoBoot:   slingNoBoot,
+		WorkDesc: formulaName,
+		TownRoot: townRoot,
+	})
+	if err != nil {
+		return err
 	}
+	targetAgent := resolved.Agent
+	targetPane := resolved.Pane
+	formulaWorkDir := resolved.WorkDir
+	delayedDogInfo := resolved.DelayedDogInfo
+	isSelfSling := resolved.IsSelfSling
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
 
@@ -178,10 +118,17 @@ func runSlingFormula(args []string) error {
 		return nil
 	}
 
+	// Resolve working directory for bd commands (routes to correct rig beads)
+	// Fall back to townRoot (HQ beads) if no specific rig directory was determined
+	if formulaWorkDir == "" {
+		formulaWorkDir = townRoot
+	}
+
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
-	cookArgs := []string{"--no-daemon", "cook", formulaName}
+	cookArgs := []string{"cook", formulaName}
 	cookCmd := exec.Command("bd", cookArgs...)
+	cookCmd.Dir = formulaWorkDir
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking formula: %w", err)
@@ -189,13 +136,14 @@ func runSlingFormula(args []string) error {
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
 	wispArgs = append(wispArgs, "--json")
 
 	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd.Dir = formulaWorkDir
 	wispCmd.Stderr = os.Stderr // Show wisp errors to user
 	wispOut, err := wispCmd.Output()
 	if err != nil {
@@ -209,15 +157,12 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-	attachedMoleculeID := wispRootID
 
-	// Step 3: Hook the wisp bead using bd update.
+	// Step 3: Hook the wisp bead with retry and verification.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", wispRootID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, wispRootID, "")
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking wisp bead: %w", err)
+	hookDir := beads.ResolveHookDir(townRoot, wispRootID, "")
+	if err := hookBeadWithRetry(wispRootID, targetAgent, hookDir); err != nil {
+		return err
 	}
 	fmt.Printf("%s Attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
@@ -231,30 +176,61 @@ func runSlingFormula(args []string) error {
 	// Note: formula slinging uses town root as workDir (no polecat-specific path)
 	updateAgentHookBead(targetAgent, wispRootID, "", townBeadsDir)
 
-	// Store dispatcher in bead description (enables completion notification to dispatcher)
-	if err := storeDispatcherInBead(wispRootID, actor); err != nil {
-		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+	// Store all attachment fields in a single read-modify-write cycle.
+	// NOTE: For standalone formula sling, the wisp IS the work - do NOT store
+	// attached_molecule as a self-reference (the wisp's own ID pointing to itself
+	// is meaningless). attached_molecule is only meaningful when a formula-on-bead
+	// creates a wisp that's bonded to a separate base bead.
+	fieldUpdates := beadFieldUpdates{
+		Dispatcher: actor,
+		Args:       slingArgs,
+	}
+	if err := storeFieldsInBead(wispRootID, fieldUpdates); err != nil {
+		fmt.Printf("%s Could not store fields in bead: %v\n", style.Dim.Render("Warning:"), err)
+	} else if slingArgs != "" {
+		fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 	}
 
-	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
-	if slingArgs != "" {
-		if err := storeArgsInBead(wispRootID, slingArgs); err != nil {
-			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
-		} else {
-			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
+		}
+		targetPane = pane
+	}
+
+	// Create Dolt branch AFTER all sling writes (hook, formula, fields) are complete.
+	// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch forks
+	// from HEAD — ensuring the polecat's branch includes all writes.
+	if resolved.NewPolecatInfo != nil && resolved.NewPolecatInfo.DoltBranch != "" {
+		if err := resolved.NewPolecatInfo.CreateDoltBranch(); err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			return fmt.Errorf("creating Dolt branch: %w", err)
 		}
 	}
 
-	// Record the attached molecule after other description updates to avoid overwrite.
-	if attachedMoleculeID != "" {
-		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
-			// Warn but don't fail - polecat can still work through steps
-			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+	// Start spawned polecat session now that hook is set.
+	// This ensures polecat sees the wisp when gt prime runs on session start.
+	if resolved.NewPolecatInfo != nil {
+		pane, err := resolved.NewPolecatInfo.StartSession()
+		if err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			return fmt.Errorf("starting polecat session: %w", err)
 		}
+		targetPane = pane
 	}
 
 	// Step 4: Nudge to start (graceful if no tmux)
+	// Skip for self-sling - agent is currently processing the sling command and will see
+	// the hooked work on next turn. Nudging would inject text while agent is busy.
+	if isSelfSling {
+		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
+		return nil
+	}
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 		return nil
@@ -267,9 +243,9 @@ func runSlingFormula(args []string) error {
 
 	var prompt string
 	if slingArgs != "" {
-		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `gt hook` to see your hook, then execute using these args.", formulaName, slingArgs)
+		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `"+cli.Name()+" hook` to see your hook, then execute using these args.", formulaName, slingArgs)
 	} else {
-		prompt = fmt.Sprintf("Formula %s slung. Run `gt hook` to see your hook, then execute the steps.", formulaName)
+		prompt = fmt.Sprintf("Formula %s slung. Run `"+cli.Name()+" hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
 	if err := t.NudgePane(targetPane, prompt); err != nil {

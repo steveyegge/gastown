@@ -1,7 +1,8 @@
-.PHONY: build install clean test generate
+.PHONY: build install clean test generate check-up-to-date
 
 BINARY := gt
 BUILD_DIR := .
+INSTALL_DIR := $(HOME)/.local/bin
 
 # Get version info for ldflags
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -23,8 +24,32 @@ ifeq ($(shell uname),Darwin)
 	@echo "Signed $(BINARY) for macOS"
 endif
 
-install: generate
-	go install -ldflags "$(LDFLAGS)" ./cmd/gt
+check-up-to-date:
+ifndef SKIP_UPDATE_CHECK
+	@git fetch origin main --quiet 2>/dev/null || true
+	@LOCAL=$$(git rev-parse HEAD 2>/dev/null); \
+	REMOTE=$$(git rev-parse origin/main 2>/dev/null); \
+	if [ -n "$$REMOTE" ] && [ "$$LOCAL" != "$$REMOTE" ]; then \
+		echo "ERROR: Local branch is not up to date with origin/main"; \
+		echo "  Local:  $$(git rev-parse --short HEAD)"; \
+		echo "  Remote: $$(git rev-parse --short origin/main)"; \
+		echo "Run 'git pull' first, or use SKIP_UPDATE_CHECK=1 to override"; \
+		exit 1; \
+	fi
+endif
+
+install: check-up-to-date build
+	@mkdir -p $(INSTALL_DIR)
+	@rm -f $(INSTALL_DIR)/$(BINARY)
+	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@# Nuke any stale go-install binaries that shadow the canonical location
+	@for bad in $(HOME)/go/bin/$(BINARY) $(HOME)/bin/$(BINARY); do \
+		if [ -f "$$bad" ]; then \
+			echo "Removing stale $$bad (use make install, not go install)"; \
+			rm -f "$$bad"; \
+		fi; \
+	done
+	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)

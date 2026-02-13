@@ -227,6 +227,93 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 	return info, nil
 }
 
+// detectRole detects the agent role from the current working directory path.
+// This is the cwd-based fallback used by GetRoleWithContext when GT_ROLE is not set.
+func detectRole(cwd, townRoot string) RoleInfo {
+	ctx := RoleInfo{
+		Role:     RoleUnknown,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+		Source:   "cwd",
+	}
+
+	// Get relative path from town root
+	relPath, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		return ctx
+	}
+
+	// Normalize and split path
+	relPath = filepath.ToSlash(relPath)
+	parts := strings.Split(relPath, "/")
+
+	// Check for mayor role
+	// At town root, or in mayor/ or mayor/rig/
+	if relPath == "." || relPath == "" {
+		ctx.Role = RoleMayor
+		return ctx
+	}
+	if len(parts) >= 1 && parts[0] == "mayor" {
+		ctx.Role = RoleMayor
+		return ctx
+	}
+
+	// Check for boot role: deacon/dogs/boot/
+	// Must check before deacon since boot is under deacon directory
+	if len(parts) >= 3 && parts[0] == "deacon" && parts[1] == "dogs" && parts[2] == "boot" {
+		ctx.Role = RoleBoot
+		return ctx
+	}
+
+	// Check for deacon role: deacon/
+	if len(parts) >= 1 && parts[0] == "deacon" {
+		ctx.Role = RoleDeacon
+		return ctx
+	}
+
+	// At this point, first part should be a rig name
+	if len(parts) < 1 {
+		return ctx
+	}
+	rigName := parts[0]
+	ctx.Rig = rigName
+
+	// Check for mayor: <rig>/mayor/ or <rig>/mayor/rig/
+	if len(parts) >= 2 && parts[1] == "mayor" {
+		ctx.Role = RoleMayor
+		return ctx
+	}
+
+	// Check for witness: <rig>/witness/rig/
+	if len(parts) >= 2 && parts[1] == "witness" {
+		ctx.Role = RoleWitness
+		return ctx
+	}
+
+	// Check for refinery: <rig>/refinery/rig/
+	if len(parts) >= 2 && parts[1] == "refinery" {
+		ctx.Role = RoleRefinery
+		return ctx
+	}
+
+	// Check for polecat: <rig>/polecats/<name>/
+	if len(parts) >= 3 && parts[1] == "polecats" {
+		ctx.Role = RolePolecat
+		ctx.Polecat = parts[2]
+		return ctx
+	}
+
+	// Check for crew: <rig>/crew/<name>/
+	if len(parts) >= 3 && parts[1] == "crew" {
+		ctx.Role = RoleCrew
+		ctx.Polecat = parts[2] // Use Polecat field for crew member name
+		return ctx
+	}
+
+	// Default: could be rig root - treat as unknown
+	return ctx
+}
+
 // parseRoleString parses a role string like "mayor", "gastown/witness", or "gastown/polecats/alpha".
 func parseRoleString(s string) (Role, string, string) {
 	s = strings.TrimSpace(s)
@@ -237,6 +324,8 @@ func parseRoleString(s string) (Role, string, string) {
 		return RoleMayor, "", ""
 	case "deacon":
 		return RoleDeacon, "", ""
+	case "boot":
+		return RoleBoot, "", ""
 	}
 
 	// Compound roles: rig/role or rig/polecats/name or rig/crew/name
@@ -249,6 +338,12 @@ func parseRoleString(s string) (Role, string, string) {
 	rig := parts[0]
 
 	switch parts[1] {
+	case "boot":
+		// Handle compound "deacon/boot" format from GT_ROLE env var
+		if rig == "deacon" && len(parts) == 2 {
+			return RoleBoot, "", ""
+		}
+		return Role(s), "", ""
 	case "witness":
 		return RoleWitness, rig, ""
 	case "refinery":
@@ -326,12 +421,14 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "polecats", polecat, "rig")
+		return filepath.Join(townRoot, rig, "polecats", polecat)
 	case RoleCrew:
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "crew", polecat, "rig")
+		return filepath.Join(townRoot, rig, "crew", polecat)
+	case RoleBoot:
+		return filepath.Join(townRoot, "deacon", "dogs", "boot")
 	default:
 		return ""
 	}
@@ -476,7 +573,7 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		{RoleDeacon, "Background supervisor daemon"},
 		{RoleWitness, "Per-rig polecat lifecycle manager"},
 		{RoleRefinery, "Per-rig merge queue processor"},
-		{RolePolecat, "Ephemeral worker with own worktree"},
+		{RolePolecat, "Worker with persistent identity, ephemeral sessions"},
 		{RoleCrew, "Persistent worker with own worktree"},
 	}
 

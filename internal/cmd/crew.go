@@ -32,7 +32,7 @@ var crewCmd = &cobra.Command{
 	Long: `Manage crew workers - persistent workspaces for human developers.
 
 CREW VS POLECATS:
-  Polecats: Ephemeral. Witness-managed. Auto-nuked after work.
+  Polecats: Ephemeral sessions. Witness-managed. Auto-nuked after work.
   Crew:     Persistent. User-managed. Stays until you remove it.
 
 Crew workers are full git clones (not worktrees) for human developers
@@ -237,7 +237,7 @@ var crewPristineCmd = &cobra.Command{
 	Short: "Sync crew workspaces with remote",
 	Long: `Ensure crew workspace(s) are up-to-date.
 
-Runs git pull and bd sync for the specified crew, or all crew workers.
+Runs git pull for the specified crew, or all crew workers.
 Reports any uncommitted changes that may need attention.
 
 Examples:

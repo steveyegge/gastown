@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/convoy"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -87,7 +88,29 @@ type MRInfo struct {
 	ConvoyCreatedAt *time.Time // Convoy creation time
 	CreatedAt       time.Time  // MR creation time
 	BlockedBy       string     // Task ID blocking this MR
+
+	// Raw data for agent-side queue health analysis (ZFC: agent decides, Go transports)
+	UpdatedAt          time.Time // When the MR was last updated
+	Assignee           string    // Who claimed this MR (empty = unclaimed)
+	BranchExistsLocal  bool      // Whether the MR branch exists locally
+	BranchExistsRemote bool      // Whether the MR branch exists in remote tracking refs
 }
+
+// MRAnomaly represents an MR queue health problem that can stall processing.
+type MRAnomaly struct {
+	ID       string        `json:"id"`
+	Branch   string        `json:"branch"`
+	Type     string        `json:"type"`     // stale-claim | orphaned-branch
+	Severity string        `json:"severity"` // warning | critical
+	Assignee string        `json:"assignee,omitempty"`
+	Age      time.Duration `json:"age,omitempty"`
+	Detail   string        `json:"detail"`
+}
+
+const (
+	staleClaimWarningAfter  = 2 * time.Hour
+	staleClaimCriticalAfter = 6 * time.Hour
+)
 
 // Engineer is the merge queue processor that polls for ready merge-requests
 // and processes them according to the merge queue design.
@@ -99,9 +122,6 @@ type Engineer struct {
 	workDir string
 	output  io.Writer    // Output destination for user-facing messages
 	router  *mail.Router // Mail router for sending protocol messages
-
-	// stopCh is used for graceful shutdown
-	stopCh chan struct{}
 }
 
 // NewEngineer creates a new Engineer for the given rig.
@@ -126,7 +146,6 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		workDir: gitDir,
 		output:  os.Stdout,
 		router:  mail.NewRouter(r.Path),
-		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -375,10 +394,24 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 }
 
+// ValidateTestCommand validates that a test command is safe to execute.
+// TestCommand comes from the rig's operator-controlled config.json, not from
+// user input or PR branches. This validation provides defense-in-depth for the
+// trusted infrastructure config path.
+func ValidateTestCommand(cmd string) error {
+	if strings.TrimSpace(cmd) == "" {
+		return fmt.Errorf("test command must not be empty")
+	}
+	return nil
+}
+
 // runTests runs the configured test command and returns the result.
 func (e *Engineer) runTests(ctx context.Context) ProcessResult {
-	if e.config.TestCommand == "" {
-		return ProcessResult{Success: true}
+	if err := ValidateTestCommand(e.config.TestCommand); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("invalid test command: %v", err),
+		}
 	}
 
 	// Run the test command with retries for flaky tests
@@ -393,8 +426,10 @@ func (e *Engineer) runTests(ctx context.Context) ProcessResult {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Retrying tests (attempt %d/%d)...\n", attempt, maxRetries)
 		}
 
-		// Note: TestCommand comes from rig's config.json (trusted infrastructure config),
-		// not from PR branches. Shell execution is intentional for flexibility (pipes, etc).
+		// Trust boundary: TestCommand comes from rig's config.json (operator-controlled
+		// infrastructure config), not from PR branches or user input. Shell execution
+		// is intentional for flexibility (pipes, env vars, etc).
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Executing test command: %s\n", e.config.TestCommand)
 		cmd := exec.CommandContext(ctx, "sh", "-c", e.config.TestCommand) //nolint:gosec // G204: TestCommand is from trusted rig config
 		cmd.Dir = e.workDir
 		var stdout, stderr bytes.Buffer
@@ -490,8 +525,43 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 		}
 	}
 
-	// 5. Log success
+	// 5. Sync crew workspaces with the newly pushed changes
+	e.syncCrewWorkspaces()
+
+	// 6. Log success
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+}
+
+// syncCrewWorkspaces pulls latest changes to all crew workspaces.
+// This ensures crew members have access to newly merged code without manual sync.
+func (e *Engineer) syncCrewWorkspaces() {
+	crewGit := git.NewGit(e.rig.Path)
+	crewMgr := crew.NewManager(e.rig, crewGit)
+
+	workers, err := crewMgr.List()
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to list crew workspaces: %v\n", err)
+		return
+	}
+
+	if len(workers) == 0 {
+		return
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Syncing %d crew workspace(s)...\n", len(workers))
+
+	for _, worker := range workers {
+		result, err := crewMgr.Pristine(worker.Name)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to sync crew/%s: %v\n", worker.Name, err)
+			continue
+		}
+		if result.Pulled {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Synced crew/%s\n", worker.Name)
+		} else if result.PullError != "" {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: crew/%s pull failed: %s\n", worker.Name, result.PullError)
+		}
+	}
 }
 
 // handleFailure handles a failed merge request.
@@ -773,6 +843,61 @@ func (e *Engineer) IsBeadOpen(beadID string) (bool, error) {
 	return issue.Status != "closed", nil
 }
 
+// issueToMRInfo converts a beads issue (with parsed MR fields) into an MRInfo.
+// Shared by ListReadyMRs, ListBlockedMRs, and ListAllOpenMRs.
+func issueToMRInfo(issue *beads.Issue, fields *beads.MRFields) *MRInfo {
+	// Parse convoy created_at if present
+	var convoyCreatedAt *time.Time
+	if fields.ConvoyCreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
+			convoyCreatedAt = &t
+		}
+	}
+
+	// Parse issue timestamps
+	var createdAt, updatedAt time.Time
+	if issue.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
+			createdAt = t
+		}
+	}
+	if issue.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil {
+			updatedAt = t
+		}
+	}
+
+	return &MRInfo{
+		ID:              issue.ID,
+		Branch:          fields.Branch,
+		Target:          fields.Target,
+		SourceIssue:     fields.SourceIssue,
+		Worker:          fields.Worker,
+		Rig:             fields.Rig,
+		Title:           issue.Title,
+		Priority:        issue.Priority,
+		AgentBead:       fields.AgentBead,
+		RetryCount:      fields.RetryCount,
+		ConvoyID:        fields.ConvoyID,
+		ConvoyCreatedAt: convoyCreatedAt,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+		Assignee:        issue.Assignee,
+	}
+}
+
+// firstOpenBlocker returns the ID of the first open blocker for an issue,
+// or empty string if none are open.
+func (e *Engineer) firstOpenBlocker(issue *beads.Issue) string {
+	for _, blockerID := range issue.BlockedBy {
+		isOpen, err := e.IsBeadOpen(blockerID)
+		if err == nil && isOpen {
+			return blockerID
+		}
+	}
+	return ""
+}
+
 // ListReadyMRs returns MRs that are ready for processing:
 // - Not claimed by another worker (checked via assignee field)
 // - Not blocked by an open task (handled by bd ready)
@@ -801,42 +926,10 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 
 		// Skip if already assigned (claimed by another worker)
 		if issue.Assignee != "" {
-			// TODO: Add stale claim detection based on updated_at
 			continue
 		}
 
-		// Parse convoy created_at if present
-		var convoyCreatedAt *time.Time
-		if fields.ConvoyCreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
-				convoyCreatedAt = &t
-			}
-		}
-
-		// Parse issue created_at
-		var createdAt time.Time
-		if issue.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
-				createdAt = t
-			}
-		}
-
-		mr := &MRInfo{
-			ID:              issue.ID,
-			Branch:          fields.Branch,
-			Target:          fields.Target,
-			SourceIssue:     fields.SourceIssue,
-			Worker:          fields.Worker,
-			Rig:             fields.Rig,
-			Title:           issue.Title,
-			Priority:        issue.Priority,
-			AgentBead:       fields.AgentBead,
-			RetryCount:      fields.RetryCount,
-			ConvoyID:        fields.ConvoyID,
-			ConvoyCreatedAt: convoyCreatedAt,
-			CreatedAt:       createdAt,
-		}
-		mrs = append(mrs, mr)
+		mrs = append(mrs, issueToMRInfo(issue, fields))
 	}
 
 	return mrs, nil
@@ -866,15 +959,8 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 		}
 
 		// Check if any blocker is still open
-		hasOpenBlocker := false
-		for _, blockerID := range issue.BlockedBy {
-			isOpen, err := e.IsBeadOpen(blockerID)
-			if err == nil && isOpen {
-				hasOpenBlocker = true
-				break
-			}
-		}
-		if !hasOpenBlocker {
+		blockedBy := e.firstOpenBlocker(issue)
+		if blockedBy == "" {
 			continue // All blockers are closed, not blocked
 		}
 
@@ -883,52 +969,131 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 			continue
 		}
 
-		// Parse convoy created_at if present
-		var convoyCreatedAt *time.Time
-		if fields.ConvoyCreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
-				convoyCreatedAt = &t
-			}
-		}
-
-		// Parse issue created_at
-		var createdAt time.Time
-		if issue.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
-				createdAt = t
-			}
-		}
-
-		// Use the first open blocker as BlockedBy
-		blockedBy := ""
-		for _, blockerID := range issue.BlockedBy {
-			isOpen, err := e.IsBeadOpen(blockerID)
-			if err == nil && isOpen {
-				blockedBy = blockerID
-				break
-			}
-		}
-
-		mr := &MRInfo{
-			ID:              issue.ID,
-			Branch:          fields.Branch,
-			Target:          fields.Target,
-			SourceIssue:     fields.SourceIssue,
-			Worker:          fields.Worker,
-			Rig:             fields.Rig,
-			Title:           issue.Title,
-			Priority:        issue.Priority,
-			AgentBead:       fields.AgentBead,
-			RetryCount:      fields.RetryCount,
-			ConvoyID:        fields.ConvoyID,
-			ConvoyCreatedAt: convoyCreatedAt,
-			CreatedAt:       createdAt,
-			BlockedBy:       blockedBy,
-		}
+		mr := issueToMRInfo(issue, fields)
+		mr.BlockedBy = blockedBy
 		mrs = append(mrs, mr)
 	}
 
 	return mrs, nil
+}
+
+// ListAllOpenMRs returns all open merge requests with full raw data.
+// Unlike ListReadyMRs/ListBlockedMRs, this performs no filtering — it returns
+// claimed, unclaimed, blocked, and unblocked MRs. It also checks branch existence
+// so agents can detect orphaned MRs. Designed for agent-side queue health analysis
+// (ZFC: Go transports data, agent decides what's interesting).
+func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
+	issues, err := e.beads.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
+	}
+
+	var mrs []*MRInfo
+	for _, issue := range issues {
+		if issue.Status != "open" {
+			continue
+		}
+
+		fields := beads.ParseMRFields(issue)
+		if fields == nil {
+			continue
+		}
+
+		mr := issueToMRInfo(issue, fields)
+
+		// Check branch existence (local + remote tracking refs)
+		mr.BranchExistsLocal, _ = e.git.BranchExists(fields.Branch)
+		mr.BranchExistsRemote, _ = e.git.RemoteTrackingBranchExists("origin", fields.Branch)
+		mr.BlockedBy = e.firstOpenBlocker(issue)
+
+		mrs = append(mrs, mr)
+	}
+
+	return mrs, nil
+}
+
+// ListQueueAnomalies finds stale claims and orphaned branches in open MRs.
+// This gives Witness/Refinery patrols deterministic signals for deadlock risk.
+func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
+	issues, err := e.beads.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
+	}
+
+	return detectQueueAnomalies(issues, now, func(branch string) (bool, bool, error) {
+		localExists, err := e.git.BranchExists(branch)
+		if err != nil {
+			return false, false, err
+		}
+		remoteTrackingExists, err := e.git.RemoteTrackingBranchExists("origin", branch)
+		if err != nil {
+			return false, false, err
+		}
+		return localExists, remoteTrackingExists, nil
+	}), nil
+}
+
+func detectQueueAnomalies(
+	issues []*beads.Issue,
+	now time.Time,
+	branchExistsFn func(branch string) (localExists bool, remoteTrackingExists bool, err error),
+) []*MRAnomaly {
+	var anomalies []*MRAnomaly
+
+	for _, issue := range issues {
+		if issue == nil || issue.Status != "open" {
+			continue
+		}
+		fields := beads.ParseMRFields(issue)
+		if fields == nil || fields.Branch == "" {
+			continue
+		}
+
+		// 1) Stale claim detection.
+		if issue.Assignee != "" {
+			updatedAt, err := time.Parse(time.RFC3339, issue.UpdatedAt)
+			if err == nil {
+				age := now.Sub(updatedAt)
+				if age >= staleClaimWarningAfter {
+					severity := "warning"
+					if age >= staleClaimCriticalAfter {
+						severity = "critical"
+					}
+					anomalies = append(anomalies, &MRAnomaly{
+						ID:       issue.ID,
+						Branch:   fields.Branch,
+						Type:     "stale-claim",
+						Severity: severity,
+						Assignee: issue.Assignee,
+						Age:      age,
+						Detail:   "MR is claimed but not progressing",
+					})
+				}
+			}
+		}
+
+		// 2) Orphaned branch detection.
+		localExists, remoteTrackingExists, err := branchExistsFn(fields.Branch)
+		if err == nil && !localExists && !remoteTrackingExists {
+			anomalies = append(anomalies, &MRAnomaly{
+				ID:       issue.ID,
+				Branch:   fields.Branch,
+				Type:     "orphaned-branch",
+				Severity: "critical",
+				Detail:   "MR branch is missing locally and in origin/* tracking refs",
+			})
+		}
+	}
+
+	return anomalies
 }
 
 // ClaimMR claims an MR for processing by setting the assignee field.

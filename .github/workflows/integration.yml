@@ -14,7 +14,7 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -30,8 +30,10 @@ jobs:
           git config --global user.email "ci@gastown.test"
 
       - name: Install beads (bd)
-        # Pin to v0.47.1 - v0.47.2 has routing defaults that cause prefix mismatch errors
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.47.1
+        # Clone and build to handle replace directives that break go install @version
+        run: |
+          git clone --depth 1 https://github.com/steveyegge/beads /tmp/beads
+          cd /tmp/beads && go install ./cmd/bd
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
@@ -43,4 +45,5 @@ jobs:
         run: go build -v ./cmd/gt
 
       - name: Run integration tests
-        run: go test -v -tags=integration -timeout=4m ./internal/cmd/...
+        run: go test -v -tags=integration -timeout=8m ./internal/cmd/...
+

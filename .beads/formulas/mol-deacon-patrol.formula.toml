@@ -16,14 +16,20 @@ This prevents flooding idle agents with health checks every few seconds.
 
 ## Second-Order Monitoring
 
-Witnesses send WITNESS_PING messages to verify the Deacon is alive. This
-prevents the "who watches the watchers" problem - if the Deacon dies,
-Witnesses detect it and escalate to the Mayor.
+Witnesses passively monitor Deacon health by checking the Deacon's agent bead
+last_activity timestamp. This prevents the "who watches the watchers" problem —
+if the Deacon dies, Witnesses detect it and escalate to the Mayor.
 
-The Deacon's agent bead last_activity timestamp is updated during each patrol
-cycle. Witnesses check this timestamp to verify health."""
+No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
+timestamp instead, and only send an alert to the Mayor if the Deacon appears
+unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
 formula = "mol-deacon-patrol"
-version = 8
+version = 11
+
+[vars]
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
 
 [[steps]]
 id = "inbox-check"
@@ -42,14 +48,6 @@ gt mail inbox
 # For each message:
 gt mail read <id>
 # Handle based on message type
-```
-
-**WITNESS_PING**:
-Witnesses periodically ping to verify Deacon is alive. Simply acknowledge
-and archive - the fact that you're processing mail proves you're running.
-Your agent bead last_activity is updated automatically during patrol.
-```bash
-gt mail archive <message-id>
 ```
 
 **HELP / Escalation**:
@@ -236,35 +234,78 @@ Check convoy completion status.
 
 Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
 
+**IMPORTANT**: Use `gt convoy` commands (not `bd list`) because convoys are stored in
+town-level HQ beads and the Deacon runs from ~/gt/deacon/. The `gt` commands are
+town-aware and will find convoys regardless of current directory.
+
 **Step 1: Find open convoys**
 ```bash
-bd list --type=convoy --status=open
+gt convoy list
 ```
 
-**Step 2: For each open convoy, check tracked issues**
+**Step 2: Check and auto-close completed convoys**
 ```bash
-bd show <convoy-id>
-# Look for 'tracks' or 'dependencies' field listing tracked issues
+gt convoy check
 ```
 
-**Step 3: If all tracked issues are closed, close the convoy**
+This command:
+- Finds all open convoys
+- Checks if all tracked issues are closed (handles cross-rig resolution)
+- Auto-closes convoys where all tracked work is complete
+- Sends notifications to convoy owners
+
+**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues).
+The `gt convoy` commands handle cross-rig issue resolution automatically.
+
+Stranded convoy detection (ready work, no workers) is handled by the separate
+`feed-stranded-convoys` step."""
+
+[[steps]]
+id = "feed-stranded-convoys"
+title = "Feed stranded convoys"
+needs = ["check-convoy-completion"]
+description = """
+Detect stranded convoys and dispatch dogs to feed them.
+
+A convoy is "stranded" when it has ready issues (open, unblocked, no assignee)
+but no workers are processing them. This step ensures work doesn't stall.
+
+**Step 1: Check for stranded convoys**
 ```bash
-# Check each tracked issue
-for issue in tracked_issues:
-    bd show <issue-id>
-    # If status is open/in_progress, convoy stays open
-    # If all are closed (completed, wontfix, etc.), convoy is complete
-
-# Close convoy when all tracked issues are done
-bd close <convoy-id> --reason "All tracked issues completed"
+gt convoy stranded --json
 ```
 
-**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
+If no stranded convoys, skip to exit criteria.
+
+**Step 2: For each stranded convoy, dispatch a dog**
+```bash
+# For each convoy in the stranded list:
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+```
+
+The dog will:
+1. Load the convoy and find ready issues
+2. Check polecat capacity across rigs
+3. Dispatch ready issues using `gt sling`
+4. Return to kennel
+
+**Step 3: Log dispatches**
+Note which convoys were fed for observability:
+```bash
+# Convoy <convoy-id> dispatched to dog for feeding (<N> ready issues)
+```
+
+**If no idle dogs available:**
+Pool dispatch auto-creates a dog when the pool is under capacity (max 4).
+If the pool is at capacity, log warning and continue - the convoy will be
+detected again next cycle when a dog becomes idle.
+
+**Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
 
 [[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["check-convoy-completion"]
+needs = ["feed-stranded-convoys"]
 description = """
 Resolve external dependencies across rigs.
 
@@ -340,6 +381,19 @@ title = "Check Witness and Refinery health"
 needs = ["trigger-pending-spawns", "dispatch-gated-molecules", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
+
+**IMPORTANT: Skip DOCKED/PARKED rigs**
+Before checking any rig, verify its operational state:
+```bash
+gt rig status <rig>
+# Check the Status: line - if DOCKED or PARKED, skip entirely
+```
+
+DOCKED rigs are globally shut down - do NOT:
+- Check their witness/refinery status
+- Send health pings
+- Attempt restarts
+Simply skip them and move to the next rig.
 
 **IMPORTANT: Idle Town Protocol**
 Before sending health check nudges, check if the town is idle:
@@ -664,9 +718,73 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "wisp-compact"
+title = "Compact expired wisps"
+needs = ["session-gc"]
+description = """
+Run TTL-based wisp compaction to manage storage growth.
+
+**Step 1: Preview compaction scope**
+```bash
+gt compact --dry-run --json
+```
+
+Parse the JSON output:
+- If promoted + deleted == 0, skip (nothing to compact)
+- If errors present, log and continue
+
+**Step 2: Execute compaction (if needed)**
+```bash
+gt compact --verbose
+```
+
+This runs the compaction algorithm:
+- Closed wisps past TTL → deleted (Dolt AS OF preserves history)
+- Non-closed wisps past TTL → promoted (stuck detection)
+- Wisps with comments/references/keep labels → promoted (proven value)
+
+**Step 3: Log results**
+Note promoted/deleted/skipped counts for the patrol digest.
+
+**Performance:**
+Compaction runs every patrol cycle. The query is fast (single bd list + filter).
+If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
+
+**Exit criteria:** Wisps compacted (or nothing to compact)."""
+
+[[steps]]
+id = "compact-report"
+title = "Send compaction digest report"
+needs = ["wisp-compact"]
+description = """
+Generate and send the daily compaction digest.
+
+**Step 1: Send daily digest**
+```bash
+gt compact report
+```
+
+This runs compaction (capturing JSON results), queries active wisps,
+builds a per-category breakdown (Heartbeats, Patrols, Errors, Untyped),
+detects anomalies, and sends the digest to deacon/ (cc mayor/).
+
+A permanent event bead (wisp.compaction) is created for audit trail.
+
+**Step 2: Weekly rollup (Mondays only)**
+If today is Monday, also send the weekly rollup:
+```bash
+gt compact report --weekly
+```
+
+This aggregates the past 7 days of compaction event beads and sends
+trend data (totals, promotion rate, avg deleted/day) to mayor/.
+
+**Exit criteria:** Compaction digest sent (or nothing to report)."""
+
+[[steps]]
 id = "costs-digest"
 title = "Aggregate daily costs [DISABLED]"
-needs = ["session-gc"]
+needs = ["compact-report"]
 description = """
 **⚠️ DISABLED** - Skip this step entirely.
 
@@ -789,7 +907,6 @@ Inbox should be EMPTY or contain only just-arrived unprocessed messages.
 **Step 2: Archive any remaining processed messages**
 
 All message types should have been archived during inbox-check processing:
-- WITNESS_PING → archived after acknowledging
 - HELP/Escalation → archived after handling
 - LIFECYCLE → archived after processing
 
@@ -836,7 +953,7 @@ Use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 10m
+  --backoff-base 60s --backoff-mult 2 --backoff-max 5m
 ```
 
 This command:
@@ -846,7 +963,7 @@ This command:
    - First timeout: 60s
    - Second timeout: 120s
    - Third timeout: 240s
-   - ...capped at 10 minutes max
+   - ...capped at 5 minutes max (PATCH-002: reduced from 10m for faster recovery)
 4. Tracks `idle:N` label on hq-deacon bead for backoff state
 
 **On signal received** (activity detected):
@@ -862,7 +979,7 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 
 **Why this approach?**
 - Any `gt` or `bd` command triggers beads activity, waking the Deacon
-- Idle towns let the Deacon sleep longer (up to 10 min between patrols)
+- Idle towns let the Deacon sleep longer (up to 5 min between patrols)
 - Active work wakes the Deacon immediately via the feed
 - No polling or fixed sleep intervals
 

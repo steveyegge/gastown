@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -264,6 +266,56 @@ func TestMailboxLegacyListUnread(t *testing.T) {
 	}
 }
 
+func TestMailboxMarkReadOnlyExcludesFromUnread(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	msgs := []*Message{
+		{ID: "msg-001", Read: false, Subject: "First"},
+		{ID: "msg-002", Read: false, Subject: "Second"},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+
+	// Both should be unread initially
+	unread, err := m.ListUnread()
+	if err != nil {
+		t.Fatalf("ListUnread error: %v", err)
+	}
+	if len(unread) != 2 {
+		t.Errorf("ListUnread returned %d, want 2", len(unread))
+	}
+
+	// Mark one as read-only (simulates gt mail read behavior)
+	if err := m.MarkReadOnly("msg-001"); err != nil {
+		t.Fatalf("MarkReadOnly error: %v", err)
+	}
+
+	// Should only have 1 unread now
+	unread, err = m.ListUnread()
+	if err != nil {
+		t.Fatalf("ListUnread error: %v", err)
+	}
+	if len(unread) != 1 {
+		t.Errorf("ListUnread returned %d after MarkReadOnly, want 1", len(unread))
+	}
+	if len(unread) == 1 && unread[0].ID != "msg-002" {
+		t.Errorf("Expected msg-002 to be unread, got %s", unread[0].ID)
+	}
+
+	// The marked message should still be in full list
+	all, err := m.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("List returned %d, want 2 (MarkReadOnly should not remove)", len(all))
+	}
+}
+
 func TestMailboxLegacyListByThread(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewMailbox(tmpDir)
@@ -504,6 +556,151 @@ func TestMailboxLegacyMarkReadTwice(t *testing.T) {
 	}
 	if !got.Read {
 		t.Error("Message should be marked as read")
+	}
+}
+
+func TestMailboxLegacyCorruptionDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Write a valid message followed by a corrupt line
+	msg := &Message{ID: "msg-001", Subject: "Valid"}
+	if err := m.Append(msg); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+
+	// Manually append a corrupt line
+	f, err := os.OpenFile(m.path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatalf("OpenFile error: %v", err)
+	}
+	if _, err := f.WriteString("this is not valid json\n"); err != nil {
+		t.Fatalf("WriteString error: %v", err)
+	}
+	f.Close()
+
+	// List should return error mentioning corruption
+	_, err = m.List()
+	if err == nil {
+		t.Fatal("List should return error for corrupt mailbox")
+	}
+	if !strings.Contains(err.Error(), "corrupt mailbox") {
+		t.Errorf("error should mention corruption, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Errorf("error should mention line number, got: %v", err)
+	}
+}
+
+func TestMailboxLegacyArchiveCorruptionDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Create a corrupt archive file
+	archivePath := m.ArchivePath()
+	if err := os.WriteFile(archivePath, []byte("{bad json\n"), 0644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+
+	_, err := m.ListArchived()
+	if err == nil {
+		t.Fatal("ListArchived should return error for corrupt archive")
+	}
+	if !strings.Contains(err.Error(), "corrupt archive") {
+		t.Errorf("error should mention corruption, got: %v", err)
+	}
+}
+
+func TestMailboxLegacyConcurrentMarkRead(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Add messages
+	for i := 0; i < 10; i++ {
+		msg := &Message{
+			ID:        fmt.Sprintf("msg-%03d", i),
+			Subject:   fmt.Sprintf("Subject %d", i),
+			Read:      false,
+			Timestamp: time.Now().Add(time.Duration(i) * time.Minute),
+		}
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+
+	// Concurrently mark different messages as read
+	var wg sync.WaitGroup
+	errs := make([]error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = m.MarkRead(fmt.Sprintf("msg-%03d", idx))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("MarkRead msg-%03d error: %v", i, err)
+		}
+	}
+
+	// All messages should be marked as read
+	messages, err := m.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(messages) != 10 {
+		t.Fatalf("Expected 10 messages, got %d", len(messages))
+	}
+	for _, msg := range messages {
+		if !msg.Read {
+			t.Errorf("Message %s should be marked as read", msg.ID)
+		}
+	}
+}
+
+func TestMailboxLegacyAtomicArchive(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Add messages
+	msgs := []*Message{
+		{ID: "msg-001", Subject: "First", Timestamp: time.Now().Add(-2 * time.Hour)},
+		{ID: "msg-002", Subject: "Second", Timestamp: time.Now().Add(-1 * time.Hour)},
+		{ID: "msg-003", Subject: "Third", Timestamp: time.Now()},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+
+	// Archive the middle message
+	if err := m.Archive("msg-002"); err != nil {
+		t.Fatalf("Archive error: %v", err)
+	}
+
+	// Inbox should have 2 messages
+	inbox, err := m.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(inbox) != 2 {
+		t.Fatalf("Expected 2 inbox messages, got %d", len(inbox))
+	}
+
+	// Archive should have 1 message
+	archived, err := m.ListArchived()
+	if err != nil {
+		t.Fatalf("ListArchived error: %v", err)
+	}
+	if len(archived) != 1 {
+		t.Fatalf("Expected 1 archived message, got %d", len(archived))
+	}
+	if archived[0].ID != "msg-002" {
+		t.Errorf("Archived message ID = %q, want msg-002", archived[0].ID)
 	}
 }
 

@@ -44,7 +44,7 @@ var dogCmd = &cobra.Command{
 	Long: `Manage dogs - reusable workers for infrastructure and cleanup.
 
 CATS VS DOGS:
-  Polecats (cats) build features. One rig. Ephemeral (one task, then nuked).
+  Polecats (cats) build features. One rig. Ephemeral sessions (one task, then nuked).
   Dogs clean up messes. Cross-rig. Reusable (multiple tasks, eventually recycled).
 
 Dogs are managed by the Deacon for town-level work:
@@ -132,6 +132,43 @@ Examples:
 	RunE: runDogCall,
 }
 
+var dogDoneCmd = &cobra.Command{
+	Use:   "done [name]",
+	Short: "Mark dog as done and return to idle",
+	Long: `Mark a dog as done with its current work and return to idle state.
+
+Dogs should call this when they complete their work assignment.
+This clears the work field and sets state to idle, making the dog
+available for new work.
+
+Without a name argument, auto-detects the current dog from the working
+directory (must be run from within a dog's worktree).
+
+Examples:
+  gt dog done         # Auto-detect from cwd
+  gt dog done alpha   # Explicit name`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDogDone,
+}
+
+var dogClearCmd = &cobra.Command{
+	Use:   "clear <name>",
+	Short: "Reset a stuck dog to idle state",
+	Long: `Reset a stuck dog to idle state.
+
+Use this when a dog is stuck in "working" state but its session has died.
+The Deacon uses this during patrol to clear dogs that have timed out.
+
+By default, refuses to clear a dog if its tmux session still exists.
+Use --force to clear even if the session is alive.
+
+Examples:
+  gt dog clear alpha           # Clear if session is dead
+  gt dog clear alpha --force   # Force clear even if session exists`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDogClear,
+}
+
 var dogStatusCmd = &cobra.Command{
 	Use:   "status [name]",
 	Short: "Show detailed dog status",
@@ -193,6 +230,9 @@ func init() {
 	// Call flags
 	dogCallCmd.Flags().BoolVar(&dogCallAll, "all", false, "Wake all idle dogs")
 
+	// Clear flags (reuses dogForce from remove)
+	dogClearCmd.Flags().BoolVarP(&dogForce, "force", "f", false, "Force clear even if session exists")
+
 	// Status flags
 	dogStatusCmd.Flags().BoolVar(&dogStatusJSON, "json", false, "Output as JSON")
 
@@ -210,6 +250,8 @@ func init() {
 	dogCmd.AddCommand(dogRemoveCmd)
 	dogCmd.AddCommand(dogListCmd)
 	dogCmd.AddCommand(dogCallCmd)
+	dogCmd.AddCommand(dogClearCmd)
+	dogCmd.AddCommand(dogDoneCmd)
 	dogCmd.AddCommand(dogStatusCmd)
 	dogCmd.AddCommand(dogDispatchCmd)
 
@@ -305,6 +347,9 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 		b = beads.New(townRoot)
 	}
 
+	var removeErrors []string
+	removed := 0
+
 	for _, name := range names {
 		d, err := mgr.Get(name)
 		if err != nil {
@@ -314,22 +359,40 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 
 		// Check if working
 		if d.State == dog.StateWorking && !dogForce {
-			return fmt.Errorf("dog %s is working (use --force to remove anyway)", name)
+			removeErrors = append(removeErrors, fmt.Sprintf("%s: is working (use --force to remove anyway)", name))
+			continue
 		}
 
 		if err := mgr.Remove(name); err != nil {
-			return fmt.Errorf("removing dog %s: %w", name, err)
+			removeErrors = append(removeErrors, fmt.Sprintf("%s: %v", name, err))
+			continue
 		}
 
 		fmt.Printf("✓ Removed dog %s\n", name)
+		removed++
 
-		// Delete agent bead for the dog
+		// Reset agent bead for the dog (preserves persistent identity)
 		if b != nil {
-			if err := b.DeleteDogAgentBead(name); err != nil {
+			if err := b.ResetDogAgentBead(name); err != nil {
 				// Non-fatal: warn but don't fail dog removal
-				fmt.Printf("  Warning: could not delete agent bead: %v\n", err)
+				fmt.Printf("  Warning: could not reset agent bead: %v\n", err)
 			}
 		}
+	}
+
+	if len(removeErrors) > 0 {
+		fmt.Printf("\nSome removals failed:\n")
+		for _, e := range removeErrors {
+			fmt.Printf("  - %s\n", e)
+		}
+	}
+
+	if removed > 0 {
+		fmt.Printf("\n✓ Removed %d dog(s).\n", removed)
+	}
+
+	if len(removeErrors) > 0 {
+		return fmt.Errorf("%d removal(s) failed", len(removeErrors))
 	}
 
 	return nil
@@ -453,7 +516,7 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 		}
 
 		if d.State == dog.StateWorking {
-			fmt.Printf("Dog %s is already working\n", name)
+			fmt.Printf("Dog %s is already working (use 'gt dog done %s' when complete)\n", name, name)
 			return nil
 		}
 
@@ -482,6 +545,109 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("✓ Called %s - ready for work\n", d.Name)
 	return nil
+}
+
+func runDogClear(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	d, err := mgr.Get(name)
+	if err != nil {
+		return fmt.Errorf("getting dog %s: %w", name, err)
+	}
+
+	// Check if already idle
+	if d.State == dog.StateIdle && d.Work == "" {
+		fmt.Printf("Dog %s is already idle\n", name)
+		return nil
+	}
+
+	// Check for live tmux session
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" && !dogForce {
+		townName, err := workspace.GetTownName(townRoot)
+		if err == nil {
+			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
+			tm := tmux.NewTmux()
+			if has, _ := tm.HasSession(sessionName); has {
+				return fmt.Errorf("dog %s has an active session (%s)\nUse --force to clear anyway", name, sessionName)
+			}
+		}
+	}
+
+	// Clear work and return to idle
+	if err := mgr.ClearWork(name); err != nil {
+		return fmt.Errorf("clearing work for dog %s: %w", name, err)
+	}
+
+	fmt.Printf("✓ Cleared dog %s (now idle)\n", name)
+	if d.Work != "" {
+		fmt.Printf("  Previous work: %s\n", d.Work)
+	}
+	return nil
+}
+
+func runDogDone(cmd *cobra.Command, args []string) error {
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	var name string
+	if len(args) > 0 {
+		name = args[0]
+	} else {
+		// Auto-detect dog from cwd
+		// Dog worktrees are at ~/gt/deacon/dogs/<name>/<rig>/
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting cwd: %w", err)
+		}
+
+		// Look for /deacon/dogs/<name>/ in path
+		parts := splitPathComponents(cwd)
+		for i := 0; i < len(parts)-1; i++ {
+			if parts[i] == "dogs" && i > 0 && parts[i-1] == "deacon" {
+				name = parts[i+1]
+				break
+			}
+		}
+
+		if name == "" {
+			return fmt.Errorf("could not detect dog name from cwd: %s\nRun from a dog worktree or specify name: gt dog done <name>", cwd)
+		}
+	}
+
+	d, err := mgr.Get(name)
+	if err != nil {
+		return fmt.Errorf("getting dog %s: %w", name, err)
+	}
+
+	if d.State == dog.StateIdle && d.Work == "" {
+		fmt.Printf("Dog %s is already idle with no work\n", name)
+		return nil
+	}
+
+	if err := mgr.ClearWork(name); err != nil {
+		return fmt.Errorf("clearing work for dog %s: %w", name, err)
+	}
+
+	fmt.Printf("✓ Dog %s returned to kennel (idle)\n", name)
+	return nil
+}
+
+func splitPathComponents(path string) []string {
+	if path == "" {
+		return nil
+	}
+
+	return strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
 }
 
 func runDogStatus(cmd *cobra.Command, args []string) error {

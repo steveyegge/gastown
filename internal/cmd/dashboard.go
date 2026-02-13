@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/web"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -43,21 +44,36 @@ func init() {
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	// Verify we're in a workspace
-	if _, err := workspace.FindFromCwdOrError(); err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
+	// Check if we're in a workspace - if not, run in setup mode
+	var handler http.Handler
+	var err error
 
-	// Create the live convoy fetcher
-	fetcher, err := web.NewLiveConvoyFetcher()
-	if err != nil {
-		return fmt.Errorf("creating convoy fetcher: %w", err)
-	}
+	townRoot, wsErr := workspace.FindFromCwdOrError()
+	if wsErr != nil {
+		// No workspace - run in setup mode
+		handler, err = web.NewSetupMux()
+		if err != nil {
+			return fmt.Errorf("creating setup handler: %w", err)
+		}
+	} else {
+		// In a workspace - run normal dashboard
+		fetcher, fetchErr := web.NewLiveConvoyFetcher()
+		if fetchErr != nil {
+			return fmt.Errorf("creating convoy fetcher: %w", fetchErr)
+		}
 
-	// Create the handler
-	handler, err := web.NewConvoyHandler(fetcher)
-	if err != nil {
-		return fmt.Errorf("creating convoy handler: %w", err)
+		// Load web timeouts config (nil-safe: NewDashboardMux applies defaults)
+		var webCfg *config.WebTimeoutsConfig
+		if ts, loadErr := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); loadErr == nil {
+			webCfg = ts.WebTimeouts
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: loading town settings: %v (using defaults)\n", loadErr)
+		}
+
+		handler, err = web.NewDashboardMux(fetcher, webCfg)
+		if err != nil {
+			return fmt.Errorf("creating dashboard handler: %w", err)
+		}
 	}
 
 	// Build the URL
@@ -69,8 +85,29 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start the server with timeouts
-	fmt.Printf("🚚 Gas Town Dashboard starting at %s\n", url)
-	fmt.Printf("   Press Ctrl+C to stop\n")
+	fmt.Print(`
+ __       __  ________  __        ______    ______   __       __  ________                        
+|  \  _  |  \|        \|  \      /      \  /      \ |  \     /  \|        \                       
+| $$ / \ | $$| $$$$$$$$| $$     |  $$$$$$\|  $$$$$$\| $$\   /  $$| $$$$$$$$                       
+| $$/  $\| $$| $$__    | $$     | $$   \$$| $$  | $$| $$$\ /  $$$| $$__                           
+| $$  $$$\ $$| $$  \   | $$     | $$      | $$  | $$| $$$$\  $$$$| $$  \                          
+| $$ $$\$$\$$| $$$$$   | $$     | $$   __ | $$  | $$| $$\$$ $$ $$| $$$$$                          
+| $$$$  \$$$$| $$_____ | $$_____| $$__/  \| $$__/ $$| $$ \$$$| $$| $$_____                        
+| $$$    \$$$| $$     \| $$     \\$$    $$ \$$    $$| $$  \$ | $$| $$     \                       
+ \$$      \$$ \$$$$$$$$ \$$$$$$$$ \$$$$$$   \$$$$$$  \$$      \$$ \$$$$$$$$                       
+                                                                                                  
+ ________   ______          ______    ______    ______   ________   ______   __       __  __    __ 
+|        \ /      \        /      \  /      \  /      \ |        \ /      \ |  \  _  |  \|  \  |  \
+ \$$$$$$$$|  $$$$$$\      |  $$$$$$\|  $$$$$$\|  $$$$$$\ \$$$$$$$$|  $$$$$$\| $$ / \ | $$| $$\ | $$
+   | $$   | $$  | $$      | $$ __\$$| $$__| $$| $$___\$$   | $$   | $$  | $$| $$/  $\| $$| $$$\| $$
+   | $$   | $$  | $$      | $$|    \| $$    $$ \$$    \    | $$   | $$  | $$| $$  $$$\ $$| $$$$\ $$
+   | $$   | $$  | $$      | $$ \$$$$| $$$$$$$$ _\$$$$$$\   | $$   | $$  | $$| $$ $$\$$\$$| $$\$$ $$
+   | $$   | $$__/ $$      | $$__| $$| $$  | $$|  \__| $$   | $$   | $$__/ $$| $$$$  \$$$$| $$ \$$$$
+   | $$    \$$    $$       \$$    $$| $$  | $$ \$$    $$   | $$    \$$    $$| $$$    \$$$| $$  \$$$
+    \$$     \$$$$$$         \$$$$$$  \$$   \$$  \$$$$$$     \$$     \$$$$$$  \$$      \$$ \$$   \$$
+
+`)
+	fmt.Printf("  launching dashboard at %s  •  api: %s/api/  •  ctrl+c to stop\n", url, url)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", dashboardPort),

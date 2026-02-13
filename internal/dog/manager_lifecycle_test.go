@@ -840,6 +840,61 @@ func TestManager_RefreshRig_notFound(t *testing.T) {
 	}
 }
 
+func TestManager_Refresh_rejectsWorkingDog(t *testing.T) {
+	m, _ := testManager(t)
+
+	now := time.Now()
+	state := &DogState{
+		Name:       "busy",
+		State:      StateWorking,
+		Work:       "important-task",
+		LastActive: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	setupDogWithState(t, m, "busy", state)
+
+	err := m.Refresh("busy")
+	if err != ErrDogWorking {
+		t.Errorf("Refresh() error = %v, want ErrDogWorking", err)
+	}
+
+	// Verify state was not modified
+	dog, _ := m.Get("busy")
+	if dog.State != StateWorking {
+		t.Errorf("State changed to %q, want Working (unchanged)", dog.State)
+	}
+	if dog.Work != "important-task" {
+		t.Errorf("Work changed to %q, want 'important-task' (unchanged)", dog.Work)
+	}
+}
+
+func TestManager_RefreshRig_rejectsWorkingDog(t *testing.T) {
+	m, _ := testManager(t)
+
+	now := time.Now()
+	state := &DogState{
+		Name:       "busy",
+		State:      StateWorking,
+		Work:       "important-task",
+		LastActive: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	setupDogWithState(t, m, "busy", state)
+
+	err := m.RefreshRig("busy", "gastown")
+	if err != ErrDogWorking {
+		t.Errorf("RefreshRig() error = %v, want ErrDogWorking", err)
+	}
+
+	// Verify state was not modified
+	dog, _ := m.Get("busy")
+	if dog.State != StateWorking {
+		t.Errorf("State changed to %q, want Working (unchanged)", dog.State)
+	}
+}
+
 func TestManager_RefreshRig_unknownRig(t *testing.T) {
 	m, _ := testManager(t)
 
@@ -945,7 +1000,7 @@ func TestManager_StateTransition_WorkReassignment(t *testing.T) {
 // =============================================================================
 
 func TestErrors_AreDistinct(t *testing.T) {
-	errors := []error{ErrDogExists, ErrDogNotFound, ErrNoRigs}
+	errors := []error{ErrDogExists, ErrDogNotFound, ErrDogWorking, ErrNoRigs}
 	errorStrings := make(map[string]bool)
 
 	for _, err := range errors {
@@ -964,6 +1019,7 @@ func TestErrors_Messages(t *testing.T) {
 	}{
 		{ErrDogExists, "dog already exists"},
 		{ErrDogNotFound, "dog not found"},
+		{ErrDogWorking, "dog is currently working"},
 		{ErrNoRigs, "no rigs configured"},
 	}
 

@@ -15,10 +15,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// convoyIDPattern validates convoy IDs to prevent SQL injection
+// convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
 
-// convoySubprocessTimeout is the timeout for bd and sqlite3 calls in the convoy panel.
+// convoySubprocessTimeout is the timeout for bd subprocess calls in the convoy panel.
 // Prevents TUI freezing if these commands hang.
 const convoySubprocessTimeout = 5 * time.Second
 
@@ -88,7 +88,7 @@ func FetchConvoys(townRoot string) (*ConvoyState, error) {
 
 // listConvoys returns convoys with the given status
 func listConvoys(beadsDir, status string) ([]convoyListItem, error) {
-	listArgs := []string{"list", "--type=convoy", "--status=" + status, "--json"}
+	listArgs := []string{"list", "--label=gt:convoy", "--status=" + status, "--json"}
 
 	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
 	defer cancel()
@@ -155,23 +155,31 @@ type trackedStatus struct {
 	Status string
 }
 
-// getTrackedIssueStatus queries tracked issues and their status
+// extractIssueID strips the external:prefix:id wrapper from bead IDs.
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
+// but consumers need the raw bead ID for display and lookups.
+func extractIssueID(id string) string {
+	if strings.HasPrefix(id, "external:") {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return id
+}
+
+// getTrackedIssueStatus queries tracked issues and their status.
 func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
-	// Validate convoyID to prevent SQL injection
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil
 	}
 
-	dbPath := filepath.Join(beadsDir, "beads.db")
-
 	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
 	defer cancel()
 
-	// Query tracked dependencies from SQLite
-	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, //nolint:gosec // G204: convoyID is validated against strict pattern
-		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
-
+	// Query tracked issues using bd dep list (returns full issue details)
+	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -179,53 +187,71 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 	}
 
 	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
+		ID     string `json:"id"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
 		return nil
 	}
 
+	// Extract raw issue IDs
+	for i := range deps {
+		deps[i].ID = extractIssueID(deps[i].ID)
+	}
+
+	// Refresh status via cross-rig lookup. bd dep list returns status from
+	// the dependency record in HQ beads which is never updated when cross-rig
+	// issues (e.g., gt-* tracked by hq-* convoys) are closed in their rig.
+	freshStatus := refreshTrackedStatus(ctx, deps)
+
 	var tracked []trackedStatus
 	for _, dep := range deps {
-		issueID := dep.DependsOnID
-
-		// Handle external reference format: external:rig:issue-id
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				issueID = parts[2]
-			}
+		status := dep.Status
+		if fresh, ok := freshStatus[dep.ID]; ok {
+			status = fresh
 		}
-
-		// Get issue status
-		status := getIssueStatus(issueID)
-		tracked = append(tracked, trackedStatus{ID: issueID, Status: status})
+		tracked = append(tracked, trackedStatus{ID: dep.ID, Status: status})
 	}
 
 	return tracked
 }
 
-// getIssueStatus fetches just the status of an issue
-func getIssueStatus(issueID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
-	defer cancel()
+// refreshTrackedStatus does a batch bd show to get current status for tracked issues.
+func refreshTrackedStatus(ctx context.Context, deps []struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}) map[string]string {
+	if len(deps) == 0 {
+		return nil
+	}
 
-	cmd := exec.CommandContext(ctx, "bd", "show", issueID, "--json")
+	args := []string{"show"}
+	for _, d := range deps {
+		args = append(args, d.ID)
+	}
+	args = append(args, "--json")
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
 	if err := cmd.Run(); err != nil {
-		return "unknown"
+		return nil
 	}
 
 	var issues []struct {
+		ID     string `json:"id"`
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
-		return "unknown"
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil
 	}
 
-	return issues[0].Status
+	result := make(map[string]string, len(issues))
+	for _, issue := range issues {
+		result[issue.ID] = issue.Status
+	}
+	return result
 }
 
 // Convoy panel styles
@@ -350,4 +376,3 @@ func renderProgressBar(completed, total int) string {
 	bar := strings.Repeat("●", filled) + strings.Repeat("○", displayTotal-filled)
 	return ConvoyProgressStyle.Render(bar)
 }
-

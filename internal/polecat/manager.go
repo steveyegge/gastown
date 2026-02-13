@@ -1,31 +1,101 @@
-// Liftoff test: 2026-01-09T14:30:00
+// Liftoff test: 2026-02-08T14:00:00
 
 package polecat
 
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// Retry constants for Dolt operations (matching hook update pattern in sling.go).
+const (
+	doltMaxRetries  = 10
+	doltBaseBackoff = 500 * time.Millisecond
+	doltBackoffMax  = 30 * time.Second
+)
+
+// doltBackoff calculates exponential backoff with ±25% jitter for a given attempt (1-indexed).
+// Formula: base * 2^(attempt-1) * (1 ± 25% random), capped at doltBackoffMax.
+func doltBackoff(attempt int) time.Duration {
+	backoff := doltBaseBackoff
+	for i := 1; i < attempt; i++ {
+		backoff *= 2
+		if backoff > doltBackoffMax {
+			backoff = doltBackoffMax
+			break
+		}
+	}
+	// Apply ±25% jitter
+	jitter := 1.0 + (rand.Float64()-0.5)*0.5 // range [0.75, 1.25]
+	result := time.Duration(float64(backoff) * jitter)
+	if result > doltBackoffMax {
+		result = doltBackoffMax
+	}
+	return result
+}
+
+// isDoltOptimisticLockError returns true if the error is an optimistic lock / serialization failure.
+// These indicate transient write conflicts from concurrent Dolt operations — worth retrying.
+func isDoltOptimisticLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "optimistic lock") ||
+		strings.Contains(msg, "serialization failure") ||
+		strings.Contains(msg, "lock wait timeout") ||
+		strings.Contains(msg, "try restarting transaction") ||
+		strings.Contains(msg, "database is read only") ||
+		strings.Contains(msg, "cannot update manifest")
+}
+
+// isDoltConfigError returns true if the error indicates a configuration or initialization
+// problem rather than a transient failure. Config errors should NOT be retried because
+// they will fail identically on every attempt, wasting ~3 minutes in the retry loop.
+// See gt-2ra: polecat spawn hang when Dolt DB not initialized.
+func isDoltConfigError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not initialized") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "table not found") ||
+		strings.Contains(msg, "issue_prefix") ||
+		strings.Contains(msg, "no database") ||
+		strings.Contains(msg, "database not found") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "configure custom types")
+}
+
 // Common errors
 var (
-	ErrPolecatExists     = errors.New("polecat already exists")
-	ErrPolecatNotFound   = errors.New("polecat not found")
-	ErrHasChanges        = errors.New("polecat has uncommitted changes")
+	ErrPolecatExists      = errors.New("polecat already exists")
+	ErrPolecatNotFound    = errors.New("polecat not found")
+	ErrHasChanges         = errors.New("polecat has uncommitted changes")
 	ErrHasUncommittedWork = errors.New("polecat has uncommitted work")
+	ErrShellInWorktree    = errors.New("shell working directory is inside polecat worktree")
+	ErrDoltUnhealthy      = errors.New("dolt health check failed")
+	ErrDoltAtCapacity     = errors.New("dolt server at connection capacity")
 )
 
 // UncommittedWorkError provides details about uncommitted work.
@@ -88,10 +158,181 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	}
 }
 
+// lockPolecat acquires an exclusive file lock for a specific polecat.
+// This prevents concurrent gt processes from racing on the same polecat's
+// filesystem operations (Add, Remove, RepairWorktree).
+// Caller must defer fl.Unlock().
+func (m *Manager) lockPolecat(name string) (*flock.Flock, error) {
+	lockDir := filepath.Join(m.rig.Path, ".runtime", "locks")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+	lockPath := filepath.Join(lockDir, fmt.Sprintf("polecat-%s.lock", name))
+	fl := flock.New(lockPath)
+	if err := fl.Lock(); err != nil {
+		return nil, fmt.Errorf("acquiring polecat lock for %s: %w", name, err)
+	}
+	return fl, nil
+}
+
+// lockPool acquires an exclusive file lock for name pool operations.
+// This prevents concurrent gt processes from racing on AllocateName/ReconcilePool.
+// Caller must defer fl.Unlock().
+func (m *Manager) lockPool() (*flock.Flock, error) {
+	lockDir := filepath.Join(m.rig.Path, ".runtime", "locks")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+	lockPath := filepath.Join(lockDir, "polecat-pool.lock")
+	fl := flock.New(lockPath)
+	if err := fl.Lock(); err != nil {
+		return nil, fmt.Errorf("acquiring pool lock: %w", err)
+	}
+	return fl, nil
+}
+
+// CheckDoltHealth verifies that the Dolt database is reachable before spawning.
+// Returns an error if Dolt exists but is unhealthy after retries.
+// Returns nil if beads is not configured (test/setup environments).
+// If read-only errors persist after retries, attempts server recovery (gt-chx92).
+// Fails fast on configuration/initialization errors (gt-2ra).
+func (m *Manager) CheckDoltHealth() error {
+	var lastErr error
+	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
+		// Use a lightweight beads operation to verify Dolt is responsive
+		_, err := m.beads.Show("__health_check_nonexistent__")
+		if err == nil || errors.Is(err, beads.ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			// Dolt is healthy — a "not found" error means the DB responded
+			return nil
+		}
+		// Optimistic lock errors mean Dolt is alive but busy with concurrent writes
+		if isDoltOptimisticLockError(err) {
+			return nil
+		}
+		// If beads isn't configured at all, skip the health check
+		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
+			return nil
+		}
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("%w: DB not initialized (not retrying): %v", ErrDoltUnhealthy, err)
+		}
+		lastErr = err
+		if attempt < doltMaxRetries {
+			backoff := doltBackoff(attempt)
+			fmt.Printf("Warning: Dolt health check attempt %d failed, retrying in %v...\n", attempt, backoff)
+			time.Sleep(backoff)
+		}
+	}
+
+	// If the persistent failure looks like read-only, attempt server recovery
+	// before giving up. This is the gt-level recovery path (gt-chx92).
+	if lastErr != nil && doltserver.IsReadOnlyError(lastErr.Error()) {
+		townRoot, err := workspace.Find(m.rig.Path)
+		if err == nil && townRoot != "" {
+			if recoverErr := doltserver.RecoverReadOnly(townRoot); recoverErr == nil {
+				// Recovery succeeded — verify health once more
+				_, err := m.beads.Show("__health_check_nonexistent__")
+				if err == nil || errors.Is(err, beads.ErrNotFound) || strings.Contains(err.Error(), "not found") {
+					return nil
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("%w: %v", ErrDoltUnhealthy, lastErr)
+}
+
+// CheckDoltServerCapacity verifies the Dolt server has capacity for new connections.
+// This is an admission control gate: if the server is near its max_connections limit,
+// spawning another polecat (which will make many bd calls) could overwhelm it.
+// Returns nil if capacity is available, ErrDoltAtCapacity if the server is overloaded.
+// Fails closed if the check errors — a server that can't report capacity is likely
+// already under stress (gt-lfc0d).
+func (m *Manager) CheckDoltServerCapacity() error {
+	townRoot, err := workspace.Find(m.rig.Path)
+	if err != nil || townRoot == "" {
+		return nil // Can't determine town root, skip check
+	}
+
+	hasCapacity, active, err := doltserver.HasConnectionCapacity(townRoot)
+	if err != nil {
+		// Fail closed: if we can't check capacity, the server may be overloaded.
+		// Proceeding optimistically caused read-only mode under load (gt-lfc0d).
+		return fmt.Errorf("%w: capacity check failed: %v", ErrDoltAtCapacity, err)
+	}
+
+	if !hasCapacity {
+		return fmt.Errorf("%w: %d active connections (server near limit)", ErrDoltAtCapacity, active)
+	}
+
+	return nil
+}
+
+// createAgentBeadWithRetry wraps CreateOrReopenAgentBead with retry logic.
+// For transient Dolt failures (server exists but write fails), retries with backoff
+// and fails hard — a polecat without an agent bead is untrackable.
+// If beads is not configured (no .beads directory), warns and returns nil
+// since this indicates a test/setup environment, not a Dolt failure.
+// Fails fast on configuration/initialization errors (gt-2ra) — these are not
+// transient and retrying them wastes ~3 minutes for identical failures.
+func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFields) error {
+	var lastErr error
+	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
+		_, err := m.beads.CreateOrReopenAgentBead(agentID, agentID, fields)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// If beads directory doesn't exist, this is a test/setup env — warn only
+		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
+			fmt.Printf("Warning: could not create agent bead (beads not configured): %v\n", err)
+			return nil
+		}
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("agent bead creation failed (DB not initialized — not retrying): %w", err)
+		}
+		if attempt < doltMaxRetries {
+			backoff := doltBackoff(attempt)
+			fmt.Printf("Warning: agent bead creation attempt %d failed, retrying in %v: %v\n", attempt, backoff, err)
+			time.Sleep(backoff)
+		}
+	}
+	return fmt.Errorf("creating agent bead after %d attempts: %w", doltMaxRetries, lastErr)
+}
+
+// SetAgentStateWithRetry wraps SetAgentState with retry logic.
+// Returns an error after exhausting retries, but callers may choose to warn
+// rather than fail — e.g., in StartSession where the tmux session is already
+// running and failing hard would orphan it. Agent state is a monitoring
+// concern, not a correctness requirement.
+// Fails fast on configuration/initialization errors (gt-2ra).
+func (m *Manager) SetAgentStateWithRetry(name string, state string) error {
+	var lastErr error
+	for attempt := 1; attempt <= doltMaxRetries; attempt++ {
+		err := m.SetAgentState(name, state)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		if isDoltConfigError(err) {
+			return fmt.Errorf("setting agent state failed (DB not initialized — not retrying): %w", err)
+		}
+		if attempt < doltMaxRetries {
+			backoff := doltBackoff(attempt)
+			fmt.Printf("Warning: SetAgentState attempt %d failed, retrying in %v: %v\n", attempt, backoff, err)
+			time.Sleep(backoff)
+		}
+	}
+	return fmt.Errorf("setting agent state after %d attempts: %w", doltMaxRetries, lastErr)
+}
+
 // assigneeID returns the beads assignee identifier for a polecat.
-// Format: "rig/polecatName" (e.g., "gastown/Toast")
+// Format: "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast")
 func (m *Manager) assigneeID(name string) string {
-	return fmt.Sprintf("%s/%s", m.rig.Name, name)
+	return fmt.Sprintf("%s/polecats/%s", m.rig.Name, name)
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
@@ -213,6 +454,11 @@ func (m *Manager) clonePath(name string) string {
 	return newPath
 }
 
+// ClonePath returns the path to a polecat's git worktree.
+func (m *Manager) ClonePath(name string) string {
+	return m.clonePath(name)
+}
+
 // exists checks if a polecat exists.
 func (m *Manager) exists(name string) bool {
 	_, err := os.Stat(m.polecatDir(name))
@@ -264,8 +510,8 @@ func (m *Manager) buildBranchName(name, issue string) string {
 
 	// {year} and {month}
 	now := time.Now()
-	vars["{year}"] = now.Format("06")   // YY format
-	vars["{month}"] = now.Format("01")  // MM format
+	vars["{year}"] = now.Format("06")  // YY format
+	vars["{month}"] = now.Format("01") // MM format
 
 	// {name}
 	vars["{name}"] = name
@@ -345,6 +591,13 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 // This allows setting hook_bead atomically at creation time, avoiding
 // cross-beads routing issues when slinging work to new polecats.
 func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error) {
+	// Acquire per-polecat file lock to prevent concurrent Add/Remove/Repair races
+	fl, err := m.lockPolecat(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	if m.exists(name) {
 		return nil, ErrPolecatExists
 	}
@@ -362,9 +615,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating polecat dir: %w", err)
 	}
 
+	// cleanupOnError removes polecatDir if worktree creation fails.
+	// This ensures exists() returns false for incomplete polecats, preventing
+	// a partial state where polecatDir exists but the worktree doesn't.
+	// See: br-w2ee9 (worktrees not being created)
+	cleanupOnError := func() {
+		_ = os.RemoveAll(polecatDir)
+	}
+
 	// Get the repo base (bare repo or mayor/rig)
 	repoGit, err := m.repoBase()
 	if err != nil {
+		cleanupOnError()
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
@@ -386,25 +648,13 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
 	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
+		cleanupOnError()
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
-	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
-	// Writing to CLAUDE.md would overwrite project instructions and could leak
-	// Gas Town internals into the project repo if merged.
+	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
+	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
+	// Full context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
@@ -434,6 +684,16 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
+	// Install runtime settings INSIDE the worktree so Claude Code can find hooks.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(clonePath, "polecat", runtimeConfig); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
+	}
+
 	// Run setup hooks from .runtime/setup-hooks/.
 	// These hooks can inject local git config, copy secrets, or perform other setup tasks.
 	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
@@ -448,16 +708,17 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// State starts as "spawning" - will be updated to "working" when Claude starts.
 	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
+	// Retries with backoff — a polecat without an agent bead is untrackable (gt-94llt7).
 	agentID := m.agentBeadID(name)
-	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	if err = m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
 		HookBead:   opts.HookBead, // Set atomically at spawn time
-	})
-	if err != nil {
-		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not create agent bead: %v\n", err)
+	}); err != nil {
+		// Hard fail — an untrackable polecat is worse than no polecat
+		cleanupOnError()
+		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
 	}
 
 	// Return polecat with working state (transient model: polecats are spawned with work)
@@ -480,16 +741,24 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 // If force is true, removes even with uncommitted changes (but not stashes/unpushed).
 // Use nuclear=true to bypass ALL safety checks.
 func (m *Manager) Remove(name string, force bool) error {
-	return m.RemoveWithOptions(name, force, false)
+	return m.RemoveWithOptions(name, force, false, false)
 }
 
 // RemoveWithOptions deletes a polecat worktree with explicit control over safety checks.
 // force=true: bypass uncommitted changes check (legacy behavior)
 // nuclear=true: bypass ALL safety checks including stashes and unpushed commits
+// selfNuke=true: bypass cwd-in-worktree check (for polecat deleting its own worktree)
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
 // falls back to git check for backward compatibility.
-func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
+func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) error {
+	// Acquire per-polecat file lock to prevent concurrent Remove races
+	fl, err := m.lockPolecat(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	if !m.exists(name) {
 		return ErrPolecatNotFound
 	}
@@ -524,6 +793,55 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 				} else {
 					return &UncommittedWorkError{PolecatName: name, Status: status}
 				}
+			}
+		}
+	}
+
+	// Even nuclear mode must not delete worktrees with unmerged MRs.
+	// The nuclear flag bypasses git-status checks (needed for self-nuke)
+	// but MR status is a higher-level concern that should always be checked.
+	if !force {
+		agentID := m.agentBeadID(name)
+		_, fields, aErr := m.beads.GetAgentBead(agentID)
+		if aErr == nil && fields != nil && fields.ActiveMR != "" {
+			mrBead, mrErr := m.beads.Show(fields.ActiveMR)
+			if mrErr == nil && mrBead != nil && mrBead.Status == "open" {
+				return fmt.Errorf("cannot remove polecat %s: MR %s is still open in merge queue\nRefinery will process the MR and clean up after merge\nUse --force to override (risks data loss)", name, fields.ActiveMR)
+			}
+		}
+	}
+
+	// Reset agent bead FIRST, before any filesystem operations.
+	// This prevents a race where a concurrent sling allocates the same name,
+	// sets hook_bead, and then has it cleared by this cleanup. By resetting
+	// the agent bead first (clearing fields, setting agent_state="nuked"),
+	// concurrent slings see a clean bead and CreateOrReopenAgentBead can
+	// simply update it without needing close/reopen (which fails on Dolt).
+	// See gt-14b8o: close/reopen cycle breaks on Dolt backend.
+	agentID := m.agentBeadID(name)
+	if err := m.beads.ResetAgentBeadForReuse(agentID, "polecat removed"); err != nil {
+		// Only log if not "not found" - it's ok if it doesn't exist
+		if !errors.Is(err, beads.ErrNotFound) {
+			fmt.Printf("Warning: could not reset agent bead %s: %v\n", agentID, err)
+		}
+	}
+
+	// Check if user's shell is cd'd into the worktree (prevents broken shell)
+	// This check runs unless selfNuke=true (polecat deleting its own worktree).
+	// When a polecat calls `gt done`, it's inside its worktree by design - the session
+	// will be killed immediately after, so breaking the shell is expected and harmless.
+	// See: https://github.com/steveyegge/gastown/issues/942
+	if !selfNuke {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			// Normalize paths for comparison
+			cwdAbs, _ := filepath.Abs(cwd)
+			cloneAbs, _ := filepath.Abs(clonePath)
+			polecatAbs, _ := filepath.Abs(polecatDir)
+
+			if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
+				return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",
+					ErrShellInWorktree, cwd, m.rig.Name, name)
 			}
 		}
 	}
@@ -572,30 +890,90 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	// Prune any stale worktree entries (non-fatal: cleanup only)
 	_ = repoGit.WorktreePrune()
 
+	// Verify removal succeeded (fixes #618)
+	// The above removal attempts may fail silently on permissions, symlinks, or busy files
+	if err := verifyRemovalComplete(polecatDir, clonePath); err != nil {
+		// Log warning but don't fail - the polecat is effectively "removed" from Gas Town's perspective
+		fmt.Printf("Warning: incomplete removal for %s: %v\n", name, err)
+	}
+
 	// Release name back to pool if it's a pooled name (non-fatal: state file update)
 	m.namePool.Release(name)
 	_ = m.namePool.Save()
 
-	// Close agent bead (non-fatal: may not exist or beads may not be available)
-	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
-	// creates tombstones that cannot be reopened.
-	agentID := m.agentBeadID(name)
-	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
-		// Only log if not "not found" - it's ok if it doesn't exist
-		if !errors.Is(err, beads.ErrNotFound) {
-			fmt.Printf("Warning: could not close agent bead %s: %v\n", agentID, err)
+	return nil
+}
+
+// verifyRemovalComplete checks that polecat directories were actually removed.
+// If they still exist, it attempts more aggressive cleanup and returns an error
+// describing what couldn't be removed.
+func verifyRemovalComplete(polecatDir, clonePath string) error {
+	var remaining []string
+
+	// Check if clone path still exists
+	if _, err := os.Stat(clonePath); err == nil {
+		// Try one more aggressive removal
+		if removeErr := forceRemoveDir(clonePath); removeErr != nil {
+			remaining = append(remaining, clonePath)
 		}
 	}
 
+	// Check if polecat dir still exists (and is different from clone path)
+	if polecatDir != clonePath {
+		if _, err := os.Stat(polecatDir); err == nil {
+			if removeErr := forceRemoveDir(polecatDir); removeErr != nil {
+				remaining = append(remaining, polecatDir)
+			}
+		}
+	}
+
+	if len(remaining) > 0 {
+		return fmt.Errorf("directories still exist after removal: %v", remaining)
+	}
 	return nil
+}
+
+// forceRemoveDir attempts aggressive removal of a directory.
+// It handles permission issues by making files writable before removal.
+func forceRemoveDir(dir string) error {
+	// First try normal removal
+	if err := os.RemoveAll(dir); err == nil {
+		return nil
+	}
+
+	// Walk the directory and make everything writable, then try again
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Continue on error
+		}
+		// Make writable (0755 for dirs, 0644 for files)
+		if d.IsDir() {
+			_ = os.Chmod(path, 0755)
+		} else {
+			_ = os.Chmod(path, 0644)
+		}
+		return nil
+	})
+
+	// Try removal again after fixing permissions
+	return os.RemoveAll(dir)
 }
 
 // AllocateName allocates a name from the name pool.
 // Returns a pooled name (polecat-01 through polecat-50) if available,
 // otherwise returns an overflow name (rigname-N).
+// After allocation, kills any lingering tmux session for the name (gt-pqf9x)
+// to prevent "session already running" errors when reusing names from dead polecats.
 func (m *Manager) AllocateName() (string, error) {
-	// First reconcile pool with existing polecats to handle stale state
-	m.ReconcilePool()
+	// Acquire pool lock to prevent concurrent allocations from racing
+	fl, err := m.lockPool()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	// Reconcile without re-acquiring the pool lock
+	m.reconcilePoolInternal()
 
 	name, err := m.namePool.Allocate()
 	if err != nil {
@@ -604,6 +982,18 @@ func (m *Manager) AllocateName() (string, error) {
 
 	if err := m.namePool.Save(); err != nil {
 		return "", fmt.Errorf("saving pool state: %w", err)
+	}
+
+	// Kill any lingering tmux session for this name (gt-pqf9x).
+	// ReconcilePool kills sessions for names without directories, but a name
+	// can be allocated after its directory was cleaned up while the tmux session
+	// lingers (race between cleanup and allocation). This extra check ensures
+	// no stale session blocks the new polecat's session creation.
+	if m.tmux != nil {
+		sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+		if alive, _ := m.tmux.HasSession(sessionName); alive {
+			_ = m.tmux.KillSessionWithProcesses(sessionName)
+		}
 	}
 
 	return name, nil
@@ -635,6 +1025,13 @@ func (m *Manager) RepairWorktree(name string, force bool) (*Polecat, error) {
 // Allows setting hook_bead atomically at repair time.
 // After repair, uses new structure: polecats/<name>/<rigname>/
 func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
+	// Acquire per-polecat file lock to prevent concurrent Repair/Remove races
+	fl, err := m.lockPolecat(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fl.Unlock() }()
+
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
 	}
@@ -661,27 +1058,6 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		}
 	}
 
-	// Close old agent bead before recreation (non-fatal)
-	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
-	// creates tombstones that cannot be reopened.
-	agentID := m.agentBeadID(name)
-	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat repair"); err != nil {
-		if !errors.Is(err, beads.ErrNotFound) {
-			fmt.Printf("Warning: could not close old agent bead %s: %v\n", agentID, err)
-		}
-	}
-
-	// Remove the old worktree (use force for git worktree removal)
-	if err := repoGit.WorktreeRemove(oldClonePath, true); err != nil {
-		// Fall back to direct removal
-		if removeErr := os.RemoveAll(oldClonePath); removeErr != nil {
-			return nil, fmt.Errorf("removing old clone path: %w", removeErr)
-		}
-	}
-
-	// Prune stale worktree entries (non-fatal: cleanup only)
-	_ = repoGit.WorktreePrune()
-
 	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
 
@@ -698,28 +1074,47 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}
 	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
-	// Create fresh worktree with unique branch name, starting from origin's default branch
-	// Old branches are left behind - they're ephemeral (never pushed to origin)
-	// and will be cleaned up by garbage collection
+	// Create fresh worktree to a temporary path first, so we can roll back if it fails.
+	// This prevents destroying the old worktree before the new one is confirmed working.
 	branchName := m.buildBranchName(name, opts.HookBead)
-	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
+	tmpClonePath := newClonePath + ".repair-tmp"
+	_ = os.RemoveAll(tmpClonePath) // clean up any leftover temp dir
+	if err := repoGit.WorktreeAddFromRef(tmpClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
+	// New worktree created successfully — now safe to reset old bead and remove old worktree.
+	// Resetting the bead AFTER creation prevents inconsistent state if creation fails.
+	// NOTE: We use ResetAgentBeadForReuse instead of CloseAndClearAgentBead to avoid
+	// the close/reopen cycle that fails on Dolt backend (gt-14b8o).
+	agentID := m.agentBeadID(name)
+	if err := m.beads.ResetAgentBeadForReuse(agentID, "polecat repair"); err != nil {
+		if !errors.Is(err, beads.ErrNotFound) {
+			fmt.Printf("Warning: could not reset old agent bead %s: %v\n", agentID, err)
 		}
 	}
 
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
-	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
+	if err := repoGit.WorktreeRemove(oldClonePath, true); err != nil {
+		// Fall back to direct removal
+		if removeErr := os.RemoveAll(oldClonePath); removeErr != nil {
+			// Clean up temp worktree before returning
+			_ = repoGit.WorktreeRemove(tmpClonePath, true)
+			_ = os.RemoveAll(tmpClonePath)
+			return nil, fmt.Errorf("removing old clone path: %w", removeErr)
+		}
+	}
+
+	// Prune stale worktree entries (non-fatal: cleanup only)
+	_ = repoGit.WorktreePrune()
+
+	// Move temp worktree to final location
+	if err := os.Rename(tmpClonePath, newClonePath); err != nil {
+		return nil, fmt.Errorf("moving repaired worktree to final path: %w", err)
+	}
+
+	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
+	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
+	// Full context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads
 	if err := m.setupSharedBeads(newClonePath); err != nil {
@@ -741,14 +1136,20 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create or reopen agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
-	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	// Retries with backoff — a polecat without an agent bead is untrackable (gt-94llt7).
+	if err = m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
 		HookBead:   opts.HookBead, // Set atomically at spawn time
-	})
-	if err != nil {
-		fmt.Printf("Warning: could not create agent bead: %v\n", err)
+	}); err != nil {
+		// Hard fail — clean up the new worktree since we can't track this polecat
+		_ = repoGit.WorktreeRemove(newClonePath, true)
+		_ = os.RemoveAll(newClonePath)
+		// Remove polecatDir to prevent limbo state where m.exists(name) returns true
+		// but no valid worktree exists. Matches AddWithOptions cleanupOnError behavior.
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
 	}
 
 	// Return fresh polecat in working state (transient model: polecats are spawned with work)
@@ -771,6 +1172,18 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 // In addition to directory checks, this also:
 // - Kills orphaned tmux sessions (sessions without directories are broken)
 func (m *Manager) ReconcilePool() {
+	fl, err := m.lockPool()
+	if err != nil {
+		return
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	m.reconcilePoolInternal()
+}
+
+// reconcilePoolInternal performs pool reconciliation without acquiring the pool lock.
+// Called by ReconcilePool (which holds the lock) and AllocateName (which also holds it).
+func (m *Manager) reconcilePoolInternal() {
 	// Get polecats with existing directories
 	polecats, err := m.List()
 	if err != nil {
@@ -817,12 +1230,18 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 		dirSet[name] = true
 	}
 
-	// Kill orphaned sessions (session exists but no directory).
+	// Kill orphaned or stale sessions.
+	// - No directory: orphan session, always kill (worktree was removed but tmux lingered)
+	// - Has directory but dead process: stale session from crashed startup (gt-jn40ft)
 	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	if m.tmux != nil {
 		for _, name := range namesWithSessions {
+			sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
 			if !dirSet[name] {
-				sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+				// Orphan: session exists but no directory
+				_ = m.tmux.KillSessionWithProcesses(sessionName)
+			} else if isSessionProcessDead(m.tmux, sessionName) {
+				// Stale: directory exists but session's process has died
 				_ = m.tmux.KillSessionWithProcesses(sessionName)
 			}
 		}
@@ -830,6 +1249,72 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 
 	m.namePool.Reconcile(namesWithDirs)
 	// Note: No Save() needed - InUse is transient state, only OverflowNext is persisted
+
+	// Clean up orphaned polecat state (fixes #698)
+	m.cleanupOrphanPolecatState()
+}
+
+// isSessionProcessDead checks if a tmux session's pane process has exited.
+// Returns true if the process is dead or cannot be checked (conservative: allows cleanup).
+func isSessionProcessDead(t *tmux.Tmux, sessionName string) bool {
+	pidStr, err := t.GetPanePID(sessionName)
+	if err != nil || pidStr == "" {
+		return true
+	}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return true
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	// On Unix, Signal(0) checks if process exists without sending a signal
+	if err := p.Signal(syscall.Signal(0)); err != nil {
+		return true
+	}
+	return false
+}
+
+// cleanupOrphanPolecatState removes partial/broken polecat state during allocation.
+// This handles the race condition where worktree creation fails mid-way, leaving:
+// - Empty polecat directories without .git
+// - Directories with invalid/corrupt .git files
+// - Stale git worktree registrations
+func (m *Manager) cleanupOrphanPolecatState() {
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return // polecats dir doesn't exist, nothing to clean
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		name := entry.Name()
+		polecatDir := filepath.Join(polecatsDir, name)
+
+		// Check if this is a valid polecat with a working worktree
+		clonePath := filepath.Join(polecatDir, m.rig.Name)
+		gitPath := filepath.Join(clonePath, ".git")
+
+		// Check if clone directory exists
+		if _, err := os.Stat(clonePath); os.IsNotExist(err) {
+			// Empty polecat directory without clone - remove it
+			_ = os.RemoveAll(polecatDir)
+			continue
+		}
+
+		// Check if .git exists (file for worktree, or directory for full clone)
+		if _, err := os.Stat(gitPath); os.IsNotExist(err) {
+			// Clone exists but no .git - incomplete worktree, remove it
+			_ = os.RemoveAll(polecatDir)
+			continue
+		}
+	}
 }
 
 // PoolStatus returns information about the name pool.
@@ -869,9 +1354,10 @@ func (m *Manager) List() ([]*Polecat, error) {
 }
 
 // Get returns a specific polecat by name.
-// State is derived from beads assignee field:
+// State is derived from beads assignee field + tmux session state:
 // - If an issue is assigned to this polecat: StateWorking
-// - If no issue assigned: StateDone (ready for cleanup - transient polecats should have work)
+// - If no issue but tmux session is running: StateWorking (session alive = still working)
+// - If no issue and no tmux session: StateDone (ready for cleanup)
 func (m *Manager) Get(name string) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
@@ -883,6 +1369,15 @@ func (m *Manager) Get(name string) (*Polecat, error) {
 // SetState updates a polecat's state.
 // In the beads model, state is derived from issue status:
 // - StateWorking/StateActive: issue status set to in_progress
+// SetAgentState updates the agent bead's agent_state field.
+// This is called after a polecat session successfully starts to transition
+// from "spawning" to "working", making gt polecat identity show accurate status.
+// Valid states: "spawning", "working", "done", "stuck", "idle"
+func (m *Manager) SetAgentState(name string, state string) error {
+	agentID := m.agentBeadID(name)
+	return m.beads.UpdateAgentState(agentID, state, nil)
+}
+
 // - StateDone: assignee cleared from issue (polecat ready for cleanup)
 // - StateStuck: issue status set to blocked (if supported)
 // If beads is not available, this is a no-op.
@@ -979,10 +1474,17 @@ func (m *Manager) ClearIssue(name string) error {
 	return nil
 }
 
-// loadFromBeads gets polecat info from beads assignee field.
-// State is simple: issue assigned → working, no issue → done (ready for cleanup).
-// Transient polecats should always have work; no work means ready for Witness cleanup.
-// We don't interpret issue status (ZFC: Go is transport, not decision-maker).
+// loadFromBeads gets polecat info from agent bead hook + beads assignee field + tmux session state.
+// State derivation priority:
+//  1. Agent bead hook_bead set → working (authoritative source for current assignment)
+//  2. Issue assigned via beads assignee → working
+//  3. Tmux session alive → working (session active even if assignment not yet recorded)
+//  4. None of the above → done (ready for cleanup)
+//
+// The hook_bead check (1) is critical for polecat name recycling: when a polecat name
+// is reused across rounds, GetAssignedIssue may return a stale issue from the previous
+// round whose assignee was never cleared. The hook_bead is set atomically at spawn/sling
+// time and is always current. (gt-ckk12)
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// Use clonePath which handles both new (polecats/<name>/<rigname>/)
 	// and old (polecats/<name>/) structures
@@ -996,7 +1498,26 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		branchName = fmt.Sprintf("polecat/%s", name)
 	}
 
-	// Query beads for assigned issue
+	// Check agent bead's hook_bead field first — this is the authoritative source
+	// for what work is currently assigned to this polecat. The hook_bead is set
+	// atomically at spawn/sling time, so it's always current even after polecat
+	// name recycling. GetAssignedIssue queries by assignee which can return stale
+	// data from previous rounds. (gt-ckk12)
+	agentID := m.agentBeadID(name)
+	_, fields, agentErr := m.beads.GetAgentBead(agentID)
+	if agentErr == nil && fields != nil && fields.HookBead != "" {
+		return &Polecat{
+			Name:      name,
+			Rig:       m.rig.Name,
+			State:     StateWorking,
+			ClonePath: clonePath,
+			Branch:    branchName,
+			Issue:     fields.HookBead,
+		}, nil
+	}
+
+	// Fallback: Query beads for assigned issue (for polecats without agent beads
+	// or with empty hook_bead)
 	assignee := m.assigneeID(name)
 	issue, beadsErr := m.beads.GetAssignedIssue(assignee)
 	if beadsErr != nil {
@@ -1011,13 +1532,21 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}, nil
 	}
 
-	// Transient model: has issue = working, no issue = done (ready for cleanup)
-	// Polecats without work should be nuked by the Witness
+	// Transient model: has issue = working, no issue = check tmux session.
+	// If tmux session is alive, the polecat is still actively working even
+	// if beads hasn't recorded an assignment yet (timing, query failure, etc.).
+	// Only mark as done when both beads says no issue AND no tmux session.
+	// Fixes: gt-o01h4l (polecat list shows 'done' for running polecats)
 	state := StateDone
 	issueID := ""
 	if issue != nil {
 		issueID = issue.ID
 		state = StateWorking
+	} else if m.tmux != nil {
+		sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
+		if running, _ := m.tmux.HasSession(sessionName); running {
+			state = StateWorking
+		}
 	}
 
 	return &Polecat{
@@ -1090,13 +1619,13 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 
 // StalenessInfo contains details about a polecat's staleness.
 type StalenessInfo struct {
-	Name            string
-	CommitsBehind   int  // How many commits behind origin/main
-	HasActiveSession bool // Whether tmux session is running
-	HasUncommittedWork bool // Whether there's uncommitted or unpushed work
-	AgentState      string // From agent bead (empty if no bead)
-	IsStale         bool   // Overall assessment: safe to clean up
-	Reason          string // Why it's considered stale (or not)
+	Name               string
+	CommitsBehind      int    // How many commits behind origin/main
+	HasActiveSession   bool   // Whether tmux session is running
+	HasUncommittedWork bool   // Whether there's uncommitted or unpushed work
+	AgentState         string // From agent bead (empty if no bead)
+	IsStale            bool   // Overall assessment: safe to clean up
+	Reason             string // Why it's considered stale (or not)
 }
 
 // DetectStalePolecats identifies polecats that are candidates for cleanup.

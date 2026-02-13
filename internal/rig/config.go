@@ -164,8 +164,6 @@ func (r *Rig) GetStringConfig(key string) string {
 // getBeadLabel reads a label value from the rig identity bead.
 // Returns nil if the rig bead doesn't exist or the label is not set.
 func (r *Rig) getBeadLabel(key string) interface{} {
-	townRoot := filepath.Dir(r.Path)
-
 	// Get the rig's beads prefix
 	prefix := "gt" // default
 	if r.Config != nil && r.Config.Prefix != "" {
@@ -177,7 +175,7 @@ func (r *Rig) getBeadLabel(key string) interface{} {
 
 	// Load the bead
 	beadsDir := beads.ResolveBeadsDir(r.Path)
-	bd := beads.NewWithBeadsDir(townRoot, beadsDir)
+	bd := beads.NewWithBeadsDir(r.Path, beadsDir)
 
 	issue, err := bd.Show(rigBeadID)
 	if err != nil {

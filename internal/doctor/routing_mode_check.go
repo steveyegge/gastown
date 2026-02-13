@@ -71,8 +71,8 @@ func (c *RoutingModeCheck) checkRoutingMode(beadsDir, location string) *CheckRes
 		// If the config key doesn't exist, that means it defaults to "auto"
 		if strings.Contains(stderr.String(), "not found") || strings.Contains(stderr.String(), "not set") {
 			return &CheckResult{
-				Name:   c.Name(),
-				Status: StatusWarning,
+				Name:    c.Name(),
+				Status:  StatusWarning,
 				Message: fmt.Sprintf("routing.mode not set at %s (defaults to auto)", location),
 				Details: []string{
 					"Auto routing mode uses git remote URL to detect user role",
@@ -94,8 +94,8 @@ func (c *RoutingModeCheck) checkRoutingMode(beadsDir, location string) *CheckRes
 	mode := strings.TrimSpace(stdout.String())
 	if mode != "explicit" {
 		return &CheckResult{
-			Name:   c.Name(),
-			Status: StatusWarning,
+			Name:    c.Name(),
+			Status:  StatusWarning,
 			Message: fmt.Sprintf("routing.mode is '%s' at %s (should be 'explicit')", mode, location),
 			Details: []string{
 				"Auto routing mode uses git remote URL to detect user role",

@@ -1,4 +1,4 @@
-# SQLite databases
+# Database files (Dolt uses .db files internally)
 *.db
 *.db?*
 *.db-journal
@@ -10,16 +10,11 @@ daemon.lock
 daemon.log
 daemon.pid
 bd.sock
-bd.sock.startlock
 sync-state.json
 last-touched
 
 # Local version tracking (prevents upgrade notification spam after git ops)
 .local_version
-
-# Legacy database files
-db.sqlite
-bd.db
 
 # Worktree redirect file (contains relative path to main repo's .beads/)
 # Must not be committed as paths would be wrong in other clones
@@ -37,6 +32,7 @@ beads.right.meta.json
 # These files are machine-specific and should not be shared across clones
 .sync.lock
 sync_base.jsonl
+export-state/
 
 # NOTE: Do NOT add negation patterns (e.g., !issues.jsonl) here.
 # They would override fork protection in .git/info/exclude, allowing

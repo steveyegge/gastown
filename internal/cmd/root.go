@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/ui"
@@ -16,14 +17,21 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "gt",
+	Use:     "gt", // Updated in init() based on GT_COMMAND
 	Short:   "Gas Town - Multi-agent workspace manager",
 	Version: Version,
-	Long: `Gas Town (gt) manages multi-agent workspaces called rigs.
+	Long:    "", // Updated in init() based on GT_COMMAND
+	PersistentPreRunE: persistentPreRun,
+}
+
+func init() {
+	// Update command name based on GT_COMMAND env var
+	cmdName := cli.Name()
+	rootCmd.Use = cmdName
+	rootCmd.Long = fmt.Sprintf(`Gas Town (%s) manages multi-agent workspaces called rigs.
 
 It coordinates agent spawning, work distribution, and communication
-across distributed teams of AI agents working on shared codebases.`,
-	PersistentPreRunE: persistentPreRun,
+across distributed teams of AI agents working on shared codebases.`, cmdName)
 }
 
 // Commands that don't require beads to be installed/checked.
@@ -53,6 +61,8 @@ var beadsExemptCommands = map[string]bool{
 	"install":    true,
 	"tap":        true,
 	"dnd":        true,
+	"krc":           true, // KRC doesn't require beads
+	"run-migration": true, // Migration orchestrator handles its own beads checks
 }
 
 // Commands exempt from the town root branch warning.
@@ -69,14 +79,14 @@ var branchCheckExemptCommands = map[string]bool{
 // persistentPreRun runs before every command.
 func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Check if binary was built properly (via make build, not raw go build).
-	// Raw go build produces unsigned binaries that macOS will kill.
+	// Raw go build produces unsigned binaries that macOS may kill.
+	// Warning only - doesn't block execution.
 	if BuiltProperly == "" {
-		fmt.Fprintln(os.Stderr, "ERROR: This binary was built with 'go build' directly.")
-		fmt.Fprintln(os.Stderr, "       Use 'make build' to create a properly signed binary.")
+		fmt.Fprintln(os.Stderr, "WARNING: This binary was built with 'go build' directly.")
+		fmt.Fprintln(os.Stderr, "         Use 'make build' to create a properly signed binary.")
 		if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
-			fmt.Fprintf(os.Stderr, "       Run from: %s\n", gtRoot)
+			fmt.Fprintf(os.Stderr, "         Run from: %s\n", gtRoot)
 		}
-		os.Exit(1)
 	}
 
 	// Initialize CLI theme (dark/light mode support)
@@ -100,8 +110,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check beads version
-	return CheckBeadsVersion()
+	// Check beads version (non-blocking - warn only)
+	if err := CheckBeadsVersion(); err != nil {
+		// Just warn, don't block - beads issues shouldn't prevent gt from running
+		fmt.Fprintf(os.Stderr, "⚠ beads check: %v\n", err)
+	}
+	return nil
 }
 
 // initCLITheme initializes the CLI color theme based on settings and environment.
@@ -209,7 +223,7 @@ func checkStaleBinaryWarning() {
 				info.CommitsBehind, version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
 		}
 		fmt.Fprintf(os.Stderr, "%s %s\n", style.WarningPrefix, msg)
-		fmt.Fprintf(os.Stderr, "    %s Run 'gt install' to update\n", style.ArrowPrefix)
+		fmt.Fprintf(os.Stderr, "    %s Run 'make install' in gastown repo to update\n", style.ArrowPrefix)
 	}
 }
 
@@ -280,4 +294,22 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 	}
 	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
 		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
+}
+
+// checkHelpFlag checks if --help or -h is the first argument and shows help if so.
+// Returns true if help was shown, false otherwise.
+//
+// This is needed for commands with DisableFlagParsing: true, which bypass
+// Cobra's automatic help flag handling.
+//
+// We only check the FIRST argument to avoid false positives like:
+//
+//	gt commit -m "--help"  # User wants message "--help", not help output
+//
+// This covers the common case (gt commit --help) without breaking edge cases.
+func checkHelpFlag(cmd *cobra.Command, args []string) (bool, error) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		return true, cmd.Help()
+	}
+	return false, nil
 }

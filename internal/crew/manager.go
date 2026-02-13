@@ -5,16 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -113,11 +114,38 @@ func (m *Manager) exists(name string) bool {
 	return err == nil
 }
 
+// lockCrew acquires an exclusive file lock for a specific crew worker.
+// This prevents concurrent gt processes from racing on the same crew worker's
+// filesystem operations (Add, Remove, Rename, Start).
+// Caller must defer fl.Unlock().
+func (m *Manager) lockCrew(name string) (*flock.Flock, error) {
+	lockDir := filepath.Join(m.rig.Path, ".runtime", "locks")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+	lockPath := filepath.Join(lockDir, fmt.Sprintf("crew-%s.lock", name))
+	fl := flock.New(lockPath)
+	if err := fl.Lock(); err != nil {
+		return nil, fmt.Errorf("acquiring crew lock for %s: %w", name, err)
+	}
+	return fl, nil
+}
+
 // Add creates a new crew worker with a clone of the rig.
 func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
 	}
+	fl, err := m.lockCrew(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fl.Unlock() }()
+	return m.addLocked(name, createBranch)
+}
+
+// addLocked creates a new crew worker, assumes caller holds lockCrew(name).
+func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error) {
 	if m.exists(name) {
 		return nil, ErrCrewExists
 	}
@@ -142,6 +170,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
 			return nil, fmt.Errorf("cloning rig: %w", err)
 		}
+	}
+
+	// Sync remotes from mayor/rig so crew clone matches the rig's remote config.
+	// This prevents origin pointing to upstream instead of the fork.
+	if err := m.syncRemotesFromRig(crewPath); err != nil {
+		fmt.Printf("Warning: could not sync remotes from rig: %v\n", err)
 	}
 
 	crewGit := git.NewGit(crewPath)
@@ -194,6 +228,16 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
+	// Install runtime settings in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	addTownRoot := filepath.Dir(m.rig.Path)
+	addRuntimeConfig := config.ResolveRoleAgentConfig("crew", addTownRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewPath, "crew", addRuntimeConfig); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -222,11 +266,61 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	return crew, nil
 }
 
+// syncRemotesFromRig copies remote configuration from the mayor/rig repo to a crew clone.
+// This ensures crew clones have the same origin (fork) and upstream as the rig,
+// preventing repo ID mismatches and broken formula slinging.
+func (m *Manager) syncRemotesFromRig(crewPath string) error {
+	rigRepoPath := filepath.Join(m.rig.Path, "mayor", "rig")
+	if _, err := os.Stat(rigRepoPath); err != nil {
+		return fmt.Errorf("mayor/rig not found at %s", rigRepoPath)
+	}
+
+	rigGit := git.NewGit(rigRepoPath)
+	crewGit := git.NewGit(crewPath)
+
+	remotes, err := rigGit.Remotes()
+	if err != nil {
+		return fmt.Errorf("reading rig remotes: %w", err)
+	}
+
+	for _, remote := range remotes {
+		if remote == "" || remote == "mayor" {
+			continue // Skip empty and local-only remotes
+		}
+
+		url, err := rigGit.RemoteURL(remote)
+		if err != nil {
+			continue
+		}
+
+		// Check if remote exists in crew clone
+		existingURL, existErr := crewGit.RemoteURL(remote)
+		if existErr != nil {
+			// Remote doesn't exist — add it
+			if _, addErr := crewGit.AddRemote(remote, url); addErr != nil {
+				fmt.Printf("Warning: could not add remote %s: %v\n", remote, addErr)
+			}
+		} else if existingURL != url {
+			// Remote exists but URL differs — update it
+			if _, setErr := crewGit.SetRemoteURL(remote, url); setErr != nil {
+				fmt.Printf("Warning: could not update remote %s: %v\n", remote, setErr)
+			}
+		}
+	}
+
+	return nil
+}
+
 // Remove deletes a crew worker.
 func (m *Manager) Remove(name string, force bool) error {
 	if err := validateCrewName(name); err != nil {
 		return err
 	}
+	fl, err := m.lockCrew(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
 	if !m.exists(name) {
 		return ErrCrewNotFound
 	}
@@ -263,7 +357,7 @@ func (m *Manager) List() ([]*CrewWorker, error) {
 
 	var workers []*CrewWorker
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
@@ -282,6 +376,16 @@ func (m *Manager) Get(name string) (*CrewWorker, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
 	}
+	fl, err := m.lockCrew(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fl.Unlock() }()
+	return m.getLocked(name)
+}
+
+// getLocked returns a crew worker, assumes caller holds lockCrew(name).
+func (m *Manager) getLocked(name string) (*CrewWorker, error) {
 	if !m.exists(name) {
 		return nil, ErrCrewNotFound
 	}
@@ -336,6 +440,24 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 
 // Rename renames a crew worker from oldName to newName.
 func (m *Manager) Rename(oldName, newName string) error {
+	if err := validateCrewName(newName); err != nil {
+		return err
+	}
+	// Lock both names in alphabetical order to prevent deadlock.
+	first, second := oldName, newName
+	if first > second {
+		first, second = second, first
+	}
+	fl1, err := m.lockCrew(first)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl1.Unlock() }()
+	fl2, err := m.lockCrew(second)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl2.Unlock() }()
 	if !m.exists(oldName) {
 		return ErrCrewNotFound
 	}
@@ -373,7 +495,7 @@ func (m *Manager) Rename(oldName, newName string) error {
 }
 
 // Pristine ensures a crew worker is up-to-date with remote.
-// It runs git pull --rebase and bd sync.
+// It runs git pull --rebase.
 func (m *Manager) Pristine(name string) (*PristineResult, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
@@ -403,21 +525,10 @@ func (m *Manager) Pristine(name string) (*PristineResult, error) {
 		result.Pulled = true
 	}
 
-	// Run bd sync
-	if err := m.runBdSync(crewPath); err != nil {
-		result.SyncError = err.Error()
-	} else {
-		result.Synced = true
-	}
+	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
+	result.Synced = true
 
 	return result, nil
-}
-
-// runBdSync runs bd sync in the given directory.
-func (m *Manager) runBdSync(dir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = dir
-	return cmd.Run()
 }
 
 // PristineResult captures the results of a pristine operation.
@@ -449,10 +560,17 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		return err
 	}
 
-	// Get or create the crew worker
-	worker, err := m.Get(name)
+	// Acquire lock to prevent concurrent Start/Remove races.
+	fl, err := m.lockCrew(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	// Get or create the crew worker (using locked variants to avoid lock re-entry)
+	worker, err := m.getLocked(name)
 	if err == ErrCrewNotFound {
-		worker, err = m.Add(name, false) // No feature branch for crew
+		worker, err = m.addLocked(name, false) // No feature branch for crew
 		if err != nil {
 			return fmt.Errorf("creating crew workspace: %w", err)
 		}
@@ -476,8 +594,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
+			// Normal start - session exists, check if agent is actually running
+			if t.IsAgentAlive(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate.
@@ -488,12 +606,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
@@ -503,13 +622,29 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if topic == "" {
 		topic = "start"
 	}
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: address,
 		Sender:    "human",
 		Topic:     topic,
 	})
 
-	// Build startup command first
+	// Compute environment variables BEFORE creating the session.
+	// These are passed via tmux -e flags so the initial shell inherits the correct
+	// env from the start, preventing parent env (e.g., GT_ROLE=mayor) from leaking
+	// into crew sessions. See: https://github.com/steveyegge/gastown/issues/1289
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "crew",
+		Rig:              m.rig.Name,
+		AgentName:        name,
+		TownRoot:         townRoot,
+		RuntimeConfigDir: opts.ClaudeConfigDir,
+	})
+	if opts.AgentOverride != "" {
+		envVars["GT_AGENT"] = opts.AgentOverride
+	}
+
+	// Build startup command (also includes env vars via 'exec env' for
+	// WaitForCommand detection — belt and suspenders with -e flags)
 	// SessionStart hook handles context loading (gt prime --hook)
 	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
 	if err != nil {
@@ -521,25 +656,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
+	// Create session with command and env vars via -e flags.
+	// The -e flags set session-level env BEFORE the shell starts, ensuring the
+	// initial shell inherits the correct GT_ROLE (not the parent's).
+	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
+	// See: https://github.com/steveyegge/gastown/issues/1289 (env inheritance fix)
+	if err := t.NewSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars); err != nil {
 		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "crew",
-		Rig:              m.rig.Name,
-		AgentName:        name,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.ClaudeConfigDir,
-		BeadsNoDaemon:    true,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
@@ -549,10 +672,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Note: We intentionally don't wait for Claude to start here.
+	// Track PID for defense-in-depth orphan cleanup (non-fatal)
+	_ = session.TrackSessionPID(townRoot, sessionID, t)
+
+	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when Claude is ready,
-	// they can check with IsClaudeRunning().
+	// serves no purpose. If the caller needs to know when the agent is ready,
+	// they can check with IsAgentAlive().
 
 	return nil
 }
@@ -591,4 +717,3 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
-

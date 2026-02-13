@@ -1,6 +1,7 @@
 package crew
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -285,6 +286,20 @@ func TestManagerList(t *testing.T) {
 	if len(workers) != 2 {
 		t.Errorf("expected 2 workers, got %d", len(workers))
 	}
+
+	// Create a dot-prefixed directory (e.g. .claude) — should be skipped
+	dotDir := filepath.Join(rigPath, "crew", ".claude")
+	if err := os.MkdirAll(dotDir, 0755); err != nil {
+		t.Fatalf("failed to create .claude dir: %v", err)
+	}
+
+	workers, err = mgr.List()
+	if err != nil {
+		t.Fatalf("List failed after adding dot dir: %v", err)
+	}
+	if len(workers) != 2 {
+		t.Errorf("expected 2 workers (dot-prefixed dir should be skipped), got %d", len(workers))
+	}
 }
 
 func TestManagerRemove(t *testing.T) {
@@ -389,6 +404,150 @@ func TestManagerGetWithStaleStateName(t *testing.T) {
 	expectedPath := filepath.Join(rigPath, "crew", "alice")
 	if worker.ClonePath != expectedPath {
 		t.Errorf("expected clone_path '%s', got '%s'", expectedPath, worker.ClonePath)
+	}
+}
+
+func TestManagerAddSyncsRemotesFromRig(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crew-test-remotes-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	rigPath := filepath.Join(tmpDir, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("failed to create rig dir: %v", err)
+	}
+
+	// Create a "fork" bare repo (what origin should point to)
+	forkRepoPath := filepath.Join(tmpDir, "fork.git")
+	if err := runCmd("git", "init", "--bare", forkRepoPath); err != nil {
+		t.Fatalf("failed to create fork repo: %v", err)
+	}
+
+	// Create an "upstream" bare repo
+	upstreamRepoPath := filepath.Join(tmpDir, "upstream.git")
+	if err := runCmd("git", "init", "--bare", upstreamRepoPath); err != nil {
+		t.Fatalf("failed to create upstream repo: %v", err)
+	}
+
+	// Create mayor/rig with both remotes configured
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	if err := runCmd("git", "clone", forkRepoPath, mayorRigPath); err != nil {
+		t.Fatalf("failed to clone mayor rig: %v", err)
+	}
+	if err := runCmd("git", "-C", mayorRigPath, "remote", "add", "upstream", upstreamRepoPath); err != nil {
+		t.Fatalf("failed to add upstream to mayor: %v", err)
+	}
+
+	// Rig GitURL uses upstream (simulating the bug — clone from upstream)
+	r := &rig.Rig{
+		Name:   "test-rig",
+		Path:   rigPath,
+		GitURL: upstreamRepoPath,
+	}
+
+	mgr := NewManager(r, git.NewGit(rigPath))
+
+	worker, err := mgr.Add("sync_test", false)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Verify crew clone's origin was updated to match mayor/rig's origin (the fork)
+	crewGit := git.NewGit(worker.ClonePath)
+	originURL, err := crewGit.RemoteURL("origin")
+	if err != nil {
+		t.Fatalf("failed to get crew origin URL: %v", err)
+	}
+	if originURL != forkRepoPath {
+		t.Errorf("crew origin = %q, want %q (should match mayor/rig)", originURL, forkRepoPath)
+	}
+
+	// Verify upstream remote was added
+	upstreamURL, err := crewGit.RemoteURL("upstream")
+	if err != nil {
+		t.Fatalf("failed to get crew upstream URL: %v", err)
+	}
+	if upstreamURL != upstreamRepoPath {
+		t.Errorf("crew upstream = %q, want %q", upstreamURL, upstreamRepoPath)
+	}
+}
+
+func TestManagerRenameValidatesNewName(t *testing.T) {
+	// Regression test: Rename must validate newName to prevent path traversal
+	// and invalid characters. See: gt-gt3zv
+	tmpDir, err := os.MkdirTemp("", "crew-test-rename-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	rigPath := filepath.Join(tmpDir, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("failed to create rig dir: %v", err)
+	}
+
+	g := git.NewGit(rigPath)
+
+	bareRepoPath := filepath.Join(tmpDir, "bare-repo.git")
+	if err := runCmd("git", "init", "--bare", bareRepoPath); err != nil {
+		t.Fatalf("failed to create bare repo: %v", err)
+	}
+
+	r := &rig.Rig{
+		Name:   "test-rig",
+		Path:   rigPath,
+		GitURL: bareRepoPath,
+	}
+
+	mgr := NewManager(r, g)
+
+	// Add a valid worker
+	_, err = mgr.Add("alice", false)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Attempt renames with invalid names - all should fail
+	invalidNames := []string{
+		"../../../etc",
+		"bad-name",
+		"has.dot",
+		"has space",
+		"..",
+		".",
+		"",
+		"path/sep",
+	}
+
+	for _, name := range invalidNames {
+		err := mgr.Rename("alice", name)
+		if err == nil {
+			t.Errorf("Rename to %q should have failed but succeeded", name)
+		}
+		if err != nil && !errors.Is(err, ErrInvalidCrewName) {
+			t.Errorf("Rename to %q: expected ErrInvalidCrewName, got %v", name, err)
+		}
+	}
+
+	// Valid rename should succeed
+	err = mgr.Rename("alice", "bob")
+	if err != nil {
+		t.Errorf("Rename to 'bob' should have succeeded: %v", err)
+	}
+
+	// Verify alice no longer exists and bob does
+	_, err = mgr.Get("alice")
+	if err != ErrCrewNotFound {
+		t.Errorf("expected ErrCrewNotFound for alice, got %v", err)
+	}
+	worker, err := mgr.Get("bob")
+	if err != nil {
+		t.Errorf("Get bob failed: %v", err)
+	}
+	if worker != nil && worker.Name != "bob" {
+		t.Errorf("expected name 'bob', got %q", worker.Name)
 	}
 }
 

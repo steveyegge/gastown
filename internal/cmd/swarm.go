@@ -39,16 +39,16 @@ var swarmCmd = &cobra.Command{
 	Use:        "swarm",
 	GroupID:    GroupWork,
 	Short:      "[DEPRECATED] Use 'gt convoy' instead",
-	Deprecated: "Use 'gt convoy' for work tracking. A 'swarm' is now just the ephemeral workers on a convoy.",
+	Deprecated: "Use 'gt convoy' for work tracking. A 'swarm' is now just the workers currently assigned to a convoy.",
 	RunE:       requireSubcommand,
 	Long: `DEPRECATED: Use 'gt convoy' instead.
 
-The term "swarm" now refers to the ephemeral set of workers on a convoy's issues,
+The term "swarm" now refers to the set of workers currently assigned to a convoy's issues,
 not a persistent tracking unit. Use 'gt convoy' for creating and tracking batched work.
 
 TERMINOLOGY:
   Convoy: Persistent tracking unit (what this command was trying to be)
-  Swarm:  Ephemeral workers on a convoy (no separate tracking needed)
+  Swarm:  Workers on a convoy (no separate tracking needed)
 
 MIGRATION:
   gt swarm create  →  gt convoy create
@@ -529,8 +529,11 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
-			// Wait for Claude to initialize
-			time.Sleep(5 * time.Second)
+			// Minimum readiness guard before injection. Start() handles
+			// runtime-config-aware delays internally, but presets with
+			// ReadyDelayMs=0 (e.g. gemini, cursor) skip the delay entirely.
+			// This floor prevents early-input races on those agents.
+			time.Sleep(1 * time.Second)
 		}
 
 		// Inject work assignment
@@ -821,11 +824,11 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking swarm status: %w", err)
 	}
 
-	var issue struct {
+	var issues []struct {
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &issue); err == nil {
-		if issue.Status == "closed" {
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err == nil && len(issues) > 0 {
+		if issues[0].Status == "closed" {
 			return fmt.Errorf("swarm already closed")
 		}
 	}

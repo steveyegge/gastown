@@ -43,9 +43,6 @@ func TestInstantiateFormulaOnBead(t *testing.T) {
 	bdScript := `#!/bin/sh
 set -e
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then
-  shift
-fi
 cmd="$1"
 shift || true
 case "$cmd" in
@@ -79,10 +76,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="show" (
   echo [{^"title^":^"Fix bug ABC^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
@@ -120,7 +113,8 @@ exit /b 0
 	}
 
 	// Test the helper function directly
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false)
+	extraVars := []string{"branch=polecat/furiosa/gt-abc123"}
+	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false, extraVars)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -144,6 +138,9 @@ exit /b 0
 	}
 	if !strings.Contains(logContent, "mol wisp mol-polecat-work") {
 		t.Errorf("mol wisp command not found in log:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "--var branch=polecat/furiosa/gt-abc123") {
+		t.Errorf("extra vars not passed to wisp command:\n%s", logContent)
 	}
 	if !strings.Contains(logContent, "mol bond") {
 		t.Errorf("mol bond command not found in log:\n%s", logContent)
@@ -176,7 +173,6 @@ func TestInstantiateFormulaOnBeadSkipCook(t *testing.T) {
 	logPath := filepath.Join(townRoot, "bd.log")
 	bdScript := `#!/bin/sh
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then shift; fi
 cmd="$1"; shift || true
 case "$cmd" in
   mol)
@@ -193,10 +189,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
     echo {^"new_epic_id^":^"gt-wisp-skip^"}
@@ -219,7 +211,7 @@ exit /b 0
 	_ = os.Chdir(townRoot)
 
 	// Test with skipCook=true
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test", "", townRoot, true)
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test", "", townRoot, true, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -263,7 +255,7 @@ exit /b 0
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := CookFormula("mol-polecat-work", townRoot)
+	err := CookFormula("mol-polecat-work", townRoot, townRoot)
 	if err != nil {
 		t.Fatalf("CookFormula failed: %v", err)
 	}
@@ -295,11 +287,11 @@ func TestSlingHookRawBeadFlag(t *testing.T) {
 // When formulaName is empty and target contains "/polecats/", mol-polecat-work should be applied.
 func TestAutoApplyLogic(t *testing.T) {
 	tests := []struct {
-		name           string
-		formulaName    string
-		hookRawBead    bool
-		targetAgent    string
-		wantAutoApply  bool
+		name          string
+		formulaName   string
+		hookRawBead   bool
+		targetAgent   string
+		wantAutoApply bool
 	}{
 		{
 			name:          "bare bead to polecat - should auto-apply",
@@ -372,7 +364,6 @@ func TestFormulaOnBeadPassesVariables(t *testing.T) {
 	logPath := filepath.Join(townRoot, "bd.log")
 	bdScript := `#!/bin/sh
 echo "CMD:$*" >> "${BD_LOG}"
-if [ "$1" = "--no-daemon" ]; then shift; fi
 cmd="$1"; shift || true
 case "$cmd" in
   cook) exit 0;;
@@ -390,10 +381,6 @@ setlocal enableextensions
 echo CMD:%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
-if "%cmd%"=="--no-daemon" (
-  set "cmd=%2"
-  set "sub=%3"
-)
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
@@ -416,7 +403,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false)
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}

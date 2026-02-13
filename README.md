@@ -37,10 +37,10 @@ graph TB
     Hooks1 -.git worktree.-> GitRepo1[Git Repository]
     Hooks2 -.git worktree.-> GitRepo2[Git Repository]
 
-    style Mayor fill:#e1f5ff
-    style Town fill:#f0f0f0
-    style Rig1 fill:#fff4e1
-    style Rig2 fill:#fff4e1
+    style Mayor fill:#e1f5ff,color:#000000
+    style Town fill:#f0f0f0,color:#000000
+    style Rig1 fill:#fff4e1,color:#000000
+    style Rig2 fill:#fff4e1,color:#000000
 ```
 
 ## Core Concepts
@@ -63,7 +63,7 @@ Your personal workspace within a rig. Where you do hands-on work.
 
 ### Polecats 🦨
 
-Ephemeral worker agents that spawn, complete a task, and disappear.
+Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist.
 
 ### Hooks 🪝
 
@@ -307,7 +307,7 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 
 **Notes:**
 
-- Claude uses hooks in `.claude/settings.json` for mail injection and startup.
+- Claude uses hooks in `.claude/settings.local.json` for mail injection and startup.
 - For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
   `~/.codex/config.toml` so role instructions are picked up.
 - For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback

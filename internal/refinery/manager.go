@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,13 +14,11 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -97,15 +96,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		// Use IsClaudeRunning for robust detection: Claude can report as "node", "claude",
-		// or version number like "2.0.76". IsAgentRunning with just "node" was too strict
-		// and caused healthy sessions to be killed. See: gastown#566
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -125,25 +120,36 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
-	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
-	// write into the source repo. Runtime walks up the tree to find settings.
-	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
+	// Ensure runtime settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
+	// so settings.local.json doesn't dirty the source repo worktree.
+	if err := rig.EnsureGitignorePatterns(refineryRigDir); err != nil {
+		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
+	}
+
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Check your hook and begin patrol.")
+
 	var command string
 	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
+		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -155,10 +161,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "refinery",
-		Rig:           m.rig.Name,
-		TownRoot:      townRoot,
-		BeadsNoDaemon: true,
+		Role:     "refinery",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
 	})
 
 	// Add refinery-specific flag
@@ -188,20 +193,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/refinery", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
 
 	return nil
 }
@@ -246,6 +237,10 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 	scored := make([]scoredIssue, 0, len(issues))
 	for _, issue := range issues {
+		// Defensive filter: bd status filters can drift; queue must only include open MRs.
+		if issue == nil || issue.Status != "open" {
+			continue
+		}
 		score := m.calculateIssueScore(issue, now)
 		scored = append(scored, scoredIssue{issue: issue, score: score})
 	}
@@ -354,122 +349,6 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-// MergeResult contains the result of a merge attempt.
-type MergeResult struct {
-	Success     bool
-	MergeCommit string // SHA of merge commit on success
-	Error       string
-	Conflict    bool
-	TestsFailed bool
-}
-
-// ProcessMR is deprecated - the Refinery agent now handles all merge processing.
-//
-// ZFC #5: Move merge/conflict decisions from Go to Refinery agent
-//
-// The agent runs git commands directly and makes decisions based on output:
-//   - Agent attempts merge: git checkout -b temp origin/polecat/<worker>
-//   - Agent detects conflict and decides: retry, notify polecat, escalate
-//   - Agent runs tests and decides: proceed, rollback, retry
-//   - Agent pushes: git push origin main
-//
-// This function is kept for backwards compatibility but always returns an error
-// indicating that the agent should handle merge processing.
-//
-// Deprecated: Use the Refinery agent (Claude) for merge processing.
-func (m *Manager) ProcessMR(mr *MergeRequest) MergeResult {
-	return MergeResult{
-		Error: "ProcessMR is deprecated - the Refinery agent handles merge processing (ZFC #5)",
-	}
-}
-
-// completeMR marks an MR as complete.
-// For success, pass closeReason (e.g., CloseReasonMerged).
-// For failures that should return to open, pass empty closeReason.
-// ZFC-compliant: no state file, just updates MR and emits events.
-// Deprecated: The Refinery agent handles merge processing (ZFC #5).
-func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg string) {
-	mr.Error = errMsg
-	actor := fmt.Sprintf("%s/refinery", m.rig.Name)
-
-	if closeReason != "" {
-		// Close the MR (in_progress → closed)
-		if err := mr.Close(closeReason); err != nil {
-			// Log error but continue - this shouldn't happen
-			_, _ = fmt.Fprintf(m.output, "Warning: failed to close MR: %v\n", err)
-		}
-		if closeReason == CloseReasonSuperseded {
-			// Emit merge_skipped event
-			_ = events.LogFeed(events.TypeMergeSkipped, actor, events.MergePayload(mr.ID, mr.Worker, mr.Branch, "superseded"))
-		}
-	} else {
-		// Reopen the MR for rework (in_progress → open)
-		if err := mr.Reopen(); err != nil {
-			// Log error but continue
-			_, _ = fmt.Fprintf(m.output, "Warning: failed to reopen MR: %v\n", err)
-		}
-	}
-}
-
-// runTests executes the test command.
-// Deprecated: The Refinery agent runs tests directly via shell commands (ZFC #5).
-func (m *Manager) runTests(testCmd string) error {
-	parts := strings.Fields(testCmd)
-	if len(parts) == 0 {
-		return nil
-	}
-
-	return util.ExecRun(m.workDir, parts[0], parts[1:]...)
-}
-
-// getMergeConfig loads the merge configuration from disk.
-// Returns default config if not configured.
-// Deprecated: Configuration is read by the agent from settings (ZFC #5).
-func (m *Manager) getMergeConfig() MergeConfig {
-	mergeConfig := DefaultMergeConfig()
-
-	// Check settings/config.json for merge_queue settings
-	settingsPath := filepath.Join(m.rig.Path, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
-	if err != nil {
-		return mergeConfig
-	}
-
-	// Apply merge_queue config if present
-	if settings.MergeQueue != nil {
-		mq := settings.MergeQueue
-		mergeConfig.TestCommand = mq.TestCommand
-		mergeConfig.RunTests = mq.RunTests
-		mergeConfig.DeleteMergedBranches = mq.DeleteMergedBranches
-		// Note: PushRetryCount and PushRetryDelayMs use defaults if not explicitly set
-	}
-
-	return mergeConfig
-}
-
-// pushWithRetry pushes to the target branch with exponential backoff retry.
-// Deprecated: The Refinery agent decides retry strategy (ZFC #5).
-func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
-	var lastErr error
-	delay := time.Duration(config.PushRetryDelayMs) * time.Millisecond
-
-	for attempt := 0; attempt <= config.PushRetryCount; attempt++ {
-		if attempt > 0 {
-			_, _ = fmt.Fprintf(m.output, "Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
-			time.Sleep(delay)
-			delay *= 2 // Exponential backoff
-		}
-
-		err := util.ExecRun(m.workDir, "git", "push", "origin", targetBranch)
-		if err == nil {
-			return nil // Success
-		}
-		lastErr = err
-	}
-
-	return fmt.Errorf("push failed after %d retries: %v", config.PushRetryCount, lastErr)
-}
-
 // formatAge formats a duration since the given time.
 func formatAge(t time.Time) string {
 	d := time.Since(t)
@@ -484,43 +363,6 @@ func formatAge(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-}
-
-// notifyWorkerConflict sends a conflict notification to a polecat.
-func (m *Manager) notifyWorkerConflict(mr *MergeRequest) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Merge conflict - rebase required",
-		Body: fmt.Sprintf(`Your branch %s has conflicts with %s.
-
-Please rebase your changes:
-  git fetch origin
-  git rebase origin/%s
-  git push -f
-
-Then the Refinery will retry the merge.`,
-			mr.Branch, mr.TargetBranch, mr.TargetBranch),
-		Priority: mail.PriorityHigh,
-	}
-	_ = router.Send(msg) // best-effort notification
-}
-
-// notifyWorkerMerged sends a success notification to a polecat.
-func (m *Manager) notifyWorkerMerged(mr *MergeRequest) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Work merged successfully",
-		Body: fmt.Sprintf(`Your branch %s has been merged to %s.
-
-Issue: %s
-Thank you for your contribution!`,
-			mr.Branch, mr.TargetBranch, mr.IssueID),
-	}
-	_ = router.Send(msg) // best-effort notification
 }
 
 // Common errors for MR operations
@@ -631,7 +473,9 @@ Please review the feedback and address the issues before resubmitting.`,
 			mr.Branch, mr.IssueID, reason),
 		Priority: mail.PriorityNormal,
 	}
-	_ = router.Send(msg) // best-effort notification
+	if err := router.Send(msg); err != nil {
+		log.Printf("warning: notifying worker of rejection for %s: %v", mr.IssueID, err)
+	}
 }
 
 // findTownRoot walks up directories to find the town root.

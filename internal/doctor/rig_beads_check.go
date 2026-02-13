@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -141,7 +142,9 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 		return nil // No rigs to process
 	}
 
-	// Create missing rig identity beads
+	// Create missing rig identity beads — collect errors instead of failing
+	// on first so one broken rig doesn't block fixes for others.
+	var errs []error
 	for rigName, info := range rigSet {
 		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
 		bd := beads.New(rigBeadsPath)
@@ -159,14 +162,14 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 			fields := &beads.RigFields{
 				Repo:   gitURL,
 				Prefix: info.prefix,
-				State:  "active",
+				State:  beads.RigStateActive,
 			}
 
-			if _, err := bd.CreateRigBead(rigBeadID, rigName, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", rigBeadID, err)
+			if _, err := bd.CreateRigBead(rigName, fields); err != nil {
+				errs = append(errs, fmt.Errorf("creating %s: %w", rigBeadID, err))
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }

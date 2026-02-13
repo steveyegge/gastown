@@ -29,6 +29,7 @@ var (
 	mailThreadJSON    bool
 	mailReplySubject  string
 	mailReplyMessage  string
+	mailStdin         bool // Read message body from stdin
 
 	// Search flags
 	mailSearchFrom    string
@@ -130,7 +131,12 @@ Examples:
   gt mail send mayor/ -s "Re: Status" -m "Done" --reply-to msg-abc123
   gt mail send --self -s "Handoff" -m "Context for next session"
   gt mail send greenplace/Toast -s "Update" -m "Progress report" --cc overseer
-  gt mail send list:oncall -s "Alert" -m "System down"`,
+  gt mail send list:oncall -s "Alert" -m "System down"
+
+  # Read body from stdin (avoids shell quoting issues):
+  gt mail send mayor/ -s "Update" --stdin <<'BODY'
+  Message with 'quotes' and "quotes" and $variables.
+  BODY`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runMailSend,
 }
@@ -448,6 +454,7 @@ func init() {
 	mailSendCmd.Flags().StringVarP(&mailSubject, "subject", "s", "", "Message subject (required)")
 	mailSendCmd.Flags().StringVarP(&mailBody, "message", "m", "", "Message body")
 	mailSendCmd.Flags().StringVar(&mailBody, "body", "", "Alias for --message")
+	mailSendCmd.Flags().BoolVar(&mailStdin, "stdin", false, "Read message body from stdin (avoids shell quoting issues)")
 	mailSendCmd.Flags().IntVar(&mailPriority, "priority", 2, "Message priority (0=urgent, 1=high, 2=normal, 3=low, 4=backlog)")
 	mailSendCmd.Flags().BoolVar(&mailUrgent, "urgent", false, "Set priority=0 (urgent)")
 	mailSendCmd.Flags().StringVar(&mailType, "type", "notification", "Message type (task, scavenge, notification, reply)")
