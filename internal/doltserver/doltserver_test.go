@@ -2482,3 +2482,150 @@ func TestMergePolecatBranch_ValidBranchName(t *testing.T) {
 		t.Errorf("valid branch name rejected: %v", err)
 	}
 }
+
+// =============================================================================
+// VerifyDatabases tests
+// =============================================================================
+
+func TestParseShowDatabases_JSON(t *testing.T) {
+	input := `{"rows":[{"Database":"hq"},{"Database":"gastown"},{"Database":"information_schema"}]}`
+	got := parseShowDatabases([]byte(input))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 databases, got %d: %v", len(got), got)
+	}
+	// Check that information_schema is filtered out.
+	for _, db := range got {
+		if db == "information_schema" {
+			t.Error("information_schema should be filtered out")
+		}
+	}
+	// Both hq and gastown should be present.
+	found := map[string]bool{}
+	for _, db := range got {
+		found[db] = true
+	}
+	if !found["hq"] || !found["gastown"] {
+		t.Errorf("expected hq and gastown, got %v", got)
+	}
+}
+
+func TestParseShowDatabases_JSONEmpty(t *testing.T) {
+	input := `{"rows":[]}`
+	got := parseShowDatabases([]byte(input))
+	if len(got) != 0 {
+		t.Errorf("expected 0 databases, got %d: %v", len(got), got)
+	}
+}
+
+func TestParseShowDatabases_JSONEmptyDatabase(t *testing.T) {
+	// Rows with empty Database field should be filtered.
+	input := `{"rows":[{"Database":"hq"},{"Database":""}]}`
+	got := parseShowDatabases([]byte(input))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 database, got %d: %v", len(got), got)
+	}
+	if got[0] != "hq" {
+		t.Errorf("expected hq, got %s", got[0])
+	}
+}
+
+func TestParseShowDatabases_LineFallback(t *testing.T) {
+	// Non-JSON output triggers line-based parsing.
+	input := `+--------------------+
+| Database           |
++--------------------+
+| hq                 |
+| gastown            |
+| information_schema |
++--------------------+`
+	got := parseShowDatabases([]byte(input))
+	// Lines starting with + or | are filtered, as is "Database" header
+	// and "information_schema". Only raw database names remain.
+	// The table-formatted lines all start with + or |, so only
+	// non-table lines would be parsed. This format should yield 0
+	// since all lines start with + or |.
+	// The fallback is for plain-text output like:
+	// hq\ngastown\ninformation_schema
+	if len(got) != 0 {
+		t.Errorf("table format should filter all lines, got %d: %v", len(got), got)
+	}
+}
+
+func TestParseShowDatabases_PlainText(t *testing.T) {
+	// Plain-text output (no JSON, no table formatting).
+	input := "hq\ngastown\ninformation_schema\n"
+	got := parseShowDatabases([]byte(input))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 databases, got %d: %v", len(got), got)
+	}
+	found := map[string]bool{}
+	for _, db := range got {
+		found[db] = true
+	}
+	if !found["hq"] || !found["gastown"] {
+		t.Errorf("expected hq and gastown, got %v", got)
+	}
+}
+
+func TestFindMissingDatabases_NoneServed(t *testing.T) {
+	served := []string{}
+	fs := []string{"hq", "gastown"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 2 {
+		t.Errorf("expected 2 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestFindMissingDatabases_AllServed(t *testing.T) {
+	served := []string{"hq", "gastown", "beads"}
+	fs := []string{"hq", "gastown"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestFindMissingDatabases_PartialMissing(t *testing.T) {
+	served := []string{"hq"}
+	fs := []string{"hq", "gastown", "beads"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 2 {
+		t.Fatalf("expected 2 missing, got %d: %v", len(missing), missing)
+	}
+	found := map[string]bool{}
+	for _, db := range missing {
+		found[db] = true
+	}
+	if !found["gastown"] || !found["beads"] {
+		t.Errorf("expected gastown and beads missing, got %v", missing)
+	}
+}
+
+func TestFindMissingDatabases_BothEmpty(t *testing.T) {
+	missing := findMissingDatabases(nil, nil)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestVerifyDatabases_NoServer(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// VerifyDatabases should return an error when no server is running
+	// or when the data directory doesn't exist. If a real server happens
+	// to be on port 3307, the TCP check will pass but dolt sql will fail
+	// due to missing data dir — either way, we expect an error.
+	served, _, err := VerifyDatabases(townRoot)
+	if err == nil {
+		// Server is running AND somehow succeeded — skip.
+		t.Skip("A server is running and dolt sql succeeded against temp dir")
+	}
+	if served != nil {
+		t.Errorf("expected nil served on error, got %v", served)
+	}
+	// Error should mention either "server not reachable" or "SHOW DATABASES".
+	if !strings.Contains(err.Error(), "server not reachable") &&
+		!strings.Contains(err.Error(), "SHOW DATABASES") {
+		t.Errorf("expected reachability or query error, got: %v", err)
+	}
+}

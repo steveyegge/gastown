@@ -608,35 +608,7 @@ func VerifyDatabases(townRoot string) (served, missing []string, err error) {
 		return nil, nil, fmt.Errorf("querying SHOW DATABASES: %w", err)
 	}
 
-	// Parse JSON output (same pattern as daemon/dolt.go:listDatabases).
-	var result struct {
-		Rows []struct {
-			Database string `json:"Database"`
-		} `json:"rows"`
-	}
-
-	servedSet := make(map[string]bool)
-	if err := json.Unmarshal(output, &result); err != nil {
-		// Fall back to line parsing if JSON fails.
-		for _, line := range strings.Split(string(output), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
-				if line != "information_schema" {
-					servedSet[line] = true
-				}
-			}
-		}
-	} else {
-		for _, row := range result.Rows {
-			if row.Database != "" && row.Database != "information_schema" {
-				servedSet[row.Database] = true
-			}
-		}
-	}
-
-	for name := range servedSet {
-		served = append(served, name)
-	}
+	served = parseShowDatabases(output)
 
 	// Compare against filesystem databases.
 	fsDatabases, err := ListDatabases(townRoot)
@@ -644,13 +616,54 @@ func VerifyDatabases(townRoot string) (served, missing []string, err error) {
 		return served, nil, fmt.Errorf("listing filesystem databases: %w", err)
 	}
 
+	missing = findMissingDatabases(served, fsDatabases)
+	return served, missing, nil
+}
+
+// parseShowDatabases parses the output of SHOW DATABASES from dolt sql.
+// It tries JSON parsing first, falling back to line-based parsing.
+// Filters out the information_schema database.
+func parseShowDatabases(output []byte) []string {
+	var result struct {
+		Rows []struct {
+			Database string `json:"Database"`
+		} `json:"rows"`
+	}
+
+	var databases []string
+	if err := json.Unmarshal(output, &result); err != nil {
+		// Fall back to line parsing if JSON fails.
+		for _, line := range strings.Split(string(output), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
+				if line != "information_schema" {
+					databases = append(databases, line)
+				}
+			}
+		}
+	} else {
+		for _, row := range result.Rows {
+			if row.Database != "" && row.Database != "information_schema" {
+				databases = append(databases, row.Database)
+			}
+		}
+	}
+	return databases
+}
+
+// findMissingDatabases returns filesystem databases not present in the served list.
+func findMissingDatabases(served, fsDatabases []string) []string {
+	servedSet := make(map[string]bool, len(served))
+	for _, db := range served {
+		servedSet[db] = true
+	}
+	var missing []string
 	for _, db := range fsDatabases {
 		if !servedSet[db] {
 			missing = append(missing, db)
 		}
 	}
-
-	return served, missing, nil
+	return missing
 }
 
 // InitRig initializes a new rig database in the data directory.
