@@ -230,6 +230,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// under concurrent load (gt-5cc2p). Changes merge at gt done time.
 	command = config.PrependEnv(command, map[string]string{"BD_DOLT_AUTO_COMMIT": "off"})
 
+	// FIX (ga-6s284): Prepend GT_RIG, GT_POLECAT, GT_ROLE to startup command
+	// so they're inherited by Kimi and other agents.
+	command = config.PrependEnv(command, map[string]string{
+		"GT_RIG":     m.rig.Name,
+		"GT_POLECAT": polecat,
+		"GT_ROLE":    fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
+	})
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
