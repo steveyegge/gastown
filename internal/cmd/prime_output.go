@@ -401,7 +401,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-witness-patrol`")
+		fmt.Println("   - If no mol → create patrol: `" + cli.Name() + " patrol new`")
 	case RolePolecat:
 		fmt.Println()
 		fmt.Println("---")
@@ -426,7 +426,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-refinery-patrol`")
+		fmt.Println("   - If no mol → create patrol: `" + cli.Name() + " patrol new`")
 	case RoleCrew:
 		fmt.Println()
 		fmt.Println("---")

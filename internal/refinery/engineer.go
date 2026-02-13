@@ -23,15 +23,14 @@ import (
 )
 
 // MergeQueueConfig holds configuration for the merge queue processor.
+//
+// Note: Integration branch gating (polecat/refinery enabled flags) is handled at
+// MR creation time via config.MergeQueueConfig and formula injection, not here.
+// The Engineer's job is to merge whatever target the MR specifies — it doesn't
+// need to know whether integration branches are enabled.
 type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
 	Enabled bool `json:"enabled"`
-
-	// TargetBranch is the default branch to merge to (e.g., "main").
-	TargetBranch string `json:"target_branch"`
-
-	// IntegrationBranches enables per-epic integration branches.
-	IntegrationBranches bool `json:"integration_branches"`
 
 	// OnConflict is the strategy for handling conflicts: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
@@ -58,16 +57,14 @@ type MergeQueueConfig struct {
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:              true,
-		TargetBranch:         "main",
-		IntegrationBranches:  true,
-		OnConflict:           "assign_back",
-		RunTests:             true,
-		TestCommand:          "",
-		DeleteMergedBranches: true,
-		RetryFlakyTests:      1,
-		PollInterval:         30 * time.Second,
-		MaxConcurrent:        1,
+		Enabled:    true,
+		OnConflict: "assign_back",
+		RunTests:                         true,
+		TestCommand:                      "",
+		DeleteMergedBranches:             true,
+		RetryFlakyTests:                  1,
+		PollInterval:                     30 * time.Second,
+		MaxConcurrent:                    1,
 	}
 }
 
@@ -127,8 +124,6 @@ type Engineer struct {
 // NewEngineer creates a new Engineer for the given rig.
 func NewEngineer(r *rig.Rig) *Engineer {
 	cfg := DefaultMergeQueueConfig()
-	// Override target branch with rig's configured default branch
-	cfg.TargetBranch = r.DefaultBranch()
 
 	// Determine the git working directory for refinery operations.
 	// Prefer refinery/rig worktree, fall back to mayor/rig (legacy architecture).
@@ -183,16 +178,14 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled              *bool   `json:"enabled"`
-		TargetBranch         *string `json:"target_branch"`
-		IntegrationBranches  *bool   `json:"integration_branches"`
-		OnConflict           *string `json:"on_conflict"`
-		RunTests             *bool   `json:"run_tests"`
-		TestCommand          *string `json:"test_command"`
-		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
-		PollInterval         *string `json:"poll_interval"`
-		MaxConcurrent        *int    `json:"max_concurrent"`
+		Enabled    *bool   `json:"enabled"`
+		OnConflict *string `json:"on_conflict"`
+		RunTests                         *bool   `json:"run_tests"`
+		TestCommand                      *string `json:"test_command"`
+		DeleteMergedBranches             *bool   `json:"delete_merged_branches"`
+		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
+		PollInterval                     *string `json:"poll_interval"`
+		MaxConcurrent                    *int    `json:"max_concurrent"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -202,12 +195,6 @@ func (e *Engineer) LoadConfig() error {
 	// Apply non-nil values to config (preserving defaults for missing fields)
 	if mqRaw.Enabled != nil {
 		e.config.Enabled = *mqRaw.Enabled
-	}
-	if mqRaw.TargetBranch != nil {
-		e.config.TargetBranch = *mqRaw.TargetBranch
-	}
-	if mqRaw.IntegrationBranches != nil {
-		e.config.IntegrationBranches = *mqRaw.IntegrationBranches
 	}
 	if mqRaw.OnConflict != nil {
 		e.config.OnConflict = *mqRaw.OnConflict

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -133,16 +134,26 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	// Determine target branch
 	target := defaultBranch
 	if mqSubmitEpic != "" {
-		// Explicit --epic flag takes precedence
-		target = "integration/" + mqSubmitEpic
+		// Explicit --epic flag: read stored branch name, fall back to template
+		rigPath := filepath.Join(townRoot, rigName)
+		target = resolveIntegrationBranchName(bd, rigPath, mqSubmitEpic)
 	} else {
 		// Auto-detect: check if source issue has a parent epic with an integration branch
-		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
-		if err != nil {
-			// Non-fatal: log and continue with default branch as target
-			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
-		} else if autoTarget != "" {
-			target = autoTarget
+		// Only if refinery integration branch auto-targeting is enabled
+		refineryEnabled := true
+		rigPath := filepath.Join(townRoot, rigName)
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+		}
+		if refineryEnabled {
+			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+			if err != nil {
+				// Non-fatal: log and continue with default branch as target
+				fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
+			} else if autoTarget != "" {
+				target = autoTarget
+			}
 		}
 	}
 
@@ -221,57 +232,6 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// detectIntegrationBranch checks if an issue is a descendant of an epic that has an integration branch.
-// Traverses up the parent chain until it finds an epic or runs out of parents.
-// Returns the integration branch target (e.g., "integration/gt-epic") if found, or "" if not.
-func detectIntegrationBranch(bd *beads.Beads, g *git.Git, issueID string) (string, error) {
-	// Traverse up the parent chain looking for an epic with an integration branch
-	// Limit depth to prevent infinite loops in case of circular references
-	const maxDepth = 10
-	currentID := issueID
-
-	for depth := 0; depth < maxDepth; depth++ {
-		// Get the current issue
-		issue, err := bd.Show(currentID)
-		if err != nil {
-			return "", fmt.Errorf("looking up issue %s: %w", currentID, err)
-		}
-
-		// Check if this issue is an epic
-		if issue.Type == "epic" {
-			// Found an epic - check if it has an integration branch
-			integrationBranch := "integration/" + issue.ID
-
-			// Check local first (faster)
-			exists, err := g.BranchExists(integrationBranch)
-			if err != nil {
-				return "", fmt.Errorf("checking local branch: %w", err)
-			}
-			if exists {
-				return integrationBranch, nil
-			}
-
-			// Check remote
-			exists, err = g.RemoteBranchExists("origin", integrationBranch)
-			if err != nil {
-				// Remote check failure is non-fatal, continue to parent
-			} else if exists {
-				return integrationBranch, nil
-			}
-			// Epic found but no integration branch - continue checking parents
-			// in case there's a higher-level epic with an integration branch
-		}
-
-		// Move to parent
-		if issue.Parent == "" {
-			return "", nil // No more parents, no integration branch found
-		}
-		currentID = issue.Parent
-	}
-
-	return "", nil // Max depth reached, no integration branch found
 }
 
 // polecatCleanup sends a lifecycle shutdown request to the witness and waits for termination.

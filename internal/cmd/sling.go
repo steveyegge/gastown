@@ -115,6 +115,7 @@ var (
 	slingNoMerge       bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
+	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 )
 
 func init() {
@@ -136,6 +137,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
+	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -245,15 +247,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 		target = args[1]
 	}
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
-		DryRun:   slingDryRun,
-		Force:    slingForce,
-		Create:   slingCreate,
-		Account:  slingAccount,
-		Agent:    slingAgent,
-		NoBoot:   slingNoBoot,
-		HookBead: beadID,
-		BeadID:   beadID,
-		TownRoot: townRoot,
+		DryRun:     slingDryRun,
+		Force:      slingForce,
+		Create:     slingCreate,
+		Account:    slingAccount,
+		Agent:      slingAgent,
+		NoBoot:     slingNoBoot,
+		HookBead:   beadID,
+		BeadID:     beadID,
+		TownRoot:   townRoot,
+		BaseBranch: slingBaseBranch,
 	})
 	if err != nil {
 		return err
@@ -265,6 +268,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	delayedDogInfo := resolved.DelayedDogInfo
 	newPolecatInfo := resolved.NewPolecatInfo
 	isSelfSling := resolved.IsSelfSling
+
+	// Inject base_branch var for formula instantiation (non-main only; formula default handles main)
+	if newPolecatInfo != nil && newPolecatInfo.BaseBranch != "" && newPolecatInfo.BaseBranch != "main" {
+		slingVars = append(slingVars, fmt.Sprintf("base_branch=%s", newPolecatInfo.BaseBranch))
+	}
 
 	// Cross-rig guard: prevent slinging beads to polecats in the wrong rig (gt-myecw).
 	// Polecats work in their rig's worktree and cannot fix code owned by another rig.
@@ -407,6 +415,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Formula-on-bead mode: instantiate formula and bond to original bead
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
+
+		// Auto-inject rig command vars as defaults (user --var flags override)
+		if parts := strings.SplitN(targetAgent, "/", 2); len(parts) >= 1 && parts[0] != "" {
+			rigCmdVars := loadRigCommandVars(townRoot, parts[0])
+			slingVars = append(rigCmdVars, slingVars...)
+		}
 
 		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {

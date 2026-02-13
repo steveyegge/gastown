@@ -17,7 +17,8 @@ You are a self-cleaning worker. You:
 nuke your sandbox, and exit. There is no idle state. Done means gone.
 
 **Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `bd ready` to find them - do NOT read this file directly.
+beads created from it. Use `gt hook` to find your pinned molecule, then `bd show`
+for step details — do NOT read this file directly.
 
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
@@ -30,6 +31,12 @@ beads created from it. Use `bd ready` to find them - do NOT read this file direc
 | Variable | Source | Description |
 |----------|--------|-------------|
 | issue | hook_bead | The issue ID you're assigned to work on |
+| base_branch | sling vars | The base branch to rebase on (default: main) |
+| setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
+| typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
+| test_command | rig config | Test command (default: `go test ./...`) |
+| lint_command | rig config | Lint command (e.g., `eslint .`). Empty = skip. |
+| build_command | rig config | Build command (e.g., `go build ./...`). Empty = skip. |
 
 ## Failure Modes
 
@@ -40,7 +47,7 @@ beads created from it. Use `bd ready` to find them - do NOT read this file direc
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 4
+version = 5
 
 [[steps]]
 id = "load-context"
@@ -104,8 +111,8 @@ git branch --show-current
 
 **2. If not on a feature branch, create one:**
 ```bash
-# Standard naming: polecat/<your-name> or feature/<issue-id>
-git checkout -b polecat/<name>
+git fetch origin
+git checkout -b polecat/<name> origin/{{base_branch}}
 ```
 
 **3. Ensure clean working state:**
@@ -125,10 +132,10 @@ git stash push -m "unrelated changes before {{issue}}"
 git checkout -- .
 ```
 
-**4. Sync with main:**
+**4. Sync with {{base_branch}}:**
 ```bash
 git fetch origin
-git rebase origin/main      # Get latest, rebase your branch
+git rebase origin/{{base_branch}}      # Get latest, rebase your branch
 ```
 
 If rebase conflicts:
@@ -136,11 +143,21 @@ If rebase conflicts:
 - Test after resolution
 - If stuck, mail Witness
 
-**Exit criteria:** You're on a clean feature branch, rebased on latest main."""
+**5. Run project setup (if configured):**
+
+If setup_command is set, run it to install dependencies:
+```bash
+{{setup_command}}
+```
+
+This ensures dependencies are installed before pre-flight checks.
+Empty setup_command means "not configured" — skip this step.
+
+**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
 
 [[steps]]
 id = "preflight-tests"
-title = "Verify tests pass on main"
+title = "Verify pre-flights pass on base branch"
 needs = ["branch-setup"]
 description = """
 Check if the codebase is healthy BEFORE starting your work.
@@ -148,57 +165,63 @@ Check if the codebase is healthy BEFORE starting your work.
 **The Scotty Principle:** Don't walk past a broken warp core. But also don't
 let someone else's mess consume your entire mission.
 
-**1. Check tests on main:**
+**1. Run pre-flights on {{base_branch}}:**
+
+Your branch was just created from or rebased on `origin/{{base_branch}}` with no
+implementation changes yet — you're already at the base branch state.
+
+Run each configured check, then tests:
+
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If test_command is set: `{{test_command}}`
+
 ```bash
-git stash                   # Save your branch state
-git checkout origin/main
-{{test_command}}            # Run tests (configured per-rig)
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{test_command}}            # Run tests (if command set)
 ```
 
-**2. If tests PASS:**
-```bash
-git checkout -              # Back to your branch
-git stash pop               # Restore state
-```
+Empty commands mean "not configured" — skip silently.
+
+**2. If pre-flights pass:**
+
 Continue to implement step.
 
-**3. If tests FAIL on main:**
+**3. If pre-flights fail on {{base_branch}}:**
 
 File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
-not your assignment. Your job is to fix the issue on your hook, not main.
+not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
 
 | Situation | Action |
 |-----------|--------|
 | Any pre-existing failure | File bead, proceed with your work |
 
-FORBIDDEN: Pushing to main. FORBIDDEN: Fixing pre-existing failures.
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
 You work on YOUR feature branch only. `gt done` handles push/MR.
 
 **File and proceed path:**
 ```bash
-bd create --title "Pre-existing test failure: <description>" \
+bd create --title "Pre-existing failure: <description>" \
   --type bug --priority 1
 
-gt mail send <rig>/witness -s "NOTICE: Main has failing tests" \
-  -m "Found pre-existing test failures on main.
+gt mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
+  -m "Found pre-existing failures on {{base_branch}}.
 Filed: <bead-id>
 Proceeding with my assigned work ({{issue}})."
-
-git checkout -
-git stash pop
 ```
 
 **Context consideration:**
-If fixing pre-existing failures consumed significant context:
+If investigating pre-existing failures consumed significant context:
 ```bash
-gt handoff -s "Fixed pre-existing failures, ready for assigned work" \
+gt handoff -s "Investigated pre-existing failures, ready for assigned work" \
   -m "Issue: {{issue}}
-Fixed: <what you fixed>
+Found: <what failed>
 Ready to start: implement step"
 ```
 Fresh session continues from implement.
 
-**Exit criteria:** Tests pass on main (or issue filed), ready to implement."""
+**Exit criteria:** Pre-flights pass on {{base_branch}} (or issue filed), ready to implement."""
 
 [[steps]]
 id = "implement"
@@ -251,8 +274,8 @@ Review your own changes before running tests.
 
 **1. Review the diff:**
 ```bash
-git diff origin/main...HEAD     # All changes vs main
-git log --oneline origin/main..HEAD  # All commits
+git diff origin/{{base_branch}}...HEAD     # All changes vs {{base_branch}}
+git log --oneline origin/{{base_branch}}..HEAD  # All commits
 ```
 
 **2. Check for common issues:**
@@ -270,7 +293,7 @@ Don't just note them - fix them now. Amend or add commits as needed.
 
 **4. Verify no unintended changes:**
 ```bash
-git diff --stat origin/main...HEAD
+git diff --stat origin/{{base_branch}}...HEAD
 # Only files relevant to {{issue}} should appear
 ```
 
@@ -280,48 +303,70 @@ If you accidentally modified unrelated files, remove those changes.
 
 [[steps]]
 id = "run-tests"
-title = "Run tests and verify coverage"
+title = "Run quality checks and tests"
 needs = ["self-review"]
 description = """
 Verify your changes don't break anything and are properly tested.
 
-**1. Run the full test suite:**
+**1. Run quality checks (skip any that are not configured):**
+
+If setup_command is set: `{{setup_command}}`
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If build_command is set: `{{build_command}}`
+
 ```bash
-{{test_command}}            # Run tests (configured per-rig)
+{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{build_command}}            # Make sure it builds (if command set)
 ```
 
-**ALL TESTS MUST PASS.** Do not proceed with failures.
+Empty commands mean "not configured for this project" — skip silently.
 
-**2. If tests fail:**
+**2. If quality checks fail:**
 - Read the failure output carefully
 - Determine if your change caused it:
   - If yes: Fix it. Return to implement step if needed.
   - If no (pre-existing): File a bead, but still must pass for your PR
 
 ```bash
-# Check if failure exists on main:
+# Check if failure exists on {{base_branch}}:
 git stash
-git checkout main
+git checkout origin/{{base_branch}}
+# Re-run the failing command(s)
+git checkout -
+git stash pop
+```
+
+**3. Run the full test suite:**
+```bash
+{{test_command}}            # Run tests (configured per-rig)
+```
+
+**ALL TESTS MUST PASS.** Do not proceed with failures.
+
+**4. If tests fail:**
+- Read the failure output carefully
+- Determine if your change caused it:
+  - If yes: Fix it. Return to implement step if needed.
+  - If no (pre-existing): File a bead, but still must pass for your PR
+
+```bash
+# Check if failure exists on {{base_branch}}:
+git stash
+git checkout origin/{{base_branch}}
 {{test_command}}
 git checkout -
 git stash pop
 ```
 
-**3. Verify test coverage for new code:**
+**5. Verify test coverage for new code:**
 - New features should have tests
 - Bug fixes should have regression tests
 - If you added significant code without tests, add them now
 
-**4. Run any other quality checks:**
-```bash
-# Linting
-{{lint_command}}
-
-# Build check
-{{build_command}}
-```
-
-**Exit criteria:** All tests pass, new code has appropriate test coverage."""
+**Exit criteria:** All quality checks and tests pass, new code has appropriate test coverage."""
 
 [[steps]]
 id = "commit-changes"
@@ -354,7 +399,7 @@ Must show "nothing to commit, working tree clean".
 
 **5. Verify you have commits:**
 ```bash
-git log origin/main..HEAD --oneline
+git log origin/{{base_branch}}..HEAD --oneline
 ```
 If you made changes during implementation, this MUST show at least 1 commit.
 
@@ -391,10 +436,10 @@ Should be empty. If not:
 ```bash
 git status                  # Must show "working tree clean"
 git stash list              # Must be empty
-git log origin/main..HEAD   # Your commits (should show your work)
+git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
 ```
 
-If `git log origin/main..HEAD` shows nothing but you DID make changes,
+If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
 something went wrong. Do NOT proceed — mail Witness for help.
 
 **Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gt done` handles that."""
@@ -451,7 +496,7 @@ You should see output like:
 ✓ Work submitted to merge queue
   MR ID: gt-xxxxx
   Source: polecat/<name>
-  Target: main
+  Target: {{base_branch}}
   Issue: {{issue}}
 ✓ Sandbox nuked
 ✓ Session exiting
@@ -459,7 +504,7 @@ You should see output like:
 
 **What happens next (not your concern):**
 - Refinery processes your MR from the queue
-- Refinery rebases and merges to main
+- Refinery rebases and merges to {{base_branch}}
 - Refinery closes the issue
 - If conflicts: Refinery spawns a FRESH polecat to re-implement
 
@@ -472,14 +517,26 @@ You are NOT involved in any of that. You're gone. Done means gone.
 description = "The issue ID assigned to this polecat"
 required = true
 
+[vars.base_branch]
+description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
+default = "main"
+
+[vars.setup_command]
+description = "Setup/install command (e.g., pnpm install). Empty = skip."
+default = "none"
+
+[vars.typecheck_command]
+description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+default = "none"
+
 [vars.test_command]
 description = "Command to run tests (auto-detected from rig settings)"
 default = "go test ./..."
 
 [vars.lint_command]
-description = "Command to run linting (auto-detected from rig settings)"
-default = "golangci-lint run ./..."
+description = "Command to run linting. Empty = skip."
+default = "none"
 
 [vars.build_command]
-description = "Command to run build (auto-detected from rig settings)"
-default = "go build ./..."
+description = "Command to run build. Empty = skip."
+default = "none"

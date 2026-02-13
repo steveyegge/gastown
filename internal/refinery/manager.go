@@ -139,7 +139,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "Check your hook and begin patrol.")
+	}, "Run `gt prime --hook` and begin patrol.")
 
 	var command string
 	if agentOverride != "" {
@@ -217,11 +217,11 @@ func (m *Manager) Stop() error {
 // Uses beads merge-request issues as the source of truth (not git branches).
 // ZFC-compliant: beads is the source of truth, no state file.
 func (m *Manager) Queue() ([]QueueItem, error) {
-	// Query beads for open merge-request type issues
+	// Query beads for open merge-request issues
 	// BeadsPath() returns the git-synced beads location
 	b := beads.New(m.rig.BeadsPath())
 	issues, err := b.List(beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	})

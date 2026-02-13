@@ -283,7 +283,32 @@ func LoadRigSettings(path string) (*RigSettings, error) {
 		return nil, err
 	}
 
+	// Check for deprecated merge_queue keys that were removed.
+	// These are silently ignored by json.Unmarshal but may indicate stale config.
+	warnDeprecatedMergeQueueKeys(data, path)
+
 	return &settings, nil
+}
+
+// DeprecatedMergeQueueKeys lists merge_queue config keys that have been removed.
+// target_branch and integration_branches were replaced by rig default_branch
+// and per-epic integration branch metadata.
+var DeprecatedMergeQueueKeys = []string{"target_branch", "integration_branches"}
+
+// warnDeprecatedMergeQueueKeys checks raw settings JSON for removed merge_queue keys
+// and prints a stderr warning. This is advisory only — not a validation error.
+func warnDeprecatedMergeQueueKeys(data []byte, path string) {
+	var raw struct {
+		MergeQueue map[string]json.RawMessage `json:"merge_queue"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || raw.MergeQueue == nil {
+		return
+	}
+	for _, key := range DeprecatedMergeQueueKeys {
+		if _, ok := raw.MergeQueue[key]; ok {
+			fmt.Fprintf(os.Stderr, "warning: %s: merge_queue.%s is deprecated and ignored (use rig default_branch instead)\n", path, key)
+		}
+	}
 }
 
 // SaveRigSettings saves rig settings to a file.

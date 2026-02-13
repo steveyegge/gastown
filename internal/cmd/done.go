@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -447,10 +448,18 @@ func runDone(cmd *cobra.Command, args []string) error {
 		}
 
 		// Determine target branch (auto-detect integration branch if applicable)
+		// Only if refinery integration branch auto-targeting is enabled
 		target := defaultBranch
-		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
-		if err == nil && autoTarget != "" {
-			target = autoTarget
+		refineryEnabled := true
+		settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+		}
+		if refineryEnabled {
+			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+			if err == nil && autoTarget != "" {
+				target = autoTarget
+			}
 		}
 
 		// Get source issue for priority inheritance

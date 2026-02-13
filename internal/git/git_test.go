@@ -535,6 +535,102 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	}
 }
 
+func TestRefExists_ValidRef(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// HEAD should exist
+	exists, err := g.RefExists("HEAD")
+	if err != nil {
+		t.Fatalf("RefExists(HEAD): %v", err)
+	}
+	if !exists {
+		t.Error("expected HEAD to exist")
+	}
+}
+
+func TestRefExists_InvalidRef(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// A ref that doesn't exist
+	exists, err := g.RefExists("refs/heads/nonexistent-branch")
+	if err != nil {
+		t.Fatalf("RefExists: %v", err)
+	}
+	if exists {
+		t.Error("expected nonexistent ref to not exist")
+	}
+}
+
+func TestRefExists_OriginRef(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a remote repo
+	remoteDir := filepath.Join(tmp, "remote")
+	if err := os.MkdirAll(remoteDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cmd := exec.Command("git", "init")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	if err := os.WriteFile(filepath.Join(remoteDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Get main branch name
+	cmd = exec.Command("git", "branch", "--show-current")
+	cmd.Dir = remoteDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+
+	// Clone bare
+	bareDir := filepath.Join(tmp, "bare.git")
+	g := NewGit(tmp)
+	if err := g.CloneBare(remoteDir, bareDir); err != nil {
+		t.Fatalf("CloneBare: %v", err)
+	}
+
+	bareGit := NewGitWithDir(bareDir, "")
+
+	// origin/<main> should exist
+	exists, err := bareGit.RefExists("origin/" + mainBranch)
+	if err != nil {
+		t.Fatalf("RefExists(origin/%s): %v", mainBranch, err)
+	}
+	if !exists {
+		t.Errorf("expected origin/%s to exist", mainBranch)
+	}
+
+	// origin/nonexistent should not exist
+	exists, err = bareGit.RefExists("origin/nonexistent")
+	if err != nil {
+		t.Fatalf("RefExists(origin/nonexistent): %v", err)
+	}
+	if exists {
+		t.Error("expected origin/nonexistent to not exist")
+	}
+}
+
 func stringContains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -810,6 +906,51 @@ func TestPruneStaleBranches_SkipsUnmerged(t *testing.T) {
 	}
 	if len(pruned) != 0 {
 		t.Errorf("expected 0 pruned (unmerged with remote should be kept), got %d", len(pruned))
+	}
+}
+
+func TestPushWithEnv(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Set up a pre-push hook that blocks unless GT_INTEGRATION_LAND=1
+	hooksDir := filepath.Join(localDir, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	hookScript := `#!/bin/bash
+if [[ "$GT_INTEGRATION_LAND" != "1" ]]; then
+  echo "BLOCKED: GT_INTEGRATION_LAND not set"
+  exit 1
+fi
+exit 0
+`
+	hookPath := filepath.Join(hooksDir, "pre-push")
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	// Make a commit to push
+	if err := os.WriteFile(filepath.Join(localDir, "env-test.txt"), []byte("test"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("env-test.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("env test"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Regular Push should fail (hook blocks without env var)
+	err := g.Push("origin", mainBranch, false)
+	if err == nil {
+		t.Fatal("expected Push to fail without GT_INTEGRATION_LAND")
+	}
+
+	// PushWithEnv with GT_INTEGRATION_LAND=1 should succeed
+	err = g.PushWithEnv("origin", mainBranch, false, []string{"GT_INTEGRATION_LAND=1"})
+	if err != nil {
+		t.Fatalf("PushWithEnv with GT_INTEGRATION_LAND=1 should succeed: %v", err)
 	}
 }
 

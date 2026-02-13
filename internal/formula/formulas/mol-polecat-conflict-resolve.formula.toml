@@ -17,7 +17,7 @@ fails. They are identified by:
 | Aspect | Regular Work | Conflict Resolution |
 |--------|--------------|---------------------|
 | Branch source | Create new branch | Checkout existing MR branch |
-| Merge path | Submit to queue via `gt done` | Push directly to main |
+| Merge path | Submit to queue via `gt done` | Push directly to {{base_branch}} |
 | Issue closure | Refinery closes after merge | Close MR bead yourself |
 | Serialization | None | Merge-slot gate required |
 
@@ -28,7 +28,8 @@ fails. They are identified by:
 | task | hook_bead | The conflict-resolution task ID |
 | original_mr | task metadata | The MR bead that had conflicts |
 | branch | task metadata | The branch to rebase |
-| conflict_sha | task metadata | Main SHA when conflict occurred |
+| conflict_sha | task metadata | Base branch SHA when conflict occurred |
+| base_branch | sling vars | The base branch to rebase on (default: main) |
 
 ## Failure Modes
 
@@ -39,7 +40,7 @@ fails. They are identified by:
 | Tests fail after resolve | Fix them before pushing |
 | Resolution unclear | Read original issue for context |"""
 formula = "mol-polecat-conflict-resolve"
-version = 1
+version = 2
 
 [[steps]]
 id = "load-task"
@@ -98,7 +99,7 @@ description = """
 Acquire exclusive access to the merge slot before proceeding.
 
 The merge slot prevents multiple conflict-resolution polecats from racing
-to push to main simultaneously (the "Monkey Knife Fight" problem).
+to push to {{base_branch}} simultaneously (the "Monkey Knife Fight" problem).
 
 **1. Check slot availability:**
 ```bash
@@ -161,21 +162,21 @@ Using `temp-resolve` as the local branch name keeps things clear.
 **4. Verify the branch state:**
 ```bash
 git log --oneline -5        # Recent commits
-git log origin/main..HEAD   # Commits not on main
+git log origin/{{base_branch}}..HEAD   # Commits not on {{base_branch}}
 ```
 
 **Exit criteria:** On temp-resolve branch, ready to rebase."""
 
 [[steps]]
 id = "rebase-resolve"
-title = "Rebase onto main and resolve conflicts"
+title = "Rebase onto base branch and resolve conflicts"
 needs = ["checkout-branch"]
 description = """
 Perform the rebase and resolve any conflicts.
 
 **1. Start the rebase:**
 ```bash
-git rebase origin/main
+git rebase origin/{{base_branch}}
 ```
 
 **2. If conflicts occur:**
@@ -209,11 +210,11 @@ git rebase --continue
 
 **4. Verify rebase success:**
 ```bash
-git log --oneline origin/main..HEAD   # Your commits rebased
+git log --oneline origin/{{base_branch}}..HEAD   # Your commits rebased
 git status                            # Clean working tree
 ```
 
-**Exit criteria:** Branch successfully rebased onto origin/main."""
+**Exit criteria:** Branch successfully rebased onto origin/{{base_branch}}."""
 
 [[steps]]
 id = "run-tests"
@@ -235,9 +236,9 @@ go test ./...               # Or appropriate test command
 - If pre-existing: file a bead, but still must fix before pushing
 
 ```bash
-# Quick check: does main pass?
+# Quick check: does {{base_branch}} pass?
 git stash
-git checkout origin/main
+git checkout origin/{{base_branch}}
 go test ./...
 git checkout temp-resolve
 git stash pop
@@ -252,13 +253,13 @@ go build ./...
 
 [[steps]]
 id = "push-to-main"
-title = "Push resolved changes directly to main"
+title = "Push resolved changes directly to base branch"
 needs = ["run-tests"]
 description = """
-Push the resolved branch directly to main.
+Push the resolved branch directly to {{base_branch}}.
 
 **Important:** Unlike normal polecat work, conflict resolution pushes directly
-to main. This is because:
+to {{base_branch}}. This is because:
 1. The original MR was already reviewed/approved by being in the queue
 2. We're just resolving conflicts, not adding new functionality
 3. Going back through the queue would create an infinite loop
@@ -266,22 +267,22 @@ to main. This is because:
 **1. Rebase one more time (in case main moved):**
 ```bash
 git fetch origin
-git rebase origin/main
+git rebase origin/{{base_branch}}
 ```
 
 If new conflicts: resolve them (return to rebase-resolve step).
 
 **2. Push to main:**
 ```bash
-git push origin temp-resolve:main
+git push origin temp-resolve:{{base_branch}}
 ```
 
 **3. Verify the push:**
 ```bash
-git log origin/main --oneline -3    # Your commits should be there
+git log origin/{{base_branch}} --oneline -3    # Your commits should be there
 ```
 
-**Exit criteria:** Changes are on origin/main."""
+**Exit criteria:** Changes are on origin/{{base_branch}}."""
 
 [[steps]]
 id = "close-beads"
@@ -304,7 +305,7 @@ bd close <source-issue> --reason="merged via conflict resolution"
 ```
 
 The Refinery normally closes issues after merge, but since we pushed
-directly to main, we handle it here.
+directly to {{base_branch}}, we handle it here.
 
 **3. Sync beads:**
 ```bash
@@ -345,10 +346,10 @@ Clean up workspace and close the conflict resolution task.
 
 **1. Clean up local branch:**
 ```bash
-git checkout main
+git checkout {{base_branch}}
 git branch -D temp-resolve
 git fetch origin
-git reset --hard origin/main
+git reset --hard origin/{{base_branch}}
 ```
 
 **2. Verify clean state:**
@@ -359,7 +360,7 @@ git stash list              # Empty
 
 **3. Close this task:**
 ```bash
-bd close {{task}} --reason="Conflicts resolved and merged to main"
+bd close {{task}} --reason="Conflicts resolved and merged to {{base_branch}}"
 ```
 
 **4. Signal completion:**
@@ -383,3 +384,7 @@ required = true
 [vars.branch]
 description = "The branch to rebase (extracted from task metadata)"
 required = true
+
+[vars.base_branch]
+description = "The base branch to rebase on and push to (e.g., main, integration/epic-id)"
+default = "main"

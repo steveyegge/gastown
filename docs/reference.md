@@ -68,9 +68,16 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
   "type": "rig",
   "name": "myproject",
   "git_url": "https://github.com/...",
+  "default_branch": "main",
   "beads": { "prefix": "mp" }
 }
 ```
+
+**Rig config fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `default_branch` | `string` | `"main"` | Default branch for the rig. Auto-detected from remote during `gt rig add`. Used as the merge target by the Refinery and as the base for polecats when no integration branch is active. |
 
 ### Settings (`settings/config.json`)
 
@@ -78,9 +85,49 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 {
   "theme": "desert",
   "max_workers": 5,
-  "merge_queue": { "enabled": true }
+  "merge_queue": {
+    "enabled": true,
+    "run_tests": true,
+    "setup_command": "",
+    "typecheck_command": "",
+    "lint_command": "",
+    "test_command": "go test ./...",
+    "build_command": "",
+    "on_conflict": "assign_back",
+    "delete_merged_branches": true,
+    "retry_flaky_tests": 1,
+    "poll_interval": "30s",
+    "max_concurrent": 1,
+    "integration_branch_polecat_enabled": true,
+    "integration_branch_refinery_enabled": true,
+    "integration_branch_template": "integration/{title}",
+    "integration_branch_auto_land": false
+  }
 }
 ```
+
+**Merge queue fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether the merge queue is active |
+| `run_tests` | `bool` | `true` | Run tests before merging |
+| `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
+| `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`) |
+| `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
+| `test_command` | `string` | `"go test ./..."` | Test command to run |
+| `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
+| `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
+| `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
+| `retry_flaky_tests` | `int` | `1` | Number of times to retry flaky tests |
+| `poll_interval` | `string` | `"30s"` | How often Refinery polls for new MRs |
+| `max_concurrent` | `int` | `1` | Maximum concurrent merges |
+| `integration_branch_polecat_enabled` | `*bool` | `true` | Polecats auto-source worktrees from integration branches |
+| `integration_branch_refinery_enabled` | `*bool` | `true` | `gt done` / `gt mq submit` auto-target integration branches |
+| `integration_branch_template` | `string` | `"integration/{title}"` | Branch name template (`{title}`, `{epic}`, `{prefix}`, `{user}`) |
+| `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol auto-lands when all children closed |
+
+See [Integration Branches](concepts/integration-branches.md) for integration branch details.
 
 ### Runtime (`.runtime/` - gitignored)
 
@@ -597,6 +644,22 @@ gt mq retry <id>             # Retry a failed merge request
 gt mq reject <id>            # Reject a merge request
 ```
 
+#### Integration Branch Commands
+
+```bash
+gt mq integration create <epic-id>              # Create integration branch
+gt mq integration create <epic-id> --branch "feat/{title}"  # Custom template
+gt mq integration create <epic-id> --base-branch develop   # Non-main base
+gt mq integration status <epic-id>              # Show branch status
+gt mq integration status <epic-id> --json       # JSON output
+gt mq integration land <epic-id>                # Merge to base branch (default: main)
+gt mq integration land <epic-id> --dry-run      # Preview only
+gt mq integration land <epic-id> --force        # Land with open MRs
+gt mq integration land <epic-id> --skip-tests   # Skip test run
+```
+
+See [Integration Branches](concepts/integration-branches.md) for the full workflow.
+
 ## Beads Commands (bd)
 
 ```bash
@@ -618,7 +681,7 @@ Deacon, Witness, and Refinery run continuous patrol loops using wisps:
 |-------|-----------------|----------------|
 | **Deacon** | `mol-deacon-patrol` | Agent lifecycle, plugin execution, health checks |
 | **Witness** | `mol-witness-patrol` | Monitor polecats, nudge stuck workers |
-| **Refinery** | `mol-refinery-patrol` | Process merge queue, review MRs |
+| **Refinery** | `mol-refinery-patrol` | Process merge queue, review MRs, check integration branches |
 
 ```
 1. bd mol wisp mol-<role>-patrol

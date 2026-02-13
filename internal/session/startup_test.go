@@ -25,8 +25,8 @@ func TestFormatStartupBeacon(t *testing.T) {
 				"gastown/crew/gus",
 				"<- deacon",
 				"assigned:gt-abc12",
-				"Work is on your hook", // assigned includes actionable instructions
-				"gt hook",
+				"gt prime --hook", // prime before anything else
+				"begin work",     // then work on hook
 			},
 		},
 		{

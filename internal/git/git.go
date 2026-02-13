@@ -3,6 +3,7 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -103,6 +104,28 @@ func (g *Git) run(args ...string) (string, error) {
 		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// runWithEnv executes a git command with additional environment variables.
+func (g *Git) runWithEnv(args []string, extraEnv []string) (string, error) {
+	if g.gitDir != "" {
+		args = append([]string{"--git-dir=" + g.gitDir}, args...)
+	}
+	cmd := exec.Command("git", args...)
+	if g.workDir != "" {
+		cmd.Dir = g.workDir
+	}
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
+	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
@@ -264,6 +287,11 @@ func configureHooksPath(repoPath string) error {
 	return nil
 }
 
+// ConfigureHooksPath sets core.hooksPath for the repo/worktree if .githooks exists.
+func (g *Git) ConfigureHooksPath() error {
+	return configureHooksPath(g.workDir)
+}
+
 // configureRefspec sets remote.origin.fetch to the standard refspec for bare repos.
 // Bare clones don't have this set by default, which breaks worktrees that need to
 // fetch and see origin/* refs. Without this, `git fetch` only updates FETCH_HEAD
@@ -365,6 +393,18 @@ func (g *Git) Push(remote, branch string, force bool) error {
 		args = append(args, "--force")
 	}
 	_, err := g.run(args...)
+	return err
+}
+
+// PushWithEnv pushes with additional environment variables.
+// Used by gt mq integration land to set GT_INTEGRATION_LAND=1, which the
+// pre-push hook checks to allow integration branch content landing on main.
+func (g *Git) PushWithEnv(remote, branch string, force bool, env []string) error {
+	args := []string{"push", remote, branch}
+	if force {
+		args = append(args, "--force")
+	}
+	_, err := g.runWithEnv(args, env)
 	return err
 }
 
@@ -689,13 +729,24 @@ func (g *Git) BranchExists(name string) (bool, error) {
 	return true, nil
 }
 
-// RemoteBranchExists checks if a branch exists on the remote.
-func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
-	_, err := g.run("ls-remote", "--heads", remote, branch)
+// RefExists checks if a ref exists (works for any ref including origin/<branch>).
+func (g *Git) RefExists(ref string) (bool, error) {
+	_, err := g.run("rev-parse", "--verify", ref)
 	if err != nil {
+		// Only treat "ref missing" as false — propagate other failures
+		// (e.g. corrupted repo, permissions, disk I/O).
+		var gitErr *GitError
+		if errors.As(err, &gitErr) &&
+			strings.Contains(gitErr.Stderr, "Needed a single revision") {
+			return false, nil
+		}
 		return false, err
 	}
-	// ls-remote returns empty if branch doesn't exist, need to check output
+	return true, nil
+}
+
+// RemoteBranchExists checks if a branch exists on the remote.
+func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)
 	if err != nil {
 		return false, err

@@ -84,6 +84,9 @@ queue for your rig, merging polecat work to main one at a time with sequential r
 - If tests fail due to the branch: REJECT it back to the polecat.
 - If tests fail due to pre-existing issues on main: file a bead. Do NOT fix it yourself.
 - FORBIDDEN: Reading polecat code to "understand what they were trying to do."
+- FORBIDDEN: Landing integration branches to the default branch (or any base branch) via raw git commands.
+  Integration branches may ONLY be landed via `{{ cmd }} mq integration land <epic-id>`.
+  Even if auto_land is configured, the landing MUST go through the CLI command, not raw git.
 
 **The Scotty Test**: Before proceeding past any failure, ask yourself:
 "Would Scotty walk past a warp core leak because it existed before his shift?"
@@ -159,13 +162,15 @@ Your work is defined by the `mol-refinery-patrol` molecule with these steps:
 1. **inbox-check** - Handle messages, escalations
 2. **queue-scan** - Identify polecat branches waiting
 3. **process-branch** - Rebase on current main
-4. **run-tests** - Run test suite
+4. **run-tests** - Run quality checks and test suite
 5. **handle-failures** - **VERIFICATION GATE** (critical!)
 6. **merge-push** - Merge and push immediately
 7. **loop-check** - More branches? Loop back
 8. **generate-summary** - Summarize cycle
-9. **context-check** - Check context usage
-10. **burn-or-loop** - Burn wisp, loop or exit
+9. **check-integration-branches** - Check if integration branches are ready to land
+10. **context-check** - Check context usage
+11. **patrol-cleanup** - End-of-cycle inbox hygiene
+12. **burn-or-loop** - Burn wisp, loop or exit
 
 ## Startup Protocol: Propulsion
 
@@ -187,9 +192,8 @@ Then check your hook:
 gt hook                          # Shows hooked work (if any)
 bd list --status=in_progress --assignee=refinery
 
-# Step 2: If no patrol, spawn one (two-step: create then hook)
-bd mol wisp mol-refinery-patrol
-bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
+# Step 2: If no patrol, spawn one (creates wisp with config vars and hooks it)
+{{ cmd }} patrol new
 ```
 
 **No thinking. No "should I?" questions. Hook → Execute.**
@@ -230,12 +234,14 @@ Step emojis:
 | inbox-check | 📥 | Checking for messages, escalations |
 | queue-scan | 🔍 | Scanning for polecat branches to merge |
 | process-branch | 🔧 | Rebasing branch on current main |
-| run-tests | 🧪 | Running test suite |
+| run-tests | 🧪 | Running quality checks and test suite |
 | handle-failures | 🚦 | Verification gate - tests must pass or issue filed |
 | merge-push | 🚀 | Merging to main and pushing |
 | loop-check | 🔄 | Checking for more branches |
 | generate-summary | 📝 | Summarizing patrol cycle |
+| check-integration-branches | 🏗️ | Checking if integration branches are ready to land |
 | context-check | 🧠 | Checking own context limit |
+| patrol-cleanup | 🧹 | End-of-cycle inbox hygiene |
 | burn-or-loop | 🔥 | Deciding whether to loop or exit |
 
 ### Execute Each Step
@@ -281,10 +287,10 @@ git rebase origin/{{ .DefaultBranch }}
 ```
 If conflicts unresolvable: notify polecat, skip to loop-check.
 
-**run-tests**: Run the test suite
-```bash
-go test ./...
-```
+**run-tests**: Run quality checks and test suite
+Run each configured command (skip any that are empty/not configured):
+setup → typecheck → lint → build → test
+Read the step description (`bd show <step-id>`) for the exact commands.
 
 **handle-failures**: **VERIFICATION GATE**
 ```
@@ -313,8 +319,15 @@ git branch -d polecat/<worker>           # Delete local polecat branch
 
 **generate-summary**: Summarize this patrol cycle.
 
+**check-integration-branches**: Check if integration branches are ready to land.
+If `auto_land` is false, say "Auto-land disabled" and move on. **FORBIDDEN**: Landing
+integration branches yourself via raw git commands. Only `{{ cmd }} mq integration land`
+is authorized.
+
 **context-check**: Assess session health — check your own RSS (`ps -o rss= -p $$`),
 session age, context usage, and work done. Fresh sessions are cheap; memory bloat is not.
+
+**patrol-cleanup**: End-of-cycle inbox hygiene — archive stale messages, check for orphaned MR beads.
 
 **burn-or-loop**: Decision point — continue or handoff (see below).
 
@@ -346,8 +359,7 @@ RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
 echo "RSS: ${RSS_MB} MB"
 
 # Option A: Continue (session is healthy and light)
-bd mol wisp mol-refinery-patrol
-bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
+{{ cmd }} patrol new
 # Continue to inbox-check...
 
 # Option B: Hand off (session is getting heavy)

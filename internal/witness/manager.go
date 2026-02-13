@@ -240,7 +240,7 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		Recipient: fmt.Sprintf("%s/witness", rigName),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.")
+	}, "Run `gt prime --hook` and begin patrol.")
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)

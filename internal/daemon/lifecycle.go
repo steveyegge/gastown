@@ -478,7 +478,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Recipient: recipient,
 		Sender:    "daemon",
 		Topic:     "lifecycle-restart",
-	}, "Check your hook and begin work.")
+	}, "Run `gt prime --hook` and begin work.")
 
 	// Build default command using the role-resolved runtime config.
 	// PrependEnv produces "export K=V ... && exec cmd" which is safe for

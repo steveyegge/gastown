@@ -16,9 +16,6 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 	if !cfg.Enabled {
 		t.Error("expected Enabled to be true by default")
 	}
-	if cfg.TargetBranch != "main" {
-		t.Errorf("expected TargetBranch to be 'main', got %q", cfg.TargetBranch)
-	}
 	if cfg.PollInterval != 30*time.Second {
 		t.Errorf("expected PollInterval to be 30s, got %v", cfg.PollInterval)
 	}
@@ -71,7 +68,6 @@ func TestEngineer_LoadConfig_WithMergeQueue(t *testing.T) {
 		"name":    "test-rig",
 		"merge_queue": map[string]interface{}{
 			"enabled":        true,
-			"target_branch":  "develop",
 			"poll_interval":  "10s",
 			"max_concurrent": 2,
 			"run_tests":      false,
@@ -96,9 +92,6 @@ func TestEngineer_LoadConfig_WithMergeQueue(t *testing.T) {
 	}
 
 	// Check that config values were loaded
-	if e.config.TargetBranch != "develop" {
-		t.Errorf("expected TargetBranch 'develop', got %q", e.config.TargetBranch)
-	}
 	if e.config.PollInterval != 10*time.Second {
 		t.Errorf("expected PollInterval 10s, got %v", e.config.PollInterval)
 	}

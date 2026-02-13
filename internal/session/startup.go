@@ -85,11 +85,12 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 			"4. If nothing hooked → wait for instructions"
 	}
 
-	// For assigned, work is already on the hook - just tell them to run it
-	// This prevents the "helpful assistant" exploration pattern (see PRIMING.md)
+	// For assigned, tell agent to prime then work on the hook.
+	// Prime must come first so the agent gets full role context (formula, commands, etc).
+	// Matches refinery pattern: short instruction with prime before action.
 	// Exclude work instructions only if explicitly set (non-hook agents get them via delayed nudge)
 	if cfg.Topic == "assigned" && !cfg.ExcludeWorkInstructions {
-		beacon += "\n\nWork is on your hook. Run `" + cli.Name() + " hook` now and begin immediately."
+		beacon += "\n\nRun `" + cli.Name() + " prime --hook` and begin work on your hook."
 	}
 
 	return beacon

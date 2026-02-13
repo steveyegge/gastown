@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -697,4 +698,36 @@ func isSlingConfigError(err error) bool {
 		strings.Contains(msg, "no database") ||
 		strings.Contains(msg, "database not found") ||
 		strings.Contains(msg, "connection refused")
+}
+
+// loadRigCommandVars reads rig settings and returns --var key=value strings
+// for all configured build pipeline commands (setup, typecheck, lint, test, build).
+// Only non-empty commands are included; empty means "skip" in the formula.
+func loadRigCommandVars(townRoot, rig string) []string {
+	if townRoot == "" || rig == "" {
+		return nil
+	}
+	settingsPath := filepath.Join(townRoot, rig, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil || settings == nil || settings.MergeQueue == nil {
+		return nil
+	}
+	mq := settings.MergeQueue
+	var vars []string
+	if mq.SetupCommand != "" {
+		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
+	}
+	if mq.TypecheckCommand != "" {
+		vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
+	}
+	if mq.LintCommand != "" {
+		vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
+	}
+	if mq.TestCommand != "" {
+		vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
+	}
+	if mq.BuildCommand != "" {
+		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+	}
+	return vars
 }

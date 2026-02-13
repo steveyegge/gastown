@@ -88,6 +88,7 @@ type ListOptions struct {
 	Parent     string // filter by parent ID
 	Assignee   string // filter by assignee (e.g., "gastown/Toast")
 	NoAssignee bool   // filter for issues with no assignee
+	Limit      int    // Max results (0 = unlimited, overrides bd default of 50)
 }
 
 // CreateOptions specifies options for creating an issue.
@@ -321,6 +322,12 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	}
 	if opts.NoAssignee {
 		args = append(args, "--no-assignee")
+	}
+	if opts.Limit > 0 {
+		args = append(args, fmt.Sprintf("--limit=%d", opts.Limit))
+	} else {
+		// Override bd's default limit of 50 to avoid silent truncation
+		args = append(args, "--limit=0")
 	}
 
 	out, err := b.run(args...)
