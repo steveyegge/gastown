@@ -190,7 +190,15 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// Try to get branch from GT_BRANCH env var (set by session manager)
 		branch = os.Getenv("GT_BRANCH")
 	}
+	// CRITICAL FIX: Only call g.CurrentBranch() if we're using the cwd-based git.
+	// When cwdAvailable is false, we fall back to the mayor clone for git operations,
+	// but the mayor clone is on main/master - NOT the polecat branch. Calling
+	// g.CurrentBranch() in that case would incorrectly return main/master.
 	if branch == "" {
+		if !cwdAvailable {
+			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch
+			return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
+		}
 		var err error
 		branch, err = g.CurrentBranch()
 		if err != nil {
