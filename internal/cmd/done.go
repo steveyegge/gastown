@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,7 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -911,14 +910,10 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
 
-	// Kill our own tmux session with proper process cleanup
+	// Kill our own session via Backend.
 	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
-	// We use KillSessionWithProcessesExcluding to ensure no orphaned processes are left behind,
-	// while excluding our own PID to avoid killing ourselves before cleanup completes.
-	// The tmux kill-session at the end will terminate us along with the session.
-	t := tmux.NewTmux()
-	myPID := strconv.Itoa(os.Getpid())
-	if err := t.KillSessionWithProcessesExcluding(sessionName, []string{myPID}); err != nil {
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	if err := backend.KillSession(sessionName); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

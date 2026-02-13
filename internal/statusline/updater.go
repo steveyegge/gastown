@@ -10,13 +10,11 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Updater collects status line data for all known identities.
 type Updater struct {
 	townRoot string
-	tmux     *tmux.Tmux
 	backend  terminal.Backend
 }
 
@@ -24,7 +22,6 @@ type Updater struct {
 func NewUpdater(townRoot string) *Updater {
 	return &Updater{
 		townRoot: townRoot,
-		tmux:     tmux.NewTmux(),
 		backend:  terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
@@ -145,21 +142,21 @@ func (u *Updater) updatePolecatIdentities(cache *Cache, rigName, polecatsDir, ri
 	}
 }
 
-// updateCrewIdentities updates identities for crew members by scanning tmux sessions.
+// updateCrewIdentities updates identities for crew members by scanning crew directories.
 func (u *Updater) updateCrewIdentities(cache *Cache, rigName, rigBeadsDir string) {
-	sessions, err := u.tmux.ListSessions()
+	// Scan crew directory for crew members instead of tmux sessions
+	crewDir := filepath.Join(u.townRoot, rigName, "crew")
+	entries, err := os.ReadDir(crewDir)
 	if err != nil {
 		return
 	}
 
-	// Look for crew sessions: gt-<rig>-crew-<name>
-	prefix := fmt.Sprintf("gt-%s-crew-", rigName)
-	for _, session := range sessions {
-		if !strings.HasPrefix(session, prefix) {
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
-		crewName := strings.TrimPrefix(session, prefix)
+		crewName := entry.Name()
 		identity := fmt.Sprintf("%s/crew/%s", rigName, crewName)
 
 		data := &IdentityData{}
@@ -262,13 +259,8 @@ func (u *Updater) populateMail(data *IdentityData, identity string, townRoot str
 	data.MailSubject = subject
 }
 
-// updateSessionHealth updates tmux session health data for the Mayor status line.
+// updateSessionHealth updates session health data for the Mayor status line.
 func (u *Updater) updateSessionHealth(cache *Cache, rigs map[string]bool) {
-	sessions, err := u.tmux.ListSessions()
-	if err != nil {
-		return
-	}
-
 	// Track per-rig status
 	for rigName := range rigs {
 		cache.Rigs[rigName] = &RigStatus{
@@ -276,49 +268,37 @@ func (u *Updater) updateSessionHealth(cache *Cache, rigs map[string]bool) {
 		}
 	}
 
-	// Track agent health
+	// Track agent health by checking coop sessions
 	witnessHealth := &AgentHealth{}
 	refineryHealth := &AgentHealth{}
+
+	// Check deacon session
 	hasDeacon := false
+	if running, _ := u.backend.HasSession("hq-deacon"); running {
+		hasDeacon = true
+	}
 
-	for _, session := range sessions {
-		// Skip non-Gas Town sessions
-		if !strings.HasPrefix(session, "gt-") && !strings.HasPrefix(session, "hq-") {
-			continue
-		}
+	// Check rig-level agent sessions
+	for rigName := range rigs {
+		status := cache.Rigs[rigName]
 
-		// Detect deacon
-		if session == "gt-deacon" || session == "hq-deacon" {
-			hasDeacon = true
-			continue
-		}
-
-		// Parse session name to extract rig and agent type
-		if strings.HasPrefix(session, "gt-") {
-			parts := strings.Split(strings.TrimPrefix(session, "gt-"), "-")
-			if len(parts) < 2 {
-				continue
+		// Check witness
+		witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+		if running, _ := u.backend.HasSession(witnessSession); running {
+			status.HasWitness = true
+			witnessHealth.Total++
+			if u.isSessionWorking(witnessSession) {
+				witnessHealth.Working++
 			}
+		}
 
-			rigName := parts[0]
-			agentType := parts[1]
-
-			// Update rig status
-			if status, ok := cache.Rigs[rigName]; ok {
-				switch agentType {
-				case "witness":
-					status.HasWitness = true
-					witnessHealth.Total++
-					if u.isSessionWorking(session) {
-						witnessHealth.Working++
-					}
-				case "refinery":
-					status.HasRefinery = true
-					refineryHealth.Total++
-					if u.isSessionWorking(session) {
-						refineryHealth.Working++
-					}
-				}
+		// Check refinery
+		refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+		if running, _ := u.backend.HasSession(refinerySession); running {
+			status.HasRefinery = true
+			refineryHealth.Total++
+			if u.isSessionWorking(refinerySession) {
+				refineryHealth.Working++
 			}
 		}
 	}

@@ -12,8 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // minOrphanAge is the minimum age (in seconds) a process must be before
@@ -21,96 +19,11 @@ import (
 // processes and avoids killing legitimate short-lived subagents.
 const minOrphanAge = 60
 
-// getTmuxSessionPIDs returns a set of PIDs belonging to ANY tmux session.
-// This prevents killing Claude processes that are running in tmux sessions,
-// even if they temporarily show TTY "?" during startup or session transitions.
-//
-// CRITICAL: We protect ALL tmux sessions, not just Gas Town ones (gt-*, hq-*).
-// User's personal Claude sessions (e.g., in sessions named "loomtown", "yaad")
-// must never be killed by orphan cleanup. The TTY="?" check is not reliable
-// during certain operations, so we must explicitly protect all tmux processes.
+// getTmuxSessionPIDs returns a set of PIDs belonging to managed sessions.
+// In K8s mode, there are no tmux sessions, so this returns an empty set.
+// Orphan detection relies solely on TTY-based and age-based checks.
 func getTmuxSessionPIDs() map[int]bool {
-	pids := make(map[int]bool)
-
-	t := tmux.NewTmux()
-
-	// Get list of ALL tmux sessions (not just gt-*/hq-*)
-	sessions, err := t.ListSessions()
-	if err != nil {
-		return pids // tmux not available or no sessions
-	}
-
-	// For each session, get the PIDs of processes in its panes
-	for _, session := range sessions {
-		if session == "" {
-			continue
-		}
-		panePIDs, err := t.ListPanePIDs(session)
-		if err != nil {
-			continue
-		}
-		for _, pidStr := range panePIDs {
-			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-				pids[pid] = true
-				// Also add child processes of the pane shell
-				addChildPIDs(pid, pids)
-			}
-		}
-	}
-
-	return pids
-}
-
-// addChildPIDs adds all descendant PIDs of a process to the set.
-// This catches Claude processes spawned by the shell in a tmux pane.
-func addChildPIDs(parentPID int, pids map[int]bool) {
-	childPIDs := getChildPIDs(parentPID)
-	for _, pid := range childPIDs {
-		pids[pid] = true
-		// Recurse to get grandchildren
-		addChildPIDs(pid, pids)
-	}
-}
-
-// getChildPIDs returns direct child PIDs of a process.
-// Tries pgrep first, falls back to parsing ps output.
-func getChildPIDs(parentPID int) []int {
-	var childPIDs []int
-
-	// Try pgrep first (faster, more reliable when available)
-	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID)).Output()
-	if err == nil {
-		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-				childPIDs = append(childPIDs, pid)
-			}
-		}
-		return childPIDs
-	}
-
-	// Fallback: parse ps output to find children
-	// ps -eo pid,ppid gives us all processes with their parent PIDs
-	out, err = exec.Command("ps", "-eo", "pid,ppid").Output()
-	if err != nil {
-		return childPIDs
-	}
-
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err1 := strconv.Atoi(fields[0])
-		ppid, err2 := strconv.Atoi(fields[1])
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if ppid == parentPID && pid > 0 {
-			childPIDs = append(childPIDs, pid)
-		}
-	}
-
-	return childPIDs
+	return make(map[int]bool)
 }
 
 // sigkillGracePeriod is how long (in seconds) we wait after sending SIGTERM
@@ -382,18 +295,9 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Get ALL valid PIDs (panes + their children) from active tmux sessions
 	validPIDs := getTmuxSessionPIDs()
 
-	// SAFETY CHECK: If no valid PIDs found, tmux might be down or no sessions exist.
-	// Returning empty is safer than marking all Claude processes as zombies.
-	if len(validPIDs) == 0 {
-		// Check if tmux is even running
-		if !tmux.NewTmux().IsAvailable() {
-			return nil, fmt.Errorf("tmux not available")
-		}
-		// tmux is running but no gt-*/hq-* sessions - that's a valid state,
-		// but we can't safely determine zombies without reference sessions.
-		// Return empty rather than marking everything as zombie.
-		return nil, nil
-	}
+	// In K8s mode, there are no local tmux sessions to cross-reference.
+	// Zombie detection relies on TTY and age checks below.
+	// If no valid PIDs found, that's expected — we still check processes.
 
 	// Use ps to get PID, TTY, command, and elapsed time for all claude processes
 	out, err := exec.Command("ps", "-eo", "pid,tty,comm,etime").Output()

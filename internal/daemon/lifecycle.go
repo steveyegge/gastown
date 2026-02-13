@@ -17,7 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -185,7 +184,7 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 		if running {
 			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 			// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
-			if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			if err := d.backend.KillSession(sessionName); err != nil {
 				return fmt.Errorf("killing session: %w", err)
 			}
 			d.logger.Printf("Killed session %s", sessionName)
@@ -195,7 +194,7 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 	case ActionCycle, ActionRestart:
 		if running {
 			// Kill the session first - use KillSessionWithProcesses to prevent orphan processes.
-			if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			if err := d.backend.KillSession(sessionName); err != nil {
 				return fmt.Errorf("killing session: %w", err)
 			}
 			d.logger.Printf("Killed session %s for restart", sessionName)
@@ -374,11 +373,9 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		d.syncWorkspace(workDir)
 	}
 
-	// Create session
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
+	// In K8s mode, session creation is handled by the controller via bead lifecycle.
+	// The daemon's role is limited to ensuring the bead exists and is in the right state.
+	// For agents that need direct session management, use the backend.
 
 	// Set environment variables
 	d.setSessionEnvironment(sessionName, config, parsed)
@@ -386,18 +383,13 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	d.applySessionTheme(sessionName, parsed)
 
-	// Get and send startup command
+	// Get and send startup command via backend
 	startCmd := d.getStartCommand(config, parsed)
-	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
+	if err := d.backend.SendKeys(sessionName, startCmd); err != nil {
+		// Non-fatal in K8s mode - session may be managed by controller
+		d.logger.Printf("Warning: could not send startup command to %s: %v", sessionName, err)
 	}
 
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated role starts aren't blocked by the warning dialog.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - Claude might still start
-	}
-	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	return nil
@@ -539,27 +531,21 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
-		_ = d.tmux.SetEnvironment(sessionName, k, v)
+		_ = d.backend.SetEnvironment(sessionName, k, v)
 	}
 
 	// Set any custom env vars from role config
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
-			_ = d.tmux.SetEnvironment(sessionName, k, expanded)
+			_ = d.backend.SetEnvironment(sessionName, k, expanded)
 		}
 	}
 }
 
-// applySessionTheme applies tmux theming to the session.
-func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
-	if parsed.RoleType == "mayor" {
-		theme := tmux.MayorTheme()
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
-	} else if parsed.RigName != "" {
-		theme := tmux.AssignTheme(parsed.RigName)
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, parsed.RigName, parsed.RoleType, parsed.RoleType)
-	}
+// applySessionTheme is a no-op in K8s mode (tmux theming not applicable).
+func (d *Daemon) applySessionTheme(_ string, _ *ParsedIdentity) {
+	// Theming is a tmux-only concept. In K8s mode, sessions are coop-managed pods.
 }
 
 // syncWorkspace syncs a git workspace before starting a new session.
@@ -842,7 +828,7 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 		// Check if tmux session exists and agent is running
-		if d.tmux.IsAgentAlive(sessionName) {
+		if d.isAgentAlive(sessionName) {
 			// Session is alive - check if it's been stuck too long
 			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
 			if err != nil {
@@ -934,7 +920,7 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 		// Session running = not orphaned (work is being processed)
-		if d.tmux.IsAgentAlive(sessionName) {
+		if d.isAgentAlive(sessionName) {
 			continue
 		}
 

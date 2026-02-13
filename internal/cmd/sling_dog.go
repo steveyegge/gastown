@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/dog"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -147,8 +146,7 @@ func DispatchToDog(dogName string, opts DogDispatchOptions) (*DogDispatchInfo, e
 	}
 
 	// Ensure dog session is running (start if needed)
-	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, townRoot)
+	sessMgr := dog.NewSessionManager(nil, townRoot)
 
 	sessOpts := dog.SessionStartOptions{
 		WorkDesc: opts.WorkDesc,
@@ -175,8 +173,7 @@ func (d *DogDispatchInfo) StartDelayedSession() (string, error) {
 		return d.Pane, nil // Session was already started
 	}
 
-	t := tmux.NewTmux()
-	sessMgr := dog.NewSessionManager(t, d.townRoot)
+	sessMgr := dog.NewSessionManager(nil, d.townRoot)
 
 	opts := dog.SessionStartOptions{
 		WorkDesc: d.workDesc,

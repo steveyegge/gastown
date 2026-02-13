@@ -36,7 +36,6 @@ import (
 	"github.com/steveyegge/gastown/internal/notify"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -57,12 +56,24 @@ func ToUrgencyProto(urgency string) gastownv1.Urgency {
 // StatusServer implements the StatusService.
 type StatusServer struct {
 	townRoot string
+	backend  terminal.Backend
 }
 
 var _ gastownv1connect.StatusServiceHandler = (*StatusServer)(nil)
 
 func NewStatusServer(townRoot string) *StatusServer {
-	return &StatusServer{townRoot: townRoot}
+	return &StatusServer{
+		townRoot: townRoot,
+		backend:  terminal.NewCoopBackend(terminal.CoopConfig{}),
+	}
+}
+
+// NewStatusServerWithBackend creates a StatusServer with a custom terminal backend.
+func NewStatusServerWithBackend(townRoot string, backend terminal.Backend) *StatusServer {
+	return &StatusServer{
+		townRoot: townRoot,
+		backend:  backend,
+	}
 }
 
 func (s *StatusServer) GetTownStatus(
@@ -233,13 +244,10 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 		return nil, fmt.Errorf("discovering rigs: %w", err)
 	}
 
-	// Get tmux sessions
-	t := tmux.NewTmux()
-	allSessions := make(map[string]bool)
-	if sessions, err := t.ListSessions(); err == nil {
-		for _, sess := range sessions {
-			allSessions[sess] = true
-		}
+	// Helper to check if a session is running via the backend.
+	isSessionRunning := func(session string) bool {
+		exists, err := s.backend.HasSession(session)
+		return err == nil && exists
 	}
 
 	// Overseer info
@@ -276,7 +284,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 			Address: &gastownv1.AgentAddress{Name: agent.name},
 			Session: agent.session,
 			Role:    agent.role,
-			Running: allSessions[agent.session],
+			Running: isSessionRunning(agent.session),
 		})
 	}
 
@@ -307,7 +315,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "witness"},
 				Session: session,
 				Role:    "witness",
-				Running: allSessions[session],
+				Running: isSessionRunning(session),
 			})
 		}
 		if r.HasRefinery {
@@ -317,7 +325,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "refinery"},
 				Session: session,
 				Role:    "refinery",
-				Running: allSessions[session],
+				Running: isSessionRunning(session),
 			})
 		}
 		for _, p := range r.Polecats {
@@ -327,7 +335,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "polecats", Name: p},
 				Session: session,
 				Role:    "polecat",
-				Running: allSessions[session],
+				Running: isSessionRunning(session),
 			})
 		}
 		for _, c := range rs.Crews {
@@ -337,7 +345,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "crew", Name: c},
 				Session: session,
 				Role:    "crew",
-				Running: allSessions[session],
+				Running: isSessionRunning(session),
 			})
 		}
 
@@ -512,35 +520,13 @@ func (s *StatusServer) checkDolt() *gastownv1.ComponentHealth {
 	}
 }
 
-// checkTmux checks whether tmux is running and has Gas Town sessions.
+// checkTmux reports tmux as not applicable (K8s mode uses coop backend).
 func (s *StatusServer) checkTmux() *gastownv1.ComponentHealth {
-	start := time.Now()
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
-	latency := time.Since(start).Milliseconds()
-
-	if err != nil {
-		return &gastownv1.ComponentHealth{
-			Name:      "tmux",
-			Healthy:   false,
-			LatencyMs: latency,
-			Message:   fmt.Sprintf("failed to list sessions: %v", err),
-		}
-	}
-
-	// Count Gas Town sessions
-	gtCount := 0
-	for _, sess := range sessions {
-		if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
-			gtCount++
-		}
-	}
-
 	return &gastownv1.ComponentHealth{
 		Name:      "tmux",
 		Healthy:   true,
-		LatencyMs: latency,
-		Message:   fmt.Sprintf("%d Gas Town sessions active", gtCount),
+		LatencyMs: 0,
+		Message:   "not applicable (K8s mode, sessions managed via coop backend)",
 	}
 }
 
@@ -2727,18 +2713,15 @@ func mapToStruct(m map[string]interface{}) *structpb.Struct {
 
 // TerminalServer implements the TerminalService.
 type TerminalServer struct {
-	tmuxClient *tmux.Tmux
-	backend    terminal.Backend
+	backend terminal.Backend
 }
 
 var _ gastownv1connect.TerminalServiceHandler = (*TerminalServer)(nil)
 
 // NewTerminalServer creates a new TerminalServer.
 func NewTerminalServer() *TerminalServer {
-	t := tmux.NewTmux()
 	return &TerminalServer{
-		tmuxClient: t,
-		backend:    terminal.NewCoopBackend(terminal.CoopConfig{}),
+		backend: terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
 
@@ -2746,8 +2729,7 @@ func NewTerminalServer() *TerminalServer {
 // Use this when the daemon runs in K8s with a coop backend.
 func NewTerminalServerWithBackend(backend terminal.Backend) *TerminalServer {
 	return &TerminalServer{
-		tmuxClient: tmux.NewTmux(),
-		backend:    backend,
+		backend: backend,
 	}
 }
 
@@ -2803,27 +2785,12 @@ func (s *TerminalServer) PeekSession(
 }
 
 func (s *TerminalServer) ListSessions(
-	ctx context.Context,
-	req *connect.Request[gastownv1.ListSessionsRequest],
+	_ context.Context,
+	_ *connect.Request[gastownv1.ListSessionsRequest],
 ) (*connect.Response[gastownv1.ListSessionsResponse], error) {
-	sessions, err := s.tmuxClient.ListSessions()
-	if err != nil {
-		return nil, unavailableErr("listing tmux sessions", err, 2)
-	}
-
-	if req.Msg.Prefix != "" {
-		var filtered []string
-		for _, sess := range sessions {
-			if strings.HasPrefix(sess, req.Msg.Prefix) {
-				filtered = append(filtered, sess)
-			}
-		}
-		sessions = filtered
-	}
-
-	return connect.NewResponse(&gastownv1.ListSessionsResponse{
-		Sessions: sessions,
-	}), nil
+	// In K8s mode, session listing is not supported (sessions are managed by the coop backend).
+	// Return empty list rather than error for forward compatibility.
+	return connect.NewResponse(&gastownv1.ListSessionsResponse{}), nil
 }
 
 func (s *TerminalServer) HasSession(
@@ -2949,12 +2916,12 @@ func (s *TerminalServer) SendInput(
 		}), nil
 	}
 
-	// Send input using appropriate method
+	// Send input using appropriate method via the backend
 	if req.Msg.Nudge {
 		// NudgeSession is serialized and more reliable for Claude sessions
-		err = s.tmuxClient.NudgeSession(session, input)
+		err = s.backend.NudgeSession(session, input)
 	} else {
-		err = s.tmuxClient.SendKeys(session, input)
+		err = s.backend.SendKeys(session, input)
 	}
 	if err != nil {
 		return connect.NewResponse(&gastownv1.SendInputResponse{

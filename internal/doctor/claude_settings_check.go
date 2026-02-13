@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -630,7 +629,6 @@ func (c *ClaudeSettingsCheck) hookHasBdStdinPiping(hooks map[string]any, hookNam
 func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 	var errors []string
 	var renamed []string
-	t := tmux.NewTmux()
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	for _, sf := range c.staleSettings {
@@ -718,8 +716,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				running, _ := backend.HasSession(sf.sessionName)
 				if running {
 					// Cycle the agent by killing and letting gt up restart it.
-					// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-					_ = t.KillSessionWithProcesses(sf.sessionName)
+					_ = backend.KillSession(sf.sessionName)
 				}
 			}
 		}

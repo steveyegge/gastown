@@ -20,7 +20,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rpcclient"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -254,21 +253,16 @@ func execRuntime(prompt, rigPath, configDir string) error {
 	return syscall.Exec(binPath, args, env)
 }
 
-// isInTmuxSession checks if we're currently inside the target tmux session.
+// isInTmuxSession checks if we're currently inside the target session.
 func isInTmuxSession(targetSession string) bool {
-	// TMUX env var format: /tmp/tmux-501/default,12345,0
-	// We need to get the current session name via tmux display-message
-	tmuxEnv := os.Getenv("TMUX")
-	if tmuxEnv == "" {
-		return false // Not in tmux at all
+	// Check env vars for current session name
+	currentSession := os.Getenv("GT_SESSION")
+	if currentSession == "" {
+		currentSession = os.Getenv("TMUX_SESSION")
 	}
-
-	// Get current session name
-	currentSession, err := tmux.NewTmux().GetCurrentSessionName()
-	if err != nil {
+	if currentSession == "" {
 		return false
 	}
-
 	return currentSession == targetSession
 }
 

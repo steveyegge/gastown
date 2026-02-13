@@ -21,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
@@ -32,7 +31,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/statusline"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -46,7 +44,6 @@ import (
 type Daemon struct {
 	config       *Config
 	patrolConfig *DaemonPatrolConfig
-	tmux         *tmux.Tmux
 	backend      terminal.Backend
 	logger       *log.Logger
 	ctx          context.Context
@@ -113,11 +110,9 @@ func New(config *Config) (*Daemon, error) {
 		}
 	}
 
-	t := tmux.NewTmux()
 	return &Daemon{
 		config:       config,
 		patrolConfig: patrolConfig,
-		tmux:         t,
 		backend:      terminal.NewCoopBackend(terminal.CoopConfig{}),
 		logger:       logger,
 		ctx:          ctx,
@@ -134,6 +129,12 @@ func (d *Daemon) SetBackend(b terminal.Backend) {
 // hasSession checks if a terminal session exists via the CoopBackend.
 func (d *Daemon) hasSession(sessionName string) (bool, error) {
 	return d.backend.HasSession(sessionName)
+}
+
+// isAgentAlive checks if a session exists and the agent process is running.
+func (d *Daemon) isAgentAlive(sessionName string) bool {
+	running, err := d.backend.IsAgentRunning(sessionName)
+	return err == nil && running
 }
 
 // Run starts the daemon main loop.
@@ -439,7 +440,7 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 		if age > 30*time.Minute {
 			// Very stuck - restart the session
 			d.logger.Printf("Deacon heartbeat is %s old - restarting session", age.Round(time.Minute))
-			if err := d.tmux.KillSession(deaconSession); err == nil {
+			if err := d.backend.KillSession(deaconSession); err == nil {
 				status.LastAction = "restart"
 				status.Target = "deacon-stuck"
 			} else {
@@ -450,7 +451,7 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 		} else if age > 15*time.Minute {
 			// Stuck but not critically - nudge to wake up
 			d.logger.Printf("Deacon heartbeat is %s old - nudging session", age.Round(time.Minute))
-			_ = d.tmux.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
+			_ = d.backend.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
 			status.LastAction = "nudge"
 			status.Target = "deacon-stale"
 		} else {
@@ -541,9 +542,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	// Session exists but heartbeat is stale - Deacon is stuck
 	if age > 30*time.Minute {
 		// Very stuck - restart the session.
-		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+		if err := d.backend.KillSession(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
 		// Spawn new Deacon immediately instead of waiting for next heartbeat
@@ -552,7 +552,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
-		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+		if err := d.backend.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
 	}
@@ -1331,77 +1331,11 @@ func (d *Daemon) emitMassDeathEvent() {
 	d.recentDeaths = nil
 }
 
-// restartPolecatSession restarts a crashed polecat session.
-func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string) error {
-	// Check rig operational state before auto-restarting
-	if operational, reason := d.isRigOperational(rigName); !operational {
-		return fmt.Errorf("cannot restart polecat: %s", reason)
-	}
-
-	// Calculate rig path for agent config resolution
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
-
-	// Determine working directory (handle both new and old structures)
-	// New structure: polecats/<name>/<rigname>/
-	// Old structure: polecats/<name>/
-	workDir := filepath.Join(rigPath, "polecats", polecatName, rigName)
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		// Fall back to old structure
-		workDir = filepath.Join(rigPath, "polecats", polecatName)
-	}
-
-	// Verify the worktree exists
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		return fmt.Errorf("polecat worktree does not exist: %s", workDir)
-	}
-
-	// Pre-sync workspace (ensure beads are current)
-	d.syncWorkspace(workDir)
-
-	// Create new tmux session
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables using centralized AgentEnv
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "polecat",
-		Rig:           rigName,
-		AgentName:     polecatName,
-		TownRoot:      d.config.TownRoot,
-		BeadsNoDaemon: true,
-		BDDaemonHost:  os.Getenv("BD_DAEMON_HOST"),
-	})
-
-	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
-	for k, v := range envVars {
-		_ = d.tmux.SetEnvironment(sessionName, k, v)
-	}
-
-	// Apply theme
-	theme := tmux.AssignTheme(rigName)
-	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")
-
-	// Set pane-died hook for future crash detection
-	agentID := fmt.Sprintf("%s/%s", rigName, polecatName)
-	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
-
-	// Launch Claude with environment exported inline
-	// Pass rigPath so rig agent settings are honored (not town-level defaults)
-	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
-	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
-	}
-
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated restarts aren't blocked by the warning dialog.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - Claude might still start
-	}
-	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
-
-	return nil
+// restartPolecatSession restarts a crashed polecat by notifying the witness.
+// In K8s mode, polecat lifecycle is managed through bead events and controller reconciliation.
+// Direct session creation is not supported -- the witness handles crash recovery.
+func (d *Daemon) restartPolecatSession(_, polecatName, _ string) error {
+	return fmt.Errorf("direct polecat session restart not supported (K8s mode); polecat %s should be recovered via bead lifecycle", polecatName)
 }
 
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat restart fails.

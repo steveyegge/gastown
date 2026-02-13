@@ -11,11 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // coopDefault returns a CoopBackend with no sessions as a safe default.
@@ -55,19 +53,16 @@ type Boot struct {
 	townRoot  string
 	bootDir   string // ~/gt/deacon/dogs/boot/
 	deaconDir string // ~/gt/deacon/
-	tmux      *tmux.Tmux
 	backend   terminal.Backend
 	degraded  bool
 }
 
 // New creates a new Boot manager.
 func New(townRoot string) *Boot {
-	t := tmux.NewTmux()
 	return &Boot{
 		townRoot:  townRoot,
 		bootDir:   filepath.Join(townRoot, "deacon", "dogs", "boot"),
 		deaconDir: filepath.Join(townRoot, "deacon"),
-		tmux:      t,
 		backend:   coopDefault(),
 		degraded:  os.Getenv("GT_DEGRADED") == "true",
 	}
@@ -110,15 +105,10 @@ func (b *Boot) IsSessionAlive() bool {
 	return err == nil && has
 }
 
-// IsCurrentSession checks if we're already running inside the Boot tmux session.
-// This handles the case where Claude inside gt-boot runs `gt boot triage` - we
-// ARE the boot session, so we shouldn't fail the lock check.
+// IsCurrentSession checks if we're already running inside the Boot session.
+// In K8s mode this is determined by the GT_SESSION environment variable.
 func (b *Boot) IsCurrentSession() bool {
-	currentSession, err := b.tmux.GetCurrentSessionName()
-	if err != nil {
-		return false
-	}
-	return currentSession == session.BootSessionName()
+	return os.Getenv("GT_SESSION") == session.BootSessionName()
 }
 
 // AcquireLock creates the marker file to indicate Boot is starting.
@@ -191,75 +181,15 @@ func (b *Boot) LoadStatus() (*Status, error) {
 	return &status, nil
 }
 
-// Spawn starts Boot in a fresh tmux session.
+// Spawn starts Boot as a subprocess.
 // Boot runs the mol-boot-triage molecule and exits when done.
-// In degraded mode (no tmux), it runs in a subprocess.
-// The agentOverride parameter allows specifying an agent alias to use instead of the town default.
-func (b *Boot) Spawn(agentOverride string) error {
+// The agentOverride parameter is unused in K8s mode (kept for API compatibility).
+func (b *Boot) Spawn(_ string) error {
 	if b.IsRunning() {
 		return fmt.Errorf("boot is already running")
 	}
 
-	// Check for degraded mode
-	if b.degraded {
-		return b.spawnDegraded()
-	}
-
-	return b.spawnTmux(agentOverride)
-}
-
-// spawnTmux spawns Boot in a tmux session.
-func (b *Boot) spawnTmux(agentOverride string) error {
-	// Kill any stale session first.
-	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-	if b.IsSessionAlive() {
-		_ = b.tmux.KillSessionWithProcesses(session.BootSessionName())
-	}
-
-	// Ensure boot directory exists
-	if err := b.EnsureDir(); err != nil {
-		return fmt.Errorf("ensuring boot dir: %w", err)
-	}
-
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: "boot",
-		Sender:    "daemon",
-		Topic:     "triage",
-	}, "Run `gt boot triage` now.")
-
-	var startCmd string
-	if agentOverride != "" {
-		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", initialPrompt, agentOverride)
-		if err != nil {
-			return fmt.Errorf("building startup command with agent override: %w", err)
-		}
-	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", initialPrompt)
-	}
-
-	// Ensure Claude settings exist for boot (autonomous role)
-	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
-		return fmt.Errorf("ensuring boot settings: %w", err)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := b.tmux.NewSessionWithCommand(session.BootSessionName(), b.bootDir, startCmd); err != nil {
-		return fmt.Errorf("creating boot session: %w", err)
-	}
-
-	// Set environment using centralized AgentEnv for consistency
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:         "boot",
-		TownRoot:     b.townRoot,
-		BDDaemonHost: os.Getenv("BD_DAEMON_HOST"),
-	})
-	for k, v := range envVars {
-		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
-	}
-
-	return nil
+	return b.spawnDegraded()
 }
 
 // spawnDegraded spawns Boot in degraded mode (no tmux).
@@ -298,7 +228,7 @@ func (b *Boot) DeaconDir() string {
 	return b.deaconDir
 }
 
-// Tmux returns the tmux manager.
-func (b *Boot) Tmux() *tmux.Tmux {
-	return b.tmux
+// Backend returns the terminal backend.
+func (b *Boot) Backend() terminal.Backend {
+	return b.backend
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/statusline"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -39,18 +38,18 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	// Get session environment
 	var rigName, polecat, crew, issue, role string
 
 	if statusLineSession != "" {
 		// Non-fatal: missing env vars are handled gracefully below
-		rigName, _ = t.GetEnvironment(statusLineSession, "GT_RIG")
-		polecat, _ = t.GetEnvironment(statusLineSession, "GT_POLECAT")
-		crew, _ = t.GetEnvironment(statusLineSession, "GT_CREW")
-		issue, _ = t.GetEnvironment(statusLineSession, "GT_ISSUE")
-		role, _ = t.GetEnvironment(statusLineSession, "GT_ROLE")
+		rigName, _ = backend.GetEnvironment(statusLineSession, "GT_RIG")
+		polecat, _ = backend.GetEnvironment(statusLineSession, "GT_POLECAT")
+		crew, _ = backend.GetEnvironment(statusLineSession, "GT_CREW")
+		issue, _ = backend.GetEnvironment(statusLineSession, "GT_ISSUE")
+		role, _ = backend.GetEnvironment(statusLineSession, "GT_ROLE")
 	} else {
 		// Fallback to process environment
 		rigName = os.Getenv("GT_RIG")
@@ -66,30 +65,30 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 
 	// Determine identity and output based on role
 	if role == "mayor" || statusLineSession == mayorSession {
-		return runMayorStatusLine(t)
+		return runMayorStatusLine(backend)
 	}
 
 	// Deacon status line
 	if role == "deacon" || statusLineSession == deaconSession {
-		return runDeaconStatusLine(t)
+		return runDeaconStatusLine(backend)
 	}
 
 	// Witness status line (session naming: gt-<rig>-witness)
 	if role == "witness" || strings.HasSuffix(statusLineSession, "-witness") {
-		return runWitnessStatusLine(t, rigName)
+		return runWitnessStatusLine(backend, rigName)
 	}
 
 	// Refinery status line
 	if role == "refinery" || strings.HasSuffix(statusLineSession, "-refinery") {
-		return runRefineryStatusLine(t, rigName)
+		return runRefineryStatusLine(backend, rigName)
 	}
 
 	// Crew/Polecat status line
-	return runWorkerStatusLine(t, statusLineSession, rigName, polecat, crew, issue)
+	return runWorkerStatusLine(backend, statusLineSession, rigName, polecat, crew, issue)
 }
 
 // runWorkerStatusLine outputs status for crew or polecat sessions.
-func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue string) error {
+func runWorkerStatusLine(backend terminal.Backend, session, rigName, polecat, crew, issue string) error {
 	// Determine agent type and identity
 	var icon, identity string
 	if polecat != "" {
@@ -103,7 +102,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 	// Get pane's working directory to find workspace
 	var townRoot string
 	if session != "" {
-		paneDir, err := t.GetPaneWorkDir(session)
+		paneDir, err := backend.GetPaneWorkDir(session)
 		if err == nil && paneDir != "" {
 			townRoot, _ = workspace.Find(paneDir)
 		}
@@ -122,7 +121,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 	// Priority 2: Fall back to GT_ISSUE env var or in_progress beads
 	currentWork := issue
 	if currentWork == "" && hookedWork == "" && session != "" {
-		currentWork = getCurrentWork(t, session, 40)
+		currentWork = getCurrentWork(backend, session, 40)
 	}
 
 	// Show hooked work (takes precedence)
@@ -163,13 +162,11 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 	return nil
 }
 
-func runMayorStatusLine(t *tmux.Tmux) error {
-	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
-
+func runMayorStatusLine(backend terminal.Backend) error {
 	// Get town root from mayor pane's working directory
 	var townRoot string
 	mayorSession := getMayorSessionName()
-	paneDir, err := t.GetPaneWorkDir(mayorSession)
+	paneDir, err := backend.GetPaneWorkDir(mayorSession)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
@@ -404,11 +401,11 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 // runDeaconStatusLine outputs status for the deacon session.
 // Shows: active rigs, polecat count, hook or mail preview
-func runDeaconStatusLine(t *tmux.Tmux) error {
+func runDeaconStatusLine(backend terminal.Backend) error {
 	// Get town root from deacon pane's working directory
 	var townRoot string
 	deaconSession := getDeaconSessionName()
-	paneDir, err := t.GetPaneWorkDir(deaconSession)
+	paneDir, err := backend.GetPaneWorkDir(deaconSession)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
@@ -474,7 +471,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 // runWitnessStatusLine outputs status for a witness session.
 // Shows: crew count, hook or mail preview
 // Note: Polecats excluded - they're ephemeral and idle detection is a GC concern
-func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
+func runWitnessStatusLine(backend terminal.Backend, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-witness
 		if strings.HasSuffix(statusLineSession, "-witness") && strings.HasPrefix(statusLineSession, "gt-") {
@@ -485,7 +482,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	// Get town root from witness pane's working directory
 	var townRoot string
 	sessionName := fmt.Sprintf("gt-%s-witness", rigName)
-	paneDir, err := t.GetPaneWorkDir(sessionName)
+	paneDir, err := backend.GetPaneWorkDir(sessionName)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
@@ -541,7 +538,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 
 // runRefineryStatusLine outputs status for a refinery session.
 // Shows: MQ length, current item, hook or mail preview
-func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
+func runRefineryStatusLine(backend terminal.Backend, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-refinery
 		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-refinery") {
@@ -558,7 +555,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	// Get town root from refinery pane's working directory
 	var townRoot string
 	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
-	paneDir, err := t.GetPaneWorkDir(sessionName)
+	paneDir, err := backend.GetPaneWorkDir(sessionName)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
@@ -780,9 +777,9 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 // getCurrentWork returns a truncated title of the first in_progress issue.
 // Uses the pane's working directory to find the beads.
 // Checks the status line cache first for performance (gt-avr97i.1).
-func getCurrentWork(t *tmux.Tmux, session string, maxLen int) string {
+func getCurrentWork(backend terminal.Backend, session string, maxLen int) string {
 	// Get the pane's working directory
-	workDir, err := t.GetPaneWorkDir(session)
+	workDir, err := backend.GetPaneWorkDir(session)
 	if err != nil || workDir == "" {
 		return ""
 	}

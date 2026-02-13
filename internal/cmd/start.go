@@ -25,7 +25,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -173,16 +172,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Could not ensure daemon config: %v\n", style.Dim.Render("○"), err)
 	}
 
-	t := tmux.NewTmux()
-
-	// Clean up orphaned tmux sessions before starting new agents.
-	// This prevents session name conflicts and resource accumulation from
-	// zombie sessions (tmux alive but Claude dead).
-	if cleaned, err := t.CleanupOrphanedSessions(); err != nil {
-		fmt.Printf("  %s Could not clean orphaned sessions: %v\n", style.Dim.Render("○"), err)
-	} else if cleaned > 0 {
-		fmt.Printf("  %s Cleaned up %d orphaned session(s)\n", style.Bold.Render("✓"), cleaned)
-	}
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 	fmt.Println("Starting all agents in parallel...")
@@ -225,7 +215,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startConfiguredCrew(t, rigs, townRoot, &mu)
+			startConfiguredCrew(backend, rigs, townRoot, &mu)
 		}()
 	}
 
@@ -365,7 +355,7 @@ func startRefineryForRig(r *rig.Rig) string {
 }
 
 // startConfiguredCrew starts crew members configured in rig settings in parallel.
-func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *sync.Mutex) {
+func startConfiguredCrew(backend terminal.Backend, rigs []*rig.Rig, townRoot string, mu *sync.Mutex) {
 	var wg sync.WaitGroup
 	var startedAny int32 // Use atomic for thread-safe flag
 
@@ -375,7 +365,7 @@ func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *syn
 			wg.Add(1)
 			go func(r *rig.Rig, crewName string) {
 				defer wg.Done()
-				msg, started := startOrRestartCrewMember(t, r, crewName, townRoot)
+				msg, started := startOrRestartCrewMember(backend, r, crewName, townRoot)
 				mu.Lock()
 				fmt.Print(msg)
 				mu.Unlock()
@@ -396,16 +386,12 @@ func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *syn
 }
 
 // startOrRestartCrewMember starts or restarts a single crew member and returns a status message.
-func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot string) (msg string, started bool) {
-	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+func startOrRestartCrewMember(backend terminal.Backend, r *rig.Rig, crewName, townRoot string) (msg string, started bool) {
 	sessionID := crewSessionName(r.Name, crewName)
 	if running, _ := backend.HasSession(sessionID); running {
-		// Session exists - check if agent is still running
-		// tmux-only: IsAgentRunning checks pane commands which is tmux-specific
-		agentCfg := config.ResolveRoleAgentConfig(constants.RoleCrew, townRoot, r.Path)
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		// Session exists - check if agent is still running via Backend
+		if running, _ := backend.IsAgentRunning(sessionID); !running {
 			// Agent has exited, restart it
-			// Build startup beacon for predecessor discovery via /resume
 			address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
 			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: address,
@@ -413,8 +399,7 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 				Topic:     "restart",
 			})
 			agentCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
-			// tmux-only: SendKeys sends text + Enter to launch agent in existing pane
-			if err := t.SendKeys(sessionID, agentCmd); err != nil {
+			if err := backend.SendKeys(sessionID, agentCmd); err != nil {
 				return fmt.Sprintf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err), false
 			}
 			return fmt.Sprintf("  %s %s/%s agent restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
@@ -442,8 +427,6 @@ func discoverAllRigs(townRoot string) ([]*rig.Rig, error) {
 }
 
 func runShutdown(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
 	// Find workspace root for polecat cleanup
 	townRoot, _ := workspace.FindFromCwd()
 
@@ -495,9 +478,9 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 	}
 
 	if shutdownGraceful {
-		return runGracefulShutdown(t, toStop, townRoot)
+		return runGracefulShutdown(toStop, townRoot)
 	}
-	return runImmediateShutdown(t, toStop, townRoot)
+	return runImmediateShutdown(toStop, townRoot)
 }
 
 // categorizeSessions splits sessions into those to stop and those to preserve.
@@ -547,7 +530,7 @@ func categorizeSessions(sessions []string, mayorSession, deaconSession string) (
 	return
 }
 
-func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) error {
+func runGracefulShutdown(gtSessions []string, townRoot string) error {
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	fmt.Printf("Graceful shutdown of Gas Town (waiting up to %ds)...\n\n", shutdownWait)
 
@@ -562,11 +545,9 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	fmt.Printf("\nPhase 2: Requesting handoff from agents...\n")
 	shutdownMsg := "[SHUTDOWN] Gas Town is shutting down. Please save your state and update your handoff bead, then type /exit or wait to be terminated."
 	for _, sess := range gtSessions {
-		// Small delay then send the message
-		// tmux-only: SendKeys sends text + Enter; using tmux directly to avoid
-		// NudgeSession's 5s debounce which would slow the shutdown loop
+		// Small delay then send the shutdown message
 		time.Sleep(constants.ShutdownNotifyDelay)
-		_ = t.SendKeys(sess, shutdownMsg) // best-effort notification
+		_ = backend.SendKeys(sess, shutdownMsg) // best-effort notification
 	}
 
 	// Phase 3: Wait for agents to complete handoff
@@ -589,7 +570,7 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	fmt.Printf("\nPhase 4: Terminating sessions...\n")
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
-	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+	stopped := killSessionsInOrder(gtSessions, mayorSession, deaconSession)
 
 	// Phase 5: Cleanup orphaned Claude processes if requested
 	if shutdownCleanupOrphans {
@@ -614,12 +595,12 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	return nil
 }
 
-func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) error {
+func runImmediateShutdown(gtSessions []string, townRoot string) error {
 	fmt.Println("Shutting down Gas Town...")
 
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
-	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+	stopped := killSessionsInOrder(gtSessions, mayorSession, deaconSession)
 
 	// Cleanup orphaned Claude processes if requested
 	if shutdownCleanupOrphans {
@@ -656,7 +637,7 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 //
 // Returns the count of sessions that were successfully stopped (verified by checking
 // if the session no longer exists after the kill attempt).
-func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
+func killSessionsInOrder(sessions []string, mayorSession, deaconSession string) int {
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	stopped := 0
 

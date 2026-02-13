@@ -16,7 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/suggest"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -640,7 +640,7 @@ func runSessionCheck(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Session Health Check\n\n", style.Bold.Render("🔍"))
 
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	totalChecked := 0
 	totalHealthy := 0
 	totalCrashed := 0
@@ -664,7 +664,7 @@ func runSessionCheck(cmd *cobra.Command, args []string) error {
 			totalChecked++
 
 			// Check if session exists
-			running, err := t.HasSession(sessionName)
+			running, err := backend.HasSession(sessionName)
 			if err != nil {
 				fmt.Printf("  %s %s/%s: %s\n", style.Bold.Render("⚠"), r.Name, polecatName, style.Dim.Render("error checking session"))
 				continue

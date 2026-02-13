@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
@@ -18,7 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/ratelimit"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -84,7 +82,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 	}
 
 	polecatGit := git.NewGit(r.Path)
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	polecatMgr := polecat.NewManager(r, polecatGit)
 
 	polecatName, err := polecatMgr.AllocateName()
@@ -93,7 +91,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 	}
 	fmt.Printf("Allocated polecat: %s\n", polecatName)
 
-	cleanupOrphanPolecatState(rigName, polecatName, r.Path, t)
+	cleanupOrphanPolecatState(rigName, polecatName, r.Path, backend)
 
 	existingPolecat, err := polecatMgr.Get(polecatName)
 
@@ -198,7 +196,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 				fmt.Printf("  Polecat %s has hooked work (%s), killing stale session...\n",
 					polecatName, agentBead.HookBead)
 				sessionName := polecatSessMgr.SessionName(polecatName)
-				_ = t.KillSessionWithProcesses(sessionName)
+				_ = backend.KillSession(sessionName)
 				running = false
 			}
 		}
@@ -229,7 +227,7 @@ func SpawnPolecatForSling(rigName string, opts SpawnOptions) (*SpawnResult, erro
 
 	sessionName := polecatSessMgr.SessionName(polecatName)
 
-	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, t, terminal.NewCoopBackend(terminal.CoopConfig{})); err != nil {
+	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, backend); err != nil {
 		return nil, fmt.Errorf("spawn verification failed for %s: %w", polecatName, err)
 	}
 
@@ -253,15 +251,10 @@ func WakeRigAgents(rigName string) {
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run()
 
-	// On K8s pods, tmux is not available — skip the local nudge.
-	// The witness on K8s is reached via coop, not local tmux.
-	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
-		return
-	}
-
-	t := tmux.NewTmux()
+	// Nudge witness via backend (coop in K8s mode).
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	_ = backend.NudgeSession(witnessSession, "Polecat dispatched - check for work")
 }
 
 // OjSlingEnabled returns true when OJ dispatch is active.
@@ -269,12 +262,12 @@ func OjSlingEnabled() bool {
 	return os.Getenv("GT_SLING_OJ") == "1"
 }
 
-func cleanupOrphanPolecatState(rigName, polecatName, rigPath string, tm *tmux.Tmux) {
+func cleanupOrphanPolecatState(rigName, polecatName, rigPath string, backend terminal.Backend) {
 	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
 	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-	if err := tm.KillSession(sessionName); err == nil {
-		fmt.Printf("  Cleaned up orphan tmux session: %s\n", sessionName)
+	if err := backend.KillSession(sessionName); err == nil {
+		fmt.Printf("  Cleaned up orphan session: %s\n", sessionName)
 	}
 
 	if entries, err := filepath.Glob(polecatDir + "/*"); err == nil && len(entries) == 0 {
@@ -310,7 +303,7 @@ func verifyWorktreeExists(clonePath string) error {
 	return nil
 }
 
-func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux, backend terminal.Backend) error {
+func verifySpawnedPolecat(clonePath, sessionName string, backend terminal.Backend) error {
 	gitPath := filepath.Join(clonePath, ".git")
 	if _, err := os.Stat(gitPath); err != nil {
 		if os.IsNotExist(err) {
@@ -319,13 +312,7 @@ func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux, backend t
 		return fmt.Errorf("checking worktree: %w", err)
 	}
 
-	var hasSession bool
-	var err error
-	if backend != nil {
-		hasSession, err = backend.HasSession(sessionName)
-	} else {
-		hasSession, err = t.HasSession(sessionName)
-	}
+	hasSession, err := backend.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
@@ -424,32 +411,10 @@ func spawnPolecatForK8s(townRoot, rigName string, r *rig.Rig, opts SpawnOptions)
 	}, nil
 }
 
-// GetSessionPane returns the pane identifier for a session's main pane.
-// This is a tmux-only operation (pane IDs are a tmux concept). On K8s
-// pods where tmux is not installed, this returns an error immediately.
+// GetSessionPane returns the pane identifier for a session.
+// In K8s mode (no tmux), pane IDs are not applicable.
+// Returns the session name as the pane identifier for backend-based sessions.
 func GetSessionPane(sessionName string) (string, error) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return "", fmt.Errorf("tmux not available (K8s pod?): %w", err)
-	}
-
-	const maxRetries = 30
-	const retryDelay = 100 * time.Millisecond
-
-	t := tmux.NewTmux()
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		paneID, err := t.GetPaneID(sessionName)
-		if err != nil {
-			lastErr = err
-			time.Sleep(retryDelay)
-			continue
-		}
-		if paneID == "" {
-			lastErr = fmt.Errorf("no panes found in session")
-			time.Sleep(retryDelay)
-			continue
-		}
-		return paneID, nil
-	}
-	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
+	// Pane IDs are a tmux concept. In K8s/coop mode, just return the session name.
+	return sessionName, nil
 }

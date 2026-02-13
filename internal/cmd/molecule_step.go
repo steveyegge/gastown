@@ -11,7 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -411,47 +411,24 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 
 	fmt.Printf("%s Next step pinned: %s\n", style.Bold.Render("📌"), nextStep.ID)
 
-	// Respawn the pane
-	if !tmux.IsInsideTmux() {
-		// Not in tmux - just print next action
-		fmt.Printf("\n%s Not in tmux - start new session with 'gt prime'\n",
+	// Respawn the session
+	if os.Getenv("TMUX") == "" && os.Getenv("GT_SESSION") == "" {
+		// Not in a session - just print next action
+		fmt.Printf("\n%s Not in a session - start new session with 'gt prime'\n",
 			style.Dim.Render("ℹ"))
 		return nil
 	}
 
-	pane := os.Getenv("TMUX_PANE")
-	if pane == "" {
-		return fmt.Errorf("TMUX_PANE not set")
-	}
-
-	// Get current session for restart command
+	// Get current session for respawn
 	currentSession, err := getCurrentTmuxSession()
 	if err != nil {
 		return fmt.Errorf("getting session name: %w", err)
 	}
 
-	restartCmd, err := buildRestartCommand(currentSession)
-	if err != nil {
-		return fmt.Errorf("building restart command: %w", err)
-	}
-
 	fmt.Printf("\n%s Respawning for next step...\n", style.Bold.Render("🔄"))
 
-	t := tmux.NewTmux()
-
-	// Kill all processes in the pane before respawning to prevent process leaks
-	if err := t.KillPaneProcesses(pane); err != nil {
-		// Non-fatal but log the warning
-		style.PrintWarning("could not kill pane processes: %v", err)
-	}
-
-	// Clear history before respawn
-	if err := t.ClearHistory(pane); err != nil {
-		// Non-fatal
-		style.PrintWarning("could not clear history: %v", err)
-	}
-
-	return t.RespawnPane(pane, restartCmd)
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	return backend.RespawnPane(currentSession)
 }
 
 // handleParallelSteps handles executing multiple steps concurrently (fan-out pattern).

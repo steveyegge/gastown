@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -162,8 +162,6 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-
-	t := tmux.NewTmux()
 
 	// Expand role shortcuts to session names and resolve backend.
 	// These shortcuts let users type "mayor" instead of "gt-mayor".
@@ -317,7 +315,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		backend, sessionKey := resolveBackendForSession(sessionName)
 
 		// Send nudge using queue (safe) or direct (may cause API 400)
-		if err := sendOrQueueNudge(backend, t, townRoot, sessionKey, message, target); err != nil {
+		if err := sendOrQueueNudge(backend, townRoot, sessionKey, message, target); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
@@ -339,7 +337,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := sendOrQueueNudge(backend, t, townRoot, sessionKey, message, ""); err != nil {
+		if err := sendOrQueueNudge(backend, townRoot, sessionKey, message, ""); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
@@ -621,11 +619,7 @@ func addressToAgentBeadID(address string) string {
 // Use --queue flag to buffer nudges when the target may be busy processing tools.
 // Use --delay flag to wait before sending (useful after session restart) (gt-j7iaxs).
 // Use --wait-ready flag to poll until agent is alive before sending (gt-kk330e).
-//
-// backend is used for NudgeSession; t is needed for tmux-specific WaitForAgentReady.
-// targetAddress is the original rig/polecat address (e.g., "gastown/furiosa") used to
-// check if the target is OJ-managed. Pass "" if unknown (falls through to tmux).
-func sendOrQueueNudge(backend terminal.Backend, t *tmux.Tmux, townRoot, sessionName, message, targetAddress string) error {
+func sendOrQueueNudge(backend terminal.Backend, townRoot, sessionName, message, _ string) error {
 	// If --queue flag is set and we're in a workspace, queue the nudge
 	if nudgeQueueFlag && townRoot != "" {
 		nq := inject.NewNudgeQueue(townRoot, sessionName)
@@ -637,16 +631,19 @@ func sendOrQueueNudge(backend terminal.Backend, t *tmux.Tmux, townRoot, sessionN
 	}
 
 	// If --wait-ready flag is set, wait for agent to be alive before sending (gt-kk330e).
-	// This prevents the race condition where gt nudge lands before Claude has started.
+	// Poll using Backend.IsAgentRunning instead of tmux-specific WaitForAgentReady.
 	if nudgeWaitReady {
 		timeout := time.Duration(nudgeWaitTimeout) * time.Second
-		if err := t.WaitForAgentReady(sessionName, timeout); err != nil {
-			return fmt.Errorf("agent not ready: %w", err)
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			if running, _ := backend.IsAgentRunning(sessionName); running {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
 	// If --delay flag is set, wait before sending (gt-j7iaxs)
-	// This helps when sending nudges right after session restart - gives Claude Code time to start
 	if nudgeDelayFlag > 0 {
 		time.Sleep(time.Duration(nudgeDelayFlag) * time.Millisecond)
 	}
@@ -680,16 +677,14 @@ Examples:
 }
 
 func runNudgeDrain(cmd *cobra.Command, args []string) error {
-	// Determine our session name. In tmux this comes from tmux display-message;
-	// in Coop/K8s agents the session is always "claude".
+	// Determine our session name from env vars. In K8s the session is always "claude".
 	var sessionName string
-	t := tmux.NewTmux()
-	sn, err := t.GetCurrentSessionName()
-	if err != nil {
-		// Not in a tmux session — use "claude" (Coop/K8s default)
-		sessionName = "claude"
+	if s := os.Getenv("GT_SESSION"); s != "" {
+		sessionName = s
+	} else if s := os.Getenv("TMUX_SESSION"); s != "" {
+		sessionName = s
 	} else {
-		sessionName = sn
+		sessionName = "claude"
 	}
 
 	// Find town root

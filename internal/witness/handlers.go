@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -707,29 +706,16 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 }
 
 // NukePolecat executes the actual nuke operation for a polecat.
-// This kills the tmux session, removes the worktree, and cleans up beads.
+// This kills the session, removes the worktree, and cleans up beads.
 // Should only be called after all safety checks pass.
 func NukePolecat(workDir, rigName, polecatName string) error {
-	// CRITICAL: Kill the tmux session FIRST and unconditionally.
-	// The session name follows the pattern gt-<rig>-<polecat>.
-	// We do this explicitly here because gt polecat nuke may fail to kill the
-	// session due to rig loading issues or race conditions with IsRunning checks.
-	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
+	// Kill the session FIRST and unconditionally.
 	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
-	t := tmux.NewTmux()
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
-	// Check if session exists and kill it
+	// Check if session exists and kill it via coop
 	if running, _ := backend.HasSession(sessionName); running {
-		// Try graceful shutdown first (Ctrl-C), then force kill
-		_ = t.SendKeysRaw(sessionName, "C-c")
-		// Brief delay for graceful handling
-		time.Sleep(100 * time.Millisecond)
-		// Force kill the session
-		if err := t.KillSessionWithProcesses(sessionName); err != nil {
-			// Log but continue - session might already be dead
-			// The important thing is we tried
-		}
+		_ = backend.KillSession(sessionName)
 	}
 
 	// Now run gt polecat nuke to clean up worktree, branch, and beads
@@ -1101,7 +1087,6 @@ func FindResolvedDecisionsForCrew(workDir, rigName string, lookback time.Duratio
 	}
 
 	var results []*ResolvedDecisionInfo
-	t := tmux.NewTmux()
 	decBackend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	for _, issue := range decisions {
@@ -1139,8 +1124,9 @@ func FindResolvedDecisionsForCrew(workDir, rigName string, lookback time.Duratio
 			continue
 		}
 
-		// Check if agent is running (healthy session that can receive nudges)
-		if !t.IsAgentAlive(sessionName) {
+		// Check if agent is running via coop backend
+		agentRunning, _ := decBackend.IsAgentRunning(sessionName)
+		if !agentRunning {
 			continue
 		}
 

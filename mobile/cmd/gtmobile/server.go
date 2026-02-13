@@ -29,7 +29,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/notify"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -212,13 +212,11 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 		return nil, fmt.Errorf("discovering rigs: %w", err)
 	}
 
-	// Get tmux sessions
-	t := tmux.NewTmux()
-	allSessions := make(map[string]bool)
-	if sessions, err := t.ListSessions(); err == nil {
-		for _, sess := range sessions {
-			allSessions[sess] = true
-		}
+	// Check agent session status via coop backend
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	isRunning := func(session string) bool {
+		running, _ := backend.HasSession(session)
+		return running
 	}
 
 	// Overseer info
@@ -255,7 +253,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 			Address: &gastownv1.AgentAddress{Name: agent.name},
 			Session: agent.session,
 			Role:    agent.role,
-			Running: allSessions[agent.session],
+			Running: isRunning(agent.session),
 		})
 	}
 
@@ -286,7 +284,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "witness"},
 				Session: session,
 				Role:    "witness",
-				Running: allSessions[session],
+				Running: isRunning(session),
 			})
 		}
 		if r.HasRefinery {
@@ -296,7 +294,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "refinery"},
 				Session: session,
 				Role:    "refinery",
-				Running: allSessions[session],
+				Running: isRunning(session),
 			})
 		}
 		for _, p := range r.Polecats {
@@ -306,7 +304,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "polecats", Name: p},
 				Session: session,
 				Role:    "polecat",
-				Running: allSessions[session],
+				Running: isRunning(session),
 			})
 		}
 		for _, c := range rs.Crews {
@@ -316,7 +314,7 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 				Address: &gastownv1.AgentAddress{Rig: r.Name, Role: "crew", Name: c},
 				Session: session,
 				Role:    "crew",
-				Running: allSessions[session],
+				Running: isRunning(session),
 			})
 		}
 
@@ -2443,15 +2441,15 @@ func mapToStruct(m map[string]interface{}) *structpb.Struct {
 	return s
 }
 
-// TerminalServer implements the TerminalService.
+// TerminalServer implements the TerminalService using the coop backend.
 type TerminalServer struct {
-	tmux *tmux.Tmux
+	backend terminal.Backend
 }
 
 var _ gastownv1connect.TerminalServiceHandler = (*TerminalServer)(nil)
 
 func NewTerminalServer() *TerminalServer {
-	return &TerminalServer{tmux: tmux.NewTmux()}
+	return &TerminalServer{backend: terminal.NewCoopBackend(terminal.CoopConfig{})}
 }
 
 func (s *TerminalServer) PeekSession(
@@ -2464,7 +2462,7 @@ func (s *TerminalServer) PeekSession(
 	}
 
 	// Check if session exists
-	exists, err := s.tmux.HasSession(session)
+	exists, err := s.backend.HasSession(session)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -2486,9 +2484,9 @@ func (s *TerminalServer) PeekSession(
 
 	var output string
 	if req.Msg.All {
-		output, err = s.tmux.CapturePaneAll(session)
+		output, err = s.backend.CapturePaneAll(session)
 	} else {
-		output, err = s.tmux.CapturePane(session, lines)
+		output, err = s.backend.CapturePane(session, lines)
 	}
 
 	if err != nil {
@@ -2512,24 +2510,10 @@ func (s *TerminalServer) ListSessions(
 	ctx context.Context,
 	req *connect.Request[gastownv1.ListSessionsRequest],
 ) (*connect.Response[gastownv1.ListSessionsResponse], error) {
-	sessions, err := s.tmux.ListSessions()
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	// Apply prefix filter if specified
-	if req.Msg.Prefix != "" {
-		var filtered []string
-		for _, sess := range sessions {
-			if strings.HasPrefix(sess, req.Msg.Prefix) {
-				filtered = append(filtered, sess)
-			}
-		}
-		sessions = filtered
-	}
-
+	// In K8s mode, session listing is not supported via coop backend.
+	// Return empty list since tmux is no longer available.
 	return connect.NewResponse(&gastownv1.ListSessionsResponse{
-		Sessions: sessions,
+		Sessions: nil,
 	}), nil
 }
 
@@ -2541,7 +2525,7 @@ func (s *TerminalServer) HasSession(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("session name is required"))
 	}
 
-	exists, err := s.tmux.HasSession(req.Msg.Session)
+	exists, err := s.backend.HasSession(req.Msg.Session)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -2583,31 +2567,22 @@ func (s *TerminalServer) WatchSession(
 			return nil
 		case <-ticker.C:
 			// Check if session exists
-			exists, err := s.tmux.HasSession(session)
-			if err != nil {
-				// Send error update
+			exists, err := s.backend.HasSession(session)
+			if err != nil || !exists {
 				if err := stream.Send(&gastownv1.TerminalUpdate{
 					Exists:    false,
 					Timestamp: time.Now().UTC().Format(time.RFC3339),
 				}); err != nil {
 					return err
+				}
+				if !exists {
+					return nil // Stop watching when session dies
 				}
 				continue
 			}
 
-			if !exists {
-				// Session no longer exists
-				if err := stream.Send(&gastownv1.TerminalUpdate{
-					Exists:    false,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				}); err != nil {
-					return err
-				}
-				return nil // Stop watching when session dies
-			}
-
 			// Capture output
-			output, err := s.tmux.CapturePane(session, lines)
+			output, err := s.backend.CapturePane(session, lines)
 			if err != nil {
 				continue
 			}
@@ -2647,7 +2622,7 @@ func (s *TerminalServer) SendInput(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("input text is required"))
 	}
 
-	exists, err := s.tmux.HasSession(session)
+	exists, err := s.backend.HasSession(session)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check session existence: %w", err))
 	}
@@ -2658,7 +2633,7 @@ func (s *TerminalServer) SendInput(
 		}), nil
 	}
 
-	if err := s.tmux.SendKeys(session, input); err != nil {
+	if err := s.backend.SendInput(session, input, true); err != nil {
 		return connect.NewResponse(&gastownv1.SendInputResponse{
 			Delivered: false,
 			Error:     fmt.Sprintf("failed to send input: %v", err),

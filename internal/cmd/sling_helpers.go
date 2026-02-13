@@ -11,9 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/bdcmd"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -408,9 +406,14 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 		// OJ send failed, fall through to tmux
 	}
 
-	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
-	t := tmux.NewTmux()
-	return t.NudgePane(pane, prompt)
+	// Use the reliable nudge pattern via the backend.
+	// Resolve pane to session name for backend routing.
+	session := getSessionFromPane(pane)
+	if session == "" {
+		session = pane
+	}
+	backend, sessionKey := resolveBackendForSession(session)
+	return backend.NudgeSession(sessionKey, prompt)
 }
 
 // nudgeViaBackend attempts to nudge a non-tmux agent (Coop/K8s) via the Backend interface.
@@ -444,16 +447,12 @@ func nudgeViaBackend(agentID, beadID, subject, args string) bool {
 
 // getSessionFromPane extracts session name from a pane target.
 // Pane targets can be:
-// - "%9" (pane ID) - need to query tmux for session
+// - "%9" (pane ID) - treated as-is (tmux pane IDs not supported in K8s mode)
 // - "gt-rig-name:0.0" (session:window.pane) - extract session name
 func getSessionFromPane(pane string) string {
 	if strings.HasPrefix(pane, "%") {
-		// Pane ID format - query tmux for the session
-		name, err := tmux.NewTmux().GetSessionName(pane)
-		if err != nil {
-			return ""
-		}
-		return name
+		// Pane ID format - no tmux to query in K8s mode
+		return ""
 	}
 	// Session:window.pane format - extract session name
 	if idx := strings.Index(pane, ":"); idx > 0 {
@@ -463,33 +462,17 @@ func getSessionFromPane(pane string) string {
 }
 
 // ensureAgentReady waits for an agent to be ready before nudging an existing session.
-// Uses a pragmatic approach: wait for the pane to leave a shell, then (Claude-only)
-// accept the bypass permissions warning and give it a moment to finish initializing.
+// In K8s mode, checks agent liveness via the backend.
 func ensureAgentReady(sessionName string) error {
-	t := tmux.NewTmux()
-
-	// If an agent is already running, assume it's ready (session was started earlier)
-	if t.IsAgentRunning(sessionName) {
-		return nil
+	backend, sessionKey := resolveBackendForSession(sessionName)
+	running, err := backend.IsAgentRunning(sessionKey)
+	if err != nil {
+		return fmt.Errorf("checking agent readiness: %w", err)
 	}
-
-	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for agent to start: %w", err)
+	if !running {
+		// Give the agent a moment to start up
+		time.Sleep(2 * time.Second)
 	}
-
-	// Claude-only: accept bypass permissions warning if present
-	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
-	if agentName == "" || agentName == "claude" {
-		_ = t.AcceptBypassPermissionsWarning(sessionName)
-
-		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
-		// Claude startup takes ~5-8 seconds on typical machines.
-		time.Sleep(8 * time.Second)
-	} else {
-		time.Sleep(1 * time.Second)
-	}
-
 	return nil
 }
 

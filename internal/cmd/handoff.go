@@ -3,10 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/advice"
@@ -19,7 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -97,17 +94,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
-
-	// Verify we're in tmux
-	if !tmux.IsInsideTmux() {
-		return fmt.Errorf("not running in tmux - cannot hand off")
-	}
-
-	pane := os.Getenv("TMUX_PANE")
-	if pane == "" {
-		return fmt.Errorf("TMUX_PANE not set - cannot hand off")
-	}
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	// Get current session name
 	currentSession, err := getCurrentTmuxSession()
@@ -147,7 +134,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// If handing off a different session, we need to find its pane and respawn there
 	if targetSession != currentSession {
-		return handoffRemoteSession(t, targetSession, restartCmd)
+		return handoffRemoteSession(backend, targetSession, restartCmd)
 	}
 
 	// Handing off ourselves - print feedback then respawn
@@ -189,8 +176,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		if handoffSubject != "" || handoffMessage != "" {
 			fmt.Printf("Would send handoff mail: subject=%q (auto-hooked)\n", handoffSubject)
 		}
-		fmt.Printf("Would execute: tmux clear-history -t %s\n", pane)
-		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
+		fmt.Printf("Would respawn session %s with: %s\n", currentSession, restartCmd)
 		return nil
 	}
 
@@ -204,16 +190,6 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
 	}
 
-	// NOTE: reportAgentState("stopped") removed (gt-zecmc)
-	// Agent liveness is observable from tmux - no need to record it in bead.
-	// "Discover, don't track" principle: reality is truth, state is derived.
-
-	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
-	if err := t.ClearHistory(pane); err != nil {
-		// Non-fatal - continue with respawn even if clear fails
-		style.PrintWarning("could not clear history: %v", err)
-	}
-
 	// Write handoff marker for successor detection (prevents handoff loop bug).
 	// The marker is cleared by gt prime after it outputs the warning.
 	// This tells the new session "you're post-handoff, don't re-run /handoff"
@@ -224,50 +200,20 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
-	// Set remain-on-exit so the pane survives process death during handoff.
-	// Without this, killing processes causes tmux to destroy the pane before
-	// we can respawn it. This is essential for tmux session reuse.
-	if err := t.SetRemainOnExit(pane, true); err != nil {
-		style.PrintWarning("could not set remain-on-exit: %v", err)
-	}
-
-	// NOTE: For self-handoff, we do NOT call KillPaneProcesses here.
-	// That would kill the gt handoff process itself before it can call RespawnPane,
-	// leaving the pane dead with no respawn. RespawnPane's -k flag handles killing
-	// atomically - tmux kills the old process and spawns the new one together.
-	// See: https://github.com/steveyegge/gastown/issues/859 (pane is dead bug)
-	//
-	// For orphan prevention, we rely on respawn-pane -k which sends SIGHUP/SIGTERM.
-	// If orphans still occur, the solution is to adjust the restart command to
-	// kill orphans at startup, not to kill ourselves before respawning.
-
-	// Check if pane's working directory exists (may have been deleted)
-	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
-	if paneWorkDir != "" {
-		if _, err := os.Stat(paneWorkDir); err != nil {
-			if townRoot := detectTownRootFromCwd(); townRoot != "" {
-				style.PrintWarning("pane working directory deleted, using town root")
-				return t.RespawnPaneWithWorkDir(pane, townRoot, restartCmd)
-			}
-		}
-	}
-
-	// Use respawn-pane -k to atomically kill current process and start new one
-	// Note: respawn-pane automatically resets remain-on-exit to off
-	return t.RespawnPane(pane, restartCmd)
+	// Respawn the session via Backend
+	return backend.RespawnPane(currentSession)
 }
 
-// getCurrentTmuxSession returns the current tmux session name.
-// On K8s pods (no tmux), falls back to GT_SESSION or TMUX_SESSION env vars.
+// getCurrentTmuxSession returns the current session name.
+// Uses GT_SESSION or TMUX_SESSION env vars (K8s-native).
 func getCurrentTmuxSession() (string, error) {
-	// Try env vars first — these are set on K8s pods where tmux is unavailable
 	if s := os.Getenv("GT_SESSION"); s != "" {
 		return s, nil
 	}
 	if s := os.Getenv("TMUX_SESSION"); s != "" {
 		return s, nil
 	}
-	return tmux.NewTmux().GetCurrentSessionName()
+	return "", fmt.Errorf("GT_SESSION or TMUX_SESSION not set")
 }
 
 // resolveRoleToSession converts a role name or path to a tmux session name.
@@ -605,9 +551,9 @@ func detectTownRootFromCwd() string {
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.
-func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error {
+func handoffRemoteSession(backend terminal.Backend, targetSession, restartCmd string) error {
 	// Check if target session exists
-	exists, err := t.HasSession(targetSession)
+	exists, err := backend.HasSession(targetSession)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
@@ -615,127 +561,22 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		return fmt.Errorf("session '%s' not found - is the agent running?", targetSession)
 	}
 
-	// Get the pane ID for the target session
-	targetPane, err := getSessionPane(targetSession)
-	if err != nil {
-		return fmt.Errorf("getting target pane: %w", err)
-	}
-
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), targetSession)
 
 	// Dry run mode
 	if handoffDryRun {
-		fmt.Printf("Would execute: tmux clear-history -t %s\n", targetPane)
-		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", targetPane, restartCmd)
-		if handoffWatch {
-			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
-		}
+		fmt.Printf("Would respawn session %s with: %s\n", targetSession, restartCmd)
 		return nil
 	}
 
-	// Set remain-on-exit so the pane survives process death during handoff.
-	// Without this, killing processes causes tmux to destroy the pane before
-	// we can respawn it. This is essential for tmux session reuse.
-	if err := t.SetRemainOnExit(targetPane, true); err != nil {
-		style.PrintWarning("could not set remain-on-exit: %v", err)
-	}
-
-	// Kill all processes in the pane before respawning to prevent orphan leaks
-	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
-	if err := t.KillPaneProcesses(targetPane); err != nil {
-		// Non-fatal but log the warning
-		style.PrintWarning("could not kill pane processes: %v", err)
-	}
-
-	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
-	if err := t.ClearHistory(targetPane); err != nil {
-		// Non-fatal - continue with respawn even if clear fails
-		style.PrintWarning("could not clear history: %v", err)
-	}
-
-	// Respawn the remote session's pane, handling deleted working directories
-	respawnErr := func() error {
-		paneWorkDir, _ := t.GetPaneWorkDir(targetSession)
-		if paneWorkDir != "" {
-			if _, statErr := os.Stat(paneWorkDir); statErr != nil {
-				if townRoot := detectTownRootFromCwd(); townRoot != "" {
-					style.PrintWarning("pane working directory deleted, using town root")
-					return t.RespawnPaneWithWorkDir(targetPane, townRoot, restartCmd)
-				}
-			}
-		}
-		return t.RespawnPane(targetPane, restartCmd)
-	}()
-	if respawnErr != nil {
-		return fmt.Errorf("respawning pane: %w", respawnErr)
-	}
-
-	// If --watch, switch to that session (tmux-only UI operation)
-	if handoffWatch && os.Getenv("TMUX") != "" {
-		fmt.Printf("Switching to %s...\n", targetSession)
-		// Use tmux switch-client to move our view to the target session
-		if err := tmux.NewTmux().SwitchClient(targetSession); err != nil {
-			// Non-fatal - they can manually switch
-			fmt.Printf("Note: Could not auto-switch (use: tmux switch-client -t %s)\n", targetSession)
-		}
+	// Respawn the remote session via Backend
+	if err := backend.RespawnPane(targetSession); err != nil {
+		return fmt.Errorf("respawning session: %w", err)
 	}
 
 	return nil
 }
 
-// getSessionPane returns the pane identifier for a session's main pane.
-// Includes retry logic to handle race conditions when called immediately after
-// session creation (tmux new-session may return before pane is queryable).
-//
-// The race condition occurs because tmux new-session returns before the session
-// is fully initialized and queryable via list-panes. This is especially common
-// on slower systems or under load. We use 30 retries at 100ms intervals (3 seconds
-// total) which provides ample time for tmux to initialize.
-//
-// This is a tmux-only operation (pane IDs are a tmux concept). On K8s pods
-// where tmux is not installed, returns an error immediately.
-func getSessionPane(sessionName string) (string, error) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return "", fmt.Errorf("tmux not available (K8s pod?): %w", err)
-	}
-
-	const maxRetries = 30
-	const retryDelay = 100 * time.Millisecond
-	debug := os.Getenv("GT_DEBUG_SLING") != ""
-
-	if debug {
-		fmt.Fprintf(os.Stderr, "[sling-debug] getSessionPane: looking for session %q\n", sessionName)
-	}
-
-	t := tmux.NewTmux()
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		paneID, err := t.GetPaneID(sessionName)
-		if err != nil {
-			lastErr = err
-			if debug && i%5 == 0 {
-				b := terminal.NewCoopBackend(terminal.CoopConfig{})
-				has, _ := b.HasSession(sessionName)
-				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: GetPaneID failed: %v, has-session: %v\n", i, lastErr, has)
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-		if paneID == "" {
-			lastErr = fmt.Errorf("no panes found in session")
-			if debug {
-				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: session exists but no panes\n", i)
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-		if debug {
-			fmt.Fprintf(os.Stderr, "[sling-debug] found pane %s after %d retries\n", paneID, i)
-		}
-		return paneID, nil
-	}
-	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
-}
 
 // sendHandoffMail sends a handoff mail to self and auto-hooks it.
 // Returns the created bead ID and any error.

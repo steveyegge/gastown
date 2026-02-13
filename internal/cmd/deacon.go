@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -23,7 +22,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -390,10 +388,7 @@ func runDeaconStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Deacon session already running. Attach with: gt deacon attach")
 	}
 
-	// tmux-only: startDeaconSession uses NewSessionWithCommand, SetEnvironment,
-	// ConfigureGasTownSession, WaitForCommand which are tmux-specific
-	t := tmux.NewTmux()
-	if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
+	if err := startDeaconSession(sessionName, deaconAgentOverride); err != nil {
 		return err
 	}
 
@@ -404,8 +399,8 @@ func runDeaconStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startDeaconSession creates and initializes the Deacon tmux session.
-func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
+// startDeaconSession creates and initializes the Deacon session via backend.
+func startDeaconSession(sessionName, agentOverride string) error {
 	// Find workspace root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -426,46 +421,22 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}, "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
+	// Start session via backend
 	fmt.Println("Starting Deacon session...")
-	if err := t.NewSessionWithCommand(sessionName, deaconDir, startupCmd); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	// Set environment (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: townRoot,
 	})
 	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionName, k, v)
+		_ = backend.SetEnvironment(sessionName, k, v)
 	}
 
-	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
-	// Note: ConfigureGasTownSession includes cycle bindings
-	theme := tmux.DeaconTheme()
-	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
-
-	// Wait for Claude to start
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for deacon to start: %w", err)
+	if err := backend.RespawnPane(sessionName); err != nil {
+		return fmt.Errorf("creating session: %w", err)
 	}
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	runtimeCfg := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
 
 	return nil
 }
@@ -578,10 +549,8 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 	}
 	if !running {
 		// Auto-start if not running
-		// tmux-only: startDeaconSession uses NewSessionWithCommand, SetEnvironment, etc.
 		fmt.Println("Deacon session not running, starting...")
-		t := tmux.NewTmux()
-		if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
+		if err := startDeaconSession(sessionName, deaconAgentOverride); err != nil {
 			return err
 		}
 	}
@@ -629,25 +598,10 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if running {
-		// Get session info for more details (tmux-specific, best effort)
-		t := tmux.NewTmux()
-		info, err := t.GetSessionInfo(sessionName)
-		if err == nil {
-			status := "detached"
-			if info.Attached {
-				status = "attached"
-			}
-			fmt.Printf("%s Deacon session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
-			fmt.Printf("  Status: %s\n", status)
-			fmt.Printf("  Created: %s\n", info.Created)
-			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
-		} else {
-			fmt.Printf("%s Deacon session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
-		}
+		fmt.Printf("%s Deacon session is %s\n",
+			style.Bold.Render("●"),
+			style.Bold.Render("running"))
+		fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 	} else {
 		// Check for K8s pod.
 		if podName, ns := detectDeaconK8sPod(); podName != "" {

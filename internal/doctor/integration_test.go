@@ -51,126 +51,7 @@ func TestIntegrationTownSetup(t *testing.T) {
 	}
 }
 
-// TestIntegrationOrphanSessionDetection verifies orphan session detection accuracy.
-func TestIntegrationOrphanSessionDetection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	tests := []struct {
-		name         string
-		sessionName  string
-		expectOrphan bool
-	}{
-		// Valid Gas Town sessions should NOT be detected as orphans
-		{"mayor_session", "hq-mayor", false},
-		{"deacon_session", "hq-deacon", false},
-		{"witness_session", "gt-gastown-witness", false},
-		{"refinery_session", "gt-gastown-refinery", false},
-		{"crew_session", "gt-gastown-crew-max", false},
-		{"polecat_session", "gt-gastown-polecat-abc123", false},
-
-		// Different rig names
-		{"niflheim_witness", "gt-niflheim-witness", false},
-		{"niflheim_crew", "gt-niflheim-crew-codex1", false},
-
-		// Invalid sessions SHOULD be detected as orphans
-		{"unknown_rig", "gt-unknownrig-witness", true},
-		{"malformed", "gt-only-two", true}, // Only 2 parts after gt
-		{"non_gt_prefix", "foo-gastown-witness", false}, // Not a gt- session, should be ignored
-	}
-
-	townRoot := setupIntegrationTown(t)
-
-	// Create test rigs
-	createTestRig(t, townRoot, "gastown")
-	createTestRig(t, townRoot, "niflheim")
-
-	check := NewOrphanSessionCheck()
-	ctx := &CheckContext{TownRoot: townRoot}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			validRigs := check.getValidRigs(townRoot)
-			mayorSession := "hq-mayor"
-			deaconSession := "hq-deacon"
-
-			isValid := check.isValidSession(tt.sessionName, validRigs, mayorSession, deaconSession)
-
-			if tt.expectOrphan && isValid {
-				t.Errorf("session %q should be detected as orphan but was marked valid", tt.sessionName)
-			}
-			if !tt.expectOrphan && !isValid && strings.HasPrefix(tt.sessionName, "gt-") {
-				t.Errorf("session %q should be valid but was detected as orphan", tt.sessionName)
-			}
-		})
-	}
-
-	// Verify the check runs without error
-	result := check.Run(ctx)
-	if result.Status == StatusError {
-		t.Errorf("orphan check returned error: %s", result.Message)
-	}
-}
-
-// TestIntegrationCrewSessionProtection verifies crew sessions are never auto-killed.
-func TestIntegrationCrewSessionProtection(t *testing.T) {
-	tests := []struct {
-		name     string
-		session  string
-		isCrew   bool
-	}{
-		{"simple_crew", "gt-gastown-crew-max", true},
-		{"crew_with_numbers", "gt-gastown-crew-worker1", true},
-		{"crew_different_rig", "gt-niflheim-crew-codex1", true},
-		{"witness_not_crew", "gt-gastown-witness", false},
-		{"refinery_not_crew", "gt-gastown-refinery", false},
-		{"polecat_not_crew", "gt-gastown-polecat-abc", false},
-		{"mayor_not_crew", "hq-mayor", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isCrewSession(tt.session)
-			if result != tt.isCrew {
-				t.Errorf("isCrewSession(%q) = %v, want %v", tt.session, result, tt.isCrew)
-			}
-		})
-	}
-}
-
-// TestIntegrationEnvVarsConsistency verifies env var expectations match actual setup.
-func TestIntegrationEnvVarsConsistency(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	townRoot := setupIntegrationTown(t)
-	createTestRig(t, townRoot, "gastown")
-
-	// Test that expected env vars are computed correctly for different roles
-	tests := []struct {
-		role      string
-		rig       string
-		wantActor string
-	}{
-		{"mayor", "", "mayor"},
-		{"deacon", "", "deacon"},
-		{"witness", "gastown", "gastown/witness"},
-		{"refinery", "gastown", "gastown/refinery"},
-		{"crew", "gastown", "gastown/crew/"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.role+"_"+tt.rig, func(t *testing.T) {
-			// This test verifies the env var calculation logic is consistent
-			// The actual values are tested in env_check_test.go
-			if tt.wantActor == "" {
-				t.Skip("actor validation not implemented")
-			}
-		})
-	}
-}
+// TestIntegrationSessionNamingConsistency verifies session naming is consistent.
 
 // TestIntegrationBeadsDirRigLevel verifies BEADS_DIR is computed correctly per rig.
 // This was a key bug: setting BEADS_DIR globally at the shell level caused all beads
@@ -244,52 +125,6 @@ func TestIntegrationBeadsDirRigLevel(t *testing.T) {
 	}
 }
 
-// TestIntegrationEnvVarsBeadsDirMismatch verifies the env check detects BEADS_DIR mismatches.
-// This catches the scenario where BEADS_DIR is set globally to town beads but a rig
-// session should have rig-level beads.
-func TestIntegrationEnvVarsBeadsDirMismatch(t *testing.T) {
-	townRoot := "/town" // Fixed path for consistent expected values
-	townBeadsDir := townRoot + "/.beads"
-	rigBeadsDir := townRoot + "/gastown/.beads"
-
-	// Create mock reader with mismatched BEADS_DIR
-	reader := &mockEnvReaderIntegration{
-		sessions: []string{"gt-gastown-witness"},
-		sessionEnvs: map[string]map[string]string{
-			"gt-gastown-witness": {
-				"GT_ROLE":   "witness",
-				"GT_RIG":    "gastown",
-				"BEADS_DIR": townBeadsDir, // WRONG: Should be rigBeadsDir
-				"GT_ROOT":   townRoot,
-			},
-		},
-	}
-
-	check := NewEnvVarsCheckWithReader(reader)
-	ctx := &CheckContext{TownRoot: townRoot}
-	result := check.Run(ctx)
-
-	// Should detect the BEADS_DIR mismatch
-	if result.Status == StatusOK {
-		t.Errorf("expected warning for BEADS_DIR mismatch, got StatusOK")
-	}
-
-	// Verify details mention BEADS_DIR
-	foundBeadsDirMismatch := false
-	for _, detail := range result.Details {
-		if strings.Contains(detail, "BEADS_DIR") {
-			foundBeadsDirMismatch = true
-			t.Logf("Detected mismatch: %s", detail)
-		}
-	}
-
-	if !foundBeadsDirMismatch && result.Status == StatusWarning {
-		t.Logf("Warning was for other reasons, expected BEADS_DIR specifically")
-		t.Logf("Result details: %v", result.Details)
-	}
-
-	_ = rigBeadsDir // Document expected value
-}
 
 // TestIntegrationAgentBeadsExist verifies agent beads are created correctly.
 func TestIntegrationAgentBeadsExist(t *testing.T) {
@@ -506,7 +341,6 @@ func TestIntegrationNoFalsePositives(t *testing.T) {
 		NewTownConfigExistsCheck(),
 		NewTownConfigValidCheck(),
 		NewRigsRegistryExistsCheck(),
-		NewOrphanSessionCheck(),
 	)
 	report := d.Run(ctx)
 
@@ -572,35 +406,6 @@ func TestIntegrationSessionNaming(t *testing.T) {
 }
 
 // Helper functions
-
-// mockEnvReaderIntegration implements SessionEnvReader for integration tests.
-type mockEnvReaderIntegration struct {
-	sessions    []string
-	sessionEnvs map[string]map[string]string
-	listErr     error
-	envErrs     map[string]error
-}
-
-func (m *mockEnvReaderIntegration) ListSessions() ([]string, error) {
-	if m.listErr != nil {
-		return nil, m.listErr
-	}
-	return m.sessions, nil
-}
-
-func (m *mockEnvReaderIntegration) GetAllEnvironment(session string) (map[string]string, error) {
-	if m.envErrs != nil {
-		if err, ok := m.envErrs[session]; ok {
-			return nil, err
-		}
-	}
-	if m.sessionEnvs != nil {
-		if env, ok := m.sessionEnvs[session]; ok {
-			return env, nil
-		}
-	}
-	return map[string]string{}, nil
-}
 
 func setupIntegrationTown(t *testing.T) string {
 	t.Helper()

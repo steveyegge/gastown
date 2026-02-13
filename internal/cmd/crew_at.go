@@ -13,7 +13,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -141,7 +140,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if session exists
-	t := tmux.NewTmux()
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	sessionID := crewSessionName(r.Name, name)
 	if debug {
@@ -155,45 +153,24 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("[DEBUG] hasSession=%v\n", hasSession)
 	}
 
-	// Before creating a new session, check if there's already a runtime session
-	// running in this crew's directory (might have been started manually or via
-	// a different mechanism)
 	if !hasSession {
-		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, runtimeConfig.Tmux.ProcessNames)
-		if err == nil && len(existingSessions) > 0 {
-			// Found an existing session with runtime running in this directory
-			existingSession := existingSessions[0]
-			fmt.Printf("%s Found existing runtime session '%s' in crew directory\n",
-				style.Warning.Render("⚠"),
-				existingSession)
-			fmt.Printf("  Attaching to existing session instead of creating a new one\n")
+		// Session doesn't exist — build startup command and start via backend
+		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
+			Recipient: address,
+			Sender:    "human",
+			Topic:     "start",
+		})
 
-			// If inside tmux (but different session), inform user
-			if tmux.IsInsideTmux() {
-				fmt.Printf("Use C-b s to switch to '%s'\n", existingSession)
-				return nil
-			}
-
-			// Outside tmux: attach unless --detached flag is set
-			if crewDetached {
-				fmt.Printf("Existing session: '%s'. Run 'tmux attach -t %s' to attach.\n",
-					existingSession, existingSession)
-				return nil
-			}
-
-			// Attach to existing session
-			return attachToTmuxSession(existingSession)
+		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command: %w", err)
 		}
-	}
-
-	if !hasSession {
-		// Create new session
-		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-			return fmt.Errorf("creating session: %w", err)
+		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
+			startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
 		}
 
-		// Set environment (non-fatal: session works without these)
-		// Use centralized AgentEnv for consistency across all role startup paths
+		// Set environment via backend
 		envVars := config.AgentEnv(config.AgentEnvConfig{
 			Role:             "crew",
 			Rig:              r.Name,
@@ -206,51 +183,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			BaseURL:          baseURL,
 		})
 		for k, v := range envVars {
-			_ = t.SetEnvironment(sessionID, k, v)
+			_ = backend.SetEnvironment(sessionID, k, v)
 		}
 
-		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-		// Note: ConfigureGasTownSession includes cycle bindings
-		theme := getThemeForRig(r.Name)
-		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
-
-		// Wait for shell to be ready after session creation
-		if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-			return fmt.Errorf("waiting for shell: %w", err)
-		}
-
-		// Get pane ID for respawn
-		paneID, err := t.GetPaneID(sessionID)
-		if err != nil {
-			return fmt.Errorf("getting pane ID: %w", err)
-		}
-
-		// Build startup beacon for predecessor discovery via /resume
-		// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
-		// The SessionStart hook handles context injection (gt prime --hook)
-		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupBeacon(session.BeaconConfig{
-			Recipient: address,
-			Sender:    "human",
-			Topic:     "start",
-		})
-
-		// Use respawn-pane to replace shell with runtime directly
-		// This gives cleaner lifecycle: runtime exits → session ends (no intermediate shell)
-		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
-		if err != nil {
-			return fmt.Errorf("building startup command: %w", err)
-		}
-		// Prepend config dir env if available
-		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
-			startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
-		}
-		// Note: Don't call KillPaneProcesses here - this is a NEW session with just
-		// a fresh shell. Killing it would destroy the pane before we can respawn.
-		// KillPaneProcesses is only needed when restarting in an EXISTING session
-		// where Claude/Node processes might be running and ignoring SIGHUP.
-		if err := t.RespawnPane(paneID, startupCmd); err != nil {
+		if err := backend.RespawnPane(sessionID); err != nil {
 			return fmt.Errorf("starting runtime: %w", err)
 		}
 
@@ -258,49 +194,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("✓"), r.Name, name)
 	} else {
 		// Session exists - check if runtime is still running
-		// Uses both pane command check and UI marker detection to avoid
-		// restarting when user is in a subshell spawned from the runtime
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
-		if err != nil {
-			return fmt.Errorf("resolving agent: %w", err)
-		}
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Runtime has exited, restart it using respawn-pane
+		if running, _ := backend.IsAgentRunning(sessionID); !running {
+			// Runtime has exited, restart it
 			fmt.Printf("Runtime exited, restarting...\n")
 
-			// Get pane ID for respawn
-			paneID, err := t.GetPaneID(sessionID)
-			if err != nil {
-				return fmt.Errorf("getting pane ID: %w", err)
-			}
-
-			// Build startup beacon for predecessor discovery via /resume
-			// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
-			address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-			beacon := session.FormatStartupBeacon(session.BeaconConfig{
-				Recipient: address,
-				Sender:    "human",
-				Topic:     "restart",
-			})
-
-			// Use respawn-pane to replace shell with runtime directly
-			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
-			if err != nil {
-				return fmt.Errorf("building startup command: %w", err)
-			}
-			// Prepend config dir env if available
-			if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
-				startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
-			}
-			// Kill all processes in the pane before respawning to prevent orphan leaks
-			// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
-			if err := t.KillPaneProcesses(paneID); err != nil {
-				// Non-fatal but log the warning
-				style.PrintWarning("could not kill pane processes: %v", err)
-			}
-			if err := t.RespawnPane(paneID, startupCmd); err != nil {
-				// If pane is stale (session exists but pane doesn't), recreate the session
+			if err := backend.RespawnPane(sessionID); err != nil {
 				if strings.Contains(err.Error(), "can't find pane") {
 					if crewAtRetried {
 						return fmt.Errorf("stale session persists after cleanup: %w", err)
@@ -325,14 +223,13 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("resolving agent: %w", err)
 		}
-		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		if running, _ := backend.IsAgentRunning(sessionID); running {
 			// Agent is already running, nothing to do
 			fmt.Printf("Already in %s session with %s running.\n", name, agentCfg.Command)
 			return nil
 		}
 
 		// We're in the session at a shell prompt - start the agent
-		// Build startup beacon for predecessor discovery via /resume
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
 		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
@@ -344,9 +241,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	}
 
 	// If inside tmux (but different session), don't switch - just inform user
-	insideTmux := tmux.IsInsideTmux()
+	insideTmux := os.Getenv("TMUX") != ""
 	if debug {
-		fmt.Printf("[DEBUG] tmux.IsInsideTmux()=%v\n", insideTmux)
+		fmt.Printf("[DEBUG] insideTmux=%v\n", insideTmux)
 	}
 	if insideTmux {
 		fmt.Printf("Session %s ready. Use C-b s to switch.\n", sessionID)
@@ -359,7 +256,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Attach to session - show which session we're attaching to
+	// Attach to session
 	fmt.Printf("Attaching to %s...\n", sessionID)
 	if debug {
 		fmt.Printf("[DEBUG] calling attachToTmuxSession(%q)\n", sessionID)

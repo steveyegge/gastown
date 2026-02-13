@@ -237,7 +237,7 @@ func (w *CredentialWatcher) restartIfCoopManaged(rigName, polecatName string) bo
 	w.logger("CredentialWatcher: restarting coop-managed agent %s/%s (session=%s)", rigName, polecatName, sessionName)
 
 	// Delete the pod/session so the reconciliation loop recreates it with fresh tokens
-	if err := w.daemon.tmux.KillSessionWithProcesses(sessionName); err != nil {
+	if err := w.daemon.backend.KillSession(sessionName); err != nil {
 		w.logger("CredentialWatcher: error killing session %s: %v", sessionName, err)
 		// Non-fatal: the session might already be dead
 	}

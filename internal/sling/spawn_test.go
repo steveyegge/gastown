@@ -1,23 +1,19 @@
 package sling
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
 )
 
-func TestGetSessionPane_NoTmux(t *testing.T) {
-	// Set PATH to empty so exec.LookPath("tmux") fails immediately.
-	// This simulates a K8s pod where tmux is not installed.
-	t.Setenv("PATH", "")
-
-	_, err := GetSessionPane("gt-test-session")
-	if err == nil {
-		t.Fatal("GetSessionPane() should return error when tmux is not on PATH")
+func TestGetSessionPane_ReturnsSessionName(t *testing.T) {
+	// In K8s/coop mode, GetSessionPane returns the session name directly.
+	pane, err := GetSessionPane("gt-test-session")
+	if err != nil {
+		t.Fatalf("GetSessionPane() unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "tmux not available") {
-		t.Errorf("GetSessionPane() error = %q, want it to contain %q", err.Error(), "tmux not available")
+	if pane != "gt-test-session" {
+		t.Errorf("GetSessionPane() = %q, want %q", pane, "gt-test-session")
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -135,98 +134,9 @@ func runTheme(cmd *cobra.Command, args []string) error {
 }
 
 func runThemeApply(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	// Discover all agent sessions via SessionRegistry
-	townRoot, _ := workspace.FindFromCwd()
-	sessions := discoverSessionNames(townRoot)
-
-	// Determine current rig
-	rigName := detectCurrentRig()
-
-	// Get session names for comparison
-	mayorSession := session.MayorSessionName()
-	deaconSession := session.DeaconSessionName()
-
-	// Apply to matching sessions
-	applied := 0
-	for _, sess := range sessions {
-		if !strings.HasPrefix(sess, "gt-") {
-			continue
-		}
-
-		// Determine theme and identity for this session
-		var theme tmux.Theme
-		var rig, worker, role string
-
-		if sess == mayorSession {
-			theme = tmux.MayorTheme()
-			worker = "Mayor"
-			role = "coordinator"
-		} else if sess == deaconSession {
-			theme = tmux.DeaconTheme()
-			worker = "Deacon"
-			role = "health-check"
-		} else if strings.HasSuffix(sess, "-witness") && strings.HasPrefix(sess, "gt-") {
-			// Witness sessions: gt-<rig>-witness
-			rig = strings.TrimPrefix(strings.TrimSuffix(sess, "-witness"), "gt-")
-			theme = getThemeForRole(rig, "witness")
-			worker = "witness"
-			role = "witness"
-		} else {
-			// Parse session name: gt-<rig>-<worker> or gt-<rig>-crew-<name>
-			parts := strings.SplitN(sess, "-", 3)
-			if len(parts) < 3 {
-				continue
-			}
-			rig = parts[1]
-
-			// Skip if not matching current rig (unless --all flag)
-			if !themeApplyAllFlag && rigName != "" && rig != rigName {
-				continue
-			}
-
-			workerPart := parts[2]
-			if strings.HasPrefix(workerPart, "crew-") {
-				worker = strings.TrimPrefix(workerPart, "crew-")
-				role = "crew"
-			} else if workerPart == "refinery" {
-				worker = "refinery"
-				role = "refinery"
-			} else {
-				worker = workerPart
-				role = "polecat"
-			}
-
-			// Use role-based theme resolution
-			theme = getThemeForRole(rig, role)
-		}
-
-		// Apply theme and status format
-		if err := t.ApplyTheme(sess, theme); err != nil {
-			fmt.Printf("  %s: failed (%v)\n", sess, err)
-			continue
-		}
-		if err := t.SetStatusFormat(sess, rig, worker, role); err != nil {
-			fmt.Printf("  %s: failed to set format (%v)\n", sess, err)
-			continue
-		}
-		if err := t.SetDynamicStatus(sess); err != nil {
-			fmt.Printf("  %s: failed to set dynamic status (%v)\n", sess, err)
-			continue
-		}
-
-		fmt.Printf("  %s: applied %s theme\n", sess, theme.Name)
-		applied++
-	}
-
-	if applied == 0 {
-		fmt.Println("No matching sessions found")
-	} else {
-		fmt.Printf("\nApplied theme to %d session(s)\n", applied)
-	}
-
-	return nil
+	// Theme apply is a tmux-only operation (status bar theming).
+	// In K8s/Coop there are no tmux status bars to theme.
+	return fmt.Errorf("theme apply requires tmux (not available in K8s)")
 }
 
 // detectCurrentRig determines the rig from environment or cwd.

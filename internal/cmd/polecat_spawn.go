@@ -21,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -98,9 +97,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}
 	}
 
-	// Get polecat manager (with tmux for session-aware allocation)
 	polecatGit := git.NewGit(r.Path)
-	t := tmux.NewTmux()
 	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	polecatMgr := polecat.NewManager(r, polecatGit)
 
@@ -113,7 +110,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Clean up orphaned state for this polecat before creation/repair
 	// This prevents contamination from previous failed spawns (hq-gsk9g, hq-cv-bn5ug)
-	cleanupOrphanPolecatState(rigName, polecatName, r.Path, tmux.NewTmux())
+	cleanupOrphanPolecatState(rigName, polecatName, r.Path, backend)
 
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
@@ -306,7 +303,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Final verification: confirm worktree and session both still exist.
 	// Issue: gt sling reports success but worktree never created (hq-yh8icr).
 	// This catches any race conditions or cleanup that might have occurred.
-	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, t, backend); err != nil {
+	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, backend); err != nil {
 		return nil, fmt.Errorf("spawn verification failed for %s: %w", polecatName, err)
 	}
 
@@ -361,7 +358,6 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	}
 
 	// Start session
-	t := tmux.NewTmux()
 	polecatSessMgr := polecat.NewSessionManager(r)
 
 	fmt.Printf("Starting session for %s/%s...\n", s.RigName, s.PolecatName)
@@ -379,11 +375,8 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		return "", fmt.Errorf("starting session: %w", err)
 	}
 
-	// Wait for runtime to be fully ready before returning.
-	runtimeConfig := config.LoadRuntimeConfig(r.Path)
-	if err := t.WaitForRuntimeReady(s.SessionName, runtimeConfig, 30*time.Second); err != nil {
-		fmt.Printf("Warning: runtime may not be fully ready: %v\n", err)
-	}
+	// Wait for session to be ready
+	time.Sleep(2 * time.Second)
 
 	// Update agent state
 	polecatGit := git.NewGit(r.Path)
@@ -392,14 +385,8 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		fmt.Printf("Warning: could not update agent state: %v\n", err)
 	}
 
-	// Get pane
-	pane, err := getSessionPane(s.SessionName)
-	if err != nil {
-		return "", fmt.Errorf("getting pane for %s: %w", s.SessionName, err)
-	}
-
-	s.Pane = pane
-	return pane, nil
+	s.Pane = s.SessionName // Use session name as pane identifier
+	return s.Pane, nil
 }
 
 // IsRigName checks if a target string is a rig name (not a role or path).
@@ -445,13 +432,13 @@ func IsRigName(target string) (string, bool) {
 // - Kills orphan tmux sessions without corresponding directories
 // - Prunes stale git worktree registrations
 // - Clears hook_bead on respawn (via fresh agent bead creation)
-func cleanupOrphanPolecatState(rigName, polecatName, rigPath string, tm *tmux.Tmux) {
+func cleanupOrphanPolecatState(rigName, polecatName, rigPath string, backend terminal.Backend) {
 	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
 	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-	// Step 1: Kill orphan tmux session if it exists
-	if err := tm.KillSession(sessionName); err == nil {
-		fmt.Printf("  Cleaned up orphan tmux session: %s\n", sessionName)
+	// Step 1: Kill orphan session if it exists
+	if err := backend.KillSession(sessionName); err == nil {
+		fmt.Printf("  Cleaned up orphan session: %s\n", sessionName)
 	}
 
 	// Step 2: Remove empty polecat directory (failed worktree creation)
@@ -508,7 +495,7 @@ func verifyWorktreeExists(clonePath string) error {
 // 2. Session exists (via backend for coop, or tmux directly)
 //
 // Issue: gt sling reports success but worktree never created (hq-yh8icr).
-func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux, backend terminal.Backend) error {
+func verifySpawnedPolecat(clonePath, sessionName string, backend terminal.Backend) error {
 	// Check 1: Worktree exists and has .git
 	gitPath := filepath.Join(clonePath, ".git")
 	if _, err := os.Stat(gitPath); err != nil {
@@ -519,13 +506,7 @@ func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux, backend t
 	}
 
 	// Check 2: Session exists
-	var hasSession bool
-	var err error
-	if backend != nil {
-		hasSession, err = backend.HasSession(sessionName)
-	} else {
-		hasSession, err = t.HasSession(sessionName)
-	}
+	hasSession, err := backend.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}

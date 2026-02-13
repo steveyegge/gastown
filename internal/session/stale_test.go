@@ -6,22 +6,6 @@ import (
 	"time"
 )
 
-func TestParseTmuxSessionCreated(t *testing.T) {
-	input := "2026-01-24 01:02:03"
-	expected, err := time.ParseInLocation("2006-01-02 15:04:05", input, time.Local)
-	if err != nil {
-		t.Fatalf("parse expected: %v", err)
-	}
-
-	parsed, err := ParseTmuxSessionCreated(input)
-	if err != nil {
-		t.Fatalf("ParseTmuxSessionCreated: %v", err)
-	}
-	if !parsed.Equal(expected) {
-		t.Fatalf("parsed time mismatch: got %v want %v", parsed, expected)
-	}
-}
-
 func TestStaleReasonForTimes(t *testing.T) {
 	now := time.Date(2026, 1, 24, 2, 0, 0, 0, time.UTC)
 	newer := now.Add(2 * time.Minute)

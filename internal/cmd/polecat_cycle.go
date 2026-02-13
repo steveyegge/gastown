@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -72,12 +71,8 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 
 	targetSession := sessions[targetIdx]
 
-	// Switch to target session
-	if err := tmux.NewTmux().SwitchClient(targetSession); err != nil {
-		return fmt.Errorf("switching to %s: %w", targetSession, err)
-	}
-
-	return nil
+	// SwitchClient is a tmux-only UI operation (no equivalent in K8s/Coop)
+	return fmt.Errorf("session cycling requires tmux (not available in K8s): target %s", targetSession)
 }
 
 // parsePolecatSessionName extracts rig and polecat name from a tmux session name.

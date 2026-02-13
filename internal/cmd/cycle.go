@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -167,8 +166,8 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 		return nil // Only one session
 	}
 
-	// Switch to target session
-	return tmux.NewTmux().SwitchClient(sessions[targetIdx])
+	// SwitchClient is a tmux-only UI operation (no equivalent in K8s/Coop)
+	return fmt.Errorf("session cycling requires tmux (not available in K8s)")
 }
 
 // listGTSessions returns all agent session names via the SessionRegistry.

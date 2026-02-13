@@ -147,9 +147,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewRigRoutesJSONLCheck())
 	d.Register(doctor.NewRoutingModeCheck())
-	d.Register(doctor.NewOrphanSessionCheck())
-	d.Register(doctor.NewZombieSessionCheck())
-	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewBranchCheck())
@@ -157,10 +154,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewBeadsSyncWorktreeCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
-	d.Register(doctor.NewLinkedPaneCheck())
-	d.Register(doctor.NewThemeCheck())
 	d.Register(doctor.NewCrashReportCheck())
-	d.Register(doctor.NewEnvVarsCheck())
 	d.Register(doctor.NewLocalDoltCheck())
 
 	// Patrol system checks

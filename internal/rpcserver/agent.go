@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -27,7 +26,6 @@ import (
 // AgentServer implements the AgentService.
 type AgentServer struct {
 	townRoot string
-	tmux     *tmux.Tmux
 	backend  terminal.Backend
 }
 
@@ -35,10 +33,8 @@ var _ gastownv1connect.AgentServiceHandler = (*AgentServer)(nil)
 
 // NewAgentServer creates a new AgentServer.
 func NewAgentServer(townRoot string) *AgentServer {
-	t := tmux.NewTmux()
 	return &AgentServer{
 		townRoot: townRoot,
-		tmux:     t,
 		backend:  terminal.NewCoopBackend(terminal.CoopConfig{}),
 	}
 }
@@ -48,7 +44,6 @@ func NewAgentServer(townRoot string) *AgentServer {
 func NewAgentServerWithBackend(townRoot string, backend terminal.Backend) *AgentServer {
 	return &AgentServer{
 		townRoot: townRoot,
-		tmux:     tmux.NewTmux(),
 		backend:  backend,
 	}
 }
@@ -60,11 +55,10 @@ func (s *AgentServer) ListAgents(
 	var agents []*gastownv1.Agent
 	runningCount := 0
 
-	// Get all tmux sessions for quick lookup
-	sessions, _ := s.tmux.ListSessions()
-	sessionSet := make(map[string]bool)
-	for _, sess := range sessions {
-		sessionSet[sess] = true
+	// Helper to check if a session is running via the backend.
+	isSessionRunning := func(session string) bool {
+		exists, err := s.backend.HasSession(session)
+		return err == nil && exists
 	}
 
 	// Load rig config
@@ -99,7 +93,7 @@ func (s *AgentServer) ListAgents(
 			{"mayor", "gt-mayor", gastownv1.AgentType_AGENT_TYPE_MAYOR},
 			{"deacon", "gt-deacon", gastownv1.AgentType_AGENT_TYPE_DEACON},
 		} {
-			running := sessionSet[ga.session]
+			running := isSessionRunning(ga.session)
 			state := gastownv1.AgentState_AGENT_STATE_STOPPED
 			if running {
 				state = gastownv1.AgentState_AGENT_STATE_RUNNING
@@ -132,7 +126,7 @@ func (s *AgentServer) ListAgents(
 			workers, _ := crewMgr.List()
 			for _, w := range workers {
 				session := fmt.Sprintf("gt-%s-crew-%s", r.Name, w.Name)
-				running := sessionSet[session]
+				running := isSessionRunning(session)
 				state := gastownv1.AgentState_AGENT_STATE_STOPPED
 				if running {
 					state = gastownv1.AgentState_AGENT_STATE_RUNNING
@@ -158,7 +152,7 @@ func (s *AgentServer) ListAgents(
 			req.Msg.Type == gastownv1.AgentType_AGENT_TYPE_POLECAT {
 			for _, p := range r.Polecats {
 				session := fmt.Sprintf("gt-%s-%s", r.Name, p)
-				running := sessionSet[session]
+				running := isSessionRunning(session)
 				state := gastownv1.AgentState_AGENT_STATE_STOPPED
 				if running {
 					state = gastownv1.AgentState_AGENT_STATE_WORKING
@@ -181,7 +175,7 @@ func (s *AgentServer) ListAgents(
 		if (req.Msg.Type == gastownv1.AgentType_AGENT_TYPE_UNSPECIFIED ||
 			req.Msg.Type == gastownv1.AgentType_AGENT_TYPE_WITNESS) && r.HasWitness {
 			session := fmt.Sprintf("gt-%s-witness", r.Name)
-			running := sessionSet[session]
+			running := isSessionRunning(session)
 			state := gastownv1.AgentState_AGENT_STATE_STOPPED
 			if running {
 				state = gastownv1.AgentState_AGENT_STATE_RUNNING
@@ -203,7 +197,7 @@ func (s *AgentServer) ListAgents(
 		if (req.Msg.Type == gastownv1.AgentType_AGENT_TYPE_UNSPECIFIED ||
 			req.Msg.Type == gastownv1.AgentType_AGENT_TYPE_REFINERY) && r.HasRefinery {
 			session := fmt.Sprintf("gt-%s-refinery", r.Name)
-			running := sessionSet[session]
+			running := isSessionRunning(session)
 			state := gastownv1.AgentState_AGENT_STATE_STOPPED
 			if running {
 				state = gastownv1.AgentState_AGENT_STATE_RUNNING

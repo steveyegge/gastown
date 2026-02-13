@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/terminal"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -92,12 +91,11 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if session == "" && len(args) > 0 {
 		session = args[0]
 	}
-	tmuxClient := tmux.NewTmux()
 
 	if session == "" {
 		// Auto-detect session
 		var err error
-		session, err = autoDetectSession(tmuxClient)
+		session, err = autoDetectSession()
 		if err != nil {
 			return fmt.Errorf("session auto-detection failed: %w", err)
 		}
@@ -113,7 +111,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 	// Execute requested operations
 	if contextUsage {
-		return runContextUsage(session, tmuxClient)
+		return runContextUsage(session)
 	}
 	if contextErrors {
 		return runContextErrors(sessionKey, backend)
@@ -175,35 +173,21 @@ func saveState(state *ContextLimitState) error {
 }
 
 // autoDetectSession attempts to find the current Gas Town session.
-// In K8s agent pods (GT_ROLE set, no tmux), returns the agent address
+// In K8s agent pods (GT_ROLE set), returns the agent address
 // so resolveBackendForSession can route to the coop backend.
-func autoDetectSession(tmuxClient *tmux.Tmux) (string, error) {
-	// Check if we're in a K8s agent pod (coop backend, no tmux).
-	// GT_ROLE is set by the controller for all agent pods.
-	if role := os.Getenv("GT_ROLE"); role != "" && !tmux.IsInsideTmux() {
-		return detectSenderFromRole(role), nil
+func autoDetectSession() (string, error) {
+	// Check GT_SESSION or TMUX_SESSION env vars first
+	if s := os.Getenv("GT_SESSION"); s != "" {
+		return s, nil
+	}
+	if s := os.Getenv("TMUX_SESSION"); s != "" {
+		return s, nil
 	}
 
-	// Check if we're inside a tmux session
-	if tmux.IsInsideTmux() {
-		// Get current session from TMUX environment variable
-		// Format: /tmp/tmux-1000/default,1234
-		tmuxEnv := os.Getenv("TMUX")
-		if tmuxEnv != "" {
-			parts := strings.Split(tmuxEnv, ",")
-			if len(parts) >= 2 {
-				// parts[0] is socket path, parts[1] is session ID
-				// We need to map session ID to name
-				sessionMap, err := tmuxClient.ListSessionIDs()
-				if err == nil {
-					for name, id := range sessionMap {
-						if id == parts[1] {
-							return name, nil
-						}
-					}
-				}
-			}
-		}
+	// Check if we're in a K8s agent pod (coop backend).
+	// GT_ROLE is set by the controller for all agent pods.
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		return detectSenderFromRole(role), nil
 	}
 
 	// Fallback: discover sessions via SessionRegistry and pick first Gas Town session
@@ -220,9 +204,8 @@ func autoDetectSession(tmuxClient *tmux.Tmux) (string, error) {
 }
 
 // runContextUsage checks current context usage (stub implementation)
-func runContextUsage(_ string, _ *tmux.Tmux) error {
+func runContextUsage(_ string) error {
 	// TODO: Implement actual context usage detection via Claude Code API
-	// For now, return stub value (session and tmuxClient will be used then)
 	if contextJSON {
 		fmt.Println(`{"usage_percent": 0, "message": "stub implementation"}`)
 	} else {

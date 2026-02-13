@@ -17,7 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -246,7 +246,7 @@ func runCosts(cmd *cobra.Command, args []string) error {
 }
 
 func runLiveCosts() error {
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 
 	// Discover all agent sessions via SessionRegistry
 	townRoot, _ := workspace.FindFromCwd()
@@ -284,7 +284,7 @@ func runLiveCosts() error {
 		}
 
 		// Check if an agent appears to be running
-		running := t.IsAgentRunning(session)
+		running, _ := backend.IsAgentRunning(session)
 
 		costs = append(costs, SessionCost{
 			Session: session,
@@ -841,9 +841,10 @@ func extractCostFromWorkDir(workDir string) (float64, error) {
 	return calculateCost(usage), nil
 }
 
-// getTmuxSessionWorkDir gets the current working directory of a tmux session.
+// getTmuxSessionWorkDir gets the current working directory of a session.
 func getTmuxSessionWorkDir(session string) (string, error) {
-	return tmux.NewTmux().GetPaneWorkDir(session)
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	return backend.GetPaneWorkDir(session)
 }
 
 func outputCostsJSON(output CostsOutput) error {
@@ -1097,15 +1098,12 @@ func deriveSessionName() string {
 // Note: We don't check TMUX env var because it may not be inherited when Claude Code
 // runs bash commands, even though we are inside a tmux session.
 func detectCurrentTmuxSession() string {
-	session, err := tmux.NewTmux().GetCurrentSessionName()
-	if err != nil {
-		return ""
+	// Try env vars first (K8s pods where tmux is unavailable)
+	if s := os.Getenv("GT_SESSION"); s != "" {
+		return s
 	}
-
-	// Only return if it looks like a Gas Town session
-	// Accept both gt- (rig sessions) and hq- (town-level sessions like hq-mayor)
-	if strings.HasPrefix(session, constants.SessionPrefix) || strings.HasPrefix(session, constants.HQSessionPrefix) {
-		return session
+	if s := os.Getenv("TMUX_SESSION"); s != "" {
+		return s
 	}
 	return ""
 }

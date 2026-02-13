@@ -8,12 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mayor"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -221,12 +219,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("finding workspace: %w", err)
-	}
-
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	sessionID := mgr.SessionName()
 
 	running, err := mgr.IsRunning()
@@ -234,64 +227,18 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if !running {
-
-		// Legacy: check for K8s terminal server session (screen-based).
-		k8sSession := session.MayorK8sSessionName()
-		if hasK8s, _ := t.HasSession(k8sSession); hasK8s {
-			fmt.Printf("%s Attaching to K8s Mayor (terminal server session: %s)\n",
-				style.Bold.Render("☸"), k8sSession)
-			return attachToTmuxSession(k8sSession)
-		}
-
-		// No local or K8s session — auto-start local
+		// No local session — auto-start
 		fmt.Println("Mayor session not running, starting...")
 		if err := mgr.Start(mayorAgentOverride); err != nil {
 			return err
 		}
 	} else {
-		// Session exists - check if runtime is still running (hq-95xfq)
-		// If runtime exited or sitting at shell, restart with proper context
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, townRoot, mayorAgentOverride)
-		if err != nil {
-			return fmt.Errorf("resolving agent: %w", err)
-		}
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Runtime has exited, restart it with proper context
-			fmt.Println("Runtime exited, restarting with context...")
+		// Session exists - check if runtime is still running
+		if agentRunning, _ := backend.IsAgentRunning(sessionID); !agentRunning {
+			// Runtime has exited, restart it
+			fmt.Println("Runtime exited, restarting...")
 
-			paneID, err := t.GetPaneID(sessionID)
-			if err != nil {
-				return fmt.Errorf("getting pane ID: %w", err)
-			}
-
-			// Build startup beacon for context (like gt handoff does)
-			beacon := session.FormatStartupBeacon(session.BeaconConfig{
-				Recipient: "mayor",
-				Sender:    "human",
-				Topic:     "attach",
-			})
-
-			// Build startup command with beacon
-			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, mayorAgentOverride)
-			if err != nil {
-				return fmt.Errorf("building startup command: %w", err)
-			}
-
-			// Set remain-on-exit so the pane survives process death during respawn.
-			// Without this, killing processes causes tmux to destroy the pane.
-			if err := t.SetRemainOnExit(paneID, true); err != nil {
-				style.PrintWarning("could not set remain-on-exit: %v", err)
-			}
-
-			// Kill all processes in the pane before respawning to prevent orphan leaks
-			// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
-			if err := t.KillPaneProcesses(paneID); err != nil {
-				// Non-fatal but log the warning
-				style.PrintWarning("could not kill pane processes: %v", err)
-			}
-
-			// Note: respawn-pane automatically resets remain-on-exit to off
-			if err := t.RespawnPane(paneID, startupCmd); err != nil {
+			if err := backend.RespawnPane(sessionID); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
 			}
 
@@ -299,7 +246,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
+	// Use shared attach helper
 	return attachToTmuxSession(sessionID)
 }
 
@@ -319,18 +266,6 @@ func runMayorStatus(cmd *cobra.Command, args []string) error {
 					style.Bold.Render("☸"),
 					style.Bold.Render("Kubernetes"))
 				fmt.Printf("  Pod: %s (namespace: %s, coop)\n", podName, ns)
-				fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt mayor attach"))
-				return nil
-			}
-
-			// Legacy: check for K8s terminal server session.
-			t := tmux.NewTmux()
-			k8sSession := session.MayorK8sSessionName()
-			if hasK8s, _ := t.HasSession(k8sSession); hasK8s {
-				fmt.Printf("%s Mayor is running in %s\n",
-					style.Bold.Render("☸"),
-					style.Bold.Render("Kubernetes"))
-				fmt.Printf("  Session: %s (terminal server bridge)\n", k8sSession)
 				fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt mayor attach"))
 				return nil
 			}

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/terminal"
 )
 
 var issueCmd = &cobra.Command{
@@ -53,8 +53,8 @@ func runIssueSet(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
-	if err := t.SetEnvironment(session, "GT_ISSUE", issueID); err != nil {
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	if err := backend.SetEnvironment(session, "GT_ISSUE", issueID); err != nil {
 		return fmt.Errorf("setting issue: %w", err)
 	}
 
@@ -71,9 +71,9 @@ func runIssueClear(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
 	// Set to empty string to clear
-	if err := t.SetEnvironment(session, "GT_ISSUE", ""); err != nil {
+	if err := backend.SetEnvironment(session, "GT_ISSUE", ""); err != nil {
 		return fmt.Errorf("clearing issue: %w", err)
 	}
 
@@ -90,8 +90,8 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
-	issue, err := t.GetEnvironment(session, "GT_ISSUE")
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	issue, err := backend.GetEnvironment(session, "GT_ISSUE")
 	if err != nil {
 		return fmt.Errorf("getting issue: %w", err)
 	}
