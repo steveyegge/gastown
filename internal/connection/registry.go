@@ -12,9 +12,9 @@ import (
 // Machine represents a managed machine in the federation.
 type Machine struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`      // "local", "ssh"
-	Host     string `json:"host"`      // for ssh: user@host
-	KeyPath  string `json:"key_path"`  // SSH private key path
+	Type     string `json:"type"`      // "k8s"
+	Host     string `json:"host"`      // for future use
+	KeyPath  string `json:"key_path"`  // for future use
 	TownPath string `json:"town_path"` // Path to town root on remote
 }
 
@@ -42,14 +42,6 @@ func NewMachineRegistry(configPath string) (*MachineRegistry, error) {
 	// Load existing config if present
 	if err := r.load(); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading registry: %w", err)
-	}
-
-	// Ensure "local" machine always exists
-	if _, ok := r.machines["local"]; !ok {
-		r.machines["local"] = &Machine{
-			Name: "local",
-			Type: "local",
-		}
 	}
 
 	return r, nil
@@ -125,9 +117,6 @@ func (r *MachineRegistry) Add(m *Machine) error {
 	if m.Type == "" {
 		return fmt.Errorf("machine type is required")
 	}
-	if m.Type == "ssh" && m.Host == "" {
-		return fmt.Errorf("ssh machine requires host")
-	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -138,10 +127,6 @@ func (r *MachineRegistry) Add(m *Machine) error {
 
 // Remove removes a machine from the registry.
 func (r *MachineRegistry) Remove(name string) error {
-	if name == "local" {
-		return fmt.Errorf("cannot remove local machine")
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -173,18 +158,9 @@ func (r *MachineRegistry) Connection(name string) (Connection, error) {
 	}
 
 	switch m.Type {
-	case "local":
-		return NewLocalConnection(), nil
-	case "ssh":
-		// SSH connection not yet implemented
-		return nil, fmt.Errorf("ssh connections not yet implemented")
+	case "k8s":
+		return nil, fmt.Errorf("k8s connection requires pod configuration; use NewK8sConnection directly")
 	default:
 		return nil, fmt.Errorf("unknown machine type: %s", m.Type)
 	}
-}
-
-// LocalConnection returns the local connection.
-// This is a convenience method for the common case.
-func (r *MachineRegistry) LocalConnection() *LocalConnection {
-	return NewLocalConnection()
 }

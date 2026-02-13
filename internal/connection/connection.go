@@ -1,6 +1,5 @@
-// Package connection provides an abstraction for local and remote operations.
-// This allows Gas Town to manage rigs on remote machines via SSH using
-// the same interface as local operations.
+// Package connection provides an abstraction for remote operations via K8s pods.
+// This allows Gas Town to manage rigs on K8s pods using kubectl exec.
 package connection
 
 import (
@@ -8,8 +7,8 @@ import (
 	"time"
 )
 
-// Connection abstracts file operations, command execution, and tmux management
-// for both local and remote (SSH) execution contexts.
+// Connection abstracts file operations and command execution
+// for K8s pod execution contexts.
 type Connection interface {
 	// Identification
 
@@ -55,27 +54,6 @@ type Connection interface {
 
 	// ExecEnv runs a command with additional environment variables.
 	ExecEnv(env map[string]string, cmd string, args ...string) ([]byte, error)
-
-	// Tmux operations
-
-	// TmuxNewSession creates a new tmux session with the given name.
-	TmuxNewSession(name, dir string) error
-
-	// TmuxKillSession terminates the named tmux session.
-	// Uses KillSessionWithProcesses internally to ensure all descendant processes are killed.
-	TmuxKillSession(name string) error
-
-	// TmuxSendKeys sends keys to the named tmux session.
-	TmuxSendKeys(session, keys string) error
-
-	// TmuxCapturePane captures the last N lines from a tmux pane.
-	TmuxCapturePane(session string, lines int) (string, error)
-
-	// TmuxHasSession returns true if the named tmux session exists.
-	TmuxHasSession(name string) (bool, error)
-
-	// TmuxListSessions returns a list of all tmux session names.
-	TmuxListSessions() ([]string, error)
 }
 
 // FileInfo abstracts fs.FileInfo for use over remote connections.

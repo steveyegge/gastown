@@ -18,9 +18,6 @@ func TestNewK8sConnection(t *testing.T) {
 	if conn.Namespace != "gastown-test" {
 		t.Errorf("Namespace = %q, want %q", conn.Namespace, "gastown-test")
 	}
-	if conn.tmux == nil {
-		t.Error("tmux should not be nil")
-	}
 	if conn.execTimeout != DefaultExecTimeout {
 		t.Errorf("execTimeout = %v, want %v", conn.execTimeout, DefaultExecTimeout)
 	}
