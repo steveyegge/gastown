@@ -108,7 +108,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			HookBead: beadID, // Set atomically at spawn time
 			Agent:    slingAgent,
 		}
-		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
 			results = append(results, slingResult{beadID: beadID, success: false, errMsg: err.Error()})
 			fmt.Printf("  %s Failed to spawn polecat: %v\n", style.Dim.Render("✗"), err)
@@ -197,7 +197,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if spawnInfo.DoltBranch != "" {
 			if err := spawnInfo.CreateDoltBranch(); err != nil {
 				fmt.Printf("  %s Could not create Dolt branch: %v, cleaning up...\n", style.Dim.Render("✗"), err)
-				rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
+				rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
 				results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
 				continue
 			}
@@ -208,7 +208,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		pane, err := spawnInfo.StartSession()
 		if err != nil {
 			fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)
-			rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
+			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
 			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
 			continue
 		} else {

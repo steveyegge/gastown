@@ -9,6 +9,9 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
+// spawnPolecatForSling is a seam for tests. Production uses SpawnPolecatForSling.
+var spawnPolecatForSling = SpawnPolecatForSling
+
 // resolveTargetAgent converts a target spec to agent ID, pane, and hook root.
 func resolveTargetAgent(target string) (agentID string, pane string, hookRoot string, err error) {
 	// First resolve to session name
@@ -188,7 +191,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			HookBead: opts.HookBead,
 			Agent:    opts.Agent,
 		}
-		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
 			return nil, fmt.Errorf("spawning polecat: %w", err)
 		}
@@ -222,7 +225,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 					HookBead: opts.HookBead,
 					Agent:    opts.Agent,
 				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+				spawnInfo, spawnErr := spawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return nil, fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
 				}

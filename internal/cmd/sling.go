@@ -410,6 +410,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
+			// If we spawned a fresh polecat (rig target), rollback the partial artifacts.
+			// Otherwise, a wisp creation failure (e.g., missing required vars) leaves an orphaned polecat.
+			if newPolecatInfo != nil {
+				fmt.Printf("%s Formula instantiation failed, rolling back spawned polecat %s...\n",
+					style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+			}
 			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
 
@@ -491,7 +498,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// from HEAD — ensuring the polecat's branch includes all writes.
 	if newPolecatInfo != nil && newPolecatInfo.DoltBranch != "" {
 		if err := newPolecatInfo.CreateDoltBranch(); err != nil {
-			rollbackSlingArtifacts(newPolecatInfo, beadID, hookWorkDir)
+			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
 			return fmt.Errorf("creating Dolt branch: %w", err)
 		}
 	}
@@ -505,7 +512,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 			// Rollback: session failed, clean up zombie artifacts (worktree, hooked bead).
 			// Without rollback, next sling attempt fails with "bead already hooked" (gt-jn40ft).
 			fmt.Printf("%s Session failed, rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
-			rollbackSlingArtifacts(newPolecatInfo, beadID, hookWorkDir)
+			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane
@@ -575,27 +582,34 @@ func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
 	return nil
 }
 
+// rollbackSlingArtifactsFn is a seam for tests. Production uses rollbackSlingArtifacts.
+var rollbackSlingArtifactsFn = rollbackSlingArtifacts
+
 // rollbackSlingArtifacts cleans up artifacts left by a partial sling when session start fails.
 // This prevents zombie polecats that block subsequent sling attempts with "bead already hooked".
 // Cleanup is best-effort: each step logs warnings but continues to clean as much as possible.
 func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
-	// 1. Unhook the bead (set status back to open so it can be re-slung)
 	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		fmt.Printf("  %s Could not find workspace to unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
-	} else {
-		unhookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-		unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
-		unhookCmd.Dir = unhookDir
-		if err := unhookCmd.Run(); err != nil {
-			fmt.Printf("  %s Could not unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
+
+	// 1. Unhook the bead (set status back to open so it can be re-slung).
+	// Some failure modes happen before any bead is hooked (e.g., wisp creation fails).
+	if beadID != "" {
+		if err != nil {
+			fmt.Printf("  %s Could not find workspace to unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
 		} else {
-			fmt.Printf("  %s Unhooked bead %s\n", style.Dim.Render("○"), beadID)
+			unhookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+			unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
+			unhookCmd.Dir = unhookDir
+			if err := unhookCmd.Run(); err != nil {
+				fmt.Printf("  %s Could not unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
+			} else {
+				fmt.Printf("  %s Unhooked bead %s\n", style.Dim.Render("○"), beadID)
+			}
 		}
 	}
 
 	// 2. Clean up Dolt branch if it was created
-	if spawnInfo.DoltBranch != "" && townRoot != "" {
+	if err == nil && spawnInfo.DoltBranch != "" && townRoot != "" {
 		doltserver.DeletePolecatBranch(townRoot, spawnInfo.RigName, spawnInfo.DoltBranch)
 	}
 
