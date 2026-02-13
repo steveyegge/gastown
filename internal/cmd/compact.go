@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/wisp"
 )
@@ -275,9 +276,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 
 	// Output results
 	if compactJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return output.Print(result)
 	}
 
 	printCompactSummary(result)

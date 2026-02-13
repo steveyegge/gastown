@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -795,9 +796,7 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 	}
 
 	if convoyStrandedJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(stranded)
+		return output.Print(stranded)
 	}
 
 	if len(stranded) == 0 {
@@ -1169,9 +1168,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 			Completed: completed,
 			Total:     len(tracked),
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(out)
+		return output.Print(out)
 	}
 
 	// Human-readable output
@@ -1247,9 +1244,7 @@ func showAllConvoyStatus(townBeads string) error {
 	}
 
 	if convoyStatusJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(convoys)
+		return output.Print(convoys)
 	}
 
 	fmt.Printf("%s\n\n", style.Bold.Render("Active Convoys"))
@@ -1332,9 +1327,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 				Total:     len(tracked),
 			})
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(enriched)
+		return output.Print(enriched)
 	}
 
 	if len(convoys) == 0 {

@@ -86,6 +86,13 @@ func PrintFormatted(v any, format Format) error {
 	return PrintJSON(v)
 }
 
+// Print writes the value to stdout in the auto-resolved format.
+// Checks GT_OUTPUT_FORMAT env var (set by --format flag or agent config).
+// Falls back to JSON if TOON encoding fails.
+func Print(v any) error {
+	return PrintFormatted(v, ResolveFormat(""))
+}
+
 // printJSONBytes pretty-prints already-marshaled JSON bytes.
 func printJSONBytes(data []byte) error {
 	var buf bytes.Buffer

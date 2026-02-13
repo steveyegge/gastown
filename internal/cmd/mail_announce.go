@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -72,9 +73,7 @@ func listAnnounceChannels(cfg *config.MessagingConfig) error {
 		sort.Slice(channels, func(i, j int) bool {
 			return channels[i].Name < channels[j].Name
 		})
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(channels)
+		return output.Print(channels)
 	}
 
 	// Human-readable output
@@ -124,9 +123,7 @@ func readAnnounceChannel(townRoot string, cfg *config.MessagingConfig, channelNa
 		if messages == nil {
 			messages = []announceMessage{}
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(messages)
+		return output.Print(messages)
 	}
 
 	// Human-readable output

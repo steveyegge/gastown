@@ -3,11 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -180,7 +180,5 @@ func runGateWake(cmd *cobra.Command, args []string) error {
 }
 
 func outputGateWakeResult(result GateWakeResult) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	return output.Print(result)
 }

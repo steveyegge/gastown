@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -857,10 +858,8 @@ func getTmuxSessionWorkDir(session string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func outputCostsJSON(output CostsOutput) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+func outputCostsJSON(o CostsOutput) error {
+	return output.Print(o)
 }
 
 func outputCostsHuman(costs []SessionCost, total float64) error {

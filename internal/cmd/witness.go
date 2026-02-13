@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -251,17 +251,15 @@ func runWitnessStatus(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if witnessStatusJSON {
-		output := WitnessStatusOutput{
+		statusOut := WitnessStatusOutput{
 			Running:           running,
 			RigName:           rigName,
 			MonitoredPolecats: polecats,
 		}
 		if sessionInfo != nil {
-			output.Session = sessionInfo.Name
+			statusOut.Session = sessionInfo.Name
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(statusOut)
 	}
 
 	// Human-readable output

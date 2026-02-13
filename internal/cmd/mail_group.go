@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -128,9 +128,7 @@ func runGroupList(cmd *cobra.Command, args []string) error {
 	}
 
 	if groupJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(groups)
+		return output.Print(groups)
 	}
 
 	if len(groups) == 0 {
@@ -169,9 +167,7 @@ func runGroupShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if groupJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(fields)
+		return output.Print(fields)
 	}
 
 	fmt.Printf("Group: %s\n", fields.Name)

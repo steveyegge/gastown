@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -450,12 +449,7 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 }
 
 func outputStatusJSON(status TownStatus) error {
-	if output.IsTOON() {
-		return output.PrintTOON(status)
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(status)
+	return output.Print(status)
 }
 
 func outputStatusText(status TownStatus) error {

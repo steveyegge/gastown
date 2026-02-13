@@ -89,6 +89,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Propagate --format flag to env var so output.Print() picks it up everywhere
+	if formatFlag, _ := cmd.Flags().GetString("format"); formatFlag != "" {
+		os.Setenv("GT_OUTPUT_FORMAT", formatFlag)
+	}
+
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
 

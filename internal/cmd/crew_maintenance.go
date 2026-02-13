@@ -1,13 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -108,9 +107,7 @@ func runCrewPristine(cmd *cobra.Command, args []string) error {
 	}
 
 	if crewJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
+		return output.Print(results)
 	}
 
 	// Text output

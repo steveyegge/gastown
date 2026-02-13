@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -103,9 +103,7 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 			"handoff_id":      handoff.ID,
 			"children_closed": childrenClosed,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return output.Print(result)
 	}
 
 	fmt.Printf("%s Burned molecule %s from %s\n",
@@ -261,9 +259,7 @@ squashed_at: %s
 			"handoff_id":      handoff.ID,
 			"children_closed": childrenClosed,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return output.Print(result)
 	}
 
 	fmt.Printf("%s Squashed molecule %s → digest %s\n",

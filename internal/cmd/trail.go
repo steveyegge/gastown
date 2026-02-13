@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -148,14 +148,14 @@ func runTrailCommits(cmd *cobra.Command, args []string) error {
 	}
 
 	gitCmd := exec.Command("git", gitArgs...)
-	output, err := gitCmd.Output()
+	gitOutput, err := gitCmd.Output()
 	if err != nil {
 		return fmt.Errorf("running git log: %w", err)
 	}
 
 	// Parse commits
 	var commits []CommitEntry
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(gitOutput)), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -191,9 +191,7 @@ func runTrailCommits(cmd *cobra.Command, args []string) error {
 	}
 
 	if trailJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(commits)
+		return output.Print(commits)
 	}
 
 	// Text output
@@ -253,7 +251,7 @@ func runTrailBeads(cmd *cobra.Command, args []string) error {
 	beadsCmd := exec.Command("beads", beadsArgs...)
 	beadsCmd.Dir = beadsDir
 	beadsCmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir+"/.beads")
-	output, err := beadsCmd.Output()
+	beadsOutput, err := beadsCmd.Output()
 	if err != nil {
 		// Fallback: beads might not support all these flags
 		// Try a simpler approach
@@ -262,7 +260,7 @@ func runTrailBeads(cmd *cobra.Command, args []string) error {
 
 	// Parse output
 	var beads []BeadEntry
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(beadsOutput)), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -285,9 +283,7 @@ func runTrailBeads(cmd *cobra.Command, args []string) error {
 	}
 
 	if trailJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(beads)
+		return output.Print(beads)
 	}
 
 	// Text output

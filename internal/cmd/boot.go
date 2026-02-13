@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -121,16 +121,14 @@ func runBootStatus(cmd *cobra.Command, args []string) error {
 	sessionAlive := b.IsSessionAlive()
 
 	if bootStatusJSON {
-		output := map[string]interface{}{
+		jsonOut := map[string]interface{}{
 			"running":       isRunning,
 			"session_alive": sessionAlive,
 			"degraded":      b.IsDegraded(),
 			"boot_dir":      b.Dir(),
 			"last_status":   status,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(jsonOut)
 	}
 
 	// Pretty print

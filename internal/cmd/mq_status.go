@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -74,7 +74,7 @@ func runMqStatus(cmd *cobra.Command, args []string) error {
 	mrFields := beads.ParseMRFields(issue)
 
 	// Build output structure
-	output := MRStatusOutput{
+	statusOutput := MRStatusOutput{
 		ID:        issue.ID,
 		Title:     issue.Title,
 		Status:    issue.Status,
@@ -88,18 +88,18 @@ func runMqStatus(cmd *cobra.Command, args []string) error {
 
 	// Add MR fields if present
 	if mrFields != nil {
-		output.Branch = mrFields.Branch
-		output.Target = mrFields.Target
-		output.SourceIssue = mrFields.SourceIssue
-		output.Worker = mrFields.Worker
-		output.Rig = mrFields.Rig
-		output.MergeCommit = mrFields.MergeCommit
-		output.CloseReason = mrFields.CloseReason
+		statusOutput.Branch = mrFields.Branch
+		statusOutput.Target = mrFields.Target
+		statusOutput.SourceIssue = mrFields.SourceIssue
+		statusOutput.Worker = mrFields.Worker
+		statusOutput.Rig = mrFields.Rig
+		statusOutput.MergeCommit = mrFields.MergeCommit
+		statusOutput.CloseReason = mrFields.CloseReason
 	}
 
 	// Add dependency info from the issue's Dependencies field
 	for _, dep := range issue.Dependencies {
-		output.DependsOn = append(output.DependsOn, DependencyInfo{
+		statusOutput.DependsOn = append(statusOutput.DependsOn, DependencyInfo{
 			ID:       dep.ID,
 			Title:    dep.Title,
 			Status:   dep.Status,
@@ -110,7 +110,7 @@ func runMqStatus(cmd *cobra.Command, args []string) error {
 
 	// Add blocker info from the issue's Dependents field
 	for _, dep := range issue.Dependents {
-		output.Blocks = append(output.Blocks, DependencyInfo{
+		statusOutput.Blocks = append(statusOutput.Blocks, DependencyInfo{
 			ID:       dep.ID,
 			Title:    dep.Title,
 			Status:   dep.Status,
@@ -121,9 +121,7 @@ func runMqStatus(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mqStatusJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(statusOutput)
 	}
 
 	// Human-readable output

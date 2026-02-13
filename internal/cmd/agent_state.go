@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -130,9 +131,7 @@ func queryAgentState(agentBead, beadsDir string) error {
 	}
 
 	if agentStateJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return output.Print(result)
 	}
 
 	// Human-readable output

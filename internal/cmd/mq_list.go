@@ -1,15 +1,14 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 )
@@ -271,9 +270,7 @@ func formatMRAge(createdAt string) string {
 
 // outputJSON outputs data as JSON.
 func outputJSON(data interface{}) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(data)
+	return output.Print(data)
 }
 
 // calculateMRScore computes the priority score for an MR using the refinery scoring function.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -138,9 +139,7 @@ func runDailyDigest() error {
 	report.Anomalies = detectAnomalies(report)
 
 	if compactReportJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+		return output.Print(report)
 	}
 
 	// Format as markdown
@@ -381,9 +380,7 @@ func runWeeklyRollup() error {
 	}
 
 	if compactReportJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rollup)
+		return output.Print(rollup)
 	}
 
 	markdown := formatWeeklyRollup(rollup)

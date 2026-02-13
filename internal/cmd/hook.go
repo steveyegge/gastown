@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -416,8 +416,7 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		} else {
 			info.Status = "empty"
 		}
-		enc := json.NewEncoder(os.Stdout)
-		return enc.Encode(info)
+		return output.Print(info)
 	}
 
 	// Compact one-line output

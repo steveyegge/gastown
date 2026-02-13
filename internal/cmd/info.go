@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/version"
 )
 
@@ -47,9 +46,7 @@ Examples:
 		}
 
 		if jsonFlag {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(info)
+			_ = output.Print(info)
 			return
 		}
 
@@ -209,9 +206,7 @@ var versionChanges = []VersionChange{
 // showWhatsNew displays agent-relevant changes from recent versions
 func showWhatsNew(jsonOutput bool) {
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(map[string]interface{}{
+		_ = output.Print(map[string]interface{}{
 			"current_version": Version,
 			"recent_changes":  versionChanges,
 		})

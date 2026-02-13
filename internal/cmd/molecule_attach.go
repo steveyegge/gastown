@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -167,9 +167,7 @@ func runMoleculeAttachment(cmd *cobra.Command, args []string) error {
 			out.AttachedMolecule = attachment.AttachedMolecule
 			out.AttachedAt = attachment.AttachedAt
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(out)
+		return output.Print(out)
 	}
 
 	// Human-readable output

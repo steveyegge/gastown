@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -254,9 +254,7 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if moleculeJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(progress)
+		return output.Print(progress)
 	}
 
 	// Human-readable output
@@ -488,9 +486,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if moleculeJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(status)
+		return output.Print(status)
 	}
 
 	// Human-readable output
@@ -937,9 +933,7 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 // outputMoleculeCurrent outputs the current info in the appropriate format.
 func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 	if moleculeJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(info)
+		return output.Print(info)
 	}
 
 	// Human-readable output matching spec format

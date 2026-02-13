@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -46,9 +45,7 @@ func runMailSearch(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mailSearchJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(messages)
+		return output.Print(messages)
 	}
 
 	// Human-readable output

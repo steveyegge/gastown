@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -10,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -191,9 +191,7 @@ func outputPluginListJSON(plugins []*plugin.Plugin) error {
 		summaries[i] = p.Summary()
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(summaries)
+	return output.Print(summaries)
 }
 
 func outputPluginListText(plugins []*plugin.Plugin, townRoot string) error {
@@ -284,9 +282,7 @@ func runPluginShow(cmd *cobra.Command, args []string) error {
 }
 
 func outputPluginShowJSON(p *plugin.Plugin) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(p)
+	return output.Print(p)
 }
 
 func outputPluginShowText(p *plugin.Plugin) error {
@@ -474,9 +470,7 @@ func runPluginHistory(cmd *cobra.Command, args []string) error {
 	}
 
 	if pluginHistoryJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(runs)
+		return output.Print(runs)
 	}
 
 	if len(runs) == 0 {

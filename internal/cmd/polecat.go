@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -436,14 +435,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 
 	// Output
 	if polecatListJSON {
-		formatFlag, _ := cmd.Flags().GetString("format")
-		format := output.ResolveFormat(formatFlag)
-		if format == output.FormatTOON {
-			return output.PrintTOON(allPolecats)
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(allPolecats)
+		return output.Print(allPolecats)
 	}
 
 	if len(allPolecats) == 0 {
@@ -658,9 +650,7 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 		if !sessInfo.LastActivity.IsZero() {
 			status.LastActivity = sessInfo.LastActivity.Format("2006-01-02 15:04:05")
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(status)
+		return output.Print(status)
 	}
 
 	// Human-readable output
@@ -775,9 +765,7 @@ func runPolecatGitState(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if polecatGitStateJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(state)
+		return output.Print(state)
 	}
 
 	// Human-readable output
@@ -997,9 +985,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if polecatCheckRecoveryJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(status)
+		return output.Print(status)
 	}
 
 	// Human-readable output
@@ -1333,7 +1319,7 @@ func runPolecatStale(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if polecatStaleJSON {
-		return json.NewEncoder(os.Stdout).Encode(staleInfos)
+		return output.Print(staleInfos)
 	}
 
 	// Summary counts

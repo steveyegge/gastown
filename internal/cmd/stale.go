@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/version"
 )
@@ -99,10 +99,8 @@ func runStale(cmd *cobra.Command, args []string) error {
 	return outputStaleText(output)
 }
 
-func outputStaleJSON(output StaleOutput) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+func outputStaleJSON(out StaleOutput) error {
+	return output.Print(out)
 }
 
 func outputStaleText(output StaleOutput) error {

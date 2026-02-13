@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/dog"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -438,9 +438,7 @@ func runDogList(cmd *cobra.Command, args []string) error {
 			})
 		}
 
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(items)
+		return output.Print(items)
 	}
 
 	// Pretty print
@@ -673,9 +671,7 @@ func showDogStatus(mgr *dog.Manager, name string) error {
 	}
 
 	if dogStatusJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(d)
+		return output.Print(d)
 	}
 
 	fmt.Printf("Dog: %s\n\n", style.Bold.Render(d.Name))
@@ -744,9 +740,7 @@ func showPackStatus(mgr *dog.Manager) error {
 			}
 		}
 
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(status)
+		return output.Print(status)
 	}
 
 	fmt.Println(style.Bold.Render("Pack Status"))
@@ -912,7 +906,7 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 	// Dry-run mode: show what would happen and exit
 	if dogDispatchDryRun {
 		if dogDispatchJSON {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return output.Print(result)
 		}
 		fmt.Printf("Dry run - would dispatch:\n")
 		fmt.Printf("  Plugin: %s\n", p.Name)
@@ -959,7 +953,7 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 
 	// Success - output result
 	if dogDispatchJSON {
-		return json.NewEncoder(os.Stdout).Encode(result)
+		return output.Print(result)
 	}
 
 	fmt.Printf("%s Found plugin: %s\n", style.Bold.Render("✓"), p.Name)

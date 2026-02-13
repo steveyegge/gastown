@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -104,9 +103,7 @@ func runMoleculeDag(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if moleculeJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(dag)
+		return output.Print(dag)
 	}
 
 	// Human-readable output

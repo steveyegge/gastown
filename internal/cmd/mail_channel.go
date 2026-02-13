@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -156,9 +157,7 @@ func runChannelList(cmd *cobra.Command, args []string) error {
 	}
 
 	if channelJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(channels)
+		return output.Print(channels)
 	}
 
 	if len(channels) == 0 {
@@ -214,9 +213,7 @@ func runChannelShow(cmd *cobra.Command, args []string) error {
 		if messages == nil {
 			messages = []channelMessage{}
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(messages)
+		return output.Print(messages)
 	}
 
 	fmt.Printf("%s Channel: %s (%d messages)\n",
@@ -445,9 +442,7 @@ func runChannelSubscribers(cmd *cobra.Command, args []string) error {
 		if subs == nil {
 			subs = []string{}
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(subs)
+		return output.Print(subs)
 	}
 
 	if len(fields.Subscribers) == 0 {

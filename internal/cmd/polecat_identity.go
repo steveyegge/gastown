@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -321,9 +322,7 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if polecatIdentityListJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(identities)
+		return output.Print(identities)
 	}
 
 	// Human-readable output
@@ -412,7 +411,7 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 
 	// JSON output - include both identity details and CV
 	if polecatIdentityShowJSON {
-		output := struct {
+		jsonOut := struct {
 			IdentityInfo
 			Title     string     `json:"title"`
 			CreatedAt string     `json:"created_at,omitempty"`
@@ -434,12 +433,10 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 			UpdatedAt: issue.UpdatedAt,
 			CV:        cv,
 		}
-		if output.HookBead == "" {
-			output.HookBead = fields.HookBead
+		if jsonOut.HookBead == "" {
+			jsonOut.HookBead = fields.HookBead
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(jsonOut)
 	}
 
 	// Human-readable output

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 )
@@ -68,9 +68,7 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mailInboxJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(messages)
+		return output.Print(messages)
 	}
 
 	// Human-readable output
@@ -162,9 +160,7 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mailReadJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(msg)
+		return output.Print(msg)
 	}
 
 	// Human-readable output

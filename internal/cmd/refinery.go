@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -379,17 +379,15 @@ func runRefineryStatus(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if refineryStatusJSON {
-		output := RefineryStatusOutput{
+		statusOut := RefineryStatusOutput{
 			Running:     running,
 			RigName:     rigName,
 			QueueLength: queueLen,
 		}
 		if sessionInfo != nil {
-			output.Session = sessionInfo.Name
+			statusOut.Session = sessionInfo.Name
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(statusOut)
 	}
 
 	// Human-readable output
@@ -427,9 +425,7 @@ func runRefineryQueue(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if refineryQueueJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(queue)
+		return output.Print(queue)
 	}
 
 	// Human-readable output
@@ -663,9 +659,7 @@ func runRefineryUnclaimed(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if refineryUnclaimedJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(unclaimed)
+		return output.Print(unclaimed)
 	}
 
 	// Human-readable output
@@ -719,9 +713,7 @@ func runRefineryReady(cmd *cobra.Command, args []string) error {
 			Ready     []*refinery.MRInfo    `json:"ready"`
 			Anomalies []*refinery.MRAnomaly `json:"anomalies,omitempty"`
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(readyOutput{
+		return output.Print(readyOutput{
 			Ready:     ready,
 			Anomalies: anomalies,
 		})
@@ -832,9 +824,7 @@ func runRefineryBlocked(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if refineryBlockedJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(blocked)
+		return output.Print(blocked)
 	}
 
 	// Human-readable output

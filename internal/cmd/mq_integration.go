@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -702,19 +702,23 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build output structure
-	output := IntegrationStatusOutput{
-		Epic:        epicID,
-		Branch:      branchName,
-		Created:     createdDate,
-		AheadOfMain: aheadCount,
-		MergedMRs:   make([]IntegrationStatusMRSummary, 0, len(mergedMRs)),
-		PendingMRs:  make([]IntegrationStatusMRSummary, 0, len(pendingMRs)),
+	statusOutput := IntegrationStatusOutput{
+		Epic:            epicID,
+		Branch:          branchName,
+		Created:         createdDate,
+		AheadOfMain:     aheadCount,
+		MergedMRs:       make([]IntegrationStatusMRSummary, 0, len(mergedMRs)),
+		PendingMRs:      make([]IntegrationStatusMRSummary, 0, len(pendingMRs)),
+		ReadyToLand:     readyToLand,
+		AutoLandEnabled: autoLandEnabled,
+		ChildrenTotal:   childrenTotal,
+		ChildrenClosed:  childrenClosed,
 	}
 
 	for _, mr := range mergedMRs {
 		// Extract the title without "Merge: " prefix for cleaner display
 		title := strings.TrimPrefix(mr.Title, "Merge: ")
-		output.MergedMRs = append(output.MergedMRs, IntegrationStatusMRSummary{
+		statusOutput.MergedMRs = append(statusOutput.MergedMRs, IntegrationStatusMRSummary{
 			ID:    mr.ID,
 			Title: title,
 		})
@@ -722,7 +726,7 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 
 	for _, mr := range pendingMRs {
 		title := strings.TrimPrefix(mr.Title, "Merge: ")
-		output.PendingMRs = append(output.PendingMRs, IntegrationStatusMRSummary{
+		statusOutput.PendingMRs = append(statusOutput.PendingMRs, IntegrationStatusMRSummary{
 			ID:     mr.ID,
 			Title:  title,
 			Status: mr.Status,
@@ -731,13 +735,11 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mqIntegrationStatusJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
+		return output.Print(statusOutput)
 	}
 
 	// Human-readable output
-	return printIntegrationStatus(&output)
+	return printIntegrationStatus(&statusOutput)
 }
 
 // printIntegrationStatus prints the integration status in human-readable format.

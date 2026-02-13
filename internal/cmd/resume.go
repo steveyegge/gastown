@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/output"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -185,9 +186,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 }
 
 func outputResumeStatus(status ResumeStatus) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(status)
+	return output.Print(status)
 }
 
 func displayResumeStatus(status ResumeStatus, parked *ParkedWork) error {
