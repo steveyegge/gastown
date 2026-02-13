@@ -143,14 +143,15 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 	// Create a temp directory structure simulating a Gas Town workspace
 	tmpDir := t.TempDir()
 
-	// Create rig structure with crew-level and polecats-level settings
+	// Create rig structure with individual crew member and polecat worktree settings
+	// (DiscoverTargets only targets individual worktrees, not parent crew/ or polecats/ dirs)
 	rigName := "testrig"
 	rigDir := filepath.Join(tmpDir, rigName)
 
-	// Create crew-level settings (inherited by all crew members)
-	crewClaudeDir := filepath.Join(rigDir, "crew", ".claude")
-	if err := os.MkdirAll(crewClaudeDir, 0755); err != nil {
-		t.Fatalf("failed to create crew/.claude dir: %v", err)
+	// Create individual crew member settings (crew/alice/.claude/settings.local.json)
+	crewMemberClaudeDir := filepath.Join(rigDir, "crew", "alice", ".claude")
+	if err := os.MkdirAll(crewMemberClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create crew/alice/.claude dir: %v", err)
 	}
 
 	crewSettings := hooks.SettingsJSON{
@@ -166,14 +167,14 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 		},
 	}
 	crewData, _ := hooks.MarshalSettings(&crewSettings)
-	if err := os.WriteFile(filepath.Join(crewClaudeDir, "settings.json"), crewData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(crewMemberClaudeDir, "settings.local.json"), crewData, 0644); err != nil {
 		t.Fatalf("failed to write crew settings: %v", err)
 	}
 
-	// Create polecats-level settings (inherited by all polecats)
-	polecatsClaudeDir := filepath.Join(rigDir, "polecats", ".claude")
-	if err := os.MkdirAll(polecatsClaudeDir, 0755); err != nil {
-		t.Fatalf("failed to create polecats/.claude dir: %v", err)
+	// Create individual polecat worktree settings (polecats/toast/.claude/settings.local.json)
+	polecatClaudeDir := filepath.Join(rigDir, "polecats", "toast", ".claude")
+	if err := os.MkdirAll(polecatClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create polecats/toast/.claude dir: %v", err)
 	}
 
 	polecatsSettings := hooks.SettingsJSON{
@@ -189,7 +190,7 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 		},
 	}
 	polecatsData, _ := hooks.MarshalSettings(&polecatsSettings)
-	if err := os.WriteFile(filepath.Join(polecatsClaudeDir, "settings.json"), polecatsData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(polecatClaudeDir, "settings.local.json"), polecatsData, 0644); err != nil {
 		t.Fatalf("failed to write polecats settings: %v", err)
 	}
 
@@ -199,7 +200,7 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 		t.Fatalf("discoverHooks failed: %v", err)
 	}
 
-	// Verify crew-level hook was discovered
+	// Verify individual crew member and polecat hooks were discovered
 	var foundCrewLevel, foundPolecatsLevel bool
 	for _, h := range hookInfos {
 		if h.Agent == "testrig/crew" && len(h.Commands) > 0 && h.Commands[0] == "crew-level-hook" {
@@ -211,9 +212,9 @@ func TestDiscoverHooksCrewLevel(t *testing.T) {
 	}
 
 	if !foundCrewLevel {
-		t.Error("expected crew-level hook to be discovered (testrig/crew)")
+		t.Error("expected crew member hook to be discovered (testrig/crew)")
 	}
 	if !foundPolecatsLevel {
-		t.Error("expected polecats-level hook to be discovered (testrig/polecats)")
+		t.Error("expected polecat hook to be discovered (testrig/polecats)")
 	}
 }

@@ -103,7 +103,7 @@ gt install ~/gt --shell
 
 # This creates:
 #   ~/gt/
-#   ├── CLAUDE.md          # Mayor role context
+#   ├── CLAUDE.md          # Identity anchor (run gt prime)
 #   ├── mayor/             # Mayor config and state
 #   ├── rigs/              # Project containers (initially empty)
 #   └── .beads/            # Town-level issue tracking

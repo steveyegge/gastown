@@ -88,7 +88,7 @@ func TestSessionStartHooksHaveHookFlag(t *testing.T) {
 		if err != nil {
 			return nil // Skip inaccessible paths
 		}
-		if info.Name() == "settings.json" && strings.Contains(path, ".claude") {
+		if (info.Name() == "settings.local.json" || info.Name() == "settings.json") && strings.Contains(path, ".claude") {
 			settingsFiles = append(settingsFiles, path)
 		}
 		return nil
@@ -98,7 +98,7 @@ func TestSessionStartHooksHaveHookFlag(t *testing.T) {
 	}
 
 	if len(settingsFiles) == 0 {
-		t.Skip("No .claude/settings.json files found")
+		t.Skip("No .claude/settings.local.json or .claude/settings.json files found")
 	}
 
 	var failures []string

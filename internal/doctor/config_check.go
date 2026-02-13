@@ -272,7 +272,7 @@ func (c *SettingsCheck) findRigs(townRoot string) []string {
 	return findAllRigs(townRoot)
 }
 
-// SessionHookCheck verifies settings.json files use proper session_id passthrough.
+// SessionHookCheck verifies settings.local.json files use proper session_id passthrough.
 // Valid options: session-start.sh wrapper OR 'gt prime --hook'.
 // Without proper config, gt seance cannot discover sessions.
 type SessionHookCheck struct {
@@ -286,14 +286,14 @@ func NewSessionHookCheck() *SessionHookCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "session-hooks",
-				CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
+				CheckDescription: "Check that settings.local.json hooks use session-start.sh or --hook flag",
 				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
 }
 
-// Run checks if all settings.json files use session-start.sh or --hook flag.
+// Run checks if all settings.local.json files use session-start.sh or --hook flag.
 func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 	var issues []string
 	var checked int
@@ -301,7 +301,7 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 	// Reset cache
 	c.filesToFix = nil
 
-	// Find all settings.json files in the town
+	// Find all settings.local.json files in the town
 	settingsFiles := c.findSettingsFiles(ctx.TownRoot)
 
 	for _, settingsPath := range settingsFiles {
@@ -322,14 +322,14 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("All %d settings.json file(s) use proper session_id passthrough", checked),
+			Message: fmt.Sprintf("All %d settings.local.json file(s) use proper session_id passthrough", checked),
 		}
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d hook issue(s) found across settings.json files", len(issues)),
+		Message: fmt.Sprintf("%d hook issue(s) found across settings.local.json files", len(issues)),
 		Details: issues,
 		FixHint: "Run 'gt doctor --fix' to update hooks to use 'gt prime --hook'",
 	}
@@ -507,69 +507,46 @@ func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool
 	return true
 }
 
-// findSettingsFiles finds all settings.json files in the town.
+// findSettingsFiles finds all settings.local.json files in the town.
+// These are the correct locations where Claude Code will find hooks.
+// See: https://github.com/anthropics/claude-code/issues/12962
 func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 	var files []string
 
-	// Town root
-	townSettings := filepath.Join(townRoot, ".claude", "settings.json")
-	if _, err := os.Stat(townSettings); err == nil {
-		files = append(files, townSettings)
+	// Town-level agents: mayor and deacon
+	mayorSettings := filepath.Join(townRoot, "mayor", ".claude", "settings.local.json")
+	if _, err := os.Stat(mayorSettings); err == nil {
+		files = append(files, mayorSettings)
 	}
 
-	// Town-level agents (mayor, deacon) - these are not rigs but have their own settings
-	for _, agent := range []string{"mayor", "deacon"} {
-		agentSettings := filepath.Join(townRoot, agent, ".claude", "settings.json")
-		if _, err := os.Stat(agentSettings); err == nil {
-			files = append(files, agentSettings)
-		}
+	deaconSettings := filepath.Join(townRoot, "deacon", ".claude", "settings.local.json")
+	if _, err := os.Stat(deaconSettings); err == nil {
+		files = append(files, deaconSettings)
 	}
 
 	// Find all rigs
 	rigs := findAllRigs(townRoot)
 	for _, rig := range rigs {
-		// Rig root
-		rigSettings := filepath.Join(rig, ".claude", "settings.json")
-		if _, err := os.Stat(rigSettings); err == nil {
-			files = append(files, rigSettings)
-		}
+		rigName := filepath.Base(rig)
 
-		// Mayor/rig
-		mayorRigSettings := filepath.Join(rig, "mayor", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(mayorRigSettings); err == nil {
-			files = append(files, mayorRigSettings)
-		}
-
-		// Witness
-		witnessSettings := filepath.Join(rig, "witness", ".claude", "settings.json")
+		// Witness - settings in working directory (witness/rig/)
+		witnessSettings := filepath.Join(rig, "witness", "rig", ".claude", "settings.local.json")
 		if _, err := os.Stat(witnessSettings); err == nil {
 			files = append(files, witnessSettings)
 		}
 
-		// Witness/rig
-		witnessRigSettings := filepath.Join(rig, "witness", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(witnessRigSettings); err == nil {
-			files = append(files, witnessRigSettings)
-		}
-
-		// Refinery
-		refinerySettings := filepath.Join(rig, "refinery", ".claude", "settings.json")
+		// Refinery - settings in working directory (refinery/rig/)
+		refinerySettings := filepath.Join(rig, "refinery", "rig", ".claude", "settings.local.json")
 		if _, err := os.Stat(refinerySettings); err == nil {
 			files = append(files, refinerySettings)
 		}
 
-		// Refinery/rig
-		refineryRigSettings := filepath.Join(rig, "refinery", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(refineryRigSettings); err == nil {
-			files = append(files, refineryRigSettings)
-		}
-
-		// Crew members
+		// Crew members - settings in each worker's directory (crew/<name>/)
 		crewPath := filepath.Join(rig, "crew")
 		if crewEntries, err := os.ReadDir(crewPath); err == nil {
 			for _, crew := range crewEntries {
 				if crew.IsDir() && !strings.HasPrefix(crew.Name(), ".") {
-					crewSettings := filepath.Join(crewPath, crew.Name(), ".claude", "settings.json")
+					crewSettings := filepath.Join(crewPath, crew.Name(), ".claude", "settings.local.json")
 					if _, err := os.Stat(crewSettings); err == nil {
 						files = append(files, crewSettings)
 					}
@@ -577,23 +554,20 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 			}
 		}
 
-		// Polecats (handle both new and old structures)
-		// New structure: polecats/<name>/<rigname>/.claude/settings.json
-		// Old structure: polecats/<name>/.claude/settings.json
-		rigName := filepath.Base(rig)
+		// Polecats - settings in worktree (polecats/<name>/<rigname>/ or legacy polecats/<name>/)
 		polecatsPath := filepath.Join(rig, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
-					// Try new structure first
-					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.json")
+					// New layout: polecats/<name>/<rigname>/
+					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.local.json")
 					if _, err := os.Stat(polecatSettings); err == nil {
 						files = append(files, polecatSettings)
 					} else {
-						// Fall back to old structure
-						polecatSettings = filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
-						if _, err := os.Stat(polecatSettings); err == nil {
-							files = append(files, polecatSettings)
+						// Legacy layout: polecats/<name>/
+						legacySettings := filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.local.json")
+						if _, err := os.Stat(legacySettings); err == nil {
+							files = append(files, legacySettings)
 						}
 					}
 				}

@@ -175,6 +175,7 @@ var doltSyncCmd = &cobra.Command{
 
 This command automates the tedious process of pushing each database individually:
   1. Stops the Dolt server (required for CLI push)
+<<<<<<< HEAD
   2. Optionally purges closed ephemeral beads (--gc)
   3. Iterates databases in .dolt-data/
   4. For each database with a configured remote, runs dolt push

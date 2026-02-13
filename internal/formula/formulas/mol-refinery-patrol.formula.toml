@@ -515,9 +515,10 @@ After await-signal returns (either by signal or timeout):
 ```bash
 bd mol squash <mol-id> --summary "<patrol-summary>"
 ```
-3. Create a new patrol wisp:
+3. Create and hook a new patrol wisp:
 ```bash
-bd mol wisp mol-refinery-patrol
+NEW_WISP=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=<rig>/refinery
 ```
 4. Continue executing from the inbox-check step of the new wisp
 

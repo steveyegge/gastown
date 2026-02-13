@@ -525,8 +525,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
 
-			// Nudge refinery to pick up the new MR
-			nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrID, branch))
+			// NOTE: Refinery nudge is deferred to AFTER the Dolt branch merge
+			// (see post-merge nudge below). Nudging here would race with the
+			// merge — refinery wakes up and queries main before the polecat's
+			// Dolt branch (containing the MR bead) is merged.
 		}
 		fmt.Printf("  Source: %s\n", branch)
 		fmt.Printf("  Target: %s\n", target)
@@ -568,9 +570,11 @@ notifyWitness:
 	// Branch-per-polecat: merge polecat's Dolt branch to main.
 	// This makes all beads changes (MR bead, issue updates) visible on main
 	// before the refinery or witness try to read them.
+	mergeFailed := false
 	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
 		fmt.Printf("Merging Dolt branch %s to main...\n", bdBranch)
 		if err := doltserver.MergePolecatBranch(townRoot, rigName, bdBranch); err != nil {
+			mergeFailed = true
 			style.PrintWarning("could not merge Dolt branch: %v (data still on branch %s)", err, bdBranch)
 		} else {
 			fmt.Printf("%s Dolt branch merged to main\n", style.Bold.Render("✓"))
@@ -578,6 +582,14 @@ notifyWitness:
 		// Unset BD_BRANCH so subsequent bd operations (updateAgentStateOnDone)
 		// write directly to main instead of the now-deleted branch.
 		os.Unsetenv("BD_BRANCH")
+	}
+
+	// Nudge refinery AFTER the Dolt merge so MR bead is visible on main.
+	// Skip nudge only if merge was attempted and failed — MR bead is stranded
+	// on the polecat branch and refinery won't find it on main.
+	// If no branch existed (crew worker), MR bead is already on main.
+	if mrID != "" && !mergeFailed {
+		nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrID, branch))
 	}
 
 	// Notify Witness about completion

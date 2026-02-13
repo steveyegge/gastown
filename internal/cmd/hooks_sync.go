@@ -15,18 +15,18 @@ var hooksSyncDryRun bool
 
 var hooksSyncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Regenerate all .claude/settings.json files",
-	Long: `Regenerate all .claude/settings.json files from the base config and overrides.
+	Short: "Regenerate all .claude/settings.local.json files",
+	Long: `Regenerate all .claude/settings.local.json files from the base config and overrides.
 
 For each target (mayor, deacon, rig/crew, rig/witness, etc.):
 1. Load base config
 2. Apply role override (if exists)
 3. Apply rig+role override (if exists)
-4. Merge hooks section into existing settings.json (preserving all fields)
-5. Write updated settings.json
+4. Merge hooks section into existing settings.local.json (preserving all fields)
+5. Write updated settings.local.json
 
 Examples:
-  gt hooks sync             # Regenerate all settings.json files
+  gt hooks sync             # Regenerate all settings.local.json files
   gt hooks sync --dry-run   # Show what would change without writing`,
 	RunE: runHooksSync,
 }
@@ -119,7 +119,7 @@ const (
 	syncCreated
 )
 
-// syncTarget syncs a single target's .claude/settings.json.
+// syncTarget syncs a single target's .claude/settings.local.json.
 // Uses MarshalSettings/UnmarshalSettings to preserve unknown fields.
 func syncTarget(target hooks.Target, dryRun bool) (syncResult, error) {
 	// Compute expected hooks for this target
@@ -165,7 +165,7 @@ func syncTarget(target hooks.Target, dryRun bool) (syncResult, error) {
 		return 0, fmt.Errorf("creating .claude directory: %w", err)
 	}
 
-	// Write settings.json using MarshalSettings to preserve unknown fields
+	// Write settings.local.json using MarshalSettings to preserve unknown fields
 	data, err := hooks.MarshalSettings(current)
 	if err != nil {
 		return 0, fmt.Errorf("marshaling settings: %w", err)

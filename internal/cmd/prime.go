@@ -56,7 +56,7 @@ HOOK MODE (--hook):
   When called as an LLM runtime hook, use --hook to enable session ID handling.
   This reads session metadata from stdin and persists it for the session.
 
-  Claude Code integration (in .claude/settings.json):
+  Claude Code integration (in .claude/settings.local.json):
     "SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]
 
   Claude Code sends JSON on stdin:
@@ -642,8 +642,7 @@ func ensureBeadsRedirect(ctx RoleContext) {
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
 	if _, err := os.Stat(redirectPath); err == nil {
-		// Redirect exists, nothing to do
-		return
+		return // Redirect exists, nothing to do
 	}
 
 	// Use shared helper - silently ignore errors during prime

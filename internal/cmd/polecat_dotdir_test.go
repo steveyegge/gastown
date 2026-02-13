@@ -16,7 +16,7 @@ func TestDiscoverHooksSkipsPolecatDotDirs(t *testing.T) {
 	townRoot := setupTestTownForDotDir(t)
 	rigPath := filepath.Join(townRoot, "gastown")
 
-	settingsPath := filepath.Join(rigPath, "polecats", ".claude", ".claude", "settings.json")
+	settingsPath := filepath.Join(rigPath, "polecats", ".claude", ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}

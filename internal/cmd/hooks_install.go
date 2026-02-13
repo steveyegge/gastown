@@ -174,19 +174,37 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 			if entries, err := os.ReadDir(polecatsDir); err == nil {
 				for _, e := range entries {
 					if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-						targets = append(targets, filepath.Join(polecatsDir, e.Name()))
+						// New layout: polecats/<name>/<rigname>/ is the worktree
+						// Fall back to polecats/<name>/ for legacy layout
+						polecatWorkDir := filepath.Join(polecatsDir, e.Name(), rig)
+						if _, err := os.Stat(polecatWorkDir); err != nil {
+							polecatWorkDir = filepath.Join(polecatsDir, e.Name())
+						}
+						targets = append(targets, polecatWorkDir)
 					}
 				}
 			}
 		case "witness":
-			witnessPath := filepath.Join(rigPath, "witness")
-			if _, err := os.Stat(witnessPath); err == nil {
-				targets = append(targets, witnessPath)
+			// Working directory is witness/rig/ if it exists, else witness/
+			witnessRigPath := filepath.Join(rigPath, "witness", "rig")
+			if _, err := os.Stat(witnessRigPath); err == nil {
+				targets = append(targets, witnessRigPath)
+			} else {
+				witnessPath := filepath.Join(rigPath, "witness")
+				if _, err := os.Stat(witnessPath); err == nil {
+					targets = append(targets, witnessPath)
+				}
 			}
 		case "refinery":
-			refineryPath := filepath.Join(rigPath, "refinery")
-			if _, err := os.Stat(refineryPath); err == nil {
-				targets = append(targets, refineryPath)
+			// Working directory is refinery/rig/ if it exists, else refinery/
+			refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
+			if _, err := os.Stat(refineryRigPath); err == nil {
+				targets = append(targets, refineryRigPath)
+			} else {
+				refineryPath := filepath.Join(rigPath, "refinery")
+				if _, err := os.Stat(refineryPath); err == nil {
+					targets = append(targets, refineryPath)
+				}
 			}
 		}
 	}
@@ -196,7 +214,7 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 
 // installHookTo installs a hook to a specific worktree.
 func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) error {
-	settingsPath := filepath.Join(worktreePath, ".claude", "settings.json")
+	settingsPath := filepath.Join(worktreePath, ".claude", "settings.local.json")
 
 	// Load existing settings or create new
 	settings, err := hooks.LoadSettings(settingsPath)

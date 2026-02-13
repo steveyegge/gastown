@@ -246,6 +246,19 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Dolt health check ticker started (interval %v)", interval)
 	}
 
+	// Start dedicated Dolt remotes push ticker if configured.
+	// This runs at a lower frequency (default 15 min) than the heartbeat (3 min)
+	// to periodically push databases to their git remotes.
+	var doltRemotesTicker *time.Ticker
+	var doltRemotesChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "dolt_remotes") {
+		interval := doltRemotesInterval(d.patrolConfig)
+		doltRemotesTicker = time.NewTicker(interval)
+		doltRemotesChan = doltRemotesTicker.C
+		defer doltRemotesTicker.Stop()
+		d.logger.Printf("Dolt remotes push ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -274,6 +287,13 @@ func (d *Daemon) Run() error {
 			// of the 3-minute general heartbeat.
 			if !d.isShutdownInProgress() {
 				d.ensureDoltServerRunning()
+			}
+
+		case <-doltRemotesChan:
+			// Periodic Dolt remote push — pushes databases to their configured
+			// git remotes on a 15-minute cadence (independent of heartbeat).
+			if !d.isShutdownInProgress() {
+				d.pushDoltRemotes()
 			}
 
 		case <-timer.C:

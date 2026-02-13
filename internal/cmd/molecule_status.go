@@ -506,6 +506,8 @@ func buildAgentIdentity(ctx RoleContext) string {
 		return "mayor/"
 	case RoleDeacon:
 		return "deacon/"
+	case RoleBoot:
+		return "deacon/boot"
 	case RoleWitness:
 		return ctx.Rig + "/witness"
 	case RoleRefinery:
@@ -982,7 +984,8 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 // Accepts both "mayor" and "mayor/" formats for compatibility.
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "mayor/" ||
-		agentID == "deacon" || agentID == "deacon/"
+		agentID == "deacon" || agentID == "deacon/" ||
+		agentID == "boot" || agentID == "deacon/boot"
 }
 
 // extractMailSender extracts the sender from mail bead labels.

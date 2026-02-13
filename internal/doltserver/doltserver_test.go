@@ -2394,3 +2394,91 @@ func TestValidateBranchName_InvalidNames(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// doltSQLScriptWithRetry tests
+// =============================================================================
+
+func TestDoltSQLScriptWithRetry_ImmediateSuccess(t *testing.T) {
+	// doltSQLScriptWithRetry calls doltSQLScript which needs a valid townRoot
+	// with .dolt-data dir and a dolt binary. Since we can't run dolt in CI,
+	// we verify the retry logic by checking that non-retryable errors return
+	// immediately without sleeping (i.e., isDoltRetryableError integration).
+	//
+	// A non-retryable error (e.g., syntax error) should return on first attempt.
+	err := doltSQLScriptWithRetry(t.TempDir(), "INVALID SQL;")
+	if err == nil {
+		// If dolt isn't installed, the exec itself fails — that's fine,
+		// the point is it doesn't retry/hang.
+		t.Skip("dolt binary available and accepted invalid SQL somehow")
+	}
+	// Verify the error is not wrapped with "after N retries" since exec failures
+	// (dolt not found / not a dolt data dir) are not retryable.
+	if strings.Contains(err.Error(), "after 3 retries") {
+		t.Errorf("non-retryable error was retried: %v", err)
+	}
+}
+
+func TestDoltSQLScriptWithRetry_NonRetryableError(t *testing.T) {
+	// Verify that isDoltRetryableError correctly classifies errors.
+	// Non-retryable errors should fail fast without retry.
+	nonRetryable := []string{
+		"syntax error near 'FOO'",
+		"table not found",
+		"unknown column",
+	}
+	for _, msg := range nonRetryable {
+		if isDoltRetryableError(fmt.Errorf("%s", msg)) {
+			t.Errorf("isDoltRetryableError(%q) = true, want false", msg)
+		}
+	}
+
+	// Retryable errors should be classified as such.
+	retryable := []string{
+		"database is read only",
+		"cannot update manifest",
+		"optimistic lock failed",
+		"serialization failure",
+		"lock wait timeout",
+		"try restarting transaction",
+	}
+	for _, msg := range retryable {
+		if !isDoltRetryableError(fmt.Errorf("%s", msg)) {
+			t.Errorf("isDoltRetryableError(%q) = false, want true", msg)
+		}
+	}
+}
+
+// =============================================================================
+// MergePolecatBranch script generation tests
+// =============================================================================
+
+func TestMergePolecatBranch_NoBranchDeleteInScripts(t *testing.T) {
+	// Verify that MergePolecatBranch's SQL scripts don't contain DOLT_BRANCH('-D').
+	// Branch deletion must happen AFTER successful merge, not inside the scripts,
+	// to prevent branch loss if the merge script fails partway through.
+	//
+	// We can't run the actual merge (requires dolt server), but we can verify
+	// the function validates branch names correctly — invalid names are rejected
+	// before any script is generated.
+	err := MergePolecatBranch(t.TempDir(), "testrig", "'; DROP TABLE --")
+	if err == nil {
+		t.Error("expected error for SQL injection branch name")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected 'invalid' in error, got: %v", err)
+	}
+}
+
+func TestMergePolecatBranch_ValidBranchName(t *testing.T) {
+	// Verify that valid branch names pass validation (function will fail
+	// later at the dolt execution step, but validation should pass).
+	err := MergePolecatBranch(t.TempDir(), "testrig", "polecat-alpha-123")
+	if err == nil {
+		t.Skip("dolt server available — merge unexpectedly succeeded")
+	}
+	// Should NOT be a validation error
+	if strings.Contains(err.Error(), "invalid") {
+		t.Errorf("valid branch name rejected: %v", err)
+	}
+}

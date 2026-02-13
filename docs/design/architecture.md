@@ -97,7 +97,7 @@ Each agent bead references its role bead via the `role_bead` field.
 │   └── dolt.pid                Server PID file
 ├── deacon/                     Deacon workspace
 │   └── dogs/<name>/            Dog worker directories
-├── mayor/                      Mayor config
+├── mayor/                      Mayor agent home
 │   ├── town.json               Town configuration
 │   ├── rigs.json               Rig registry
 │   ├── daemon.json             Daemon patrol config
@@ -109,13 +109,20 @@ Each agent bead references its role bead via the `role_bead` field.
 │   └── messaging.json          Mail lists, queues, channels
 └── <rig>/                      Project container (NOT a git clone)
     ├── config.json             Rig identity and beads prefix
-    ├── mayor/rig/              Canonical clone (beads live here)
+    ├── mayor/rig/              Canonical clone (beads live here, NOT an agent)
     │   └── .beads/             Rig-level beads (redirected to Dolt)
-    ├── refinery/rig/           Worktree from mayor/rig
-    ├── witness/                Witness workspace (monitors only)
-    ├── crew/<name>/            Human workspaces (full clones)
-    └── polecats/<name>/        Worker worktrees from mayor/rig
+    ├── refinery/               Refinery agent home
+    │   └── rig/                Worktree from mayor/rig
+    ├── witness/                Witness agent home (no clone)
+    ├── crew/                   Crew parent
+    │   └── <name>/             Human workspaces (full clones)
+    └── polecats/               Polecats parent
+        └── <name>/<rigname>/   Worker worktrees from mayor/rig
 ```
+
+**Note**: No per-directory CLAUDE.md or AGENTS.md is created. Only `~/gt/CLAUDE.md`
+(town-root identity anchor) exists on disk. Full context is injected by `gt prime`
+via SessionStart hook.
 
 ### Worktree Architecture
 

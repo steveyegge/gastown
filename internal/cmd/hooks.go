@@ -17,9 +17,9 @@ via the sync command.
 Subcommands:
   base       Edit the shared base hook config
   override   Edit overrides for a role or rig
-  sync       Regenerate all .claude/settings.json files
+  sync       Regenerate all .claude/settings.local.json files
   diff       Show what sync would change
-  list       Show all managed settings.json locations
+  list       Show all managed settings.local.json locations
   scan       Scan workspace for existing hooks
   registry   List hooks from the registry
   install    Install a hook from the registry
@@ -31,7 +31,7 @@ Config structure:
 Merge strategy: base → role → rig+role (more specific wins)
 
 Examples:
-  gt hooks sync           # Regenerate all settings.json files
+  gt hooks sync           # Regenerate all settings.local.json files
   gt hooks diff           # Preview what sync would change
   gt hooks base           # Edit the shared base config
   gt hooks override crew  # Edit overrides for all crew workers

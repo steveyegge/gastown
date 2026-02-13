@@ -16,7 +16,7 @@ func TestSyncPreservesNonHooksFields(t *testing.T) {
 	crewDir := filepath.Join(tmpDir, "town", "rig1", "crew", "alice")
 	os.MkdirAll(crewDir, 0755)
 
-	// Write an existing settings.json with known AND unknown fields
+	// Write an existing settings.local.json with known AND unknown fields
 	claudeDir := filepath.Join(crewDir, ".claude")
 	os.MkdirAll(claudeDir, 0755)
 
@@ -38,7 +38,7 @@ func TestSyncPreservesNonHooksFields(t *testing.T) {
   "anotherUnknown": {"nested": true}
 }
 `
-	settingsPath := filepath.Join(claudeDir, "settings.json")
+	settingsPath := filepath.Join(claudeDir, "settings.local.json")
 	os.WriteFile(settingsPath, []byte(existingJSON), 0600)
 
 	// Save a base config
@@ -126,7 +126,7 @@ func TestSyncCreatesNewSettings(t *testing.T) {
 		Hooks:          *merged,
 	}
 
-	settingsPath := filepath.Join(tmpDir, "test-worktree", ".claude", "settings.json")
+	settingsPath := filepath.Join(tmpDir, "test-worktree", ".claude", "settings.local.json")
 	os.MkdirAll(filepath.Dir(settingsPath), 0755)
 	data, _ := MarshalSettings(settings)
 	data = append(data, '\n')
@@ -134,7 +134,7 @@ func TestSyncCreatesNewSettings(t *testing.T) {
 
 	// Verify file was created and has correct content
 	if _, err := os.Stat(settingsPath); err != nil {
-		t.Fatalf("settings.json should exist now: %v", err)
+		t.Fatalf("settings.local.json should exist now: %v", err)
 	}
 
 	resultData, _ := os.ReadFile(settingsPath)
@@ -191,7 +191,7 @@ func TestUnmarshalMarshalRoundtrip(t *testing.T) {
 }
 
 func TestLoadSettingsMissingReturnsZeroValue(t *testing.T) {
-	s, err := LoadSettings("/nonexistent/path/settings.json")
+	s, err := LoadSettings("/nonexistent/path/settings.local.json")
 	if err != nil {
 		t.Fatalf("LoadSettings should not error for missing file, got: %v", err)
 	}

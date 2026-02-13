@@ -79,6 +79,23 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 	c.issues = append(c.issues, mayorIssues...)
 
+	// Check 2.5: Detect stale mayor/CLAUDE.md and mayor/AGENTS.md
+	// Mayor no longer gets per-directory bootstrap files — only the town-root identity anchor.
+	mayorDir := filepath.Join(ctx.TownRoot, "mayor")
+	for _, filename := range []string{"CLAUDE.md", "AGENTS.md"} {
+		filePath := filepath.Join(mayorDir, filename)
+		if fileExists(filePath) {
+			issue := primingIssue{
+				location:    "mayor",
+				issueType:   "stale_intermediate_instructions_md",
+				description: fmt.Sprintf("Stale %s at intermediate directory (no longer needed)", filename),
+				fixable:     true,
+			}
+			c.issues = append(c.issues, issue)
+			details = append(details, fmt.Sprintf("%s: %s", issue.location, issue.description))
+		}
+	}
+
 	// Check 3: Deacon priming
 	deaconPath := filepath.Join(ctx.TownRoot, "deacon")
 	if dirExists(deaconPath) {
@@ -131,7 +148,7 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
-	settingsPath := filepath.Join(agentPath, ".claude", "settings.json")
+	settingsPath := filepath.Join(agentPath, ".claude", "settings.local.json")
 
 	// Check for SessionStart hook with gt prime
 	if fileExists(settingsPath) {
@@ -161,20 +178,6 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 				issueType:   "large_claude_md",
 				description: fmt.Sprintf("CLAUDE.md has %d lines (should be <30 for bootstrap pointer)", lines),
 				fixable:     false, // Requires manual review
-			})
-		}
-	}
-
-	// Check AGENTS.md is minimal (bootstrap pointer, not full context)
-	agentsMdPath := filepath.Join(agentPath, "AGENTS.md")
-	if fileExists(agentsMdPath) {
-		lines := c.countLines(agentsMdPath)
-		if lines > 20 {
-			issues = append(issues, primingIssue{
-				location:    agentDir,
-				issueType:   "large_agents_md",
-				description: fmt.Sprintf("AGENTS.md has %d lines (should be <20 for bootstrap pointer)", lines),
-				fixable:     false, // Full context should come from gt prime templates
 			})
 		}
 	}
@@ -221,17 +224,28 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 			})
 		}
 
-		// Check AGENTS.md is minimal at rig level (bootstrap pointer, not full context)
-		agentsMdPath := filepath.Join(rigPath, "AGENTS.md")
-		if fileExists(agentsMdPath) {
-			lines := c.countLines(agentsMdPath)
-			if lines > 20 {
-				issues = append(issues, primingIssue{
-					location:    rigName,
-					issueType:   "large_agents_md",
-					description: fmt.Sprintf("AGENTS.md has %d lines (should be <20 for bootstrap pointer)", lines),
-					fixable:     false, // Requires manual review
-				})
+		// NOTE: CLAUDE.md inside worktrees (mayor/rig, refinery/rig, crew/<name>,
+		// polecats/<name>/<rig>) is the customer's legitimate repo file.
+		// Sparse checkout has been removed — these files are no longer hidden.
+		// Gas Town's context comes from gt prime via SessionStart hook.
+
+		// Detect stale CLAUDE.md/AGENTS.md at intermediate directories.
+		// These are no longer created — only ~/gt/CLAUDE.md (town root) exists.
+		// Full context is injected by `gt prime` via SessionStart hook.
+		for _, role := range []string{"refinery", "witness", "crew", "polecats"} {
+			agentPath := filepath.Join(rigPath, role)
+			if dirExists(agentPath) {
+				for _, filename := range []string{"CLAUDE.md", "AGENTS.md"} {
+					filePath := filepath.Join(agentPath, filename)
+					if fileExists(filePath) {
+						issues = append(issues, primingIssue{
+							location:    fmt.Sprintf("%s/%s", rigName, role),
+							issueType:   "stale_intermediate_instructions_md",
+							description: fmt.Sprintf("Stale %s at intermediate directory (no longer needed)", filename),
+							fixable:     true,
+						})
+					}
+				}
 			}
 		}
 
@@ -258,6 +272,7 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 					continue
 				}
 				crewPath := filepath.Join(crewDir, crewEntry.Name())
+
 				// Check if beads redirect is set up (crew should redirect to rig)
 				beadsDir := beads.ResolveBeadsDir(crewPath)
 				primeMdPath := filepath.Join(beadsDir, "PRIME.md")
@@ -273,6 +288,7 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		}
 
 		// Check polecat PRIME.md
+		// Polecat structure: polecats/<name>/<rigname>/ (worktree is nested inside polecatDir)
 		polecatsDir := filepath.Join(rigPath, "polecats")
 		if dirExists(polecatsDir) {
 			pcEntries, _ := os.ReadDir(polecatsDir)
@@ -280,13 +296,33 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 				if !pcEntry.IsDir() || pcEntry.Name() == ".claude" {
 					continue
 				}
-				polecatPath := filepath.Join(polecatsDir, pcEntry.Name())
-				// Check if beads redirect is set up
-				beadsDir := beads.ResolveBeadsDir(polecatPath)
+				polecatDir := filepath.Join(polecatsDir, pcEntry.Name())
+
+				// Check for orphaned .beads at polecatDir level (bug created these)
+				// The .beads should only exist at worktree level: polecats/<name>/<rigname>/.beads
+				orphanedBeads := filepath.Join(polecatDir, ".beads")
+				if dirExists(orphanedBeads) {
+					issues = append(issues, primingIssue{
+						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcEntry.Name()),
+						issueType:   "orphaned_beads_dir",
+						description: "Orphaned .beads directory at wrong level (should be in worktree)",
+						fixable:     true,
+					})
+				}
+
+				// The actual worktree is at polecats/<name>/<rigname>/
+				polecatWorktree := filepath.Join(polecatDir, rigName)
+				if !dirExists(polecatWorktree) {
+					// No worktree yet - skip (polecat may not be fully set up)
+					continue
+				}
+
+				// Check if beads redirect is set up in the worktree
+				beadsDir := beads.ResolveBeadsDir(polecatWorktree)
 				primeMdPath := filepath.Join(beadsDir, "PRIME.md")
 				if !fileExists(primeMdPath) {
 					issues = append(issues, primingIssue{
-						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcEntry.Name()),
+						location:    fmt.Sprintf("%s/polecats/%s/%s", rigName, pcEntry.Name(), rigName),
 						issueType:   "missing_prime_md",
 						description: "Missing PRIME.md (Gas Town context fallback)",
 						fixable:     true,
@@ -367,6 +403,15 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 			if err := os.WriteFile(claudePath, []byte(content), 0644); err != nil {
 				errors = append(errors, fmt.Sprintf("town-root CLAUDE.md: %v", err))
 			}
+
+		case "orphaned_beads_dir":
+			// Remove orphaned .beads directory at polecatDir level
+			// These were incorrectly created by a bug that looked at polecats/<name>/
+			// instead of polecats/<name>/<rigname>/
+			orphanedPath := filepath.Join(ctx.TownRoot, issue.location, ".beads")
+			if err := os.RemoveAll(orphanedPath); err != nil {
+				errors = append(errors, fmt.Sprintf("%s: failed to remove orphaned .beads: %v", issue.location, err))
+			}
 		case "missing_prime_md":
 			// Provision PRIME.md at the appropriate location
 			var targetPath string
@@ -385,6 +430,20 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 					errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
 				}
 			}
+
+		case "stale_intermediate_instructions_md":
+			// Remove stale CLAUDE.md/AGENTS.md from intermediate directories.
+			// These are no longer created — only ~/gt/CLAUDE.md (town root) exists.
+			agentPath := filepath.Join(ctx.TownRoot, issue.location)
+			for _, filename := range []string{"CLAUDE.md", "AGENTS.md"} {
+				filePath := filepath.Join(agentPath, filename)
+				if fileExists(filePath) {
+					if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+						errors = append(errors, fmt.Sprintf("%s: failed to remove %s: %v", issue.location, filename, err))
+					}
+				}
+			}
+
 		}
 	}
 

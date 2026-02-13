@@ -14,7 +14,7 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -45,5 +45,5 @@ jobs:
         run: go build -v ./cmd/gt
 
       - name: Run integration tests
-        run: go test -v -tags=integration -timeout=4m ./internal/cmd/...
+        run: go test -v -tags=integration -timeout=8m ./internal/cmd/...
 

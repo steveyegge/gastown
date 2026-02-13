@@ -59,6 +59,9 @@ Crew workspace checks:
   - crew-state               Validate crew worker state.json files (fixable)
   - crew-worktrees           Detect stale cross-rig worktrees (fixable)
 
+Migration checks (fixable):
+  - sparse-checkout          Detect legacy sparse checkout across all rigs
+
 Rig checks (with --rig flag):
   - rig-is-git-repo          Verify rig is a valid git repository
   - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
@@ -74,8 +77,8 @@ Routing checks (fixable):
   - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
-  - session-hooks            Check settings.json use session-start.sh
-  - claude-settings          Check Claude settings.json match templates (fixable)
+  - session-hooks            Check settings.local.json use session-start.sh
+  - claude-settings          Check Claude settings.local.json match templates (fixable)
 
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
@@ -180,6 +183,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewLegacyGastownCheck())
 	d.Register(doctor.NewClaudeSettingsCheck())
 
+	// Sparse checkout migration (runs across all rigs, not just --rig mode)
+	d.Register(doctor.NewSparseCheckoutCheck())
+
 	// Priming subsystem check
 	d.Register(doctor.NewPrimingCheck())
 
@@ -195,6 +201,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
+	d.Register(doctor.NewDoltHooksCheck())
 
 	// Hooks sync check
 	d.Register(doctor.NewHooksSyncCheck())

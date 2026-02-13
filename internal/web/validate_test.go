@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -571,8 +572,9 @@ func TestExpandHomePath_RootUser(t *testing.T) {
 	if result == "" {
 		t.Error("expandHomePath(\"~/projects\") returned empty string")
 	}
-	// The result should end with /projects regardless of what HOME is
-	if !strings.HasSuffix(result, "/projects") {
-		t.Errorf("expandHomePath(\"~/projects\") = %q, want suffix /projects", result)
+	// The result should end with the platform-appropriate path separator + "projects"
+	wantSuffix := string(filepath.Separator) + "projects"
+	if !strings.HasSuffix(result, wantSuffix) {
+		t.Errorf("expandHomePath(\"~/projects\") = %q, want suffix %q", result, wantSuffix)
 	}
 }

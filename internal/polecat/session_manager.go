@@ -188,12 +188,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 
-	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
-	// This keeps settings out of the git worktree while allowing runtime to find them
-	// when walking up the tree from workDir (polecats/<name>/<rigname>/).
-	// Each polecat gets isolated settings rather than sharing a single settings file.
-	polecatHomeDir := m.polecatDir(polecat)
-	if err := runtime.EnsureSettingsForRole(polecatHomeDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist INSIDE the worktree so Claude Code can find them.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

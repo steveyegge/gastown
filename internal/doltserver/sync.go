@@ -180,6 +180,7 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 	return results
 }
 
+
 // PurgeClosedEphemerals runs "bd purge" for a specific rig database to remove
 // closed ephemeral beads (wisps, convoys) before pushing to DoltHub.
 // Returns the number of beads purged and any error encountered.

@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 )
 
@@ -212,6 +214,8 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 		{"my.rig", `rig name "my.rig" contains invalid characters`},
 		{"my rig", `rig name "my rig" contains invalid characters`},
 		{"op-baby-test", `rig name "op-baby-test" contains invalid characters`},
+		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
+		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
 	}
 
 	for _, tt := range tests {
@@ -472,7 +476,7 @@ set -e
 echo "$@" >> "$BD_CMD_LOG"
 exit 0
 `
-	windowsScript := "@echo off\r\nexit /b 0\r\n"
+	windowsScript := "@echo off\r\nif defined BD_CMD_LOG echo %* >> \"%BD_CMD_LOG%\"\r\nexit /b 0\r\n"
 	binDir := writeFakeBD(t, script, windowsScript)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("BD_CMD_LOG", cmdLog)
@@ -951,5 +955,78 @@ func TestIsStandardBeadHash(t *testing.T) {
 				t.Errorf("isStandardBeadHash(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRegisterRig_RejectsReservedNames(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	tests := []struct {
+		name      string
+		wantError string
+	}{
+		{"hq", `rig name "hq" is reserved for town-level infrastructure`},
+		{"HQ", `rig name "HQ" is reserved for town-level infrastructure`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := manager.RegisterRig(RegisterRigOptions{
+				Name: tt.name,
+			})
+			if err == nil {
+				t.Errorf("RegisterRig(%q) succeeded, want error containing %q", tt.name, tt.wantError)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("RegisterRig(%q) error = %q, want error containing %q", tt.name, err.Error(), tt.wantError)
+			}
+		})
+	}
+}
+
+func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {
+	// Verify that EnsureMetadata writes the fields that AddRig depends on:
+	// dolt_mode=server, dolt_database=<rigName>, backend=dolt
+	// This guards against the regression fixed in PR #1343.
+	townRoot := t.TempDir()
+	rigName := "myrig"
+
+	// Create the beads directory structure that EnsureMetadata expects
+	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+
+	if err := doltserver.EnsureMetadata(townRoot, rigName); err != nil {
+		t.Fatalf("EnsureMetadata: %v", err)
+	}
+
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("read metadata.json: %v", err)
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parse metadata.json: %v", err)
+	}
+
+	checks := map[string]string{
+		"backend":       "dolt",
+		"dolt_mode":     "server",
+		"dolt_database": rigName,
+	}
+	for key, want := range checks {
+		got, ok := meta[key].(string)
+		if !ok {
+			t.Errorf("metadata.json missing %q field", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("metadata.json %q = %q, want %q", key, got, want)
+		}
 	}
 }

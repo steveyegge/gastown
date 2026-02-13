@@ -451,9 +451,24 @@ func buildRestartCommand(sessionName string) (string, error) {
 
 	// Build environment exports - role vars first, then Claude vars
 	var exports []string
+	var agentEnv map[string]string // agent config Env (rc.toml [agents.X.env])
 	if gtRole != "" {
 		simpleRole := config.ExtractSimpleRole(gtRole)
-		runtimeConfig := config.ResolveRoleAgentConfig(simpleRole, townRoot, "")
+		// When GT_AGENT is set, resolve config with the override so we pick up
+		// the active agent's env (e.g., NODE_OPTIONS from [agents.X.env]).
+		// Otherwise, fall back to role-based resolution.
+		var runtimeConfig *config.RuntimeConfig
+		if currentAgent != "" {
+			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, "", currentAgent)
+			if err == nil {
+				runtimeConfig = rc
+			} else {
+				runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, "")
+			}
+		} else {
+			runtimeConfig = config.ResolveRoleAgentConfig(simpleRole, townRoot, "")
+		}
+		agentEnv = runtimeConfig.Env
 		exports = append(exports, "GT_ROLE="+gtRole)
 		exports = append(exports, "BD_ACTOR="+gtRole)
 		exports = append(exports, "GIT_AUTHOR_NAME="+gtRole)
@@ -477,6 +492,19 @@ func buildRestartCommand(sessionName string) (string, error) {
 			// Shell-escape the value in case it contains special chars
 			exports = append(exports, fmt.Sprintf("%s=%q", name, val))
 		}
+	}
+
+	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
+	// from being inherited through tmux into Claude's Node.js runtime.
+	// When the agent's runtime config explicitly sets NODE_OPTIONS (e.g., for
+	// memory tuning via --max-old-space-size in rc.toml [agents.X.env]), export
+	// that value so it survives handoff. Otherwise clear it.
+	// Note: agentEnv is intentionally nil when gtRole is empty (non-role handoffs),
+	// which causes the nil map lookup to return ("", false) — clearing NODE_OPTIONS.
+	if val, hasNodeOpts := agentEnv["NODE_OPTIONS"]; hasNodeOpts {
+		exports = append(exports, fmt.Sprintf("NODE_OPTIONS=%q", val))
+	} else {
+		exports = append(exports, "NODE_OPTIONS=")
 	}
 
 	if len(exports) > 0 {

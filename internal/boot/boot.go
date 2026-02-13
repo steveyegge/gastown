@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -177,6 +178,14 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
+	}
+
+	// Resolve runtime config and ensure settings exist for Boot's agent.
+	// This creates .claude/settings.local.json so the SessionStart hook fires,
+	// which runs gt prime to inject Boot's role context.
+	runtimeConfig := config.ResolveRoleAgentConfig("boot", b.townRoot, "")
+	if err := runtime.EnsureSettingsForRole(b.bootDir, "boot", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{

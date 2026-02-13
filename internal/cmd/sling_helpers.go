@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -251,14 +252,18 @@ func getSessionFromPane(pane string) string {
 func ensureAgentReady(sessionName string) error {
 	t := tmux.NewTmux()
 
-	// If an agent is already running, assume it's ready (session was started earlier)
 	if t.IsAgentRunning(sessionName) {
-		return nil
-	}
-
-	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for agent to start: %w", err)
+		// Agent process is detected, but it may have just started (fresh spawn).
+		// Check session age — if < 15s old, the agent likely isn't ready for input yet.
+		if !isSessionYoung(sessionName, 15*time.Second) {
+			return nil
+		}
+		// Fall through to apply startup delay for young sessions.
+	} else {
+		// Agent not running yet - wait for it to start (shell → program transition)
+		if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+			return fmt.Errorf("waiting for agent to start: %w", err)
+		}
 	}
 
 	// Claude-only: accept bypass permissions warning if present
@@ -274,6 +279,19 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	return nil
+}
+
+// isSessionYoung returns true if the tmux session was created less than maxAge ago.
+func isSessionYoung(sessionName string, maxAge time.Duration) bool {
+	out, err := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{session_created}").Output()
+	if err != nil {
+		return false
+	}
+	createdUnix, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return false
+	}
+	return time.Since(time.Unix(createdUnix, 0)) < maxAge
 }
 
 // detectCloneRoot finds the root of the current git clone.
@@ -555,6 +573,7 @@ func isHookedAgentDead(assignee string) bool {
 
 // hookBeadWithRetry hooks a bead to a target agent with exponential backoff retry
 // and post-hook verification. This ensures the hook sticks even under Dolt concurrency.
+// Fails fast on configuration/initialization errors (gt-2ra).
 // See: https://github.com/steveyegge/gastown/issues/148
 func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 	const maxRetries = 10
@@ -569,6 +588,10 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {
 			lastErr = err
+			// Fail fast on config/init errors — retrying won't help (gt-2ra)
+			if isSlingConfigError(err) {
+				return fmt.Errorf("hooking bead failed (DB not initialized — not retrying): %w", err)
+			}
 			if attempt < maxRetries {
 				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)
 				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
@@ -630,4 +653,21 @@ func slingBackoff(attempt int, base, max time.Duration) time.Duration { //nolint
 		result = max
 	}
 	return result
+}
+
+// isSlingConfigError returns true if the error indicates a configuration or
+// initialization problem rather than a transient failure. Config errors should
+// NOT be retried because they will fail identically on every attempt (gt-2ra).
+func isSlingConfigError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not initialized") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "table not found") ||
+		strings.Contains(msg, "issue_prefix") ||
+		strings.Contains(msg, "no database") ||
+		strings.Contains(msg, "database not found") ||
+		strings.Contains(msg, "connection refused")
 }

@@ -6,19 +6,61 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 )
+
+// =============================================================================
+// Worktree Cleanliness Test Allowlist
+// =============================================================================
+//
+// These files are allowed to appear as untracked in agent worktrees.
+// Each entry documents which component creates the file and why it's acceptable.
+//
+// TODO items indicate files that should eventually be removed or relocated.
+
+// agentAllowlist maps agent type to allowed untracked files in their worktrees.
+// All agents also implicitly allow .beads/ or .beads/redirect (added in checkWorktreeClean).
+//
+// IMPORTANT: Be very conservative about adding files here. Each entry represents
+// a file that Gas Town creates inside the user's repo, which could be accidentally
+// committed and pushed upstream. Prefer ephemeral context injection (gt prime) over
+// on-disk files.
+var agentAllowlist = map[string][]string{
+	// Mayor is a clone (not worktree) - it's the canonical copy of the user's repo.
+	// For tracked beads repos, bd init creates files here (runs in mayor/rig).
+	"mayor": {
+		"?? AGENTS.md", // bd init: creates multi-provider instructions (tracked beads repos only)
+		"?? .claude/",  // bd init: creates .claude/settings.local.json with onboard prompt
+	},
+
+	// Refinery is a worktree for the merge queue processor.
+	"refinery": {},
+
+	// Crew workers are user-managed worktrees for human developers.
+	"crew": {
+		"?? state.json", // crew/manager.go: Gas Town metadata (TODO: migrate to beads like polecats)
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
+	},
+
+	// Polecats are ephemeral worktrees for autonomous agents.
+	"polecat": {
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
+	},
+}
 
 // createTestGitRepo creates a minimal git repository for testing.
 // Returns the path to the bare repo URL (suitable for cloning).
@@ -369,37 +411,73 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 		t.Errorf("refinery/rig/.git should be a file (worktree), not a directory")
 	}
 
-	// Verify Claude settings are created in correct locations (outside git repos).
-	// Settings in parent directories are inherited by agents via directory traversal,
-	// without polluting the source repos.
-	expectedSettings := []struct {
+	// NOTE: Claude settings are no longer installed by gt rig add.
+	// Claude Code does NOT traverse parent directories for settings, only for CLAUDE.md.
+	// Settings are installed by each agent in their working directory at startup time.
+	// Verify NO settings exist at parent directories (neither settings.json nor settings.local.json).
+	parentSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
 		{filepath.Join(rigPath, "witness", ".claude", "settings.json"), "witness/.claude/settings.json"},
+		{filepath.Join(rigPath, "witness", ".claude", "settings.local.json"), "witness/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "refinery", ".claude", "settings.json"), "refinery/.claude/settings.json"},
+		{filepath.Join(rigPath, "refinery", ".claude", "settings.local.json"), "refinery/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "crew", ".claude", "settings.json"), "crew/.claude/settings.json"},
+		{filepath.Join(rigPath, "crew", ".claude", "settings.local.json"), "crew/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "polecats", ".claude", "settings.json"), "polecats/.claude/settings.json"},
+		{filepath.Join(rigPath, "polecats", ".claude", "settings.local.json"), "polecats/.claude/settings.local.json"},
 	}
 
-	for _, s := range expectedSettings {
-		if _, err := os.Stat(s.path); err != nil {
-			t.Errorf("%s not found: %v", s.desc, err)
+	for _, s := range parentSettingsThatShouldNotExist {
+		if _, err := os.Stat(s.path); err == nil {
+			t.Errorf("%s should NOT exist (Claude Code doesn't traverse parent dirs for settings)", s.desc)
 		}
 	}
 
-	// Verify settings are NOT created inside source repos (these would be wrong)
-	wrongLocations := []struct {
+	// NOTE: No per-directory CLAUDE.md/AGENTS.md is created at agent level.
+	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
+	// Full context is injected ephemerally by `gt prime` at session start.
+
+	// NOTE: settings.local.json WILL exist inside working directories (witness/rig/.claude/settings.local.json)
+	// but only after agents start. gt rig add doesn't install settings; agents install them at startup.
+	// The old settings.json filename should never exist (it's been replaced by settings.local.json).
+	staleSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
-		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude (inside source repo)"},
-		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude (inside source repo)"},
+		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude/settings.json (stale filename)"},
+		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude/settings.json (stale filename)"},
 	}
 
-	for _, w := range wrongLocations {
+	for _, w := range staleSettingsThatShouldNotExist {
 		if _, err := os.Stat(w.path); err == nil {
-			t.Errorf("%s should NOT exist (settings would pollute source repo)", w.desc)
+			t.Errorf("%s should NOT exist (use settings.local.json instead)", w.desc)
+		}
+	}
+
+	// Verify CLAUDE.md/AGENTS.md is NOT created at any agent directory or inside source repos
+	wrongClaudeMd := []struct {
+		path string
+		desc string
+	}{
+		{filepath.Join(rigPath, "mayor", "CLAUDE.md"), "mayor/CLAUDE.md (per-rig mayor is just a clone)"},
+		{filepath.Join(rigPath, "mayor", "AGENTS.md"), "mayor/AGENTS.md (per-rig mayor is just a clone)"},
+		{filepath.Join(rigPath, "mayor", "rig", "CLAUDE.md"), "mayor/rig/CLAUDE.md (inside source repo)"},
+		{filepath.Join(rigPath, "refinery", "rig", "CLAUDE.md"), "refinery/rig/CLAUDE.md (inside source repo)"},
+		{filepath.Join(rigPath, "refinery", "CLAUDE.md"), "refinery/CLAUDE.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "refinery", "AGENTS.md"), "refinery/AGENTS.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "witness", "CLAUDE.md"), "witness/CLAUDE.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "witness", "AGENTS.md"), "witness/AGENTS.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "crew", "CLAUDE.md"), "crew/CLAUDE.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "crew", "AGENTS.md"), "crew/AGENTS.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "polecats", "CLAUDE.md"), "polecats/CLAUDE.md (no per-directory bootstrap)"},
+		{filepath.Join(rigPath, "polecats", "AGENTS.md"), "polecats/AGENTS.md (no per-directory bootstrap)"},
+	}
+
+	for _, w := range wrongClaudeMd {
+		if _, err := os.Stat(w.path); err == nil {
+			t.Errorf("%s should NOT exist (would pollute source repo)", w.desc)
 		}
 	}
 }
@@ -881,4 +959,351 @@ func TestAgentBeadIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAgentWorktreesStayClean verifies that after gt install, gt rig add, and
+// agent creation, all agent worktrees have no unexpected Gas Town files.
+//
+// This is a critical invariant: user repos should stay clean. The only allowed
+// Gas Town file is .beads/redirect which points to the shared rig-level beads.
+//
+// Agents tested:
+// - Mayor: mayor/rig/ (clone, created by gt rig add)
+// - Refinery: refinery/rig/ (worktree, created by gt rig add)
+// - Crew: crew/<name>/ (worktree, created by gt crew add)
+// - Polecat: polecats/<name>/<rigname>/ (worktree, created by gt polecat add)
+//
+// Known issues this test catches:
+// - Extra files in .beads/ beyond redirect (e.g., PRIME.md, databases)
+// - AGENTS.md being copied/created in worktrees
+// - CLAUDE.md being created in worktrees
+// - Any other Gas Town artifacts polluting the repo
+//
+// Tests two scenarios:
+// - Repo WITHOUT tracked .beads/ (clean repo)
+// - Repo WITH tracked .beads/ (simulates beads project)
+func TestAgentWorktreesStayClean(t *testing.T) {
+	// Skip if bd is not available (required for beads initialization)
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping integration test")
+	}
+
+	testCases := []struct {
+		name            string
+		hasTrackedBeads bool
+	}{
+		{"RepoWithoutBeads", false},
+		{"RepoWithTrackedBeads", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			runAgentCleanTest(t, tc.hasTrackedBeads)
+		})
+	}
+}
+
+// agentWorktree describes an agent's worktree to check for cleanliness.
+type agentWorktree struct {
+	name        string   // Human-readable name (e.g., "mayor", "polecat")
+	path        string   // Path to the worktree
+	allowlist   []string // Additional allowlisted files beyond .beads/redirect
+	isClone     bool     // True if this is a clone (not worktree) - has different expectations
+}
+
+// runAgentCleanTest runs the agent worktree cleanliness test for all agent types.
+// If hasTrackedBeads is true, the source repo will have a tracked .beads/ directory.
+func runAgentCleanTest(t *testing.T, hasTrackedBeads bool) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	// Build gt binary for testing
+	gtBinary := buildGT(t)
+
+	// Step 1: Create test git repo with some committed files
+	repoDir := filepath.Join(tmpDir, "user-project")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	// Initialize git repo
+	gitCmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	}
+	for _, args := range gitCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create some project files
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# User Project\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
+	// Optionally create tracked .beads/ directory (simulates beads-enabled project)
+	if hasTrackedBeads {
+		beadsDir := filepath.Join(repoDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatalf("mkdir .beads: %v", err)
+		}
+		// Create minimal beads files that would be tracked
+		if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: test\n"), 0644); err != nil {
+			t.Fatalf("write config.yaml: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, ".gitignore"), []byte("*.db\n*.db-*\n"), 0644); err != nil {
+			t.Fatalf("write .gitignore: %v", err)
+		}
+	}
+
+	// Commit all files
+	commitCmds := [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "Initial commit"},
+	}
+	for _, args := range commitCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Step 2: Run gt install
+	cmd := exec.Command(gtBinary, "install", hqPath, "--name", "test-town")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+	t.Logf("gt install output:\n%s", output)
+
+	// Step 3: Add rig using Manager API (CLI rejects local paths since URL validation was added)
+	// Use different prefix based on whether source has tracked beads
+	prefix := "tr"
+	if hasTrackedBeads {
+		prefix = "test" // Must match the prefix in source repo's .beads/config.yaml
+	}
+	rigsPath := filepath.Join(hqPath, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		t.Fatalf("load rigs.json: %v", err)
+	}
+	g := git.NewGit(hqPath)
+	mgr := rig.NewManager(hqPath, rigsConfig, g)
+	_, err = mgr.AddRig(rig.AddRigOptions{
+		Name:        "testrig",
+		GitURL:      repoDir,
+		BeadsPrefix: prefix,
+	})
+	if err != nil {
+		t.Fatalf("AddRig failed: %v", err)
+	}
+	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+		t.Fatalf("save rigs.json: %v", err)
+	}
+
+	// Append route to routes.jsonl (the CLI does this after AddRig, but we're using the Go API)
+	route := beads.Route{
+		Prefix: prefix + "-",
+		Path:   "testrig",
+	}
+	if err := beads.AppendRoute(hqPath, route); err != nil {
+		t.Fatalf("AppendRoute: %v", err)
+	}
+
+	// Step 4: Create a crew member
+	cmd = exec.Command(gtBinary, "crew", "add", "testcrew", "--rig", "testrig")
+	cmd.Dir = hqPath
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "GT_ROOT="+hqPath)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt crew add failed: %v\nOutput: %s", err, output)
+	}
+	t.Logf("gt crew add output:\n%s", output)
+
+	// Step 5: Create a polecat (non-fatal: beads infrastructure may not support
+	// agent bead creation in environments without a running Dolt server).
+	// Use a context with timeout to avoid the 10-retry exponential backoff
+	// consuming the entire test timeout.
+	polecatCreated := false
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd = exec.CommandContext(ctx, gtBinary, "polecat", "add", "testrig", "TestCat")
+	cmd.Dir = hqPath
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "GT_ROOT="+hqPath)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("gt polecat add failed (non-fatal, beads may not be available): %v", err)
+	} else {
+		polecatCreated = true
+		t.Logf("gt polecat add output:\n%s", output)
+	}
+
+	// Step 6: Define all agent worktrees to check
+	rigPath := filepath.Join(hqPath, "testrig")
+
+	agents := []agentWorktree{
+		{
+			name:      "mayor",
+			path:      filepath.Join(rigPath, "mayor", "rig"),
+			isClone:   true,
+			allowlist: agentAllowlist["mayor"],
+		},
+		{
+			name:      "refinery",
+			path:      filepath.Join(rigPath, "refinery", "rig"),
+			isClone:   false,
+			allowlist: agentAllowlist["refinery"],
+		},
+		{
+			name:      "crew",
+			path:      filepath.Join(rigPath, "crew", "testcrew"),
+			isClone:   false,
+			allowlist: agentAllowlist["crew"],
+		},
+	}
+
+	if polecatCreated {
+		// Find polecat worktree path (handles both old and new structure)
+		polecatPath := filepath.Join(rigPath, "polecats", "TestCat", "testrig")
+		if _, err := os.Stat(polecatPath); os.IsNotExist(err) {
+			polecatPath = filepath.Join(rigPath, "polecats", "TestCat")
+		}
+		agents = append(agents, agentWorktree{
+			name:      "polecat",
+			path:      polecatPath,
+			isClone:   false,
+			allowlist: agentAllowlist["polecat"],
+		})
+	}
+
+	// Step 7: Check each agent worktree
+	var allFailures []string
+	for _, agent := range agents {
+		t.Run(agent.name, func(t *testing.T) {
+			failures := checkWorktreeClean(t, agent, hasTrackedBeads)
+			if len(failures) > 0 {
+				allFailures = append(allFailures, fmt.Sprintf("%s: %v", agent.name, failures))
+			}
+		})
+	}
+
+	if len(allFailures) > 0 {
+		t.Logf("Summary of failures across all agents:\n%s", strings.Join(allFailures, "\n"))
+	}
+}
+
+// checkWorktreeClean checks a single agent worktree for unexpected files.
+// Returns a list of unexpected files found.
+func checkWorktreeClean(t *testing.T, agent agentWorktree, hasTrackedBeads bool) []string {
+	t.Helper()
+
+	// Verify the worktree exists
+	if _, err := os.Stat(agent.path); os.IsNotExist(err) {
+		t.Fatalf("%s worktree not found at %s", agent.name, agent.path)
+	}
+
+	// Run git status --porcelain
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = agent.path
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status failed for %s: %v\nOutput: %s", agent.name, err, output)
+	}
+
+	// Build allowlist for this agent
+	// Base allowlist: .beads/ directory or .beads/redirect file
+	allowlist := map[string]bool{
+		"?? .beads/":         true, // Directory shown when .beads/ not in source
+		"?? .beads/redirect": true, // File shown when .beads/ is tracked in source
+	}
+	// When source repo has tracked .beads/, bd init generates additional files
+	if hasTrackedBeads {
+		// These files are generated by bd init and are expected
+		// Note: TrimSpace removes leading space from porcelain format, so " M" becomes "M"
+		allowlist["M .beads/.gitignore"] = true            // Modified .gitignore
+		allowlist["?? .beads/PRIME.md"] = true             // Priming context file
+		allowlist["?? .beads/README.md"] = true            // Beads README
+		allowlist["?? .beads/interactions.jsonl"] = true   // Interactions log
+		allowlist["?? .beads/issues.jsonl"] = true         // Issues log
+		allowlist["?? .beads/metadata.json"] = true        // Beads metadata
+		allowlist["?? .beads/.gt-types-configured"] = true // Custom types sentinel
+		allowlist["?? .beads/.locks/"] = true              // Beads lock files directory
+		allowlist["?? .beads/dolt-access.lock"] = true     // Dolt access lock
+		allowlist["?? .beads/dolt/"] = true                // Dolt database directory
+		allowlist["?? .beads/hooks/"] = true               // Beads hooks directory
+		allowlist["?? .gitattributes"] = true              // Git attributes for beads
+		allowlist["?? AGENTS.md"] = true                   // Multi-provider bootstrap
+	}
+	// Add agent-specific allowlist
+	for _, pattern := range agent.allowlist {
+		allowlist[pattern] = true
+	}
+
+	// Parse git status output
+	statusOutput := strings.TrimSpace(string(output))
+	var unexpectedFiles []string
+
+	if statusOutput != "" {
+		for _, line := range strings.Split(statusOutput, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if !allowlist[line] {
+				unexpectedFiles = append(unexpectedFiles, line)
+			}
+		}
+	}
+
+	// On failure, output detailed debug info
+	if len(unexpectedFiles) > 0 {
+		t.Logf("=== FAILURE: %s worktree is not clean ===", agent.name)
+		t.Logf("Path: %s", agent.path)
+		t.Logf("Is clone: %v", agent.isClone)
+		t.Logf("Has tracked .beads in source: %v", hasTrackedBeads)
+
+		// List all files
+		t.Logf("\n=== All files in %s worktree ===", agent.name)
+		findCmd := exec.Command("find", ".", "-type", "f", "-not", "-path", "./.git/*")
+		findCmd.Dir = agent.path
+		findOutput, _ := findCmd.CombinedOutput()
+		t.Logf("%s", findOutput)
+
+		// Show .beads contents if it exists
+		beadsPath := filepath.Join(agent.path, ".beads")
+		if _, err := os.Stat(beadsPath); err == nil {
+			t.Logf("\n=== Contents of .beads/ ===")
+			lsCmd := exec.Command("ls", "-la")
+			lsCmd.Dir = beadsPath
+			lsOutput, _ := lsCmd.CombinedOutput()
+			t.Logf("%s", lsOutput)
+		}
+
+		// Show full git status
+		t.Logf("\n=== Full git status ===")
+		statusCmd := exec.Command("git", "status")
+		statusCmd.Dir = agent.path
+		statusFullOutput, _ := statusCmd.CombinedOutput()
+		t.Logf("%s", statusFullOutput)
+
+		// Report each unexpected file
+		for _, file := range unexpectedFiles {
+			t.Errorf("UNEXPECTED FILE in %s: %s", agent.name, file)
+		}
+	} else {
+		t.Logf("SUCCESS: %s worktree is clean", agent.name)
+	}
+
+	return unexpectedFiles
 }

@@ -105,7 +105,18 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	var runtimeConfig *config.RuntimeConfig
+	if crewAgentOverride != "" {
+		rc, _, resolveErr := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		if resolveErr != nil {
+			style.PrintWarning("could not resolve agent override %q: %v, falling back to default", crewAgentOverride, resolveErr)
+			runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+		} else {
+			runtimeConfig = rc
+		}
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig("crew", townRoot, r.Path)
+	}
 	if runtimeConfig == nil {
 		runtimeConfig = config.DefaultRuntimeConfig()
 	}

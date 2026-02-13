@@ -2,8 +2,11 @@ package feed
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,5 +378,143 @@ func TestCurator_GeneratesSummary(t *testing.T) {
 		if summary != tc.expected {
 			t.Errorf("generateSummary(%s): expected %q, got %q", tc.event.Type, tc.expected, summary)
 		}
+	}
+}
+
+// --- Truncation and size limit tests ---
+
+func TestCurator_TruncatesAtMaxSize(t *testing.T) {
+	tmpDir := t.TempDir()
+	feedPath := filepath.Join(tmpDir, FeedFile)
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+	curator.maxFeedFileSize = 1024 // override for testing
+
+	// Write events directly to the feed file to exceed the limit
+	f, err := os.OpenFile(feedPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		ev := FeedEvent{
+			Timestamp: time.Now().Add(time.Duration(i) * time.Second).UTC().Format(time.RFC3339),
+			Source:    "gt",
+			Type:      "test",
+			Actor:     "test-actor",
+			Summary:   fmt.Sprintf("test event %d with some padding to make it longer", i),
+		}
+		data, _ := json.Marshal(ev)
+		f.Write(append(data, '\n'))
+	}
+	f.Close()
+
+	// Verify file exceeds limit
+	info, _ := os.Stat(feedPath)
+	if info.Size() <= 1024 {
+		t.Fatalf("test setup: file size %d should exceed 1024", info.Size())
+	}
+
+	// Write one more event through curator (triggers truncation)
+	curator.writeFeedEvent(&events.Event{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Source:     "gt",
+		Type:       events.TypeDone,
+		Actor:      "test-actor",
+		Payload:    map[string]interface{}{"bead": "test"},
+		Visibility: events.VisibilityFeed,
+	})
+
+	// Verify file was truncated
+	info, err = os.Stat(feedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > 1024+512 { // allow small overshoot for the new write
+		t.Errorf("file size %d should be near or below limit after truncation", info.Size())
+	}
+
+	// Verify content is valid JSONL
+	content, _ := os.ReadFile(feedPath)
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev FeedEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Errorf("malformed line after truncation: %v", err)
+		}
+	}
+}
+
+func TestCurator_ReadRecentFeedEventsLargeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	feedPath := filepath.Join(tmpDir, FeedFile)
+
+	// Write a large feed file with events spanning hours
+	f, err := os.OpenFile(feedPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for i := 0; i < 5000; i++ {
+		ts := now.Add(-2*time.Hour + time.Duration(i)*time.Millisecond*1440)
+		ev := FeedEvent{
+			Timestamp: ts.UTC().Format(time.RFC3339),
+			Source:    "gt",
+			Type:      events.TypeDone,
+			Actor:     "test-actor",
+			Summary:   fmt.Sprintf("event %d", i),
+		}
+		data, _ := json.Marshal(ev)
+		f.Write(append(data, '\n'))
+	}
+	f.Close()
+
+	curator := NewCurator(tmpDir)
+
+	result := curator.readRecentFeedEvents(10 * time.Second)
+
+	if len(result) > 100 {
+		t.Errorf("readRecentFeedEvents returned %d events for 10s window, expected << 5000", len(result))
+	}
+	if len(result) == 0 {
+		t.Error("readRecentFeedEvents returned 0 events, expected at least some recent ones")
+	}
+}
+
+func TestCurator_FeedFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file permissions are not supported on Windows")
+	}
+	tmpDir := t.TempDir()
+	feedPath := filepath.Join(tmpDir, FeedFile)
+
+	curator := NewCurator(tmpDir)
+
+	curator.writeFeedEvent(&events.Event{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Source:     "gt",
+		Type:       events.TypeDone,
+		Actor:      "test-actor",
+		Payload:    map[string]interface{}{"bead": "test"},
+		Visibility: events.VisibilityFeed,
+	})
+
+	info, err := os.Stat(feedPath)
+	if err != nil {
+		t.Fatalf("feed file not created: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("feed file permissions = %o, want 0600", perm)
+	}
+}
+
+func TestCurator_DefaultMaxFeedFileSize(t *testing.T) {
+	curator := NewCurator(t.TempDir())
+	if curator.maxFeedFileSize != maxFeedFileSize {
+		t.Errorf("maxFeedFileSize = %d, want %d", curator.maxFeedFileSize, maxFeedFileSize)
 	}
 }

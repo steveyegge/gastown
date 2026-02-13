@@ -191,12 +191,24 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			fmt.Printf("  %s Could not store fields in bead: %v\n", style.Dim.Render("Warning:"), err)
 		}
 
+		// Create Dolt branch AFTER all sling writes are complete.
+		// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch
+		// forks from HEAD — ensuring the polecat's branch includes all writes.
+		if spawnInfo.DoltBranch != "" {
+			if err := spawnInfo.CreateDoltBranch(); err != nil {
+				fmt.Printf("  %s Could not create Dolt branch: %v, cleaning up...\n", style.Dim.Render("✗"), err)
+				rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
+				results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
+				continue
+			}
+		}
+
 		// Start polecat session now that molecule/bead is attached.
 		// This ensures polecat sees its work when gt prime runs on session start.
 		pane, err := spawnInfo.StartSession()
 		if err != nil {
 			fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)
-			cleanupSpawnedPolecat(spawnInfo, rigName)
+			rollbackSlingArtifacts(spawnInfo, beadToHook, hookWorkDir)
 			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false})
 			continue
 		} else {

@@ -201,11 +201,24 @@ func runSlingFormula(args []string) error {
 		targetPane = pane
 	}
 
+	// Create Dolt branch AFTER all sling writes (hook, formula, fields) are complete.
+	// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch forks
+	// from HEAD — ensuring the polecat's branch includes all writes.
+	if resolved.NewPolecatInfo != nil && resolved.NewPolecatInfo.DoltBranch != "" {
+		if err := resolved.NewPolecatInfo.CreateDoltBranch(); err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			return fmt.Errorf("creating Dolt branch: %w", err)
+		}
+	}
+
 	// Start spawned polecat session now that hook is set.
 	// This ensures polecat sees the wisp when gt prime runs on session start.
 	if resolved.NewPolecatInfo != nil {
 		pane, err := resolved.NewPolecatInfo.StartSession()
 		if err != nil {
+			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
+			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane

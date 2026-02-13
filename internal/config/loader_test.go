@@ -1541,6 +1541,88 @@ func TestResolveRoleAgentConfigFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+func TestIsClaudeAgent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		rc       *RuntimeConfig
+		expected bool
+	}{
+		{"empty provider and command (defaults)", &RuntimeConfig{}, true},
+		{"explicit claude provider", &RuntimeConfig{Provider: "claude", Command: "anything"}, true},
+		{"explicit codex provider", &RuntimeConfig{Provider: "codex", Command: "claude"}, false},
+		{"bare claude command", &RuntimeConfig{Command: "claude"}, true},
+		{"path to claude binary", &RuntimeConfig{Command: "/usr/local/bin/claude"}, true},
+		{"aider command no provider", &RuntimeConfig{Command: "aider"}, false},
+		{"generic provider", &RuntimeConfig{Provider: "generic"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isClaudeAgent(tt.rc); got != tt.expected {
+				t.Errorf("isClaudeAgent(%+v) = %v, want %v", tt.rc, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWithRoleSettingsFlag_SkipsNonClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	// Configure aider (non-Claude agent) for polecat role
+	settings := NewRigSettings()
+	settings.Runtime = &RuntimeConfig{
+		Command: "aider",
+		Args:    []string{"--no-git", "--model", "claude-3"},
+	}
+	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	// Should NOT contain --settings since aider is not a Claude agent
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			t.Errorf("non-Claude agent 'aider' should not get --settings flag, but Args = %v", rc.Args)
+			break
+		}
+	}
+}
+
+func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	// Default config (Claude agent) for polecat role
+	settings := NewRigSettings()
+	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	// Should contain --settings since default agent is Claude
+	found := false
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("default Claude agent should get --settings flag for polecat role, but Args = %v", rc.Args)
+	}
+}
+
 func TestDaemonPatrolConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

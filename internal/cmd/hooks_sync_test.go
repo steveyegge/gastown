@@ -23,7 +23,7 @@ func TestSyncTargetCreatesNew(t *testing.T) {
 	}
 
 	// Target that doesn't exist yet
-	targetPath := filepath.Join(tmpDir, "test-rig", "crew", ".claude", "settings.json")
+	targetPath := filepath.Join(tmpDir, "test-rig", "crew", ".claude", "settings.local.json")
 	target := hooks.Target{
 		Path: targetPath,
 		Key:  "crew",
@@ -41,7 +41,7 @@ func TestSyncTargetCreatesNew(t *testing.T) {
 
 	// Verify the file was written
 	if _, err := os.Stat(targetPath); err != nil {
-		t.Fatalf("settings.json not created: %v", err)
+		t.Fatalf("settings.local.json not created: %v", err)
 	}
 
 	// Verify contents
@@ -72,8 +72,8 @@ func TestSyncTargetUpdatesExisting(t *testing.T) {
 		t.Fatalf("SaveBase failed: %v", err)
 	}
 
-	// Create existing settings.json with different hooks
-	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.json")
+	// Create existing settings.local.json with different hooks
+	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,8 @@ func TestSyncTargetUnchanged(t *testing.T) {
 		t.Fatalf("SaveBase failed: %v", err)
 	}
 
-	// Create existing settings.json with matching hooks
-	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.json")
+	// Create existing settings.local.json with matching hooks
+	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestSyncTargetDryRun(t *testing.T) {
 		t.Fatalf("SaveBase failed: %v", err)
 	}
 
-	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.json")
+	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.local.json")
 	target := hooks.Target{
 		Path: targetPath,
 		Key:  "crew",
@@ -224,7 +224,7 @@ func TestSyncTargetSetsEnabledPlugins(t *testing.T) {
 		t.Fatalf("SaveBase failed: %v", err)
 	}
 
-	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.json")
+	targetPath := filepath.Join(tmpDir, "test", ".claude", "settings.local.json")
 	target := hooks.Target{
 		Path: targetPath,
 		Key:  "crew",

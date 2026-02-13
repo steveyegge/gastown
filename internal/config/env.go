@@ -114,6 +114,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
 
+	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
+	// from being inherited through tmux into Claude's Node.js runtime.
+	// This is the PRIMARY guard: setting it here (the single source of truth
+	// for agent env) protects all AgentEnv-based paths automatically — tmux
+	// SetEnvironment, EnvForExecCommand, PrependEnv. SanitizeAgentEnv provides
+	// a SUPPLEMENTAL guard for non-AgentEnv paths (lifecycle default, handoff).
+	// In BuildStartupCommand, rc.Env is merged after AgentEnv and can override
+	// this empty value with intentional settings like --max-old-space-size.
+	env["NODE_OPTIONS"] = ""
+
 	return env
 }
 

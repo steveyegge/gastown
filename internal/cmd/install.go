@@ -193,17 +193,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   ✓ Created mayor/rigs.json\n")
 
-	// Create Mayor CLAUDE.md at mayor/ (Mayor's canonical home)
-	// NOTE: Role-specific CLAUDE.md stays in mayor/, but a generic identity anchor
-	// is also created at the town root (see createTownRootCLAUDEmd below).
-	if created, err := createMayorCLAUDEmd(mayorDir, absPath); err != nil {
-		fmt.Printf("   %s Could not create CLAUDE.md: %v\n", style.Dim.Render("⚠"), err)
-	} else if created {
-		fmt.Printf("   ✓ Created mayor/CLAUDE.md\n")
-	} else {
-		fmt.Printf("   ✓ Preserved existing mayor/CLAUDE.md\n")
-	}
-
 	// Create a generic CLAUDE.md at the town root as an identity anchor.
 	// Claude Code sets its CWD to the git root (~/gt/), so mayor/CLAUDE.md is
 	// not loaded directly. This town-root file ensures agents running from within
@@ -230,7 +219,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+			fmt.Printf("   ✓ Created mayor/.claude/settings.local.json\n")
 		}
 	}
 
@@ -243,7 +232,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+			fmt.Printf("   ✓ Created deacon/.claude/settings.local.json\n")
 		}
 	}
 
@@ -403,36 +392,6 @@ Run ` + "`" + cli.Name() + " prime`" + ` for full context after compaction, clea
 Your role is set by the GT_ROLE environment variable and injected by ` + "`" + cli.Name() + " prime`" + `.
 `
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
-}
-
-// createMayorCLAUDEmd creates a minimal bootstrap pointer instead of full context.
-// Full context is injected ephemerally by `gt prime` at session start.
-// This keeps the on-disk file small (<30 lines) per priming architecture.
-//
-// Returns (created bool, error) - created is false if file already exists.
-func createMayorCLAUDEmd(mayorDir, _ string) (bool, error) {
-	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-
-	// Check if file already exists - preserve user customizations
-	if _, err := os.Stat(claudePath); err == nil {
-		return false, nil // File exists, preserve it
-	} else if !os.IsNotExist(err) {
-		return false, err // Unexpected error
-	}
-
-	bootstrap := `# Mayor Context
-
-> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
-
-Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
-
-## Quick Reference
-
-- Check mail: ` + "`" + cli.Name() + " mail inbox`" + `
-- Check rigs: ` + "`" + cli.Name() + " rig list`" + `
-- Start patrol: ` + "`" + cli.Name() + " patrol start`" + `
-`
-	return true, os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 func writeJSON(path string, data interface{}) error {

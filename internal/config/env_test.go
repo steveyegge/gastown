@@ -16,6 +16,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
+	assertEnv(t, env, "NODE_OPTIONS", "")                  // cleared to prevent debugger inheritance
 	assertNotSet(t, env, "GT_RIG")
 }
 
@@ -50,6 +51,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BD_DOLT_AUTO_COMMIT", "off") // gt-5cc2p: prevent manifest contention
+	assertEnv(t, env, "NODE_OPTIONS", "")            // cleared to prevent debugger inheritance
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -427,5 +429,123 @@ func assertNotSet(t *testing.T, env map[string]string, key string) {
 	t.Helper()
 	if _, ok := env[key]; ok {
 		t.Errorf("env[%q] should not be set, but is %q", key, env[key])
+	}
+}
+
+func TestSanitizeAgentEnv(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		resolvedEnv map[string]string
+		callerEnv   map[string]string
+		wantKey     bool   // expect NODE_OPTIONS to be present in resolvedEnv
+		wantValue   string // expected value if present
+	}{
+		{
+			name:        "neither map has NODE_OPTIONS — sets empty",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat"},
+			callerEnv:   map[string]string{"GT_ROLE": "polecat"},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "caller provides NODE_OPTIONS — preserved",
+			resolvedEnv: map[string]string{"NODE_OPTIONS": "--max-old-space-size=4096"},
+			callerEnv:   map[string]string{"NODE_OPTIONS": "--max-old-space-size=4096"},
+			wantKey:     true,
+			wantValue:   "--max-old-space-size=4096",
+		},
+		{
+			name:        "rc.Env provides NODE_OPTIONS in resolvedEnv — preserved",
+			resolvedEnv: map[string]string{"NODE_OPTIONS": "--max-old-space-size=8192"},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "--max-old-space-size=8192",
+		},
+		{
+			name:        "empty maps — sets empty",
+			resolvedEnv: map[string]string{},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "same map without NODE_OPTIONS — sets empty (lifecycle.go pattern)",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat", "GT_RIG": "myrig"},
+			callerEnv:   nil, // will be set to same map below
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "AgentEnv output with empty callerEnv — preserves empty NODE_OPTIONS",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat", "NODE_OPTIONS": ""},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callerEnv := tt.callerEnv
+			if callerEnv == nil {
+				// same-map pattern: pass resolvedEnv as both args (lifecycle.go pattern)
+				callerEnv = tt.resolvedEnv
+			}
+			SanitizeAgentEnv(tt.resolvedEnv, callerEnv)
+			val, ok := tt.resolvedEnv["NODE_OPTIONS"]
+			if ok != tt.wantKey {
+				t.Errorf("NODE_OPTIONS present=%v, want %v", ok, tt.wantKey)
+			}
+			if ok && val != tt.wantValue {
+				t.Errorf("NODE_OPTIONS=%q, want %q", val, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestAgentEnv_IncludesNodeOptionsClearing(t *testing.T) {
+	t.Parallel()
+	// Verify AgentEnv always includes NODE_OPTIONS="" regardless of role.
+	// This protects tmux SetEnvironment and EnvForExecCommand paths.
+	roles := []struct {
+		role      string
+		rig       string
+		agentName string
+	}{
+		{"mayor", "", ""},
+		{"deacon", "", ""},
+		{"boot", "", ""},
+		{"witness", "myrig", ""},
+		{"refinery", "myrig", ""},
+		{"polecat", "myrig", "Toast"},
+		{"crew", "myrig", "emma"},
+	}
+	for _, r := range roles {
+		t.Run(r.role, func(t *testing.T) {
+			env := AgentEnv(AgentEnvConfig{
+				Role:      r.role,
+				Rig:       r.rig,
+				AgentName: r.agentName,
+				TownRoot:  "/town",
+			})
+			assertEnv(t, env, "NODE_OPTIONS", "")
+		})
+	}
+}
+
+func TestBuildStartupCommandWithEnv_IncludesNodeOptions(t *testing.T) {
+	t.Parallel()
+	// Integration test: verify BuildStartupCommandWithEnv output includes NODE_OPTIONS=
+	// when the env map has it set to empty (as AgentEnv produces).
+	env := map[string]string{
+		"GT_ROLE":      "polecat",
+		"NODE_OPTIONS": "",
+	}
+	result := BuildStartupCommandWithEnv(env, "claude", "")
+	expected := "export GT_ROLE=polecat NODE_OPTIONS= && claude"
+	if result != expected {
+		t.Errorf("BuildStartupCommandWithEnv() = %q, want %q", result, expected)
 	}
 }

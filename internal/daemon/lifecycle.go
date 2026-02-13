@@ -480,11 +480,16 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Topic:     "lifecycle-restart",
 	}, "Check your hook and begin work.")
 
-	// Build default command using the role-resolved runtime config
-	defaultCmd := "exec " + runtimeConfig.BuildCommandWithPrompt(prompt)
+	// Build default command using the role-resolved runtime config.
+	// PrependEnv produces "export K=V ... && exec cmd" which is safe for
+	// WaitForCommand/pane_current_command detection: exec replaces the shell,
+	// so tmux sees the agent process, not a shell running exports.
+	defaultEnv := map[string]string{}
 	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
-		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
+		defaultEnv["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
 	}
+	config.SanitizeAgentEnv(defaultEnv, map[string]string{})
+	defaultCmd := config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), defaultEnv)
 
 	// Polecats and crew need environment variables set in the command
 	if parsed.RoleType == "polecat" {
@@ -499,6 +504,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
+		config.SanitizeAgentEnv(envVars, map[string]string{})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
@@ -514,6 +520,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
+		config.SanitizeAgentEnv(envVars, map[string]string{})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
