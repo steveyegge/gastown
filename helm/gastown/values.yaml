@@ -154,7 +154,7 @@ bd-daemon:
   # =============================================================================
   image:
     repository: ghcr.io/groblegark/beads
-    tag: "0.57.17"
+    tag: ""  # Uses bd-daemon Chart.appVersion — do NOT pin here
     pullPolicy: Always
 
   daemon:
