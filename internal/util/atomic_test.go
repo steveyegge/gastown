@@ -197,6 +197,9 @@ func TestAtomicWriteFileReadOnlyDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only directories are not reliable on Windows")
 	}
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root (root bypasses file permissions)")
+	}
 
 	tmpDir := t.TempDir()
 	roDir := filepath.Join(tmpDir, "readonly")

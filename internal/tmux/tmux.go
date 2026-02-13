@@ -132,7 +132,17 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	}
 	// Add the command as the last argument - tmux runs it as the pane's initial process
 	args = append(args, command)
-	_, err := t.run(args...)
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Running tmux command: tmux %v\n", args)
+	}
+	output, err := t.run(args...)
+	if os.Getenv("GT_DEBUG") != "" {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Tmux error: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Tmux output: %s\n", output)
+		}
+	}
 	return err
 }
 
@@ -1434,8 +1444,14 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 	for time.Now().Before(deadline) {
 		cmd, err := t.GetPaneCommand(session)
 		if err != nil {
+			if os.Getenv("GT_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "[DEBUG] GetPaneCommand error: %v\n", err)
+			}
 			time.Sleep(constants.PollInterval)
 			continue
+		}
+		if os.Getenv("GT_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Current pane command: %s\n", cmd)
 		}
 		// Check if current command is NOT in the exclude list
 		excluded := false
@@ -1446,6 +1462,9 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 			}
 		}
 		if !excluded {
+			if os.Getenv("GT_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Command %s is not excluded, ready!\n", cmd)
+			}
 			return nil
 		}
 		time.Sleep(constants.PollInterval)

@@ -54,8 +54,15 @@ func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Starting mayor session: sessionID=%s agentOverride=%s\n", sessionID, agentOverride)
+	}
+
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Session exists check: running=%v\n", running)
+	}
 	if running {
 		// Session exists - check if agent is actually running (healthy vs zombie)
 		if t.IsAgentAlive(sessionID) {
@@ -69,12 +76,21 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Ensure mayor directory exists (for Claude settings)
 	mayorDir := m.mayorDir()
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Creating mayor directory: %s\n", mayorDir)
+	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
 	// Ensure runtime settings exist
-	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, mayorDir)
+	runtimeConfig, _, err := config.ResolveAgentConfigWithOverride(m.townRoot, mayorDir, agentOverride)
+	if err != nil {
+		return fmt.Errorf("resolving agent config: %w", err)
+	}
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Runtime config: provider=%s\n", runtimeConfig.Hooks.Provider)
+	}
 	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
@@ -89,16 +105,28 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Building startup command for role=mayor agentOverride=%s\n", agentOverride)
+	}
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
+	}
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Startup command: %s\n", startupCmd)
 	}
 
 	// Create session in mayorDir - Mayor's home directory within the town.
 	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
 	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Creating tmux session: sessionID=%s workDir=%s\n", sessionID, mayorDir)
+	}
 	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
+	}
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Tmux session created successfully\n")
 	}
 
 	// Set environment variables (non-fatal: session works without these)
@@ -116,10 +144,19 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
 	// Wait for Claude to start - fatal if Claude fails to launch
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Waiting for agent to start (timeout=%v)\n", constants.ClaudeStartTimeout)
+	}
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
+		if os.Getenv("GT_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Agent failed to start: %v\n", err)
+		}
 		return fmt.Errorf("waiting for mayor to start: %w", err)
+	}
+	if os.Getenv("GT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Agent started successfully\n")
 	}
 
 	// Set auto-respawn hook so the mayor session survives tmux detach and crashes.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/kiro"
 	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -35,7 +36,7 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 		return nil
 	}
 
-	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode)
+	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode, kiro settings)
 	switch provider {
 	case "claude":
 		if err := claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
@@ -43,6 +44,10 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 		}
 	case "opencode":
 		if err := opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+			return err
+		}
+	case "kiro":
+		if err := kiro.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
 			return err
 		}
 	}

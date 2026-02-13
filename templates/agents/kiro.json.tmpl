@@ -1,0 +1,22 @@
+{
+  "$schema": "https://gastown.dev/schemas/agent-template-v1.json",
+  "name": "kiro",
+  "description": "Kiro CLI agent",
+  "command": "{{.KiroPath | default \"kiro\"}}",
+  "args": ["--trust-all-tools"],
+  "non_interactive": {
+    "prompt_flag": "-p",
+    "output_flag": "--output json"
+  },
+  "runtime": {
+    "provider": "kiro",
+    "tmux": {
+      "ready_prompt_prefix": "",
+      "ready_delay_ms": {{.ReadyDelayMs | default 8000}},
+      "process_names": ["kiro", "node"]
+    }
+  },
+  "hooks": {
+    "provider": "kiro"
+  }
+}
