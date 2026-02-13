@@ -9,6 +9,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -1341,8 +1342,16 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			return r.tmux.SendNotificationBanner(sessionID, msg.From, msg.Subject)
 		}
 
-		// Send notification to the agent's conversation history
+		// Queue the notification for cooperative delivery at the agent's next
+		// turn boundary. This avoids interrupting in-flight tool calls.
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+		if r.townRoot != "" {
+			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+				Sender:  msg.From,
+				Message: notification,
+			})
+		}
+		// Fallback to direct nudge if town root unavailable
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 

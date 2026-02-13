@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -114,7 +115,8 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 				result.MailSent = mailID
 
 				// Nudge the refinery to check its inbox immediately.
-				if nudgeErr := nudgeRefinery(rigName); nudgeErr != nil {
+				townRoot, _ := workspace.Find(workDir)
+				if nudgeErr := nudgeRefinery(townRoot, rigName); nudgeErr != nil {
 					// Non-fatal - refinery will still pick up on next cycle
 					if result.Error == nil {
 						result.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
@@ -628,14 +630,14 @@ Verified: clean git state`,
 	return msg.ID, nil
 }
 
-// nudgeRefinery sends a nudge to the refinery session to wake it up.
-// This ensures the refinery processes MERGE_READY mail immediately
-// rather than waiting for its next patrol cycle or daemon heartbeat.
-func nudgeRefinery(rigName string) error {
-	t := tmux.NewTmux()
+// nudgeRefinery queues a nudge for the refinery session to check its inbox.
+// Uses the nudge queue for cooperative delivery so we don't interrupt in-flight
+// tool calls. The refinery will pick this up at its next turn boundary.
+func nudgeRefinery(townRoot, rigName string) error {
 	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
 
 	// Check if refinery is running
+	t := tmux.NewTmux()
 	running, err := t.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking refinery session: %w", err)
@@ -647,8 +649,15 @@ func nudgeRefinery(rigName string) error {
 		return nil
 	}
 
-	// Nudge the running refinery to check its inbox
+	// Queue the nudge for cooperative delivery at next turn boundary
 	nudgeMsg := "MERGE_READY received - check inbox for pending work"
+	if townRoot != "" {
+		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			Sender:  rigName + "/witness",
+			Message: nudgeMsg,
+		})
+	}
+	// Fallback to direct nudge if town root unavailable
 	return t.NudgeSession(sessionName, nudgeMsg)
 }
 

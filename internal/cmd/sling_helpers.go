@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -453,17 +454,25 @@ func wakeRigAgents(rigName string) {
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
-	// Nudge witness to clear any backoff
-	t := tmux.NewTmux()
+	// Queue nudge to witness for cooperative delivery.
+	// This avoids interrupting in-flight tool calls.
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-
-	// Silent nudge - session might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		_ = nudge.Enqueue(townRoot, witnessSession, nudge.QueuedNudge{
+			Sender:  "sling",
+			Message: "Polecat dispatched - check for work",
+		})
+	} else {
+		// Fallback to direct nudge if town root unavailable
+		t := tmux.NewTmux()
+		_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	}
 }
 
-// nudgeRefinery wakes the refinery for a rig after an MR is created.
-// This ensures the refinery picks up the new merge request promptly
-// instead of waiting for its next poll cycle.
+// nudgeRefinery queues a nudge for the refinery after an MR is created.
+// Uses the nudge queue for cooperative delivery so we don't interrupt
+// in-flight tool calls. The refinery picks this up at its next turn boundary.
 func nudgeRefinery(rigName, message string) {
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
 
@@ -478,8 +487,18 @@ func nudgeRefinery(rigName, message string) {
 		return // Don't actually nudge tmux in tests
 	}
 
-	t := tmux.NewTmux()
-	_ = t.NudgeSession(refinerySession, message)
+	// Queue for cooperative delivery at refinery's next turn boundary
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		_ = nudge.Enqueue(townRoot, refinerySession, nudge.QueuedNudge{
+			Sender:  "sling",
+			Message: message,
+		})
+	} else {
+		// Fallback to direct nudge if town root unavailable
+		t := tmux.NewTmux()
+		_ = t.NudgeSession(refinerySession, message)
+	}
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.

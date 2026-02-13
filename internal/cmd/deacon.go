@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -806,9 +807,14 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	// Record ping
 	agentState.RecordPing()
 
-	// Send health check nudge
-	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
-		return fmt.Errorf("sending nudge: %w", err)
+	// Queue health check nudge for cooperative delivery at agent's next turn boundary.
+	// This avoids interrupting in-flight tool calls.
+	healthMsg := "HEALTH_CHECK: respond with any action to confirm responsiveness"
+	if err := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+		Sender:  "deacon",
+		Message: healthMsg,
+	}); err != nil {
+		return fmt.Errorf("queuing nudge: %w", err)
 	}
 
 	// Get baseline time AFTER sending nudge to avoid false positives.
