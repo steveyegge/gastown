@@ -790,9 +790,7 @@ func sendCloseNotification(addr, convoyID, title, reason string) {
 	subject := fmt.Sprintf("🚚 Convoy closed: %s", title)
 	body := fmt.Sprintf("Convoy %s has been closed.\n\nReason: %s", convoyID, reason)
 
-	mailArgs := []string{"mail", "send", addr, "-s", subject, "-m", body}
-	mailCmd := exec.Command("gt", mailArgs...)
-	if err := mailCmd.Run(); err != nil {
+	if err := sendMailDirect(addr, subject, body); err != nil {
 		style.PrintWarning("couldn't send notification: %v", err)
 	} else {
 		fmt.Printf("  Notified: %s\n", addr)
@@ -1210,12 +1208,10 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 		}
 
 		if addr != "" && !notified[addr] {
-			// Send notification via gt mail
-			mailArgs := []string{"mail", "send", addr,
-				"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
-				"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.", convoyID)}
-			mailCmd := exec.Command("gt", mailArgs...)
-			_ = mailCmd.Run() // Best effort, ignore errors
+			// Send notification via direct mail API
+			subject := fmt.Sprintf("🚚 Convoy landed: %s", title)
+			body := fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.", convoyID)
+			_ = sendMailDirect(addr, subject, body) // Best effort, ignore errors
 			notified[addr] = true
 		}
 	}

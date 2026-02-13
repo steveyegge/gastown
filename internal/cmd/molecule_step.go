@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -590,11 +589,7 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	// This triggers MR submission to the merge queue.
 	if roleCtx.Role == RolePolecat {
 		fmt.Printf("%s Signaling completion to witness...\n", style.Bold.Render("📤"))
-
-		doneCmd := exec.Command("gt", "done", "--status", "COMPLETED")
-		doneCmd.Stdout = os.Stdout
-		doneCmd.Stderr = os.Stderr
-		return doneCmd.Run()
+		return callDone(ExitCompleted)
 	}
 
 	// For other roles, just print completion message

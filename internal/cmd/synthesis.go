@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -570,12 +569,7 @@ func createSynthesisBead(convoyID string, meta *ConvoyMeta, f *formula.Formula,
 
 // slingSynthesis slings the synthesis bead to a rig.
 func slingSynthesis(beadID, targetRig string) error {
-	slingArgs := []string{"sling", beadID, targetRig}
-	slingCmd := exec.Command("gt", slingArgs...)
-	slingCmd.Stdout = os.Stdout
-	slingCmd.Stderr = os.Stderr
-
-	return slingCmd.Run()
+	return callSling([]string{beadID, targetRig})
 }
 
 // findFormula searches for a formula file by name.

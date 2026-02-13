@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -575,10 +574,12 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 
 // findTownRoot finds the Gas Town root directory.
 func findTownRoot() (string, error) {
-	cmd := exec.Command("gt", "root")
-	out, err := cmd.Output()
+	root, err := workspace.FindFromCwd()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	if root == "" {
+		return "", fmt.Errorf("not in a Gas Town workspace")
+	}
+	return root, nil
 }

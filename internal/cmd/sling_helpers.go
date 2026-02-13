@@ -628,8 +628,7 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 // separately when an MR is actually created (by nudgeRefinery).
 func wakeRigAgents(rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
-	bootCmd := exec.Command("gt", "rig", "boot", rigName)
-	_ = bootCmd.Run() // Ignore errors - rig might already be running
+	_ = runRigBoot(nil, []string{rigName}) // Ignore errors - rig might already be running
 
 	// Nudge witness to clear any backoff
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)

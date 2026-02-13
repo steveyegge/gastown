@@ -924,3 +924,23 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 
 	return nil
 }
+
+// callDone invokes the done logic directly with the given exit type,
+// without shelling out to `gt done`. exitType should be one of the
+// Exit* constants (e.g. ExitCompleted, ExitDeferred).
+func callDone(exitType string) error {
+	// Save and restore flag state to avoid side effects
+	savedStatus := doneStatus
+	savedPhase := donePhaseComplete
+	savedGate := doneGate
+	defer func() {
+		doneStatus = savedStatus
+		donePhaseComplete = savedPhase
+		doneGate = savedGate
+	}()
+
+	doneStatus = exitType
+	donePhaseComplete = false
+	doneGate = ""
+	return runDone(nil, nil)
+}

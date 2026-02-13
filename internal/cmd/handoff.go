@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/advice"
 	"github.com/steveyegge/gastown/internal/bdcmd"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -80,10 +81,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("🐾"), polecatName)
 		// Polecats don't respawn themselves - Witness handles lifecycle
 		// Call gt done with DEFERRED exit type to preserve work state
-		doneCmd := exec.Command("gt", "done", "--exit", "DEFERRED")
-		doneCmd.Stdout = os.Stdout
-		doneCmd.Stderr = os.Stderr
-		return doneCmd.Run()
+		return callDone(ExitDeferred)
 	}
 
 	// If --collect flag is set, auto-collect state into the message
@@ -891,26 +889,42 @@ func hookBeadForHandoff(beadID string) error {
 func collectHandoffState() string {
 	var parts []string
 
-	// Get hooked work
-	hookOutput, err := exec.Command("gt", "hook").Output()
-	if err == nil {
-		hookStr := strings.TrimSpace(string(hookOutput))
-		if hookStr != "" && !strings.Contains(hookStr, "Nothing on hook") {
-			parts = append(parts, "## Hooked Work\n"+hookStr)
+	// Get hooked work via beads API
+	if workDir, err := findLocalBeadsDir(); err == nil {
+		b := beads.New(workDir)
+		agentID, _, _, _ := resolveSelfTarget()
+		if agentID != "" {
+			hooked, err := b.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Assignee: agentID,
+				Priority: -1,
+			})
+			if err == nil && len(hooked) > 0 {
+				var hookLines []string
+				for _, bd := range hooked {
+					hookLines = append(hookLines, fmt.Sprintf("%s: %s '%s' [%s]", agentID, bd.ID, bd.Title, bd.Status))
+				}
+				parts = append(parts, "## Hooked Work\n"+strings.Join(hookLines, "\n"))
+			}
 		}
 	}
 
-	// Get inbox summary (first few messages)
-	inboxOutput, err := exec.Command("gt", "mail", "inbox").Output()
-	if err == nil {
-		inboxStr := strings.TrimSpace(string(inboxOutput))
-		if inboxStr != "" && !strings.Contains(inboxStr, "Inbox empty") {
-			// Limit to first 10 lines for brevity
-			lines := strings.Split(inboxStr, "\n")
-			if len(lines) > 10 {
-				lines = append(lines[:10], "... (more messages)")
+	// Get inbox summary via mail API
+	address := detectSender()
+	if mailbox, err := getMailbox(address); err == nil {
+		messages, err := mailbox.List()
+		if err == nil && len(messages) > 0 {
+			total, unread, _ := mailbox.Count()
+			var inboxLines []string
+			inboxLines = append(inboxLines, fmt.Sprintf("Inbox: %s (%d messages, %d unread)", address, total, unread))
+			for i, msg := range messages {
+				if i >= 10 {
+					inboxLines = append(inboxLines, "... (more messages)")
+					break
+				}
+				inboxLines = append(inboxLines, fmt.Sprintf("  %s: %s", msg.From, msg.Subject))
 			}
-			parts = append(parts, "## Inbox\n"+strings.Join(lines, "\n"))
+			parts = append(parts, "## Inbox\n"+strings.Join(inboxLines, "\n"))
 		}
 	}
 

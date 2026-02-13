@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -280,19 +279,15 @@ func triggerEscalation(state *ContextLimitState) error {
 	}
 	subject := fmt.Sprintf("CONTEXT_LIMIT: %s", polecat)
 
-	// Send auto-mail witness
-	// We'll use exec to call gt mail send witness -s subject
-	// This avoids complex dependencies
-	cmd := exec.Command("gt", "mail", "send", "witness", "-s", subject)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("sending auto-mail witness: %w\noutput: %s", err, output)
+	// Send auto-mail to witness
+	if err := sendMailDirect("witness", subject, ""); err != nil {
+		return fmt.Errorf("sending auto-mail witness: %w", err)
 	}
 
 	// Create escalation bead
-	cmd = exec.Command("gt", "escalate", "--severity", "high", "--reason", "Context limit circuit breaker tripped", "--source", sender)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if err := callEscalate("high", "Context limit circuit breaker tripped", sender); err != nil {
 		// Log error but don't fail - mail sent is primary action
-		fmt.Printf("Warning: Failed to create escalation bead: %v\n%s", err, output)
+		fmt.Printf("Warning: Failed to create escalation bead: %v\n", err)
 	}
 
 	state.EscalatedAt = time.Now()

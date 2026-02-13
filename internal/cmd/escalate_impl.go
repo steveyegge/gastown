@@ -729,3 +729,33 @@ func detectSenderFallback() string {
 	}
 	return ""
 }
+
+// callEscalate invokes the escalate logic directly without shelling out to `gt escalate`.
+// severity must be one of: critical, high, medium, low.
+func callEscalate(severity, reason, source string) error {
+	// Save and restore flag state
+	savedSeverity := escalateSeverity
+	savedReason := escalateReason
+	savedSource := escalateSource
+	savedRelated := escalateRelatedBead
+	savedDryRun := escalateDryRun
+	savedJSON := escalateJSON
+	defer func() {
+		escalateSeverity = savedSeverity
+		escalateReason = savedReason
+		escalateSource = savedSource
+		escalateRelatedBead = savedRelated
+		escalateDryRun = savedDryRun
+		escalateJSON = savedJSON
+	}()
+
+	escalateSeverity = severity
+	escalateReason = reason
+	escalateSource = source
+	escalateRelatedBead = ""
+	escalateDryRun = false
+	escalateJSON = false
+
+	// runEscalate expects the description as args[0]
+	return runEscalate(nil, []string{reason})
+}

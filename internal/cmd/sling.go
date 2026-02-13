@@ -874,3 +874,59 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+
+// callSling invokes the sling logic directly with default flags,
+// without shelling out to `gt sling`.
+func callSling(args []string) error {
+	// Save and restore flag state
+	saved := struct {
+		subject, message, onTarget, slingArgs, account, agent, convoy, merge, execTarget string
+		dryRun, hookRawBead, create, force, noConvoy, noMerge, owned                     bool
+		vars                                                                               []string
+	}{
+		slingSubject, slingMessage, slingOnTarget, slingArgs, slingAccount, slingAgent,
+		slingConvoy, slingMergeStrategy, slingExecutionTarget,
+		slingDryRun, slingHookRawBead, slingCreate, slingForce, slingNoConvoy, slingNoMerge, slingOwned,
+		slingVars,
+	}
+	defer func() {
+		slingSubject = saved.subject
+		slingMessage = saved.message
+		slingOnTarget = saved.onTarget
+		slingArgs = saved.slingArgs
+		slingAccount = saved.account
+		slingAgent = saved.agent
+		slingConvoy = saved.convoy
+		slingMergeStrategy = saved.merge
+		slingExecutionTarget = saved.execTarget
+		slingDryRun = saved.dryRun
+		slingHookRawBead = saved.hookRawBead
+		slingCreate = saved.create
+		slingForce = saved.force
+		slingNoConvoy = saved.noConvoy
+		slingNoMerge = saved.noMerge
+		slingOwned = saved.owned
+		slingVars = saved.vars
+	}()
+
+	// Reset to defaults
+	slingSubject = ""
+	slingMessage = ""
+	slingOnTarget = ""
+	slingArgs = ""
+	slingAccount = ""
+	slingAgent = ""
+	slingConvoy = ""
+	slingMergeStrategy = ""
+	slingExecutionTarget = ""
+	slingDryRun = false
+	slingHookRawBead = false
+	slingCreate = false
+	slingForce = false
+	slingNoConvoy = false
+	slingNoMerge = false
+	slingOwned = false
+	slingVars = nil
+
+	return runSling(nil, args)
+}

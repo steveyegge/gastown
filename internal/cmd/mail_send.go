@@ -260,6 +260,38 @@ func nudgeMailRecipient(recipientAddr, from, subject string) {
 
 // expandMailShortcut expands role shortcuts to full mail addresses.
 // This provides consistency with gt nudge which accepts the same shortcuts.
+// sendMailDirect sends a mail message without shelling out to gt.
+// This is the internal equivalent of `gt mail send <to> -s <subject> -m <body>`.
+// It handles address expansion, routing, event logging, and recipient nudging.
+func sendMailDirect(to, subject, body string) error {
+	to = expandMailShortcut(to)
+
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	from := detectSender()
+
+	msg := &mail.Message{
+		From:     from,
+		To:       to,
+		Subject:  subject,
+		Body:     body,
+		ThreadID: generateThreadID(),
+	}
+
+	router := mail.NewRouter(workDir)
+	if err := router.Send(msg); err != nil {
+		return fmt.Errorf("sending message: %w", err)
+	}
+
+	_ = events.LogFeed(events.TypeMail, from, events.MailPayload(to, subject))
+	emitMailBusEvent(events.BusMailSent, from, to, subject)
+	nudgeMailRecipient(to, from, subject)
+	return nil
+}
+
 func expandMailShortcut(address string) string {
 	switch address {
 	case "mayor":

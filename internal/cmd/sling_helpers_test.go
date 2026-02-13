@@ -71,7 +71,7 @@ func TestWakeRigAgentsDoesNotNudgeRefinery(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "nudge.log")
 	t.Setenv("GT_TEST_NUDGE_LOG", logPath)
 
-	// wakeRigAgents calls exec.Command("gt", "rig", "boot", ...) and tmux.NudgeSession.
+	// wakeRigAgents calls runRigBoot() directly and backend.NudgeSession.
 	// The boot command and witness nudge will fail silently (no real rig/tmux).
 	// We only care that nudgeRefinery is NOT called (no log entries).
 	wakeRigAgents("testrig")
