@@ -366,6 +366,31 @@ gt nudge mayor "Status update needed"
 **Important:** `{{ cmd }} nudge` is the ONLY reliable way to send text to Claude sessions.
 Raw `tmux send-keys` is unreliable. Always use `{{ cmd }} nudge` for agent-to-agent communication.
 
+### Nudge Delivery Modes
+
+Nudges support three delivery modes to avoid interrupting agents mid-work:
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| Immediate | `--mode=immediate` (default) | Direct send-keys. Interrupts current work. |
+| Queue | `--mode=queue` | Writes to file queue. Agent picks up at next turn boundary via hook. |
+| Wait-idle | `--mode=wait-idle` | Waits for idle prompt, then delivers. Falls back to queue on timeout. |
+
+For non-urgent coordination, prefer `--mode=queue` to avoid killing in-flight work.
+
+### Nudge Resilience (for your own work)
+
+Queued nudges arrive as `<system-reminder>` blocks via your `UserPromptSubmit` hook.
+When you see a queued nudge:
+
+1. **Evaluate priority** — Is the nudge more urgent than your current task?
+2. **If higher priority**: Checkpoint current work (commit, update beads), then handle nudge
+3. **If lower priority**: Note the nudge, continue current work, handle when done
+
+For long-running operations (builds, tests, multi-step implementations), prefer
+`run_in_background: true` on Task and Bash tools. Background tasks survive turn
+interruption, making your work naturally nudge-resilient.
+
 ## No Witness Monitoring
 
 **Important**: Unlike polecats, you have no Witness watching over you:

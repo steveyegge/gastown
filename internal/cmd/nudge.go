@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -21,6 +22,21 @@ var nudgeMessageFlag string
 var nudgeForceFlag bool
 var nudgeStdinFlag bool
 var nudgeIfFreshFlag bool
+var nudgeModeFlag string
+var nudgePriorityFlag string
+
+// Nudge delivery modes.
+const (
+	// NudgeModeImmediate sends directly via tmux send-keys (current behavior).
+	// This interrupts in-flight work but guarantees immediate delivery.
+	NudgeModeImmediate = "immediate"
+	// NudgeModeQueue writes to a file queue; agent picks up via hook at next
+	// turn boundary. Zero interruption but delivery depends on agent turn frequency.
+	NudgeModeQueue = "queue"
+	// NudgeModeWaitIdle waits for the agent to become idle (prompt visible),
+	// then delivers directly. Falls back to queue on timeout. Best of both worlds.
+	NudgeModeWaitIdle = "wait-idle"
+)
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
@@ -28,22 +44,29 @@ func init() {
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
 	nudgeCmd.Flags().BoolVar(&nudgeStdinFlag, "stdin", false, "Read message from stdin (avoids shell quoting issues)")
 	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
+	nudgeCmd.Flags().StringVar(&nudgeModeFlag, "mode", NudgeModeImmediate, "Delivery mode: immediate (default), queue, or wait-idle")
+	nudgeCmd.Flags().StringVar(&nudgePriorityFlag, "priority", nudge.PriorityNormal, "Queue priority: normal (default) or urgent")
 }
 
 var nudgeCmd = &cobra.Command{
 	Use:     "nudge <target> [message]",
 	GroupID: GroupComm,
 	Short:   "Send a synchronous message to any Gas Town worker",
-	Long: `Universal synchronous messaging API for Gas Town worker-to-worker communication.
+	Long: `Universal messaging API for Gas Town worker-to-worker communication.
 
-Delivers a message directly to any worker's Claude Code session: polecats, crew,
-witness, refinery, mayor, or deacon. Use this for real-time coordination when
-you need immediate attention from another worker.
+Delivers a message to any worker's Claude Code session: polecats, crew,
+witness, refinery, mayor, or deacon.
 
-Uses a reliable delivery pattern:
-1. Sends text in literal mode (-l flag)
-2. Waits 500ms for paste to complete
-3. Sends Enter as a separate command
+Delivery modes (--mode):
+  immediate  Send directly via tmux send-keys (default). Interrupts in-flight
+             work but guarantees immediate delivery.
+  queue      Write to a file queue; agent picks up via hook at next turn
+             boundary. Zero interruption. Use for non-urgent coordination.
+  wait-idle  Wait for agent to become idle (prompt visible), then deliver
+             directly. Falls back to queue on timeout.
+
+The default is immediate for backward compatibility. For non-urgent messages
+where you don't want to interrupt the agent's current work, use --mode=queue.
 
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.
@@ -84,6 +107,50 @@ Examples:
 // ifFreshMaxAge is the maximum session age for --if-fresh to allow a nudge.
 // Sessions older than this are considered compaction/clear restarts, not new sessions.
 const ifFreshMaxAge = 60 * time.Second
+
+// waitIdleTimeout is how long --mode=wait-idle will poll before falling back to queue.
+const waitIdleTimeout = 15 * time.Second
+
+// deliverNudge routes a nudge based on the --mode flag.
+// For "immediate" mode: sends directly via tmux (current behavior).
+// For "queue" mode: writes to the nudge queue for cooperative delivery.
+// For "wait-idle" mode: waits for idle, then delivers or falls back to queue.
+func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
+	townRoot, _ := workspace.FindFromCwd()
+
+	switch nudgeModeFlag {
+	case NudgeModeQueue:
+		if townRoot == "" {
+			return fmt.Errorf("--mode=queue requires a Gas Town workspace")
+		}
+		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			Sender:   sender,
+			Message:  message,
+			Priority: nudgePriorityFlag,
+		})
+
+	case NudgeModeWaitIdle:
+		if townRoot == "" {
+			// Fall back to immediate if no workspace
+			return t.NudgeSession(sessionName, message)
+		}
+		// Try to wait for idle
+		err := t.WaitForIdle(sessionName, waitIdleTimeout)
+		if err == nil {
+			// Agent is idle — safe to deliver directly
+			return t.NudgeSession(sessionName, message)
+		}
+		// Agent busy — queue instead
+		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			Sender:   sender,
+			Message:  message,
+			Priority: nudgePriorityFlag,
+		})
+
+	default: // NudgeModeImmediate
+		return t.NudgeSession(sessionName, message)
+	}
+}
 
 func runNudge(cmd *cobra.Command, args []string) error {
 	// --if-fresh: skip nudge if the caller's tmux session is older than 60s.
@@ -205,11 +272,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		if err := t.NudgeSession(deaconSession, message); err != nil {
+		if err := deliverNudge(t, deaconSession, message, sender); err != nil {
 			return fmt.Errorf("nudging deacon: %w", err)
 		}
 
-		fmt.Printf("%s Nudged deacon\n", style.Bold.Render("✓"))
+		fmt.Printf("%s Nudged deacon (%s)\n", style.Bold.Render("✓"), nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -250,12 +317,12 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Send nudge using the reliable NudgeSession
-		if err := t.NudgeSession(sessionName, message); err != nil {
+		// Send nudge using the configured delivery mode
+		if err := deliverNudge(t, sessionName, message, sender); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
-		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)
+		fmt.Printf("%s Nudged %s/%s (%s)\n", style.Bold.Render("✓"), rigName, polecatName, nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -272,11 +339,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := t.NudgeSession(target, message); err != nil {
+		if err := deliverNudge(t, target, message, sender); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
-		fmt.Printf("✓ Nudged %s\n", target)
+		fmt.Printf("✓ Nudged %s (%s)\n", target, nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {

@@ -1650,6 +1650,43 @@ func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, tim
 	return fmt.Errorf("timeout waiting for runtime prompt")
 }
 
+// DefaultReadyPromptPrefix is the Claude Code prompt prefix used for idle detection.
+// Claude Code uses ❯ (U+276F) as the prompt character.
+const DefaultReadyPromptPrefix = "❯ "
+
+// WaitForIdle polls until the agent appears to be at an idle prompt.
+// Unlike WaitForRuntimeReady (which is for bootstrap), this is for steady-state
+// idle detection — used to avoid interrupting agents mid-work.
+//
+// Returns nil if the agent becomes idle within the timeout.
+// Returns an error if the timeout expires while the agent is still busy.
+func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
+	promptPrefix := DefaultReadyPromptPrefix
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		lines, err := t.CapturePaneLines(session, 5)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		// Check last non-empty line for prompt prefix
+		for i := len(lines) - 1; i >= 0; i-- {
+			trimmed := strings.TrimSpace(lines[i])
+			if trimmed == "" {
+				continue
+			}
+			prefix := strings.TrimSpace(promptPrefix)
+			if strings.HasPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
+				return nil
+			}
+			break // Only check the last non-empty line
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("agent not idle after %s", timeout)
+}
+
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	format := "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}|#{session_activity}|#{session_last_attached}"

@@ -1786,3 +1786,45 @@ func TestMatchesPromptPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitForIdle_Timeout(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if os.Getenv("TMUX") == "" {
+		t.Skip("not inside tmux")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("test requires unix")
+	}
+
+	tm := NewTmux()
+
+	// Create a session running a long sleep (no prompt visible)
+	sessionName := fmt.Sprintf("gt-test-idle-%d", time.Now().UnixNano())
+	if err := tm.NewSessionWithCommand(sessionName, os.TempDir(), "sleep 60"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// WaitForIdle should timeout quickly since the session is running sleep, not a prompt
+	err := tm.WaitForIdle(sessionName, 500*time.Millisecond)
+	if err == nil {
+		t.Error("WaitForIdle should have timed out for a busy session")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not idle") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDefaultReadyPromptPrefix(t *testing.T) {
+	// Verify the constant is set correctly
+	if DefaultReadyPromptPrefix == "" {
+		t.Error("DefaultReadyPromptPrefix should not be empty")
+	}
+	if !strings.Contains(DefaultReadyPromptPrefix, "❯") {
+		t.Errorf("DefaultReadyPromptPrefix = %q, want to contain ❯", DefaultReadyPromptPrefix)
+	}
+}

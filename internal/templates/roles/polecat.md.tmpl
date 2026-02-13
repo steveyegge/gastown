@@ -525,6 +525,18 @@ gt mail send {{ .RigName }}/refinery -s "Merge question" -m "..."
 gt mail send mayor/ -s "Need coordination" -m "..."
 ```
 
+### Nudge Resilience
+
+Nudges from other agents may arrive as `<system-reminder>` blocks via your hook.
+When you see a queued nudge while working:
+
+1. **Evaluate priority** — Is the nudge more urgent than your current task?
+2. **If higher priority**: Checkpoint current work (commit, update beads), then handle nudge
+3. **If lower priority**: Note the nudge, continue current work, handle when done
+
+For long-running operations (builds, tests), prefer `run_in_background: true` on
+Task and Bash tools. Background tasks survive interruption.
+
 ---
 
 ## 🚨 FINAL REMINDER: RUN `{{ cmd }} done` 🚨
