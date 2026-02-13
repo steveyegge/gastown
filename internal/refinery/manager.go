@@ -156,10 +156,21 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
 
+	// Determine the effective agent: explicit --agent flag takes priority,
+	// then role_agents from settings, then default resolution.
+	// We must resolve this so GT_AGENT is set in the tmux environment,
+	// which allows handoff/respawn to preserve the correct agent.
+	effectiveAgent := agentOverride
+	if effectiveAgent == "" {
+		if name, isRoleSpecific := config.ResolveRoleAgentName("refinery", townRoot, m.rig.Path); isRoleSpecific {
+			effectiveAgent = name
+		}
+	}
+
 	var command string
-	if agentOverride != "" {
+	if effectiveAgent != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, effectiveAgent)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
@@ -184,6 +195,12 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	// Add refinery-specific flag
 	envVars["GT_REFINERY"] = "1"
+
+	// Preserve effective agent in tmux env so handoff/respawn can detect it.
+	// Without this, handoff falls back to ResolveAgentConfig which ignores role_agents.
+	if effectiveAgent != "" {
+		envVars["GT_AGENT"] = effectiveAgent
+	}
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
 	for k, v := range envVars {
