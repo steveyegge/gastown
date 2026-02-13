@@ -3840,3 +3840,71 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
 	}
 }
+
+// TestBuildStartupCommand_UsesGTRootFromEnvVars verifies that when rigPath is empty
+// but GT_ROOT is provided in envVars, the function uses GT_ROOT to resolve town
+// settings and respects role_agents configuration. This is the path hit when the
+// daemon spawns town-level agents (deacon, mayor) where rigPath is always empty.
+// Fixes #433
+func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd := BuildStartupCommand(envVars, "", "")
+
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, "", "", "")
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
+	}
+}
