@@ -1502,7 +1502,8 @@ func ExtractSimpleRole(gtRole string) string {
 
 // BuildStartupCommand builds a full startup command with environment exports.
 // envVars is a map of environment variable names to values.
-// rigPath is optional - if empty, tries to detect town root from cwd.
+// rigPath is optional - if empty, uses envVars["GT_ROOT"] to find town root,
+// falling back to cwd detection if GT_ROOT is not set.
 // prompt is optional - if provided, appended as the initial prompt.
 //
 // If envVars contains GT_ROLE, the function uses role-based agent resolution
@@ -1527,14 +1528,19 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
+		// For town-level agents (mayor, deacon), prefer GT_ROOT from envVars
+		// (set by AgentEnv) over cwd detection. This ensures role_agents config
+		// is respected even when the daemon runs outside the town hierarchy.
+		townRoot = envVars["GT_ROOT"]
+		if townRoot == "" {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		if rc == nil {
 			if role != "" {
-				// Use role-based agent resolution for per-role model selection
 				rc = ResolveRoleAgentConfig(role, townRoot, "")
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
@@ -1659,22 +1665,29 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			// Can't find town root from cwd - but if agentOverride is specified,
-			// try to use the preset directly. This allows `gt deacon start --agent codex`
-			// to work even when run from outside the town directory.
-			if agentOverride != "" {
-				if preset := GetAgentPresetByName(agentOverride); preset != nil {
-					rc = RuntimeConfigFromPreset(AgentPreset(agentOverride))
+		// For town-level agents (mayor, deacon), prefer GT_ROOT from envVars
+		// (set by AgentEnv) over cwd detection. This ensures role_agents config
+		// is respected even when the daemon runs outside the town hierarchy.
+		townRoot = envVars["GT_ROOT"]
+		if townRoot == "" {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				// Can't find town root from cwd - but if agentOverride is specified,
+				// try to use the preset directly. This allows `gt deacon start --agent codex`
+				// to work even when run from outside the town directory.
+				if agentOverride != "" {
+					if preset := GetAgentPresetByName(agentOverride); preset != nil {
+						rc = RuntimeConfigFromPreset(AgentPreset(agentOverride))
+					} else {
+						return "", fmt.Errorf("agent '%s' not found", agentOverride)
+					}
 				} else {
-					return "", fmt.Errorf("agent '%s' not found", agentOverride)
+					rc = DefaultRuntimeConfig()
 				}
-			} else {
-				rc = DefaultRuntimeConfig()
 			}
-		} else {
+		}
+		if rc == nil {
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
@@ -1682,7 +1695,6 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 					return "", resolveErr
 				}
 			} else if role != "" {
-				// No override, use role-based agent resolution
 				rc = ResolveRoleAgentConfig(role, townRoot, "")
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")

@@ -1224,6 +1224,22 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
 	}
 
+	// Step 3.5: Reject any open MRs for this branch before deleting it.
+	// Prevents MQ/git sync inconsistency where MR exists but branch is gone.
+	if branchToDelete != "" {
+		bd := beads.New(r.Path)
+		mr, findErr := bd.FindMRForBranch(branchToDelete)
+		if findErr != nil {
+			fmt.Printf("  %s MR lookup failed: %v\n", style.Dim.Render("○"), findErr)
+		} else if mr != nil {
+			if err := bd.CloseWithReason("rejected: polecat nuked", mr.ID); err != nil {
+				fmt.Printf("  %s MR close failed for %s: %v\n", style.Warning.Render("⚠"), mr.ID, err)
+			} else {
+				fmt.Printf("  %s rejected MR %s (polecat nuked)\n", style.Warning.Render("⚠"), mr.ID)
+			}
+		}
+	}
+
 	// Step 4: Delete branch (if we know it)
 	if branchToDelete != "" {
 		var repoGit *git.Git

@@ -33,7 +33,7 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
 
 [vars]
 [vars.wisp_type]
@@ -229,12 +229,41 @@ If tests FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on main?
 2. If branch caused it:
    - Abort merge
-   - Notify polecat: "Tests failing. Please fix and resubmit."
+   - **REOPEN the source issue** so it returns to the ready queue:
+     ```bash
+     bd update <issue-id> --status=open --assignee=""
+     bd sync
+     ```
+   - Notify witness of rejection using the MERGE_FAILED protocol:
+     ```bash
+     gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" -m "Branch: <branch>
+     Issue: <issue-id>
+     Polecat: <polecat-name>
+     Rig: <rig>
+     FailureType: tests
+     Error: <failure description>"
+     ```
+   - Close the MR bead as rejected:
+     ```bash
+     bd close <mr-bead-id> --reason "Rejected: <failure description>"
+     ```
+   - Delete the rejected branch (a new polecat will create a fresh one):
+     ```bash
+     git push origin --delete <polecat-branch>
+     ```
+   - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on main:
    - File a bead: bd create --type=bug --priority=1 --title="..."
    - FORBIDDEN: Writing code to fix test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
+
+**REJECTION CHECKLIST** (all required before skipping to loop-check):
+- [ ] Source issue reopened (bd update <issue-id> --status=open --assignee="")
+- [ ] MERGE_FAILED notification sent to witness
+- [ ] MR bead closed with rejection reason
+- [ ] Rejected branch deleted from remote
+- [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - Tests passing, OR

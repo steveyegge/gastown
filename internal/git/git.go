@@ -339,6 +339,13 @@ func (g *Git) Fetch(remote string) error {
 	return err
 }
 
+// FetchPrune fetches from the remote and prunes stale remote-tracking refs.
+// This removes remote-tracking branches for branches that no longer exist on the remote.
+func (g *Git) FetchPrune(remote string) error {
+	_, err := g.run("fetch", "--prune", remote)
+	return err
+}
+
 // FetchBranch fetches a specific branch from the remote.
 func (g *Git) FetchBranch(remote, branch string) error {
 	_, err := g.run("fetch", remote, branch)
@@ -1177,4 +1184,89 @@ func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error
 	}
 
 	return n == 0, n, nil
+}
+
+// PrunedBranch represents a local branch that was pruned (or would be pruned in dry-run).
+type PrunedBranch struct {
+	Name   string // Branch name (e.g., "polecat/rictus-mkb0vq9f")
+	Reason string // Why it was pruned: "merged", "no-remote", "no-remote-merged"
+}
+
+// PruneStaleBranches finds and deletes local branches matching a pattern that are
+// stale — either fully merged to the default branch or whose remote tracking branch
+// no longer exists (indicating the remote branch was deleted after merge).
+//
+// This addresses cross-clone branch accumulation: when polecats push branches to
+// origin, other clones create local tracking branches via git fetch. After the
+// remote branch is deleted (post-merge), git fetch --prune removes the remote
+// tracking ref but the local branch persists indefinitely.
+//
+// Safety: never deletes the current branch or the default branch (main/master).
+// Uses git branch -d (not -D), so only fully-merged branches are deleted.
+func (g *Git) PruneStaleBranches(pattern string, dryRun bool) ([]PrunedBranch, error) {
+	if pattern == "" {
+		pattern = "polecat/*"
+	}
+
+	// Get current branch to avoid deleting it
+	currentBranch, _ := g.CurrentBranch()
+	defaultBranch := g.RemoteDefaultBranch()
+
+	// List all local branches matching the pattern
+	branches, err := g.ListBranches(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("listing branches: %w", err)
+	}
+
+	var pruned []PrunedBranch
+	for _, branch := range branches {
+		branch = strings.TrimSpace(branch)
+		if branch == "" || branch == currentBranch || branch == defaultBranch {
+			continue
+		}
+
+		// Check if the remote tracking branch still exists
+		hasRemote, err := g.RemoteTrackingBranchExists("origin", branch)
+		if err != nil {
+			continue // Skip on error, don't fail the whole operation
+		}
+
+		// Check if the branch is merged to the default branch
+		merged, err := g.IsAncestor(branch, "origin/"+defaultBranch)
+		if err != nil {
+			// If we can't determine merge status, only prune if remote is gone
+			if hasRemote {
+				continue
+			}
+			// Remote gone and can't check merge status — skip to be safe
+			continue
+		}
+
+		var reason string
+		if merged && !hasRemote {
+			reason = "no-remote-merged"
+		} else if merged {
+			reason = "merged"
+		} else if !hasRemote {
+			reason = "no-remote"
+		} else {
+			continue // Branch has remote and is not merged — keep it
+		}
+
+		if !dryRun {
+			// Use -d (not -D) for safety — only deletes fully merged branches.
+			// For "no-remote" branches that aren't merged, -d will fail safely.
+			if err := g.DeleteBranch(branch, false); err != nil {
+				// If -d fails (not merged), skip this branch
+				continue
+			}
+		}
+
+		pruned = append(pruned, PrunedBranch{
+			Name:   branch,
+			Reason: reason,
+		})
+	}
+
+	return pruned, nil
 }

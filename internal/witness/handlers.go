@@ -1028,14 +1028,21 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			// that's been stuck too long (polecat hung in gt done).
 			if doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second {
 				// Polecat has been stuck in gt done for >60s — kill session.
+				// Read hook bead before nuke (nuke may clean up agent bead)
+				_, stuckHookBead := getAgentBeadState(workDir, agentBeadID)
 				zombie := ZombieResult{
 					PolecatName: polecatName,
 					AgentState:  "stuck-in-done",
+					HookBead:    stuckHookBead,
 					Action:      fmt.Sprintf("killed-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
 				}
 				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
 					zombie.Error = err
 					zombie.Action = fmt.Sprintf("kill-stuck-session-failed: %v", err)
+				}
+				// Notify convoys if hooked bead was closed (gt-nsteq7)
+				if stuckHookBead != "" && getBeadStatus(workDir, stuckHookBead) == "closed" {
+					convoy.CheckConvoysForIssue(townRoot, stuckHookBead, "witness-zombie", nil)
 				}
 				result.Zombies = append(result.Zombies, zombie)
 				continue
@@ -1046,14 +1053,21 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			// status.go detects but DetectZombiePolecats previously missed.
 			// See: gt-kj6r6
 			if !t.IsAgentAlive(sessionName) {
+				// Read hook bead before nuke (nuke may clean up agent bead)
+				_, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
 				zombie := ZombieResult{
 					PolecatName: polecatName,
 					AgentState:  "agent-dead-in-session",
+					HookBead:    deadAgentHookBead,
 					Action:      "killed-agent-dead-session",
 				}
 				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
 					zombie.Error = err
 					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
+				}
+				// Notify convoys if hooked bead was closed (gt-nsteq7)
+				if deadAgentHookBead != "" && getBeadStatus(workDir, deadAgentHookBead) == "closed" {
+					convoy.CheckConvoysForIssue(townRoot, deadAgentHookBead, "witness-zombie", nil)
 				}
 				result.Zombies = append(result.Zombies, zombie)
 			} else {
@@ -1072,6 +1086,8 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 						zombie.Error = err
 						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
 					}
+					// Notify convoys about the closed bead (gt-nsteq7)
+					convoy.CheckConvoysForIssue(townRoot, hookBead, "witness-zombie", nil)
 					result.Zombies = append(result.Zombies, zombie)
 				}
 			}
@@ -1088,14 +1104,21 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			}
 			// Old done-intent + dead session = polecat tried to exit but session
 			// died mid-gt-done. Auto-nuke without further checks.
+			// Read hook bead before nuke (nuke may clean up agent bead)
+			_, diHookBead := getAgentBeadState(workDir, agentBeadID)
 			zombie := ZombieResult{
 				PolecatName: polecatName,
 				AgentState:  "done-intent-dead",
+				HookBead:    diHookBead,
 				Action:      fmt.Sprintf("auto-nuked (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
 			}
 			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
 				zombie.Error = err
 				zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
+			}
+			// Notify convoys if hooked bead was closed (gt-nsteq7)
+			if diHookBead != "" && getBeadStatus(workDir, diHookBead) == "closed" {
+				convoy.CheckConvoysForIssue(townRoot, diHookBead, "witness-zombie", nil)
 			}
 			result.Zombies = append(result.Zombies, zombie)
 			continue
@@ -1199,6 +1222,13 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 				}
 				zombie.Action = fmt.Sprintf("escalated (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
 			}
+		}
+
+		// Notify convoys if hooked bead was closed (gt-nsteq7).
+		// This covers all standard zombie paths: clean, empty status, and dirty.
+		// The bead may have been closed even if the polecat never ran gt done.
+		if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
+			convoy.CheckConvoysForIssue(townRoot, hookBead, "witness-zombie", nil)
 		}
 
 		result.Zombies = append(result.Zombies, zombie)

@@ -7,9 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -54,17 +51,11 @@ func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
-	// Check if session already exists
-	running, _ := t.HasSession(sessionID)
-	if running {
-		// Session exists - check if agent is actually running (healthy vs zombie)
-		if t.IsAgentAlive(sessionID) {
-			return ErrAlreadyRunning
-		}
-		// Zombie - tmux alive but agent dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
-			return fmt.Errorf("killing zombie session: %w", err)
-		}
+	// Kill any existing zombie session (tmux alive but agent dead).
+	// Returns error if session is healthy and already running.
+	_, err := session.KillExistingSession(t, sessionID, true)
+	if err != nil {
+		return ErrAlreadyRunning
 	}
 
 	// Ensure mayor directory exists (for Claude settings)
@@ -73,70 +64,31 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure runtime settings exist
-	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, mayorDir)
-	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
-		return fmt.Errorf("ensuring runtime settings: %w", err)
-	}
-
-	// Build startup beacon with explicit instructions (matches gt handoff behavior)
-	// This ensures the agent has clear context immediately, not after nudges arrive
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
-	})
-
-	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session in mayorDir - Mayor's home directory within the town.
-	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
-	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
-	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "mayor",
-		TownRoot: m.townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
-	// Apply Mayor theming (non-fatal: theming failure doesn't affect operation)
+	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.MayorTheme()
-	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
-
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Kill the zombie session before returning error
-		_ = t.KillSessionWithProcesses(sessionID)
-		return fmt.Errorf("waiting for mayor to start: %w", err)
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID: sessionID,
+		WorkDir:   mayorDir,
+		Role:      "mayor",
+		TownRoot:  m.townRoot,
+		AgentName: "Mayor",
+		Beacon: session.BeaconConfig{
+			Recipient: "mayor",
+			Sender:    "human",
+			Topic:     "cold-start",
+		},
+		AgentOverride: agentOverride,
+		Theme:         &theme,
+		WaitForAgent:  true,
+		WaitFatal:     true,
+		AutoRespawn:   true,
+		AcceptBypass:  true,
+	})
+	if err != nil {
+		return err
 	}
 
-	// Set auto-respawn hook so the mayor session survives tmux detach and crashes.
-	// When Claude exits (for any reason), tmux will automatically respawn it.
-	// This matches the deacon's resilience behavior (PATCH-010).
-	if err := t.SetAutoRespawnHook(sessionID); err != nil {
-		// Non-fatal: Mayor still works, just won't auto-respawn
-		fmt.Printf("warning: failed to set auto-respawn hook for mayor: %v\n", err)
-	}
-
-	// Accept bypass permissions warning dialog if it appears.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
-
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
+	time.Sleep(session.ShutdownDelay())
 
 	return nil
 }

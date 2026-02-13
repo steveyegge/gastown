@@ -543,3 +543,319 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+// initTestRepoWithRemote sets up a local repo with a bare remote and initial push.
+// Returns (localDir, remoteDir, mainBranch).
+func initTestRepoWithRemote(t *testing.T) (string, string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	// Create bare remote
+	remoteDir := filepath.Join(tmp, "remote.git")
+	if err := exec.Command("git", "init", "--bare", remoteDir).Run(); err != nil {
+		t.Fatalf("git init --bare: %v", err)
+	}
+
+	// Create local repo
+	localDir := filepath.Join(tmp, "local")
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = localDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+	}
+
+	// Initial commit
+	if err := os.WriteFile(filepath.Join(localDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+		{"git", "remote", "add", "origin", remoteDir},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = localDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+	}
+
+	// Get main branch name and push
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = localDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("branch --show-current: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+
+	cmd = exec.Command("git", "push", "-u", "origin", mainBranch)
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	return localDir, remoteDir, mainBranch
+}
+
+func TestPruneStaleBranches_MergedBranch(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Create a polecat branch, commit, and merge it to main
+	if err := g.CreateBranch("polecat/test-merged"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/test-merged"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "feature.txt"), []byte("feature"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("feature.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("add feature"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Push polecat branch to origin
+	cmd := exec.Command("git", "push", "origin", "polecat/test-merged")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push polecat branch: %v", err)
+	}
+
+	// Merge to main
+	if err := g.Checkout(mainBranch); err != nil {
+		t.Fatalf("Checkout main: %v", err)
+	}
+	if err := g.Merge("polecat/test-merged"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Push main
+	cmd = exec.Command("git", "push", "origin", mainBranch)
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push main: %v", err)
+	}
+
+	// Delete remote polecat branch (simulating refinery cleanup)
+	cmd = exec.Command("git", "push", "origin", "--delete", "polecat/test-merged")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("delete remote branch: %v", err)
+	}
+
+	// Fetch --prune to remove remote tracking ref
+	if err := g.FetchPrune("origin"); err != nil {
+		t.Fatalf("FetchPrune: %v", err)
+	}
+
+	// Verify polecat branch still exists locally
+	branches, err := g.ListBranches("polecat/*")
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if len(branches) != 1 {
+		t.Fatalf("expected 1 local polecat branch, got %d", len(branches))
+	}
+
+	// Prune should remove it
+	pruned, err := g.PruneStaleBranches("polecat/*", false)
+	if err != nil {
+		t.Fatalf("PruneStaleBranches: %v", err)
+	}
+	if len(pruned) != 1 {
+		t.Fatalf("expected 1 pruned branch, got %d", len(pruned))
+	}
+	if pruned[0].Name != "polecat/test-merged" {
+		t.Errorf("pruned name = %q, want polecat/test-merged", pruned[0].Name)
+	}
+	if pruned[0].Reason != "no-remote-merged" {
+		t.Errorf("pruned reason = %q, want no-remote-merged", pruned[0].Reason)
+	}
+
+	// Verify branch is gone
+	branches, err = g.ListBranches("polecat/*")
+	if err != nil {
+		t.Fatalf("ListBranches after prune: %v", err)
+	}
+	if len(branches) != 0 {
+		t.Errorf("expected 0 branches after prune, got %d: %v", len(branches), branches)
+	}
+}
+
+func TestPruneStaleBranches_DryRun(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Create and merge a polecat branch (same as above)
+	if err := g.CreateBranch("polecat/test-dryrun"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/test-dryrun"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "dry.txt"), []byte("dry"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("dry.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("dry run test"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := g.Checkout(mainBranch); err != nil {
+		t.Fatalf("Checkout main: %v", err)
+	}
+	if err := g.Merge("polecat/test-dryrun"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Push main to update origin/main
+	cmd := exec.Command("git", "push", "origin", mainBranch)
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push main: %v", err)
+	}
+
+	// Dry run should report but not delete
+	pruned, err := g.PruneStaleBranches("polecat/*", true)
+	if err != nil {
+		t.Fatalf("PruneStaleBranches dry-run: %v", err)
+	}
+	if len(pruned) != 1 {
+		t.Fatalf("expected 1 branch in dry-run, got %d", len(pruned))
+	}
+
+	// Branch should still exist
+	branches, err := g.ListBranches("polecat/*")
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if len(branches) != 1 {
+		t.Errorf("expected branch to still exist after dry-run, got %d branches", len(branches))
+	}
+}
+
+func TestPruneStaleBranches_SkipsCurrentBranch(t *testing.T) {
+	localDir, _, _ := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Create and checkout a polecat branch (making it the current branch)
+	if err := g.CreateBranch("polecat/current"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/current"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+
+	// Prune should not delete the current branch
+	pruned, err := g.PruneStaleBranches("polecat/*", false)
+	if err != nil {
+		t.Fatalf("PruneStaleBranches: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Errorf("expected 0 pruned (current branch should be skipped), got %d", len(pruned))
+	}
+}
+
+func TestPruneStaleBranches_SkipsUnmerged(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Create a polecat branch with a commit NOT merged to main
+	if err := g.CreateBranch("polecat/unmerged"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/unmerged"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "unmerged.txt"), []byte("unmerged"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("unmerged.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("unmerged work"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Push to remote so it has a remote tracking branch
+	cmd := exec.Command("git", "push", "origin", "polecat/unmerged")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	if err := g.Checkout(mainBranch); err != nil {
+		t.Fatalf("Checkout main: %v", err)
+	}
+
+	// Prune should NOT delete unmerged branch that still has remote
+	pruned, err := g.PruneStaleBranches("polecat/*", false)
+	if err != nil {
+		t.Fatalf("PruneStaleBranches: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Errorf("expected 0 pruned (unmerged with remote should be kept), got %d", len(pruned))
+	}
+}
+
+func TestFetchPrune(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Create and push a branch
+	if err := g.CreateBranch("polecat/prune-test"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	cmd := exec.Command("git", "push", "origin", "polecat/prune-test")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if err := g.Checkout(mainBranch); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+
+	// Verify remote tracking ref exists
+	exists, err := g.RemoteTrackingBranchExists("origin", "polecat/prune-test")
+	if err != nil {
+		t.Fatalf("RemoteTrackingBranchExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected remote tracking branch to exist")
+	}
+
+	// Delete remote branch
+	cmd = exec.Command("git", "push", "origin", "--delete", "polecat/prune-test")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("delete remote: %v", err)
+	}
+
+	// FetchPrune should remove the stale tracking ref
+	if err := g.FetchPrune("origin"); err != nil {
+		t.Fatalf("FetchPrune: %v", err)
+	}
+
+	exists, err = g.RemoteTrackingBranchExists("origin", "polecat/prune-test")
+	if err != nil {
+		t.Fatalf("RemoteTrackingBranchExists after prune: %v", err)
+	}
+	if exists {
+		t.Error("expected remote tracking branch to be pruned")
+	}
+}

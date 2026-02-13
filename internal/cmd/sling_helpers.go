@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -270,12 +271,38 @@ func ensureAgentReady(sessionName string) error {
 	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
 	if agentName == "" || agentName == "claude" {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
+	}
 
-		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
-		// Claude startup takes ~5-8 seconds on typical machines.
-		time.Sleep(8 * time.Second)
+	// Use prompt-detection polling instead of fixed sleep.
+	// For known presets: uses ReadyPromptPrefix (e.g. "❯ " for Claude) polled every 200ms.
+	// For unknown/custom agents: falls back to a 1s fixed delay (mirrors old behavior).
+	// Note: uses preset-only resolution (not ResolveRoleAgentConfig) because
+	// ensureAgentReady lacks rig/town context — only has the session name.
+	effectiveName := agentName
+	if effectiveName == "" {
+		effectiveName = "claude" // Default sessions without GT_AGENT are Claude
+	}
+	var rc *config.RuntimeConfig
+	if preset := config.GetAgentPreset(config.AgentPreset(effectiveName)); preset != nil {
+		rc = config.RuntimeConfigFromPreset(config.AgentPreset(effectiveName))
 	} else {
-		time.Sleep(1 * time.Second)
+		// Unknown agent — use minimal config: no prompt detection, short fixed delay.
+		rc = &config.RuntimeConfig{
+			Tmux: &config.RuntimeTmuxConfig{
+				ReadyDelayMs: 1000,
+			},
+		}
+	}
+	// Ensure a minimum 1s readiness delay for presets without prompt detection.
+	// Without this, agents with ReadyPromptPrefix="" and ReadyDelayMs=0
+	// (e.g. gemini, cursor) would skip the readiness guard entirely,
+	// reintroducing early-input races that this function exists to prevent.
+	if rc.Tmux != nil && rc.Tmux.ReadyPromptPrefix == "" && rc.Tmux.ReadyDelayMs < 1000 {
+		rc.Tmux.ReadyDelayMs = 1000
+	}
+	if err := t.WaitForRuntimeReady(sessionName, rc, constants.ClaudeStartTimeout); err != nil {
+		// Graceful degradation: warn but proceed (matches original behavior of always continuing)
+		fmt.Fprintf(os.Stderr, "Warning: agent readiness detection timed out for %s: %v\n", sessionName, err)
 	}
 
 	return nil

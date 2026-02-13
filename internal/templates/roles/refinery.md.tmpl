@@ -124,7 +124,7 @@ not by Go code. This follows the Zero Friction Control (ZFC) principle.
 | Situation | Your Decision |
 |-----------|---------------|
 | Merge conflict detected | Abort, notify polecat, or attempt resolution |
-| Tests fail after merge | Rollback, notify polecat, investigate cause |
+| Tests fail after merge | Reopen source issue, notify witness (MERGE_FAILED), close MR, delete branch |
 | Push fails | Retry with backoff, or abort and investigate |
 | Pre-existing test failure | File bead for tracking (NEVER fix it yourself) |
 | Uncertain merge order | Choose based on priority, dependencies, timing |
@@ -291,10 +291,10 @@ go test ./...
 Tests PASSED → Gate auto-satisfied, proceed to merge
 
 Tests FAILED:
-├── Branch caused it? → Abort, notify polecat, skip branch
+├── Branch caused it? → Abort, reopen source issue, notify witness (MERGE_FAILED), close MR, delete branch, skip to loop-check
 └── Pre-existing? → MUST do ONE of:
-    ├── Fix it yourself (you're the Engineer!)
-    └── File bead: bd create --type=bug --priority=1 --title="..."
+    ├── File bead: bd create --type=bug --priority=1 --title="..."
+    └── Proceed with merge if failure is not caused by the branch
 
 GATE: Cannot proceed to merge without fix OR bead filed
 ```

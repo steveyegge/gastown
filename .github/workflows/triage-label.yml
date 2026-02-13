@@ -1,0 +1,26 @@
+name: Auto-label new issues and PRs
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+jobs:
+  add-triage-label:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Add needs-triage label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.issue?.number || context.payload.pull_request?.number;
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              labels: ['status/needs-triage']
+            });

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -434,10 +433,5 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 
 // findTownRoot finds the Gas Town root directory.
 func findTownRoot() (string, error) {
-	cmd := exec.Command("gt", "root")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return workspace.FindFromCwd()
 }
