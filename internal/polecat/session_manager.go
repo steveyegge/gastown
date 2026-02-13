@@ -188,10 +188,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 
-	// Ensure runtime settings exist INSIDE the worktree so Claude Code can find them.
-	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
-	// See: https://github.com/anthropics/claude-code/issues/12962
-	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in the shared polecats parent directory.
+	// Settings are passed to Claude Code via --settings flag.
+	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, workDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

@@ -78,8 +78,8 @@ Routing checks (fixable):
   - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
-  - session-hooks            Check settings.local.json use session-start.sh
-  - claude-settings          Check Claude settings.local.json match templates (fixable)
+  - session-hooks            Check settings.json use session-start.sh
+  - claude-settings          Check Claude settings.json match templates (fixable)
   - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
 
 Patrol checks:

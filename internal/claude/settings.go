@@ -34,15 +34,11 @@ func RoleTypeFor(role string) RoleType {
 	}
 }
 
-// EnsureSettings ensures .claude/settings.local.json exists in the given directory.
-// We use settings.local.json instead of settings.json to:
-// - Avoid conflicting with any project settings the customer may have
-// - Be automatically gitignored by Claude Code convention
-// - Take precedence over settings.json
-//
-// See: https://github.com/anthropics/claude-code/issues/12962
+// EnsureSettings ensures .claude/settings.json exists in the given directory.
+// Settings are installed in a gastown-managed parent directory and passed to
+// Claude Code via --settings flag, keeping customer repos untouched.
 func EnsureSettings(workDir string, roleType RoleType) error {
-	return EnsureSettingsAt(workDir, roleType, ".claude", "settings.local.json")
+	return EnsureSettingsAt(workDir, roleType, ".claude", "settings.json")
 }
 
 // EnsureSettingsAt ensures a settings file exists at a custom directory/file.

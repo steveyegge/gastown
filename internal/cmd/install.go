@@ -216,10 +216,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		mayorRuntimeConfig := config.ResolveRoleAgentConfig("mayor", absPath, mayorDir)
-		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
+		if err := runtime.EnsureSettingsForRole(mayorDir, mayorDir, "mayor", mayorRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created mayor/.claude/settings.local.json\n")
+			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
 		}
 	}
 
@@ -229,10 +229,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		deaconRuntimeConfig := config.ResolveRoleAgentConfig("deacon", absPath, deaconDir)
-		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
+		if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", deaconRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created deacon/.claude/settings.local.json\n")
+			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
 		}
 	}
 

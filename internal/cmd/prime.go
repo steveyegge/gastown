@@ -56,7 +56,7 @@ HOOK MODE (--hook):
   When called as an LLM runtime hook, use --hook to enable session ID handling.
   This reads session metadata from stdin and persists it for the session.
 
-  Claude Code integration (in .claude/settings.local.json):
+  Claude Code integration (in .claude/settings.json):
     "SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]
 
   Claude Code sends JSON on stdin:

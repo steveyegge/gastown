@@ -95,7 +95,7 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Ensure runtime settings exist in deaconDir where session runs.
 	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
-	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

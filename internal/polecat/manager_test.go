@@ -844,10 +844,9 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	// TRACKED files to the repo's directory structure. The user's code should stay pure.
 	//
 	// After polecat install, `git status` in the worktree should show no
-	// untracked files and no modifications, EXCEPT for .claude/settings.local.json
-	// which we install for runtime hooks. This is gitignored by convention.
-	//
-	// Real repos gitignore .claude/ so our settings.local.json won't pollute the repo.
+	// untracked files and no modifications. Settings are installed at the shared
+	// polecats/.claude/settings.json directory (outside worktrees), so they
+	// never appear in any worktree's git status.
 
 	root := t.TempDir()
 
@@ -885,7 +884,7 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	}
 
 	// Create .gitignore with .claude/ and .beads/ (standard practice)
-	// .claude/ - Claude Code local state (settings.local.json)
+	// .claude/ - Claude Code local state
 	// .beads/ - Gas Town local state (redirect file)
 	gitignorePath := filepath.Join(mayorRig, ".gitignore")
 	if err := os.WriteFile(gitignorePath, []byte(".claude/\n.beads/\n"), 0644); err != nil {
@@ -950,7 +949,7 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	}
 
 	// Run git status in worktree - should show nothing except .beads/ (infrastructure)
-	// .claude/settings.local.json is gitignored so won't appear
+	// Settings are at polecats/.claude/settings.json (outside worktree) so won't appear
 	cmd = exec.Command("git", "status", "--porcelain")
 	cmd.Dir = polecat.ClonePath
 	out, err := cmd.CombinedOutput()
@@ -979,12 +978,11 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	}
 }
 
-func TestAddWithOptions_SettingsInstalledInWorktree(t *testing.T) {
-	// This test verifies that polecat creation installs .claude/settings.local.json
-	// INSIDE the worktree (not in the parent polecats/ directory) so that Claude Code
-	// can find the hooks. Claude Code does not traverse parent directories for settings.
-	//
-	// See: https://github.com/anthropics/claude-code/issues/12962
+func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
+	// This test verifies that polecat creation installs .claude/settings.json
+	// in the SHARED polecats/ parent directory (not inside individual worktrees).
+	// Claude Code with --settings supports parent directory settings, and placing
+	// them at the polecats/ level avoids polluting individual worktree repos.
 
 	root := t.TempDir()
 
@@ -1061,15 +1059,17 @@ func TestAddWithOptions_SettingsInstalledInWorktree(t *testing.T) {
 		t.Fatalf("AddWithOptions: %v", err)
 	}
 
-	// Verify settings.local.json exists INSIDE the worktree
-	settingsPath := filepath.Join(polecat.ClonePath, ".claude", "settings.local.json")
+	// Verify settings.json exists in the SHARED polecats/ parent directory
+	// polecats dir is the parent of polecat.ClonePath's parent (ClonePath = polecats/<name>/<rig>)
+	polecatsDir := filepath.Dir(filepath.Dir(polecat.ClonePath))
+	settingsPath := filepath.Join(polecatsDir, ".claude", "settings.json")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
-		t.Errorf("settings.local.json should exist at %s (inside worktree) for Claude Code to find hooks", settingsPath)
+		t.Errorf("settings.json should exist at %s (shared polecats dir) for Claude Code to find hooks", settingsPath)
 	}
 
-	// Verify settings.json does NOT exist at the old location (polecats/.claude/)
-	oldSettingsPath := filepath.Join(root, "polecats", ".claude", "settings.json")
-	if _, err := os.Stat(oldSettingsPath); err == nil {
-		t.Errorf("settings.json should NOT exist at old location %s (Claude Code can't find it there)", oldSettingsPath)
+	// Verify settings.json does NOT exist inside the worktree (no longer installed there)
+	worktreeSettingsPath := filepath.Join(polecat.ClonePath, ".claude", "settings.json")
+	if _, err := os.Stat(worktreeSettingsPath); err == nil {
+		t.Errorf("settings.json should NOT exist inside worktree at %s (settings are now in shared polecats dir)", worktreeSettingsPath)
 	}
 }

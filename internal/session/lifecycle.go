@@ -143,7 +143,11 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 	runtimeConfig := config.ResolveRoleAgentConfig(cfg.Role, cfg.TownRoot, cfg.RigPath)
 
 	// 2. Ensure settings/plugins exist for the agent.
-	if err := runtime.EnsureSettingsForRole(cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
+	settingsDir := config.RoleSettingsDir(cfg.Role, cfg.RigPath)
+	if settingsDir == "" {
+		settingsDir = cfg.WorkDir
+	}
+	if err := runtime.EnsureSettingsForRole(settingsDir, cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
 		return nil, fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

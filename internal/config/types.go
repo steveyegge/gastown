@@ -697,10 +697,9 @@ func defaultHooksDir(provider string) string {
 func defaultHooksFile(provider string) string {
 	switch provider {
 	case "claude":
-		// Use settings.local.json to avoid conflicting with customer settings
-		// and to be automatically gitignored by Claude Code convention.
-		// See: https://github.com/anthropics/claude-code/issues/12962
-		return "settings.local.json"
+		// Use settings.json installed via --settings flag in a gastown-managed
+		// parent directory, keeping customer repos untouched.
+		return "settings.json"
 	case "opencode":
 		return "gastown.js"
 	default:

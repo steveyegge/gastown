@@ -704,12 +704,12 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
-	// Install runtime settings INSIDE the worktree so Claude Code can find hooks.
-	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Install runtime settings in the shared polecats parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(clonePath, "polecat", runtimeConfig); err != nil {
+	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, clonePath, "polecat", runtimeConfig); err != nil {
 		// Non-fatal - log warning but continue
 		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}

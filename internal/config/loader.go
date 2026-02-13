@@ -1095,7 +1095,7 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 		return rc
 	}
 
-	settingsDir := roleSettingsDir(role, rigPath)
+	settingsDir := RoleSettingsDir(role, rigPath)
 	if settingsDir == "" {
 		return rc
 	}
@@ -1115,10 +1115,10 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 	return rc
 }
 
-// roleSettingsDir returns the shared settings directory for roles whose session
+// RoleSettingsDir returns the shared settings directory for roles whose session
 // working directory differs from their settings location. Returns empty for
 // roles where settings and session directory are the same (mayor, deacon).
-func roleSettingsDir(role, rigPath string) string {
+func RoleSettingsDir(role, rigPath string) string {
 	switch role {
 	case "crew", "witness", "refinery":
 		return filepath.Join(rigPath, role)

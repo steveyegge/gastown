@@ -120,17 +120,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
-	// Ensure runtime settings exist in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Ensure runtime settings exist in the shared refinery parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(refineryRigDir, "refinery", runtimeConfig); err != nil {
+	refinerySettingsDir := config.RoleSettingsDir("refinery", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(refinerySettingsDir, refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
-	// so settings.local.json doesn't dirty the source repo worktree.
+	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(refineryRigDir); err != nil {
 		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
 	}

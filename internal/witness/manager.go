@@ -117,17 +117,16 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure runtime settings exist in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Ensure runtime settings exist in the shared witness parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	townRoot := m.townRoot()
 	runtimeConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(witnessDir, "witness", runtimeConfig); err != nil {
+	witnessSettingsDir := config.RoleSettingsDir("witness", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(witnessSettingsDir, witnessDir, "witness", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
-	// so settings.local.json doesn't dirty the source repo worktree.
+	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(witnessDir); err != nil {
 		fmt.Printf("Warning: could not update witness .gitignore: %v\n", err)
 	}

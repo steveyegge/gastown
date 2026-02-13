@@ -15,13 +15,12 @@ import (
 )
 
 // EnsureSettingsForRole provisions all agent-specific configuration for a role.
-// This includes settings/plugins AND slash commands.
-//
-// Design note: We keep this function name (vs creating EnsureAgentSetup) to minimize
-// changes across the codebase. All existing callers automatically get command
-// provisioning without code changes. The name is still accurate as commands are
-// part of agent settings/configuration.
-func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
+// settingsDir is where provider settings (e.g., .claude/settings.json) are installed.
+// workDir is the agent's working directory where slash commands are provisioned.
+// For roles like crew/witness/refinery/polecat, settingsDir is a gastown-managed
+// parent directory (passed via --settings flag), while workDir is the customer repo.
+// For mayor/deacon, settingsDir and workDir are the same.
+func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
@@ -36,13 +35,14 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 	}
 
 	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode)
+	// Settings are installed to settingsDir (gastown-managed parent for rig roles).
 	switch provider {
 	case "claude":
-		if err := claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+		if err := claude.EnsureSettingsForRoleAt(settingsDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
 			return err
 		}
 	case "opencode":
-		if err := opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+		if err := opencode.EnsurePluginAt(settingsDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
 			return err
 		}
 	}

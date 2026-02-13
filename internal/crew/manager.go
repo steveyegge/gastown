@@ -228,12 +228,12 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
-	// Install runtime settings in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Install runtime settings in the shared crew parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	addTownRoot := filepath.Dir(m.rig.Path)
 	addRuntimeConfig := config.ResolveRoleAgentConfig("crew", addTownRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(crewPath, "crew", addRuntimeConfig); err != nil {
+	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewSettingsDir, crewPath, "crew", addRuntimeConfig); err != nil {
 		// Non-fatal - log warning but continue
 		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
@@ -606,12 +606,12 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure runtime settings exist in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Ensure runtime settings exist in the shared crew parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
+	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

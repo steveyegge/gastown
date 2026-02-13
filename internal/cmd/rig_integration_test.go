@@ -44,7 +44,7 @@ var agentAllowlist = map[string][]string{
 	// For tracked beads repos, bd init creates files here (runs in mayor/rig).
 	"mayor": {
 		"?? AGENTS.md", // bd init: creates multi-provider instructions (tracked beads repos only)
-		"?? .claude/",  // bd init: creates .claude/settings.local.json with onboard prompt
+		"?? .claude/",  // bd init: creates .claude/settings.json with onboard prompt
 	},
 
 	// Refinery is a worktree for the merge queue processor.
@@ -53,12 +53,12 @@ var agentAllowlist = map[string][]string{
 	// Crew workers are user-managed worktrees for human developers.
 	"crew": {
 		"?? state.json", // crew/manager.go: Gas Town metadata (TODO: migrate to beads like polecats)
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
 	},
 
 	// Polecats are ephemeral worktrees for autonomous agents.
 	"polecat": {
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/settings.local.json, .claude/commands/, and .runtime/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
 	},
 }
 
@@ -412,26 +412,22 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 	}
 
 	// NOTE: Claude settings are no longer installed by gt rig add.
-	// Claude Code does NOT traverse parent directories for settings, only for CLAUDE.md.
-	// Settings are installed by each agent in their working directory at startup time.
-	// Verify NO settings exist at parent directories (neither settings.json nor settings.local.json).
+	// Settings are now installed at parent directories (e.g., witness/.claude/settings.json)
+	// by each agent at startup time, and passed to Claude via --settings flag.
+	// Verify NO settings exist at parent directories yet (gt rig add doesn't create them).
 	parentSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
 		{filepath.Join(rigPath, "witness", ".claude", "settings.json"), "witness/.claude/settings.json"},
-		{filepath.Join(rigPath, "witness", ".claude", "settings.local.json"), "witness/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "refinery", ".claude", "settings.json"), "refinery/.claude/settings.json"},
-		{filepath.Join(rigPath, "refinery", ".claude", "settings.local.json"), "refinery/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "crew", ".claude", "settings.json"), "crew/.claude/settings.json"},
-		{filepath.Join(rigPath, "crew", ".claude", "settings.local.json"), "crew/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "polecats", ".claude", "settings.json"), "polecats/.claude/settings.json"},
-		{filepath.Join(rigPath, "polecats", ".claude", "settings.local.json"), "polecats/.claude/settings.local.json"},
 	}
 
 	for _, s := range parentSettingsThatShouldNotExist {
 		if _, err := os.Stat(s.path); err == nil {
-			t.Errorf("%s should NOT exist (Claude Code doesn't traverse parent dirs for settings)", s.desc)
+			t.Errorf("%s should NOT exist after gt rig add (agents install settings at startup)", s.desc)
 		}
 	}
 
@@ -439,20 +435,22 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
 	// Full context is injected ephemerally by `gt prime` at session start.
 
-	// NOTE: settings.local.json WILL exist inside working directories (witness/rig/.claude/settings.local.json)
-	// but only after agents start. gt rig add doesn't install settings; agents install them at startup.
-	// The old settings.json filename should never exist (it's been replaced by settings.local.json).
+	// NOTE: Settings are now installed at parent directories (e.g., witness/.claude/settings.json)
+	// and passed to Claude via --settings flag. Settings no longer exist inside working directories.
+	// The old settings.local.json filename should never exist (replaced by settings.json at parent dirs).
 	staleSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
-		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude/settings.json (stale filename)"},
-		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude/settings.json (stale filename)"},
+		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.local.json"), "witness/rig/.claude/settings.local.json (stale filename)"},
+		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.local.json"), "refinery/rig/.claude/settings.local.json (stale filename)"},
+		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude/settings.json (settings belong at parent dir)"},
+		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude/settings.json (settings belong at parent dir)"},
 	}
 
 	for _, w := range staleSettingsThatShouldNotExist {
 		if _, err := os.Stat(w.path); err == nil {
-			t.Errorf("%s should NOT exist (use settings.local.json instead)", w.desc)
+			t.Errorf("%s should NOT exist (settings are at parent dirs via --settings flag)", w.desc)
 		}
 	}
 

@@ -67,9 +67,12 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	// tracking issues.jsonl. Adding .beads/ here overrides that and breaks
 	// bd sync. This has regressed twice (PR #753 added it, #891 removed it,
 	// #966 re-added it). See overlay_test.go for a regression guard.
+	//
+	// NOTE: .claude/settings.json is NOT listed here because settings are now
+	// installed in gastown-managed parent directories via --settings flag,
+	// not in the customer repo worktree.
 	requiredPatterns := []string{
 		".runtime/",
-		".claude/settings.local.json",
 		".claude/commands/",
 		".logs/",
 	}
@@ -131,7 +134,7 @@ func EnsureGitignorePatterns(worktreePath string) error {
 // matchesGitignorePattern checks if a gitignore line covers the required pattern.
 // Handles variant forms (with/without trailing slash, leading slash) and recognizes
 // that a broader directory pattern (e.g., ".claude/") covers more specific paths
-// (e.g., ".claude/settings.local.json").
+// (e.g., ".claude/commands/").
 func matchesGitignorePattern(line, pattern string) bool {
 	// Strip leading slash for comparison
 	normLine := strings.TrimPrefix(line, "/")
@@ -145,7 +148,7 @@ func matchesGitignorePattern(line, pattern string) bool {
 	}
 
 	// A broader directory pattern covers more specific paths underneath it.
-	// e.g., ".claude/" covers ".claude/settings.local.json"
+	// e.g., ".claude/" covers ".claude/commands/"
 	if strings.HasSuffix(normLine, "/") && strings.HasPrefix(normPattern, normLine) {
 		return true
 	}

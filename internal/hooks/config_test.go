@@ -485,8 +485,8 @@ func TestDiscoverTargets(t *testing.T) {
 		t.Fatalf("DiscoverTargets failed: %v", err)
 	}
 
-	if len(targets) < 5 {
-		t.Errorf("expected at least 5 targets, got %d", len(targets))
+	if len(targets) < 4 {
+		t.Errorf("expected at least 4 targets, got %d", len(targets))
 		for _, tgt := range targets {
 			t.Logf("  target: %s (key=%s)", tgt.DisplayKey(), tgt.Key)
 		}
