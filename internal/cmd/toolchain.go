@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/bdcmd"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -270,7 +271,7 @@ func runToolchainBuild(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Updating bead %s with sidecar_image=%s\n",
 			style.Bold.Render("↻"), beadID, buildTag)
 
-		updateCmd := exec.Command("bd", "update", beadID,
+		updateCmd := bdcmd.Command("update", beadID,
 			"--metadata", fmt.Sprintf("sidecar_image=%s", buildTag))
 		updateCmd.Stdout = os.Stdout
 		updateCmd.Stderr = os.Stderr
