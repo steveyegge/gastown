@@ -72,16 +72,13 @@ bd show <issue-id> --json
 
 An issue is "ready" if ALL of these are true:
 - status = "open" (NOT in_progress, closed, or hooked)
-- not blocked from issue details (`blocked_by_count > 0`, `blocked_by`, or open `dependencies` edges with `dependency_type="blocks"`)
+- not in blocked list (check: bd blocked --json)
 - assignee is empty OR assignee session is dead
 
 Check blocked status:
 ```bash
-bd show <issue-id> --json
-# Blocked when any of these are true:
-# - blocked_by_count > 0
-# - blocked_by has entries
-# - dependencies has an entry with dependency_type="blocks" and status not in {"closed","tombstone"}
+bd blocked --json
+# If issue ID appears here, it's blocked (skip it)
 ```
 
 Check assignee session if set:
