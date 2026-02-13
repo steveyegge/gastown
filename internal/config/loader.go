@@ -1092,14 +1092,16 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 
 // roleSettingsDir returns the shared settings directory for roles whose session
 // working directory differs from their settings location. Returns empty for
-// roles where settings and session directory are the same (mayor, deacon).
+// roles where settings and session directory are the same (mayor, deacon), or
+// where each agent has its own settings in its working directory (crew, polecat).
 func roleSettingsDir(role, rigPath string) string {
 	switch role {
-	case "crew", "witness", "refinery":
+	case "witness", "refinery":
+		// Single-instance roles: settings live at <rig>/<role>/.claude/
 		return filepath.Join(rigPath, role)
-	case "polecat":
-		return filepath.Join(rigPath, "polecats")
 	default:
+		// crew/polecat: per-agent settings in <rig>/<role>/<name>/.claude/ (CWD)
+		// mayor/deacon/boot: settings in working directory
 		return ""
 	}
 }

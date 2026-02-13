@@ -1603,14 +1603,14 @@ func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
 		t.Fatalf("creating settings dir: %v", err)
 	}
 
-	// Default config (Claude agent) for polecat role
+	// Default config (Claude agent) for witness role (single-instance, gets --settings)
 	settings := NewRigSettings()
 	if err := SaveRigSettings(filepath.Join(settingsDir, "config.json"), settings); err != nil {
 		t.Fatalf("saving settings: %v", err)
 	}
 
-	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
-	// Should contain --settings since default agent is Claude
+	rc := ResolveRoleAgentConfig("witness", townRoot, rigPath)
+	// Should contain --settings since witness is a single-instance role
 	found := false
 	for _, arg := range rc.Args {
 		if arg == "--settings" {
@@ -1619,7 +1619,18 @@ func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("default Claude agent should get --settings flag for polecat role, but Args = %v", rc.Args)
+		t.Errorf("default Claude agent should get --settings flag for witness role, but Args = %v", rc.Args)
+	}
+
+	// Polecat and crew should NOT get --settings (per-agent settings in CWD)
+	for _, role := range []string{"polecat", "crew"} {
+		rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		for _, arg := range rc.Args {
+			if arg == "--settings" {
+				t.Errorf("%s role should NOT get --settings flag (per-agent CWD settings), but Args = %v", role, rc.Args)
+				break
+			}
+		}
 	}
 }
 
