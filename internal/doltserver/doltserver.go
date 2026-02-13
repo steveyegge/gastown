@@ -578,6 +578,81 @@ func ListDatabases(townRoot string) ([]string, error) {
 	return databases, nil
 }
 
+// VerifyDatabases queries the running Dolt SQL server for SHOW DATABASES and
+// compares the result against the filesystem-discovered databases from
+// ListDatabases. Returns the list of databases the server is actually serving
+// and any that exist on disk but are missing from the server.
+//
+// This catches the silent failure mode where Dolt skips databases with stale
+// manifests after migration — the filesystem says they exist, but the server
+// doesn't serve them.
+func VerifyDatabases(townRoot string) (served, missing []string, err error) {
+	config := DefaultConfig(townRoot)
+
+	// First, check if the server is reachable.
+	if err := CheckServerReachable(townRoot); err != nil {
+		return nil, nil, fmt.Errorf("server not reachable: %w", err)
+	}
+
+	// Query the server for databases it is actually serving.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dolt", "sql",
+		"-r", "json",
+		"-q", "SHOW DATABASES",
+	)
+	cmd.Dir = config.DataDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("querying SHOW DATABASES: %w", err)
+	}
+
+	// Parse JSON output (same pattern as daemon/dolt.go:listDatabases).
+	var result struct {
+		Rows []struct {
+			Database string `json:"Database"`
+		} `json:"rows"`
+	}
+
+	servedSet := make(map[string]bool)
+	if err := json.Unmarshal(output, &result); err != nil {
+		// Fall back to line parsing if JSON fails.
+		for _, line := range strings.Split(string(output), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
+				if line != "information_schema" {
+					servedSet[line] = true
+				}
+			}
+		}
+	} else {
+		for _, row := range result.Rows {
+			if row.Database != "" && row.Database != "information_schema" {
+				servedSet[row.Database] = true
+			}
+		}
+	}
+
+	for name := range servedSet {
+		served = append(served, name)
+	}
+
+	// Compare against filesystem databases.
+	fsDatabases, err := ListDatabases(townRoot)
+	if err != nil {
+		return served, nil, fmt.Errorf("listing filesystem databases: %w", err)
+	}
+
+	for _, db := range fsDatabases {
+		if !servedSet[db] {
+			missing = append(missing, db)
+		}
+	}
+
+	return served, missing, nil
+}
+
 // InitRig initializes a new rig database in the data directory.
 // If the Dolt server is running, it executes CREATE DATABASE to register the
 // database with the live server (avoiding the need for a restart).
