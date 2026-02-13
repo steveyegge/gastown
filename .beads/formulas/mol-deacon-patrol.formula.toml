@@ -439,8 +439,9 @@ gt witness status <rig>
 gt refinery status <rig>
 
 # ONLY if active work exists - health ping (clears backoff as side effect)
-gt nudge <rig>/witness 'HEALTH_CHECK from deacon'
-gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
+# Use --mode=queue to avoid interrupting in-flight tool calls
+gt nudge --mode=queue <rig>/witness 'HEALTH_CHECK from deacon'
+gt nudge --mode=queue <rig>/refinery 'HEALTH_CHECK from deacon'
 ```
 
 **Health Ping Benefit**: The nudge commands serve dual purposes:
