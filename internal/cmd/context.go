@@ -104,7 +104,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve backend for the target session (supports tmux, coop, ssh)
+	// Resolve backend for the target session (supports coop)
 	backend, sessionKey := resolveBackendForSession(session)
 
 	// If no specific flag is set, default to --check

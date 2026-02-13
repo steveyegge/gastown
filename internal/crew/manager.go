@@ -543,11 +543,19 @@ func (m *Manager) SessionName(name string) string {
 	return fmt.Sprintf("gt-%s-crew-%s", m.rig.Name, name)
 }
 
-// Start creates and starts a tmux session for a crew member.
+// Start creates and starts a session for a crew member.
 // If the crew member doesn't exist, it will be created first.
+// When running in K8s (detected via KUBERNETES_SERVICE_HOST or rig settings),
+// creates an agent bead with K8s labels instead of a tmux session.
 func (m *Manager) Start(name string, opts StartOptions) error {
 	if err := validateCrewName(name); err != nil {
 		return err
+	}
+
+	// Check execution target — K8s or local
+	execTarget := config.ResolveExecutionTarget(m.rig.Path, "")
+	if execTarget == config.ExecutionTargetK8s {
+		return m.startK8s(name, opts)
 	}
 
 	// Get or create the crew worker
@@ -717,6 +725,34 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// serves no purpose. If the caller needs to know when the agent is ready,
 	// they can check with IsAgentAlive().
 
+	return nil
+}
+
+// startK8s creates an agent bead for a K8s crew member without creating
+// a local worktree or tmux session. The K8s controller watches for agent beads
+// with gt:agent + execution_target:k8s labels, then creates pods.
+func (m *Manager) startK8s(name string, opts StartOptions) error {
+	townRoot := filepath.Dir(m.rig.Path)
+	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
+	agentBeadID := beads.CrewBeadIDWithPrefix(prefix, m.rig.Name, name)
+	beadsClient := beads.New(townRoot)
+
+	_, err := beadsClient.CreateOrReopenAgentBead(agentBeadID, agentBeadID, &beads.AgentFields{
+		RoleType:   "crew",
+		Rig:        m.rig.Name,
+		AgentState: "spawning",
+		HookBead:   opts.HookBead,
+	})
+	if err != nil {
+		return fmt.Errorf("creating agent bead for K8s crew: %w", err)
+	}
+
+	// Label the agent bead so the controller dispatches it to K8s.
+	if err := beadsClient.AddLabel(agentBeadID, "execution_target:k8s"); err != nil {
+		fmt.Printf("Warning: could not add execution_target label: %v\n", err)
+	}
+
+	fmt.Printf("Crew %s dispatched to K8s (agent_state=spawning)\n", name)
 	return nil
 }
 

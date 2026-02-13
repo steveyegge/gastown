@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -92,10 +93,18 @@ func (m *SessionManager) kennelPath(dogName string) string {
 
 // Start creates and starts a new session for a dog.
 // Dogs run Claude sessions that check mail for work and execute formulas.
+// When running in K8s (detected via KUBERNETES_SERVICE_HOST), creates an
+// agent bead with K8s labels instead of a tmux session.
 func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	kennelDir := m.kennelPath(dogName)
 	if _, err := os.Stat(kennelDir); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s", ErrDogNotFound, dogName)
+	}
+
+	// Check execution target — dogs are town-level (no rig path)
+	execTarget := config.ResolveExecutionTarget("", "")
+	if execTarget == config.ExecutionTargetK8s {
+		return m.startK8s(dogName, opts)
 	}
 
 	sessionID := m.SessionName(dogName)
@@ -179,6 +188,30 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		return fmt.Errorf("session %s died during startup", sessionID)
 	}
 
+	return nil
+}
+
+// startK8s creates an agent bead for a K8s dog without creating a tmux session.
+// The K8s controller watches for agent beads with gt:agent + execution_target:k8s
+// labels, then creates pods.
+func (m *SessionManager) startK8s(dogName string, opts SessionStartOptions) error {
+	agentBeadID := beads.DogBeadIDTown(dogName)
+	beadsClient := beads.New(m.townRoot)
+
+	_, err := beadsClient.CreateOrReopenAgentBead(agentBeadID, agentBeadID, &beads.AgentFields{
+		RoleType:   "dog",
+		AgentState: "spawning",
+	})
+	if err != nil {
+		return fmt.Errorf("creating agent bead for K8s dog: %w", err)
+	}
+
+	// Label the agent bead so the controller dispatches it to K8s.
+	if err := beadsClient.AddLabel(agentBeadID, "execution_target:k8s"); err != nil {
+		fmt.Printf("Warning: could not add execution_target label: %v\n", err)
+	}
+
+	fmt.Printf("Dog %s dispatched to K8s (agent_state=spawning)\n", dogName)
 	return nil
 }
 

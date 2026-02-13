@@ -218,7 +218,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	}
 
 	// Special case: "deacon" target maps to the Deacon session.
-	// Uses ResolveBackend to support Coop (K8s), SSH, and local tmux.
+	// Uses ResolveBackend to support Coop (K8s) and local backends.
 	if target == "deacon" || target == "deacon/" {
 		deaconSession := session.DeaconSessionName()
 
@@ -245,7 +245,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Try remote backend first (K8s-hosted agents via Coop or SSH).
+	// Try remote backend first (K8s-hosted agents via Coop).
 	// This works for any target format (rig/polecat, raw agent bead ID, etc.).
 	remoteBackend := terminal.ResolveBackend(target)
 	switch remoteBackend.(type) {

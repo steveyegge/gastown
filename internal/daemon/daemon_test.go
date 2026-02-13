@@ -248,7 +248,7 @@ func TestGetCoopURLFromNotes(t *testing.T) {
 		expected string
 	}{
 		{"empty notes", "", ""},
-		{"no coop", "backend: tmux\nssh_host: 10.0.0.1", ""},
+		{"no coop", "backend: local\nsome_key: 10.0.0.1", ""},
 		{"coop with url", "backend: coop\ncoop_url: http://10.0.0.5:8080", "http://10.0.0.5:8080"},
 		{"coop url only", "coop_url: http://localhost:8080", "http://localhost:8080"},
 		{"coop with token", "backend: coop\ncoop_url: http://10.0.0.5:8080\ncoop_token: secret", "http://10.0.0.5:8080"},

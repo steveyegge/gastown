@@ -34,21 +34,10 @@ func (m *mockNotesReader) GetAgentNotes(agentID string) (string, error) {
 	return n, nil
 }
 
-// mockTmuxLister returns a canned list of tmux sessions.
-type mockTmuxLister struct {
-	sessions []string
-	err      error
-}
-
-func (m *mockTmuxLister) ListSessions() ([]string, error) {
-	return m.sessions, m.err
-}
-
 func TestDiscoverAll_Empty(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
 		&mockNotesReader{notes: map[string]string{}},
-		&mockTmuxLister{sessions: nil},
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
@@ -60,7 +49,7 @@ func TestDiscoverAll_Empty(t *testing.T) {
 	}
 }
 
-func TestDiscoverAll_LocalTmux(t *testing.T) {
+func TestDiscoverAll_LocalAgent(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{
 			"hq-mayor": {
@@ -71,7 +60,6 @@ func TestDiscoverAll_LocalTmux(t *testing.T) {
 			},
 		}},
 		&mockNotesReader{notes: map[string]string{}},
-		&mockTmuxLister{sessions: []string{"hq-mayor", "hq-deacon"}},
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
@@ -89,11 +77,8 @@ func TestDiscoverAll_LocalTmux(t *testing.T) {
 	if s.Role != "mayor" {
 		t.Errorf("Role = %q, want mayor", s.Role)
 	}
-	if s.BackendType != "tmux" {
-		t.Errorf("BackendType = %q, want tmux", s.BackendType)
-	}
-	if !s.Alive {
-		t.Error("expected Alive=true for tmux session in list")
+	if s.BackendType != "coop" {
+		t.Errorf("BackendType = %q, want coop", s.BackendType)
 	}
 	if s.AgentState != "working" {
 		t.Errorf("AgentState = %q, want working", s.AgentState)
@@ -113,7 +98,6 @@ func TestDiscoverAll_CoopFromNotes(t *testing.T) {
 		&mockNotesReader{notes: map[string]string{
 			"gt-gastown-crew-k8s": "backend: coop\ncoop_url: http://10.0.1.5:8080",
 		}},
-		nil, // no tmux in K8s
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
@@ -149,8 +133,7 @@ func TestDiscoverAll_K8sDefaultsToCoop(t *testing.T) {
 				Labels:      []string{"gt:agent", "execution_target:k8s"},
 			},
 		}},
-		&mockNotesReader{notes: map[string]string{}}, // no notes yet
-		nil,
+		&mockNotesReader{notes: map[string]string{}},
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
@@ -162,9 +145,8 @@ func TestDiscoverAll_K8sDefaultsToCoop(t *testing.T) {
 	}
 
 	s := sessions[0]
-	// K8s target without coop_url should default to coop backend
 	if s.BackendType != "coop" {
-		t.Errorf("BackendType = %q, want coop (K8s default)", s.BackendType)
+		t.Errorf("BackendType = %q, want coop", s.BackendType)
 	}
 }
 
@@ -191,7 +173,6 @@ func TestDiscoverRig_Filters(t *testing.T) {
 			},
 		}},
 		&mockNotesReader{notes: map[string]string{}},
-		&mockTmuxLister{sessions: nil},
 	)
 
 	sessions, err := reg.DiscoverRig(context.Background(), "gastown", DiscoverOpts{})
@@ -217,7 +198,6 @@ func TestLookup_Found(t *testing.T) {
 			},
 		}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 
 	s, err := reg.Lookup(context.Background(), "hq-mayor", false)
@@ -233,7 +213,6 @@ func TestLookup_NotFound(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 
 	_, err := reg.Lookup(context.Background(), "missing", false)
@@ -266,7 +245,6 @@ func TestDiscoverAll_WithLivenessCheck(t *testing.T) {
 		&mockNotesReader{notes: map[string]string{
 			"gt-gastown-crew-k8s": "backend: coop\ncoop_url: " + srv.URL,
 		}},
-		nil,
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{
@@ -296,7 +274,6 @@ func TestDiscoverAll_LivenessCheckUnreachable(t *testing.T) {
 		&mockNotesReader{notes: map[string]string{
 			"gt-gastown-crew-k8s": "backend: coop\ncoop_url: http://127.0.0.1:1", // unreachable
 		}},
-		nil,
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{
@@ -317,40 +294,11 @@ func TestDiscoverAll_ListerError(t *testing.T) {
 	reg := New(
 		&mockAgentLister{err: fmt.Errorf("daemon unreachable")},
 		nil,
-		nil,
 	)
 
 	_, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
 	if err == nil {
 		t.Fatal("expected error when lister fails")
-	}
-}
-
-func TestDiscoverAll_TmuxErrors_Graceful(t *testing.T) {
-	reg := New(
-		&mockAgentLister{beads: map[string]*beads.Issue{
-			"hq-mayor": {
-				ID:          "hq-mayor",
-				Title:       "Mayor",
-				Description: "Mayor\n\nrole_type: mayor\nrig: null\nagent_state: working",
-				Labels:      []string{"gt:agent"},
-			},
-		}},
-		&mockNotesReader{notes: map[string]string{}},
-		&mockTmuxLister{err: fmt.Errorf("tmux not running")},
-	)
-
-	// Should still succeed — tmux errors are non-fatal
-	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("expected 1 session, got %d", len(sessions))
-	}
-	// Mayor should not be alive since tmux failed
-	if sessions[0].Alive {
-		t.Error("expected Alive=false when tmux list failed")
 	}
 }
 
@@ -363,15 +311,14 @@ func TestApplyNotes_BackendDetection(t *testing.T) {
 	}{
 		{"coop explicit", "backend: coop\ncoop_url: http://x:8080", "coop", "http://x:8080"},
 		{"coop from url only", "coop_url: http://x:8080", "coop", "http://x:8080"},
-		{"ssh backend", "backend: k8s\nssh_host: user@pod", "ssh", ""},
-		{"ssh alt", "backend: ssh\nssh_host: user@pod", "ssh", ""},
-		{"no backend info", "some_key: some_val", "tmux", ""},
+		{"k8s backend maps to coop", "backend: k8s\ncoop_url: http://x:8080", "coop", "http://x:8080"},
+		{"no backend info", "some_key: some_val", "coop", ""},
 	}
 
 	reg := &SessionRegistry{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Session{BackendType: "tmux"}
+			s := &Session{BackendType: "coop"}
 			reg.applyNotes(s, tt.notes)
 			if s.BackendType != tt.wantBackend {
 				t.Errorf("BackendType = %q, want %q", s.BackendType, tt.wantBackend)
@@ -460,7 +407,6 @@ func TestCreateSession_K8s(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 	reg.SetWriter(writer)
 
@@ -507,7 +453,6 @@ func TestCreateSession_Local(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 	reg.SetWriter(writer)
 
@@ -523,8 +468,8 @@ func TestCreateSession_Local(t *testing.T) {
 	if s.Target != "local" {
 		t.Errorf("Target = %q, want local", s.Target)
 	}
-	if s.BackendType != "tmux" {
-		t.Errorf("BackendType = %q, want tmux", s.BackendType)
+	if s.BackendType != "coop" {
+		t.Errorf("BackendType = %q, want coop", s.BackendType)
 	}
 
 	// No K8s label
@@ -536,7 +481,6 @@ func TestCreateSession_Local(t *testing.T) {
 func TestCreateSession_NoWriter(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
-		nil,
 		nil,
 	)
 
@@ -551,7 +495,6 @@ func TestCreateSession_EmptyID(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
 		nil,
-		nil,
 	)
 	reg.SetWriter(writer)
 
@@ -565,7 +508,6 @@ func TestDestroySession(t *testing.T) {
 	writer := newMockWriter()
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
-		nil,
 		nil,
 	)
 	reg.SetWriter(writer)
@@ -586,7 +528,6 @@ func TestDestroySession(t *testing.T) {
 func TestDestroySession_NoWriter(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{}},
-		nil,
 		nil,
 	)
 
@@ -625,7 +566,6 @@ func TestRestartSession_CoopBackend(t *testing.T) {
 		&mockNotesReader{notes: map[string]string{
 			"gt-gastown-crew-k8s": "backend: coop\ncoop_url: " + srv.URL,
 		}},
-		nil,
 	)
 
 	err := reg.RestartSession(context.Background(), "gt-gastown-crew-k8s")
@@ -640,7 +580,7 @@ func TestRestartSession_CoopBackend(t *testing.T) {
 	}
 }
 
-func TestRestartSession_NonCoopBackendFails(t *testing.T) {
+func TestRestartSession_NoCoopURL(t *testing.T) {
 	reg := New(
 		&mockAgentLister{beads: map[string]*beads.Issue{
 			"hq-mayor": {
@@ -651,12 +591,12 @@ func TestRestartSession_NonCoopBackendFails(t *testing.T) {
 			},
 		}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 
+	// No coop_url means restart should fail
 	err := reg.RestartSession(context.Background(), "hq-mayor")
 	if err == nil {
-		t.Fatal("expected error for non-coop session")
+		t.Fatal("expected error for session without coop_url")
 	}
 }
 
@@ -673,7 +613,6 @@ func TestHookBeadFromJSON(t *testing.T) {
 			},
 		}},
 		&mockNotesReader{notes: map[string]string{}},
-		nil,
 	)
 
 	sessions, err := reg.DiscoverAll(context.Background(), DiscoverOpts{})

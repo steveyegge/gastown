@@ -401,41 +401,60 @@ func (s *AgentServer) StartCrew(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("crew name is required"))
 	}
 
-	// Build gt crew start command
-	args := []string{"crew", "start", req.Msg.Name, "--rig", req.Msg.Rig}
-	if req.Msg.Account != "" {
-		args = append(args, "--account", req.Msg.Account)
-	}
-	if req.Msg.AgentOverride != "" {
-		args = append(args, "--agent", req.Msg.AgentOverride)
-	}
-	if req.Msg.Create {
-		args = append(args, "--create")
-	}
-
-	cmd := exec.CommandContext(ctx, "gt", args...)
-	cmd.Dir = s.townRoot
-	output, err := cmd.CombinedOutput()
+	// Resolve town name for bead ID generation.
+	townName, err := workspace.GetTownName(s.townRoot)
 	if err != nil {
-		return nil, cmdExecErr("start crew", err, output)
+		townName = "" // Fall back to no-town format
 	}
 
-	session := fmt.Sprintf("gt-%s-crew-%s", req.Msg.Rig, req.Msg.Name)
+	// Generate the agent bead ID using town-level format (hq- prefix).
+	crewID := beads.CrewBeadIDTown(townName, req.Msg.Rig, req.Msg.Name)
+
+	// Create the beads client against town-level beads.
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	bd := beads.New(townBeadsPath)
+
+	// Build agent fields. Setting agent_state=spawning marks this as starting.
+	fields := &beads.AgentFields{
+		RoleType:   "crew",
+		Rig:        req.Msg.Rig,
+		AgentState: "spawning",
+	}
+
+	title := fmt.Sprintf("Crew worker %s in %s", req.Msg.Name, req.Msg.Rig)
+
+	// CreateOrReopen handles re-starting a crew with the same name.
+	issue, err := bd.CreateOrReopenAgentBead(crewID, title, fields)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("creating agent bead: %w", err))
+	}
+
+	// Determine if this was a reopen (crew existed before).
+	created := issue.Status == "" || issue.Status == "open"
+
+	// Add execution_target:k8s label so the controller reconciles this into a pod.
+	if err := bd.AddLabel(crewID, "execution_target:k8s"); err != nil {
+		// Non-fatal: controller may still discover via gt:agent label
+		fmt.Printf("Warning: could not add execution_target label: %v\n", err)
+	}
+
+	// Set the bead status to in_progress to trigger the controller.
+	inProgress := "in_progress"
+	if err := bd.Update(crewID, beads.UpdateOptions{Status: &inProgress}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("setting bead status to in_progress: %w", err))
+	}
+
 	agent := &gastownv1.Agent{
 		Address:   fmt.Sprintf("%s/crew/%s", req.Msg.Rig, req.Msg.Name),
 		Name:      req.Msg.Name,
 		Rig:       req.Msg.Rig,
 		Type:      gastownv1.AgentType_AGENT_TYPE_CREW,
 		State:     gastownv1.AgentState_AGENT_STATE_RUNNING,
-		Session:   session,
 		StartedAt: timestamppb.Now(),
 	}
 
-	created := strings.Contains(string(output), "Created")
-
 	return connect.NewResponse(&gastownv1.StartCrewResponse{
 		Agent:   agent,
-		Session: session,
 		Created: created,
 	}), nil
 }
@@ -451,30 +470,42 @@ func (s *AgentServer) StopAgent(
 
 	// Parse address to get agent details
 	parts := strings.Split(address, "/")
-	var cmd *exec.Cmd
 
+	// Resolve town name and beads client.
+	townName, err := workspace.GetTownName(s.townRoot)
+	if err != nil {
+		townName = ""
+	}
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	bd := beads.New(townBeadsPath)
+
+	var beadID string
 	switch {
 	case len(parts) >= 3 && parts[1] == "crew":
-		args := []string{"crew", "stop", parts[2], "--rig", parts[0]}
-		if req.Msg.Force {
-			args = append(args, "--force")
-		}
-		cmd = exec.CommandContext(ctx, "gt", args...)
+		beadID = beads.CrewBeadIDTown(townName, parts[0], parts[2])
 	case len(parts) >= 3 && parts[1] == "polecats":
-		// For polecats, we send shutdown to witness
-		args := []string{"polecat", "kill", parts[2], "--rig", parts[0]}
-		if req.Msg.Force {
-			args = append(args, "--force")
-		}
-		cmd = exec.CommandContext(ctx, "gt", args...)
+		prefix := beads.GetPrefixForRig(s.townRoot, parts[0])
+		beadID = beads.PolecatBeadIDWithPrefix(prefix, parts[0], parts[2])
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cannot stop agent: %s", address))
 	}
 
-	cmd.Dir = s.townRoot
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, cmdExecErr("stop agent", err, output)
+	// Check if bead has incomplete work before closing.
+	hadIncompleteWork := false
+	if issue, fields, err := bd.GetAgentBead(beadID); err == nil && issue != nil && fields != nil {
+		hadIncompleteWork = fields.HookBead != ""
+	}
+
+	// Close the bead. The controller reacts to the close event by deleting the pod.
+	reason := req.Msg.Reason
+	if reason == "" {
+		reason = "stopped via RPC"
+		if req.Msg.Force {
+			reason = "force stopped via RPC"
+		}
+	}
+	if err := bd.CloseAndClearAgentBead(beadID, reason); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("closing agent bead %s: %w", beadID, err))
 	}
 
 	agent := &gastownv1.Agent{
@@ -484,7 +515,7 @@ func (s *AgentServer) StopAgent(
 
 	return connect.NewResponse(&gastownv1.StopAgentResponse{
 		Agent:             agent,
-		HadIncompleteWork: strings.Contains(string(output), "incomplete"),
+		HadIncompleteWork: hadIncompleteWork,
 	}), nil
 }
 

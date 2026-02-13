@@ -521,7 +521,7 @@ func stopK8sAgents(townRoot string, dryRun bool) (stopped []string, errors []str
 
 	// Use SessionRegistry to discover K8s sessions with backend resolution
 	lister := &mapAgentLister{agents: allAgents}
-	reg := registry.New(lister, nil, nil) // no tmux needed for K8s agents
+	reg := registry.New(lister, nil)
 	ctx := context.Background()
 	sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{})
 	if err != nil {

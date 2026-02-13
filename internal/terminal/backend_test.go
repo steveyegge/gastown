@@ -17,7 +17,7 @@ func TestParseCoopConfig_Empty(t *testing.T) {
 }
 
 func TestParseCoopConfig_NoCoop(t *testing.T) {
-	cfg, err := parseCoopConfig("backend: k8s\nssh_host: something")
+	cfg, err := parseCoopConfig("backend: k8s\nsome_key: something")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

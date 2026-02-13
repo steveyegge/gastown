@@ -52,7 +52,7 @@ func NewSessionManager(r *rig.Rig) *SessionManager {
 }
 
 // SetBackend overrides the terminal backend used for session liveness checks.
-// This enables coop or SSH backends for K8s-hosted agents.
+// This enables coop backends for K8s-hosted agents.
 func (m *SessionManager) SetBackend(b terminal.Backend) {
 	m.backend = b
 }

@@ -259,6 +259,33 @@ const (
 	ExecutionTargetK8s ExecutionTarget = "k8s"
 )
 
+// ResolveExecutionTarget determines the execution target for a rig.
+// Priority: explicit override > rig settings > K8s auto-detect > "local".
+// When running inside a K8s pod (KUBERNETES_SERVICE_HOST is set), defaults
+// to "k8s" instead of "local" so agents spawn as pods, not tmux sessions.
+//
+// rigPath may be empty for town-level agents (e.g., dogs) that have no rig.
+func ResolveExecutionTarget(rigPath, override string) ExecutionTarget {
+	if override != "" {
+		return ExecutionTarget(override)
+	}
+
+	if rigPath != "" {
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		settings, err := LoadRigSettings(settingsPath)
+		if err == nil && settings.Execution != nil && settings.Execution.Target != "" {
+			return settings.Execution.Target
+		}
+	}
+
+	// Auto-detect K8s: every pod gets KUBERNETES_SERVICE_HOST injected by kubelet.
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return ExecutionTargetK8s
+	}
+
+	return ExecutionTargetLocal
+}
+
 // ExecutionConfig configures polecat execution target for a rig.
 type ExecutionConfig struct {
 	// Target is "local" (default) or "k8s".

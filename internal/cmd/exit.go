@@ -209,7 +209,7 @@ func clearAgentHook(cwd, townRoot string) {
 }
 
 // selfKillExitSession terminates the polecat's own session.
-// Uses terminal.ResolveBackend to support tmux, SSH, and Coop backends.
+// Uses terminal.ResolveBackend to support Coop backends.
 // Similar to selfKillSession in done.go but with different logging.
 func selfKillExitSession(_ string, roleInfo RoleInfo) error {
 	rigName := os.Getenv("GT_RIG")
@@ -233,7 +233,7 @@ func selfKillExitSession(_ string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "gt exit: clean termination", "gt exit"))
 
-	// Kill session via Backend abstraction (tmux, SSH, or Coop)
+	// Kill session via Backend abstraction (Coop)
 	backend := terminal.ResolveBackend(agentID)
 	if err := backend.KillSession(sessionName); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)

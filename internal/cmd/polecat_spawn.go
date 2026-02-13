@@ -505,7 +505,7 @@ func verifyWorktreeExists(clonePath string) error {
 //
 // Checks:
 // 1. Worktree directory exists and has .git
-// 2. Session exists (via backend for coop/SSH, or tmux directly)
+// 2. Session exists (via backend for coop, or tmux directly)
 //
 // Issue: gt sling reports success but worktree never created (hq-yh8icr).
 func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux, backend terminal.Backend) error {

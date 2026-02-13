@@ -253,7 +253,7 @@ func nudgeMailRecipient(recipientAddr, from, subject string) {
 			fmt.Fprintf(os.Stderr, "mail-nudge: %s: %v\n", target, err)
 		}
 	default:
-		// Local tmux or SSH — skip direct nudge (daemon handler covers these
+		// Local — skip direct nudge (daemon handler covers these
 		// via the bus event, or they'll pick up mail on next poll).
 	}
 }

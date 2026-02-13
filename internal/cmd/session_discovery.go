@@ -23,7 +23,7 @@ func discoverSessionNames(townRoot string) []string {
 	}
 
 	lister := &mapAgentLister{agents: agents}
-	reg := registry.New(lister, nil, nil)
+	reg := registry.New(lister, nil)
 	ctx := context.Background()
 	sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{})
 	if err != nil {
@@ -47,7 +47,7 @@ func discoverSessionNamesForRig(townRoot, rigName string) []string {
 	}
 
 	lister := &mapAgentLister{agents: agents}
-	reg := registry.New(lister, nil, nil)
+	reg := registry.New(lister, nil)
 	ctx := context.Background()
 	sessions, err := reg.DiscoverRig(ctx, rigName, registry.DiscoverOpts{})
 	if err != nil {

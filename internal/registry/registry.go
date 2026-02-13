@@ -1,12 +1,11 @@
 // Package registry provides cross-backend session discovery for gastown agents.
 //
-// SessionRegistry replaces tmux.ListSessions() by querying beads (the canonical
-// agent registry) and optionally health-checking each session via its appropriate
-// backend (Coop, SSH, or local tmux).
+// SessionRegistry queries beads (the canonical agent registry) and optionally
+// health-checks each session via the Coop backend.
 //
 // Agent beads with the "gt:agent" label are the source of truth for which agents
-// exist. Backend metadata (coop_url, ssh_host, etc.) is stored in the bead's
-// notes field as key: value pairs.
+// exist. Backend metadata (coop_url, etc.) is stored in the bead's notes field
+// as key: value pairs.
 package registry
 
 import (
@@ -37,7 +36,7 @@ type Session struct {
 	// TmuxSession is the computed tmux session name (e.g., "hq-mayor", "gt-gastown-crew-k8s").
 	TmuxSession string
 
-	// BackendType is the detected backend: "coop", "ssh", or "tmux".
+	// BackendType is the detected backend: "coop" or "local".
 	BackendType string
 
 	// CoopURL is the Coop sidecar HTTP endpoint (only set for coop backend).
@@ -68,13 +67,8 @@ type AgentLister interface {
 // NotesReader reads agent bead notes (backend metadata).
 type NotesReader interface {
 	// GetAgentNotes returns the notes field for an agent bead.
-	// The notes contain key: value pairs like coop_url, ssh_host, etc.
+	// The notes contain key: value pairs like coop_url, etc.
 	GetAgentNotes(agentID string) (string, error)
-}
-
-// TmuxLister lists local tmux sessions.
-type TmuxLister interface {
-	ListSessions() ([]string, error)
 }
 
 // BeadWriter creates and closes agent beads. This interface is satisfied by
@@ -124,7 +118,6 @@ type DiscoverOpts struct {
 type SessionRegistry struct {
 	lister AgentLister
 	notes  NotesReader
-	tmux   TmuxLister
 	writer BeadWriter // optional, needed for Create/Destroy operations
 }
 
@@ -132,12 +125,10 @@ type SessionRegistry struct {
 //
 // lister provides agent bead enumeration (beads.Beads or daemon client).
 // notes provides bead notes for backend metadata resolution.
-// tmux provides local tmux session listing (can be nil if running in K8s-only mode).
-func New(lister AgentLister, notes NotesReader, tmux TmuxLister) *SessionRegistry {
+func New(lister AgentLister, notes NotesReader) *SessionRegistry {
 	return &SessionRegistry{
 		lister: lister,
 		notes:  notes,
-		tmux:   tmux,
 	}
 }
 
@@ -149,23 +140,11 @@ func (r *SessionRegistry) SetWriter(w BeadWriter) {
 
 // DiscoverAll discovers all agent sessions, optionally health-checking them.
 func (r *SessionRegistry) DiscoverAll(ctx context.Context, opts DiscoverOpts) ([]Session, error) {
-	// 1. Get all agent beads
 	agentBeads, err := r.lister.ListAgentBeads()
 	if err != nil {
 		return nil, fmt.Errorf("listing agent beads: %w", err)
 	}
 
-	// 2. Get local tmux sessions for O(1) lookup
-	tmuxSessions := make(map[string]bool)
-	if r.tmux != nil {
-		if sessions, err := r.tmux.ListSessions(); err == nil {
-			for _, s := range sessions {
-				tmuxSessions[s] = true
-			}
-		}
-	}
-
-	// 3. Build session list from beads
 	var sessions []Session
 	for id, issue := range agentBeads {
 		s := r.buildSession(id, issue)
@@ -175,15 +154,10 @@ func (r *SessionRegistry) DiscoverAll(ctx context.Context, opts DiscoverOpts) ([
 			continue
 		}
 
-		// Check tmux presence for local agents
-		if s.BackendType == "tmux" && tmuxSessions[s.TmuxSession] {
-			s.Alive = true
-		}
-
 		sessions = append(sessions, s)
 	}
 
-	// 4. Optionally health-check coop/ssh sessions
+	// Optionally health-check coop sessions
 	if opts.CheckLiveness {
 		r.healthCheck(ctx, sessions, opts)
 	}
@@ -228,7 +202,7 @@ func (r *SessionRegistry) buildSession(id string, issue *beads.Issue) Session {
 		Role:        fields.RoleType,
 		AgentState:  fields.AgentState,
 		HookBead:    fields.HookBead,
-		BackendType: "tmux", // default
+		BackendType: "coop", // default — all sessions are coop-backed
 		Target:      "local",
 	}
 
@@ -261,12 +235,6 @@ func (r *SessionRegistry) buildSession(id string, issue *beads.Issue) Session {
 		}
 	}
 
-	// If target is k8s but no coop_url resolved, default to coop backend
-	// (controller may not have written notes yet)
-	if s.Target == "k8s" && s.BackendType == "tmux" {
-		s.BackendType = "coop"
-	}
-
 	return s
 }
 
@@ -281,20 +249,17 @@ func (r *SessionRegistry) applyNotes(s *Session, notes string) {
 		val := strings.TrimSpace(parts[1])
 		switch key {
 		case "backend":
-			if val == "coop" {
+			if val == "coop" || val == "k8s" {
 				s.BackendType = "coop"
-			} else if val == "k8s" || val == "ssh" {
-				s.BackendType = "ssh"
 			}
 		case "coop_url":
 			s.CoopURL = val
 			s.BackendType = "coop"
 		}
 	}
-
 }
 
-// healthCheck runs concurrent health checks on sessions with coop/ssh backends.
+// healthCheck runs concurrent health checks on coop-backed sessions.
 func (r *SessionRegistry) healthCheck(ctx context.Context, sessions []Session, opts DiscoverOpts) {
 	timeout := opts.Timeout
 	if timeout == 0 {
@@ -310,8 +275,8 @@ func (r *SessionRegistry) healthCheck(ctx context.Context, sessions []Session, o
 
 	for i := range sessions {
 		s := &sessions[i]
-		if s.BackendType == "tmux" {
-			continue // Already checked via tmux session list
+		if s.BackendType != "coop" || s.CoopURL == "" {
+			continue
 		}
 
 		wg.Add(1)
@@ -326,26 +291,16 @@ func (r *SessionRegistry) healthCheck(ctx context.Context, sessions []Session, o
 	wg.Wait()
 }
 
-// healthCheckOne checks a single session's liveness via its backend.
+// healthCheckOne checks a single session's liveness via its coop backend.
 func (r *SessionRegistry) healthCheckOne(ctx context.Context, s *Session, timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var backend terminal.Backend
-	switch s.BackendType {
-	case "coop":
-		if s.CoopURL == "" {
-			return
-		}
-		b := terminal.NewCoopBackend(terminal.CoopConfig{Timeout: timeout})
-		b.AddSession("claude", s.CoopURL)
-		backend = b
-	default:
-		return // SSH and tmux don't need async health checks
+	if s.BackendType != "coop" || s.CoopURL == "" {
+		return
 	}
 
-	_ = ctx // timeout is set on the CoopBackend's HTTP client
-	alive, err := backend.HasSession("claude")
+	b := terminal.NewCoopBackend(terminal.CoopConfig{Timeout: timeout})
+	b.AddSession("claude", s.CoopURL)
+
+	alive, err := b.HasSession("claude")
 	if err == nil {
 		s.Alive = alive
 	}
@@ -428,8 +383,7 @@ func (r *SessionRegistry) CreateSession(opts CreateSessionOpts) (*Session, error
 }
 
 // DestroySession closes the agent bead, triggering the K8s controller to
-// delete the pod. For local agents, this just closes the bead — the caller
-// is responsible for killing the tmux session.
+// delete the pod.
 func (r *SessionRegistry) DestroySession(agentID, reason string) error {
 	if r.writer == nil {
 		return fmt.Errorf("registry: no BeadWriter configured (call SetWriter)")
@@ -438,8 +392,6 @@ func (r *SessionRegistry) DestroySession(agentID, reason string) error {
 }
 
 // RestartSession restarts an agent by switching the coop session in-place.
-// This only works for coop-backed sessions. For tmux sessions, use
-// Backend.RespawnPane() directly.
 func (r *SessionRegistry) RestartSession(ctx context.Context, agentID string) error {
 	s, err := r.Lookup(ctx, agentID, false)
 	if err != nil {

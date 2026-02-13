@@ -22,7 +22,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/registry"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/term"
 )
@@ -309,14 +308,12 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	beadsWg.Wait()
 
 	// Discover all sessions via SessionRegistry for unified liveness.
-	// Uses the pre-fetched allAgentBeads as the canonical agent lister and
-	// tmux for local session detection. The registry handles both tmux
-	// presence checks and coop health checks in a single DiscoverAll call,
-	// replacing both tmux.ListSessions() and checkCoopAgentLiveness().
+	// Uses the pre-fetched allAgentBeads as the canonical agent lister.
+	// The registry handles coop health checks in a single DiscoverAll call.
 	allSessions := make(map[string]bool)
 	{
 		lister := &mapAgentLister{agents: allAgentBeads}
-		reg := registry.New(lister, nil, tmux.NewTmux())
+		reg := registry.New(lister, nil)
 		ctx := context.Background()
 		if sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{CheckLiveness: true}); err == nil {
 			for _, s := range sessions {

@@ -368,7 +368,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 }
 
 // tryRemoteCrewAt attempts to attach to a remote K8s crew pod via coop.
-// Returns (true, err) if a remote backend was found (coop or SSH),
+// Returns (true, err) if a remote backend was found (coop),
 // or (false, nil) if no remote backend exists (fall through to local).
 func tryRemoteCrewAt(rigName, crewName string) (handled bool, err error) {
 	// Check if we're connected to a remote daemon.

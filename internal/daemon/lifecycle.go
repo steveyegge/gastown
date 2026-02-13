@@ -174,7 +174,7 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 		}
 	}
 
-	// Check if session exists (routes through backend for coop/SSH support)
+	// Check if session exists (routes through backend for coop support)
 	running, err := d.hasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
@@ -641,7 +641,7 @@ type AgentBeadInfo struct {
 	HookBead   string // Parsed from description: hook_bead
 	RoleType   string // Parsed from description: role_type
 	Rig        string // Parsed from description: rig
-	Notes      string // Backend metadata (backend, coop_url, ssh_host, etc.)
+	Notes      string // Backend metadata (backend, coop_url, etc.)
 	LastUpdate string `json:"updated_at"`
 	// Note: RoleBead field removed - role definitions are now config-based
 }

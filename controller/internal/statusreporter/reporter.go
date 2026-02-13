@@ -134,7 +134,7 @@ func (r *BdReporter) ReportPodStatus(ctx context.Context, agentName string, stat
 
 // ReportBackendMetadata writes backend connection info to the agent bead's
 // notes field. This structured data is parsed by ResolveBackend() to determine
-// how to connect to the agent (Coop, SSH, or local tmux).
+// how to connect to the agent (via Coop).
 func (r *BdReporter) ReportBackendMetadata(ctx context.Context, agentName string, meta BackendMetadata) error {
 	r.reportsTotal.Add(1)
 

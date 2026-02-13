@@ -141,5 +141,5 @@
 
 ### Phase 5: Cleanup
 1. Delete tmux package (3,659 lines)
-2. Delete TmuxBackend, SSHBackend
+2. Delete TmuxBackend, SSHBackend (DONE)
 3. Remove all workspace.FindFromCwd() calls (use resolveContext())

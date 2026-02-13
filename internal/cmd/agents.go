@@ -276,7 +276,7 @@ func mergeK8sAgents(agents []*AgentSession, seen map[string]bool, townRoot strin
 
 	// Build registry and discover K8s sessions
 	lister := &mapAgentLister{agents: allAgentBeads}
-	reg := registry.New(lister, nil, nil) // no tmux — already handled above
+	reg := registry.New(lister, nil)
 	ctx := context.Background()
 	sessions, err := reg.DiscoverAll(ctx, registry.DiscoverOpts{CheckLiveness: true})
 	if err != nil {

@@ -770,8 +770,6 @@ type Backend interface {
 | Backend | Transport | Status |
 |---------|-----------|--------|
 | **CoopBackend** | HTTP to Coop API | Active (K8s) |
-| **TmuxBackend** | `tmux` CLI | Legacy (being removed) |
-| **SSHBackend** | SSH tunnel | Legacy (being removed) |
 
 The `CoopBackend` maps each session name to a Coop base URL (e.g., `http://10.0.1.5:8080`)
 and translates Backend method calls to HTTP requests:

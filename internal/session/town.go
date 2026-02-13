@@ -30,7 +30,7 @@ func TownSessions() []TownSession {
 // StopTownSession stops a single town-level session.
 // If force is true, skips graceful shutdown (Ctrl-C) and kills immediately.
 // Returns true if the session was running and stopped, false if not running.
-// Uses the provided backend for session liveness checks (supports coop/SSH/tmux).
+// Uses the provided backend for session liveness checks.
 func StopTownSession(t *tmux.Tmux, ts TownSession, force bool, backend ...terminal.Backend) (bool, error) {
 	var running bool
 	var err error
