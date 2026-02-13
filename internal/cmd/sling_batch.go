@@ -220,6 +220,13 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 		activeCount++
 		results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: true})
+
+		// Add delay between spawns to prevent Dolt lock contention (gm-p33k)
+		// Sequential spawns without delay can cause database lock timeouts
+		// when multiple bd operations (agent bead creation, hook setting) overlap
+		if i < len(beadIDs)-1 { // Don't sleep after the last spawn
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	if !slingNoBoot {
