@@ -1098,7 +1098,11 @@ func roleSettingsDir(role, rigPath string) string {
 	case "crew", "witness", "refinery":
 		return filepath.Join(rigPath, role)
 	case "polecat":
-		return filepath.Join(rigPath, "polecats")
+		// Polecats get settings via EnsureSettingsForRole into their worktree
+		// (polecats/<name>/<rig>/). Claude Code resolves settings from its cwd,
+		// so no --settings flag is needed. The parent polecats/ directory is not
+		// a valid settings location.
+		return ""
 	default:
 		return ""
 	}

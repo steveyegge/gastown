@@ -1594,7 +1594,7 @@ func TestWithRoleSettingsFlag_SkipsNonClaude(t *testing.T) {
 	}
 }
 
-func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
+func TestWithRoleSettingsFlag_NoSettingsForPolecat(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "myrig")
@@ -1610,16 +1610,13 @@ func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
 	}
 
 	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
-	// Should contain --settings since default agent is Claude
-	found := false
+	// Polecats should NOT get --settings since EnsureSettingsForRole writes
+	// settings into the worktree and Claude resolves from cwd.
 	for _, arg := range rc.Args {
 		if arg == "--settings" {
-			found = true
+			t.Errorf("polecat should not get --settings flag (settings are in worktree cwd), but Args = %v", rc.Args)
 			break
 		}
-	}
-	if !found {
-		t.Errorf("default Claude agent should get --settings flag for polecat role, but Args = %v", rc.Args)
 	}
 }
 
