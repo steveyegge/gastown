@@ -299,7 +299,7 @@ func detectNamespace() string {
 var commonTools = []string{
 	"node", "npm", "npx", "yarn", "pnpm",
 	"python3", "pip3", "python", "pip",
-	"go", "gopls", "rustc", "cargo",
+	"go", "gopls", "rustc", "cargo", "rust-analyzer",
 	"gcc", "g++", "make", "cmake",
 	"java", "javac", "mvn", "gradle",
 	"ruby", "gem", "perl",

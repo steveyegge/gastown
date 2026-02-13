@@ -68,6 +68,14 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_VERSION}.tgz" | \
     tar -xz --strip-components=1 -C /usr/local/bin docker/docker
 
+# ── Rust Analyzer (pre-built binary, no full toolchain needed) ────────
+FROM base AS rust-analyzer-builder
+ARG TARGETARCH
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
+    curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-${ARCH}-unknown-linux-gnu.gz" | \
+    gunzip > /usr/local/bin/rust-analyzer && \
+    chmod +x /usr/local/bin/rust-analyzer
+
 # ── Kaniko (daemonless image builder) ─────────────────────────────────
 FROM gcr.io/kaniko-project/executor:v1.23.2 AS kaniko
 
@@ -99,7 +107,13 @@ COPY --from=docker-builder /usr/local/bin/docker /usr/local/bin/docker
 # Kaniko
 COPY --from=kaniko /kaniko/executor /usr/local/bin/kaniko
 
+# Rust Analyzer
+COPY --from=rust-analyzer-builder /usr/local/bin/rust-analyzer /usr/local/bin/rust-analyzer
+
 ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Sidecar entrypoint: exports tool binaries to shared workspace volume, then sleeps
+COPY entrypoint.sh /usr/local/bin/toolchain-entrypoint.sh
 
 # Run as agent user (matches agent container UID/GID 1000)
 RUN groupadd -g 1000 agent 2>/dev/null || true && \
@@ -108,11 +122,12 @@ RUN groupadd -g 1000 agent 2>/dev/null || true && \
 USER 1000:1000
 WORKDIR /home/agent/gt
 
-# Native sidecar: sleep forever, tools accessed via kubectl exec or shared volume
-CMD ["sleep", "infinity"]
+CMD ["/usr/local/bin/toolchain-entrypoint.sh"]
 
 # ── Minimal target: just base tools ───────────────────────────────────
 FROM base AS minimal
+
+COPY entrypoint.sh /usr/local/bin/toolchain-entrypoint.sh
 
 # Run as agent user
 RUN groupadd -g 1000 agent 2>/dev/null || true && \
@@ -121,4 +136,4 @@ RUN groupadd -g 1000 agent 2>/dev/null || true && \
 USER 1000:1000
 WORKDIR /home/agent/gt
 
-CMD ["sleep", "infinity"]
+CMD ["/usr/local/bin/toolchain-entrypoint.sh"]

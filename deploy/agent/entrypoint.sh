@@ -170,28 +170,45 @@ fi
 export XDG_STATE_HOME="${STATE_DIR}"
 echo "[entrypoint] XDG_STATE_HOME=${XDG_STATE_HOME}"
 
+# ── Toolchain PATH ──────────────────────────────────────────────────────
+#
+# The toolchain sidecar exports binaries (gopls, rust-analyzer, etc.) to
+# .toolchain/bin/ on the shared workspace volume. Add it to PATH so Claude
+# Code can spawn LSP servers directly.
+
+TOOLBIN="${WORKSPACE}/.toolchain/bin"
+if [ -d "${TOOLBIN}" ]; then
+    export PATH="${TOOLBIN}:${PATH}"
+    echo "[entrypoint] Added ${TOOLBIN} to PATH"
+fi
+
 # ── Claude settings ──────────────────────────────────────────────────────
 #
-# User-level settings (permissions) always written to ~/.claude/settings.json.
+# User-level settings (permissions + LSP plugins) written to ~/.claude/settings.json.
+# LSP plugins are enabled conditionally based on toolchain sidecar contents.
 # Hooks come from config bead materialization if available, otherwise static.
 
-cat > "${CLAUDE_DIR}/settings.json" <<'PERMISSIONS'
-{
-  "permissions": {
-    "allow": [
-      "Bash(*)",
-      "Read(*)",
-      "Write(*)",
-      "Edit(*)",
-      "Glob(*)",
-      "Grep(*)",
-      "WebFetch(*)",
-      "WebSearch(*)"
-    ],
-    "deny": []
-  }
-}
-PERMISSIONS
+# Start with base settings JSON (permissions).
+SETTINGS_JSON='{"permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],"deny":[]}}'
+
+# Conditionally add LSP plugins based on which binaries the toolchain exported.
+PLUGINS_JSON=""
+if [ -x "${TOOLBIN}/gopls" ]; then
+    PLUGINS_JSON="${PLUGINS_JSON}\"gopls-lsp@claude-plugins-official\":true,"
+    echo "[entrypoint] Enabling gopls LSP plugin"
+fi
+if [ -x "${TOOLBIN}/rust-analyzer" ]; then
+    PLUGINS_JSON="${PLUGINS_JSON}\"rust-analyzer-lsp@claude-plugins-official\":true,"
+    echo "[entrypoint] Enabling rust-analyzer LSP plugin"
+fi
+
+if [ -n "${PLUGINS_JSON}" ]; then
+    # Strip trailing comma and merge into settings.
+    PLUGINS_JSON="{${PLUGINS_JSON%,}}"
+    SETTINGS_JSON=$(echo "${SETTINGS_JSON}" | jq --argjson p "${PLUGINS_JSON}" '. + {enabledPlugins: $p}')
+fi
+
+echo "${SETTINGS_JSON}" | jq . > "${CLAUDE_DIR}/settings.json"
 
 # Try config bead materialization (writes to workspace .claude/settings.json).
 # This queries the daemon for claude-hooks config beads and merges them by
