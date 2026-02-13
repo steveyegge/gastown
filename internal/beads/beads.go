@@ -84,6 +84,9 @@ type Issue struct {
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 
+	// Notes contains backend metadata (backend, coop_url, etc.) as key: value pairs.
+	Notes string `json:"notes,omitempty"`
+
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)

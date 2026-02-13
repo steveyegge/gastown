@@ -530,29 +530,75 @@ func (s *AgentServer) NudgeAgent(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("message is required"))
 	}
 
-	// Build gt nudge command
-	args := []string{"nudge", req.Msg.Agent, req.Msg.Message}
+	// Resolve agent address to bead ID.
+	address := req.Msg.Agent
+	parts := strings.Split(address, "/")
 
-	cmd := exec.CommandContext(ctx, "gt", args...)
-	cmd.Dir = s.townRoot
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, cmdExecErr("nudge agent", err, output)
+	townName, _ := workspace.GetTownName(s.townRoot)
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	bd := beads.New(townBeadsPath)
+
+	var beadID string
+	switch {
+	case address == "mayor":
+		beadID = beads.MayorBeadIDTown()
+	case address == "deacon":
+		beadID = beads.DeaconBeadIDTown()
+	case len(parts) >= 2 && parts[1] == "witness":
+		beadID = beads.WitnessBeadIDTown(townName, parts[0])
+	case len(parts) >= 2 && parts[1] == "refinery":
+		beadID = beads.RefineryBeadIDTown(townName, parts[0])
+	case len(parts) >= 3 && parts[1] == "crew":
+		beadID = beads.CrewBeadIDTown(townName, parts[0], parts[2])
+	case len(parts) >= 3 && parts[1] == "polecats":
+		prefix := beads.GetPrefixForRig(s.townRoot, parts[0])
+		beadID = beads.PolecatBeadIDWithPrefix(prefix, parts[0], parts[2])
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid agent address: %s", address))
 	}
 
-	// Extract session from output or construct it
-	session := ""
-	parts := strings.Split(req.Msg.Agent, "/")
-	if len(parts) >= 3 && parts[1] == "crew" {
-		session = fmt.Sprintf("gt-%s-crew-%s", parts[0], parts[2])
-	} else if len(parts) >= 3 && parts[1] == "polecats" {
-		session = fmt.Sprintf("gt-%s-%s", parts[0], parts[2])
+	// Look up bead to get coop_url from notes.
+	issue, err := bd.Show(beadID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("agent bead %s not found: %w", beadID, err))
+	}
+
+	coopURL := coopURLFromNotes(issue.Notes)
+	if coopURL == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("agent %s has no coop_url in bead notes (not a K8s agent?)", beadID))
+	}
+
+	// Send nudge via coop API.
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{Timeout: 10 * time.Second})
+	backend.AddSession("claude", coopURL)
+
+	if err := backend.NudgeSession("claude", req.Msg.Message); err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("nudge failed for %s: %w", beadID, err))
 	}
 
 	return connect.NewResponse(&gastownv1.NudgeAgentResponse{
 		Delivered: true,
-		Session:   session,
+		Session:   beadID,
 	}), nil
+}
+
+// coopURLFromNotes extracts a coop_url from agent bead notes.
+// Notes contain key: value pairs, one per line.
+func coopURLFromNotes(notes string) string {
+	if notes == "" {
+		return ""
+	}
+	for _, line := range strings.Split(notes, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.TrimSpace(parts[0]) == "coop_url" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 func (s *AgentServer) PeekAgent(
