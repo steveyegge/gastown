@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/session"
@@ -61,8 +64,14 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
-	// Convert address to bead ID format for remote backend lookup.
-	// ParseAddress handles rig/name, rig/crew/name, and role shortnames.
+	// When running outside K8s, use kubectl port-forward to reach agent pods.
+	// ResolveBackend returns coop_url with internal pod IPs (e.g., 10.x.x.x)
+	// which are unreachable from a developer workstation.
+	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
+		return peekViaPortForward(address, lines)
+	}
+
+	// Inside K8s: use ResolveBackend which can hit pod IPs directly.
 	identity, err := session.ParseAddress(address)
 	if err == nil {
 		beadID := identity.BeadID()
@@ -73,7 +82,7 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve session name from address for local tmux lookup
+	// Fallback: resolve session name for backend lookup.
 	var sessionName string
 	switch address {
 	case "mayor":
@@ -86,7 +95,6 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		if identity != nil {
 			sessionName = identity.SessionName()
 		} else {
-			// Fallback for unparseable addresses
 			rigName, polecatName, parseErr := parseAddress(address)
 			if parseErr != nil {
 				return parseErr
@@ -100,9 +108,41 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve backend for this session — routes to coop for remote agents, tmux for local
 	resolvedBackend, sessionKey := resolveBackendForSession(sessionName)
 	return peekViaBackend(resolvedBackend, sessionKey, lines)
+}
+
+// peekViaPortForward uses kubectl port-forward to reach an agent pod's coop API.
+// This is the path used when running outside K8s (developer workstation).
+func peekViaPortForward(address string, lines int) error {
+	podName, ns := resolveCoopTarget(address)
+	if podName == "" {
+		// resolveCoopTarget needs GT_K8S_NAMESPACE. Try bead metadata as fallback.
+		podInfo, err := terminal.ResolveAgentPodInfo(address)
+		if err != nil {
+			return fmt.Errorf("cannot find pod for %q: set GT_K8S_NAMESPACE or ensure agent bead has pod metadata", address)
+		}
+		podName = podInfo.PodName
+		ns = podInfo.Namespace
+	}
+
+	conn := terminal.NewCoopPodConnection(terminal.CoopPodConnectionConfig{
+		PodName:   podName,
+		Namespace: ns,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := conn.Open(ctx); err != nil {
+		return fmt.Errorf("connecting to pod %s: %w", podName, err)
+	}
+	defer conn.Close()
+
+	// Create a CoopBackend pointing at the port-forwarded local URL.
+	backend := terminal.NewCoopBackend(terminal.CoopConfig{})
+	backend.AddSession("claude", conn.LocalURL())
+	return peekViaBackend(backend, "claude", lines)
 }
 
 // peekViaBackend captures terminal output using a terminal.Backend.

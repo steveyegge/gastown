@@ -50,7 +50,16 @@ func resolveCoopConfig(agentID string) (*coopResolvedConfig, error) {
 // coopResolvedConfig holds Coop connection info parsed from bead metadata.
 type coopResolvedConfig struct {
 	CoopConfig
-	baseURL string
+	baseURL   string
+	podName   string
+	namespace string
+}
+
+// AgentPodInfo contains K8s pod metadata for an agent.
+type AgentPodInfo struct {
+	PodName   string
+	Namespace string
+	CoopURL   string
 }
 
 // parseCoopConfig parses Coop config from bd show output.
@@ -74,6 +83,10 @@ func parseCoopConfig(output string) (*coopResolvedConfig, error) {
 			cfg.baseURL = val
 		case "coop_token":
 			cfg.Token = val
+		case "pod_name":
+			cfg.podName = val
+		case "pod_namespace":
+			cfg.namespace = val
 		}
 	}
 
@@ -105,4 +118,57 @@ func getAgentNotes(agentID string) (string, error) {
 		return "", fmt.Errorf("agent bead %q not found", agentID)
 	}
 	return issues[0].Notes, nil
+}
+
+// ResolveAgentPodInfo looks up an agent's K8s pod metadata from its bead notes.
+// The address can be a shortname ("mayor"), bead ID ("hq-mayor"), or path
+// ("gastown/polecats/furiosa"). Returns pod_name and pod_namespace from the
+// bead's notes field, which are written by the controller's status reporter.
+func ResolveAgentPodInfo(address string) (*AgentPodInfo, error) {
+	// Build candidate bead IDs to try.
+	candidates := []string{address}
+
+	// Try parsing as an address to get bead ID format.
+	// Import cycle avoidance: we parse the address format inline.
+	switch address {
+	case "mayor":
+		candidates = []string{"hq-mayor"}
+	case "deacon":
+		candidates = []string{"hq-deacon"}
+	case "boot":
+		candidates = []string{"hq-boot"}
+	default:
+		// If it contains slashes, it's a path format — add the hyphenated form.
+		if strings.Contains(address, "/") {
+			parts := strings.Split(address, "/")
+			switch len(parts) {
+			case 2:
+				// rig/role → gt-rig-role-hq
+				candidates = append(candidates, fmt.Sprintf("gt-%s-%s-hq", parts[0], parts[1]))
+			case 3:
+				// rig/type/name → gt-rig-type-name
+				role := parts[1]
+				if role == "polecats" {
+					role = "polecat"
+				}
+				candidates = append(candidates, fmt.Sprintf("gt-%s-%s-%s", parts[0], role, parts[2]))
+			}
+		}
+	}
+
+	for _, id := range candidates {
+		cfg, err := resolveCoopConfig(id)
+		if err != nil || cfg == nil {
+			continue
+		}
+		if cfg.podName != "" {
+			return &AgentPodInfo{
+				PodName:   cfg.podName,
+				Namespace: cfg.namespace,
+				CoopURL:   cfg.baseURL,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no pod metadata found for agent %q", address)
 }
