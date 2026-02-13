@@ -118,6 +118,11 @@ const waitIdleTimeout = 15 * time.Second
 func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	townRoot, _ := workspace.FindFromCwd()
 
+	// For direct tmux delivery, prefix with sender attribution.
+	// Queue-based delivery stores Sender as a separate field and
+	// FormatForInjection adds the prefix, so we must NOT double-prefix.
+	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
+
 	switch nudgeModeFlag {
 	case NudgeModeQueue:
 		if townRoot == "" {
@@ -132,13 +137,13 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	case NudgeModeWaitIdle:
 		if townRoot == "" {
 			// Fall back to immediate if no workspace
-			return t.NudgeSession(sessionName, message)
+			return t.NudgeSession(sessionName, prefixedMessage)
 		}
 		// Try to wait for idle
 		err := t.WaitForIdle(sessionName, waitIdleTimeout)
 		if err == nil {
 			// Agent is idle — safe to deliver directly
-			return t.NudgeSession(sessionName, message)
+			return t.NudgeSession(sessionName, prefixedMessage)
 		}
 		// Agent busy — queue instead
 		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
@@ -148,7 +153,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		})
 
 	default: // NudgeModeImmediate
-		return t.NudgeSession(sessionName, message)
+		return t.NudgeSession(sessionName, prefixedMessage)
 	}
 }
 
@@ -220,9 +225,6 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			sender = string(roleInfo.Role)
 		}
 	}
-
-	// Prefix message with sender
-	message = fmt.Sprintf("[from %s] %s", sender, message)
 
 	// Check DND status for target (unless force flag or channel target)
 	townRoot, _ := workspace.FindFromCwd()

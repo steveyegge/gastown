@@ -1662,6 +1662,7 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 	promptPrefix := DefaultReadyPromptPrefix
+	prefix := strings.TrimSpace(promptPrefix)
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -1670,17 +1671,17 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		// Check last non-empty line for prompt prefix
-		for i := len(lines) - 1; i >= 0; i-- {
-			trimmed := strings.TrimSpace(lines[i])
+		// Scan all captured lines for the prompt prefix.
+		// Claude Code renders a status bar below the prompt line,
+		// so the prompt may not be the last non-empty line.
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue
 			}
-			prefix := strings.TrimSpace(promptPrefix)
 			if strings.HasPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
 				return nil
 			}
-			break // Only check the last non-empty line
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
