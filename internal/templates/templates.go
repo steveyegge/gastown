@@ -41,9 +41,6 @@ var templateFuncs = template.FuncMap{
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
 
-//go:embed commands/*.md
-var commandsFS embed.FS
-
 //go:embed launchd/*.plist systemd/*.service
 var supervisorFS embed.FS
 
