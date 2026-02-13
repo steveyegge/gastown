@@ -354,6 +354,7 @@ func agentBeadToAddress(bead *agentBead) string {
 // Examples:
 //   - ppf-pyspark_pipeline_framework-witness → pyspark_pipeline_framework/witness
 //   - ppf-pyspark_pipeline_framework-polecat-Toast → pyspark_pipeline_framework/Toast
+//   - bd-beads-crew-beavis → beads/beavis
 func parseRigAgentAddress(bead *agentBead) string {
 	// Parse rig and role_type from description
 	var roleType, rig string
@@ -367,7 +368,10 @@ func parseRigAgentAddress(bead *agentBead) string {
 	}
 
 	if rig == "" || rig == "null" || roleType == "" || roleType == "null" {
-		return ""
+		// Fallback: parse from bead ID by scanning for known role markers.
+		// ID format: <prefix>-<rig>-<role>[-<name>]
+		// Known roles: witness, refinery, crew, polecat, mayor, deacon
+		return parseRigAgentAddressFromID(bead.ID)
 	}
 
 	// For singleton roles (witness, refinery), address is rig/role
@@ -389,6 +393,61 @@ func parseRigAgentAddress(bead *agentBead) string {
 
 	// Fallback: return rig/roleType (may not be correct for all cases)
 	return rig + "/" + roleType
+}
+
+// parseRigAgentAddressFromID extracts a mail address from a rig-prefixed bead ID
+// when the description metadata is missing. Scans for known role markers in the ID
+// to determine the rig name and agent name.
+// ID format: <prefix>-<rig>-<role>[-<name>]
+func parseRigAgentAddressFromID(id string) string {
+	// Known agent role markers that appear in bead IDs
+	knownRoles := []string{"crew", "polecat", "witness", "refinery"}
+
+	for _, role := range knownRoles {
+		marker := "-" + role + "-"
+		if idx := strings.Index(id, marker); idx >= 0 {
+			// Everything between prefix- and -role- is the rig name.
+			// The prefix ends at the first hyphen: <prefix>-<rig>-...
+			// But prefix could be multi-char (bd, gt, ppf), so we find
+			// the rig as the substring between the first hyphen and the role marker.
+			firstHyphen := strings.Index(id, "-")
+			if firstHyphen < 0 || firstHyphen >= idx {
+				continue
+			}
+			rig := id[firstHyphen+1 : idx]
+			if rig == "" {
+				continue
+			}
+			name := id[idx+len(marker):]
+			if name != "" {
+				// Named role (crew, polecat): address is rig/name
+				return rig + "/" + name
+			}
+			// Shouldn't happen for crew/polecat, but handle gracefully
+			return rig + "/" + role
+		}
+
+		// Check for singleton role at end of ID: <prefix>-<rig>-<role>
+		suffix := "-" + role
+		if strings.HasSuffix(id, suffix) {
+			// Find rig between first hyphen and the suffix
+			firstHyphen := strings.Index(id, "-")
+			if firstHyphen < 0 {
+				continue
+			}
+			suffixStart := len(id) - len(suffix)
+			if firstHyphen >= suffixStart {
+				continue
+			}
+			rig := id[firstHyphen+1 : suffixStart]
+			if rig == "" {
+				continue
+			}
+			return rig + "/" + role
+		}
+	}
+
+	return ""
 }
 
 // parseAgentAddressFromDescription extracts agent address from description metadata.
