@@ -370,7 +370,7 @@ func parseRigAgentAddress(bead *agentBead) string {
 	if rig == "" || rig == "null" || roleType == "" || roleType == "null" {
 		// Fallback: parse from bead ID by scanning for known role markers.
 		// ID format: <prefix>-<rig>-<role>[-<name>]
-		// Known roles: witness, refinery, crew, polecat, mayor, deacon
+		// Known rig-level roles: crew, polecat, witness, refinery
 		return parseRigAgentAddressFromID(bead.ID)
 	}
 
@@ -398,12 +398,20 @@ func parseRigAgentAddress(bead *agentBead) string {
 // parseRigAgentAddressFromID extracts a mail address from a rig-prefixed bead ID
 // when the description metadata is missing. Scans for known role markers in the ID
 // to determine the rig name and agent name.
+//
 // ID format: <prefix>-<rig>-<role>[-<name>]
+//
+// Singleton roles (witness, refinery) must NOT have a name segment — IDs like
+// "bd-beads-witness-extra" are malformed and return "".
+//
+// Keep role lists in sync with beads.RigLevelRoles and beads.NamedRoles.
 func parseRigAgentAddressFromID(id string) string {
-	// Known agent role markers that appear in bead IDs
-	knownRoles := []string{"crew", "polecat", "witness", "refinery"}
+	// Singleton roles: no name segment allowed
+	singletonRoles := []string{"witness", "refinery"}
+	// Named roles: require a name segment
+	namedRoles := []string{"crew", "polecat"}
 
-	for _, role := range knownRoles {
+	for _, role := range namedRoles {
 		marker := "-" + role + "-"
 		if idx := strings.Index(id, marker); idx >= 0 {
 			// Everything between prefix- and -role- is the rig name.
@@ -423,11 +431,20 @@ func parseRigAgentAddressFromID(id string) string {
 				// Named role (crew, polecat): address is rig/name
 				return rig + "/" + name
 			}
-			// Shouldn't happen for crew/polecat, but handle gracefully
-			return rig + "/" + role
+			// crew/polecat without a name — malformed, skip
+			continue
+		}
+	}
+
+	for _, role := range singletonRoles {
+		// Singleton roles match only at end of ID: <prefix>-<rig>-<role>
+		// Reject if a name segment follows (e.g. -witness-extra is malformed).
+		marker := "-" + role + "-"
+		if strings.Contains(id, marker) {
+			// Has a name segment after the role — malformed singleton
+			continue
 		}
 
-		// Check for singleton role at end of ID: <prefix>-<rig>-<role>
 		suffix := "-" + role
 		if strings.HasSuffix(id, suffix) {
 			// Find rig between first hyphen and the suffix

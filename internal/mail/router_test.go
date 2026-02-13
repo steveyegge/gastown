@@ -794,6 +794,21 @@ func TestAgentBeadToAddress(t *testing.T) {
 			want: "pyspark_pipeline_framework/Toast",
 		},
 		{
+			name: "malformed singleton witness with name segment",
+			bead: &agentBead{ID: "bd-beads-witness-extra"},
+			want: "",
+		},
+		{
+			name: "malformed singleton refinery with name segment",
+			bead: &agentBead{ID: "bd-beads-refinery-extra"},
+			want: "",
+		},
+		{
+			name: "hyphenated agent name via fallback",
+			bead: &agentBead{ID: "bd-beads-crew-my-agent"},
+			want: "beads/my-agent",
+		},
+		{
 			name: "empty ID",
 			bead: &agentBead{ID: ""},
 			want: "",
