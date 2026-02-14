@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // BranchCheck detects persistent roles (crew, witness, refinery) that are
@@ -44,7 +46,7 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		if branch == "main" || branch == "master" {
+		if c.isExpectedBranch(ctx.TownRoot, dir, branch) {
 			onMain++
 		} else {
 			offMain = append(offMain, fmt.Sprintf("%s (on %s)", c.relativePath(ctx.TownRoot, dir), branch))
@@ -58,7 +60,7 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 		if err != nil {
 			continue
 		}
-		if branch != "main" && branch != "master" {
+		if !c.isExpectedBranch(ctx.TownRoot, dir, branch) {
 			c.offMainDirs = append(c.offMainDirs, dir)
 		}
 	}
@@ -113,6 +115,31 @@ func (c *BranchCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return lastErr
+}
+
+// isExpectedBranch checks if a directory is on the expected branch.
+// For rigs with a custom default_branch, that branch is expected.
+// Otherwise, main or master are expected.
+func (c *BranchCheck) isExpectedBranch(townRoot, dir, branch string) bool {
+	if branch == "main" || branch == "master" {
+		return true
+	}
+	// Derive the rig path from the directory.
+	// Directories are like <town>/<rig>/refinery/rig or <town>/<rig>/crew/<name>.
+	rel, err := filepath.Rel(townRoot, dir)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+	if len(parts) < 1 {
+		return false
+	}
+	rigPath := filepath.Join(townRoot, parts[0])
+	cfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil || cfg.DefaultBranch == "" {
+		return false
+	}
+	return branch == cfg.DefaultBranch
 }
 
 // findPersistentRoleDirs finds all directories that should be on main:
