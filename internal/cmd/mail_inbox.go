@@ -68,6 +68,9 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mailInboxJSON {
+		if messages == nil {
+			messages = []*mail.Message{}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(messages)
