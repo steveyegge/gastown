@@ -282,6 +282,7 @@ var (
 	rigStopNuclear     bool
 	rigRestartForce    bool
 	rigRestartNuclear  bool
+	rigListJSON        bool
 )
 
 func init() {
@@ -297,6 +298,8 @@ func init() {
 	rigCmd.AddCommand(rigStartCmd)
 	rigCmd.AddCommand(rigStatusCmd)
 	rigCmd.AddCommand(rigStopCmd)
+
+	rigListCmd.Flags().BoolVar(&rigListJSON, "json", false, "Output as JSON")
 
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
@@ -485,33 +488,91 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	// Create rig manager to get details
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
+	t := tmux.NewTmux()
 
-	fmt.Printf("Rigs in %s:\n\n", townRoot)
+	type rigInfo struct {
+		Name     string `json:"name"`
+		Status   string `json:"status"`
+		Witness  string `json:"witness"`
+		Refinery string `json:"refinery"`
+		Polecats int    `json:"polecats"`
+		Crew     int    `json:"crew"`
+	}
+
+	var rigs []rigInfo
 
 	for name := range rigsConfig.Rigs {
 		r, err := mgr.GetRig(name)
 		if err != nil {
-			fmt.Printf("  %s %s\n", style.Warning.Render("!"), name)
+			if rigListJSON {
+				rigs = append(rigs, rigInfo{Name: name, Status: "error"})
+			} else {
+				fmt.Printf("  %s %s\n", style.Warning.Render("!"), name)
+			}
 			continue
 		}
 
-		summary := r.Summary()
-		fmt.Printf("  %s\n", style.Bold.Render(name))
-		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
+		opState, _ := getRigOperationalState(townRoot, name)
 
-		agents := []string{}
-		if summary.HasRefinery {
-			agents = append(agents, "refinery")
+		witnessSession := fmt.Sprintf("gt-%s-witness", name)
+		refinerySession := fmt.Sprintf("gt-%s-refinery", name)
+		witnessRunning, _ := t.HasSession(witnessSession)
+		refineryRunning, _ := t.HasSession(refinerySession)
+
+		witnessStatus := "stopped"
+		if witnessRunning {
+			witnessStatus = "running"
 		}
-		if summary.HasWitness {
-			agents = append(agents, "witness")
+		refineryStatus := "stopped"
+		if refineryRunning {
+			refineryStatus = "running"
 		}
-		if r.HasMayor {
-			agents = append(agents, "mayor")
+
+		summary := r.Summary()
+		rigs = append(rigs, rigInfo{
+			Name:     name,
+			Status:   strings.ToLower(opState),
+			Witness:  witnessStatus,
+			Refinery: refineryStatus,
+			Polecats: summary.PolecatCount,
+			Crew:     summary.CrewCount,
+		})
+	}
+
+	if rigListJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rigs)
+	}
+
+	fmt.Printf("Rigs in %s:\n\n", townRoot)
+	for _, ri := range rigs {
+		if ri.Status == "error" {
+			fmt.Printf("  %s %s\n", style.Warning.Render("!"), ri.Name)
+			continue
 		}
-		if len(agents) > 0 {
-			fmt.Printf("    Agents: %v\n", agents)
+
+		stateLabel := style.Success.Render(strings.ToUpper(ri.Status))
+		if ri.Status == "parked" {
+			stateLabel = style.Warning.Render("PARKED")
+		} else if ri.Status == "docked" {
+			stateLabel = style.Dim.Render("DOCKED")
 		}
+
+		fmt.Printf("  %s  %s\n", style.Bold.Render(ri.Name), stateLabel)
+
+		witnessIcon := style.Dim.Render("○")
+		if ri.Witness == "running" {
+			witnessIcon = style.Success.Render("●")
+		}
+		refineryIcon := style.Dim.Render("○")
+		if ri.Refinery == "running" {
+			refineryIcon = style.Success.Render("●")
+		}
+
+		fmt.Printf("    Witness: %s %s  Refinery: %s %s\n",
+			witnessIcon, ri.Witness, refineryIcon, ri.Refinery)
+		fmt.Printf("    Polecats: %d  Crew: %d\n", ri.Polecats, ri.Crew)
 		fmt.Println()
 	}
 
