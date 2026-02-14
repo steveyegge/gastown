@@ -33,7 +33,6 @@ type tmuxOps interface {
 	SetAutoRespawnHook(session string) error
 	AcceptBypassPermissionsWarning(session string) error
 	SendKeysRaw(session, keys string) error
-	NudgeSession(session, message string) error
 	GetSessionInfo(name string) (*tmux.SessionInfo, error)
 }
 
@@ -100,11 +99,11 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run `gt deacon heartbeat`. 2. Check `gt hook`; if work is hooked, execute it. 3. If no hook, create a patrol wisp with `bd mol wisp mol-deacon-patrol`, then hook it (`bd update <wisp-id> --status=hooked --assignee=deacon`) and execute it. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.", runtimeConfig)
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -159,9 +158,6 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
-
-	// Run unified startup bootstrap fallback for runtime configs that need nudges.
-	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "deacon", initialPrompt, runtimeConfig)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

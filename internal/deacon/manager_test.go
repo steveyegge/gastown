@@ -3,11 +3,9 @@ package deacon
 import (
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -22,12 +20,10 @@ type mockTmux struct {
 	sessionInfo      *tmux.SessionInfo
 	sessionInfoErr   error
 	sendKeysErr      error
-	nudgeErr         error
 
 	// Call tracking
 	killCalls       []string
 	newSessionCalls int
-	nudgeCalls      []string
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
@@ -49,7 +45,7 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 }
 
 func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error    { return nil }
+func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }
@@ -58,13 +54,9 @@ func (m *mockTmux) WaitForCommand(_ string, _ []string, _ time.Duration) error {
 	return m.waitErr
 }
 
-func (m *mockTmux) SetAutoRespawnHook(_ string) error             { return nil }
-func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error { return nil }
-func (m *mockTmux) SendKeysRaw(_, _ string) error                 { return m.sendKeysErr }
-func (m *mockTmux) NudgeSession(_ string, message string) error {
-	m.nudgeCalls = append(m.nudgeCalls, message)
-	return m.nudgeErr
-}
+func (m *mockTmux) SetAutoRespawnHook(_ string) error              { return nil }
+func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error  { return nil }
+func (m *mockTmux) SendKeysRaw(_, _ string) error                  { return m.sendKeysErr }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
@@ -176,83 +168,6 @@ func TestStart_NoExistingSession(t *testing.T) {
 	// Should NOT have tried to kill anything
 	if len(mock.killCalls) != 0 {
 		t.Errorf("expected 0 kill calls, got %d", len(mock.killCalls))
-	}
-}
-
-func TestStart_NoHookRuntimeWithPrompt_DoesNotRunStartupFallback(t *testing.T) {
-	townRoot := t.TempDir()
-
-	settings := config.NewTownSettings()
-	settings.RoleAgents["deacon"] = "codex-fast"
-	settings.Agents["codex-fast"] = &config.RuntimeConfig{
-		Provider:   "codex",
-		Command:    "codex",
-		PromptMode: "arg",
-		Hooks: &config.RuntimeHooksConfig{
-			Provider: "none",
-		},
-		Tmux: &config.RuntimeTmuxConfig{
-			ReadyDelayMs: 0,
-		},
-	}
-	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), settings); err != nil {
-		t.Fatalf("SaveTownSettings() error = %v", err)
-	}
-
-	mock := &mockTmux{
-		hasSessionResult: false,
-	}
-	m := newTestManager(townRoot, mock)
-
-	if err := m.Start(""); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	for _, call := range mock.nudgeCalls {
-		if strings.Contains(call, "gt prime") {
-			t.Fatalf("expected no startup fallback nudge for no-hook+prompt runtime, got %v", mock.nudgeCalls)
-		}
-	}
-}
-
-func TestStart_NoHookRuntimeNoPrompt_RunsStartupFallback(t *testing.T) {
-	townRoot := t.TempDir()
-
-	settings := config.NewTownSettings()
-	settings.RoleAgents["deacon"] = "opencode-fast"
-	settings.Agents["opencode-fast"] = &config.RuntimeConfig{
-		Provider:   "opencode",
-		Command:    "opencode",
-		PromptMode: "none",
-		Hooks: &config.RuntimeHooksConfig{
-			Provider: "none",
-		},
-		Tmux: &config.RuntimeTmuxConfig{
-			ReadyDelayMs: 0,
-		},
-	}
-	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), settings); err != nil {
-		t.Fatalf("SaveTownSettings() error = %v", err)
-	}
-
-	mock := &mockTmux{
-		hasSessionResult: false,
-	}
-	m := newTestManager(townRoot, mock)
-
-	if err := m.Start(""); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	foundPrimeFallback := false
-	for _, call := range mock.nudgeCalls {
-		if strings.Contains(call, "gt prime") {
-			foundPrimeFallback = true
-			break
-		}
-	}
-	if !foundPrimeFallback {
-		t.Fatalf("expected startup fallback nudge to include gt prime for no-hook+no-prompt runtime, got %v", mock.nudgeCalls)
 	}
 }
 
@@ -392,11 +307,11 @@ func TestStop_KillFails(t *testing.T) {
 
 func TestIsRunning(t *testing.T) {
 	tests := []struct {
-		name    string
-		running bool
-		err     error
-		wantRun bool
-		wantErr bool
+		name     string
+		running  bool
+		err      error
+		wantRun  bool
+		wantErr  bool
 	}{
 		{
 			name:    "running",

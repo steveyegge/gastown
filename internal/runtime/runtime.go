@@ -211,7 +211,7 @@ const DefaultPrimeWaitMs = 2000
 //	|-------|--------|--------------------------|---------------------|---------------------|
 //	| ✓     | ✓      | Standard                 | Hook runs gt prime  | In beacon           |
 //	| ✓     | ✗      | Standard (via nudge)     | Hook runs gt prime  | Same nudge          |
-//	| ✗     | ✓      | "Run gt prime" (prompt)  | Agent runs manually | Delayed nudge       |
+//	| ✗     | ✓      | "Run gt prime" (prompt)  | Agent runs manually | In prompt           |
 //	| ✗     | ✗      | "Run gt prime" (nudge)   | Agent runs manually | Delayed nudge       |
 type StartupFallbackInfo struct {
 	// IncludePrimeInBeacon indicates the beacon should include "Run gt prime" instruction.

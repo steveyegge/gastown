@@ -310,9 +310,10 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 - Claude uses hooks in `.claude/settings.json` (managed via `--settings` flag) for mail injection and startup.
 - For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
   `~/.codex/config.toml` so role instructions are picked up.
-- For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback
-  after the session is ready: `gt prime`, optional `gt mail check --inject`
-  for autonomous roles, and `gt nudge deacon session-started`.
+- For runtimes without hooks and without prompt support (e.g., default OpenCode), Gas Town sends
+  a startup fallback after the session is ready: `gt prime`, optional
+  `gt mail check --inject` for autonomous roles, and `gt nudge deacon
+  session-started`.
 
 ## Key Commands
 

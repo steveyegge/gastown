@@ -22,8 +22,6 @@ var (
 	bootAgentOverride string
 )
 
-const deaconStartupGracePeriod = 2 * time.Minute
-
 var bootCmd = &cobra.Command{
 	Use:     "boot",
 	GroupID: GroupAgents,
@@ -319,18 +317,10 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 	if townRoot != "" {
 		hb := deacon.ReadHeartbeat(townRoot)
 		if hb.ShouldPoke() {
-			now := time.Now()
-			sessionStartedAt, _ := session.SessionCreatedAt(deaconSession)
-			deferForStartup, restart, age := classifyStaleHeartbeatAction(now, sessionStartedAt, hb)
-
-			if deferForStartup {
-				fmt.Printf("Deacon session started %s ago; stale heartbeat predates startup (%s old) - deferring action\n",
-					now.Sub(sessionStartedAt).Round(time.Second), age.Round(time.Minute))
-				return "nothing", "deacon-starting", nil
-			}
-
-			// Heartbeat is stale (>15 min) - Deacon may be stuck.
-			if restart {
+			// Heartbeat is stale (>15 min) - Deacon is stuck
+			// Nudge the session to try to wake it up
+			age := hb.Age()
+			if age > 30*time.Minute {
 				// Very stuck - restart the session.
 				// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))
@@ -340,12 +330,12 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 				// Kill failed - report it (daemon will retry next tick)
 				fmt.Printf("Failed to kill session: %v\n", err)
 				return "restart-failed", "deacon-stuck", nil
+			} else {
+				// Stuck but not critically - try nudging first
+				fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
+				_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
+				return "nudge", "deacon-stale", nil
 			}
-
-			// Stuck but not critically - try nudging first
-			fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
-			_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
-			return "nudge", "deacon-stale", nil
 		} else {
 			// Heartbeat is fresh - but is Deacon actually working?
 			// Check for idle state (no work on hook, or work not progressing)
@@ -362,7 +352,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			hookBead := getDeaconHookBead()
 			if hookBead == "" {
 				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, create a patrol wisp (`bd mol wisp mol-deacon-patrol`), hook it (`bd update <wisp-id> --status=hooked --assignee=deacon`), and continue patrol.")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, start patrol: gt deacon patrol")
 				return "nudge", "deacon-idle", nil
 			}
 
@@ -371,41 +361,13 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			lastActivity, err := getMoleculeLastActivity(hookBead)
 			if err == nil && !lastActivity.IsZero() && time.Since(lastActivity) > 15*time.Minute {
 				fmt.Printf("Deacon has hooked work but no progress in %s - nudging\n", time.Since(lastActivity).Round(time.Minute))
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue current patrol work, or create a fresh patrol wisp (`bd mol wisp mol-deacon-patrol`) and hook it.")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue work or restart patrol: gt deacon patrol")
 				return "nudge", "deacon-stale-work", nil
 			}
 		}
 	}
 
 	return "nothing", "", nil
-}
-
-// classifyStaleHeartbeatAction decides stale-heartbeat action while avoiding
-// false restarts immediately after a deacon session restart.
-func classifyStaleHeartbeatAction(now, sessionStartedAt time.Time, hb *deacon.Heartbeat) (deferForStartup bool, restart bool, age time.Duration) {
-	if hb == nil {
-		age = 24 * time.Hour * 365
-	} else {
-		age = now.Sub(hb.Timestamp)
-	}
-
-	// Startup grace: if the current deacon session was started recently and the
-	// heartbeat is missing or predates this session, defer action to allow the
-	// new process to emit its first heartbeat.
-	if !sessionStartedAt.IsZero() {
-		sessionAge := now.Sub(sessionStartedAt)
-		if sessionAge >= 0 && sessionAge < deaconStartupGracePeriod {
-			if hb == nil || hb.Timestamp.Before(sessionStartedAt) {
-				return true, false, age
-			}
-		}
-	}
-
-	// Outside startup grace, escalate based on heartbeat age.
-	if age > 30*time.Minute {
-		return false, true, age
-	}
-	return false, false, age
 }
 
 // isDeaconInBackoff checks if the Deacon is in await-signal backoff mode.

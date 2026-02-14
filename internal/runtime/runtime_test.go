@@ -305,6 +305,33 @@ func TestGetStartupBootstrapPlan_NoHooksNoPrompt(t *testing.T) {
 	}
 }
 
+type mockStartupNudger struct {
+	nudges []string
+}
+
+func (m *mockStartupNudger) NudgeSession(_session, message string) error {
+	m.nudges = append(m.nudges, message)
+	return nil
+}
+
+func TestRunStartupBootstrapIfNeeded_NoHooksWithPrompt(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	mock := &mockStartupNudger{}
+	err := RunStartupBootstrapIfNeeded(mock, "session-id", "deacon", "Boot now.", rc)
+	if err != nil {
+		t.Fatalf("RunStartupBootstrapIfNeeded() error = %v", err)
+	}
+	if len(mock.nudges) != 0 {
+		t.Fatalf("expected no startup nudges for no-hooks+prompt, got %v", mock.nudges)
+	}
+}
+
 func TestStartupBeacon_NoHooksWithPrompt_IncludesPrimeInstruction(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		PromptMode: "arg",
