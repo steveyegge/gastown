@@ -39,10 +39,12 @@
         var mailCompose = document.getElementById('mail-compose');
         var issueDetail = document.getElementById('issue-detail');
         var prDetail = document.getElementById('pr-detail');
+        var sessionPreview = document.getElementById('session-preview');
         var inDetailView = (mailDetail && mailDetail.style.display !== 'none') ||
                           (mailCompose && mailCompose.style.display !== 'none') ||
                           (issueDetail && issueDetail.style.display !== 'none') ||
-                          (prDetail && prDetail.style.display !== 'none');
+                          (prDetail && prDetail.style.display !== 'none') ||
+                          (sessionPreview && sessionPreview.style.display !== 'none');
         if (!inDetailView && !hasExpanded) {
             window.pauseRefresh = false;
         }
@@ -1523,6 +1525,97 @@
             // Resume HTMX refresh
             window.pauseRefresh = false;
         });
+    }
+
+    // ============================================
+    // SESSION TERMINAL PREVIEW
+    // ============================================
+    var sessionPreviewInterval = null;
+    var sessionsTable = null; // will be set when opening preview
+
+    // Click on session row to preview terminal output
+    document.addEventListener('click', function(e) {
+        var sessionRow = e.target.closest('.session-row');
+        if (sessionRow) {
+            e.preventDefault();
+            var sessionName = sessionRow.getAttribute('data-session-name');
+            if (sessionName) {
+                openSessionPreview(sessionName);
+            }
+        }
+    });
+
+    function openSessionPreview(sessionName) {
+        window.pauseRefresh = true;
+
+        var preview = document.getElementById('session-preview');
+        var nameEl = document.getElementById('session-preview-name');
+        var contentEl = document.getElementById('session-preview-content');
+        var statusEl = document.getElementById('session-preview-status');
+
+        if (!preview || !contentEl) return;
+
+        // Hide the sessions table, show preview
+        sessionsTable = preview.parentNode.querySelector('table');
+        if (sessionsTable) sessionsTable.style.display = 'none';
+        var emptyState = preview.parentNode.querySelector('.empty-state');
+        if (emptyState) emptyState.style.display = 'none';
+
+        nameEl.textContent = sessionName;
+        contentEl.textContent = 'Loading...';
+        statusEl.textContent = '';
+        preview.style.display = 'block';
+
+        // Fetch immediately
+        fetchSessionPreview(sessionName, contentEl, statusEl);
+
+        // Auto-refresh every 3 seconds
+        if (sessionPreviewInterval) clearInterval(sessionPreviewInterval);
+        sessionPreviewInterval = setInterval(function() {
+            fetchSessionPreview(sessionName, contentEl, statusEl);
+        }, 3000);
+    }
+
+    function fetchSessionPreview(sessionName, contentEl, statusEl) {
+        fetch('/api/session/preview?session=' + encodeURIComponent(sessionName))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    contentEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                contentEl.textContent = data.content || '(empty)';
+                // Auto-scroll to bottom
+                contentEl.scrollTop = contentEl.scrollHeight;
+                // Show refresh timestamp
+                var now = new Date();
+                var timeStr = now.getHours() + ':' + (now.getMinutes() < 10 ? '0' : '') + now.getMinutes() + ':' + (now.getSeconds() < 10 ? '0' : '') + now.getSeconds();
+                statusEl.textContent = 'refreshed ' + timeStr;
+            })
+            .catch(function(err) {
+                contentEl.textContent = 'Failed to load preview: ' + err.message;
+            });
+    }
+
+    function closeSessionPreview() {
+        if (sessionPreviewInterval) {
+            clearInterval(sessionPreviewInterval);
+            sessionPreviewInterval = null;
+        }
+
+        var preview = document.getElementById('session-preview');
+        if (preview) preview.style.display = 'none';
+
+        // Show the sessions table again
+        if (sessionsTable) sessionsTable.style.display = '';
+
+        window.pauseRefresh = false;
+    }
+
+    // Back button from session preview
+    var sessionPreviewBack = document.getElementById('session-preview-back');
+    if (sessionPreviewBack) {
+        sessionPreviewBack.addEventListener('click', closeSessionPreview);
     }
 
 })();
