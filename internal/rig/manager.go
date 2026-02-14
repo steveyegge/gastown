@@ -444,26 +444,34 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			fmt.Printf("  Using prefix '%s' for tracked beads (no existing issues to detect from)\n", opts.BeadsPrefix)
 		}
 
-		// Initialize bd database if it doesn't exist.
+		// Initialize bd database if runtime files are missing.
 		// DB files are gitignored so they won't exist after clone — bd init creates them.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
+		//
+		// Note: bdDatabaseExists checks for metadata.json which may be tracked in git.
+		// When metadata.json exists but the Dolt server database doesn't (fresh clone
+		// to a new workspace), we still need to run bd init to create the server-side
+		// database and set issue_prefix. Always ensure issue_prefix is set afterward.
 		if !bdDatabaseExists(sourceBeadsDir) {
 			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix, "--backend", "dolt", "--server") // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
-			// Configure custom types for Gas Town (beads v0.46.0+)
-			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-			configCmd.Dir = mayorRigPath
-			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+		}
 
-			// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
-			prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", opts.BeadsPrefix)
-			prefixSetCmd.Dir = mayorRigPath
-			if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
-				fmt.Printf("  Warning: Could not set issue_prefix: %v (%s)\n", prefixErr, strings.TrimSpace(string(prefixOutput)))
-			}
+		// Always ensure issue_prefix and custom types are configured, even when
+		// metadata.json was tracked in git (bdDatabaseExists returned true).
+		// The tracked metadata.json tells bd HOW to connect but doesn't guarantee
+		// the server-side database has issue_prefix set for this workspace.
+		configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+		configCmd.Dir = mayorRigPath
+		_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+
+		prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", opts.BeadsPrefix)
+		prefixSetCmd.Dir = mayorRigPath
+		if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
+			fmt.Printf("  Warning: Could not set issue_prefix: %v (%s)\n", prefixErr, strings.TrimSpace(string(prefixOutput)))
 		}
 	}
 
@@ -933,14 +941,44 @@ func isStandardBeadHash(s string) bool {
 	return true
 }
 
-// bdDatabaseExists checks if a beads directory has an initialized database.
-// Checks for Dolt metadata (the standard backend).
+// bdDatabaseExists checks if a beads directory has an initialized database
+// that is actually usable (not just tracked metadata from another workspace).
+//
+// For Dolt server mode, metadata.json may be tracked in git with dolt_database
+// pointing to a database that doesn't exist on this Dolt server. In that case,
+// we need to run bd init to create the server-side database.
 func bdDatabaseExists(beadsDir string) bool {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
-	if _, err := os.Stat(metadataPath); err == nil {
-		return true
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return false
 	}
-	return false
+
+	// Parse metadata to check if the referenced Dolt database actually exists.
+	var meta struct {
+		DoltMode     string `json:"dolt_mode"`
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return true // Can't parse — assume it exists (backward compat)
+	}
+
+	// For server mode, verify the database exists in .dolt-data/.
+	// metadata.json may be tracked in git from another workspace where
+	// the Dolt server had this database, but this is a fresh server.
+	if meta.DoltMode == "server" && meta.DoltDatabase != "" {
+		// Walk up from beadsDir to find the town root (.dolt-data lives there).
+		townRoot := beads.FindTownRoot(filepath.Dir(beadsDir))
+		if townRoot == "" {
+			return true // Can't find town root — assume it exists
+		}
+		dbDir := filepath.Join(townRoot, ".dolt-data", meta.DoltDatabase)
+		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
+			return false // Database doesn't exist on this server
+		}
+	}
+
+	return true
 }
 
 // When adding a rig from a source repo that has .beads/ tracked in git (like a project
