@@ -325,6 +325,30 @@ When `os.Stdout` is not a TTY (detected via `isatty()`):
 
 ---
 
+## Acceptance Criteria
+
+These scenarios define "done" for v1:
+
+| # | Scenario | Expected Result |
+|---|----------|-----------------|
+| 1 | `gt doctor orphan-sessions` | Runs only orphan-sessions check in <1s, simplified output |
+| 2 | `gt doctor orphan-sessions wisp-gc` | Runs both checks, streaming output with summary |
+| 3 | `gt doctor cleanup` | Runs all Cleanup-category checks with "Running: Cleanup (N checks)" header |
+| 4 | `gt doctor orphan-sessions --fix` | Runs check, fixes issues, re-runs to verify |
+| 5 | `gt doctor orphan-sessions --fix --dry-run` | Runs check, shows "Would fix: ..." without acting |
+| 6 | `gt doctor orphen-sessions` | Error: unknown check + "Did you mean: orphan-sessions?" + "Run gt doctor list" |
+| 7 | `gt doctor list` | Shows all checks grouped by category with 🔧 icons for fixable |
+| 8 | `gt doctor` (no args) | Full 47-check run, identical to current behavior |
+| 9 | `gt doctor --fix` (no args) | Fix all, identical to current behavior |
+| 10 | `gt doctor orphan_sessions` | Normalizes to `orphan-sessions`, runs check |
+| 11 | `gt doctor Orphan-Sessions` | Case-insensitive match, runs check |
+| 12 | `gt doctor all` | Error: unknown check "all" + redirect to `gt doctor` |
+| 13 | `gt doctor <rig-check>` (no --rig) | Error: "requires --rig flag" with correct invocation |
+| 14 | `gt doctor orphan-sessions \| cat` | Non-TTY: no ANSI codes, text prefixes (PASS/WARN/FAIL) |
+| 15 | Tab-completing `gt doctor or<TAB>` | Completes to `orphan-sessions` (and other matches) |
+
+---
+
 ## Non-Goals (v1)
 
 - Exclusion patterns (`--except`)
@@ -348,3 +372,29 @@ When `os.Stdout` is not a TTY (detected via `isatty()`):
 - **Exclusion:** `gt doctor --except orphan-sessions` to skip specific checks
 - **Profiles:** Named check combinations for repeated use
 - **Drill-down:** More detail for single-check than full run shows
+
+---
+
+## Spec Review
+
+**Reviewed:** 2026-02-14
+**Method:** Completeness check (45 P0+P1 questions) + fresh assessment (6 categories)
+**Gaps identified:** 1 important, 3 nice-to-have
+**Gaps resolved:** 1 (acceptance criteria added)
+
+### Clarifications Added
+
+| Topic | Clarification |
+|-------|---------------|
+| Acceptance criteria | Added 15 concrete test scenarios defining "done" |
+
+### Implementation Details (developer discretion)
+
+These are intentionally left to the implementer:
+
+| Detail | Guidance |
+|--------|----------|
+| Levenshtein threshold | 2 edit distance is standard for CLI tools |
+| TTY detection package | `golang.org/x/term` or `mattn/go-isatty` — either works |
+| One-time hint suppression | Config file flag or simple counter — low stakes |
+| `--dry-run` without `--fix` | Silent ignore (spec says "only meaningful with `--fix`") |
