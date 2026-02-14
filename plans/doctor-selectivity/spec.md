@@ -9,8 +9,9 @@
 ## Overview
 
 Add support for selective doctor execution: `gt doctor <check-name>` runs only the
-specified check(s) instead of the full 47-check suite. This addresses three validated
-pain points: speed (full runs are slow), noise (users care about one check but see 47),
+specified check(s) instead of the full suite (~72 base checks, ~83 with rig checks).
+This addresses three validated pain points: speed (full runs are slow), noise (users
+care about one check but see all of them),
 and surgical fixing (users know what's broken and want to fix it directly).
 
 The feature adds positional arguments to the existing `gt doctor` command, a `list`
@@ -62,13 +63,13 @@ and maintenance. Both interactive and scripted/CI use cases.
 | 21 | Partial fix success? | Reports what succeeded/remains via re-run | Auto: Per-item fixes + verification. |
 | 22 | Immediate feedback? | Yes, streaming "○ name..." before result | Auto: Existing pattern. |
 | 23 | All flags compose? | Yes (`--verbose`, `--slow`, `--rig`, etc.) | Auto: Flags orthogonal to selection. |
-| 24 | Rig check without `--rig`? | Clear error with correct invocation hint | Auto: Rig checks not registered without flag. |
+| 24 | Rig check without `--rig`? | "Unknown check" + did-you-mean + "--rig" hint. Rig checks not registered without flag, so they appear as unknown. | Review: Updated from original — rig checks are conditionally registered. |
 | 25 | Verbose default for targeted? | No, keep `--verbose` opt-in | Human choice — targeting = focus, not depth |
 | 26 | Tab completion? | Yes, in v1 | Human choice — Cobra has built-in support |
 | 27 | Help text update? | Prominent — update Usage line + examples | Auto: Standard practice. |
 | 28 | Hint in full output? | Yes, subtle one-time tip | Auto: Drives adoption. |
 | 29 | `gt doctor all`? | Error + redirect to `gt doctor` with no args | Auto |
-| 30 | Reserved words? | Reserve `list` as subcommand | Auto: No check name conflicts. |
+| 30 | Reserved words? | Reserve `list` as subcommand, `all` as redirect to no-args | Auto: No check name conflicts. |
 | 31 | Ctrl+C during fix? | Safe — per-item atomic fixes | Auto: Existing check design. |
 | 32 | Concurrent runs? | No locking — checks are idempotent | Auto |
 | 33 | Outside workspace? | Already handled: clear error | Auto |
@@ -104,8 +105,12 @@ and maintenance. Both interactive and scripted/CI use cases.
 ### Architecture Overview
 
 Selective execution adds a filtering layer between check registration and check execution.
-The existing `Doctor` framework is unchanged — filtering happens in `cmd/doctor.go` before
-calling `RunStreaming` or `FixStreaming`.
+Filtering happens in `cmd/doctor.go` before calling `RunStreaming` or `FixStreaming`.
+
+**Architectural assumption:** Checks are self-contained — each check's `Run()` and `Fix()`
+operate only on the check's own struct state (e.g., `missingRigs []string` populated by
+`Run()` and consumed by `Fix()`). No check reads results from other checks. This is verified
+in the codebase and is a requirement for selective execution to work safely.
 
 ```
 User Input → Parse Args → Filter Checks → Doctor.RunStreaming/FixStreaming → Report
@@ -128,11 +133,18 @@ gt doctor list                         # Show available checks
 gt doctor --fix                        # Fix all (existing behavior)
 ```
 
-**Argument resolution order:**
-1. If arg is `list` → run list subcommand
-2. If arg matches an exact check name → select that check
-3. If arg matches a category name (case-insensitive) → select all checks in category
-4. Otherwise → error with "did you mean?" suggestions
+**Routing:** `list` is a Cobra subcommand (child of `doctorCmd`). Cobra routes
+`gt doctor list` automatically before `runDoctor` is called. No special handling
+in `runDoctor` needed for `list`.
+
+**Note:** `cobra.EnablePrefixMatching` is enabled globally (root.go:257), so
+`gt doctor l` will prefix-match to `list`. No current check names start with `l`
+that could conflict, but future check names should avoid the `list` prefix.
+
+**Argument resolution order (in `runDoctor`):**
+1. If arg matches an exact check name (after normalization) → select that check
+2. If arg matches a category name (case-insensitive, matched against display names like "Cleanup", "Core") → select all checks in category
+3. Otherwise → error with "did you mean?" suggestions (Levenshtein distance ≤ 2, show up to 3 suggestions)
 
 **Input normalization:**
 - Case-insensitive: `Orphan-Sessions` → `orphan-sessions`
@@ -159,8 +171,8 @@ type FilterResult struct {
 // FilterChecks filters registered checks by name or category
 func FilterChecks(checks []Check, args []string) (*FilterResult, error)
 
-// SuggestCheck returns the closest check name for typo correction
-func SuggestCheck(checks []Check, input string) string
+// SuggestCheck returns up to 3 closest check names within edit distance ≤ 2
+func SuggestCheck(checks []Check, input string) []string
 
 // NormalizeName converts input to canonical kebab-case form
 func NormalizeName(input string) string
@@ -192,6 +204,9 @@ Rig (requires --rig)
 
 🔧 icon indicates fixable checks (`CanFix() == true`).
 
+**`--rig` interaction:** Without `--rig`, rig checks are shown in a separate section with
+note "Requires --rig flag". With `--rig <name>`, rig checks are shown alongside other checks.
+
 #### 3. Modified Doctor Command (`internal/cmd/doctor.go`)
 
 Changes to `runDoctor`:
@@ -201,16 +216,20 @@ Changes to `runDoctor`:
 - For multi-check/category: same streaming format, adapted scope
 - `--dry-run` flag: shows what fix would do without applying
 
-#### 4. Shell Completion (`internal/cmd/completion.go`)
+#### 4. Shell Completion (in `internal/cmd/doctor.go`)
 
-Register completion function for doctor command:
+Set `ValidArgsFunction` on `doctorCmd` (no separate file needed):
 - Returns all check names + category names for tab completion
 - Cobra's built-in `ValidArgsFunction` mechanism
+- Categories are completable alongside check names
 
 #### 5. Dry-Run Mode
 
 New flag `--dry-run` (only meaningful with `--fix`):
-- Runs the check's `Run()` to identify issues
+- Implemented in `cmd/doctor.go`, NOT in `doctor.go` core
+- When `--fix --dry-run`: calls `RunStreaming` (not `FixStreaming`), then renders
+  custom "Would fix:" output based on the check results
+- This preserves the "minimal core changes" principle
 - Reports what would be fixed without calling `Fix()`
 - Output: "Would fix: 5 orphaned sessions" with details
 
@@ -229,6 +248,14 @@ Running: orphan-sessions
 
   ⚠  orphan-sessions  5 orphaned sessions found (fixing)...
   🔧 orphan-sessions  5 orphaned sessions cleaned (fixed)
+```
+
+#### Single Check — Non-Fixable with --fix
+```
+Running: town-config-valid
+
+  ⚠  town-config-valid  mayor/town.json has invalid JSON
+     └─ This check does not support auto-fix.
 ```
 
 #### Single Check — Dry Run
@@ -252,13 +279,21 @@ Running: Cleanup (4 checks)
 ✓ 3 passed  ⚠ 1 warning  ✗ 0 failed
 ```
 
-#### Unknown Check Name
+#### Unknown Check Name (single)
 ```
 Error: unknown check "orphen-sessions"
 
   Did you mean: orphan-sessions?
 
   Run "gt doctor list" to see all available checks.
+```
+
+#### Unknown Check Names (multiple)
+```
+Error: unknown checks "foo", "bar"
+
+  Run "gt doctor list" to see all available checks.
+  Some checks require --rig. Run "gt doctor list --rig <name>".
 ```
 
 #### Non-TTY Output (piped)
@@ -268,12 +303,22 @@ Running: orphan-sessions
 PASS  orphan-sessions  no orphaned sessions found
 ```
 
+#### Non-TTY Category Run (piped)
+```
+Running: Cleanup (4 checks)
+PASS  orphan-sessions       no orphaned sessions found
+WARN  orphan-processes      2 orphaned Claude processes
+PASS  wisp-gc               no abandoned wisps
+PASS  stale-beads-redirect  no stale redirect files
+3 passed  1 warning  0 failed
+```
+
 ### Error Handling
 
 | Scenario | Behavior |
 |----------|----------|
 | Unknown check name | Error + Levenshtein suggestion + "gt doctor list" |
-| Rig check without `--rig` | Error: "check 'X' requires --rig flag" with correct command |
+| Rig check without `--rig` | Error: "unknown check 'X'" + did-you-mean suggestions + "Some checks require --rig. Run `gt doctor list --rig <name>`." (Rig checks are not registered without `--rig`, so they appear as unknown.) |
 | `--fix` on non-fixable | Check runs normally, notes "does not support auto-fix" |
 | `--dry-run` without `--fix` | Ignored (dry-run only meaningful with `--fix`) |
 | `gt doctor all` | Error: "unknown check 'all'. Run `gt doctor` with no arguments." |
@@ -293,11 +338,19 @@ PASS  orphan-sessions  no orphaned sessions found
 
 ### Non-TTY Detection
 
-When `os.Stdout` is not a TTY (detected via `isatty()`):
+Detect via existing `ui.IsTerminal()` (`internal/ui/terminal.go:96`, uses `golang.org/x/term`).
+TTY state is determined in `cmd/doctor.go` and passed to `RunStreaming`/`FixStreaming`
+via an `isTTY bool` parameter (or via a writer wrapper that strips ANSI/`\r`).
+
+When non-TTY:
 - No ANSI color codes
-- No carriage return streaming (no `\r` overwrites)
+- No carriage return streaming (no `\r` overwrites in `RunStreaming`/`FixStreaming`)
 - Status as text prefix: `PASS`, `WARN`, `FAIL`, `FIXED`
 - No icons (no ✓, ⚠, ✗, 🔧, ⏳)
+
+**Note:** This requires modifying `internal/doctor/doctor.go` to accept TTY state.
+The `RunStreaming`/`FixStreaming` methods use `\r` carriage returns (doctor.go lines 91, 204)
+that must be conditionally disabled.
 
 ---
 
@@ -314,14 +367,14 @@ When `os.Stdout` is not a TTY (detected via `isatty()`):
 | File | Changes |
 |------|---------|
 | `internal/cmd/doctor.go` | Add arg parsing, check filtering, `--dry-run` flag, non-TTY detection, simplified output for targeted runs |
-| `internal/doctor/doctor.go` | No changes to core — filtering is external |
-| `internal/doctor/types.go` | No changes |
+| `internal/doctor/doctor.go` | Add `isTTY` parameter to `RunStreaming`/`FixStreaming` to conditionally disable `\r` overwrites and ANSI codes when piped |
+| `internal/doctor/types.go` | Add `Category() string` to `Check` interface (currently behind unexported `categoryGetter` type assertion in doctor.go:39). All checks already implement it via `BaseCheck`/`FixableCheck`. |
 
 ### Estimated Scope
-- ~300 lines new code (filter.go + doctor_list.go)
-- ~100 lines modified (cmd/doctor.go)
-- ~200 lines tests
-- Shell completion: ~30 lines
+- ~500 lines new code (filter.go + doctor_list.go + non-TTY + dry-run rendering)
+- ~200 lines modified (cmd/doctor.go + doctor.go TTY support + types.go Category())
+- ~400 lines tests
+- Shell completion: ~30 lines (in cmd/doctor.go)
 
 ---
 
@@ -338,14 +391,17 @@ These scenarios define "done" for v1:
 | 5 | `gt doctor orphan-sessions --fix --dry-run` | Runs check, shows "Would fix: ..." without acting |
 | 6 | `gt doctor orphen-sessions` | Error: unknown check + "Did you mean: orphan-sessions?" + "Run gt doctor list" |
 | 7 | `gt doctor list` | Shows all checks grouped by category with 🔧 icons for fixable |
-| 8 | `gt doctor` (no args) | Full 47-check run, identical to current behavior |
+| 8 | `gt doctor` (no args) | Full check run (~72 checks), identical to current behavior |
 | 9 | `gt doctor --fix` (no args) | Fix all, identical to current behavior |
 | 10 | `gt doctor orphan_sessions` | Normalizes to `orphan-sessions`, runs check |
 | 11 | `gt doctor Orphan-Sessions` | Case-insensitive match, runs check |
 | 12 | `gt doctor all` | Error: unknown check "all" + redirect to `gt doctor` |
-| 13 | `gt doctor <rig-check>` (no --rig) | Error: "requires --rig flag" with correct invocation |
+| 13 | `gt doctor <rig-check>` (no --rig) | Error: "unknown check" + did-you-mean + "Some checks require --rig" hint |
 | 14 | `gt doctor orphan-sessions \| cat` | Non-TTY: no ANSI codes, text prefixes (PASS/WARN/FAIL) |
 | 15 | Tab-completing `gt doctor or<TAB>` | Completes to `orphan-sessions` (and other matches) |
+| 16 | `gt doctor town-config-valid --fix` | Runs check, shows "does not support auto-fix" note |
+| 17 | `gt doctor cleanup \| cat` | Non-TTY category run: text prefixes, no ANSI, clean lines |
+| 18 | `gt doctor orphan-sessions --dry-run` (no --fix) | Runs normally, --dry-run silently ignored |
 
 ---
 
@@ -375,26 +431,50 @@ These scenarios define "done" for v1:
 
 ---
 
-## Spec Review
+## Spec Review (Phase 3)
 
 **Reviewed:** 2026-02-14
 **Method:** Completeness check (45 P0+P1 questions) + fresh assessment (6 categories)
-**Gaps identified:** 1 important, 3 nice-to-have
-**Gaps resolved:** 1 (acceptance criteria added)
+**Result:** 45/45 questions addressed. Added 15 acceptance criteria.
 
-### Clarifications Added
+## Multi-Model Review (Phase 4)
 
-| Topic | Clarification |
-|-------|---------------|
-| Acceptance criteria | Added 15 concrete test scenarios defining "done" |
+**Reviewed:** 2026-02-14
+**Models:** Opus 4.6, Sonnet 4.5, Haiku 4.5 (Codex/o4-mini failed, Haiku substituted)
+**Issues Found:** 16 (2 critical, 4 high, 5 medium, 5 low)
+**Issues Addressed:** 16 of 16
+
+### Findings Addressed
+
+| # | Issue | Resolution |
+|---|-------|------------|
+| 1 | Check count 47 → actual ~72/83 | Updated all references |
+| 2 | Rig check error impossible | Changed to "unknown check" + --rig hint |
+| 3 | Category() not on Check interface | Will add Category() to Check interface |
+| 4 | Non-TTY detection underspecified | Specified mechanism: ui.IsTerminal() + isTTY parameter |
+| 5 | `list` subcommand vs arg confusion | Clarified: Cobra subcommand, removed from arg resolution |
+| 6 | cobra.EnablePrefixMatching risk | Documented in CLI Grammar section |
+| 7 | Dry-run contradicts "no core changes" | Specified: implemented in cmd/doctor.go via RunStreaming |
+| 8 | Non-fixable + --fix output missing | Added output format example |
+| 9 | Scope estimate too low | Revised to ~500 new + ~200 modified + ~400 tests |
+| 10 | Multiple unmatched error format | Added example for multiple unknown checks |
+| 11 | List --rig interaction | Specified: separate section without --rig, inline with |
+| 12 | Levenshtein threshold | Moved to spec: ≤2 distance, up to 3 suggestions |
+| 13 | Shell completion file | Changed to ValidArgsFunction in doctor.go |
+| 14 | One-time hint | Deferred to implementation (low stakes) |
+| 15 | Non-TTY multi-check example | Added category run piped example |
+| 16 | Dry-run exit code | Kept 0 (no action = no error), documented rationale |
+
+### Ambiguities Resolved
+
+| Topic | Decision | Rationale |
+|-------|----------|-----------|
+| Rig check errors | "Unknown check" + --rig hint | Simplest, no architecture change needed |
+| Category access | Add Category() to Check interface | Clean API, all checks already implement via BaseCheck |
 
 ### Implementation Details (developer discretion)
 
-These are intentionally left to the implementer:
-
 | Detail | Guidance |
 |--------|----------|
-| Levenshtein threshold | 2 edit distance is standard for CLI tools |
-| TTY detection package | `golang.org/x/term` or `mattn/go-isatty` — either works |
 | One-time hint suppression | Config file flag or simple counter — low stakes |
 | `--dry-run` without `--fix` | Silent ignore (spec says "only meaningful with `--fix`") |
