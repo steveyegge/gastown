@@ -9,7 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
-	"github.com/steveyegge/gastown/internal/runtime"
+	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -121,7 +121,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		runtimeConfig = config.DefaultRuntimeConfig()
 	}
 	crewSettingsDir := config.RoleSettingsDir("crew", r.Path)
-	if err := runtime.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
+	if err := runtimelifecycle.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
 	}

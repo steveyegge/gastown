@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -93,7 +94,7 @@ func TestSessionIDFromEnv_CustomEnvVar(t *testing.T) {
 
 func TestSleepForReadyDelay_NilConfig(t *testing.T) {
 	// Should not panic with nil config
-	SleepForReadyDelay(nil)
+	runtimelifecycle.SleepForReadyDelay(nil)
 }
 
 func TestSleepForReadyDelay_ZeroDelay(t *testing.T) {
@@ -104,7 +105,7 @@ func TestSleepForReadyDelay_ZeroDelay(t *testing.T) {
 	}
 
 	start := time.Now()
-	SleepForReadyDelay(rc)
+	runtimelifecycle.SleepForReadyDelay(rc)
 	elapsed := time.Since(start)
 
 	// Should return immediately
@@ -121,7 +122,7 @@ func TestSleepForReadyDelay_WithDelay(t *testing.T) {
 	}
 
 	start := time.Now()
-	SleepForReadyDelay(rc)
+	runtimelifecycle.SleepForReadyDelay(rc)
 	elapsed := time.Since(start)
 
 	// Should sleep for at least 10ms
@@ -140,7 +141,7 @@ func TestSleepForReadyDelay_NilTmuxConfig(t *testing.T) {
 	}
 
 	start := time.Now()
-	SleepForReadyDelay(rc)
+	runtimelifecycle.SleepForReadyDelay(rc)
 	elapsed := time.Since(start)
 
 	// Should return immediately
@@ -387,7 +388,7 @@ func TestGetStartupBootstrapPlan_HooksNoPrompt(t *testing.T) {
 
 func TestEnsureSettingsForRole_NilConfig(t *testing.T) {
 	// Should not panic with nil config
-	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", nil)
+	err := runtimelifecycle.EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", nil)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with nil config should not error, got %v", err)
 	}
@@ -398,7 +399,7 @@ func TestEnsureSettingsForRole_NilHooks(t *testing.T) {
 		Hooks: nil,
 	}
 
-	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
+	err := runtimelifecycle.EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with nil hooks should not error, got %v", err)
 	}
@@ -411,7 +412,7 @@ func TestEnsureSettingsForRole_UnknownProvider(t *testing.T) {
 		},
 	}
 
-	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
+	err := runtimelifecycle.EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with unknown provider should not error, got %v", err)
 	}
@@ -431,7 +432,7 @@ func TestEnsureSettingsForRole_OpenCodeUsesWorkDir(t *testing.T) {
 		},
 	}
 
-	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	err := runtimelifecycle.EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
 	if err != nil {
 		t.Fatalf("EnsureSettingsForRole() error = %v", err)
 	}
@@ -458,7 +459,7 @@ func TestEnsureSettingsForRole_ClaudeUsesSettingsDir(t *testing.T) {
 		},
 	}
 
-	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	err := runtimelifecycle.EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
 	if err != nil {
 		t.Fatalf("EnsureSettingsForRole() error = %v", err)
 	}

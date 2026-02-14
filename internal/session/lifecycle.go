@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/opencode"
-	"github.com/steveyegge/gastown/internal/templates/commands"
+	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -149,7 +147,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 	if settingsDir == "" {
 		settingsDir = cfg.WorkDir
 	}
-	if err := ensureSettingsForRole(settingsDir, cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
+	if err := runtimelifecycle.EnsureSettingsForRole(settingsDir, cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
 		return nil, fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -230,7 +228,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 
 	// 11. Ready delay.
 	if cfg.ReadyDelay {
-		sleepForReadyDelay(runtimeConfig)
+		runtimelifecycle.SleepForReadyDelay(runtimeConfig)
 	}
 
 	// 12. Verify session survived startup.
@@ -327,56 +325,7 @@ func buildCommand(cfg SessionConfig, prompt string) (string, error) {
 // Exposed for callers that need to call it independently (e.g., when
 // using a pre-built StartResult).
 func ReadyDelay(rc *config.RuntimeConfig) {
-	sleepForReadyDelay(rc)
-}
-
-// sleepForReadyDelay sleeps for the runtime's configured readiness delay.
-func sleepForReadyDelay(rc *config.RuntimeConfig) {
-	if rc == nil || rc.Tmux == nil {
-		return
-	}
-	if rc.Tmux.ReadyDelayMs <= 0 {
-		return
-	}
-	time.Sleep(time.Duration(rc.Tmux.ReadyDelayMs) * time.Millisecond)
-}
-
-// ensureSettingsForRole provisions all agent-specific configuration for a role.
-//
-// This mirrors runtime.EnsureSettingsForRole to avoid an import cycle between
-// session and runtime packages.
-func ensureSettingsForRole(settingsDir, workDir, role string, rc *config.RuntimeConfig) error {
-	if rc == nil {
-		rc = config.DefaultRuntimeConfig()
-	}
-
-	if rc.Hooks == nil {
-		return nil
-	}
-
-	provider := rc.Hooks.Provider
-	if provider == "" || provider == "none" {
-		return nil
-	}
-
-	switch provider {
-	case "claude":
-		if err := claude.EnsureSettingsForRoleAt(settingsDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
-			return err
-		}
-	case "opencode":
-		if err := opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
-			return err
-		}
-	}
-
-	if commands.IsKnownAgent(provider) {
-		if err := commands.ProvisionFor(workDir, provider); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	runtimelifecycle.SleepForReadyDelay(rc)
 }
 
 // ShutdownDelay is the standard delay after session creation.

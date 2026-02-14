@@ -5,63 +5,14 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/opencode"
+	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/templates/commands"
 )
 
 type startupNudger interface {
 	NudgeSession(session, message string) error
-}
-
-// EnsureSettingsForRole provisions all agent-specific configuration for a role.
-// settingsDir is where provider settings (e.g., .claude/settings.json) are installed.
-// workDir is the agent's working directory where slash commands are provisioned.
-// For roles like crew/witness/refinery/polecat, settingsDir is a gastown-managed
-// parent directory (passed via --settings flag), while workDir is the customer repo.
-// For mayor/deacon, settingsDir and workDir are the same.
-func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.RuntimeConfig) error {
-	if rc == nil {
-		rc = config.DefaultRuntimeConfig()
-	}
-
-	if rc.Hooks == nil {
-		return nil
-	}
-
-	provider := rc.Hooks.Provider
-	if provider == "" || provider == "none" {
-		return nil
-	}
-
-	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode)
-	// Settings are installed to settingsDir (gastown-managed parent for rig roles).
-	switch provider {
-	case "claude":
-		if err := claude.EnsureSettingsForRoleAt(settingsDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
-			return err
-		}
-	case "opencode":
-		// OpenCode plugins stay in workDir — OpenCode has no --settings equivalent
-		// for path redirection, so it discovers plugins from the working directory.
-		if err := opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
-			return err
-		}
-	}
-
-	// 2. Slash commands (agent-agnostic, uses shared body with provider-specific frontmatter)
-	// Only provision for known agents to maintain backwards compatibility
-	if commands.IsKnownAgent(provider) {
-		if err := commands.ProvisionFor(workDir, provider); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
@@ -73,17 +24,6 @@ func SessionIDFromEnv() string {
 		}
 	}
 	return os.Getenv("CLAUDE_SESSION_ID")
-}
-
-// SleepForReadyDelay sleeps for the runtime's configured readiness delay.
-func SleepForReadyDelay(rc *config.RuntimeConfig) {
-	if rc == nil || rc.Tmux == nil {
-		return
-	}
-	if rc.Tmux.ReadyDelayMs <= 0 {
-		return
-	}
-	time.Sleep(time.Duration(rc.Tmux.ReadyDelayMs) * time.Millisecond)
 }
 
 // StartupFallbackCommands returns commands that approximate Claude hooks when hooks are unavailable.
@@ -178,7 +118,7 @@ func RunStartupBootstrapIfNeeded(t startupNudger, sessionID, role, startupPrompt
 	if !plan.SendPromptNudge && !plan.RunPrimeFallback {
 		return nil
 	}
-	SleepForReadyDelay(rc)
+	runtimelifecycle.SleepForReadyDelay(rc)
 	return RunStartupBootstrap(t, sessionID, role, startupPrompt, rc)
 }
 
