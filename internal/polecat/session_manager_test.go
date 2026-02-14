@@ -292,3 +292,52 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSessionName(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessionName string
+		rigName     string
+		wantErr     bool
+	}{
+		{
+			name:        "valid themed name",
+			sessionName: "gt-gastown_manager-furiosa",
+			rigName:     "gastown_manager",
+			wantErr:     false,
+		},
+		{
+			name:        "valid overflow name (new format)",
+			sessionName: "gt-gastown_manager-51",
+			rigName:     "gastown_manager",
+			wantErr:     false,
+		},
+		{
+			name:        "malformed double-prefix (bug)",
+			sessionName: "gt-gastown_manager-gastown_manager-51",
+			rigName:     "gastown_manager",
+			wantErr:     true,
+		},
+		{
+			name:        "malformed double-prefix gastown",
+			sessionName: "gt-gastown-gastown-142",
+			rigName:     "gastown",
+			wantErr:     true,
+		},
+		{
+			name:        "different rig (can't validate)",
+			sessionName: "gt-other-rig-name",
+			rigName:     "gastown",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSessionName(tt.sessionName, tt.rigName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSessionName() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -960,8 +960,9 @@ func forceRemoveDir(dir string) error {
 }
 
 // AllocateName allocates a name from the name pool.
-// Returns a pooled name (polecat-01 through polecat-50) if available,
-// otherwise returns an overflow name (rigname-N).
+// Returns a themed pooled name (furiosa, nux, etc.) if available,
+// otherwise returns an overflow name (just a number like "51").
+// The rig prefix is added by SessionName to create full session names like "gt-<rig>-51".
 // After allocation, kills any lingering tmux session for the name (gt-pqf9x)
 // to prevent "session already running" errors when reusing names from dead polecats.
 func (m *Manager) AllocateName() (string, error) {

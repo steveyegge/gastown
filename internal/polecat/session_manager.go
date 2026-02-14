@@ -99,8 +99,42 @@ type SessionInfo struct {
 }
 
 // SessionName generates the tmux session name for a polecat.
+// Validates that the polecat name doesn't contain the rig prefix to prevent
+// double-prefix bugs (e.g., "gt-gastown_manager-gastown_manager-142").
 func (m *SessionManager) SessionName(polecat string) string {
-	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
+	sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
+
+	// Validate session name format to detect double-prefix bugs
+	if err := validateSessionName(sessionName, m.rig.Name); err != nil {
+		// Log warning but don't fail - allow the session to be created
+		// so we can track and clean up malformed sessions later
+		fmt.Fprintf(os.Stderr, "Warning: malformed session name: %v\n", err)
+	}
+
+	return sessionName
+}
+
+// validateSessionName checks for double-prefix session names.
+// Returns an error if the session name has the rig prefix duplicated.
+// Example bad name: "gt-gastown_manager-gastown_manager-142"
+func validateSessionName(sessionName, rigName string) error {
+	// Expected format: gt-<rig>-<name>
+	// Check if the name part starts with the rig prefix (indicates double-prefix bug)
+	prefix := fmt.Sprintf("gt-%s-", rigName)
+	if !strings.HasPrefix(sessionName, prefix) {
+		return nil // Not our rig, can't validate
+	}
+
+	namePart := strings.TrimPrefix(sessionName, prefix)
+
+	// Check if name part starts with rig name followed by hyphen
+	// This indicates overflow name included rig prefix: gt-<rig>-<rig>-N
+	if strings.HasPrefix(namePart, rigName+"-") {
+		return fmt.Errorf("double-prefix detected: %s (expected format: gt-%s-<name>)",
+			sessionName, rigName)
+	}
+
+	return nil
 }
 
 // polecatDir returns the parent directory for a polecat.

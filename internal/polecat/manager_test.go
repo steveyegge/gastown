@@ -1073,3 +1073,57 @@ func TestAddWithOptions_SettingsInstalledInWorktree(t *testing.T) {
 		t.Errorf("settings.json should NOT exist at old location %s (Claude Code can't find it there)", oldSettingsPath)
 	}
 }
+
+// TestOverflowNameSessionFormat verifies that overflow names don't create double-prefix.
+// Regression test for the double-prefix bug (gt-rig-rig-N instead of gt-rig-N).
+func TestOverflowNameSessionFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create minimal rig
+	rigPath := filepath.Join(tmpDir, "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: rigPath,
+	}
+
+	// Create name pool with small size to trigger overflow quickly
+	pool := NewNamePoolWithConfig(rigPath, "testrig", "mad-max", nil, 2)
+	mgr := &Manager{
+		rig:      r,
+		namePool: pool,
+	}
+
+	// Allocate all themed names
+	_, _ = mgr.namePool.Allocate() // furiosa
+	_, _ = mgr.namePool.Allocate() // nux
+
+	// Next allocation should be overflow (just a number)
+	overflowName, err := mgr.namePool.Allocate()
+	if err != nil {
+		t.Fatalf("overflow allocation failed: %v", err)
+	}
+
+	// Overflow name should be just "3", not "testrig-3"
+	if overflowName != "3" {
+		t.Errorf("expected overflow name '3', got %s", overflowName)
+	}
+
+	// Create session manager
+	sessMgr := NewSessionManager(nil, r)
+	sessionName := sessMgr.SessionName(overflowName)
+
+	// Verify session name is gt-testrig-3, NOT gt-testrig-testrig-3
+	expected := "gt-testrig-3"
+	if sessionName != expected {
+		t.Errorf("expected session name %s, got %s (double-prefix bug!)", expected, sessionName)
+	}
+
+	// Verify no double-prefix
+	if strings.Contains(sessionName, "testrig-testrig") {
+		t.Errorf("double-prefix detected in session name: %s", sessionName)
+	}
+}
