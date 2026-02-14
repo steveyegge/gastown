@@ -258,13 +258,21 @@ func runDoltStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Check for databases before starting — user-facing guard for manual starts.
+	// Internal callers (install, migrate) may legitimately start with an empty
+	// data dir and create databases afterward via bd init.
+	config := doltserver.DefaultConfig(townRoot)
+	databases, _ := doltserver.ListDatabases(townRoot)
+	if len(databases) == 0 {
+		return fmt.Errorf("no databases found in %s\nInitialize with: gt dolt init-rig <name>", config.DataDir)
+	}
+
 	if err := doltserver.Start(townRoot); err != nil {
 		return err
 	}
 
 	// Get state for display
 	state, _ := doltserver.LoadState(townRoot)
-	config := doltserver.DefaultConfig(townRoot)
 
 	fmt.Printf("%s Dolt server started (PID %d, port %d)\n",
 		style.Bold.Render("✓"), state.PID, config.Port)

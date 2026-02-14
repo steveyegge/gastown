@@ -16,7 +16,9 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -273,6 +275,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
+		// Start the Dolt server — bd commands need a running server.
+		// The server stays running after install (it's lightweight infrastructure,
+		// like a database). Stop it with 'gt dolt stop' when not needed.
+		if _, err := exec.LookPath("dolt"); err == nil {
+			if err := doltserver.Start(absPath); err != nil {
+				if !strings.Contains(err.Error(), "already running") {
+					fmt.Printf("   %s Could not start Dolt server: %v\n", style.Dim.Render("⚠"), err)
+				}
+			}
+		} else {
+			fmt.Printf("   %s dolt not found in PATH — Dolt backend may not fully initialize\n", style.Dim.Render("⚠"))
+		}
+
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -291,6 +306,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// These use hq- prefix and are stored in town beads for cross-rig coordination.
 		if err := initTownAgentBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
+		}
+
+		// Set beads routing mode to explicit (required by gt doctor).
+		routingCmd := exec.Command("bd", "config", "set", "routing.mode", "explicit")
+		routingCmd.Dir = absPath
+		if out, err := routingCmd.CombinedOutput(); err != nil {
+			fmt.Printf("   %s Could not set routing.mode: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(out)))
 		}
 	}
 
@@ -321,6 +343,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not provision slash commands: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		fmt.Printf("   ✓ Created .claude/commands/ (slash commands for all agents)\n")
+	}
+
+	// Sync hooks to generate .claude/settings.json files for all targets.
+	if targets, err := hooks.DiscoverTargets(absPath); err == nil {
+		synced := 0
+		for _, target := range targets {
+			if _, err := syncTarget(target, false); err == nil {
+				synced++
+			}
+		}
+		if synced > 0 {
+			fmt.Printf("   ✓ Synced %d hook target(s)\n", synced)
+		}
 	}
 
 	if installShell {
@@ -359,6 +394,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %d. (Optional) Configure agents: %s\n", step, style.Dim.Render("gt config agent list"))
 	step++
 	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
+	fmt.Println()
+	fmt.Printf("Note: Dolt server is running (stop with %s)\n", style.Dim.Render("gt dolt stop"))
 
 	return nil
 }
