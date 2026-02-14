@@ -7,7 +7,7 @@ nudge = "Check mail and hook status, then act accordingly."
 prompt_template = "mayor.md.tmpl"
 
 [session]
-pattern = "hq-mayor"
+pattern = "{town_name}-mayor"
 work_dir = "{town}"
 needs_pre_sync = false
 start_command = "exec claude --dangerously-skip-permissions"

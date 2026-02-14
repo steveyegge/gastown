@@ -19,14 +19,14 @@ func TestLoadBuiltinRoleDefinition(t *testing.T) {
 			name:          "mayor",
 			role:          "mayor",
 			wantScope:     "town",
-			wantPattern:   "hq-mayor",
+			wantPattern:   "{town_name}-mayor",
 			wantPreSync:   false,
 		},
 		{
 			name:          "deacon",
 			role:          "deacon",
 			wantScope:     "town",
-			wantPattern:   "hq-deacon",
+			wantPattern:   "{town_name}-deacon",
 			wantPreSync:   false,
 		},
 		{

@@ -94,8 +94,10 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* and hq-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		// Only check Gas Town sessions:
+		// - gt-* for rig-level agents
+		// - <town>-mayor, <town>-deacon, <town>-boot for town-level agents
+		if !isGasTownSession(sess) {
 			continue
 		}
 
@@ -160,6 +162,20 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 
 // isCrewSession returns true if the session name matches the crew pattern.
 // Crew sessions are gt-<rig>-crew-<name> and are protected from auto-cleanup.
+// isGasTownSession returns true if the session name belongs to a Gas Town agent.
+// Matches rig-level sessions (gt-*) and town-level sessions (<town>-mayor, etc.).
+func isGasTownSession(sess string) bool {
+	if strings.HasPrefix(sess, "gt-") {
+		return true
+	}
+	for _, suffix := range []string{"-mayor", "-deacon", "-boot", "-overseer"} {
+		if strings.HasSuffix(sess, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func isCrewSession(session string) bool {
 	// Pattern: gt-<rig>-crew-<name>
 	// Example: gt-gastown-crew-joe

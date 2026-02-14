@@ -316,7 +316,9 @@ func (d *Daemon) identityToSession(identity string) string {
 
 	// If role config has session_pattern, use it
 	if config != nil && config.SessionPattern != "" {
-		return beads.ExpandRolePattern(config.SessionPattern, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
+		// Pre-expand {town_name} placeholder for town-scoped session names
+		pattern := strings.ReplaceAll(config.SessionPattern, "{town_name}", session.GetTownName())
+		return beads.ExpandRolePattern(pattern, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
 	}
 
 	// Fallback: use default patterns based on role type

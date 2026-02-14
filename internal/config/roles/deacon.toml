@@ -7,7 +7,7 @@ nudge = "Run 'gt prime' to check patrol status and begin heartbeat cycle."
 prompt_template = "deacon.md.tmpl"
 
 [session]
-pattern = "hq-deacon"
+pattern = "{town_name}-deacon"
 work_dir = "{town}"
 needs_pre_sync = false
 start_command = "exec claude --dangerously-skip-permissions"

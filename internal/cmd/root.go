@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/version"
@@ -126,6 +127,12 @@ func initCLITheme() {
 		settingsPath := config.TownSettingsPath(townRoot)
 		if settings, err := config.LoadOrCreateTownSettings(settingsPath); err == nil {
 			configTheme = settings.CLITheme
+		}
+
+		// Set the town name for session naming so that multiple towns
+		// can run concurrent tmux sessions without name collisions.
+		if townName, err := workspace.GetTownName(townRoot); err == nil {
+			session.SetTownName(townName)
 		}
 	}
 

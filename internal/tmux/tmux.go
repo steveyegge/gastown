@@ -1847,7 +1847,7 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // - Crew sessions: All crew members in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
-// Gas Town sessions (those starting with "gt-" or "hq-"). For non-GT sessions,
+// Gas Town sessions (rig-level "gt-*" or town-level role suffixes). For non-GT sessions,
 // the default tmux behavior (next-window/previous-window) is preserved.
 // See: https://github.com/steveyegge/gastown/issues/13
 //
@@ -1856,16 +1856,16 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
 	// C-b n → gt cycle next for GT sessions, next-window otherwise
-	// The if-shell checks if session name starts with "gt-" or "hq-"
+	// The if-shell checks if session is a Gas Town session (gt-* or town-level role)
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^gt-|-(mayor|deacon|boot|overseer)$'",
 		"run-shell 'gt cycle next --session #{session_name}'",
 		"next-window"); err != nil {
 		return err
 	}
 	// C-b p → gt cycle prev for GT sessions, previous-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^gt-|-(mayor|deacon|boot|overseer)$'",
 		"run-shell 'gt cycle prev --session #{session_name}'",
 		"previous-window"); err != nil {
 		return err
@@ -1878,12 +1878,12 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // Uses `gt feed --window` which handles both creation and switching.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+// (those starting with "gt-" or having a town-level role suffix). For non-GT sessions, a help message is shown.
 // See: https://github.com/steveyegge/gastown/issues/13
 func (t *Tmux) SetFeedBinding(session string) error {
 	// C-b a → gt feed --window for GT sessions, help message otherwise
 	_, err := t.run("bind-key", "-T", "prefix", "a",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^gt-|-(mayor|deacon|boot|overseer)$'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
 	return err
@@ -1893,11 +1893,11 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // This runs `gt agents` which displays a tmux popup with all Gas Town agents.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+// (those starting with "gt-" or having a town-level role suffix). For non-GT sessions, a help message is shown.
 func (t *Tmux) SetAgentsBinding(session string) error {
 	// C-b g → gt agents for GT sessions, help message otherwise
 	_, err := t.run("bind-key", "-T", "prefix", "g",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^gt-|-(mayor|deacon|boot|overseer)$'",
 		"run-shell 'gt agents'",
 		"display-message 'C-b g is for Gas Town sessions only'")
 	return err
@@ -1948,8 +1948,10 @@ func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
 	}
 
 	for _, sess := range sessions {
-		// Only process Gas Town sessions (gt-* for rigs, hq-* for town-level)
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		// Only process Gas Town sessions:
+		// - gt-* for rig-level agents (witness, refinery, polecats, crew)
+		// - <town>-mayor, <town>-deacon, <town>-boot for town-level agents
+		if !isGasTownSession(sess) {
 			continue
 		}
 
@@ -1966,6 +1968,22 @@ func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
 	}
 
 	return cleaned, nil
+}
+
+// isGasTownSession returns true if the session name belongs to a Gas Town agent.
+// Matches rig-level sessions (gt-*) and town-level sessions (<town>-mayor, etc.).
+func isGasTownSession(sess string) bool {
+	// Rig-level sessions always start with "gt-"
+	if strings.HasPrefix(sess, "gt-") {
+		return true
+	}
+	// Town-level sessions end with a known role suffix
+	for _, suffix := range []string{"-mayor", "-deacon", "-boot", "-overseer"} {
+		if strings.HasSuffix(sess, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetPaneDiedHook sets a pane-died hook on a session to detect crashes.

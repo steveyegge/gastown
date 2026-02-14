@@ -13,16 +13,47 @@ func TestParseSessionName(t *testing.T) {
 		wantName string
 		wantErr  bool
 	}{
-		// Town-level roles (hq-mayor, hq-deacon)
+		// Town-level roles (legacy hq-mayor, hq-deacon)
 		{
-			name:     "mayor",
+			name:     "mayor legacy",
 			session:  "hq-mayor",
 			wantRole: RoleMayor,
 		},
 		{
-			name:     "deacon",
+			name:     "deacon legacy",
 			session:  "hq-deacon",
 			wantRole: RoleDeacon,
+		},
+
+		// Town-level roles (new format: <town>-mayor, <town>-deacon)
+		{
+			name:     "mayor custom town",
+			session:  "redos-mayor",
+			wantRole: RoleMayor,
+		},
+		{
+			name:     "deacon custom town",
+			session:  "nyx-deacon",
+			wantRole: RoleDeacon,
+		},
+		{
+			name:     "mayor hyphenated town",
+			session:  "my-town-mayor",
+			wantRole: RoleMayor,
+		},
+
+		// Boot (new format: <town>-boot)
+		{
+			name:     "boot legacy",
+			session:  "hq-boot",
+			wantRole: RoleDeacon,
+			wantName: "boot",
+		},
+		{
+			name:     "boot custom town",
+			session:  "redos-boot",
+			wantRole: RoleDeacon,
+			wantName: "boot",
 		},
 
 		// Witness (simple rig)
@@ -94,18 +125,18 @@ func TestParseSessionName(t *testing.T) {
 
 		// Error cases
 		{
-			name:    "missing prefix",
-			session: "gastown-witness",
-			wantErr: true,
-		},
-		{
-			name:    "empty after prefix",
+			name:    "empty after gt prefix",
 			session: "gt-",
 			wantErr: true,
 		},
 		{
 			name:    "just prefix single segment",
 			session: "gt-x",
+			wantErr: true,
+		},
+		{
+			name:    "unknown format",
+			session: "random-string",
 			wantErr: true,
 		},
 	}
@@ -134,6 +165,9 @@ func TestParseSessionName(t *testing.T) {
 }
 
 func TestAgentIdentity_SessionName(t *testing.T) {
+	SetTownName("hq")
+	defer SetTownName("hq")
+
 	tests := []struct {
 		name     string
 		identity AgentIdentity
@@ -168,6 +202,41 @@ func TestAgentIdentity_SessionName(t *testing.T) {
 			name:     "polecat",
 			identity: AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "morsov"},
 			want:     "gt-gastown-morsov",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.identity.SessionName(); got != tt.want {
+				t.Errorf("AgentIdentity.SessionName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentIdentity_SessionNameCustomTown(t *testing.T) {
+	SetTownName("redos")
+	defer SetTownName("hq")
+
+	tests := []struct {
+		name     string
+		identity AgentIdentity
+		want     string
+	}{
+		{
+			name:     "mayor uses town name",
+			identity: AgentIdentity{Role: RoleMayor},
+			want:     "redos-mayor",
+		},
+		{
+			name:     "deacon uses town name",
+			identity: AgentIdentity{Role: RoleDeacon},
+			want:     "redos-deacon",
+		},
+		{
+			name:     "witness unchanged",
+			identity: AgentIdentity{Role: RoleWitness, Rig: "gastown"},
+			want:     "gt-gastown-witness",
 		},
 	}
 
@@ -228,6 +297,9 @@ func TestAgentIdentity_Address(t *testing.T) {
 }
 
 func TestParseSessionName_RoundTrip(t *testing.T) {
+	SetTownName("hq")
+	defer SetTownName("hq")
+
 	// Test that parsing then reconstructing gives the same result
 	sessions := []string{
 		"hq-mayor",
@@ -236,6 +308,28 @@ func TestParseSessionName_RoundTrip(t *testing.T) {
 		"gt-foo-bar-refinery",
 		"gt-gastown-crew-max",
 		"gt-gastown-morsov",
+	}
+
+	for _, sess := range sessions {
+		t.Run(sess, func(t *testing.T) {
+			identity, err := ParseSessionName(sess)
+			if err != nil {
+				t.Fatalf("ParseSessionName(%q) error = %v", sess, err)
+			}
+			if got := identity.SessionName(); got != sess {
+				t.Errorf("Round-trip failed: ParseSessionName(%q).SessionName() = %q", sess, got)
+			}
+		})
+	}
+}
+
+func TestParseSessionName_RoundTripCustomTown(t *testing.T) {
+	SetTownName("redos")
+	defer SetTownName("hq")
+
+	sessions := []string{
+		"redos-mayor",
+		"redos-deacon",
 	}
 
 	for _, sess := range sessions {

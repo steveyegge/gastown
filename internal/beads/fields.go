@@ -705,6 +705,8 @@ func FormatRoleConfig(config *RoleConfig) string {
 
 // ExpandRolePattern expands placeholders in a pattern string.
 // Supported placeholders: {town}, {rig}, {name}, {role}
+// Note: {town_name} (the town identifier from town.json) should be pre-expanded
+// by callers before passing to this function, as it requires session package access.
 func ExpandRolePattern(pattern, townRoot, rig, name, role string) string {
 	result := pattern
 	result = strings.ReplaceAll(result, "{town}", townRoot)

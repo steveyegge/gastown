@@ -30,6 +30,7 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/workspace"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -102,6 +103,15 @@ func New(config *Config) (*Daemon, error) {
 
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Initialize town name for session naming (avoids tmux session collisions
+	// across multiple Gas Town instances).
+	if townName, err := workspace.GetTownName(config.TownRoot); err == nil {
+		session.SetTownName(townName)
+		logger.Printf("Town name: %s", townName)
+	} else {
+		logger.Printf("Warning: could not load town name, using default: %v", err)
+	}
 
 	// Load patrol config from mayor/daemon.json (optional - nil if missing)
 	patrolConfig := LoadPatrolConfig(config.TownRoot)

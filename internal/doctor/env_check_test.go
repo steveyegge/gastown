@@ -342,8 +342,26 @@ func TestEnvVarsCheck_HyphenatedRig(t *testing.T) {
 }
 
 func TestEnvVarsCheck_BootCorrect(t *testing.T) {
-	// Boot watchdog session (gt-boot) uses "boot" role in AgentEnv,
+	// Boot watchdog session uses "boot" role in AgentEnv,
 	// even though ParseSessionName returns Role=deacon, Name="boot".
+	// Session name uses town name prefix (e.g., "hq-boot").
+	expected := expectedEnv("boot", "", "boot")
+	reader := &mockEnvReader{
+		sessions: []string{"hq-boot"},
+		sessionEnvs: map[string]map[string]string{
+			"hq-boot": expected,
+		},
+	}
+	check := NewEnvVarsCheckWithReader(reader)
+	result := check.Run(testCtx())
+
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want StatusOK", result.Status)
+	}
+}
+
+func TestEnvVarsCheck_BootCorrectLegacy(t *testing.T) {
+	// Legacy gt-boot format should still be parseable
 	expected := expectedEnv("boot", "", "boot")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-boot"},
