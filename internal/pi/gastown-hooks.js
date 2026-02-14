@@ -3,10 +3,10 @@
 // but using pi's extension API.
 //
 // Events mapped:
-//   session_start       → gt prime --hook (capture context)
+//   startup             → gt prime --hook (capture context)
 //   before_agent_start  → inject captured context into system prompt
 //   tool_call           → gt tap guard pr-workflow (on git push/pr create)
-//   session_shutdown    → gt costs record
+//   (no shutdown event) → gt costs record (NOT supported by pi extension API)
 //
 // Loaded via: pi -e gastown-hooks.js
 
@@ -14,8 +14,8 @@ export default (pi) => {
   let primeContext = null;
   let contextInjected = false;
 
-  // SessionStart — run gt prime and capture context for injection
-  pi.on("session_start", async (event, context) => {
+  // Startup — run gt prime and capture context for injection
+  pi.on("startup", async (event, context) => {
     try {
       const result = await pi.exec("gt", ["prime", "--hook"]);
       if (result.code === 0 && result.stdout.trim()) {
@@ -83,12 +83,7 @@ export default (pi) => {
     }
   });
 
-  // Stop equivalent — record API costs
-  pi.on("session_shutdown", async (event, context) => {
-    try {
-      await pi.exec("gt", ["costs", "record"]);
-    } catch (e) {
-      console.error("[gastown] gt costs record failed:", e.message);
-    }
-  });
+  // NOTE: Pi extension API has no session shutdown/exit event.
+  // Cost recording (gt costs record) must be handled externally,
+  // e.g. by the witness or a wrapper script after pi exits.
 };
