@@ -313,7 +313,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
 
 	// Run startup bootstrap through one canonical path (no duplicate fallback nudges).
-	debugSession("RunStartupBootstrap", runtime.RunStartupBootstrapIfNeeded(m.tmux, sessionID, "polecat", beacon, runtimeConfig))
+	if err := runtime.RunStartupBootstrapIfNeeded(m.tmux, sessionID, "polecat", beacon, runtimeConfig); err != nil {
+		if killErr := m.tmux.KillSessionWithProcesses(sessionID); killErr != nil {
+			return fmt.Errorf("running startup bootstrap: %w (also failed to cleanup session: %v)", err, killErr)
+		}
+		return fmt.Errorf("running startup bootstrap: %w", err)
+	}
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.

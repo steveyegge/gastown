@@ -190,7 +190,12 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 
 	// Run startup bootstrap only when runtime capabilities require fallback nudges.
-	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "witness", initialPrompt, runtimeConfig)
+	if err := runtime.RunStartupBootstrapIfNeeded(t, sessionID, "witness", initialPrompt, runtimeConfig); err != nil {
+		if killErr := t.KillSessionWithProcesses(sessionID); killErr != nil {
+			return fmt.Errorf("running startup bootstrap: %w (also failed to cleanup session: %v)", err, killErr)
+		}
+		return fmt.Errorf("running startup bootstrap: %w", err)
+	}
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {

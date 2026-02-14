@@ -675,6 +675,9 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Run startup bootstrap only when runtime capabilities require fallback nudges.
 	if err := runtime.RunStartupBootstrapIfNeeded(t, sessionID, "crew", beacon, runtimeConfig); err != nil {
+		if killErr := t.KillSessionWithProcesses(sessionID); killErr != nil {
+			return fmt.Errorf("running startup bootstrap: %w (also failed to cleanup session: %v)", err, killErr)
+		}
 		return fmt.Errorf("running startup bootstrap: %w", err)
 	}
 

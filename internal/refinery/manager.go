@@ -190,7 +190,12 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
-	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "refinery", initialPrompt, runtimeConfig)
+	if err := runtime.RunStartupBootstrapIfNeeded(t, sessionID, "refinery", initialPrompt, runtimeConfig); err != nil {
+		if killErr := t.KillSessionWithProcesses(sessionID); killErr != nil {
+			return fmt.Errorf("running startup bootstrap: %w (also failed to cleanup session: %v)", err, killErr)
+		}
+		return fmt.Errorf("running startup bootstrap: %w", err)
+	}
 
 	return nil
 }
