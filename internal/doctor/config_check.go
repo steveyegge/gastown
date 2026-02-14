@@ -615,7 +615,7 @@ func NewCustomTypesCheck() *CustomTypesCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "beads-custom-types",
 				CheckDescription: "Check that Gas Town custom types are registered with beads",
-				CheckCategory:    CategoryConfig,
+				CheckCategory:    CategoryBeads,
 			},
 		},
 	}

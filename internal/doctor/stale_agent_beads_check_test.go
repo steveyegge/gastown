@@ -21,8 +21,8 @@ func TestNewStaleAgentBeadsCheck(t *testing.T) {
 		t.Errorf("unexpected description: %q", check.Description())
 	}
 
-	if check.Category() != CategoryRig {
-		t.Errorf("expected category %q, got %q", CategoryRig, check.Category())
+	if check.Category() != CategoryCleanup {
+		t.Errorf("expected category %q, got %q", CategoryCleanup, check.Category())
 	}
 }
 

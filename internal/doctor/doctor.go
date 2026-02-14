@@ -35,10 +35,6 @@ func (d *Doctor) Checks() []Check {
 	return d.checks
 }
 
-// categoryGetter interface for checks that provide a category
-type categoryGetter interface {
-	Category() string
-}
 
 // Run executes all registered checks and returns a report.
 func (d *Doctor) Run(ctx *CheckContext) *Report {
@@ -65,9 +61,9 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 		if result.Name == "" {
 			result.Name = check.Name()
 		}
-		// Set category from check if available
-		if cg, ok := check.(categoryGetter); ok && result.Category == "" {
-			result.Category = cg.Category()
+		// Set category from check if not already set by Run()
+		if result.Category == "" {
+			result.Category = check.Category()
 		}
 
 		// Stream: overwrite line with result
@@ -127,9 +123,9 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 		if result.Name == "" {
 			result.Name = check.Name()
 		}
-		// Set category from check if available
-		if cg, ok := check.(categoryGetter); ok && result.Category == "" {
-			result.Category = cg.Category()
+		// Set category from check if not already set by Run()
+		if result.Category == "" {
+			result.Category = check.Category()
 		}
 
 		// Attempt fix if check failed and is fixable
@@ -158,8 +154,8 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 					result.Name = check.Name()
 				}
 				// Set category again after re-run
-				if cg, ok := check.(categoryGetter); ok && result.Category == "" {
-					result.Category = cg.Category()
+				if result.Category == "" {
+					result.Category = check.Category()
 				}
 				// Update message to indicate fix was applied
 				if result.Status == StatusOK {
