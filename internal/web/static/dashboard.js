@@ -569,41 +569,87 @@
         });
     });
 
-    // Load mail inbox on page load
+    // Load mail inbox as threaded conversations
     function loadMailInbox() {
         var loading = document.getElementById('mail-loading');
-        var table = document.getElementById('mail-table');
-        var tbody = document.getElementById('mail-tbody');
+        var threadsContainer = document.getElementById('mail-threads');
         var empty = document.getElementById('mail-empty');
         var count = document.getElementById('mail-count');
 
-        if (!loading || !table || !tbody) return;
+        if (!loading || !threadsContainer) return;
 
-        fetch('/api/mail/inbox')
+        fetch('/api/mail/threads')
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 loading.style.display = 'none';
 
-                if (data.messages && data.messages.length > 0) {
-                    table.style.display = 'table';
+                if (data.threads && data.threads.length > 0) {
+                    threadsContainer.style.display = 'block';
                     empty.style.display = 'none';
-                    tbody.innerHTML = '';
+                    threadsContainer.innerHTML = '';
 
-                    data.messages.forEach(function(msg) {
-                        var tr = document.createElement('tr');
-                        tr.className = 'mail-row' + (msg.read ? '' : ' mail-unread');
-                        tr.setAttribute('data-msg-id', msg.id);
-                        tr.setAttribute('data-from', msg.from);
+                    data.threads.forEach(function(thread) {
+                        var threadEl = document.createElement('div');
+                        threadEl.className = 'mail-thread' + (thread.unread_count > 0 ? ' mail-thread-unread' : '');
+
+                        var last = thread.last_message;
+                        var hasMultiple = thread.count > 1;
+                        var countBadge = hasMultiple ? '<span class="thread-count">' + thread.count + '</span>' : '';
+                        var unreadDot = thread.unread_count > 0 ? '<span class="thread-unread-dot"></span>' : '';
 
                         var priorityIcon = '';
-                        if (msg.priority === 'urgent') priorityIcon = '<span class="priority-urgent">⚡</span> ';
-                        else if (msg.priority === 'high') priorityIcon = '<span class="priority-high">!</span> ';
+                        if (last.priority === 'urgent') priorityIcon = '<span class="priority-urgent">⚡</span> ';
+                        else if (last.priority === 'high') priorityIcon = '<span class="priority-high">!</span> ';
 
-                        tr.innerHTML =
-                            '<td class="mail-from">' + escapeHtml(msg.from) + '</td>' +
-                            '<td>' + priorityIcon + '<span class="mail-subject">' + escapeHtml(msg.subject) + '</span></td>' +
-                            '<td class="mail-time">' + formatMailTime(msg.timestamp) + '</td>';
-                        tbody.appendChild(tr);
+                        // Thread header (always visible)
+                        var headerEl = document.createElement('div');
+                        headerEl.className = 'mail-thread-header';
+                        headerEl.setAttribute('data-thread-id', thread.thread_id);
+                        headerEl.innerHTML =
+                            '<div class="mail-thread-left">' +
+                                unreadDot +
+                                '<span class="mail-from">' + escapeHtml(last.from) + '</span>' +
+                                countBadge +
+                            '</div>' +
+                            '<div class="mail-thread-center">' +
+                                priorityIcon +
+                                '<span class="mail-subject">' + escapeHtml(thread.subject) + '</span>' +
+                                (hasMultiple ? '<span class="mail-thread-preview"> — ' + escapeHtml(last.body ? last.body.substring(0, 60) : '') + '</span>' : '') +
+                            '</div>' +
+                            '<div class="mail-thread-right">' +
+                                '<span class="mail-time">' + formatMailTime(last.timestamp) + '</span>' +
+                            '</div>';
+
+                        threadEl.appendChild(headerEl);
+
+                        // Thread messages (collapsed by default, only for multi-message threads)
+                        if (hasMultiple) {
+                            var msgsEl = document.createElement('div');
+                            msgsEl.className = 'mail-thread-messages';
+                            msgsEl.style.display = 'none';
+
+                            thread.messages.forEach(function(msg) {
+                                var msgEl = document.createElement('div');
+                                msgEl.className = 'mail-thread-msg' + (msg.read ? '' : ' mail-unread');
+                                msgEl.setAttribute('data-msg-id', msg.id);
+                                msgEl.setAttribute('data-from', msg.from);
+                                msgEl.innerHTML =
+                                    '<div class="mail-thread-msg-header">' +
+                                        '<span class="mail-from">' + escapeHtml(msg.from) + '</span>' +
+                                        '<span class="mail-time">' + formatMailTime(msg.timestamp) + '</span>' +
+                                    '</div>' +
+                                    '<div class="mail-thread-msg-subject">' + escapeHtml(msg.subject) + '</div>';
+                                msgsEl.appendChild(msgEl);
+                            });
+
+                            threadEl.appendChild(msgsEl);
+                        } else {
+                            // Single message thread - clicking opens the message directly
+                            headerEl.setAttribute('data-msg-id', last.id);
+                            headerEl.setAttribute('data-from', last.from);
+                        }
+
+                        threadsContainer.appendChild(threadEl);
                     });
 
                     // Update count
@@ -611,9 +657,10 @@
                         var unread = data.unread_count || 0;
                         count.textContent = unread > 0 ? unread + ' unread' : data.total;
                         if (unread > 0) count.classList.add('has-unread');
+                        else count.classList.remove('has-unread');
                     }
                 } else {
-                    table.style.display = 'none';
+                    threadsContainer.style.display = 'none';
                     empty.style.display = 'block';
                     if (count) count.textContent = '0';
                 }
@@ -1025,8 +1072,43 @@
     // Expose for refresh after HTMX swaps
     window.refreshReadyPanel = loadReady;
 
-    // Click on mail row to read message
+    // Click on mail thread header - toggle expand or open single message
     document.addEventListener('click', function(e) {
+        // Handle click on individual message within expanded thread
+        var threadMsg = e.target.closest('.mail-thread-msg');
+        if (threadMsg) {
+            e.preventDefault();
+            var msgId = threadMsg.getAttribute('data-msg-id');
+            var from = threadMsg.getAttribute('data-from');
+            if (msgId) {
+                openMailDetail(msgId, from);
+            }
+            return;
+        }
+
+        // Handle click on thread header
+        var threadHeader = e.target.closest('.mail-thread-header');
+        if (threadHeader) {
+            e.preventDefault();
+            var msgId = threadHeader.getAttribute('data-msg-id');
+            if (msgId) {
+                // Single message thread - open directly
+                var from = threadHeader.getAttribute('data-from');
+                openMailDetail(msgId, from);
+            } else {
+                // Multi-message thread - toggle expand/collapse
+                var threadEl = threadHeader.closest('.mail-thread');
+                var msgsEl = threadEl ? threadEl.querySelector('.mail-thread-messages') : null;
+                if (msgsEl) {
+                    var isExpanded = msgsEl.style.display !== 'none';
+                    msgsEl.style.display = isExpanded ? 'none' : 'block';
+                    threadEl.classList.toggle('mail-thread-expanded', !isExpanded);
+                }
+            }
+            return;
+        }
+
+        // Legacy: handle click on mail-row (All Traffic tab)
         var mailRow = e.target.closest('.mail-row');
         if (mailRow) {
             e.preventDefault();

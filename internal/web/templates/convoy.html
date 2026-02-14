@@ -350,20 +350,10 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    <!-- Inbox view (overseer inbox via API) -->
+                    <!-- Inbox view (threaded conversations via API) -->
                     <div id="mail-list">
                         <div class="loading-state" id="mail-loading">Loading inbox...</div>
-                        <table id="mail-table" style="display: none;">
-                            <thead>
-                                <tr>
-                                    <th>From</th>
-                                    <th>Subject</th>
-                                    <th>Time</th>
-                                </tr>
-                            </thead>
-                            <tbody id="mail-tbody">
-                            </tbody>
-                        </table>
+                        <div id="mail-threads" style="display: none;"></div>
                         <div class="empty-state" id="mail-empty" style="display: none;">
                             <p>No mail in inbox</p>
                         </div>

@@ -90,6 +90,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleOptions(w, r)
 	case path == "/mail/inbox" && r.Method == http.MethodGet:
 		h.handleMailInbox(w, r)
+	case path == "/mail/threads" && r.Method == http.MethodGet:
+		h.handleMailThreads(w, r)
 	case path == "/mail/read" && r.Method == http.MethodGet:
 		h.handleMailRead(w, r)
 	case path == "/mail/send" && r.Method == http.MethodPost:
@@ -239,6 +241,8 @@ type MailMessage struct {
 	Timestamp string `json:"timestamp"`
 	Read      bool   `json:"read"`
 	Priority  string `json:"priority,omitempty"`
+	ThreadID  string `json:"thread_id,omitempty"`
+	ReplyTo   string `json:"reply_to,omitempty"`
 }
 
 // MailInboxResponse is the response for /api/mail/inbox.
@@ -246,6 +250,23 @@ type MailInboxResponse struct {
 	Messages    []MailMessage `json:"messages"`
 	UnreadCount int           `json:"unread_count"`
 	Total       int           `json:"total"`
+}
+
+// MailThread represents a group of messages in a conversation thread.
+type MailThread struct {
+	ThreadID    string        `json:"thread_id"`
+	Subject     string        `json:"subject"`
+	LastMessage MailMessage   `json:"last_message"`
+	Messages    []MailMessage `json:"messages"`
+	Count       int           `json:"count"`
+	UnreadCount int           `json:"unread_count"`
+}
+
+// MailThreadsResponse is the response for /api/mail/threads.
+type MailThreadsResponse struct {
+	Threads     []MailThread `json:"threads"`
+	UnreadCount int          `json:"unread_count"`
+	Total       int          `json:"total"`
 }
 
 // handleMailInbox returns the user's inbox.
@@ -295,6 +316,132 @@ func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
 		UnreadCount: unread,
 		Total:       len(messages),
 	})
+}
+
+// handleMailThreads returns the inbox grouped by conversation threads.
+func (h *APIHandler) handleMailThreads(w http.ResponseWriter, r *http.Request) {
+	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox", "--json"})
+	if err != nil {
+		// Fall back to text parsing
+		output, err = h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox"})
+		if err != nil {
+			h.sendError(w, "Failed to fetch inbox: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		messages := parseMailInboxText(output)
+		threads := groupIntoThreads(messages)
+		unread := 0
+		for _, t := range threads {
+			unread += t.UnreadCount
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(MailThreadsResponse{
+			Threads:     threads,
+			UnreadCount: unread,
+			Total:       len(messages),
+		})
+		return
+	}
+
+	var messages []MailMessage
+	if err := json.Unmarshal([]byte(output), &messages); err != nil {
+		h.sendError(w, "Failed to parse inbox: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	threads := groupIntoThreads(messages)
+	unread := 0
+	for _, t := range threads {
+		unread += t.UnreadCount
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(MailThreadsResponse{
+		Threads:     threads,
+		UnreadCount: unread,
+		Total:       len(messages),
+	})
+}
+
+// groupIntoThreads groups messages into conversation threads.
+// Messages are grouped by ThreadID when available, otherwise by ReplyTo chain,
+// and finally by subject similarity as a fallback.
+func groupIntoThreads(messages []MailMessage) []MailThread {
+	// Map from thread key to slice of messages
+	threadMap := make(map[string][]MailMessage)
+	// Track message ID -> thread key for reply-to chaining
+	msgToThread := make(map[string]string)
+	// Maintain insertion order of thread keys
+	var threadOrder []string
+	threadSeen := make(map[string]bool)
+
+	for _, msg := range messages {
+		var threadKey string
+
+		// Priority 1: Use ThreadID if present
+		if msg.ThreadID != "" {
+			threadKey = "thread:" + msg.ThreadID
+		} else if msg.ReplyTo != "" {
+			// Priority 2: Follow reply-to chain
+			if parentKey, ok := msgToThread[msg.ReplyTo]; ok {
+				threadKey = parentKey
+			} else {
+				// Start a new thread anchored to the reply-to ID
+				threadKey = "reply:" + msg.ReplyTo
+			}
+		} else {
+			// Priority 3: Standalone message (its own thread)
+			threadKey = "msg:" + msg.ID
+		}
+
+		threadMap[threadKey] = append(threadMap[threadKey], msg)
+		msgToThread[msg.ID] = threadKey
+
+		if !threadSeen[threadKey] {
+			threadOrder = append(threadOrder, threadKey)
+			threadSeen[threadKey] = true
+		}
+	}
+
+	// Build thread structs, ordered by most recent message
+	var threads []MailThread
+	for _, key := range threadOrder {
+		msgs := threadMap[key]
+		if len(msgs) == 0 {
+			continue
+		}
+
+		// Last message is the most recent (messages come in chronological order)
+		last := msgs[len(msgs)-1]
+
+		// Use the first message's subject as the thread subject (strip Re: prefixes)
+		subject := msgs[0].Subject
+		subject = strings.TrimPrefix(subject, "Re: ")
+		subject = strings.TrimPrefix(subject, "RE: ")
+
+		unread := 0
+		for _, m := range msgs {
+			if !m.Read {
+				unread++
+			}
+		}
+
+		threadID := key
+		if last.ThreadID != "" {
+			threadID = last.ThreadID
+		}
+
+		threads = append(threads, MailThread{
+			ThreadID:    threadID,
+			Subject:     subject,
+			LastMessage: last,
+			Messages:    msgs,
+			Count:       len(msgs),
+			UnreadCount: unread,
+		})
+	}
+
+	return threads
 }
 
 // handleMailRead reads a specific message by ID.
@@ -461,6 +608,10 @@ func parseMailReadOutput(output string, msgID string) MailMessage {
 			msg.To = strings.TrimPrefix(line, "To: ")
 		} else if strings.HasPrefix(line, "ID: ") {
 			msg.ID = strings.TrimPrefix(line, "ID: ")
+		} else if strings.HasPrefix(line, "Thread: ") {
+			msg.ThreadID = strings.TrimSpace(strings.TrimPrefix(line, "Thread: "))
+		} else if strings.HasPrefix(line, "Reply-To: ") {
+			msg.ReplyTo = strings.TrimSpace(strings.TrimPrefix(line, "Reply-To: "))
 		} else if line == "" && msg.From != "" && !inBody {
 			inBody = true
 		} else if inBody {
