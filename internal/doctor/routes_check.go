@@ -154,11 +154,11 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		if prefix != "" {
 			if existingPath, found := routeByPrefix[prefix]; found {
 				// Route exists but points to a different path than expected.
-				// This happens with legacy rigs where the route points to the rig
-				// root (e.g., "crom") instead of the canonical beads location
-				// (e.g., "crom/mayor/rig"). The rig-root path relies on a .beads/redirect
-				// file, which breaks with bd's routing resolver (beads#1749).
-				if existingPath != expectedPath {
+				// Only flag as suboptimal if the existing path relies on a
+				// .beads/redirect file — this is the specific legacy pattern
+				// broken by beads#1749. Intentional non-canonical routes
+				// (without redirect) are left alone.
+				if existingPath != expectedPath && isRedirectDependent(ctx.TownRoot, existingPath) {
 					suboptimalRoutes = append(suboptimalRoutes, prefix)
 					details = append(details, fmt.Sprintf("Route %s -> %s should be %s -> %s (avoids redirect resolution bug)", prefix, existingPath, prefix, expectedPath))
 				}
@@ -169,6 +169,12 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	// Build set of suboptimal prefixes to avoid double-counting in validity check
+	suboptimalSet := make(map[string]bool, len(suboptimalRoutes))
+	for _, p := range suboptimalRoutes {
+		suboptimalSet[p] = true
+	}
+
 	// Check each route points to a valid location
 	for _, r := range routes {
 		rigPath := filepath.Join(ctx.TownRoot, r.Path)
@@ -176,6 +182,11 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 
 		// Special case: "." path is town root, already checked
 		if r.Path == "." {
+			continue
+		}
+
+		// Skip routes already flagged as suboptimal to avoid double-counting
+		if suboptimalSet[r.Prefix] {
 			continue
 		}
 
@@ -268,6 +279,27 @@ func (c *RoutesCheck) checkRoutesValid(ctx *CheckContext, routes []beads.Route) 
 	}
 }
 
+// hasRealBeadsDir checks whether a route target path has a real .beads directory
+// (not just a redirect). This is used by Fix to ensure we only rewrite routes
+// to paths that have an actual beads database, since the whole point of the
+// rewrite is to bypass redirect resolution (beads#1749).
+func hasRealBeadsDir(targetPath string) bool {
+	beadsPath := filepath.Join(targetPath, ".beads")
+	_, err := os.Stat(beadsPath)
+	return err == nil
+}
+
+// isRedirectDependent checks whether a route path relies on a .beads/redirect
+// file for resolution. This identifies the specific legacy pattern where the
+// route points to a rig root that has .beads/redirect instead of a real
+// .beads database — exactly the pattern broken by beads#1749.
+func isRedirectDependent(townRoot, routePath string) bool {
+	fullPath := filepath.Join(townRoot, routePath)
+	redirectPath := filepath.Join(fullPath, ".beads", "redirect")
+	_, err := os.Stat(redirectPath)
+	return err == nil
+}
+
 // Fix attempts to add missing routing entries and rewrite suboptimal ones.
 func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
@@ -283,7 +315,9 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 		routes = []beads.Route{} // Start fresh if can't load
 	}
 
-	// Build map of existing prefixes to route index for fast lookup
+	// Build map of existing prefixes to route index for fast lookup.
+	// NOTE: routeMap indices are only valid as long as routes is append-only
+	// (no removals or reordering within this method).
 	routeMap := make(map[string]int) // prefix -> index in routes slice
 	for i, r := range routes {
 		routeMap[r.Prefix] = i
@@ -317,11 +351,21 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 		return nil
 	}
 
-	// Add missing routes and rewrite suboptimal ones for each rig.
-	// Suboptimal routes point to the rig root (e.g., "crom") which relies on
-	// a .beads/redirect file. The beads routing resolver has a bug resolving
-	// redirects (beads#1749), so we rewrite to the canonical path (e.g.,
-	// "crom/mayor/rig") which has a real .beads directory and needs no redirect.
+	// Collect prefixes from rigs to detect duplicates (finding #5).
+	// If rigs.json has duplicate prefixes, skip auto-fix for those prefixes
+	// to avoid non-deterministic behavior from map iteration order.
+	prefixCount := make(map[string]int)
+	for _, rigEntry := range rigsConfig.Rigs {
+		if rigEntry.BeadsConfig != nil && rigEntry.BeadsConfig.Prefix != "" {
+			prefixCount[rigEntry.BeadsConfig.Prefix+"-"]++
+		}
+	}
+
+	// Add missing routes and rewrite redirect-dependent ones for each rig.
+	// Only rewrites routes that rely on .beads/redirect at the rig root —
+	// the specific legacy pattern broken by beads#1749. Routes are rewritten
+	// to the canonical path (e.g., "crom/mayor/rig") which has a real .beads
+	// directory and needs no redirect resolution.
 	for rigName, rigEntry := range rigsConfig.Rigs {
 		prefix := ""
 		if rigEntry.BeadsConfig != nil && rigEntry.BeadsConfig.Prefix != "" {
@@ -332,21 +376,32 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 			continue
 		}
 
+		// Skip duplicate prefixes to avoid non-deterministic rewrites
+		if prefixCount[prefix] > 1 {
+			fmt.Fprintf(os.Stderr, "Warning: skipping route fix for duplicate prefix %s (%d rigs share it)\n",
+				prefix, prefixCount[prefix])
+			continue
+		}
+
 		// Determine the correct canonical path based on actual rig layout
 		rigRoutePath := determineRigBeadsPath(ctx.TownRoot, rigName)
 		canonicalPath := filepath.Join(ctx.TownRoot, rigRoutePath)
 
 		if idx, exists := routeMap[prefix]; exists {
-			// Route exists — check if it points to the canonical path
-			if routes[idx].Path != rigRoutePath {
-				if _, err := os.Stat(canonicalPath); err == nil {
+			// Route exists — only rewrite if current path is redirect-dependent
+			// and canonical target has a real .beads directory (not a redirect).
+			if routes[idx].Path != rigRoutePath && isRedirectDependent(ctx.TownRoot, routes[idx].Path) {
+				if hasRealBeadsDir(canonicalPath) {
 					routes[idx].Path = rigRoutePath
 					modified = true
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: cannot rewrite route %s -> %s to %s (canonical path has no .beads directory)\n",
+						prefix, routes[idx].Path, rigRoutePath)
 				}
 			}
 		} else {
-			// Route missing — add it if the canonical path exists
-			if _, err := os.Stat(canonicalPath); err == nil {
+			// Route missing — add it if the canonical path has a real .beads dir
+			if hasRealBeadsDir(canonicalPath) {
 				routeMap[prefix] = len(routes)
 				routes = append(routes, beads.Route{
 					Prefix: prefix,

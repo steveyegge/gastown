@@ -1,8 +1,10 @@
 package doctor
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -402,6 +404,207 @@ func TestDetermineRigBeadsPath_Containment(t *testing.T) {
 		}
 	})
 }
+
+func TestRoutesCheck_SuboptimalRoutes(t *testing.T) {
+	// Helper to set up a town with a legacy rig whose route points to the rig root
+	// instead of the canonical mayor/rig path.
+	setupLegacyRig := func(t *testing.T) (tmpDir string) {
+		t.Helper()
+		tmpDir = t.TempDir()
+
+		// Town-level .beads
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Legacy rig: redirect at rig root points to mayor/rig/.beads
+		rigBeadsDir := filepath.Join(tmpDir, "crom", ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// The canonical target must exist with a real .beads directory
+		canonicalBeads := filepath.Join(tmpDir, "crom", "mayor", "rig", ".beads")
+		if err := os.MkdirAll(canonicalBeads, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// rigs.json registers the rig
+		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		rigsContent := `{
+			"version": 1,
+			"rigs": {
+				"crom": {
+					"git_url": "https://github.com/example/crom",
+					"beads": { "prefix": "cr" }
+				}
+			}
+		}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "rigs.json"), []byte(rigsContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Legacy route: prefix cr- points to rig root "crom" (suboptimal)
+		routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
+{"prefix":"cr-","path":"crom"}
+`
+		if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		return tmpDir
+	}
+
+	t.Run("Run detects legacy rig-root route as suboptimal", func(t *testing.T) {
+		tmpDir := setupLegacyRig(t)
+
+		check := NewRoutesCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+		result := check.Run(ctx)
+
+		if result.Status != StatusWarning {
+			t.Errorf("expected StatusWarning, got %v: %s", result.Status, result.Message)
+		}
+		if len(result.Details) == 0 {
+			t.Fatal("expected details about suboptimal route, got none")
+		}
+		found := false
+		for _, d := range result.Details {
+			if strings.Contains(d, "cr-") && strings.Contains(d, "crom/mayor/rig") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected detail mentioning cr- and crom/mayor/rig, got: %v", result.Details)
+		}
+	})
+
+	t.Run("Fix rewrites suboptimal route to canonical path", func(t *testing.T) {
+		tmpDir := setupLegacyRig(t)
+
+		check := NewRoutesCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		if err := check.Fix(ctx); err != nil {
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		// Read routes.jsonl and verify cr- now points to crom/mayor/rig
+		content, err := os.ReadFile(filepath.Join(tmpDir, ".beads", "routes.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contentStr := string(content)
+		if !strings.Contains(contentStr, `"path":"crom/mayor/rig"`) {
+			t.Errorf("expected route rewritten to crom/mayor/rig, got:\n%s", contentStr)
+		}
+		if strings.Contains(contentStr, `"path":"crom"}`) {
+			t.Error("old suboptimal route path 'crom' still present after fix")
+		}
+
+		// Run should now pass
+		result := check.Run(ctx)
+		if result.Status != StatusOK {
+			t.Errorf("expected StatusOK after fix, got %v: %s (details: %v)", result.Status, result.Message, result.Details)
+		}
+	})
+
+	t.Run("Fix skips rewrite when canonical target has no .beads directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Town-level .beads
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Rig with redirect, but the canonical target directory has NO .beads
+		rigBeadsDir := filepath.Join(tmpDir, "crom", ".beads")
+		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Create the canonical directory but WITHOUT .beads inside it
+		if err := os.MkdirAll(filepath.Join(tmpDir, "crom", "mayor", "rig"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Intentionally no .beads here — this makes the target beads-invalid
+
+		// rigs.json
+		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		rigsContent := `{
+			"version": 1,
+			"rigs": {
+				"crom": {
+					"git_url": "https://github.com/example/crom",
+					"beads": { "prefix": "cr" }
+				}
+			}
+		}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "rigs.json"), []byte(rigsContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Route pointing to rig root
+		routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
+{"prefix":"cr-","path":"crom"}
+`
+		if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewRoutesCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		// Capture stderr to verify the warning message
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stderr = w
+
+		if err := check.Fix(ctx); err != nil {
+			os.Stderr = oldStderr
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		w.Close()
+		os.Stderr = oldStderr
+		var stderrBuf bytes.Buffer
+		if _, err := stderrBuf.ReadFrom(r); err != nil {
+			t.Fatal(err)
+		}
+		stderrOutput := stderrBuf.String()
+
+		if !strings.Contains(stderrOutput, "Warning: cannot rewrite route cr-") {
+			t.Errorf("expected stderr warning about cannot rewrite route, got: %q", stderrOutput)
+		}
+
+		// Route should remain unchanged — "crom" not rewritten because target is not beads-valid
+		content, err := os.ReadFile(filepath.Join(beadsDir, "routes.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contentStr := string(content)
+		if strings.Contains(contentStr, `"path":"crom/mayor/rig"`) {
+			t.Error("route was rewritten to crom/mayor/rig despite missing .beads directory at canonical target")
+		}
+	})
+}
+
 
 func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 	t.Run("corrupted routes.jsonl results in empty routes", func(t *testing.T) {
