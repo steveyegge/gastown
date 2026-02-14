@@ -608,6 +608,12 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		}
 	}
 
+	// Create rig-level settings directory (used by gt config for rig overrides)
+	rigSettingsPath := filepath.Join(rigPath, constants.DirSettings)
+	if err := os.MkdirAll(rigSettingsPath, 0755); err != nil {
+		return nil, fmt.Errorf("creating settings dir: %w", err)
+	}
+
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
