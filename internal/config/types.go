@@ -502,6 +502,36 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	return args
 }
 
+// detectProviderFromCommand detects the provider from the command path.
+// It extracts the base name of the command and maps known agent commands
+// to their respective providers. Returns empty string for unknown commands.
+func detectProviderFromCommand(command string) string {
+	if command == "" {
+		return ""
+	}
+	base := filepath.Base(command)
+	switch base {
+	case "claude":
+		return "claude"
+	case "opencode":
+		return "opencode"
+	case "gemini":
+		return "gemini"
+	case "codex":
+		return "codex"
+	case "cursor":
+		return "cursor"
+	case "auggie":
+		return "auggie"
+	case "amp":
+		return "amp"
+	case "pi":
+		return "pi"
+	default:
+		return ""
+	}
+}
+
 func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		rc = &RuntimeConfig{}

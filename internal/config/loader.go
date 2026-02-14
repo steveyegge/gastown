@@ -1380,6 +1380,25 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 				Dir:          ".opencode/plugin",
 				SettingsFile: "gastown.js",
 			}
+		case "pi":
+			result.Hooks = &RuntimeHooksConfig{
+				Provider:     "pi",
+				Dir:          ".pi/extensions",
+				SettingsFile: "gastown-hooks.js",
+			}
+		}
+	}
+
+	// Auto-fill Tmux defaults for pi (process detection).
+	if result.Command == "pi" {
+		if result.Tmux == nil {
+			result.Tmux = &RuntimeTmuxConfig{
+				ProcessNames: []string{"pi", "node", "bun"},
+				ReadyDelayMs: 3000,
+			}
+		}
+		if result.PromptMode == "" {
+			result.PromptMode = "arg"
 		}
 	}
 
