@@ -22,8 +22,8 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 	if got != want {
 		t.Errorf("buildWitnessStartCommand = %q, want %q", got, want)
 	}
-	if prompt != "" {
-		t.Errorf("prompt = %q, want empty for role-config start command", prompt)
+	if prompt == "" {
+		t.Error("expected non-empty startup prompt for role-config start command fallback")
 	}
 }
 

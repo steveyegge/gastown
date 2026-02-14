@@ -673,7 +673,9 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	_ = t.SetCrewCycleBindings(sessionID)
 
 	// Run startup bootstrap only when runtime capabilities require fallback nudges.
-	_ = runtime.RunStartupBootstrapIfNeeded(t, sessionID, "crew", beacon, runtimeConfig)
+	if err := runtime.RunStartupBootstrapIfNeeded(t, sessionID, "crew", beacon, runtimeConfig); err != nil {
+		return fmt.Errorf("running startup bootstrap: %w", err)
+	}
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, t)
