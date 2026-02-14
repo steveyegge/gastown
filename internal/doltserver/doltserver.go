@@ -352,17 +352,8 @@ func Start(townRoot string) error {
 		return fmt.Errorf("creating data directory: %w", err)
 	}
 
-	// List available databases
-	databases, err := ListDatabases(townRoot)
-	if err != nil {
-		return fmt.Errorf("listing databases: %w", err)
-	}
-
-	if len(databases) == 0 {
-		return fmt.Errorf("no databases found in %s\nInitialize with: gt dolt init-rig <name>", config.DataDir)
-	}
-
 	// Clean up stale Dolt LOCK files in all database directories
+	databases, _ := ListDatabases(townRoot)
 	for _, db := range databases {
 		dbDir := filepath.Join(config.DataDir, db)
 		if err := cleanupStaleDoltLock(dbDir); err != nil {
