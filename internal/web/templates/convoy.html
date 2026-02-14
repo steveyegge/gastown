@@ -137,8 +137,9 @@
                         </thead>
                         <tbody>
                             {{range .Convoys}}
-                            <tr class="convoy-row">
+                            <tr class="convoy-row" data-convoy-id="{{.ID}}">
                                 <td>
+                                    <span class="convoy-toggle">▶</span>
                                     {{if eq .WorkStatus "complete"}}
                                     <span class="badge badge-green">✓</span>
                                     {{else if eq .WorkStatus "active"}}

@@ -212,10 +212,140 @@
             transition: width 0.3s ease;
         }
 
-        /* Expandable issues */
+        /* Convoy toggle arrow */
+        .convoy-toggle {
+            display: inline-block;
+            width: 14px;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: transform 0.15s ease;
+            margin-right: 4px;
+        }
+
+        .convoy-expanded {
+            background: rgba(89, 194, 255, 0.06);
+        }
+
+        /* Convoy detail row (expanded sub-table) */
+        .convoy-detail-row {
+            background: none;
+        }
+
+        .convoy-detail-row:hover {
+            background: none;
+        }
+
+        .convoy-detail-row td {
+            padding: 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Expandable issues container */
         .tracked-issues {
             background: var(--bg-dark);
             border-top: 1px solid var(--border);
+        }
+
+        .tracked-issues-loading,
+        .tracked-issues-error,
+        .tracked-issues-empty {
+            padding: 12px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .tracked-issues-error {
+            color: var(--red);
+        }
+
+        /* Tracked issues sub-table */
+        .tracked-issues-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .tracked-issues-table th {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .tracked-issues-table td {
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(45, 54, 63, 0.5);
+        }
+
+        .tracked-issue-row:hover {
+            background: rgba(89, 194, 255, 0.06);
+        }
+
+        .tracked-issue-row.tracked-issue-closed {
+            opacity: 0.7;
+        }
+
+        .tracked-issue-title {
+            color: var(--text-secondary);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tracked-issue-assignee {
+            color: var(--purple);
+            font-size: 0.75rem;
+        }
+
+        .tracked-issue-progress {
+            font-size: 0.75rem;
+        }
+
+        .convoy-progress-done {
+            color: var(--green);
+        }
+
+        .convoy-progress-active {
+            color: var(--cyan);
+        }
+
+        .convoy-progress-age {
+            color: var(--text-muted);
+        }
+
+        /* Tracked issues progress summary */
+        .tracked-issues-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .tracked-issues-progress-bar {
+            flex: 1;
+            max-width: 120px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .tracked-issues-progress-fill {
+            height: 100%;
+            background: var(--green);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .tracked-issues-progress-text {
+            font-size: 0.7rem;
+            color: var(--text-muted);
         }
 
         .tracked-issue {
