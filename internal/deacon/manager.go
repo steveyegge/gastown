@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -26,6 +27,7 @@ type tmuxOps interface {
 	IsAgentAlive(session string) bool
 	KillSessionWithProcesses(name string) error
 	NewSessionWithCommand(name, workDir, command string) error
+	NudgeSession(session, message string) error
 	SetRemainOnExit(pane string, on bool) error
 	SetEnvironment(session, key, value string) error
 	ConfigureGasTownSession(session string, theme tmux.Theme, rig, worker, role string) error
@@ -99,14 +101,9 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.")
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
+	startupCmd, initialPrompt, err := buildDeaconStartCommand(m.townRoot, agentOverride, runtimeConfig)
 	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
+		return err
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -159,9 +156,28 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
+	// Run startup bootstrap only when runtime capabilities require fallback nudges.
+	if err := runtime.RunStartupBootstrapIfNeeded(t, sessionID, "deacon", initialPrompt, runtimeConfig); err != nil {
+		if killErr := t.KillSessionWithProcesses(sessionID); killErr != nil {
+			return fmt.Errorf("running startup bootstrap: %w (also failed to cleanup session: %v)", err, killErr)
+		}
+		return fmt.Errorf("running startup bootstrap: %w", err)
+	}
 
 	return nil
+}
+
+func buildDeaconStartCommand(townRoot, agentOverride string, runtimeConfig *config.RuntimeConfig) (string, string, error) {
+	initialPrompt := runtime.StartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon running in PERSISTENT PATROL MODE. My patrol loop: 1. Run gt deacon heartbeat. 2. Check gt hook - if exists, execute it. 3. If no hook, create and execute: gt wisp create mol-deacon-patrol --hook --execute. 4. After patrol completes, use await-signal to wait for next cycle. 5. Return to step 1. I NEVER exit voluntarily.", runtimeConfig)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
+	if err != nil {
+		return "", "", fmt.Errorf("building startup command: %w", err)
+	}
+	return startupCmd, initialPrompt, nil
 }
 
 // Stop stops the deacon session.

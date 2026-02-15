@@ -3,9 +3,11 @@ package deacon
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -20,10 +22,12 @@ type mockTmux struct {
 	sessionInfo      *tmux.SessionInfo
 	sessionInfoErr   error
 	sendKeysErr      error
+	nudgeErr         error
 
 	// Call tracking
 	killCalls       []string
 	newSessionCalls int
+	nudges          []string
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
@@ -44,8 +48,13 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 	return m.newSessionErr
 }
 
+func (m *mockTmux) NudgeSession(_session, message string) error {
+	m.nudges = append(m.nudges, message)
+	return m.nudgeErr
+}
+
 func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
+func (m *mockTmux) SetEnvironment(_, _, _ string) error    { return nil }
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }
@@ -54,9 +63,9 @@ func (m *mockTmux) WaitForCommand(_ string, _ []string, _ time.Duration) error {
 	return m.waitErr
 }
 
-func (m *mockTmux) SetAutoRespawnHook(_ string) error              { return nil }
-func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error  { return nil }
-func (m *mockTmux) SendKeysRaw(_, _ string) error                  { return m.sendKeysErr }
+func (m *mockTmux) SetAutoRespawnHook(_ string) error             { return nil }
+func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error { return nil }
+func (m *mockTmux) SendKeysRaw(_, _ string) error                 { return m.sendKeysErr }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
@@ -95,6 +104,65 @@ func TestManager_deaconDir(t *testing.T) {
 	expected := filepath.Join("/tmp/test-town", "deacon")
 	if m.deaconDir() != expected {
 		t.Errorf("deaconDir() = %q, want %q", m.deaconDir(), expected)
+	}
+}
+
+func TestBuildDeaconStartCommand_NoHooksWithPrompt_IncludesPrimeInstruction(t *testing.T) {
+	runtimeConfig := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	command, prompt, err := buildDeaconStartCommand("/tmp/test-town", "", runtimeConfig)
+	if err != nil {
+		t.Fatalf("buildDeaconStartCommand: %v", err)
+	}
+	if command == "" {
+		t.Fatal("expected non-empty startup command")
+	}
+	if !strings.Contains(prompt, "Run `gt prime` to initialize your context.") {
+		t.Fatalf("expected no-hooks+prompt startup prompt to include prime instruction, got %q", prompt)
+	}
+}
+
+func TestBuildDeaconStartCommand_HooksWithPrompt_NoPrimeInstruction(t *testing.T) {
+	runtimeConfig := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	_, prompt, err := buildDeaconStartCommand("/tmp/test-town", "", runtimeConfig)
+	if err != nil {
+		t.Fatalf("buildDeaconStartCommand: %v", err)
+	}
+	if strings.Contains(prompt, "Run `gt prime` to initialize your context.") {
+		t.Fatalf("expected hooks+prompt startup prompt to omit prime instruction, got %q", prompt)
+	}
+}
+
+func TestStart_NoHooksWithPrompt_DoesNotNudgeFallback(t *testing.T) {
+	townRoot := t.TempDir()
+
+	settings := config.NewTownSettings()
+	settings.RoleAgents["deacon"] = "codex"
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	mock := &mockTmux{
+		hasSessionResult: false,
+	}
+	m := newTestManager(townRoot, mock)
+
+	if err := m.Start(""); err != nil {
+		t.Fatalf("Start(): %v", err)
+	}
+	if len(mock.nudges) != 0 {
+		t.Fatalf("expected no startup nudges for no-hooks+prompt deacon runtime, got %v", mock.nudges)
 	}
 }
 
@@ -307,11 +375,11 @@ func TestStop_KillFails(t *testing.T) {
 
 func TestIsRunning(t *testing.T) {
 	tests := []struct {
-		name     string
-		running  bool
-		err      error
-		wantRun  bool
-		wantErr  bool
+		name    string
+		running bool
+		err     error
+		wantRun bool
+		wantErr bool
 	}{
 		{
 			name:    "running",
