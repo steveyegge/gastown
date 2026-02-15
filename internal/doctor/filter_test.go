@@ -330,6 +330,149 @@ func TestSuggestCheck_EmptyChecks(t *testing.T) {
 	}
 }
 
+// --- FilterByCategory ---
+
+func TestFilterByCategory_NoArgs(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "", "")
+	if len(result.Matched) != len(checks) {
+		t.Errorf("no args: got %d matched, want %d", len(result.Matched), len(checks))
+	}
+	if result.Error != nil {
+		t.Errorf("no args: unexpected error: %v", result.Error)
+	}
+}
+
+func TestFilterByCategory_CategoryOnly(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "Cleanup", "")
+	if result.Error != nil {
+		t.Fatalf("category only: unexpected error: %v", result.Error)
+	}
+	if result.CategoryName != "Cleanup" {
+		t.Errorf("category name: got %q, want %q", result.CategoryName, "Cleanup")
+	}
+	want := []string{"orphan-sessions", "orphan-processes", "wisp-garbage-collection", "stale-beads-redirect"}
+	if len(result.Matched) != len(want) {
+		t.Fatalf("category only: got %d matched (%v), want %d", len(result.Matched), checkNames(result.Matched), len(want))
+	}
+}
+
+func TestFilterByCategory_CategoryCaseInsensitive(t *testing.T) {
+	checks := testChecks()
+	for _, input := range []string{"cleanup", "CLEANUP", "Cleanup", "cLEANUP"} {
+		result := FilterByCategory(checks, input, "")
+		if result.Error != nil {
+			t.Errorf("category %q: unexpected error: %v", input, result.Error)
+		}
+		if len(result.Matched) != 4 {
+			t.Errorf("category %q: got %d matched, want 4", input, len(result.Matched))
+		}
+	}
+}
+
+func TestFilterByCategory_CategoryAndCheck(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "Cleanup", "orphan-sessions")
+	if result.Error != nil {
+		t.Fatalf("category+check: unexpected error: %v", result.Error)
+	}
+	if len(result.Matched) != 1 {
+		t.Fatalf("category+check: got %d matched, want 1", len(result.Matched))
+	}
+	if result.Matched[0].Name() != "orphan-sessions" {
+		t.Errorf("category+check: got %q, want %q", result.Matched[0].Name(), "orphan-sessions")
+	}
+}
+
+func TestFilterByCategory_CheckNormalized(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "cleanup", "orphan_sessions")
+	if result.Error != nil {
+		t.Fatalf("normalized: unexpected error: %v", result.Error)
+	}
+	if len(result.Matched) != 1 || result.Matched[0].Name() != "orphan-sessions" {
+		t.Errorf("normalized: got %v", checkNames(result.Matched))
+	}
+}
+
+func TestFilterByCategory_UnknownCategory(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "nonexistent", "")
+	if result.ErrorKind != FilterErrorUnknownCategory {
+		t.Errorf("unknown category: got error kind %v, want FilterErrorUnknownCategory", result.ErrorKind)
+	}
+	if result.CategoryInput != "nonexistent" {
+		t.Errorf("category input: got %q, want %q", result.CategoryInput, "nonexistent")
+	}
+}
+
+func TestFilterByCategory_UnknownCheckInCategory(t *testing.T) {
+	checks := testChecks()
+	result := FilterByCategory(checks, "Cleanup", "nonexistent-check")
+	if result.ErrorKind != FilterErrorUnknownCheck {
+		t.Errorf("unknown check: got error kind %v, want FilterErrorUnknownCheck", result.ErrorKind)
+	}
+	if result.CheckInput != "nonexistent-check" {
+		t.Errorf("check input: got %q, want %q", result.CheckInput, "nonexistent-check")
+	}
+}
+
+func TestFilterByCategory_CheckInWrongCategory(t *testing.T) {
+	checks := testChecks()
+	// orphan-sessions is in Cleanup, not Core
+	result := FilterByCategory(checks, "Core", "orphan-sessions")
+	if result.ErrorKind != FilterErrorUnknownCheck {
+		t.Errorf("wrong category: got error kind %v, want FilterErrorUnknownCheck", result.ErrorKind)
+	}
+}
+
+// --- ResolveCategory ---
+
+func TestResolveCategory(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"cleanup", "Cleanup"},
+		{"CLEANUP", "Cleanup"},
+		{"Core", "Core"},
+		{"infrastructure", "Infrastructure"},
+		{"nonexistent", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ResolveCategory(tt.input)
+			if got != tt.want {
+				t.Errorf("ResolveCategory(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- SuggestCategory ---
+
+func TestSuggestCategory_CloseTypo(t *testing.T) {
+	suggestions := SuggestCategory("clenaup")
+	found := false
+	for _, s := range suggestions {
+		if s == "Cleanup" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("SuggestCategory(\"clenaup\"): 'Cleanup' not in suggestions %v", suggestions)
+	}
+}
+
+func TestSuggestCategory_NoMatch(t *testing.T) {
+	suggestions := SuggestCategory("zzzzzzzzz")
+	if len(suggestions) != 0 {
+		t.Errorf("SuggestCategory no match: got %v, want empty", suggestions)
+	}
+}
+
 // --- levenshtein ---
 
 func TestLevenshtein(t *testing.T) {

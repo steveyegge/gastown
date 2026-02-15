@@ -22,16 +22,17 @@ var (
 )
 
 var doctorCmd = &cobra.Command{
-	Use:     "doctor [check-name | category]...",
-	GroupID: GroupDiag,
-	Short:   "Run health checks on the workspace",
-	Args:              cobra.ArbitraryArgs,
+	Use:               "doctor [category] [check]",
+	GroupID:           GroupDiag,
+	Short:             "Run health checks on the workspace",
+	Args:              cobra.MaximumNArgs(2),
 	RunE:              runDoctor,
 	ValidArgsFunction: completeDoctorArgs,
 }
 
 func init() {
 	doctorCmd.Long = buildDoctorLong()
+	doctorCmd.SetHelpFunc(doctorHelp)
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Attempt to automatically fix issues")
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.PersistentFlags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
@@ -60,7 +61,7 @@ func buildDoctorLong() string {
 
 	var b strings.Builder
 	b.WriteString("Run diagnostic checks on the Gas Town workspace.\n\n")
-	b.WriteString("Run all checks (default), specific checks by name, or all checks in a category.\n")
+	b.WriteString("Run all checks (default), all checks in a category, or a specific check.\n")
 
 	// Print checks grouped by category
 	for _, category := range doctor.CategoryOrder {
@@ -90,49 +91,116 @@ func buildDoctorLong() string {
 		}
 	}
 
-	b.WriteString("\nChecks marked 🔧 can be fixed automatically with gt doctor <check> --fix\n")
+	b.WriteString("\nChecks marked 🔧 can be fixed automatically with gt doctor <category> <check> --fix\n")
 	b.WriteString("\nExamples:\n")
-	b.WriteString("  gt doctor                          # Run all checks\n")
-	b.WriteString("  gt doctor <check>                  # Run one check\n")
-	b.WriteString("  gt doctor <check> <check>          # Run multiple checks\n")
-	b.WriteString("  gt doctor <category>               # Run all checks in a category\n")
-	b.WriteString("  gt doctor <check> --fix            # Run and fix one check\n")
-	b.WriteString("  gt doctor <check> --fix --dry-run  # Preview fixes\n")
-	b.WriteString("  gt doctor list                     # Show available checks")
+	b.WriteString("  gt doctor                                    # Run all checks\n")
+	b.WriteString("  gt doctor --fix                              # Run all + fix\n")
+	b.WriteString("  gt doctor <category>                         # Run all checks in a category\n")
+	b.WriteString("  gt doctor <category> <check>                 # Run one check\n")
+	b.WriteString("  gt doctor <category> <check> --fix           # Fix one check\n")
+	b.WriteString("  gt doctor <category> --fix --dry-run         # Preview fixes for category\n")
+	b.WriteString("  gt doctor list                               # Show available checks")
 
 	return b.String()
 }
 
-// completeDoctorArgs provides tab completion for check names and category names.
-func completeDoctorArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+// doctorHelp is a custom help function that shows category-filtered help
+// when a category name is passed as a positional arg (e.g. "gt doctor core -h").
+func doctorHelp(cmd *cobra.Command, args []string) {
+	// Cobra passes raw args; scan for a category name among them
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		category := doctor.ResolveCategory(arg)
+		if category != "" {
+			// Temporarily replace Long with category-specific text, let cobra render
+			originalLong := cmd.Long
+			cmd.Long = buildCategoryHelp(category)
+			cmd.SetHelpFunc(nil)
+			cmd.Help()
+			cmd.Long = originalLong
+			cmd.SetHelpFunc(doctorHelp)
+			return
+		}
+	}
+
+	// Fall back to default help
+	cmd.SetHelpFunc(nil) // clear to avoid recursion
+	cmd.Help()
+	cmd.SetHelpFunc(doctorHelp) // restore
+}
+
+// buildCategoryHelp generates help text for a specific category.
+func buildCategoryHelp(category string) string {
 	baseChecks, rigChecks := allDoctorChecks()
-	var completions []string
-	seen := make(map[string]bool)
 
-	for _, c := range baseChecks {
-		if !seen[c.Name()] {
-			completions = append(completions, c.Name())
-			seen[c.Name()] = true
-		}
-	}
+	// Combine if rig is specified
+	allChecks := baseChecks
 	if doctorRig != "" {
-		for _, c := range rigChecks {
-			if !seen[c.Name()] {
-				completions = append(completions, c.Name())
-				seen[c.Name()] = true
-			}
-		}
+		allChecks = append(allChecks, rigChecks...)
 	}
 
-	for _, cat := range doctor.CategoryOrder {
-		lower := strings.ToLower(cat)
-		if !seen[lower] {
-			completions = append(completions, lower)
-			seen[lower] = true
+	checks := doctor.ChecksInCategory(allChecks, category)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Run all %s checks, or a specific check in this category.\n", category)
+	fmt.Fprintf(&b, "\n%s (%d checks):\n", category, len(checks))
+	for _, c := range checks {
+		fix := "  "
+		if c.CanFix() {
+			fix = "🔧"
 		}
+		fmt.Fprintf(&b, "  %-27s %s %s\n", c.Name(), fix, c.Description())
 	}
 
-	return completions, cobra.ShellCompDirectiveNoFileComp
+	fmt.Fprintf(&b, "\nChecks marked 🔧 can be fixed automatically with gt doctor %s <check> --fix\n", strings.ToLower(category))
+	fmt.Fprintf(&b, "\nExamples:\n")
+	fmt.Fprintf(&b, "  gt doctor %-37s # Run all %s checks\n", strings.ToLower(category), category)
+	if len(checks) > 0 {
+		example := checks[0].Name()
+		fmt.Fprintf(&b, "  gt doctor %s %-*s # Run one check\n",
+			strings.ToLower(category), 37-len(strings.ToLower(category))-1, example)
+		fmt.Fprintf(&b, "  gt doctor %s %s --fix\n", strings.ToLower(category), example)
+	}
+
+	return b.String()
+}
+
+// completeDoctorArgs provides position-aware tab completion.
+// First arg: category names. Second arg: check names within that category.
+func completeDoctorArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		// First positional arg: complete with category names
+		var completions []string
+		for _, cat := range doctor.CategoryOrder {
+			completions = append(completions, strings.ToLower(cat))
+		}
+		return completions, cobra.ShellCompDirectiveNoFileComp
+
+	case 1:
+		// Second positional arg: complete with check names in the selected category
+		category := doctor.ResolveCategory(args[0])
+		if category == "" {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		baseChecks, rigChecks := allDoctorChecks()
+		allChecks := baseChecks
+		if doctorRig != "" {
+			allChecks = append(allChecks, rigChecks...)
+		}
+
+		var completions []string
+		for _, c := range doctor.ChecksInCategory(allChecks, category) {
+			completions = append(completions, c.Name())
+		}
+		return completions, cobra.ShellCompDirectiveNoFileComp
+
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -259,33 +327,28 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Handle reserved word "all"
 	for _, arg := range args {
 		if strings.EqualFold(arg, "all") {
-			return fmt.Errorf("unknown check %q. Run \"gt doctor\" with no arguments to run all checks", "all")
+			return fmt.Errorf("unknown category %q. Run \"gt doctor\" with no arguments to run all checks", "all")
 		}
 	}
 
-	// Filter checks if args provided
+	// Parse category-first args
 	isTargeted := len(args) > 0
 	var checks []doctor.Check
 	var categoryName string
 
 	if isTargeted {
-		result := doctor.FilterChecks(allChecks, args)
+		var checkName string
+		if len(args) > 1 {
+			checkName = args[1]
+		}
 
-		if len(result.Unmatched) > 0 {
-			return formatUnmatchedError(allChecks, result.Unmatched)
+		result := doctor.FilterByCategory(allChecks, args[0], checkName)
+		if result.Error != nil {
+			return formatCategoryError(allChecks, result)
 		}
 
 		checks = result.Matched
-
-		// Detect category mode: single arg that matched multiple checks
-		if len(args) == 1 && len(checks) > 1 {
-			for _, cat := range doctor.CategoryOrder {
-				if strings.EqualFold(cat, args[0]) {
-					categoryName = cat
-					break
-				}
-			}
-		}
+		categoryName = result.CategoryName
 	} else {
 		checks = allChecks
 	}
@@ -372,26 +435,60 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// formatUnmatchedError builds an error message for unknown check names with suggestions.
-func formatUnmatchedError(allChecks []doctor.Check, unmatched []string) error {
+// formatCategoryError builds context-aware error messages for category-first filtering.
+func formatCategoryError(allChecks []doctor.Check, result *doctor.FilterCategoryResult) error {
 	var b strings.Builder
 
-	if len(unmatched) == 1 {
-		name := unmatched[0]
-		fmt.Fprintf(&b, "unknown check %q", name)
+	switch result.ErrorKind {
+	case doctor.FilterErrorUnknownCategory:
+		fmt.Fprintf(&b, "unknown category %q", result.CategoryInput)
 
-		suggestions := doctor.SuggestCheck(allChecks, name)
+		// Check if the input matches a check name (user used old flat syntax)
+		normalized := doctor.NormalizeName(result.CategoryInput)
+		for _, check := range allChecks {
+			if doctor.NormalizeName(check.Name()) == normalized {
+				fmt.Fprintf(&b, "\n\n  %q is a check in category %q. Use:\n    gt doctor %s %s",
+					result.CategoryInput, check.Category(),
+					strings.ToLower(check.Category()), check.Name())
+				break
+			}
+		}
+
+		// Suggest similar categories
+		suggestions := doctor.SuggestCategory(result.CategoryInput)
+		if len(suggestions) == 1 {
+			fmt.Fprintf(&b, "\n\n  Did you mean: %s?", strings.ToLower(suggestions[0]))
+		} else if len(suggestions) > 1 {
+			lower := make([]string, len(suggestions))
+			for i, s := range suggestions {
+				lower[i] = strings.ToLower(s)
+			}
+			fmt.Fprintf(&b, "\n\n  Did you mean one of: %s?", strings.Join(lower, ", "))
+		}
+
+		// List valid categories
+		b.WriteString("\n\n  Available categories:")
+		for _, cat := range doctor.CategoryOrder {
+			fmt.Fprintf(&b, "\n    %s", strings.ToLower(cat))
+		}
+
+	case doctor.FilterErrorUnknownCheck:
+		fmt.Fprintf(&b, "unknown check %q in category %q", result.CheckInput, result.CategoryName)
+
+		// Suggest similar check names within the category
+		categoryChecks := doctor.ChecksInCategory(allChecks, result.CategoryName)
+		suggestions := doctor.SuggestCheck(categoryChecks, result.CheckInput)
 		if len(suggestions) == 1 {
 			fmt.Fprintf(&b, "\n\n  Did you mean: %s?", suggestions[0])
 		} else if len(suggestions) > 1 {
 			fmt.Fprintf(&b, "\n\n  Did you mean one of: %s?", strings.Join(suggestions, ", "))
 		}
-	} else {
-		quoted := make([]string, len(unmatched))
-		for i, name := range unmatched {
-			quoted[i] = fmt.Sprintf("%q", name)
+
+		// List valid checks in this category
+		fmt.Fprintf(&b, "\n\n  Checks in %s:", result.CategoryName)
+		for _, c := range categoryChecks {
+			fmt.Fprintf(&b, "\n    %s", c.Name())
 		}
-		fmt.Fprintf(&b, "unknown checks %s", strings.Join(quoted, ", "))
 	}
 
 	b.WriteString("\n\n  Run \"gt doctor list\" to see all available checks.")

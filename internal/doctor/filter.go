@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -61,6 +62,106 @@ func FilterChecks(checks []Check, args []string) *FilterResult {
 	}
 
 	return result
+}
+
+// FilterErrorKind indicates what went wrong in category-first filtering.
+type FilterErrorKind int
+
+const (
+	FilterErrorNone            FilterErrorKind = iota
+	FilterErrorUnknownCategory                 // First arg didn't match any category
+	FilterErrorUnknownCheck                    // Second arg didn't match any check in the category
+)
+
+// FilterCategoryResult holds the outcome of category-first filtering.
+type FilterCategoryResult struct {
+	Matched       []Check         // Checks that matched
+	CategoryName  string          // Resolved canonical category name
+	CategoryInput string          // Raw user input for category
+	CheckInput    string          // Raw user input for check name
+	Error         error           // Non-nil if category or check name is invalid
+	ErrorKind     FilterErrorKind // Type of error for caller to format messages
+}
+
+// FilterByCategory implements category-first argument resolution.
+//   - Empty category: returns all checks.
+//   - Category only: returns all checks in that category (case-insensitive).
+//   - Category + checkName: returns the single matching check within that category.
+func FilterByCategory(checks []Check, category, checkName string) *FilterCategoryResult {
+	result := &FilterCategoryResult{
+		CategoryInput: category,
+		CheckInput:    checkName,
+	}
+
+	if category == "" {
+		result.Matched = checks
+		return result
+	}
+
+	// Resolve canonical category name
+	canonical := ResolveCategory(category)
+	if canonical == "" {
+		result.ErrorKind = FilterErrorUnknownCategory
+		result.Error = fmt.Errorf("unknown category %q", category)
+		return result
+	}
+	result.CategoryName = canonical
+
+	// Filter checks by category
+	categoryChecks := ChecksInCategory(checks, canonical)
+
+	if checkName == "" {
+		result.Matched = categoryChecks
+		return result
+	}
+
+	// Find specific check within category
+	normalized := NormalizeName(checkName)
+	for _, check := range categoryChecks {
+		if NormalizeName(check.Name()) == normalized {
+			result.Matched = []Check{check}
+			return result
+		}
+	}
+
+	result.ErrorKind = FilterErrorUnknownCheck
+	result.Error = fmt.Errorf("unknown check %q in category %q", checkName, canonical)
+	return result
+}
+
+// ResolveCategory returns the canonical category name for a case-insensitive input,
+// or empty string if not found.
+func ResolveCategory(input string) string {
+	for _, cat := range CategoryOrder {
+		if strings.EqualFold(cat, input) {
+			return cat
+		}
+	}
+	return ""
+}
+
+// ChecksInCategory returns all checks belonging to a category (case-insensitive).
+func ChecksInCategory(checks []Check, category string) []Check {
+	var result []Check
+	for _, check := range checks {
+		if strings.EqualFold(check.Category(), category) {
+			result = append(result, check)
+		}
+	}
+	return result
+}
+
+// SuggestCategory returns category names within Levenshtein distance <= 2 of the input.
+func SuggestCategory(input string) []string {
+	normalized := strings.ToLower(input)
+	var suggestions []string
+	for _, cat := range CategoryOrder {
+		dist := levenshtein(normalized, strings.ToLower(cat))
+		if dist > 0 && dist <= 2 {
+			suggestions = append(suggestions, cat)
+		}
+	}
+	return suggestions
 }
 
 // NormalizeName converts input to canonical kebab-case form.

@@ -184,7 +184,7 @@ func runDoctorList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(w)
 	}
 
-	fmt.Fprintln(w, "Checks marked 🔧 can be fixed automatically with gt doctor <check> --fix")
+	fmt.Fprintln(w, "Checks marked 🔧 can be fixed automatically with gt doctor <category> <check> --fix")
 
 	return nil
 }
