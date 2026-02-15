@@ -137,8 +137,9 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 
 	case NudgeModeWaitIdle:
 		if townRoot == "" {
-			// Fall back to immediate if no workspace
-			return t.NudgeSession(sessionName, prefixedMessage)
+			// wait-idle needs workspace for queue fallback — fail explicitly
+			// rather than silently degrading to immediate (destructive) delivery.
+			return fmt.Errorf("--mode=wait-idle requires a Gas Town workspace")
 		}
 		// Try to wait for idle
 		err := t.WaitForIdle(sessionName, waitIdleTimeout)
@@ -152,11 +153,17 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			return fmt.Errorf("wait-idle: %w", err)
 		}
 		// Timeout (agent busy) — queue instead
-		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+		if qErr := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
 			Sender:   sender,
 			Message:  message,
 			Priority: nudgePriorityFlag,
-		})
+		}); qErr != nil {
+			// Queue failed — fall back to immediate as last resort.
+			// Better to interrupt than lose the message entirely.
+			fmt.Fprintf(os.Stderr, "Warning: queue fallback failed (%v), delivering immediately\n", qErr)
+			return t.NudgeSession(sessionName, prefixedMessage)
+		}
+		return nil
 
 	default: // NudgeModeImmediate
 		return t.NudgeSession(sessionName, prefixedMessage)
