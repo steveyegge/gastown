@@ -38,18 +38,20 @@ func (d *Doctor) Checks() []Check {
 
 // Run executes all registered checks and returns a report.
 func (d *Doctor) Run(ctx *CheckContext) *Report {
-	return d.RunStreaming(ctx, nil, 0)
+	return d.RunStreaming(ctx, nil, 0, true)
 }
 
 // RunStreaming executes all registered checks with optional real-time output.
 // If w is non-nil, prints each check name as it starts and result when done.
 // If slowThreshold > 0, shows hourglass icon for slow checks.
-func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
+// If isTTY is false, output uses plain text prefixes (PASS/WARN/FAIL) instead
+// of ANSI colors and icons, with no \r carriage return overwrites.
+func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration, isTTY bool) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
-		// Stream: print check name before running
-		if w != nil {
+		// Stream: print check name before running (TTY only — non-TTY skips intermediate output)
+		if w != nil && isTTY {
 			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
 		}
 
@@ -66,30 +68,53 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 			result.Category = check.Category()
 		}
 
-		// Stream: overwrite line with result
+		// Stream: output result
 		if w != nil {
-			var statusIcon string
-			switch result.Status {
-			case StatusOK:
-				statusIcon = ui.RenderPassIcon()
-			case StatusWarning:
-				statusIcon = ui.RenderWarnIcon()
-			case StatusError:
-				statusIcon = ui.RenderFailIcon()
-			}
-			// Check if slow (hourglass replaces spaces to maintain alignment)
 			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
-			slowIndicator := "  "
 			if isSlow {
 				report.Summary.Slow++
-				slowIndicator = "⏳"
 			}
-			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
-			if result.Message != "" {
-				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
-			}
-			if isSlow {
-				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+
+			if isTTY {
+				// TTY: overwrite the "checking..." line with colored result
+				var statusIcon string
+				switch result.Status {
+				case StatusOK:
+					statusIcon = ui.RenderPassIcon()
+				case StatusWarning:
+					statusIcon = ui.RenderWarnIcon()
+				case StatusError:
+					statusIcon = ui.RenderFailIcon()
+				}
+				slowIndicator := "  "
+				if isSlow {
+					slowIndicator = "⏳"
+				}
+				fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
+				if result.Message != "" {
+					fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+				}
+				if isSlow {
+					fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+				}
+			} else {
+				// Non-TTY: clean line-by-line output with text prefixes
+				var prefix string
+				switch result.Status {
+				case StatusOK:
+					prefix = "PASS"
+				case StatusWarning:
+					prefix = "WARN"
+				case StatusError:
+					prefix = "FAIL"
+				}
+				fmt.Fprintf(w, "%s  %s", prefix, result.Name)
+				if result.Message != "" {
+					fmt.Fprintf(w, "  %s", result.Message)
+				}
+				if isSlow {
+					fmt.Fprintf(w, "  (%s)", formatDuration(result.Elapsed))
+				}
 			}
 			fmt.Fprintln(w)
 		}
@@ -103,18 +128,20 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 // Fix runs all checks with auto-fix enabled where possible.
 // It first runs the check, then if it fails and can be fixed, attempts the fix.
 func (d *Doctor) Fix(ctx *CheckContext) *Report {
-	return d.FixStreaming(ctx, nil, 0)
+	return d.FixStreaming(ctx, nil, 0, true)
 }
 
 // FixStreaming runs all checks with auto-fix and optional real-time output.
 // If w is non-nil, prints each check name as it starts and result when done.
 // If slowThreshold > 0, shows hourglass icon for slow checks.
-func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
+// If isTTY is false, output uses plain text prefixes (PASS/WARN/FAIL/FIXED) instead
+// of ANSI colors and icons, with no \r carriage return overwrites.
+func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration, isTTY bool) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
-		// Stream: print check name before running
-		if w != nil {
+		// Stream: print check name before running (TTY only)
+		if w != nil && isTTY {
 			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
 		}
 
@@ -130,8 +157,8 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 
 		// Attempt fix if check failed and is fixable
 		if result.Status != StatusOK && check.CanFix() {
-			// Stream: show the problem with fixing indicator (all on same line)
-			if w != nil {
+			// Stream: show the problem with fixing indicator (TTY only)
+			if w != nil && isTTY {
 				var problemIcon string
 				if result.Status == StatusError {
 					problemIcon = ui.RenderFailIcon()
@@ -171,38 +198,65 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 		// Record total elapsed time including any fix attempts
 		result.Elapsed = time.Since(start)
 
-		// Stream: overwrite line with final result
+		// Stream: output final result
 		if w != nil {
-			var statusIcon string
-			if result.Fixed {
-				statusIcon = ui.RenderFixIcon()
-			} else {
-				switch result.Status {
-				case StatusOK:
-					statusIcon = ui.RenderPassIcon()
-				case StatusWarning:
-					statusIcon = ui.RenderWarnIcon()
-				case StatusError:
-					statusIcon = ui.RenderFailIcon()
-				}
-			}
-			// Check if slow (hourglass replaces spaces to maintain alignment)
-			// Fix icon (🔧) is double-width, so use one less padding space
 			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
-			slowIndicator := "  "
-			if result.Fixed {
-				slowIndicator = " "
-			}
 			if isSlow {
 				report.Summary.Slow++
-				slowIndicator = "⏳"
 			}
-			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
-			if result.Message != "" {
-				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
-			}
-			if isSlow {
-				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+
+			if isTTY {
+				// TTY: overwrite line with colored result and icons
+				var statusIcon string
+				if result.Fixed {
+					statusIcon = ui.RenderFixIcon()
+				} else {
+					switch result.Status {
+					case StatusOK:
+						statusIcon = ui.RenderPassIcon()
+					case StatusWarning:
+						statusIcon = ui.RenderWarnIcon()
+					case StatusError:
+						statusIcon = ui.RenderFailIcon()
+					}
+				}
+				// Fix icon (🔧) is double-width, so use one less padding space
+				slowIndicator := "  "
+				if result.Fixed {
+					slowIndicator = " "
+				}
+				if isSlow {
+					slowIndicator = "⏳"
+				}
+				fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
+				if result.Message != "" {
+					fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+				}
+				if isSlow {
+					fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+				}
+			} else {
+				// Non-TTY: clean line-by-line output with text prefixes
+				var prefix string
+				if result.Fixed {
+					prefix = "FIXED"
+				} else {
+					switch result.Status {
+					case StatusOK:
+						prefix = "PASS"
+					case StatusWarning:
+						prefix = "WARN"
+					case StatusError:
+						prefix = "FAIL"
+					}
+				}
+				fmt.Fprintf(w, "%s  %s", prefix, result.Name)
+				if result.Message != "" {
+					fmt.Fprintf(w, "  %s", result.Message)
+				}
+				if isSlow {
+					fmt.Fprintf(w, "  (%s)", formatDuration(result.Elapsed))
+				}
 			}
 			fmt.Fprintln(w)
 		}

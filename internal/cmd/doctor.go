@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doctor"
+	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -237,13 +238,16 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Detect TTY for output formatting
+	isTTY := ui.IsTerminal()
+
 	// Run checks with streaming output
 	fmt.Println() // Initial blank line
 	var report *doctor.Report
 	if doctorFix {
-		report = d.FixStreaming(ctx, os.Stdout, slowThreshold)
+		report = d.FixStreaming(ctx, os.Stdout, slowThreshold, isTTY)
 	} else {
-		report = d.RunStreaming(ctx, os.Stdout, slowThreshold)
+		report = d.RunStreaming(ctx, os.Stdout, slowThreshold, isTTY)
 	}
 
 	// Print summary (checks were already printed during streaming)
