@@ -50,14 +50,15 @@ func TestIsTownLevelRoleBoot(t *testing.T) {
 		agentID string
 		want    bool
 	}{
-		{"boot", true},
 		{"deacon/boot", true},
+		{"deacon-boot", true},
 		{"mayor", true},
 		{"mayor/", true},
 		{"deacon", true},
 		{"deacon/", true},
 		{"gastown/witness", false},
 		{"west/boot", false},
+		{"boot", false}, // bare "boot" is not a valid agentID
 	}
 
 	for _, tt := range tests {
@@ -65,5 +66,25 @@ func TestIsTownLevelRoleBoot(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("isTownLevelRole(%q) = %v, want %v", tt.agentID, got, tt.want)
 		}
+	}
+}
+
+func TestActorStringBoot(t *testing.T) {
+	info := RoleInfo{Role: RoleBoot}
+	got := info.ActorString()
+	want := "deacon-boot"
+	if got != want {
+		t.Errorf("ActorString() for RoleBoot = %q, want %q", got, want)
+	}
+}
+
+func TestActorStringConsistentWithBDActorBoot(t *testing.T) {
+	// ActorString() must match what BD_ACTOR is set to in config/env.go.
+	// BD_ACTOR for boot is "deacon-boot".
+	info := RoleInfo{Role: RoleBoot}
+	actorString := info.ActorString()
+	bdActor := "deacon-boot" // from internal/config/env.go:57
+	if actorString != bdActor {
+		t.Errorf("ActorString() = %q does not match BD_ACTOR = %q", actorString, bdActor)
 	}
 }

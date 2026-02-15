@@ -993,7 +993,7 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "mayor/" ||
 		agentID == "deacon" || agentID == "deacon/" ||
-		agentID == "boot" || agentID == "deacon/boot"
+		agentID == "deacon/boot" || agentID == "deacon-boot"
 }
 
 // extractMailSender extracts the sender from mail bead labels.

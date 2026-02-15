@@ -405,6 +405,8 @@ func (info RoleInfo) ActorString() string {
 			return fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
 		}
 		return "crew"
+	case RoleBoot:
+		return "deacon-boot"
 	default:
 		return string(info.Role)
 	}
