@@ -395,11 +395,10 @@ func formatUnmatchedError(allChecks []doctor.Check, unmatched []string) error {
 	}
 
 	// Show available categories
-	cats := make([]string, len(doctor.CategoryOrder))
-	for i, cat := range doctor.CategoryOrder {
-		cats[i] = strings.ToLower(cat)
+	b.WriteString("\n\n  Available categories:")
+	for _, cat := range doctor.CategoryOrder {
+		fmt.Fprintf(&b, "\n    %s", strings.ToLower(cat))
 	}
-	fmt.Fprintf(&b, "\n\n  Available categories: %s", strings.Join(cats, ", "))
 
 	b.WriteString("\n  Run \"gt doctor list\" to see all available checks.")
 	if doctorRig == "" {
