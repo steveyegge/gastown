@@ -19,12 +19,14 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-var nudgeMessageFlag string
-var nudgeForceFlag bool
-var nudgeStdinFlag bool
-var nudgeIfFreshFlag bool
-var nudgeModeFlag string
-var nudgePriorityFlag string
+var (
+	nudgeMessageFlag  string
+	nudgeForceFlag    bool
+	nudgeStdinFlag    bool
+	nudgeIfFreshFlag  bool
+	nudgeModeFlag     string
+	nudgePriorityFlag string
+)
 
 // Nudge delivery modes.
 const (

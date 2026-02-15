@@ -419,13 +419,6 @@ func TestDrainSweepsOrphanedClaims(t *testing.T) {
 		t.Errorf("got message %q, want %q", nudges[0].Message, "valid")
 	}
 
-	// Check directory: orphaned claim should be gone, fresh claim should remain
-	entries, _ := os.ReadDir(dir)
-	var remaining []string
-	for _, e := range entries {
-		remaining = append(remaining, e.Name())
-	}
-
 	// The orphaned (old) claim should have been swept
 	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
 		t.Error("orphaned .claimed file should have been swept")
