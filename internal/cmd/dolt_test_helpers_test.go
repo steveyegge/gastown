@@ -17,6 +17,24 @@ import (
 
 const doltTestPort = "3307"
 
+// configureTestGitIdentity sets git global config in an isolated HOME directory
+// so that EnsureDoltIdentity (called during gt install preflight) can copy
+// identity from git to dolt.
+func configureTestGitIdentity(t *testing.T, homeDir string) {
+	t.Helper()
+	env := append(os.Environ(), "HOME="+homeDir)
+	for _, args := range [][]string{
+		{"config", "--global", "user.name", "Test User"},
+		{"config", "--global", "user.email", "test@test.com"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+}
+
 // doltServer tracks the singleton dolt sql-server process for integration tests.
 // Started once per test binary invocation via sync.Once; cleaned up at process exit.
 var (

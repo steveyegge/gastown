@@ -1024,6 +1024,7 @@ func runAgentCleanTest(t *testing.T, hasTrackedBeads bool) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
+	configureTestGitIdentity(t, tmpDir)
 	hqPath := filepath.Join(tmpDir, "test-hq")
 
 	// Build gt binary for testing

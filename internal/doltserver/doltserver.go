@@ -49,6 +49,77 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
+// EnsureDoltIdentity configures dolt global identity (user.name, user.email)
+// if not already set. Copies values from git config as a sensible default.
+// This must run before InitRig and Start, since dolt init requires identity.
+func EnsureDoltIdentity() error {
+	// Check each field independently to avoid creating duplicates with --add.
+	// Distinguish "key not found" (exit code 1, empty output) from dolt crashes.
+	needName, err := doltConfigMissing("user.name")
+	if err != nil {
+		return fmt.Errorf("probing dolt user.name: %w", err)
+	}
+	needEmail, err := doltConfigMissing("user.email")
+	if err != nil {
+		return fmt.Errorf("probing dolt user.email: %w", err)
+	}
+
+	if !needName && !needEmail {
+		return nil // already configured
+	}
+
+	// Copy missing fields from git global config.
+	// We read --global only (not repo-local) to avoid silently persisting
+	// a repo-scoped override into dolt's permanent global config.
+	if needName {
+		gitName, err := exec.Command("git", "config", "--global", "user.name").Output()
+		if err != nil || len(bytes.TrimSpace(gitName)) == 0 {
+			return fmt.Errorf("dolt identity not configured and git user.name not available; run: dolt config --global --add user.name \"Your Name\"")
+		}
+		if err := setDoltGlobalConfig("user.name", strings.TrimSpace(string(gitName))); err != nil {
+			return fmt.Errorf("failed to set dolt user.name: %w", err)
+		}
+	}
+
+	if needEmail {
+		gitEmail, err := exec.Command("git", "config", "--global", "user.email").Output()
+		if err != nil || len(bytes.TrimSpace(gitEmail)) == 0 {
+			return fmt.Errorf("dolt identity not configured and git user.email not available; run: dolt config --global --add user.email \"you@example.com\"")
+		}
+		if err := setDoltGlobalConfig("user.email", strings.TrimSpace(string(gitEmail))); err != nil {
+			return fmt.Errorf("failed to set dolt user.email: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// doltConfigMissing checks whether a dolt global config key is unset.
+// Returns (true, nil) for missing keys, (false, nil) for present keys,
+// and (false, error) when dolt itself fails unexpectedly.
+func doltConfigMissing(key string) (bool, error) {
+	cmd := exec.Command("dolt", "config", "--global", "--get", key)
+	out, err := cmd.Output()
+	if err == nil {
+		// Command succeeded — key exists if output is non-empty
+		return len(bytes.TrimSpace(out)) == 0, nil
+	}
+	// dolt config --get exits 1 for missing keys with no stderr.
+	// Any other failure (crash, permission error) is unexpected.
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return true, nil // key not found — expected
+	}
+	return false, fmt.Errorf("dolt config --global --get %s: %w", key, err)
+}
+
+// setDoltGlobalConfig idempotently sets a dolt global config key.
+// Uses --unset then --add to avoid duplicate entries from repeated calls.
+func setDoltGlobalConfig(key, value string) error {
+	// Remove existing value (ignore error — key may not exist yet)
+	_ = exec.Command("dolt", "config", "--global", "--unset", key).Run()
+	return exec.Command("dolt", "config", "--global", "--add", key, value).Run()
+}
+
 // Default configuration
 const (
 	DefaultPort           = 3307
@@ -765,10 +836,11 @@ func jsonKeys(m map[string]json.RawMessage) []string {
 // InitRig initializes a new rig database in the data directory.
 // If the Dolt server is running, it executes CREATE DATABASE to register the
 // database with the live server (avoiding the need for a restart).
-// Returns true if the database was registered with a running server.
-func InitRig(townRoot, rigName string) (serverWasRunning bool, err error) {
+// Returns (serverWasRunning, created, err). created is false when the database
+// already existed on disk (idempotent no-op).
+func InitRig(townRoot, rigName string) (serverWasRunning bool, created bool, err error) {
 	if rigName == "" {
-		return false, fmt.Errorf("rig name cannot be empty")
+		return false, false, fmt.Errorf("rig name cannot be empty")
 	}
 
 	config := DefaultConfig(townRoot)
@@ -776,15 +848,20 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, err error) {
 	// Validate rig name (simple alphanumeric + underscore/dash)
 	for _, r := range rigName {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
-			return false, fmt.Errorf("invalid rig name %q: must contain only alphanumeric, underscore, or dash", rigName)
+			return false, false, fmt.Errorf("invalid rig name %q: must contain only alphanumeric, underscore, or dash", rigName)
 		}
 	}
 
 	rigDir := filepath.Join(config.DataDir, rigName)
 
-	// Check if already exists on disk
+	// Check if already exists on disk — idempotent for callers like gt install.
+	// Still run EnsureMetadata to repair missing/corrupt metadata.json.
 	if _, err := os.Stat(filepath.Join(rigDir, ".dolt")); err == nil {
-		return false, fmt.Errorf("rig database %q already exists at %s", rigName, rigDir)
+		running, _, _ := IsRunning(townRoot)
+		if err := EnsureMetadata(townRoot, rigName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: metadata.json update failed for existing database %q: %v\n", rigName, err)
+		}
+		return running, false, nil
 	}
 
 	// Check if server is running
@@ -794,20 +871,20 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, err error) {
 		// Server is running: use CREATE DATABASE which both creates the
 		// directory and registers the database with the live server.
 		if err := serverExecSQL(townRoot, fmt.Sprintf("CREATE DATABASE `%s`", rigName)); err != nil {
-			return true, fmt.Errorf("creating database on running server: %w", err)
+			return true, false, fmt.Errorf("creating database on running server: %w", err)
 		}
 	} else {
 		// Server not running: create directory and init manually.
 		// The database will be picked up when the server starts.
 		if err := os.MkdirAll(rigDir, 0755); err != nil {
-			return false, fmt.Errorf("creating rig directory: %w", err)
+			return false, false, fmt.Errorf("creating rig directory: %w", err)
 		}
 
 		cmd := exec.Command("dolt", "init")
 		cmd.Dir = rigDir
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return false, fmt.Errorf("initializing Dolt database: %w\n%s", err, output)
+			return false, false, fmt.Errorf("initializing Dolt database: %w\n%s", err, output)
 		}
 	}
 
@@ -817,7 +894,7 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, err error) {
 		fmt.Fprintf(os.Stderr, "Warning: database initialized but metadata.json update failed: %v\n", err)
 	}
 
-	return running, nil
+	return running, true, nil
 }
 
 // Migration represents a database migration from old to new location.
@@ -1208,8 +1285,12 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 	}
 
 	// No local data — create a fresh database
-	if _, err := InitRig(townRoot, ws.ConfiguredDB); err != nil {
+	_, created, err := InitRig(townRoot, ws.ConfiguredDB)
+	if err != nil {
 		return "", fmt.Errorf("creating database for %s: %w", ws.RigName, err)
+	}
+	if !created {
+		return "database already exists (no-op)", nil
 	}
 	return "created new database", nil
 }

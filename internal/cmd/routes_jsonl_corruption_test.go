@@ -28,6 +28,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		// Test that gt install creates issues.jsonl before routes.jsonl
 		// so that bd auto-export doesn't corrupt routes.jsonl
 		tmpDir := t.TempDir()
+		configureTestGitIdentity(t, tmpDir)
 		townRoot := filepath.Join(tmpDir, "test-town")
 
 		gtBinary := buildGT(t)
@@ -85,6 +86,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		// Test that gt rig add does NOT create routes.jsonl in rig beads
 		// (rig-level routes.jsonl breaks bd's walk-up routing to town routes)
 		tmpDir := t.TempDir()
+		configureTestGitIdentity(t, tmpDir)
 		townRoot := filepath.Join(tmpDir, "test-town")
 
 		gtBinary := buildGT(t)

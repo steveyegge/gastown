@@ -142,6 +142,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Preflight: ensure dolt identity before any workspace mutations.
+	// This prevents a partial install that can't be retried without --force.
+	if !installNoBeads {
+		if _, err := exec.LookPath("dolt"); err == nil {
+			if err := doltserver.EnsureDoltIdentity(); err != nil {
+				return fmt.Errorf("dolt identity setup failed (required for beads): %w\n\nTo fix, run:\n  dolt config --global --add user.name \"Your Name\"\n  dolt config --global --add user.email \"you@example.com\"", err)
+			}
+		}
+	}
+
 	fmt.Printf("%s Creating Gas Town HQ at %s\n\n",
 		style.Bold.Render("🏭"), style.Dim.Render(absPath))
 
@@ -278,10 +288,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
-		// Start the Dolt server — bd commands need a running server.
-		// The server stays running after install (it's lightweight infrastructure,
-		// like a database). Stop it with 'gt dolt stop' when not needed.
+		// Set up Dolt: identity → init-rig hq → server start.
+		// This ordering works because InitRig falls through to `dolt init`
+		// when the server isn't running yet.
 		if _, err := exec.LookPath("dolt"); err == nil {
+			// Identity was verified in preflight above.
+			// Create HQ database before starting server.
+			if _, _, err := doltserver.InitRig(absPath, "hq"); err != nil {
+				fmt.Printf("   %s Could not init HQ database: %v\n", style.Dim.Render("⚠"), err)
+			}
+
+			// Start the Dolt server — bd commands need a running server.
+			// The server stays running after install (it's lightweight infrastructure,
+			// like a database). Stop it with 'gt dolt stop' when not needed.
 			if err := doltserver.Start(absPath); err != nil {
 				if !strings.Contains(err.Error(), "already running") {
 					fmt.Printf("   %s Could not start Dolt server: %v\n", style.Dim.Render("⚠"), err)

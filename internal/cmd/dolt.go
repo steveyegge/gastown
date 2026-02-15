@@ -523,13 +523,19 @@ func runDoltInitRig(cmd *cobra.Command, args []string) error {
 
 	rigName := args[0]
 
-	serverWasRunning, err := doltserver.InitRig(townRoot, rigName)
+	serverWasRunning, created, err := doltserver.InitRig(townRoot, rigName)
 	if err != nil {
 		return err
 	}
 
 	config := doltserver.DefaultConfig(townRoot)
 	rigDir := doltserver.RigDatabaseDir(townRoot, rigName)
+
+	if !created {
+		fmt.Printf("%s Rig database %q already exists (no-op)\n", style.Bold.Render("✓"), rigName)
+		fmt.Printf("  Location: %s\n", rigDir)
+		return nil
+	}
 
 	fmt.Printf("%s Initialized rig database %q\n", style.Bold.Render("✓"), rigName)
 	fmt.Printf("  Location: %s\n", rigDir)

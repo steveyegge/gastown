@@ -125,6 +125,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 	requireDoltServer(t)
 
 	tmpDir := t.TempDir()
+	configureTestGitIdentity(t, tmpDir)
 	gtBinary := buildGT(t)
 
 	t.Run("TrackedRepoWithExistingPrefix", func(t *testing.T) {

@@ -350,9 +350,21 @@ func TestInstallDoctorClean(t *testing.T) {
 	env := cleanE2EEnv()
 	env = append(env, "HOME="+tmpDir)
 
-	// 1. Install town with git
+	// Kill any stale dolt from previous test BEFORE install to avoid port 3307 conflict.
+	_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
+
+	// Set up git identity in the test's temp HOME so EnsureDoltIdentity can copy it.
+	configureGitIdentity(t, env)
+
+	// 1. Install town with git (now includes dolt identity, HQ init, server start)
 	t.Run("install", func(t *testing.T) {
 		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
+	})
+	t.Cleanup(func() {
+		cmd := exec.Command(gtBinary, "dolt", "stop")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		_ = cmd.Run()
 	})
 
 	// 2. Verify core structure exists
@@ -364,19 +376,46 @@ func TestInstallDoctorClean(t *testing.T) {
 		assertFileExists(t, filepath.Join(hqPath, "mayor", "rigs.json"), "mayor/rigs.json")
 	})
 
-	// 3. Initialize Dolt database and start server
-	t.Run("dolt-start", func(t *testing.T) {
-		// Kill any stale dolt from previous test to avoid port 3307 conflict
-		_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
-		configureDoltIdentity(t, env)
-		runGTCmd(t, gtBinary, hqPath, env, "dolt", "init-rig", "hq")
-		runGTCmd(t, gtBinary, hqPath, env, "dolt", "start")
-	})
-	t.Cleanup(func() {
-		cmd := exec.Command(gtBinary, "dolt", "stop")
+	// 3. Verify install bootstrapped dolt (identity, HQ database, server)
+	t.Run("verify-dolt-bootstrap", func(t *testing.T) {
+		// HQ database should exist
+		hqDoltDir := filepath.Join(hqPath, ".dolt-data", "hq", ".dolt")
+		assertDirExists(t, hqDoltDir, ".dolt-data/hq/.dolt")
+
+		// Dolt identity should have been copied from git config
+		nameCmd := exec.Command("dolt", "config", "--global", "--get", "user.name")
+		nameCmd.Env = env
+		nameOut, err := nameCmd.Output()
+		if err != nil {
+			t.Fatalf("dolt config --get user.name failed: %v", err)
+		}
+		if got := strings.TrimSpace(string(nameOut)); got != "Test User" {
+			t.Errorf("dolt user.name = %q, want %q", got, "Test User")
+		}
+
+		// Dolt server should be reachable
+		cmd := exec.Command(gtBinary, "dolt", "status")
 		cmd.Dir = hqPath
 		cmd.Env = env
-		_ = cmd.Run()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("dolt status failed (server may not be running): %v\n%s", err, out)
+		}
+		if strings.Contains(string(out), "not running") {
+			t.Errorf("expected dolt server to be running, got: %s", out)
+		}
+
+		// init-rig hq again should be idempotent (no error, "already exists" message)
+		initCmd := exec.Command(gtBinary, "dolt", "init-rig", "hq")
+		initCmd.Dir = hqPath
+		initCmd.Env = env
+		initOut, err := initCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("re-running init-rig hq should be idempotent, got error: %v\n%s", err, initOut)
+		}
+		if !strings.Contains(string(initOut), "already exists") {
+			t.Errorf("expected 'already exists' message, got: %s", initOut)
+		}
 	})
 
 	// 4. Add a small public repo as a rig (CLI rejects local paths)
@@ -445,18 +484,15 @@ func TestInstallWithDaemon(t *testing.T) {
 	env := cleanE2EEnv()
 	env = append(env, "HOME="+tmpDir)
 
-	// 1. Install town with git
+	// Kill any stale dolt from previous test BEFORE install to avoid port 3307 conflict.
+	_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
+
+	// Set up git identity in the test's temp HOME so EnsureDoltIdentity can copy it.
+	configureGitIdentity(t, env)
+
+	// 1. Install town with git (now includes dolt identity, HQ init, server start)
 	t.Run("install", func(t *testing.T) {
 		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
-	})
-
-	// 2. Initialize Dolt database and start server
-	t.Run("dolt-start", func(t *testing.T) {
-		// Kill any stale dolt from previous test to avoid port 3307 conflict
-		_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
-		configureDoltIdentity(t, env)
-		runGTCmd(t, gtBinary, hqPath, env, "dolt", "init-rig", "hq")
-		runGTCmd(t, gtBinary, hqPath, env, "dolt", "start")
 	})
 	t.Cleanup(func() {
 		cmd := exec.Command(gtBinary, "dolt", "stop")
@@ -465,7 +501,7 @@ func TestInstallWithDaemon(t *testing.T) {
 		_ = cmd.Run()
 	})
 
-	// 3. Start daemon
+	// 2. Start daemon
 	t.Run("daemon-start", func(t *testing.T) {
 		runGTCmd(t, gtBinary, hqPath, env, "daemon", "start")
 	})
@@ -539,19 +575,20 @@ func cleanE2EEnv() []string {
 	return clean
 }
 
-// configureDoltIdentity sets dolt global config in the test's HOME directory.
-// Tests override HOME to a temp dir for isolation, so dolt can't find the
-// container's build-time global config. This must run before gt dolt init-rig.
-func configureDoltIdentity(t *testing.T, env []string) {
+// configureGitIdentity sets git global config in the test's temp HOME directory.
+// Tests override HOME to a temp dir for isolation, so git/dolt can't find the
+// container's build-time global config. EnsureDoltIdentity copies from git config,
+// so git identity must be available before gt install.
+func configureGitIdentity(t *testing.T, env []string) {
 	t.Helper()
 	for _, args := range [][]string{
-		{"config", "--global", "--add", "user.name", "Test User"},
-		{"config", "--global", "--add", "user.email", "test@test.com"},
+		{"config", "--global", "user.name", "Test User"},
+		{"config", "--global", "user.email", "test@test.com"},
 	} {
-		cmd := exec.Command("dolt", args...)
+		cmd := exec.Command("git", args...)
 		cmd.Env = env
 		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("dolt %v failed: %v\n%s", args, err, out)
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
 }
