@@ -88,11 +88,12 @@ gt sling agent-validation sfgastown
 ## What it does
 
 1. **Context**: Verifies Gas Town identity, role, and startup context are present
-2. **Hook**: Confirms work is hooked and the bead is accessible
-3. **Tools**: Validates gt and bd CLI tools are functional
-4. **Mail**: Waits for mail from the mayor, reads it, and replies to confirm receipt
-5. **Task**: Executes an optional test task to prove agent responsiveness
-6. **Report**: Prints pass/fail summary and completes the bead
+2. **Lifecycle**: Checks tmux session for deacon boot and witness nudge messages
+3. **Hook**: Confirms work is hooked and the bead is accessible
+4. **Tools**: Validates gt and bd CLI tools are functional
+5. **Mail**: Waits for mail from the mayor, reads it, and replies to confirm receipt
+6. **Task**: Executes an optional test task to prove agent responsiveness
+7. **Report**: Prints pass/fail summary and completes the bead
 """
 formula = "agent-validation"
 type = "workflow"
@@ -136,9 +137,45 @@ Record pass/fail for each check.
 **Exit criteria:** Gas Town context is confirmed present in your session."""
 
 [[steps]]
+id = "verify-lifecycle"
+title = "Verify deacon boot and witness nudge were received"
+needs = ["verify-context"]
+description = """
+Confirm that the Gas Town lifecycle infrastructure (witness and deacon) fired
+correctly during your startup. You should have received these as messages in
+your session before you started working.
+
+**1. Witness nudge:**
+Check if you received a message from the witness during startup. It looks like:
+`[GAS TOWN] <rig>/polecats/<name> <- witness • <timestamp> • assigned`
+followed by `Run gt prime --hook and begin work on your hook.`
+
+Report whether you saw this witness nudge in your conversation. PASS if yes.
+
+**2. Deacon boot:**
+Check if the deacon (boot agent) sent you a message or ran any commands in
+your session before you started. The deacon handles initial session setup.
+
+Report whether deacon activity was visible. PASS if yes, SKIP if not seen
+(the deacon may run silently or be disabled).
+
+**3. gt prime execution:**
+Confirm that `gt prime` was executed during your startup (either by you, by
+the witness nudge instruction, or by a startup hook). The output should have
+included your Gas Town role and context.
+
+```bash
+gt prime 2>/dev/null | head -3
+```
+
+PASS if gt prime output includes your role and `[GAS TOWN]` header.
+
+**Exit criteria:** Witness nudge confirmed received. Deacon boot noted. gt prime ran."""
+
+[[steps]]
 id = "verify-hook"
 title = "Verify work is on your hook"
-needs = ["verify-context"]
+needs = ["verify-lifecycle"]
 description = """
 Confirm that this validation bead is hooked to you.
 
@@ -284,6 +321,10 @@ Gas Town context:     [PASS/FAIL]
   - Role awareness:   [PASS/FAIL]
   - Rig identity:     [PASS/FAIL]
   - Startup context:  [PASS/FAIL]
+Lifecycle:            [PASS/FAIL]
+  - Witness nudge:    [PASS/FAIL]
+  - Deacon boot:      [PASS/FAIL/SKIP]
+  - gt prime fired:   [PASS/FAIL]
 Hook assignment:      [PASS/FAIL]
   - Work hooked:      [PASS/FAIL]
   - Bead accessible:  [PASS/FAIL]
@@ -293,7 +334,7 @@ CLI tools:            [PASS/FAIL]
   - Rig list:         [PASS/FAIL]
 Mail round-trip:      [PASS/FAIL]
   - Mail received:    [PASS/FAIL]
-  - Reply sent:       [PASS/FAIL]
+  - Identity reply:   [PASS/FAIL]
 Test task execution:  [PASS/FAIL]
 
 VALIDATION_OK
