@@ -398,6 +398,7 @@ func formatUnmatchedError(allChecks []doctor.Check, unmatched []string) error {
 	if doctorRig == "" {
 		b.WriteString("\n  Some checks require --rig. Run \"gt doctor list --rig <name>\".")
 	}
+	b.WriteString("\n") // blank line before cobra's Usage block
 
 	return fmt.Errorf("%s", b.String())
 }
