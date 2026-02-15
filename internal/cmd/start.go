@@ -466,8 +466,8 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 			}
 			return fmt.Sprintf("  %s %s/%s agent restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
 		}
-		// Agent is dead (zombie session) - fall through to startCrewMember
-		// which calls crewMgr.Start() to kill zombie and recreate cleanly
+		// Agent is alive — nothing to do
+		return fmt.Sprintf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName), false
 	}
 
 	if err := startCrewMember(r.Name, crewName, townRoot); err != nil {
