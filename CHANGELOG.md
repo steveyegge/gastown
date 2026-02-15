@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-15
+
+### Added
+
+#### Dolt-Native Architecture
+- **Complete SQLite-to-Dolt migration** - Gas Town is now Dolt-native; all SQLite code removed
+- **`gt dolt` command** - Server management (start, stop, status, migrate, rollback, sync, init-rig)
+- **`gt install` consolidation** - Folds Dolt identity, HQ database, and server start into single command
+- **Branch-per-polecat write isolation** - Each polecat gets its own Dolt branch to prevent write conflicts
+- **Proactive Dolt health alerting** - Daemon monitors server health with dedicated 30s ticker
+- **Auto-create DoltHub repos and configure remotes** - `gt dolt sync` pushes to DoltHub
+- **Dolt remotes patrol** - Periodic push to git remotes for federation readiness
+- **Max-connections and admission control** - Prevents connection storms on Dolt server
+
+#### Dashboard & Web UI
+- **Comprehensive UX overhaul** - 13 interactive data panels with crew notifications
+- **SSE real-time updates** - Replaces 10s polling with server-sent events
+- **Interactive command palette** - Autocomplete, recent history, contextual suggestions
+- **Interactive convoy management** - Create, close, feed convoys from dashboard
+- **Interactive hook management** - View and manage hooks from dashboard
+- **Issue management actions** - Work panel detail view with sling buttons
+- **Convoy titles alongside IDs** - Better convoy identification
+
+#### Daemon & Supervision
+- **launchd/systemd supervision support** - OS-native daemon management
+- **Exponential backoff for agent restarts** - Prevents restart storms
+- **Mayor daemon supervision** - Daemon manages Mayor session lifecycle
+- **Boot watchdog** - Ephemeral dog that triages Deacon state on each daemon tick
+
+#### Molecule & Workflow System
+- **DAG visualization** (`gt mol dag`) - Visualize molecule dependency graphs
+- **Fan-out/gather pattern** - Parallel steps in patrol workflows
+- **Wisp compaction** (`gt compact`) - TTL-based wisp lifecycle management
+- **Key Record Chronicle (KRC)** - Forensic value decay model for ephemeral data
+- **Wisp promotion criteria** - Helpers for squash-to-persistent decisions
+- **Formula variable declarations** - Proper `[vars]` sections in all formulas
+
+#### Hooks Management
+- **Centralized hook management** - `gt hooks sync`, `gt hooks diff`, `gt hooks list`
+- **Per-matcher merge logic** - Fine-grained hook configuration
+- **Hook registry integration** - Hooks wired into `gt rig add` and `gt doctor`
+
+#### Agent Lifecycle
+- **Persistent polecat identity model** - Agent beads survive nuke; identity accumulates forever
+- **Auto re-dispatch recovered beads** - Deacon recovers work from dead polecats
+- **Witness resets abandoned beads** - Dead polecat detection triggers work recovery
+- **Auto-respawn hooks** - Mayor sessions survive tmux detach
+- **Signal stop handler** (`gt signal stop`) - Turn-boundary messaging for clean stops
+- **PID tracking for spawned agents** - Better process management
+
+#### Convoy System
+- **Completion notifications** - Push convoy completion to active Mayor session
+- **Auto-close empty convoys** - Empty 0/0 convoys auto-closed on create
+- **`--merge` and `--owned` flags** for `gt convoy create` and `gt sling`
+- **Safety checks on `gt convoy close`** with `--force` override
+- **Reactive convoy continuation feeding** - Observer auto-feeds convoys
+
+#### CLI Improvements
+- **`--stdin` flag** - Shell-quoting-safe message bodies for mail, nudge, handoff, escalate, sling
+- **`--auto` flag for handoff** - PreCompact auto-handoff support
+- **`gt hook clear`** - Alias for `gt unhook`
+- **`gt dog clear` and `gt warrant`** - Dog management commands
+- **`gt rig settings`** - Interactive rig settings management
+- **`--adopt` flag for `gt rig add`** - Register existing directories
+- **Enhanced `--help` text** - Long descriptions added to 30+ commands
+- **Dark mode CLI theme support** - Configurable terminal themes
+- **Agent switcher keybinding** - `C-b g` for tmux agent switching
+- **`gt prime` compact/resume detection** - Lighter post-compaction priming
+- **Command quick-reference in CLAUDE.md** - Auto-generated per role
+
+#### Community Contributions
+- **Containerized E2E tests** - Docker-based install and daemon testing
+- **Integration branch enhancements** - End-to-end integration branches across the pipeline
+- **Stale claim timeout in refinery** - Prevents stuck MRs
+- **Serialize main pushes with merge slot** - Prevents push conflicts
+- **Agent-agnostic zombie detection** - Works with any AI agent, not just Claude
+- **Configurable CLI name** (`GT_COMMAND` env var) - For custom installations
+- **Compaction reporting** - Daily digest and weekly rollup
+
+### Changed
+
+- **Dolt is the only backend** - All SQLite code removed; `--no-daemon` flag deprecated
+- **Settings moved to `settings.local.json`** - Cleaner separation from repo config
+- **`gt status --fast` optimized** - From ~5s to ~2s
+- **Refinery squash merge** - Closed MRs excluded from queue output
+- **Priority-based mail notifications** - Prevents agent derailment from low-priority mail
+- **Compaction reporting** - Automated daily digest and weekly rollup
+- **Formula template rendering** - Go text/template for convoy prompts
+- **Centralized configuration** - Hardcoded timeouts and thresholds moved to TownSettings
+
+### Fixed
+
+#### Reliability & Race Conditions
+- **flock-based locking** across molecule attach, events/feed writes, crew files, and lock acquisition
+- **TOCTOU guards** on Dolt server startup, worktree operations, cleanup actions, and FindRigBeadsDir
+- **Atomic writes** for catalog, routes, settings, and per-bead files
+- **Thread-safe NotificationManager** with mutex protection
+- **Deadlock elimination** in daemon restart backoff tests
+- **Process group termination** using verified member enumeration instead of blind PGID kill
+
+#### Security Hardening
+- **Input validation** for web dashboard handlers, group names, dog names, issue creation
+- **Path traversal prevention** in dog names, rig names, and bead operations
+- **Shell injection prevention** via session name validation and branch name sanitization
+- **Rejected flag-like titles** to prevent garbage bead creation from malformed commands
+
+#### Dolt Backend
+- **Read-only state auto-recovery** - Commands detect and recover from Dolt read-only mode
+- **Split-brain prevention** when `bd` used before Dolt server starts
+- **Exponential backoff with jitter** for Dolt retries (10 attempts)
+- **Database verification** after migration and server start
+- **Orphaned database detection and cleanup** in `.dolt-data/`
+
+#### Session & Process Management
+- **Polecat nuke improvements** - Close open MRs, verify worktree removal, handle cd'd shells
+- **Zombie detection** - tmux-alive-but-agent-dead detection, cleanup_status handling
+- **Respawn protection** - Prevents destroying unmerged MR work on respawn
+- **Nudge backoff** - Correct cap, reduced timeout, transient error retry
+- **Session name parsing** - Handles hyphenated rig names correctly
+- **NBSP normalization** - Fixes Claude Code readiness detection
+
+#### Cross-Rig Operations
+- **Beads routing fixes** - Correct prefix detection, redirect topology verification
+- **Cross-rig agent bead operations** routed to correct database
+- **Convoy tracking** - Proper external issue status refresh and stranded detection
+- **Doctor checks** continue on error in agent/rig bead fix methods
+
+#### Many more fixes
+- 200+ bug fixes from community contributions and internal development
+- See `git log v0.5.0..v0.6.0` for complete details
+
 ## [0.5.0] - 2026-01-22
 
 ### Added
