@@ -723,10 +723,12 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		filepath.Join(rigPath, ".beads"),
 		filepath.Join(rigPath, "mayor", "rig", ".beads"),
 	}
+	foundBeadsCandidate := false
 	for _, beadsDir := range beadsDirCandidates {
 		if _, err := os.Stat(beadsDir); err != nil {
 			continue
 		}
+		foundBeadsCandidate = true
 
 		// Detect prefix: try dolt backend first, fall back to metadata.json, then issues.jsonl.
 		// With dolt, metadata.json survives clone (dolt/ is gitignored since bd v0.50+).
@@ -845,6 +847,16 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			}
 		}
 		break
+	}
+
+	// If no existing .beads/ candidate was found, initialize a fresh database
+	// to match the behavior of the normal (non-adopt) gt rig add path.
+	if !foundBeadsCandidate && result.BeadsPrefix != "" {
+		if err := mgr.InitBeads(rigPath, result.BeadsPrefix); err != nil {
+			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))
+		}
 	}
 
 	// Print results
