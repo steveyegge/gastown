@@ -2,7 +2,6 @@
 package runtime
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"strings"
 
@@ -69,6 +68,21 @@ type StartupBootstrapPlan struct {
 	RunPrimeFallback bool
 }
 
+func runStartupBootstrapWithPlan(t startupNudger, sessionID, role, startupPrompt string, rc *config.RuntimeConfig, plan *StartupBootstrapPlan) error {
+	if plan == nil {
+		plan = GetStartupBootstrapPlan(role, rc)
+	}
+	if plan.SendPromptNudge && startupPrompt != "" {
+		if err := t.NudgeSession(sessionID, startupPrompt); err != nil {
+			return err
+		}
+	}
+	if plan.RunPrimeFallback {
+		return RunStartupFallback(t, sessionID, role, rc)
+	}
+	return nil
+}
+
 func runtimeHasHooks(rc *config.RuntimeConfig) bool {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
@@ -100,16 +114,7 @@ func GetStartupBootstrapPlan(role string, rc *config.RuntimeConfig) *StartupBoot
 // It handles prompt delivery fallback for no-prompt runtimes and non-hook
 // gt prime fallback commands.
 func RunStartupBootstrap(t startupNudger, sessionID, role, startupPrompt string, rc *config.RuntimeConfig) error {
-	plan := GetStartupBootstrapPlan(role, rc)
-	if plan.SendPromptNudge && startupPrompt != "" {
-		if err := t.NudgeSession(sessionID, startupPrompt); err != nil {
-			return err
-		}
-	}
-	if plan.RunPrimeFallback {
-		return RunStartupFallback(t, sessionID, role, rc)
-	}
-	return nil
+	return runStartupBootstrapWithPlan(t, sessionID, role, startupPrompt, rc, nil)
 }
 
 // RunStartupBootstrapIfNeeded runs startup bootstrap only when capability fallbacks are required.
@@ -119,7 +124,7 @@ func RunStartupBootstrapIfNeeded(t startupNudger, sessionID, role, startupPrompt
 		return nil
 	}
 	runtimelifecycle.SleepForReadyDelay(rc)
-	return RunStartupBootstrap(t, sessionID, role, startupPrompt, rc)
+	return runStartupBootstrapWithPlan(t, sessionID, role, startupPrompt, rc, plan)
 }
 
 // isAutonomousRole returns true if the given role should automatically
@@ -138,72 +143,11 @@ func isAutonomousRole(role string) bool {
 	}
 }
 
-// DefaultPrimeWaitMs is the default wait time in milliseconds for non-hook agents
-// to run gt prime before sending work instructions.
-const DefaultPrimeWaitMs = 2000
-
-// StartupFallbackInfo describes what fallback actions are needed for agent startup
-// based on the agent's hook and prompt capabilities.
-//
-// Fallback matrix based on agent capabilities:
-//
-//	| Hooks | Prompt | Beacon Content           | Context Source      | Work Instructions   |
-//	|-------|--------|--------------------------|---------------------|---------------------|
-//	| ✓     | ✓      | Standard                 | Hook runs gt prime  | In beacon           |
-//	| ✓     | ✗      | Standard (via nudge)     | Hook runs gt prime  | Same nudge          |
-//	| ✗     | ✓      | "Run gt prime" (prompt)  | Agent runs manually | In prompt           |
-//	| ✗     | ✗      | "Run gt prime" (nudge)   | Agent runs manually | Delayed nudge       |
-type StartupFallbackInfo struct {
-	// IncludePrimeInBeacon indicates the beacon should include "Run gt prime" instruction.
-	// True for non-hook agents where gt prime doesn't run automatically.
-	IncludePrimeInBeacon bool
-
-	// SendBeaconNudge indicates the beacon must be sent via nudge (agent has no prompt support).
-	// True for agents with PromptMode "none".
-	SendBeaconNudge bool
-
-	// SendStartupNudge indicates work instructions need to be sent via nudge.
-	// True when beacon doesn't include work instructions (non-hook agents, or hook agents without prompt).
-	SendStartupNudge bool
-
-	// StartupNudgeDelayMs is milliseconds to wait before sending work instructions nudge.
-	// Allows gt prime to complete for non-hook agents (where it's not automatic).
-	StartupNudgeDelayMs int
-}
-
-// GetStartupFallbackInfo returns the fallback actions needed based on agent capabilities.
-func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
-	hasHooks := runtimeHasHooks(rc)
-	hasPrompt := runtimeHasPrompt(rc)
-
-	info := &StartupFallbackInfo{}
-
-	if !hasHooks {
-		// Non-hook agents need to be told to run gt prime
-		info.IncludePrimeInBeacon = true
-		info.SendStartupNudge = true
-		info.StartupNudgeDelayMs = DefaultPrimeWaitMs
-
-		if !hasPrompt {
-			// No prompt support - beacon must be sent via nudge
-			info.SendBeaconNudge = true
-		}
-	} else if !hasPrompt {
-		// Has hooks but no prompt - need to nudge beacon + work instructions together
-		// Hook runs gt prime synchronously, so no wait needed
-		info.SendBeaconNudge = true
-		info.SendStartupNudge = true
-		info.StartupNudgeDelayMs = 0
-	}
-	// else: hooks + prompt - nothing needed, all in CLI prompt + hook
-
-	return info
-}
-
 // StartupBeaconConfig applies capability-based startup fallback behavior to beacon config.
 func StartupBeaconConfig(cfg session.BeaconConfig, rc *config.RuntimeConfig) session.BeaconConfig {
-	info := GetStartupFallbackInfo(rc)
-	cfg.IncludePrimeInstruction = info.IncludePrimeInBeacon
+	// Startup beacon only needs one fallback dimension:
+	// include `gt prime` instruction when no session-start hooks are available.
+	cfg.IncludePrimeInstruction = !runtimeHasHooks(rc)
 	return cfg
 }
 
@@ -215,14 +159,4 @@ func StartupBeacon(cfg session.BeaconConfig, rc *config.RuntimeConfig) string {
 // StartupPrompt builds the startup prompt with capability-based fallback behavior.
 func StartupPrompt(cfg session.BeaconConfig, instructions string, rc *config.RuntimeConfig) string {
 	return session.BuildStartupPrompt(StartupBeaconConfig(cfg, rc), instructions)
-}
-
-// StartupNudgeContent returns the work instructions to send as a startup nudge.
-func StartupNudgeContent() string {
-	return "Check your hook with `" + cli.Name() + " hook`. If work is present, begin immediately."
-}
-
-// BeaconPrimeInstruction returns the instruction to add to beacon for non-hook agents.
-func BeaconPrimeInstruction() string {
-	return "\n\nRun `" + cli.Name() + " prime` to initialize your context."
 }
