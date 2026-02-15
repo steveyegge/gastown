@@ -23,7 +23,7 @@ func Install() error {
 		return fmt.Errorf("creating bin directory: %w", err)
 	}
 
-	wrappers := []string{"gt-codex", "gt-opencode"}
+	wrappers := []string{"gt-codex", "gt-gemini", "gt-opencode"}
 	for _, name := range wrappers {
 		content, err := scriptsFS.ReadFile("scripts/" + name)
 		if err != nil {
@@ -45,7 +45,7 @@ func Remove() error {
 		return err
 	}
 
-	wrappers := []string{"gt-codex", "gt-opencode"}
+	wrappers := []string{"gt-codex", "gt-gemini", "gt-opencode"}
 	for _, name := range wrappers {
 		destPath := filepath.Join(binDir, name)
 		if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {

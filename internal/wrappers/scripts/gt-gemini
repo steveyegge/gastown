@@ -1,0 +1,18 @@
+#!/bin/bash
+# ABOUTME: Wrapper script that runs gt prime before launching gemini.
+# ABOUTME: Ensures Gas Town context is available in Gemini CLI sessions.
+
+set -e
+
+gastown_enabled() {
+    [[ -n "$GASTOWN_DISABLED" ]] && return 1
+    [[ -n "$GASTOWN_ENABLED" ]] && return 0
+    local state_file="$HOME/.local/state/gastown/state.json"
+    [[ -f "$state_file" ]] && grep -q '"enabled":\s*true' "$state_file" 2>/dev/null
+}
+
+if gastown_enabled && command -v gt &>/dev/null; then
+    gt prime 2>/dev/null || true
+fi
+
+exec gemini "$@"

@@ -445,6 +445,33 @@ func TestStartupNudgeContent(t *testing.T) {
 	}
 }
 
+func TestEnsureSettingsForRole_GeminiUsesWorkDir(t *testing.T) {
+	// Gemini CLI has no --settings flag; settings must go to workDir (like OpenCode).
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "gemini",
+			Dir:          ".gemini",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	// Settings should be in workDir, not settingsDir
+	if _, err := os.Stat(settingsDir + "/.gemini/settings.json"); err == nil {
+		t.Error("Gemini settings should NOT be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/.gemini/settings.json"); err != nil {
+		t.Error("Gemini settings should be in workDir")
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && findSubstring(s, substr)

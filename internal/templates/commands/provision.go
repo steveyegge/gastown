@@ -33,6 +33,7 @@ type Agent struct {
 // Agents maps agent names to their configurations.
 var Agents = map[string]Agent{
 	"claude":   {ConfigDir: ".claude"},
+	"gemini":   {ConfigDir: ".gemini"},
 	"opencode": {ConfigDir: ".opencode"},
 }
 

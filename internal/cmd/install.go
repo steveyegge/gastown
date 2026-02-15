@@ -81,7 +81,7 @@ func init() {
 	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
-	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-gemini/gt-opencode wrapper scripts to ~/bin/")
 	installCmd.Flags().BoolVar(&installSupervisor, "supervisor", false, "Configure launchd/systemd for daemon auto-restart")
 	rootCmd.AddCommand(installCmd)
 }
@@ -120,7 +120,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			if err := wrappers.Install(); err != nil {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
-			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			fmt.Printf("✓ Installed gt-codex, gt-gemini, and gt-opencode to %s\n", wrappers.BinDir())
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")

@@ -614,6 +614,8 @@ func defaultRuntimeCommand(provider string) string {
 	switch provider {
 	case "codex":
 		return "codex"
+	case "gemini":
+		return "gemini"
 	case "opencode":
 		return "opencode"
 	case "generic":
@@ -669,10 +671,14 @@ func defaultPromptMode(provider string) string {
 }
 
 func defaultSessionIDEnv(provider string) string {
-	if provider == "claude" {
+	switch provider {
+	case "claude":
 		return "CLAUDE_SESSION_ID"
+	case "gemini":
+		return "GEMINI_SESSION_ID"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func defaultConfigDirEnv(provider string) string {
@@ -686,6 +692,8 @@ func defaultHooksProvider(provider string) string {
 	switch provider {
 	case "claude":
 		return "claude"
+	case "gemini":
+		return "gemini"
 	case "opencode":
 		return "opencode"
 	default:
@@ -697,6 +705,8 @@ func defaultHooksDir(provider string) string {
 	switch provider {
 	case "claude":
 		return ".claude"
+	case "gemini":
+		return ".gemini"
 	case "opencode":
 		return ".opencode/plugin"
 	default:
@@ -710,6 +720,8 @@ func defaultHooksFile(provider string) string {
 		// Use settings.json installed via --settings flag in a gastown-managed
 		// parent directory, keeping customer repos untouched.
 		return "settings.json"
+	case "gemini":
+		return "settings.json"
 	case "opencode":
 		return "gastown.js"
 	default:
@@ -720,6 +732,9 @@ func defaultHooksFile(provider string) string {
 func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
+	}
+	if provider == "gemini" {
+		return []string{"gemini"}
 	}
 	if provider == "opencode" {
 		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
@@ -744,6 +759,10 @@ func defaultReadyDelayMs(provider string) int {
 	if provider == "claude" {
 		return 10000
 	}
+	if provider == "gemini" {
+		// Estimated delay — needs tuning after real Gemini CLI testing.
+		return 5000
+	}
 	if provider == "codex" {
 		return 3000
 	}
@@ -757,13 +776,12 @@ func defaultReadyDelayMs(provider string) int {
 }
 
 func defaultInstructionsFile(provider string) string {
-	if provider == "codex" {
+	switch provider {
+	case "codex", "gemini", "opencode":
 		return "AGENTS.md"
+	default:
+		return "CLAUDE.md"
 	}
-	if provider == "opencode" {
-		return "AGENTS.md"
-	}
-	return "CLAUDE.md"
 }
 
 // quoteForShell quotes a string for safe shell usage.

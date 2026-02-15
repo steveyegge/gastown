@@ -9,6 +9,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/gemini"
 	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -39,6 +40,11 @@ func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.Runtime
 	switch provider {
 	case "claude":
 		if err := claude.EnsureSettingsForRoleAt(settingsDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+			return err
+		}
+	case "gemini":
+		// Gemini CLI has no --settings flag; install settings in workDir (like OpenCode).
+		if err := gemini.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
 			return err
 		}
 	case "opencode":
