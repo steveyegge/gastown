@@ -120,6 +120,9 @@ func validateConvoyStatusTransition(currentStatus, targetStatus string) error {
 		(current == convoyStatusClosed && target == convoyStatusOpen) {
 		return nil
 	}
+	// With only two valid statuses, identity and both cross-transitions are
+	// covered above. This is unreachable unless new statuses are added to
+	// ensureKnownConvoyStatus without updating this function.
 	return fmt.Errorf("illegal convoy status transition %q -> %q", currentStatus, targetStatus)
 }
 
@@ -538,9 +541,8 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	// If convoy is closed, reopen it
 	reopened := false
 	if normalizeConvoyStatus(convoy.Status) == convoyStatusClosed {
-		if err := validateConvoyStatusTransition(convoy.Status, convoyStatusOpen); err != nil {
-			return fmt.Errorf("can't reopen convoy '%s': %w", convoyID, err)
-		}
+		// closed→open is always valid; ensureKnownConvoyStatus above guarantees
+		// the current status is known, so no additional transition check needed.
 		reopenArgs := []string{"update", convoyID, "--status=open"}
 		reopenCmd := exec.Command("bd", reopenArgs...)
 		reopenCmd.Dir = townBeads
@@ -1081,8 +1083,9 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 	}
 
 	var convoys []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
 		return nil, fmt.Errorf("parsing convoy list: %w", err)
@@ -1090,6 +1093,10 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 
 	// Check each convoy
 	for _, convoy := range convoys {
+		if err := ensureKnownConvoyStatus(convoy.Status); err != nil {
+			style.PrintWarning("skipping convoy %s: invalid lifecycle state: %v", convoy.ID, err)
+			continue
+		}
 		tracked, err := getTrackedIssues(townBeads, convoy.ID)
 		if err != nil {
 			style.PrintWarning("skipping convoy %s: %v", convoy.ID, err)

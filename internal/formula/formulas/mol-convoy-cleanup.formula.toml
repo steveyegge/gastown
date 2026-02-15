@@ -113,34 +113,28 @@ bd show <tracked-id>
 
 [[steps]]
 id = "archive-convoy"
-title = "Archive convoy to cold storage"
+title = "Close convoy and prepare for archival"
 needs = ["generate-summary"]
 description = """
-Move convoy from active to archived state.
+Close the convoy to mark it complete. Beads retention handles archival.
 
-**1. Update convoy status:**
+**1. Close convoy:**
 ```bash
-bd update {{convoy}} --status=archived
-# Or close if not already closed
-bd close {{convoy}} --reason="Convoy complete, archived"
+bd close {{convoy}} --reason="Convoy complete"
 ```
 
-**2. Generate archive record:**
-The convoy bead with all metadata is the archive record. Beads retention
-handles moving it to `.beads/archive/` after the retention period.
-
-**3. Verify archive:**
+**2. Verify closure:**
 ```bash
 bd show {{convoy}}
-# Status should reflect archived state
+# Status should be "closed"
 ```
 
-**4. Sync to persist:**
+**3. Sync to persist:**
 ```bash
 bd sync
 ```
 
-**Exit criteria:** Convoy archived, changes synced."""
+**Exit criteria:** Convoy closed, changes synced."""
 
 [[steps]]
 id = "notify-overseer"
@@ -152,7 +146,7 @@ Notify the Mayor (overseer) of convoy completion.
 **1. Send completion mail:**
 ```bash
 gt mail send mayor/ -s "Convoy complete: {{convoy.title}}" -m "$(cat <<EOF
-Convoy {{convoy}} has completed and been archived.
+Convoy {{convoy}} has completed and been closed.
 
 ## Summary
 {{generated_summary}}
@@ -162,7 +156,7 @@ Convoy {{convoy}} has completed and been archived.
 - Issues: {{issue_count}}
 - Contributors: {{contributor_list}}
 
-This convoy has been archived. View details: bd show {{convoy}}
+This convoy has been closed. View details: bd show {{convoy}}
 EOF
 )"
 ```
