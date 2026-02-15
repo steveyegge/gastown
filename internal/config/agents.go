@@ -138,7 +138,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentCodex: {
 		Name:    AgentCodex,
 		Command: "codex",
-		Args:    []string{"--yolo"},
+		Args:    []string{"--dangerously-bypass-approvals-and-sandbox"},
 		// Codex may surface as either "codex" or "node" depending on launcher path.
 		// NOTE: "node" intentionally overlaps with Claude; callers must resolve this
 		// list using the session's GT_AGENT (see tmux.IsAgentAlive/FindAgentPane).
@@ -404,7 +404,7 @@ func BuildResumeCommand(agentName, sessionID string) string {
 	// Add resume based on style
 	switch info.ResumeStyle {
 	case "subcommand":
-		// e.g., "codex resume <session_id> --yolo"
+		// e.g., "codex resume <session_id> --dangerously-bypass-approvals-and-sandbox"
 		return info.Command + " " + info.ResumeFlag + " " + sessionID + " " + strings.Join(args, " ")
 	case "flag":
 		fallthrough
