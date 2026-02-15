@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -263,11 +264,13 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 	var unreachable []string
 	var details []string
 	totalRigs := 0
+	unreachableRigs := 0
 	for addr, rigs := range rigsByAddr {
 		totalRigs += len(rigs)
 		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 		if err != nil {
 			unreachable = append(unreachable, addr)
+			unreachableRigs += len(rigs)
 			details = append(details, fmt.Sprintf("Server %s unreachable (rigs: %s)", addr, strings.Join(rigs, ", ")))
 		} else {
 			_ = conn.Close()
@@ -279,7 +282,7 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:   c.Name(),
 			Status: StatusError,
 			Message: fmt.Sprintf("SPLIT-BRAIN RISK: %d rig(s) configured for Dolt server mode but server unreachable at %s",
-				totalRigs, strings.Join(unreachable, ", ")),
+				unreachableRigs, strings.Join(unreachable, ", ")),
 			Details: append(details,
 				"bd commands will fail or create isolated local databases",
 				"This is the split-brain scenario — data written now may be invisible to the server later",
@@ -351,9 +354,9 @@ func (c *DoltServerReachableCheck) getServerAddr(beadsDir string) (string, bool)
 		host = "127.0.0.1"
 	}
 	if port == 0 {
-		port = 3307 // default gt dolt server port
+		port = doltserver.DefaultPort
 	}
-	return fmt.Sprintf("%s:%d", host, port), true
+	return net.JoinHostPort(host, strconv.Itoa(port)), true
 }
 
 // DoltOrphanedDatabaseCheck detects databases in .dolt-data/ that are not
