@@ -1585,6 +1585,25 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 //
 // See: gt deacon pending (ZFC-compliant AI observation)
 // See: gt deacon trigger-pending (bootstrap mode, regex-based)
+
+// matchesPromptPrefix reports whether a captured pane line matches the
+// configured ready-prompt prefix. It normalizes non-breaking spaces
+// (U+00A0) to regular spaces before matching, because Claude Code uses
+// NBSP after its ❯ prompt character while the default ReadyPromptPrefix
+// uses a regular space. See https://github.com/steveyegge/gastown/issues/1387.
+func matchesPromptPrefix(line, readyPromptPrefix string) bool {
+	if readyPromptPrefix == "" {
+		return false
+	}
+	trimmed := strings.TrimSpace(line)
+	// Normalize NBSP (U+00A0) → regular space so that prompt matching
+	// works regardless of which whitespace character the agent uses.
+	trimmed = strings.ReplaceAll(trimmed, "\u00a0", " ")
+	normalizedPrefix := strings.ReplaceAll(readyPromptPrefix, "\u00a0", " ")
+	prefix := strings.TrimSpace(normalizedPrefix)
+	return strings.HasPrefix(trimmed, normalizedPrefix) || (prefix != "" && trimmed == prefix)
+}
+
 func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
 	if rc == nil || rc.Tmux == nil {
 		return nil
@@ -1613,9 +1632,7 @@ func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, tim
 		}
 		// Look for runtime prompt indicator at start of line
 		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			prefix := strings.TrimSpace(rc.Tmux.ReadyPromptPrefix)
-			if strings.HasPrefix(trimmed, rc.Tmux.ReadyPromptPrefix) || (prefix != "" && trimmed == prefix) {
+			if matchesPromptPrefix(line, rc.Tmux.ReadyPromptPrefix) {
 				return nil
 			}
 		}

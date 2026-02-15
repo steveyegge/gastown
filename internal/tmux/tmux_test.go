@@ -1734,3 +1734,55 @@ func TestNudgeSession_WithRetry(t *testing.T) {
 		t.Errorf("NudgeSession() = %v, want nil", err)
 	}
 }
+
+// TestMatchesPromptPrefix verifies that prompt matching handles non-breaking
+// spaces (NBSP, U+00A0) correctly. Claude Code uses NBSP after its ❯ prompt
+// character, but the default ReadyPromptPrefix uses a regular space.
+// Regression test for https://github.com/steveyegge/gastown/issues/1387.
+func TestMatchesPromptPrefix(t *testing.T) {
+	const (
+		nbsp          = "\u00a0" // non-breaking space
+		regularPrefix = "❯ "    // default: ❯ + regular space
+	)
+
+	tests := []struct {
+		name   string
+		line   string
+		prefix string
+		want   bool
+	}{
+		// Regular space in both line and prefix (baseline)
+		{"regular space matches", "❯ ", regularPrefix, true},
+		{"regular space with trailing content", "❯ some input", regularPrefix, true},
+
+		// NBSP in line, regular space in prefix (the bug scenario)
+		{"NBSP bare prompt matches", "❯" + nbsp, regularPrefix, true},
+		{"NBSP with content matches", "❯" + nbsp + "claude --help", regularPrefix, true},
+		{"NBSP with leading whitespace", "  ❯" + nbsp, regularPrefix, true},
+
+		// NBSP in prefix (defensive: user could configure it either way)
+		{"NBSP prefix matches NBSP line", "❯" + nbsp + "hello", "❯" + nbsp, true},
+		{"NBSP prefix matches regular space line", "❯ hello", "❯" + nbsp, true},
+
+		// Empty prefix never matches
+		{"empty prefix", "❯ ", "", false},
+
+		// No prompt character at all
+		{"no prompt", "hello world", regularPrefix, false},
+		{"empty line", "", regularPrefix, false},
+		{"whitespace only", "   ", regularPrefix, false},
+
+		// Bare prompt character without any space
+		{"bare prompt no space", "❯", regularPrefix, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesPromptPrefix(tt.line, tt.prefix)
+			if got != tt.want {
+				t.Errorf("matchesPromptPrefix(%q, %q) = %v, want %v",
+					tt.line, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
