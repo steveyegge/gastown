@@ -616,7 +616,23 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 		return fmt.Errorf("checking convoy %s: %w", convoyID, err)
 	}
 	if len(tracked) == 0 {
-		fmt.Printf("%s Convoy %s has no tracked issues\n", style.Dim.Render("○"), convoyID)
+		// Empty convoy (0 tracked issues) is definitionally complete — auto-close it.
+		// This matches the batch behavior in checkAndCloseCompletedConvoys.
+		if dryRun {
+			fmt.Printf("%s Would auto-close empty convoy 🚚 %s: %s\n", style.Warning.Render("⚠"), convoyID, convoy.Title)
+			return nil
+		}
+
+		reason := "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
+		closeArgs := []string{"close", convoyID, "-r", reason}
+		closeCmd := exec.Command("bd", closeArgs...)
+		closeCmd.Dir = townBeads
+		if err := closeCmd.Run(); err != nil {
+			return fmt.Errorf("closing empty convoy: %w", err)
+		}
+
+		fmt.Printf("%s Auto-closed empty convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
+		notifyConvoyCompletion(townBeads, convoyID, convoy.Title)
 		return nil
 	}
 
@@ -850,21 +866,29 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Found %d stranded convoy(s):\n\n", style.Warning.Render("⚠"), len(stranded))
+	var feedable []strandedConvoyInfo
 	for _, s := range stranded {
 		fmt.Printf("  🚚 %s: %s\n", s.ID, s.Title)
-		fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
-		for _, issueID := range s.ReadyIssues {
-			fmt.Printf("       • %s\n", issueID)
+		if s.ReadyCount == 0 && len(s.ReadyIssues) == 0 {
+			fmt.Printf("     %s\n", style.Warning.Render("Empty convoy (0 tracked issues) — investigate or close"))
+		} else {
+			fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
+			for _, issueID := range s.ReadyIssues {
+				fmt.Printf("       • %s\n", issueID)
+			}
+			feedable = append(feedable, s)
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("To feed stranded convoys, run:")
-	for _, s := range stranded {
-		fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+	if len(feedable) > 0 {
+		fmt.Println("To feed stranded convoys, run:")
+		for _, s := range feedable {
+			fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+		}
+		fmt.Println()
+		fmt.Println(style.Dim.Render("  Note: Pool dispatch auto-creates dogs if pool is under capacity."))
 	}
-	fmt.Println()
-	fmt.Println(style.Dim.Render("  Note: Pool dispatch auto-creates dogs if pool is under capacity."))
 
 	return nil
 }
@@ -900,6 +924,13 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 			continue
 		}
 		if len(tracked) == 0 {
+			// Empty convoy (0 tracked issues) is anomalous — flag it
+			stranded = append(stranded, strandedConvoyInfo{
+				ID:          convoy.ID,
+				Title:       convoy.Title,
+				ReadyCount:  0,
+				ReadyIssues: []string{},
+			})
 			continue
 		}
 
