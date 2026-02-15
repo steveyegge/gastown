@@ -11,8 +11,11 @@ import (
 	"time"
 )
 
+// dolthubAPIBase is the DoltHub REST API base URL.
+// It is a var (not const) so tests can override it with httptest servers.
+var dolthubAPIBase = "https://www.dolthub.com/api/v1alpha1"
+
 const (
-	dolthubAPIBase = "https://www.dolthub.com/api/v1alpha1"
 	// dolthubRemoteBase is the Dolt remote API endpoint for push/pull.
 	dolthubRemoteBase = "https://doltremoteapi.dolthub.com"
 )
@@ -31,7 +34,11 @@ func DoltHubOrg() string {
 
 // DoltHubRepoName converts a local database name to a DoltHub repo name.
 // Replaces underscores with hyphens (e.g., "beads_gt" → "beads-gt").
+// Special case: "hq" maps to "gt-hq" (the town-level HQ database uses the gt- prefix).
 func DoltHubRepoName(dbName string) string {
+	if dbName == "hq" {
+		return "gt-hq"
+	}
 	return strings.ReplaceAll(dbName, "_", "-")
 }
 
@@ -115,8 +122,9 @@ func AddRemote(dbDir, org, repo string) error {
 }
 
 // SetupDoltHubRemote creates a DoltHub repo, adds the remote, and does an
-// initial push. Each step is best-effort — failures are returned but don't
-// prevent subsequent steps from being attempted.
+// initial push. Each step is fail-fast — the function returns on the first
+// error because each step requires the previous to succeed (can't add a
+// remote if repo creation failed, can't push if the remote wasn't added).
 func SetupDoltHubRemote(dbDir, org, dbName, token string) error {
 	repo := DoltHubRepoName(dbName)
 

@@ -47,7 +47,7 @@ func TestDoltHubRepoName(t *testing.T) {
 	}{
 		{"beads_gt", "beads-gt"},
 		{"beads_bd", "beads-bd"},
-		{"hq", "hq"},
+		{"hq", "gt-hq"},
 		{"laser", "laser"},
 		{"payment_portal", "payment-portal"},
 		{"a_b_c", "a-b-c"},
@@ -101,17 +101,14 @@ func TestCreateDoltHubRepo_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Override the API base for testing
-	origBase := dolthubAPIBase
-	// We can't override the const, but we can test via the full function
-	// by using a custom HTTP server. Since CreateDoltHubRepo uses the const,
-	// we test the HTTP interaction logic via the test server approach below.
-	_ = origBase
+	// Override the API base so CreateDoltHubRepo hits our mock server.
+	orig := dolthubAPIBase
+	dolthubAPIBase = server.URL
+	defer func() { dolthubAPIBase = orig }()
 
-	// For unit testing the HTTP logic, we'd need to inject the URL.
-	// Instead, test the success path by checking the mock server was called correctly.
-	// The actual API base is tested via integration tests.
-	t.Log("Mock server verified request format successfully")
+	if err := CreateDoltHubRepo("bvts", "beads-gt", "test-token"); err != nil {
+		t.Fatalf("CreateDoltHubRepo returned error: %v", err)
+	}
 }
 
 func TestCreateDoltHubRepo_AlreadyExists(t *testing.T) {
@@ -124,9 +121,15 @@ func TestCreateDoltHubRepo_AlreadyExists(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Same note as above — we verify the response handling logic is correct
-	// by checking that "already exists" errors are treated as success.
-	t.Log("Already-exists response handling verified")
+	// Override the API base so CreateDoltHubRepo hits our mock server.
+	orig := dolthubAPIBase
+	dolthubAPIBase = server.URL
+	defer func() { dolthubAPIBase = orig }()
+
+	// "already exists" should be treated as success (nil error).
+	if err := CreateDoltHubRepo("bvts", "beads-gt", "test-token"); err != nil {
+		t.Fatalf("CreateDoltHubRepo returned error for 409 already-exists: %v", err)
+	}
 }
 
 func TestAddRemote_NoExistingRemote(t *testing.T) {
