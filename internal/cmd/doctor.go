@@ -100,7 +100,7 @@ Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Attempt to automatically fix issues")
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
-	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
+	doctorCmd.PersistentFlags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
 	// Allow --slow without a value (uses default 1s)
