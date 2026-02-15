@@ -329,7 +329,7 @@ func init() {
 
 	rigListCmd.Flags().BoolVar(&rigListJSON, "json", false, "Output as JSON")
 
-	rigRemoveCmd.Flags().BoolVarP(&rigRemoveForce, "force", "f", false, "Kill running tmux sessions before removing")
+	rigRemoveCmd.Flags().BoolVarP(&rigRemoveForce, "force", "f", false, "Kill running tmux sessions before removing (may lose uncommitted work)")
 
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
@@ -637,7 +637,13 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 
 	// Check for running tmux sessions before removing
 	t := tmux.NewTmux()
-	sessions := findRigSessions(t, name)
+	sessions, sessErr := findRigSessions(t, name)
+	if sessErr != nil {
+		if !rigRemoveForce {
+			return fmt.Errorf("could not verify session state for rig %s: %w (use --force to skip check)", name, sessErr)
+		}
+		fmt.Printf("  %s Could not check tmux sessions: %v (proceeding due to --force)\n", style.Warning.Render("!"), sessErr)
+	}
 	if len(sessions) > 0 {
 		if !rigRemoveForce {
 			fmt.Printf("%s Rig %s has %d running tmux session(s):\n",
@@ -652,14 +658,20 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("refusing to remove rig with running sessions")
 		}
 
-		// --force: kill all rig sessions
+		// --force: kill all rig sessions (WARNING: may lose uncommitted work)
 		fmt.Printf("Killing %d tmux session(s) for rig %s...\n", len(sessions), name)
+		var killErrors []string
 		for _, s := range sessions {
 			if err := t.KillSessionWithProcesses(s); err != nil {
 				fmt.Printf("  %s Failed to kill session %s: %v\n", style.Warning.Render("!"), s, err)
+				killErrors = append(killErrors, s)
 			} else {
 				fmt.Printf("  Killed %s\n", s)
 			}
+		}
+		if len(killErrors) > 0 {
+			return fmt.Errorf("aborting remove: failed to kill %d session(s) (%s); rig left registered to avoid orphaned sessions",
+				len(killErrors), strings.Join(killErrors, ", "))
 		}
 	}
 
@@ -1953,11 +1965,11 @@ func syncRigHooks(townRoot, rigName string) error {
 // findRigSessions returns all tmux sessions belonging to the given rig.
 // All rig sessions share the "gt-{rig}-" prefix, so this catches witness,
 // refinery, polecat, and crew sessions in one pass.
-func findRigSessions(t *tmux.Tmux, rigName string) []string {
+func findRigSessions(t *tmux.Tmux, rigName string) ([]string, error) {
 	prefix := session.Prefix + rigName + "-"
 	all, err := t.ListSessions()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("listing tmux sessions: %w", err)
 	}
 	var matches []string
 	for _, name := range all {
@@ -1965,7 +1977,7 @@ func findRigSessions(t *tmux.Tmux, rigName string) []string {
 			matches = append(matches, name)
 		}
 	}
-	return matches
+	return matches, nil
 }
 
 // isGitRemoteURL returns true if s looks like a remote git URL

@@ -86,7 +86,10 @@ func TestFindRigSessions(t *testing.T) {
 		}
 	}()
 
-	got := findRigSessions(tm, "testrig1223")
+	got, err := findRigSessions(tm, "testrig1223")
+	if err != nil {
+		t.Fatalf("findRigSessions: %v", err)
+	}
 
 	// Verify all matching sessions are returned
 	gotSet := make(map[string]bool, len(got))
@@ -117,7 +120,10 @@ func TestFindRigSessions_NoSessions(t *testing.T) {
 	}
 
 	tm := tmux.NewTmux()
-	got := findRigSessions(tm, "nonexistentrig999")
+	got, err := findRigSessions(tm, "nonexistentrig999")
+	if err != nil {
+		t.Fatalf("findRigSessions: %v", err)
+	}
 	if len(got) != 0 {
 		t.Errorf("expected 0 sessions, got %d: %v", len(got), got)
 	}
