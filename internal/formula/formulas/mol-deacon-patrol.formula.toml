@@ -966,11 +966,10 @@ id = "loop-or-exit"
 title = "Burn and respawn or loop"
 needs = ["context-check"]
 description = """
-Burn and let daemon respawn, or exit if context high.
+End of patrol cycle decision.
 
-Decision point at end of patrol cycle:
+**If context LOW** (can continue patrolling):
 
-If context is LOW:
 Use await-signal with exponential backoff to wait for activity:
 
 ```bash
@@ -993,27 +992,30 @@ Reset the idle counter and start next patrol cycle:
 ```bash
 gt agent state hq-deacon --set idle=0
 ```
-Then return to inbox-check step.
 
 **On timeout** (no activity):
 The idle counter was auto-incremented. Continue to next patrol cycle
-(the longer backoff will apply next time). Return to inbox-check step.
+(the longer backoff will apply next time).
 
-**Why this approach?**
-- Any `gt` or `bd` command triggers beads activity, waking the Deacon
-- Idle towns let the Deacon sleep longer (up to 5 min between patrols)
-- Active work wakes the Deacon immediately via the feed
-- No polling or fixed sleep intervals
-
-If context is HIGH:
-- Write state to persistent storage
-- Exit cleanly
-- Let the daemon orchestrator respawn a fresh Deacon
-
-The daemon ensures Deacon is always running:
+After await-signal returns (either by signal or timeout):
+1. Generate a brief summary of this patrol cycle
+2. Squash the current wisp:
 ```bash
-# Daemon respawns on exit
-gt daemon status
+bd mol squash <mol-id> --summary "<patrol-summary>"
 ```
+3. Create and hook a new patrol wisp:
+```bash
+NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=deacon
+```
+4. Continue executing from the inbox-check step of the new wisp
 
-This enables infinite patrol duration via context-aware respawning."""
+**If context HIGH** (approaching limit):
+1. Write handoff mail with notable observations:
+```bash
+gt handoff -s "Deacon patrol handoff" -m "<observations>"
+```
+2. Exit cleanly - the daemon will respawn a fresh Deacon session
+
+**IMPORTANT**: You must either create a new wisp (context LOW) or exit (context HIGH).
+Never leave the session idle without work on your hook."""
