@@ -1,342 +1,177 @@
 description = """
-End-to-end agent validation run by the mayor.
+Self-test formula run by a polecat to validate its own Gas Town integration.
 
-Configures town and rig settings for a target agent, spawns a polecat,
-inspects its prompt for correct Gas Town context injection, gives it a
-test task, and verifies execution. Cleans up afterward.
+When slung to a rig, the polecat verifies that it received correct Gas Town
+context injection, has work on its hook, can use Gas Town CLI tools, and can
+execute a test task.
 
 ## Usage
 
 ```bash
-gt formula run agent-validation --agent=pi --rig=pi_agent
-gt formula run agent-validation --agent=opus-46 --rig=sfgastown --task="read src/main.rs and report the first 5 lines"
+gt sling agent-validation sfgastown
+gt sling agent-validation pi_agent
 ```
 
 ## What it does
 
-1. **Configure**: Sets the target agent in town and rig settings
-2. **Spawn**: Slings a test bead to the target rig, spawning a polecat
-3. **Inspect**: Captures the polecat's tmux pane output, verifies Gas Town context
-4. **Task**: Nudges the polecat with a test task, verifies it executes
-5. **Report**: Summarizes pass/fail and cleans up
-
-## Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| agent | (required) | Agent name from settings (e.g., "pi", "opus-46") |
-| rig | (required) | Rig to spawn the polecat in (e.g., "pi_agent", "sfgastown") |
-| task | "report your role and hooked work" | Test task to give the polecat |
-| restore_config | true | Whether to restore settings after test |
+1. **Context**: Verifies Gas Town identity, role, and startup context are present
+2. **Hook**: Confirms work is hooked and the bead is accessible
+3. **Tools**: Validates gt and bd CLI tools are functional
+4. **Task**: Executes an optional test task to prove agent responsiveness
+5. **Report**: Prints pass/fail summary and completes the bead
 """
 formula = "agent-validation"
 type = "workflow"
-version = 1
-
-[vars.agent]
-description = "Agent name to test (must exist in town settings or be a built-in preset)"
-required = true
-
-[vars.rig]
-description = "Rig to spawn the test polecat in"
-required = true
+version = 2
 
 [vars.task]
-description = "Test task to give the polecat after verifying prompt injection"
+description = "Optional test task to execute after validation checks"
 required = false
-default = "Report your role, your hooked work (gt hook), and confirm you received Gas Town context. Include the text VALIDATION_OK in your response."
-
-[vars.restore_config]
-description = "Whether to restore settings/config.json after test (true/false)"
-required = false
-default = "true"
+default = "Read the first 5 lines of any source file in this repo and report them."
 
 [[steps]]
-id = "preflight"
-title = "Verify prerequisites and back up config"
+id = "verify-context"
+title = "Verify Gas Town context was injected"
 description = """
-Ensure infrastructure is ready and save current settings.
+Check that Gas Town context is present in your session. You should have received
+identity and role information during startup.
 
-**1. Verify tools:**
+**1. Check environment variables:**
+```bash
+echo "GT_ROLE=$GT_ROLE"
+echo "GT_RIG=$GT_RIG"
+echo "GT_POLECAT=$GT_POLECAT"
+echo "GT_ROOT=$GT_ROOT"
+```
+
+At minimum, GT_ROLE should be set (typically "polecat").
+
+**2. Verify you know your identity:**
+Report the following from your injected context:
+- Your role (polecat, crew, etc.)
+- The rig you're working in
+- The town name (Gas Town)
+
+**3. Check that gt prime output was captured:**
+```bash
+gt prime 2>/dev/null | head -5
+```
+
+Record pass/fail for each check.
+
+**Exit criteria:** Gas Town context is confirmed present in your session."""
+
+[[steps]]
+id = "verify-hook"
+title = "Verify work is on your hook"
+needs = ["verify-context"]
+description = """
+Confirm that this validation bead is hooked to you.
+
+**1. Check your hook:**
+```bash
+gt hook
+```
+
+The output should show a hooked bead (the validation bead that triggered this formula).
+
+**2. Verify the bead is accessible:**
+```bash
+bd show $(gt hook --id 2>/dev/null || echo "unknown")
+```
+
+If `gt hook --id` isn't available, check `gt hook` output for the bead ID and use that.
+
+**3. Verify bead status:**
+The hooked bead should be in_progress.
+
+**Exit criteria:** Hook shows assigned work, bead is accessible via bd."""
+
+[[steps]]
+id = "verify-tools"
+title = "Verify Gas Town CLI tools work"
+needs = ["verify-hook"]
+description = """
+Run basic Gas Town commands to verify the CLI is functional.
+
+**1. Check gt is available:**
 ```bash
 gt --version
+```
+
+**2. Check bd is available:**
+```bash
 bd --version
 ```
 
-**2. Verify Dolt server:**
+**3. Check rig status:**
 ```bash
-mysql -h 127.0.0.1 -P 3307 -u root -e "SELECT 1"
+gt rig list
 ```
 
-**3. Verify the agent exists in config:**
+**4. Check beads access:**
 ```bash
-python3 -c "
-import json
-with open('$HOME/gt/settings/config.json') as f:
-    cfg = json.load(f)
-agents = cfg.get('agents', {})
-builtins = {'claude','pi','opencode','gemini','codex','cursor','auggie','amp'}
-name = '{{agent}}'
-if name in agents:
-    agent = agents[name]
-    print(f'Agent: {name}')
-    print(f'  command: {agent.get(\"command\", \"?\")}')
-    print(f'  args: {agent.get(\"args\", [])}')
-    print(f'  env: {list(agent.get(\"env\", {}).keys())}')
-elif name in builtins:
-    print(f'Agent: {name} (built-in preset)')
-else:
-    print(f'ERROR: Agent \"{name}\" not found')
-    exit(1)
-"
+bd stats
 ```
 
-**4. Verify the agent binary resolves:**
+**5. Check mail access:**
 ```bash
-python3 -c "
-import json, subprocess
-with open('$HOME/gt/settings/config.json') as f:
-    cfg = json.load(f)
-agent = cfg.get('agents', {}).get('{{agent}}', {})
-cmd = agent.get('command', '{{agent}}')
-result = subprocess.run(['which', cmd], capture_output=True, text=True)
-if result.returncode == 0:
-    print(f'Binary: {result.stdout.strip()}')
-else:
-    print(f'ERROR: Binary not found: {cmd}')
-    exit(1)
-"
+gt mail inbox 2>/dev/null || echo "Mail check: skipped or unavailable"
 ```
 
-**5. Verify the rig exists:**
-```bash
-test -d "$HOME/gt/{{rig}}" || { echo "ERROR: Rig {{rig}} not found"; exit 1; }
-gt rig list | grep -q "{{rig}}"
-```
+Record pass/fail for each tool check.
 
-**6. Check memory (don't spawn if box is low):**
-```bash
-free -h
-# Available memory should be > 1.5GB to safely spawn an agent
-```
-
-**7. Back up current config:**
-```bash
-cp ~/gt/settings/config.json ~/gt/settings/config.json.agent-validation-backup
-```
-
-**Exit criteria:** Tools available, agent and rig exist, config backed up."""
+**Exit criteria:** Core CLI tools (gt, bd) are functional."""
 
 [[steps]]
-id = "configure-settings"
-title = "Configure town and rig settings for target agent"
-needs = ["preflight"]
+id = "execute-task"
+title = "Execute a test task"
+needs = ["verify-tools"]
 description = """
-Set role_agents.polecat to the target agent at both town and rig level.
+Execute the test task to prove agent responsiveness.
 
-**1. Set town-level polecat agent:**
-```bash
-python3 -c "
-import json
-with open('$HOME/gt/settings/config.json') as f:
-    cfg = json.load(f)
-cfg.setdefault('role_agents', {})['polecat'] = '{{agent}}'
-with open('$HOME/gt/settings/config.json', 'w') as f:
-    json.dump(cfg, f, indent=4)
-print('Town settings: role_agents.polecat = {{agent}}')
-"
-```
+**Task:** {{task}}
 
-**2. Optionally set rig-level override:**
-```bash
-rig_config="$HOME/gt/{{rig}}/settings/config.json"
-if [ -f "$rig_config" ]; then
-    python3 -c "
-import json
-with open('$rig_config') as f:
-    cfg = json.load(f)
-cfg.setdefault('role_agents', {})['polecat'] = '{{agent}}'
-with open('$rig_config', 'w') as f:
-    json.dump(cfg, f, indent=4)
-print('Rig settings: role_agents.polecat = {{agent}}')
-"
-fi
-```
+Execute the task above and record the output. This proves the agent can
+receive instructions and produce results within the Gas Town framework.
 
-**3. Verify the setting took effect:**
-```bash
-python3 -c "
-import json
-with open('$HOME/gt/settings/config.json') as f:
-    cfg = json.load(f)
-polecat_agent = cfg.get('role_agents', {}).get('polecat', '?')
-print(f'Configured polecat agent: {polecat_agent}')
-assert polecat_agent == '{{agent}}', f'Expected {{agent}}, got {polecat_agent}'
-print('OK')
-"
-```
-
-**Exit criteria:** Both town and rig settings point polecat role to {{agent}}."""
+**Exit criteria:** Test task executed, output captured."""
 
 [[steps]]
-id = "create-test-bead"
-title = "Create a test bead in the target rig"
-needs = ["configure-settings"]
+id = "report-and-complete"
+title = "Report results and complete"
+needs = ["execute-task"]
 description = """
-Create a lightweight test bead that the polecat will be assigned.
+Print a summary of all validation checks and complete the bead.
 
+**1. Print summary:**
+```
+=== Agent Validation Self-Test ===
+
+Gas Town context:     [PASS/FAIL]
+  - Role awareness:   [PASS/FAIL]
+  - Rig identity:     [PASS/FAIL]
+  - Startup context:  [PASS/FAIL]
+Hook assignment:      [PASS/FAIL]
+  - Work hooked:      [PASS/FAIL]
+  - Bead accessible:  [PASS/FAIL]
+CLI tools:            [PASS/FAIL]
+  - gt available:     [PASS/FAIL]
+  - bd available:     [PASS/FAIL]
+  - Rig list:         [PASS/FAIL]
+Test task execution:  [PASS/FAIL]
+
+VALIDATION_OK
+```
+
+Include VALIDATION_OK in the output if all critical checks pass.
+
+**2. Add results to bead notes:**
 ```bash
-bd create --rig {{rig}} \
-    --title "Agent validation: {{agent}} prompt test" \
-    --description "Automated validation bead. Verify that agent '{{agent}}' receives correct Gas Town prompt context when slung to {{rig}}. Test task: {{task}}" \
-    --type task \
-    --priority 3
+bd update <bead-id> --notes "Validation complete. All checks passed."
 ```
 
-Record the bead ID from the output — you'll need it for the sling step.
+**3. Complete the bead:**
+The bead will be closed when you finish (via gt done or bd close).
 
-**Exit criteria:** Test bead created, ID recorded."""
-
-[[steps]]
-id = "sling-polecat"
-title = "Sling the test bead to spawn a polecat"
-needs = ["create-test-bead"]
-description = """
-Use gt sling to dispatch the test bead, spawning a polecat with the configured agent.
-
-```bash
-gt sling <bead-id> {{rig}}
-```
-
-Record the polecat name and tmux session name from the output.
-The session name follows the pattern: `gt-{{rig}}-<polecat-name>`
-
-**Wait for the session to appear:**
-```bash
-# Poll for up to 60 seconds
-for i in $(seq 1 60); do
-    tmux has-session -t "gt-{{rig}}-<polecat-name>" 2>/dev/null && break
-    sleep 1
-done
-```
-
-**Exit criteria:** Polecat spawned, tmux session running."""
-
-[[steps]]
-id = "inspect-prompt"
-title = "Inspect polecat prompt for Gas Town context"
-needs = ["sling-polecat"]
-description = """
-Capture the polecat's tmux pane output and verify Gas Town context was injected.
-
-**1. Wait for agent to start (give hooks time to fire):**
-```bash
-sleep 15   # Allow session_start + before_agent_start hooks to run
-```
-
-**2. Capture pane output:**
-```bash
-tmux capture-pane -t "gt-{{rig}}-<polecat-name>" -p -S -500 > /tmp/agent-validation-pane.txt
-```
-
-**3. Check for Gas Town context markers:**
-```bash
-grep -ciE "GAS.TOWN|gastown"            /tmp/agent-validation-pane.txt  # Town identity
-grep -ciE "polecat|POLECAT"             /tmp/agent-validation-pane.txt  # Role awareness
-grep -ciE "gt hook|hook.*work|assigned" /tmp/agent-validation-pane.txt  # Work assignment
-grep -ciE "gt prime|startup|propulsion" /tmp/agent-validation-pane.txt  # Startup protocol
-```
-
-Each check should return > 0. Record pass/fail for each.
-
-**4. Check for agent-specific markers:**
-- **Pi agent:** Look for `[gastown] gt prime captured` in stderr (hooks fired)
-- **Claude agent:** Look for `GAS TOWN` in the initial system prompt
-- **OpenCode agent:** Look for context injection in startup output
-
-**Exit criteria:** Pane captured, Gas Town context markers verified (or failures documented)."""
-
-[[steps]]
-id = "test-task"
-title = "Give the polecat a test task and verify execution"
-needs = ["inspect-prompt"]
-description = """
-Nudge the polecat with a test task and check it responds.
-
-**1. Send the test task:**
-```bash
-gt nudge {{rig}}/<polecat-name> "{{task}}"
-```
-
-**2. Wait for response (up to 45 seconds):**
-```bash
-INITIAL=$(tmux capture-pane -t "gt-{{rig}}-<polecat-name>" -p -S -500)
-for i in $(seq 1 45); do
-    CURRENT=$(tmux capture-pane -t "gt-{{rig}}-<polecat-name>" -p -S -500)
-    if [ "$CURRENT" != "$INITIAL" ]; then
-        echo "Agent is responding (pane content changed)"
-        break
-    fi
-    sleep 1
-done
-```
-
-**3. Check for expected response markers:**
-```bash
-tmux capture-pane -t "gt-{{rig}}-<polecat-name>" -p -S -500 > /tmp/agent-validation-response.txt
-grep -ciE "VALIDATION_OK|polecat|role|hook" /tmp/agent-validation-response.txt
-```
-
-If the agent responded with VALIDATION_OK and acknowledged its role, the test passes.
-
-**Exit criteria:** Agent responded to nudge, test task output captured."""
-
-[[steps]]
-id = "cleanup-and-report"
-title = "Clean up and report results"
-needs = ["test-task"]
-description = """
-Nuke the test polecat, close the test bead, restore config, and summarize.
-
-**1. Nuke the polecat:**
-```bash
-gt polecat nuke {{rig}}/<polecat-name> --force
-```
-
-**2. Close the test bead:**
-```bash
-bd close <bead-id> --reason "agent-validation formula complete"
-```
-
-**3. Restore config (if restore_config=true):**
-```bash
-if [ "{{restore_config}}" = "true" ] && [ -f ~/gt/settings/config.json.agent-validation-backup ]; then
-    cp ~/gt/settings/config.json.agent-validation-backup ~/gt/settings/config.json
-    rm ~/gt/settings/config.json.agent-validation-backup
-    echo "Config restored"
-fi
-```
-
-**4. Print summary:**
-```
-=== Agent Validation: {{agent}} in {{rig}} ===
-
-Infrastructure:        [PASS/FAIL]
-Agent binary:          [PASS/FAIL]
-Settings configured:   [PASS/FAIL]
-Polecat spawned:       [PASS/FAIL]
-Gas Town context:      [PASS/FAIL]
-  - Town identity:     [PASS/FAIL]
-  - Role awareness:    [PASS/FAIL]
-  - Work assignment:   [PASS/FAIL]
-  - Startup protocol:  [PASS/FAIL]
-Test task execution:   [PASS/FAIL]
-Cleanup:               [PASS/FAIL]
-```
-
-**5. Clean up temp files:**
-```bash
-rm -f /tmp/agent-validation-pane.txt /tmp/agent-validation-response.txt
-```
-
-**Exit criteria:** Polecat nuked, bead closed, config restored, results summarized."""
+**Exit criteria:** Results summarized, bead completed."""
