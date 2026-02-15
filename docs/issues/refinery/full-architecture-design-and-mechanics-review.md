@@ -1149,4 +1149,267 @@ There are no guardrails, output validation, or model-specific configurations to 
 
 ---
 
-*Investigation complete. 3 loops of field research with 17 haiku subagent dispatches analysing ~15,000 lines of source code across 40+ files.*
+---
+
+## Loop 4 Deep-Dive Findings: Work Assignment Lifecycle
+
+Loop 4 dispatched 5 subagents to investigate how work is given to polecats — the upstream side of the lifecycle before the polecat begins executing.
+
+### Category T: Sling Pipeline — Work Dispatch Orchestration
+
+#### T.1: Sling Is the Universal Dispatcher — All Work Flows Through One Command (Design Note)
+
+**Location:** `internal/cmd/sling.go`
+
+All work assignment in Gas Town flows through `gt sling`. It is the single entry point for:
+- Human-initiated work dispatch (`gt sling <bead> <rig>`)
+- Batch work dispatch (`gt sling --batch <bead1> <bead2> ... <rig>`)
+- Dog pool dispatch (round-robin across idle dogs)
+- Convoy-tracked dispatch
+- Deacon redispatch of recovered work
+
+The sling pipeline makes 4 key decisions in order:
+1. **WHAT** — verify bead exists, check status (hooked/pinned?)
+2. **WHERE** — resolve target: self, dog pool, spawn fresh polecat, or existing agent
+3. **HOW** — select and instantiate formula (mol-polecat-work by default)
+4. **WITH WHAT** — construct variables from rig settings + user flags + auto-detected values
+
+#### T.2: Pull-Based Design — No Automatic Work Assignment (P2)
+
+**Location:** System-wide
+
+Gas Town uses a **pull-based** dispatch model. There is no daemon or background service that automatically routes work from `bd ready` to available polecats. Work sits idle until a human (or the Deacon redispatch for recovered work) explicitly slings it.
+
+**Why this is a flaw:** In a system designed for autonomous operation, the work selection step requires human intervention. The Deacon only redispatches recovered work (from dead polecats), not new work. Convoy work dispatch exists in code (`sling_convoy.go`) but convoys are observation-only — they track but don't drive dispatch.
+
+#### T.3: Silent Formula Failure in Batch Mode (P1)
+
+**Location:** `internal/cmd/sling_batch.go:162`
+
+When batch sling processes multiple beads and formula instantiation fails for one, it logs the error but continues to the next bead. The polecat for the failed bead is spawned but receives the raw bead without formula guidance. The polecat starts a session but has no formula steps to follow.
+
+**Why this is a flaw:** A polecat without a formula is an LLM with no instructions. It will attempt to interpret the raw bead description and may do anything — or nothing. There is no mechanism to detect that a polecat is running without a formula.
+
+#### T.4: Lookalike ID Acceptance (P2)
+
+**Location:** `internal/cmd/sling.go:263`
+
+When the bead ID provided to sling doesn't exist exactly, the system searches for close matches. If a similar-looking ID is found, it may be accepted with a confusing error message rather than a clean rejection.
+
+**Why this is a flaw:** Typos in bead IDs could sling the wrong work to a polecat.
+
+#### T.5: Dolt Branch Timing Window (P1)
+
+**Location:** `internal/cmd/sling.go:559`
+
+The polecat's Dolt branch is named at spawn time but created after sling writes complete. If sling fails after spawn but before the Dolt branch is created, the Witness may see stale state because the polecat's agent bead exists on the main Dolt branch but the work hasn't been written yet.
+
+**Why this is a flaw:** There is a timing window where the polecat appears to exist (agent bead created) but has no work assigned (Dolt branch not yet created). The Witness may classify this as a zombie.
+
+### Category U: Polecat Spawn Lifecycle — Two-Phase Architecture
+
+#### U.1: Two-Phase Spawn Is Well-Designed (Positive Finding)
+
+**Location:** `internal/cmd/polecat_spawn.go:59-319`
+
+Polecat spawning is split into two phases:
+1. **SpawnPolecatForSling** (lines 59-226) — pre-spawn health checks, name allocation, worktree creation, agent bead creation with atomic hook_bead assignment
+2. **StartSession** (lines 232-319) — started AFTER sling writes complete, creates tmux session, injects environment variables
+
+This ensures the agent bead is fully configured before the polecat session starts. The polecat's first action reads its agent bead and finds its work already assigned.
+
+#### U.2: Comprehensive Failure Handling in Spawn (Positive Finding)
+
+**Location:** `internal/cmd/polecat_spawn.go`
+
+Spawn failures are handled with a cleanup cascade:
+
+| Failure | Handling |
+|---------|----------|
+| Dolt server down | 10 retry attempts with exponential backoff |
+| Worktree creation fails | `cleanupOnError()` removes partial polecat directory |
+| Agent bead creation fails | Hard fail (untrackable polecat is worse than no polecat) |
+| Session dies mid-startup | Stale session detection kills dead sessions |
+| Worktree silently missing | Verification immediately after creation |
+| Unmerged MR exists | Blocks spawn (prevents losing work) |
+
+#### U.3: BD_BRANCH Per-Polecat Isolation (Positive Finding)
+
+**Location:** `internal/cmd/polecat_spawn.go`, environment variable injection
+
+Each polecat gets its own Dolt branch (`polecat/<name>`), preventing write contention. `BD_DOLT_AUTO_COMMIT=off` keeps writes in the working set until explicit merge. This is a sound isolation design.
+
+#### U.4: GT_POLECAT_PATH Fallback for gt done (Design Note)
+
+**Location:** Environment variable injection during spawn
+
+The `GT_POLECAT_PATH` environment variable is injected so that `gt done` can find the polecat's worktree even if the current working directory has changed. This is a defensive mechanism that partially compensates for the hook_bead corruption issue (K.1).
+
+### Category V: Formula Instantiation — Three Dispatch Modes
+
+#### V.1: Formula-on-Bead Creates Compound Work Items (Design Note)
+
+**Location:** `internal/cmd/sling_helpers.go`, `internal/cmd/sling_formula.go`
+
+When a formula is applied to a bead (the common case for polecat work), the instantiation creates a **compound** work item:
+1. **Cook** the formula (ensure `.proto.toml` exists)
+2. **Create wisp** with variables: `feature=<title>`, `issue=<beadID>`, plus rig/user vars
+3. **Bond** wisp to base bead (creates compound — wisp references bead as parent)
+4. **Hook** the base bead with `attached_molecule` pointing to wisp
+
+The polecat sees a molecule (the formula steps) attached to its hooked bead (the issue). The formula provides structure; the bead provides the work specification.
+
+#### V.2: Variable Resolution Priority (Design Note)
+
+**Location:** `internal/cmd/sling_helpers.go`
+
+Formula variables are resolved in priority order:
+1. User `--var` flags (highest priority)
+2. Rig config from `config.json` (setup_command, test_command, etc.)
+3. Formula defaults in `[vars]` section
+4. Computed values (issue, feature, base_branch)
+
+Missing required variables silently fall back to formula defaults, which may be empty strings or placeholder values.
+
+#### V.3: No Variable Validation (P1)
+
+**Location:** `internal/cmd/sling_helpers.go`, formula instantiation
+
+Formula variables are not validated against the formula's declared variables. If a variable is missing and the formula has no default, it's injected as an empty string. The formula step that references the variable gets empty content.
+
+**Why this is a flaw:** A missing `setup_command` variable means the polecat skips environment setup. A missing `test_command` means it skips testing. These are silently missing — no error, no warning.
+
+#### V.4: Formula-on-Bead Hook_Bead Bug Is the Root Cause of V.1 Corruption (P0 — Reconfirmed)
+
+**Location:** `internal/cmd/sling.go:517-523`
+
+Reconfirmed from K.1: when a new polecat is spawned with a formula, the `hookSetAtomically` flag prevents updating the agent's `hook_bead` after formula instantiation. The agent knows about its spawn-time hook but not the formula compound that was created afterward.
+
+### Category W: Polecat Work Formula — 9-Step State Machine
+
+#### W.1: Formula Is a 9-Step State Machine (Design Note)
+
+**Location:** `internal/formula/formulas/mol-polecat-work.formula.toml`
+
+The polecat work formula defines 9 steps:
+
+| Step | Name | LLM Judgment Required |
+|------|------|----------------------|
+| 1 | Load context | Medium — read issue, understand requirements |
+| 2 | Branch setup | Low — execute git commands |
+| 3 | Preflight tests | Medium — assess test output, detect pre-existing failures |
+| 4 | Implement | **Very High** — design, code, architect |
+| 5 | Self-review | **High** — assess own code quality |
+| 6 | Run tests | Medium — interpret test output |
+| 7 | Commit changes | Low — construct commit message |
+| 8 | Cleanup workspace | Low — execute cleanup commands |
+| 9 | Submit and exit | Low — run `gt done`, self-destruct |
+
+Steps 4 and 5 require the most LLM judgment. Steps 2, 7, 8, 9 are mostly structured commands.
+
+#### W.2: FORBIDDEN Directives Rely on LLM Compliance (P1)
+
+**Location:** `mol-polecat-work.formula.toml`
+
+The formula contains FORBIDDEN directives:
+- Do NOT push to main directly
+- Do NOT close issues (that's the Witness/Refinery's job)
+- Do NOT wait for merge results
+- Do NOT fix pre-existing test failures (file a bead instead)
+
+These are prose instructions to an LLM. Compliance depends entirely on the model:
+- Strong models (Opus) reliably follow FORBIDDEN directives
+- Weaker models (Haiku) may ignore or misinterpret them
+- Non-Anthropic models may not understand the directive format at all
+
+**Why this is a flaw:** Critical safety invariants (don't push to main, don't close issues) are enforced by LLM prose compliance, not by code. The pre-push hook (R.1) is supposed to be the code-level guard, but it's not fully implemented.
+
+#### W.3: Stuck Polecat Escalation (Design Note)
+
+**Location:** `mol-polecat-work.formula.toml`
+
+If a polecat is stuck for >15 minutes, the formula instructs it to mail the Witness. If context is filling up, use `gt handoff` for a fresh session. These are reasonable escalation mechanisms, but they depend on the LLM self-assessing its own stuckness — which varies by model.
+
+#### W.4: No Formula Step Checkpointing (P2)
+
+**Location:** `mol-polecat-work.formula.toml`
+
+There is no checkpoint mechanism between formula steps. If a polecat crashes between step 6 (tests pass) and step 9 (submit), the work is complete and tested but never submitted. The next session starts fresh and may re-implement from scratch rather than resuming from the tested state.
+
+**Why this is a flaw:** The `gt handoff` mechanism provides continuity context, but it's a suggestion to the LLM, not a structured checkpoint. A fresh polecat dispatched to the same bead may not know that the previous polecat already completed the implementation.
+
+### Category X: Work Selection and Dispatch Coordination
+
+#### X.1: Convoy Is Observation-Only — No Dispatch Automation (P2)
+
+**Location:** `internal/cmd/sling_convoy.go`
+
+Convoys track batches of work but don't drive dispatch. `sling_convoy.go` adds convoy tracking to a sling operation (recording that the bead was dispatched as part of a convoy), but convoys don't automatically dispatch remaining work when a polecat completes one item.
+
+**Why this is a flaw:** A convoy of 10 items requires 10 explicit sling commands. There is no "convoy runner" that automatically dispatches the next item when the previous one completes.
+
+#### X.2: No Capacity Management (P2)
+
+**Location:** System-wide
+
+There is no capacity management for polecat dispatch. The system does not track:
+- How many polecats are currently running
+- How many polecats the rig can support (memory, tmux slots)
+- Whether the Dolt server is under load
+
+A batch sling of 20 items will spawn 20 polecats simultaneously, potentially exhausting system resources.
+
+**Why this is a flaw:** In a high-throughput environment, unbounded polecat spawning can cause resource exhaustion (OOM, tmux limits, Dolt contention).
+
+#### X.3: Double-Dispatch Prevention (Positive Finding)
+
+**Location:** `internal/cmd/sling.go`
+
+The system prevents assigning the same work twice through:
+- Status check: blocks re-sling of hooked/in-progress beads unless `--force`
+- Auto-force fallback: if the hooked agent has no live session, permits re-sling
+- Atomic spawn: hook_bead set during polecat creation (coordinated write)
+
+This is a well-designed guard against duplicate work assignment.
+
+---
+
+## Updated Finding Index (Loop 4 Additions)
+
+| ID | Category | Severity | Title |
+|----|----------|----------|-------|
+| T.1 | Sling Pipeline | — | Sling is universal dispatcher (design note) |
+| T.2 | Sling Pipeline | P2 | Pull-based design — no automatic work assignment |
+| T.3 | Sling Pipeline | P1 | Silent formula failure in batch mode |
+| T.4 | Sling Pipeline | P2 | Lookalike ID acceptance |
+| T.5 | Sling Pipeline | P1 | Dolt branch timing window |
+| U.1 | Polecat Spawn | — | Two-phase spawn is well-designed (positive) |
+| U.2 | Polecat Spawn | — | Comprehensive failure handling in spawn (positive) |
+| U.3 | Polecat Spawn | — | BD_BRANCH per-polecat isolation (positive) |
+| U.4 | Polecat Spawn | — | GT_POLECAT_PATH fallback (design note) |
+| V.1 | Formula | — | Formula-on-bead creates compound work items (design note) |
+| V.2 | Formula | — | Variable resolution priority (design note) |
+| V.3 | Formula | P1 | No variable validation |
+| V.4 | Formula | P0 | Formula-on-bead hook_bead bug (reconfirmed from K.1) |
+| W.1 | Work Formula | — | Formula is a 9-step state machine (design note) |
+| W.2 | Work Formula | P1 | FORBIDDEN directives rely on LLM compliance |
+| W.3 | Work Formula | — | Stuck polecat escalation (design note) |
+| W.4 | Work Formula | P2 | No formula step checkpointing |
+| X.1 | Dispatch | P2 | Convoy is observation-only — no dispatch automation |
+| X.2 | Dispatch | P2 | No capacity management |
+| X.3 | Dispatch | — | Double-dispatch prevention (positive) |
+
+---
+
+## Final Summary Statistics (All 4 Loops)
+
+| Severity | Count | Description |
+|----------|-------|-------------|
+| **P0** | 21 | System-breaking: data loss, wrong-branch merges, infinite loops, dead protocols |
+| **P1** | 33 | High-impact: silent failures, missing coordination, no validation |
+| **P2** | 23 | Latent risk: performance, edge cases, design debt |
+| Positive | 11 | Well-designed components |
+| Design Notes | 10 | Architectural observations (neither flaw nor positive) |
+| **Total** | 98 | (77 flaws + 11 positive findings + 10 design notes) |
+
+*Investigation complete. 4 loops of field research with 22 haiku subagent dispatches analysing ~20,000 lines of source code across 50+ files.*
