@@ -10,6 +10,8 @@
 package nudge
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,6 +47,14 @@ func queueDir(townRoot, session string) string {
 	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe)
 }
 
+// randomSuffix returns a short random hex string to disambiguate filenames
+// when multiple processes enqueue within the same nanosecond.
+func randomSuffix() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // Enqueue writes a nudge to the queue for the given session.
 // The nudge will be picked up by the agent's hook at the next turn boundary.
 func Enqueue(townRoot, session string, nudge QueuedNudge) error {
@@ -65,8 +75,10 @@ func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 		return fmt.Errorf("marshaling nudge: %w", err)
 	}
 
-	// Use nanosecond timestamp for unique ordering
-	filename := fmt.Sprintf("%d.json", nudge.Timestamp.UnixNano())
+	// Use nanosecond timestamp + random suffix for unique, ordered filenames.
+	// The random suffix prevents collisions when multiple agents enqueue
+	// nudges for the same session within the same nanosecond.
+	filename := fmt.Sprintf("%d-%s.json", nudge.Timestamp.UnixNano(), randomSuffix())
 	path := filepath.Join(dir, filename)
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
@@ -78,6 +90,10 @@ func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 
 // Drain reads and removes all queued nudges for a session, returning them
 // in FIFO order. This is called by the hook to pick up pending nudges.
+//
+// Uses rename-then-process to prevent concurrent Drain calls from delivering
+// the same nudge twice: each file is atomically renamed to a .claimed suffix
+// before reading, so only one caller can claim each nudge.
 func Drain(townRoot, session string) ([]QueuedNudge, error) {
 	dir := queueDir(townRoot, session)
 
@@ -101,23 +117,34 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
+
+		// Atomically claim the file by renaming it. If another Drain call
+		// is racing us, only one rename will succeed — the loser gets
+		// ENOENT and moves on. This prevents double-delivery.
+		claimPath := path + ".claimed"
+		if err := os.Rename(path, claimPath); err != nil {
+			// Another Drain got it first, or file was already removed
+			continue
+		}
+
+		data, err := os.ReadFile(claimPath)
 		if err != nil {
-			// Skip unreadable files
+			// Unreadable — clean up so it doesn't become a ghost entry
+			_ = os.Remove(claimPath)
 			continue
 		}
 
 		var n QueuedNudge
 		if err := json.Unmarshal(data, &n); err != nil {
-			// Skip malformed files, but clean them up
-			_ = os.Remove(path)
+			// Malformed — clean up
+			_ = os.Remove(claimPath)
 			continue
 		}
 
 		nudges = append(nudges, n)
 
-		// Remove after reading
-		_ = os.Remove(path)
+		// Remove the claimed file after successful processing
+		_ = os.Remove(claimPath)
 	}
 
 	return nudges, nil
