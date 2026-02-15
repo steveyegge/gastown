@@ -615,28 +615,8 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 	if err != nil {
 		return fmt.Errorf("checking convoy %s: %w", convoyID, err)
 	}
-	if len(tracked) == 0 {
-		// Empty convoy (0 tracked issues) is definitionally complete — auto-close it.
-		// This matches the batch behavior in checkAndCloseCompletedConvoys.
-		if dryRun {
-			fmt.Printf("%s Would auto-close empty convoy 🚚 %s: %s\n", style.Warning.Render("⚠"), convoyID, convoy.Title)
-			return nil
-		}
-
-		reason := "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
-		closeArgs := []string{"close", convoyID, "-r", reason}
-		closeCmd := exec.Command("bd", closeArgs...)
-		closeCmd.Dir = townBeads
-		if err := closeCmd.Run(); err != nil {
-			return fmt.Errorf("closing empty convoy: %w", err)
-		}
-
-		fmt.Printf("%s Auto-closed empty convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
-		notifyConvoyCompletion(townBeads, convoyID, convoy.Title)
-		return nil
-	}
-
-	// Check if all tracked issues are closed
+	// A convoy with 0 tracked issues is definitionally complete
+	// (tracking deps were likely lost). Treat as all-closed.
 	allClosed := true
 	openCount := 0
 	for _, t := range tracked {
@@ -651,14 +631,18 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 		return nil
 	}
 
-	// All tracked issues are complete - close the convoy
+	// All tracked issues are complete (or convoy is empty) - close the convoy
 	if dryRun {
 		fmt.Printf("%s Would auto-close convoy 🚚 %s: %s\n", style.Warning.Render("⚠"), convoyID, convoy.Title)
 		return nil
 	}
 
 	// Actually close the convoy
-	closeArgs := []string{"close", convoyID, "-r", "All tracked issues completed"}
+	reason := "All tracked issues completed"
+	if len(tracked) == 0 {
+		reason = "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
+	}
+	closeArgs := []string{"close", convoyID, "-r", reason}
 	closeCmd := exec.Command("bd", closeArgs...)
 	closeCmd.Dir = townBeads
 
@@ -893,7 +877,8 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// findStrandedConvoys finds convoys with ready work but no workers.
+// findStrandedConvoys finds convoys with ready work but no workers,
+// or empty convoys (0 tracked issues) that need cleanup.
 func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 	stranded := []strandedConvoyInfo{} // Initialize as empty slice for proper JSON encoding
 
@@ -923,8 +908,9 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 			style.PrintWarning("skipping convoy %s: %v", convoy.ID, err)
 			continue
 		}
+		// Empty convoys (0 tracked issues) are stranded — they need
+		// attention (auto-close via convoy check or manual cleanup).
 		if len(tracked) == 0 {
-			// Empty convoy (0 tracked issues) is anomalous — flag it
 			stranded = append(stranded, strandedConvoyInfo{
 				ID:          convoy.ID,
 				Title:       convoy.Title,
