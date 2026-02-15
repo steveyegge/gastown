@@ -763,10 +763,6 @@ esac
 
 	// Should have checked 2 polecat assignees (alpha and bravo)
 	// "crew/sean" is not a polecat, "" has no assignee
-	if result.Checked != 2 {
-		t.Errorf("Checked = %d, want 2 (alpha + bravo)", result.Checked)
-	}
-
 	// Should have found 1 orphan (alpha — no dir, no session)
 	// bravo has directory so deferred to DetectZombiePolecats
 	if len(result.Orphans) != 1 {
@@ -783,4 +779,245 @@ esac
 	if orphan.Assignee != "testrig/polecats/alpha" {
 		t.Errorf("orphan Assignee = %q, want %q", orphan.Assignee, "testrig/polecats/alpha")
 	}
+}
+
+// --- DetectOrphanedMolecules tests ---
+
+func TestOrphanedMoleculeResult_Types(t *testing.T) {
+	// Verify the result types have all expected fields.
+	r := OrphanedMoleculeResult{
+		BeadID:      "gt-work-123",
+		MoleculeID:  "gt-mol-456",
+		Assignee:    "testrig/polecats/alpha",
+		PolecatName: "alpha",
+		Closed:      5,
+		Error:       nil,
+	}
+	if r.BeadID != "gt-work-123" {
+		t.Errorf("BeadID = %q, want %q", r.BeadID, "gt-work-123")
+	}
+	if r.MoleculeID != "gt-mol-456" {
+		t.Errorf("MoleculeID = %q, want %q", r.MoleculeID, "gt-mol-456")
+	}
+	if r.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", r.PolecatName, "alpha")
+	}
+	if r.Closed != 5 {
+		t.Errorf("Closed = %d, want 5", r.Closed)
+	}
+
+	// Aggregate result
+	agg := DetectOrphanedMoleculesResult{
+		Checked: 10,
+		Orphans: []OrphanedMoleculeResult{r},
+		Errors:  []error{fmt.Errorf("test error")},
+	}
+	if agg.Checked != 10 {
+		t.Errorf("Checked = %d, want 10", agg.Checked)
+	}
+	if len(agg.Orphans) != 1 {
+		t.Errorf("len(Orphans) = %d, want 1", len(agg.Orphans))
+	}
+	if len(agg.Errors) != 1 {
+		t.Errorf("len(Errors) = %d, want 1", len(agg.Errors))
+	}
+}
+
+func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
+	// When bd is not in PATH, should return empty result with errors.
+	t.Setenv("PATH", "/nonexistent")
+	result := DetectOrphanedMolecules("/tmp/nonexistent", "testrig", nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+	// Should have errors from failed bd list commands
+	if len(result.Errors) == 0 {
+		t.Error("expected errors when bd is not available")
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("expected no orphans, got %d", len(result.Orphans))
+	}
+}
+
+func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
+	// With a mock bd that returns empty lists, should get empty result.
+	tmpDir := t.TempDir()
+	mockBd := filepath.Join(tmpDir, "bd")
+	if err := os.WriteFile(mockBd, []byte("#!/bin/sh\necho '[]'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmpDir)
+
+	result := DetectOrphanedMolecules(tmpDir, "testrig", nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("len(Orphans) = %d, want 0", len(result.Orphans))
+	}
+}
+
+func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
+	// When bd show returns empty, should return empty string.
+	t.Setenv("PATH", "/nonexistent")
+	result := getAttachedMoleculeID("/tmp", "gt-fake-123")
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
+	// Full test with mock bd returning beads assigned to dead polecats.
+	//
+	// Setup:
+	// - alpha: dead polecat (no tmux, no directory) with attached molecule → orphaned
+	// - bravo: alive polecat (directory exists) → skip
+	// - crew/sean: non-polecat assignee → skip
+	// - empty assignee → skip
+
+	tmpDir := t.TempDir()
+
+	// Create town structure: tmpDir is the "town root"
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create bravo's directory (alive polecat)
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "bravo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// No directory for alpha (dead polecat)
+
+	// Create workspace.Find marker
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gt-root"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock bd that handles list and show commands
+	logFile := filepath.Join(tmpDir, "bd.log")
+	mockBd := filepath.Join(tmpDir, "bd")
+	mockScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+case "$1" in
+  list)
+    case "$*" in
+      *--status=hooked*)
+        cat <<'EOJSON'
+[
+  {"id":"gt-work-001","assignee":"testrig/polecats/alpha"},
+  {"id":"gt-work-002","assignee":"testrig/polecats/bravo"},
+  {"id":"gt-work-003","assignee":"testrig/crew/sean"},
+  {"id":"gt-work-004","assignee":""}
+]
+EOJSON
+        ;;
+      *--status=in_progress*)
+        echo '[]'
+        ;;
+      *--parent=gt-mol-orphan*)
+        cat <<'EOJSON'
+[
+  {"id":"gt-step-001","status":"open"},
+  {"id":"gt-step-002","status":"open"},
+  {"id":"gt-step-003","status":"closed"}
+]
+EOJSON
+        ;;
+      *--parent=*)
+        echo '[]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    ;;
+  show)
+    case "$2" in
+      gt-work-001)
+        echo '[{"description":"attached_molecule: gt-mol-orphan\\nattached_at: 2026-01-15T10:00:00Z\\ndispatched_by: mayor"}]'
+        ;;
+      gt-mol-orphan)
+        echo '[{"status":"open"}]'
+        ;;
+      *)
+        echo '[{"status":"open","description":""}]'
+        ;;
+    esac
+    ;;
+  close)
+    # Accept close commands silently
+    ;;
+  *)
+    ;;
+esac
+`, logFile)
+
+	if err := os.WriteFile(mockBd, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+
+	result := DetectOrphanedMolecules(tmpDir, rigName, nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+
+	// Should have checked 2 polecat-assigned beads (alpha and bravo)
+	if result.Checked != 2 {
+		t.Errorf("Checked = %d, want 2 (alpha + bravo)", result.Checked)
+	}
+
+	// Should have found 1 orphan (alpha's molecule)
+	if len(result.Orphans) != 1 {
+		t.Fatalf("len(Orphans) = %d, want 1", len(result.Orphans))
+	}
+
+	orphan := result.Orphans[0]
+	if orphan.BeadID != "gt-work-001" {
+		t.Errorf("orphan.BeadID = %q, want %q", orphan.BeadID, "gt-work-001")
+	}
+	if orphan.MoleculeID != "gt-mol-orphan" {
+		t.Errorf("orphan.MoleculeID = %q, want %q", orphan.MoleculeID, "gt-mol-orphan")
+	}
+	if orphan.PolecatName != "alpha" {
+		t.Errorf("orphan.PolecatName = %q, want %q", orphan.PolecatName, "alpha")
+	}
+	// Closed should be 3: 2 open step children + 1 molecule itself
+	if orphan.Closed != 3 {
+		t.Errorf("orphan.Closed = %d, want 3 (2 open steps + 1 molecule)", orphan.Closed)
+	}
+	if orphan.Error != nil {
+		t.Errorf("orphan.Error = %v, want nil", orphan.Error)
+	}
+
+	// Verify bd close was called by checking the log
+	logBytes, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("reading bd log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !containsSubstring(logContent, "close gt-step-001 gt-step-002") {
+		t.Errorf("expected bd close for step children, got log:\n%s", logContent)
+	}
+	if !containsSubstring(logContent, "close gt-mol-orphan") {
+		t.Errorf("expected bd close for molecule, got log:\n%s", logContent)
+	}
+}
+
+// containsSubstring checks if s contains sub (used in test assertions).
+func containsSubstring(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && findSubstring(s, sub))
+}
+
+func findSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

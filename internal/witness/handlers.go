@@ -1366,7 +1366,6 @@ type DetectOrphanedBeadsResult struct {
 // catch that case.
 func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOrphanedBeadsResult {
 	result := &DetectOrphanedBeadsResult{}
-
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		townRoot = workDir
@@ -1433,6 +1432,234 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 	}
 
 	return result
+}
+
+// OrphanedMoleculeResult represents a single orphaned molecule detection.
+type OrphanedMoleculeResult struct {
+	BeadID      string // The base work bead with the orphaned molecule
+	MoleculeID  string // The attached molecule (wisp) ID
+	Assignee    string // The dead polecat's full address
+	PolecatName string // Just the polecat name
+	Closed      int    // Number of issues closed (molecule + descendants)
+	Error       error
+}
+
+// DetectOrphanedMoleculesResult holds aggregate results of the orphan scan.
+type DetectOrphanedMoleculesResult struct {
+	Checked int                      // Number of polecat-assigned beads checked
+	Orphans []OrphanedMoleculeResult // Orphaned molecules found and processed
+	Errors  []error
+}
+
+// DetectOrphanedMolecules scans for mol-polecat-work molecule instances whose
+// owning polecat no longer exists. For each orphaned molecule, it closes the
+// molecule and its descendant step issues, unblocking the parent work bead.
+//
+// Detection chain: hooked/in_progress bead → polecat assignee → check existence →
+// read attached_molecule → close molecule + descendants.
+//
+// This complements DetectZombiePolecats (which scans FROM polecat directories)
+// by scanning FROM beads. Once a polecat is nuked and its directory removed,
+// DetectZombiePolecats can't see it — but the orphaned molecules remain.
+//
+// See: https://github.com/steveyegge/gastown/issues/1381
+func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *DetectOrphanedMoleculesResult {
+	result := &DetectOrphanedMoleculesResult{}
+
+	// Find town root for path resolution
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	// Step 1: List beads that could have attached molecules.
+	// Slung beads start as status=hooked; polecats may change them to in_progress.
+	type beadSummary struct {
+		ID       string `json:"id"`
+		Assignee string `json:"assignee"`
+	}
+	var allBeads []beadSummary
+	for _, status := range []string{"hooked", "in_progress"} {
+		output, err := util.ExecWithOutput(workDir, "bd", "list", "--status="+status, "--json")
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("listing %s beads: %w", status, err))
+			continue
+		}
+		if output == "" {
+			continue
+		}
+		var items []beadSummary
+		if err := json.Unmarshal([]byte(output), &items); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("parsing %s beads: %w", status, err))
+			continue
+		}
+		allBeads = append(allBeads, items...)
+	}
+
+	if len(allBeads) == 0 {
+		return result
+	}
+
+	// Step 2: Check each polecat-assigned bead
+	polecatPrefix := rigName + "/polecats/"
+	t := tmux.NewTmux()
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+
+	for _, b := range allBeads {
+		if !strings.HasPrefix(b.Assignee, polecatPrefix) {
+			continue
+		}
+
+		polecatName := strings.TrimPrefix(b.Assignee, polecatPrefix)
+		result.Checked++
+
+		// Check if polecat still has a tmux session
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		hasSession, _ := t.HasSession(sessionName)
+		if hasSession {
+			continue // Polecat is alive
+		}
+
+		// Check if polecat directory still exists (might be mid-cleanup)
+		polecatDir := filepath.Join(polecatsDir, polecatName)
+		if _, statErr := os.Stat(polecatDir); statErr == nil {
+			continue // Directory exists; DetectZombiePolecats handles these
+		}
+
+		// Polecat is dead and gone — read the full bead to check for attached molecule
+		attachedMol := getAttachedMoleculeID(workDir, b.ID)
+		if attachedMol == "" {
+			continue // No molecule attached
+		}
+
+		// Check molecule status — skip if already closed
+		molStatus := getBeadStatus(workDir, attachedMol)
+		if molStatus == "closed" || molStatus == "" {
+			continue
+		}
+
+		// Close the orphaned molecule and its descendants
+		orphan := OrphanedMoleculeResult{
+			BeadID:      b.ID,
+			MoleculeID:  attachedMol,
+			Assignee:    b.Assignee,
+			PolecatName: polecatName,
+		}
+
+		closed, closeErr := closeMoleculeWithDescendants(workDir, attachedMol)
+		if closeErr != nil {
+			orphan.Error = closeErr
+			result.Errors = append(result.Errors, closeErr)
+		}
+		orphan.Closed = closed
+
+		// Mail deacon about the orphaned molecule closure
+		if router != nil && closed > 0 {
+			msg := &mail.Message{
+				From:     fmt.Sprintf("%s/witness", rigName),
+				To:       "deacon/",
+				Subject:  fmt.Sprintf("ORPHANED_MOLECULE_CLOSED %s", attachedMol),
+				Priority: mail.PriorityNormal,
+				Body: fmt.Sprintf(`Closed orphaned mol-polecat-work molecule and %d descendant(s).
+
+Molecule: %s
+Base Bead: %s
+Dead Polecat: %s/%s
+
+The parent bead is now unblocked for re-dispatch.`,
+					closed, attachedMol, b.ID, rigName, polecatName),
+			}
+			_ = router.Send(msg) // Best-effort
+		}
+
+		result.Orphans = append(result.Orphans, orphan)
+	}
+
+	return result
+}
+
+// getAttachedMoleculeID reads a bead and returns its attached_molecule ID, if any.
+func getAttachedMoleculeID(workDir, beadID string) string {
+	output, err := util.ExecWithOutput(workDir, "bd", "show", beadID, "--json")
+	if err != nil || output == "" {
+		return ""
+	}
+
+	var issues []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+
+	fields := beads.ParseAttachmentFields(&beads.Issue{Description: issues[0].Description})
+	if fields == nil {
+		return ""
+	}
+	return fields.AttachedMolecule
+}
+
+// closeMoleculeWithDescendants closes a molecule and all its descendant step
+// issues using the bd CLI. Returns the total number of issues closed.
+func closeMoleculeWithDescendants(workDir, moleculeID string) (int, error) {
+	// Recursively close descendants first (bottom-up)
+	closed := closeDescendantsViaCLI(workDir, moleculeID)
+
+	// Close the molecule itself
+	reason := "Orphaned mol-polecat-work — owning polecat no longer exists (issue #1381)"
+	if err := util.ExecRun(workDir, "bd", "close", moleculeID, "-r", reason); err != nil {
+		return closed, fmt.Errorf("closing molecule %s: %w", moleculeID, err)
+	}
+	closed++
+
+	return closed, nil
+}
+
+// closeDescendantsViaCLI recursively closes descendant issues of a parent
+// using bd CLI commands. Returns count of issues closed.
+func closeDescendantsViaCLI(workDir, parentID string) int {
+	// List children of this parent
+	output, err := util.ExecWithOutput(workDir, "bd", "list", "--parent="+parentID, "--json")
+	if err != nil || output == "" {
+		return 0
+	}
+
+	var children []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &children); err != nil {
+		return 0
+	}
+
+	if len(children) == 0 {
+		return 0
+	}
+
+	// Recursively close grandchildren first
+	totalClosed := 0
+	for _, child := range children {
+		totalClosed += closeDescendantsViaCLI(workDir, child.ID)
+	}
+
+	// Close open direct children
+	var idsToClose []string
+	for _, child := range children {
+		if child.Status != "closed" {
+			idsToClose = append(idsToClose, child.ID)
+		}
+	}
+
+	if len(idsToClose) > 0 {
+		reason := "Orphaned mol-polecat-work step — owning polecat no longer exists"
+		args := append([]string{"close"}, idsToClose...)
+		args = append(args, "-r", reason)
+		if err := util.ExecRun(workDir, "bd", args...); err == nil {
+			totalClosed += len(idsToClose)
+		}
+	}
+
+	return totalClosed
 }
 
 // DoneIntent represents a parsed done-intent label from an agent bead.
