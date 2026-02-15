@@ -25,29 +25,13 @@ var doctorCmd = &cobra.Command{
 	Use:     "doctor [check-name | category]...",
 	GroupID: GroupDiag,
 	Short:   "Run health checks on the workspace",
-	Long: `Run diagnostic checks on the Gas Town workspace.
-
-Run all checks (default), specific checks by name, or all checks in a category.
-
-Examples:
-  gt doctor                                  # Run all checks
-  gt doctor orphan-sessions                  # Run one check
-  gt doctor orphan-sessions wisp-gc          # Run multiple checks
-  gt doctor cleanup                          # Run all Cleanup checks
-  gt doctor orphan-sessions --fix            # Run and fix one check
-  gt doctor orphan-sessions --fix --dry-run  # Preview fixes
-  gt doctor list                             # Show available checks
-
-Use --fix to attempt automatic fixes for issues that support it.
-Use --rig to check a specific rig instead of the entire workspace.
-Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).
-Use --dry-run with --fix to preview what would be fixed without applying changes.`,
 	Args:              cobra.ArbitraryArgs,
 	RunE:              runDoctor,
 	ValidArgsFunction: completeDoctorArgs,
 }
 
 func init() {
+	doctorCmd.Long = buildDoctorLong()
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Attempt to automatically fix issues")
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.PersistentFlags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
@@ -57,6 +41,66 @@ func init() {
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
 	doctorCmd.Flags().BoolVar(&doctorDryRun, "dry-run", false, "Preview fixes without applying (use with --fix)")
 	rootCmd.AddCommand(doctorCmd)
+}
+
+// buildDoctorLong generates the Long help text from registered checks,
+// so it stays in sync as checks are added, removed, or recategorized.
+func buildDoctorLong() string {
+	baseChecks, rigChecks := allDoctorChecks()
+
+	// Group by category
+	byCategory := make(map[string][]doctor.Check)
+	for _, c := range baseChecks {
+		cat := c.Category()
+		if cat == "" {
+			cat = "Other"
+		}
+		byCategory[cat] = append(byCategory[cat], c)
+	}
+
+	var b strings.Builder
+	b.WriteString("Run diagnostic checks on the Gas Town workspace.\n\n")
+	b.WriteString("Run all checks (default), specific checks by name, or all checks in a category.\n")
+
+	// Print checks grouped by category
+	for _, category := range doctor.CategoryOrder {
+		checks, exists := byCategory[category]
+		if !exists || len(checks) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s:\n", category)
+		for _, c := range checks {
+			fix := "  "
+			if c.CanFix() {
+				fix = "🔧"
+			}
+			fmt.Fprintf(&b, "  %-27s %s %s\n", c.Name(), fix, c.Description())
+		}
+	}
+
+	// Rig checks (separate section)
+	if len(rigChecks) > 0 {
+		fmt.Fprintf(&b, "\nRig (requires --rig):\n")
+		for _, c := range rigChecks {
+			fix := "  "
+			if c.CanFix() {
+				fix = "🔧"
+			}
+			fmt.Fprintf(&b, "  %-27s %s %s\n", c.Name(), fix, c.Description())
+		}
+	}
+
+	b.WriteString("\nChecks marked 🔧 can be fixed automatically with gt doctor <check> --fix\n")
+	b.WriteString("\nExamples:\n")
+	b.WriteString("  gt doctor                                  # Run all checks\n")
+	b.WriteString("  gt doctor orphan-sessions                  # Run one check\n")
+	b.WriteString("  gt doctor orphan-sessions wisp-gc          # Run multiple checks\n")
+	b.WriteString("  gt doctor cleanup                          # Run all Cleanup checks\n")
+	b.WriteString("  gt doctor orphan-sessions --fix            # Run and fix one check\n")
+	b.WriteString("  gt doctor orphan-sessions --fix --dry-run  # Preview fixes\n")
+	b.WriteString("  gt doctor list                             # Show available checks")
+
+	return b.String()
 }
 
 // completeDoctorArgs provides tab completion for check names and category names.
