@@ -110,7 +110,8 @@ Examples:
 const ifFreshMaxAge = 60 * time.Second
 
 // waitIdleTimeout is how long --mode=wait-idle will poll before falling back to queue.
-const waitIdleTimeout = 15 * time.Second
+// This is a var (not const) so tests can override it to avoid 15s waits.
+var waitIdleTimeout = 15 * time.Second
 
 // deliverNudge routes a nudge based on the --mode flag.
 // For "immediate" mode: sends directly via tmux (current behavior).

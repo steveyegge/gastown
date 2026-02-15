@@ -282,12 +282,17 @@ func TestNudgeValidModesAccepted(t *testing.T) {
 	origPriority := nudgePriorityFlag
 	origMessage := nudgeMessageFlag
 	origStdin := nudgeStdinFlag
+	origTimeout := waitIdleTimeout
 	defer func() {
 		nudgeModeFlag = origMode
 		nudgePriorityFlag = origPriority
 		nudgeMessageFlag = origMessage
 		nudgeStdinFlag = origStdin
+		waitIdleTimeout = origTimeout
 	}()
+
+	// Shorten wait-idle timeout to avoid 15s test delay
+	waitIdleTimeout = 200 * time.Millisecond
 
 	nudgeStdinFlag = false
 	nudgeMessageFlag = "test"
