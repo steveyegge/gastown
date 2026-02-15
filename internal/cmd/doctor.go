@@ -55,6 +55,7 @@ Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
   - clone-divergence         Detect clones significantly behind origin/main
   - default-branch-all-rigs  Verify default_branch exists on remote for all rigs
+  - worktree-gitdir-valid    Verify worktree .git files reference existing paths (fixable)
 
 Crew workspace checks:
   - crew-state               Validate crew worker state.json files (fixable)
@@ -216,6 +217,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Dolt health checks
 	d.Register(doctor.NewDoltMetadataCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())
+
+	// Worktree gitdir validity (runs across all rigs, or specific rig with --rig)
+	d.Register(doctor.NewWorktreeGitdirCheck())
 
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {
