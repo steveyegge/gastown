@@ -29,7 +29,7 @@ func testChecks() []Check {
 		newStub("town-config-valid", CategoryCore),
 		newStub("orphan-sessions", CategoryCleanup),
 		newStub("orphan-processes", CategoryCleanup),
-		newStub("wisp-gc", CategoryCleanup),
+		newStub("wisp-garbage-collection", CategoryCleanup),
 		newStub("stale-beads-redirect", CategoryCleanup),
 		newStub("rig-is-git-repo", CategoryRig),
 		newStub("session-hooks", CategoryConfig),
@@ -51,8 +51,8 @@ func TestNormalizeName(t *testing.T) {
 		{"Orphan_Sessions", "orphan-sessions"},
 		{"orphan_Sessions", "orphan-sessions"},
 		{"ORPHAN_SESSIONS", "orphan-sessions"},
-		{"wisp-gc", "wisp-gc"},
-		{"wisp_gc", "wisp-gc"},
+		{"wisp-garbage-collection", "wisp-garbage-collection"},
+		{"wisp_garbage_collection", "wisp-garbage-collection"},
 		{"WispGc", "wispgc"},
 		{"", ""},
 	}
@@ -128,7 +128,7 @@ func TestFilterChecks_CategoryMatch(t *testing.T) {
 	result := FilterChecks(checks, []string{"Cleanup"})
 
 	// Should match all Cleanup checks
-	want := []string{"orphan-sessions", "orphan-processes", "wisp-gc", "stale-beads-redirect"}
+	want := []string{"orphan-sessions", "orphan-processes", "wisp-garbage-collection", "stale-beads-redirect"}
 	if len(result.Matched) != len(want) {
 		t.Fatalf("category: got %d matched (%v), want %d", len(result.Matched), checkNames(result.Matched), len(want))
 	}
@@ -155,14 +155,14 @@ func TestFilterChecks_CategoryCaseInsensitive(t *testing.T) {
 
 func TestFilterChecks_MultipleArgs(t *testing.T) {
 	checks := testChecks()
-	result := FilterChecks(checks, []string{"orphan-sessions", "wisp-gc"})
+	result := FilterChecks(checks, []string{"orphan-sessions", "wisp-garbage-collection"})
 	if len(result.Matched) != 2 {
 		t.Fatalf("multiple: got %d matched, want 2", len(result.Matched))
 	}
 	if result.Matched[0].Name() != "orphan-sessions" {
 		t.Errorf("multiple[0]: got %q", result.Matched[0].Name())
 	}
-	if result.Matched[1].Name() != "wisp-gc" {
+	if result.Matched[1].Name() != "wisp-garbage-collection" {
 		t.Errorf("multiple[1]: got %q", result.Matched[1].Name())
 	}
 }
@@ -182,7 +182,7 @@ func TestFilterChecks_DeduplicateNameAndCategory(t *testing.T) {
 	// orphan-sessions is in Cleanup, so specifying both should not duplicate
 	result := FilterChecks(checks, []string{"orphan-sessions", "Cleanup"})
 
-	// Should have orphan-sessions (from name) + orphan-processes, wisp-gc, stale-beads-redirect (from category) = 4
+	// Should have orphan-sessions (from name) + orphan-processes, wisp-garbage-collection, stale-beads-redirect (from category) = 4
 	if len(result.Matched) != 4 {
 		t.Fatalf("dedup: got %d matched (%v), want 4", len(result.Matched), checkNames(result.Matched))
 	}
@@ -298,19 +298,17 @@ func TestSuggestCheck_NormalizedInput(t *testing.T) {
 
 func TestSuggestCheck_DistanceTwo(t *testing.T) {
 	checks := testChecks()
-	// "wrsp-gc" is distance 2 from "wisp-gc" (w→w, r→i, s→s, p→p = 1 sub + ... let me check)
-	// Actually "wrsp-gc" vs "wisp-gc": w=w, r≠i, s=s, p=p, -=-, g=g, c=c → distance 1
-	// Let's use "wasp-gc" which is distance 1 from "wisp-gc" (a≠i)
-	suggestions := SuggestCheck(checks, "wasp-gc")
+	// "wisp-garbage-collectian" is distance 1 from "wisp-garbage-collection" (a≠o)
+	suggestions := SuggestCheck(checks, "wisp-garbage-collectian")
 	found := false
 	for _, s := range suggestions {
-		if s == "wisp-gc" {
+		if s == "wisp-garbage-collection" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("distance 2: 'wisp-gc' not in suggestions %v", suggestions)
+		t.Errorf("distance 2: 'wisp-garbage-collection' not in suggestions %v", suggestions)
 	}
 }
 

@@ -92,13 +92,13 @@ func buildDoctorLong() string {
 
 	b.WriteString("\nChecks marked 🔧 can be fixed automatically with gt doctor <check> --fix\n")
 	b.WriteString("\nExamples:\n")
-	b.WriteString("  gt doctor                                  # Run all checks\n")
-	b.WriteString("  gt doctor orphan-sessions                  # Run one check\n")
-	b.WriteString("  gt doctor orphan-sessions wisp-gc          # Run multiple checks\n")
-	b.WriteString("  gt doctor cleanup                          # Run all Cleanup checks\n")
-	b.WriteString("  gt doctor orphan-sessions --fix            # Run and fix one check\n")
-	b.WriteString("  gt doctor orphan-sessions --fix --dry-run  # Preview fixes\n")
-	b.WriteString("  gt doctor list                             # Show available checks")
+	b.WriteString("  gt doctor                          # Run all checks\n")
+	b.WriteString("  gt doctor <check>                  # Run one check\n")
+	b.WriteString("  gt doctor <check> <check>          # Run multiple checks\n")
+	b.WriteString("  gt doctor <category>               # Run all checks in a category\n")
+	b.WriteString("  gt doctor <check> --fix            # Run and fix one check\n")
+	b.WriteString("  gt doctor <check> --fix --dry-run  # Preview fixes\n")
+	b.WriteString("  gt doctor list                     # Show available checks")
 
 	return b.String()
 }
