@@ -50,6 +50,7 @@ func ValidateTarget(target string) error {
 	}
 
 	// Dog targets are valid at any depth (deacon/dogs, deacon/dogs/<name>).
+	// Deacon sub-path validation is handled downstream by IsDogTarget/resolveTarget.
 	if strings.ToLower(parts[0]) == "deacon" {
 		return nil
 	}
@@ -60,38 +61,46 @@ func ValidateTarget(target string) error {
 			"Use 'mayor' to target the mayor directly", target)
 	}
 
-	// Path targets: parts[0] = rig, parts[1] = role.
+	// Path targets: parts[0] = rig, parts[1] = role or shorthand name.
+	// Two-segment paths like "gastown/nux" are polecat/crew shorthand —
+	// resolvePathToSession handles these by trying polecat then crew lookup.
+	// We only validate when the second segment IS a known role.
 	if len(parts) >= 2 {
 		role := strings.ToLower(parts[1])
-		if !knownRoles[role] {
+		if knownRoles[role] {
+			// Known role: apply role-specific constraints.
+			if role == "witness" || role == "refinery" {
+				// Witness and refinery are singleton roles — no sub-agents.
+				if len(parts) > 2 {
+					return fmt.Errorf("invalid target %q: %s does not have named sub-agents\n"+
+						"Usage: %s/%s", target, role, parts[0], role)
+				}
+			} else if len(parts) == 2 {
+				// Crew and polecats require a name segment.
+				if role == "crew" {
+					return fmt.Errorf("invalid target %q: crew requires a worker name\n"+
+						"Usage: %s/crew/<name>", target, parts[0])
+				}
+				return fmt.Errorf("invalid target %q: polecats requires a polecat name\n"+
+					"Usage: %s/polecats/<name>\n"+
+					"Or use just %q to auto-spawn a polecat", target, parts[0], parts[0])
+			}
+			// Too many segments for role paths: rig/role/name/extra
+			if len(parts) > 3 {
+				return fmt.Errorf("invalid target %q: too many path segments (max 3: rig/role/name)", target)
+			}
+		} else if len(parts) > 2 {
+			// Not a known role but has 3+ segments — not a valid shorthand.
 			return fmt.Errorf("invalid target %q: unknown role %q\n"+
 				"Valid roles after a rig name:\n"+
 				"  %s/polecats/<name>  specific polecat\n"+
 				"  %s/crew/<name>      crew worker\n"+
 				"  %s/witness          rig witness\n"+
 				"  %s/refinery         rig refinery\n"+
-				"Or use just %q to auto-spawn a polecat",
+				"Or use just %q to target by name shorthand",
 				target, parts[1], parts[0], parts[0], parts[0], parts[0], parts[0])
 		}
-	}
-
-	// Crew and polecats require a name segment.
-	if len(parts) == 2 {
-		role := strings.ToLower(parts[1])
-		if role == "crew" {
-			return fmt.Errorf("invalid target %q: crew requires a worker name\n"+
-				"Usage: %s/crew/<name>", target, parts[0])
-		}
-		if role == "polecats" {
-			return fmt.Errorf("invalid target %q: polecats requires a polecat name\n"+
-				"Usage: %s/polecats/<name>\n"+
-				"Or use just %q to auto-spawn a polecat", target, parts[0], parts[0])
-		}
-	}
-
-	// Too many segments: rig/crew/name/extra
-	if len(parts) > 3 {
-		return fmt.Errorf("invalid target %q: too many path segments (max 3: rig/role/name)", target)
+		// else: 2-segment with unknown role → polecat/crew shorthand, let resolveTarget handle.
 	}
 
 	return nil

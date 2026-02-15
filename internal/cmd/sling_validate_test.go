@@ -24,20 +24,25 @@ func TestValidateTarget(t *testing.T) {
 		{name: "rig/refinery", target: "gastown/refinery", wantErr: false},
 		{name: "deacon/dogs", target: "deacon/dogs", wantErr: false},
 		{name: "deacon/dogs/name", target: "deacon/dogs/rex", wantErr: false},
+		{name: "polecat shorthand", target: "gastown/nux", wantErr: false},
+		{name: "crew shorthand", target: "gastown/max", wantErr: false},
 
 		// Invalid targets — empty segments
 		{name: "trailing slash", target: "gastown/", wantErr: true, errMsg: "empty path segment"},
 		{name: "double slash", target: "gastown//polecats", wantErr: true, errMsg: "empty path segment"},
 		{name: "leading slash", target: "/polecats", wantErr: true, errMsg: "empty path segment"},
 
-		// Invalid targets — unknown role
-		{name: "unknown role", target: "gastown/badrole", wantErr: true, errMsg: "unknown role"},
-		{name: "typo in role", target: "gastown/polecat", wantErr: true, errMsg: "unknown role"},
-		{name: "plural witness", target: "gastown/witnesses", wantErr: true, errMsg: "unknown role"},
+		// Invalid targets — unknown role (only rejected with 3+ segments)
+		{name: "unknown role 3-seg", target: "gastown/badrole/name", wantErr: true, errMsg: "unknown role"},
+		{name: "typo in role 3-seg", target: "gastown/polecat/name", wantErr: true, errMsg: "unknown role"},
 
 		// Invalid targets — missing name
 		{name: "crew no name", target: "gastown/crew", wantErr: true, errMsg: "requires a worker name"},
 		{name: "polecats no name", target: "gastown/polecats", wantErr: true, errMsg: "requires a polecat name"},
+
+		// Invalid targets — witness/refinery with sub-agents
+		{name: "witness with name", target: "gastown/witness/extra", wantErr: true, errMsg: "does not have named sub-agents"},
+		{name: "refinery with name", target: "gastown/refinery/extra", wantErr: true, errMsg: "does not have named sub-agents"},
 
 		// Invalid targets — too many segments
 		{name: "too many segments", target: "gastown/crew/burke/extra", wantErr: true, errMsg: "too many path segments"},

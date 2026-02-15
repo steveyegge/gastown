@@ -217,6 +217,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 		args[i] = strings.TrimRight(args[i], "/")
 	}
 
+	// Validate target format early, before any dispatch path (bead, formula, batch)
+	// can trigger resolveTarget side-effects like polecat spawning.
+	if len(args) > 1 {
+		if err := ValidateTarget(args[len(args)-1]); err != nil {
+			return err
+		}
+	}
+
 	// Batch mode detection: multiple beads with rig target
 	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
 	// When len(args) > 2 and last arg is a rig, sling each bead to its own polecat
@@ -299,12 +307,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var target string
 	if len(args) > 1 {
 		target = args[1]
-
-		// Validate target format before resolveTarget, which can have
-		// side-effects like polecat spawning.
-		if err := ValidateTarget(target); err != nil {
-			return err
-		}
 	}
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
 		DryRun:     slingDryRun,
