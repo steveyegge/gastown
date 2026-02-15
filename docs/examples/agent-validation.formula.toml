@@ -2,8 +2,8 @@ description = """
 Self-test formula run by a polecat to validate its own Gas Town integration.
 
 When slung to a rig, the polecat verifies that it received correct Gas Town
-context injection, has work on its hook, can use Gas Town CLI tools, and can
-execute a test task.
+context injection, has work on its hook, can use Gas Town CLI tools, confirms
+mail delivery by replying to the mayor, and executes a test task.
 
 ## Prerequisites (Mayor / Overseer)
 
@@ -42,6 +42,37 @@ which pi       # Should resolve to ~/.bun/bin/pi
 which claude   # Should resolve to ~/.local/bin/claude
 ```
 
+**4. After slinging, run the mayor-side validation protocol:**
+
+```bash
+# 1. Sling the formula
+gt sling agent-validation sfgastown
+# Note the polecat name from the output (e.g., "obsidian")
+
+# 2. Wait for polecat to boot (~30s for pi, ~15s for claude)
+sleep 30
+
+# 3. Send the polecat a test mail
+gt mail send sfgastown/polecats/<name> -s "VALIDATION: mail test" -m "Reply with your identity to confirm you received Gas Town context."
+
+# 4. Wait for the polecat's reply (check inbox)
+#    The reply should contain: role, name, rig, agent runtime, hooked bead
+gt mail inbox   # Look for "VALIDATION: identity confirmed"
+gt mail read <reply-id>
+
+# 5. Verify the reply contains VALIDATION_MAIL_OK and correct identity info
+
+# 6. Wait for the polecat to complete and hand off
+#    The polecat will run gt done when finished. Check:
+gt polecat status sfgastown/<name>   # Should show "done" or session ended
+gt mail inbox                        # Look for handoff mail
+```
+
+**Validation is complete when:**
+- Polecat replied with correct identity (role, rig, agent runtime)
+- Polecat completed all formula steps
+- Polecat handed off via gt done
+
 ## Usage
 
 ```bash
@@ -59,12 +90,13 @@ gt sling agent-validation sfgastown
 1. **Context**: Verifies Gas Town identity, role, and startup context are present
 2. **Hook**: Confirms work is hooked and the bead is accessible
 3. **Tools**: Validates gt and bd CLI tools are functional
-4. **Task**: Executes an optional test task to prove agent responsiveness
-5. **Report**: Prints pass/fail summary and completes the bead
+4. **Mail**: Waits for mail from the mayor, reads it, and replies to confirm receipt
+5. **Task**: Executes an optional test task to prove agent responsiveness
+6. **Report**: Prints pass/fail summary and completes the bead
 """
 formula = "agent-validation"
 type = "workflow"
-version = 2
+version = 3
 
 [vars.task]
 description = "Optional test task to execute after validation checks"
@@ -156,19 +188,77 @@ gt rig list
 bd stats
 ```
 
-**5. Check mail access:**
-```bash
-gt mail inbox 2>/dev/null || echo "Mail check: skipped or unavailable"
-```
-
 Record pass/fail for each tool check.
 
 **Exit criteria:** Core CLI tools (gt, bd) are functional."""
 
 [[steps]]
+id = "verify-mail"
+title = "Wait for mail from mayor and reply to confirm"
+needs = ["verify-tools"]
+description = """
+The mayor will send you a test mail after you boot. Wait for it, read it, and
+reply to confirm receipt. This validates the full mail round-trip.
+
+**1. Check your inbox for mail from the mayor:**
+```bash
+gt mail inbox
+```
+
+**2. If no mail yet, poll for up to 90 seconds:**
+```bash
+for i in $(seq 1 18); do
+    count=$(gt mail inbox 2>/dev/null | grep -c "VALIDATION" || true)
+    if [ "$count" -gt 0 ]; then
+        echo "Mail received"
+        break
+    fi
+    echo "Waiting for mail from mayor... ($i/18)"
+    sleep 5
+done
+```
+
+**3. Read the mail:**
+```bash
+gt mail inbox
+# Find the VALIDATION mail and read it:
+gt mail read <mail-id>
+```
+
+**4. Reply to the mayor confirming your identity and receipt:**
+Your reply MUST include identity details extracted from your injected Gas Town prompt:
+- Your role (e.g., polecat)
+- Your name (e.g., obsidian)
+- The rig you're in (e.g., sfgastown)
+- The agent runtime you're using (e.g., Claude Opus 4.6, Pi/Gemini, OpenCode)
+- Your hooked bead ID
+
+```bash
+gt mail send mayor/ -s "VALIDATION: identity confirmed" -m "VALIDATION_MAIL_OK
+Role: <your role from prompt>
+Name: <your polecat name>
+Rig: <your rig>
+Agent: <your agent runtime/model>
+Hooked bead: <bead ID>
+I received your test mail and confirm my Gas Town identity."
+```
+
+This proves the agent actually received and understood its Gas Town context,
+not just that mail delivery works.
+
+**5. Mark the mail as read:**
+```bash
+gt mail mark-read <mail-id>
+```
+
+Record pass/fail. If no mail arrives within 90 seconds, record FAIL but continue.
+
+**Exit criteria:** Mail received, read, and reply sent to mayor (or timeout recorded)."""
+
+[[steps]]
 id = "execute-task"
 title = "Execute a test task"
-needs = ["verify-tools"]
+needs = ["verify-mail"]
 description = """
 Execute the test task to prove agent responsiveness.
 
@@ -201,6 +291,9 @@ CLI tools:            [PASS/FAIL]
   - gt available:     [PASS/FAIL]
   - bd available:     [PASS/FAIL]
   - Rig list:         [PASS/FAIL]
+Mail round-trip:      [PASS/FAIL]
+  - Mail received:    [PASS/FAIL]
+  - Reply sent:       [PASS/FAIL]
 Test task execution:  [PASS/FAIL]
 
 VALIDATION_OK
