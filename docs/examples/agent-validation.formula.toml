@@ -1,0 +1,372 @@
+description = """
+Self-test formula run by a polecat to validate its own Gas Town integration.
+
+When slung to a rig, the polecat verifies that it received correct Gas Town
+context injection, has work on its hook, can use Gas Town CLI tools, confirms
+mail delivery by replying to the mayor, and executes a test task.
+
+## Prerequisites (Mayor / Overseer)
+
+Before slinging this formula, configure the target agent:
+
+**1. Set the polecat agent in town settings** (`~/gt/settings/config.json`):
+```json
+{
+    "role_agents": {
+        "polecat": "pi"
+    }
+}
+```
+
+Or override at rig level (`~/gt/<rig>/settings/config.json`):
+```json
+{
+    "role_agents": {
+        "polecat": "pi"
+    }
+}
+```
+
+See `docs/examples/town-settings.example.json` and `docs/examples/rig-settings.example.json`
+for full configuration examples.
+
+**2. Ensure agent authentication is configured:**
+- **Claude**: `ANTHROPIC_API_KEY` or Claude Max subscription (auto-detected)
+- **Pi**: Antigravity credentials at `~/.pi/agent/auth.json`
+  - Setup: `pi auth` or see https://github.com/badlogic/pi-mono#authentication
+- **OpenCode**: Provider-specific API keys in environment
+
+**3. Verify the agent binary is installed:**
+```bash
+which pi       # Should resolve to ~/.bun/bin/pi
+which claude   # Should resolve to ~/.local/bin/claude
+```
+
+**4. Clean up stale beads before slinging:**
+Polecat names are recycled from the namepool. If a previous polecat with the
+same name left beads in HOOKED or IN_PROGRESS state, the new polecat will pick
+those up instead of the formula wisps.
+
+```bash
+# Check what name will be allocated (or sling and note the name)
+# Then close any stale beads assigned to that polecat:
+bd list --status=open --assignee=sfgastown/polecats/<name> 2>/dev/null
+# Close any that appear:
+bd close <stale-id> --reason "stale bead from previous polecat session"
+```
+
+**5. Sling and run the mayor-side validation protocol:**
+
+`gt sling` "cooks" the formula: it reads the [[steps]] below, creates a parent
+epic bead (the formula itself) with one child wisp per step, wires up the
+dependency chain from the `needs` fields, hooks the epic to a fresh polecat,
+and nudges it to start. The polecat then autonomously works through the wisps
+in dependency order.
+
+```bash
+# 1. Sling the formula (this cooks it into an epic + child wisps automatically)
+gt sling agent-validation sfgastown
+# Note the polecat name from the output (e.g., "obsidian")
+
+# 2. Wait for polecat to boot (~30s for pi, ~15s for claude)
+sleep 30
+
+# 3. Send the polecat a test mail
+gt mail send sfgastown/polecats/<name> -s "VALIDATION: mail test" -m "Reply with your identity to confirm you received Gas Town context."
+
+# 4. Wait for the polecat's reply (check inbox)
+#    The reply should contain: role, name, rig, agent runtime, hooked bead
+gt mail inbox   # Look for "VALIDATION: identity confirmed"
+gt mail read <reply-id>
+
+# 5. Verify the reply contains VALIDATION_MAIL_OK and correct identity info
+
+# 6. Wait for the polecat to complete and hand off
+#    The polecat will run gt done when finished. Check:
+gt polecat status sfgastown/<name>   # Should show "done" or session ended
+gt mail inbox                        # Look for handoff mail
+```
+
+**Validation is complete when:**
+- Polecat replied with correct identity (role, rig, agent runtime)
+- Polecat completed all formula steps
+- Polecat handed off via gt done
+
+## Usage
+
+```bash
+# Set agent, then sling
+# In ~/gt/settings/config.json: "role_agents": {"polecat": "pi"}
+gt sling agent-validation sfgastown
+
+# Or for Claude (default):
+# "role_agents": {"polecat": "opus-46"}
+gt sling agent-validation sfgastown
+```
+
+## What it does
+
+1. **Context**: Verifies Gas Town identity, role, and startup context are present
+2. **Lifecycle**: Checks tmux session for deacon boot and witness nudge messages
+3. **Hook**: Confirms work is hooked and the bead is accessible
+4. **Tools**: Validates gt and bd CLI tools are functional
+5. **Mail**: Waits for mail from the mayor, reads it, and replies to confirm receipt
+6. **Task**: Executes an optional test task to prove agent responsiveness
+7. **Report**: Prints pass/fail summary and completes the bead
+"""
+formula = "agent-validation"
+type = "workflow"
+version = 3
+
+[vars.task]
+description = "Optional test task to execute after validation checks"
+required = false
+default = "Read the first 5 lines of any source file in this repo and report them."
+
+[[steps]]
+id = "verify-context"
+title = "Verify Gas Town context was injected"
+description = """
+Check that Gas Town context is present in your session. You should have received
+identity and role information during startup.
+
+**1. Check environment variables:**
+```bash
+echo "GT_ROLE=$GT_ROLE"
+echo "GT_RIG=$GT_RIG"
+echo "GT_POLECAT=$GT_POLECAT"
+echo "GT_ROOT=$GT_ROOT"
+```
+
+At minimum, GT_ROLE should be set (typically "polecat").
+
+**2. Verify you know your identity:**
+Report the following from your injected context:
+- Your role (polecat, crew, etc.)
+- The rig you're working in
+- The town name (Gas Town)
+
+**3. Check that gt prime output was captured:**
+```bash
+gt prime 2>/dev/null | head -5
+```
+
+Record pass/fail for each check.
+
+**Exit criteria:** Gas Town context is confirmed present in your session."""
+
+[[steps]]
+id = "verify-lifecycle"
+title = "Verify deacon boot and witness nudge were received"
+needs = ["verify-context"]
+description = """
+Confirm that the Gas Town lifecycle infrastructure (witness and deacon) fired
+correctly during your startup. You should have received these as messages in
+your session before you started working.
+
+**1. Witness nudge:**
+Check if you received a message from the witness during startup. It looks like:
+`[GAS TOWN] <rig>/polecats/<name> <- witness • <timestamp> • assigned`
+followed by `Run gt prime --hook and begin work on your hook.`
+
+Report whether you saw this witness nudge in your conversation. PASS if yes.
+
+**2. Deacon boot:**
+Check if the deacon (boot agent) sent you a message or ran any commands in
+your session before you started. The deacon handles initial session setup.
+
+Report whether deacon activity was visible. PASS if yes, SKIP if not seen
+(the deacon may run silently or be disabled).
+
+**3. gt prime execution:**
+Confirm that `gt prime` was executed during your startup (either by you, by
+the witness nudge instruction, or by a startup hook). The output should have
+included your Gas Town role and context.
+
+```bash
+gt prime 2>/dev/null | head -3
+```
+
+PASS if gt prime output includes your role and `[GAS TOWN]` header.
+
+**Exit criteria:** Witness nudge confirmed received. Deacon boot noted. gt prime ran."""
+
+[[steps]]
+id = "verify-hook"
+title = "Verify work is on your hook"
+needs = ["verify-lifecycle"]
+description = """
+Confirm that this validation bead is hooked to you.
+
+**1. Check your hook:**
+```bash
+gt hook
+```
+
+The output should show a hooked bead (the validation bead that triggered this formula).
+
+**2. Verify the bead is accessible:**
+```bash
+bd show $(gt hook --id 2>/dev/null || echo "unknown")
+```
+
+If `gt hook --id` isn't available, check `gt hook` output for the bead ID and use that.
+
+**3. Verify bead status:**
+The hooked bead should be in_progress.
+
+**Exit criteria:** Hook shows assigned work, bead is accessible via bd."""
+
+[[steps]]
+id = "verify-tools"
+title = "Verify Gas Town CLI tools work"
+needs = ["verify-hook"]
+description = """
+Run basic Gas Town commands to verify the CLI is functional.
+
+**1. Check gt is available:**
+```bash
+gt --version
+```
+
+**2. Check bd is available:**
+```bash
+bd --version
+```
+
+**3. Check rig status:**
+```bash
+gt rig list
+```
+
+**4. Check beads access:**
+```bash
+bd stats
+```
+
+Record pass/fail for each tool check.
+
+**Exit criteria:** Core CLI tools (gt, bd) are functional."""
+
+[[steps]]
+id = "verify-mail"
+title = "Wait for mail from mayor and reply to confirm"
+needs = ["verify-tools"]
+description = """
+The mayor will send you a test mail after you boot. Wait for it, read it, and
+reply to confirm receipt. This validates the full mail round-trip.
+
+**1. Check your inbox for mail from the mayor:**
+```bash
+gt mail inbox
+```
+
+**2. If no mail yet, poll for up to 90 seconds:**
+```bash
+for i in $(seq 1 18); do
+    count=$(gt mail inbox 2>/dev/null | grep -c "VALIDATION" || true)
+    if [ "$count" -gt 0 ]; then
+        echo "Mail received"
+        break
+    fi
+    echo "Waiting for mail from mayor... ($i/18)"
+    sleep 5
+done
+```
+
+**3. Read the mail:**
+```bash
+gt mail inbox
+# Find the VALIDATION mail and read it:
+gt mail read <mail-id>
+```
+
+**4. Reply to the mayor confirming your identity and receipt:**
+Your reply MUST include identity details extracted from your injected Gas Town prompt:
+- Your role (e.g., polecat)
+- Your name (e.g., obsidian)
+- The rig you're in (e.g., sfgastown)
+- The agent runtime you're using (e.g., Claude Opus 4.6, Pi/Gemini, OpenCode)
+- Your hooked bead ID
+
+```bash
+gt mail send mayor/ -s "VALIDATION: identity confirmed" -m "VALIDATION_MAIL_OK
+Role: <your role from prompt>
+Name: <your polecat name>
+Rig: <your rig>
+Agent: <your agent runtime/model>
+Hooked bead: <bead ID>
+I received your test mail and confirm my Gas Town identity."
+```
+
+This proves the agent actually received and understood its Gas Town context,
+not just that mail delivery works.
+
+**5. Mark the mail as read:**
+```bash
+gt mail mark-read <mail-id>
+```
+
+Record pass/fail. If no mail arrives within 90 seconds, record FAIL but continue.
+
+**Exit criteria:** Mail received, read, and reply sent to mayor (or timeout recorded)."""
+
+[[steps]]
+id = "execute-task"
+title = "Execute a test task"
+needs = ["verify-mail"]
+description = """
+Execute the test task to prove agent responsiveness.
+
+**Task:** {{task}}
+
+Execute the task above and record the output. This proves the agent can
+receive instructions and produce results within the Gas Town framework.
+
+**Exit criteria:** Test task executed, output captured."""
+
+[[steps]]
+id = "report-and-complete"
+title = "Report results and complete"
+needs = ["execute-task"]
+description = """
+Print a summary of all validation checks and complete the bead.
+
+**1. Print summary:**
+```
+=== Agent Validation Self-Test ===
+
+Gas Town context:     [PASS/FAIL]
+  - Role awareness:   [PASS/FAIL]
+  - Rig identity:     [PASS/FAIL]
+  - Startup context:  [PASS/FAIL]
+Lifecycle:            [PASS/FAIL]
+  - Witness nudge:    [PASS/FAIL]
+  - Deacon boot:      [PASS/FAIL/SKIP]
+  - gt prime fired:   [PASS/FAIL]
+Hook assignment:      [PASS/FAIL]
+  - Work hooked:      [PASS/FAIL]
+  - Bead accessible:  [PASS/FAIL]
+CLI tools:            [PASS/FAIL]
+  - gt available:     [PASS/FAIL]
+  - bd available:     [PASS/FAIL]
+  - Rig list:         [PASS/FAIL]
+Mail round-trip:      [PASS/FAIL]
+  - Mail received:    [PASS/FAIL]
+  - Identity reply:   [PASS/FAIL]
+Test task execution:  [PASS/FAIL]
+
+VALIDATION_OK
+```
+
+Include VALIDATION_OK in the output if all critical checks pass.
+
+**2. Add results to bead notes:**
+```bash
+bd update <bead-id> --notes "Validation complete. All checks passed."
+```
+
+**3. Complete the bead:**
+The bead will be closed when you finish (via gt done or bd close).
+
+**Exit criteria:** Results summarized, bead completed."""

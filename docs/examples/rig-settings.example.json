@@ -1,0 +1,66 @@
+{
+    "_comment": "Rig-level settings: ~/gt/<rig>/settings/config.json",
+    "_comment2": "Overrides town-level agent/role settings for this specific rig.",
+    "_comment3": "Only include fields you want to override — omitted fields inherit from town settings.",
+
+    "type": "rig-settings",
+    "version": 1,
+
+    "agent": "pi",
+
+    "agents": {
+        "rig-specific-agent": {
+            "command": "claude",
+            "args": ["--model", "sonnet", "--dangerously-skip-permissions"],
+            "env": {
+                "CLAUDECODE": ""
+            }
+        }
+    },
+
+    "role_agents": {
+        "polecat":  "pi",
+        "witness":  "pi",
+        "refinery": "pi"
+    },
+
+    "merge_queue": {
+        "enabled": true,
+        "integration_branch_polecat_enabled": true,
+        "integration_branch_refinery_enabled": true,
+        "integration_branch_template": "integration/{epic}",
+        "integration_branch_auto_land": false,
+        "on_conflict": "assign_back",
+        "run_tests": true,
+        "test_command": "go test ./...",
+        "build_command": "go build ./...",
+        "lint_command": "golangci-lint run",
+        "setup_command": "",
+        "typecheck_command": "",
+        "delete_merged_branches": true,
+        "retry_flaky_tests": 1,
+        "poll_interval": "30s",
+        "max_concurrent": 1,
+        "stale_claim_timeout": "30m"
+    },
+
+    "theme": {
+        "name": "ocean",
+        "role_themes": {
+            "witness": "rust",
+            "refinery": "plum"
+        }
+    },
+
+    "namepool": {
+        "style": "minerals"
+    },
+
+    "crew": {
+        "startup": "none"
+    },
+
+    "workflow": {
+        "default_formula": "mol-polecat-work"
+    }
+}

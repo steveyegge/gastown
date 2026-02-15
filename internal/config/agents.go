@@ -29,6 +29,8 @@ const (
 	AgentAmp AgentPreset = "amp"
 	// AgentOpenCode is OpenCode multi-model CLI.
 	AgentOpenCode AgentPreset = "opencode"
+	// AgentPi is Pi Coding Agent (extension-based lifecycle).
+	AgentPi AgentPreset = "pi"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -201,6 +203,21 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
 			OutputFlag: "--format json",
+		},
+	},
+	AgentPi: {
+		Name:                AgentPi,
+		Command:             "pi",
+		Args:                []string{}, // Extension loaded via -e flag in town settings
+		ProcessNames:        []string{"pi", "node", "bun"}, // Pi runs as Node.js
+		SessionIDEnv:        "PI_SESSION_ID",
+		ResumeFlag:          "",    // No resume support yet
+		ResumeStyle:         "",
+		SupportsHooks:       true,  // Uses .pi/extensions/gastown-hooks.js
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+			OutputFlag: "--no-session",
 		},
 	},
 }

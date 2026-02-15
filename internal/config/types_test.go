@@ -519,3 +519,33 @@ func TestParseDurationOrDefault_AllWebTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestDetectProviderFromCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"claude", "claude"},
+		{"opencode", "opencode"},
+		{"gemini", "gemini"},
+		{"codex", "codex"},
+		{"cursor", "cursor"},
+		{"auggie", "auggie"},
+		{"amp", "amp"},
+		{"pi", "pi"},
+		{"/usr/local/bin/claude", "claude"},
+		{"/home/user/.bun/bin/pi", "pi"},
+		{"unknown-agent", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got := detectProviderFromCommand(tt.command)
+			if got != tt.want {
+				t.Errorf("detectProviderFromCommand(%q) = %q, want %q", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+

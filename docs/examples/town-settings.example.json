@@ -1,0 +1,100 @@
+{
+    "_comment": "Town-level settings: ~/gt/settings/config.json",
+    "_comment2": "Controls agent selection, role mapping, and operational thresholds for all rigs.",
+    "_comment3": "Rig-level settings (below) can override any agent/role configuration.",
+
+    "type": "town-settings",
+    "version": 1,
+
+    "default_agent": "claude",
+
+    "agents": {
+        "opus-46": {
+            "command": "claude",
+            "args": ["--model", "opus", "--dangerously-skip-permissions"],
+            "env": {
+                "CLAUDECODE": ""
+            }
+        },
+        "opus-46-capped": {
+            "command": "cgroup-wrap",
+            "args": ["claude", "--model", "opus", "--dangerously-skip-permissions"],
+            "env": {
+                "CLAUDECODE": ""
+            }
+        },
+        "pi": {
+            "command": "pi",
+            "args": ["-e", "/path/to/gastown-hooks.js"],
+            "prompt_mode": "arg",
+            "hooks": {
+                "provider": "pi",
+                "dir": ".pi/extensions",
+                "settings_file": "gastown-hooks.js"
+            },
+            "tmux": {
+                "process_names": ["pi", "node", "bun"],
+                "ready_delay_ms": 3000
+            },
+            "session": {
+                "session_id_env": "PI_SESSION_ID"
+            },
+            "instructions": {
+                "file": "AGENTS.md"
+            }
+        },
+        "kimi-k2.5": {
+            "command": "opencode",
+            "args": ["-m", "kimi-for-coding/kimi-k2.5"],
+            "env": {
+                "OPENCODE_PERMISSION": "{\"*\":\"allow\"}"
+            },
+            "prompt_mode": "none"
+        },
+        "sonnet-via-opencode": {
+            "command": "opencode",
+            "args": ["-m", "openrouter/anthropic/claude-sonnet-4.5"],
+            "env": {
+                "OPENCODE_PERMISSION": "{\"*\":\"allow\"}"
+            },
+            "prompt_mode": "none"
+        }
+    },
+
+    "role_agents": {
+        "mayor":    "opus-46",
+        "deacon":   "opus-46",
+        "witness":  "opus-46-capped",
+        "refinery": "opus-46-capped",
+        "polecat":  "opus-46-capped",
+        "crew":     "opus-46",
+        "boot":     "opus-46",
+        "dog":      "opus-46"
+    },
+
+    "cli_theme": "dark",
+
+    "agent_email_domain": "gastown.local",
+
+    "web_timeouts": {
+        "cmd_timeout": "15s",
+        "gh_cmd_timeout": "10s",
+        "tmux_cmd_timeout": "2s",
+        "fetch_timeout": "8s",
+        "default_run_timeout": "30s",
+        "max_run_timeout": "60s"
+    },
+
+    "worker_status": {
+        "stale_threshold": "5m",
+        "stuck_threshold": "30m",
+        "heartbeat_fresh_threshold": "5m",
+        "mayor_active_threshold": "5m"
+    },
+
+    "feed_curator": {
+        "done_dedupe_window": "10s",
+        "sling_aggregate_window": "30s",
+        "min_aggregate_count": 3
+    }
+}
