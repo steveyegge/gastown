@@ -844,8 +844,11 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			}
 		}
 
-		// Init database if metadata.json is missing or dolt/ directory is missing.
+		// Re-init database if metadata.json is missing or dolt/ directory is missing.
 		// Since bd v0.50+, dolt/ is gitignored and won't exist after clone.
+		// Use mgr.InitBeads() for consistency with the non-adopt path — it handles
+		// BEADS_DIR env isolation, prefix validation, custom types config, tracked-beads
+		// redirect, and fallback config creation.
 		metadataPath = filepath.Join(beadsDir, "metadata.json")
 		needsInit := false
 		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
@@ -866,21 +869,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			if prefix == "" {
 				break
 			}
-			workDir := filepath.Dir(beadsDir) // directory containing .beads/
-			// IMPORTANT: Use --backend dolt --server to prevent SQLite creation.
-			// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
-			initCmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
-			initCmd.Dir = workDir
-			if output, initErr := initCmd.CombinedOutput(); initErr != nil {
-				fmt.Printf("  %s Could not init bd database: %v (%s)\n", style.Warning.Render("!"), initErr, strings.TrimSpace(string(output)))
+			if err := mgr.InitBeads(rigPath, prefix); err != nil {
+				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
-				// Explicitly persist issue_prefix (bd init --prefix may not persist it).
-				prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-				prefixCmd.Dir = workDir
-				if out, err := prefixCmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("setting issue_prefix after bd init: %w (%s)", err, strings.TrimSpace(string(out)))
-				}
 			}
 		}
 		break
