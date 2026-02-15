@@ -68,6 +68,10 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// GitHub integration events (emitted by gt github check)
+	TypeGitHubCheckFailed = "github_check_failed"
+	TypeGitHubCheckPoll   = "github_check_poll"
 )
 
 // EventsFile is the name of the raw events log.

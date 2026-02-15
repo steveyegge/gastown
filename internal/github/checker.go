@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 )
 
 // CheckFailure represents a failed CI check that needs a bead.
@@ -102,6 +103,15 @@ func RunCheck(cfg CheckerConfig) (*CheckResult, error) {
 				continue
 			}
 			result.Created = append(result.Created, beadID)
+
+			// Log event for feed visibility
+			_ = events.LogFeed(events.TypeGitHubCheckFailed, cfg.Actor, map[string]interface{}{
+				"repo":       repo,
+				"pr":         pr.Number,
+				"check":      check.Name,
+				"conclusion": check.Conclusion,
+				"bead_id":    beadID,
+			})
 		}
 	}
 
