@@ -875,8 +875,8 @@ func TestCopilotProviderDefaults(t *testing.T) {
 
 	// Test defaultPromptMode
 	mode := defaultPromptMode("copilot")
-	if mode != "prompt" {
-		t.Errorf("defaultPromptMode(copilot) = %q, want prompt", mode)
+	if mode != "arg" {
+		t.Errorf("defaultPromptMode(copilot) = %q, want arg", mode)
 	}
 
 	// Test defaultSessionIDEnv (should be empty)
