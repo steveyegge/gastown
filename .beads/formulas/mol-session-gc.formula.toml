@@ -85,7 +85,7 @@ gt doctor -v
 **2. Parse doctor output for:**
 - orphan-sessions: Tmux sessions to kill
 - orphan-processes: Claude processes to terminate
-- wisp-gc: Wisps to delete
+- wisp-garbage-collection: Wisps to delete
 
 **3. Additional scans (for aggressive mode):**
 ```bash
