@@ -1527,12 +1527,13 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 
 // OrphanedMoleculeResult represents a single orphaned molecule detection.
 type OrphanedMoleculeResult struct {
-	BeadID      string // The base work bead with the orphaned molecule
-	MoleculeID  string // The attached molecule (wisp) ID
-	Assignee    string // The dead polecat's full address
-	PolecatName string // Just the polecat name
-	Closed      int    // Number of issues closed (molecule + descendants)
-	Error       error
+	BeadID        string // The base work bead with the orphaned molecule
+	MoleculeID    string // The attached molecule (wisp) ID
+	Assignee      string // The dead polecat's full address
+	PolecatName   string // Just the polecat name
+	Closed        int    // Number of issues closed (molecule + descendants)
+	BeadRecovered bool   // Whether the parent bead was reset for re-dispatch
+	Error         error
 }
 
 // DetectOrphanedMoleculesResult holds aggregate results of the orphan scan.
@@ -1571,7 +1572,7 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 	}
 	var allBeads []beadSummary
 	for _, status := range []string{"hooked", "in_progress"} {
-		output, err := util.ExecWithOutput(workDir, "bd", "list", "--status="+status, "--json")
+		output, err := util.ExecWithOutput(workDir, "bd", "list", "--status="+status, "--json", "--limit=0")
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("listing %s beads: %w", status, err))
 			continue
@@ -1606,7 +1607,12 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 
 		// Check if polecat still has a tmux session
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
-		hasSession, _ := t.HasSession(sessionName)
+		hasSession, sessionErr := t.HasSession(sessionName)
+		if sessionErr != nil {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking session %s for bead %s: %w", sessionName, b.ID, sessionErr))
+			continue
+		}
 		if hasSession {
 			continue // Polecat is alive
 		}
@@ -1615,6 +1621,24 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 		polecatDir := filepath.Join(polecatsDir, polecatName)
 		if _, statErr := os.Stat(polecatDir); statErr == nil {
 			continue // Directory exists; DetectZombiePolecats handles these
+		} else if !os.IsNotExist(statErr) {
+			// Transient error (permission denied, I/O error) — skip to avoid false positive
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking polecat dir %s for bead %s: %w", polecatDir, b.ID, statErr))
+			continue
+		}
+
+		// TOCTOU re-check: polecat could have been recreated between initial
+		// checks and now. Re-verify before destructive action.
+		if _, statErr := os.Stat(polecatDir); statErr == nil {
+			continue // Directory reappeared — skip
+		} else if !os.IsNotExist(statErr) {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("re-checking polecat dir %s for bead %s: %w", polecatDir, b.ID, statErr))
+			continue
+		}
+		if alive, _ := t.HasSession(sessionName); alive {
+			continue // Session reappeared — polecat was respawned
 		}
 
 		// Polecat is dead and gone — read the full bead to check for attached molecule
@@ -1644,24 +1668,8 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 		}
 		orphan.Closed = closed
 
-		// Mail deacon about the orphaned molecule closure
-		if router != nil && closed > 0 {
-			msg := &mail.Message{
-				From:     fmt.Sprintf("%s/witness", rigName),
-				To:       "deacon/",
-				Subject:  fmt.Sprintf("ORPHANED_MOLECULE_CLOSED %s", attachedMol),
-				Priority: mail.PriorityNormal,
-				Body: fmt.Sprintf(`Closed orphaned mol-polecat-work molecule and %d descendant(s).
-
-Molecule: %s
-Base Bead: %s
-Dead Polecat: %s/%s
-
-The parent bead is now unblocked for re-dispatch.`,
-					closed, attachedMol, b.ID, rigName, polecatName),
-			}
-			_ = router.Send(msg) // Best-effort
-		}
+		// Reset the parent bead so it can be re-dispatched
+		orphan.BeadRecovered = resetAbandonedBead(workDir, rigName, b.ID, polecatName, router)
 
 		result.Orphans = append(result.Orphans, orphan)
 	}
@@ -1694,25 +1702,32 @@ func getAttachedMoleculeID(workDir, beadID string) string {
 // issues using the bd CLI. Returns the total number of issues closed.
 func closeMoleculeWithDescendants(workDir, moleculeID string) (int, error) {
 	// Recursively close descendants first (bottom-up)
-	closed := closeDescendantsViaCLI(workDir, moleculeID)
+	closed, descErr := closeDescendantsViaCLI(workDir, moleculeID)
 
 	// Close the molecule itself
 	reason := "Orphaned mol-polecat-work — owning polecat no longer exists (issue #1381)"
 	if err := util.ExecRun(workDir, "bd", "close", moleculeID, "-r", reason); err != nil {
-		return closed, fmt.Errorf("closing molecule %s: %w", moleculeID, err)
+		closeErr := fmt.Errorf("closing molecule %s: %w", moleculeID, err)
+		if descErr != nil {
+			return closed, fmt.Errorf("%w; also: %v", closeErr, descErr)
+		}
+		return closed, closeErr
 	}
 	closed++
 
-	return closed, nil
+	return closed, descErr
 }
 
 // closeDescendantsViaCLI recursively closes descendant issues of a parent
-// using bd CLI commands. Returns count of issues closed.
-func closeDescendantsViaCLI(workDir, parentID string) int {
+// using bd CLI commands. Returns count of issues closed and any error.
+func closeDescendantsViaCLI(workDir, parentID string) (int, error) {
 	// List children of this parent
 	output, err := util.ExecWithOutput(workDir, "bd", "list", "--parent="+parentID, "--json")
-	if err != nil || output == "" {
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("listing children of %s: %w", parentID, err)
+	}
+	if output == "" {
+		return 0, nil
 	}
 
 	var children []struct {
@@ -1720,17 +1735,22 @@ func closeDescendantsViaCLI(workDir, parentID string) int {
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(output), &children); err != nil {
-		return 0
+		return 0, fmt.Errorf("parsing children of %s: %w", parentID, err)
 	}
 
 	if len(children) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	// Recursively close grandchildren first
 	totalClosed := 0
+	var errs []error
 	for _, child := range children {
-		totalClosed += closeDescendantsViaCLI(workDir, child.ID)
+		n, err := closeDescendantsViaCLI(workDir, child.ID)
+		totalClosed += n
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	// Close open direct children
@@ -1745,12 +1765,17 @@ func closeDescendantsViaCLI(workDir, parentID string) int {
 		reason := "Orphaned mol-polecat-work step — owning polecat no longer exists"
 		args := append([]string{"close"}, idsToClose...)
 		args = append(args, "-r", reason)
-		if err := util.ExecRun(workDir, "bd", args...); err == nil {
+		if err := util.ExecRun(workDir, "bd", args...); err != nil {
+			errs = append(errs, fmt.Errorf("closing children of %s: %w", parentID, err))
+		} else {
 			totalClosed += len(idsToClose)
 		}
 	}
 
-	return totalClosed
+	if len(errs) > 0 {
+		return totalClosed, errs[0]
+	}
+	return totalClosed, nil
 }
 
 

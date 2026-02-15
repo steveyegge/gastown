@@ -916,12 +916,13 @@ esac
 func TestOrphanedMoleculeResult_Types(t *testing.T) {
 	// Verify the result types have all expected fields.
 	r := OrphanedMoleculeResult{
-		BeadID:      "gt-work-123",
-		MoleculeID:  "gt-mol-456",
-		Assignee:    "testrig/polecats/alpha",
-		PolecatName: "alpha",
-		Closed:      5,
-		Error:       nil,
+		BeadID:        "gt-work-123",
+		MoleculeID:    "gt-mol-456",
+		Assignee:      "testrig/polecats/alpha",
+		PolecatName:   "alpha",
+		Closed:        5,
+		BeadRecovered: true,
+		Error:         nil,
 	}
 	if r.BeadID != "gt-work-123" {
 		t.Errorf("BeadID = %q, want %q", r.BeadID, "gt-work-123")
@@ -934,6 +935,9 @@ func TestOrphanedMoleculeResult_Types(t *testing.T) {
 	}
 	if r.Closed != 5 {
 		t.Errorf("Closed = %d, want 5", r.Closed)
+	}
+	if !r.BeadRecovered {
+		t.Error("BeadRecovered = false, want true")
 	}
 
 	// Aggregate result
@@ -1080,7 +1084,7 @@ EOJSON
   show)
     case "$2" in
       gt-work-001)
-        echo '[{"description":"attached_molecule: gt-mol-orphan\\nattached_at: 2026-01-15T10:00:00Z\\ndispatched_by: mayor"}]'
+        echo '[{"status":"hooked","description":"attached_molecule: gt-mol-orphan\\nattached_at: 2026-01-15T10:00:00Z\\ndispatched_by: mayor"}]'
         ;;
       gt-mol-orphan)
         echo '[{"status":"open"}]'
@@ -1092,6 +1096,9 @@ EOJSON
     ;;
   close)
     # Accept close commands silently
+    ;;
+  update)
+    # Accept update commands (used by resetAbandonedBead)
     ;;
   *)
     ;;
@@ -1142,25 +1149,18 @@ esac
 		t.Fatalf("reading bd log: %v", err)
 	}
 	logContent := string(logBytes)
-	if !containsSubstring(logContent, "close gt-step-001 gt-step-002") {
+	if !strings.Contains(logContent, "close gt-step-001 gt-step-002") {
 		t.Errorf("expected bd close for step children, got log:\n%s", logContent)
 	}
-	if !containsSubstring(logContent, "close gt-mol-orphan") {
+	if !strings.Contains(logContent, "close gt-mol-orphan") {
 		t.Errorf("expected bd close for molecule, got log:\n%s", logContent)
 	}
-}
-
-// containsSubstring checks if s contains sub (used in test assertions).
-func containsSubstring(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && findSubstring(s, sub))
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+	// Verify bead was recovered (resetAbandonedBead called bd update)
+	if !orphan.BeadRecovered {
+		t.Error("orphan.BeadRecovered = false, want true (resetAbandonedBead should have reset the bead)")
 	}
-	return false
+	if !strings.Contains(logContent, "update gt-work-001") {
+		t.Errorf("expected bd update for bead reset, got log:\n%s", logContent)
+	}
 }
 
