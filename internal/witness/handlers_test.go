@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -651,5 +652,135 @@ func TestBeadRecoveredField_DefaultFalse(t *testing.T) {
 	}
 	if z.BeadRecovered {
 		t.Error("BeadRecovered should default to false")
+	}
+}
+
+func TestDetectOrphanedBeads_NoBdAvailable(t *testing.T) {
+	// When bd is not available (test environment), should return empty result
+	result := DetectOrphanedBeads("/nonexistent", "testrig", nil)
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 when bd unavailable", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("Orphans = %d, want 0 when bd unavailable", len(result.Orphans))
+	}
+}
+
+func TestDetectOrphanedBeads_ResultTypes(t *testing.T) {
+	// Verify the OrphanedBeadResult type has all expected fields
+	o := OrphanedBeadResult{
+		BeadID:        "gt-orphan1",
+		Assignee:      "testrig/polecats/alpha",
+		PolecatName:   "alpha",
+		BeadRecovered: true,
+		Error:         nil,
+	}
+
+	if o.BeadID != "gt-orphan1" {
+		t.Errorf("BeadID = %q, want %q", o.BeadID, "gt-orphan1")
+	}
+	if o.Assignee != "testrig/polecats/alpha" {
+		t.Errorf("Assignee = %q, want %q", o.Assignee, "testrig/polecats/alpha")
+	}
+	if o.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", o.PolecatName, "alpha")
+	}
+	if !o.BeadRecovered {
+		t.Error("BeadRecovered = false, want true")
+	}
+}
+
+func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping mock bd test on Windows")
+	}
+
+	// Set up town directory structure
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a polecat directory for "bravo" (alive dir, dead session)
+	// This case should be SKIPPED (deferred to DetectZombiePolecats)
+	if err := os.Mkdir(filepath.Join(polecatsDir, "bravo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// "alpha" has NO directory and NO tmux session — true orphan
+	// "bravo" has directory but no session — deferred to DetectZombiePolecats
+	// "charlie" has no directory, assigned to different rig — still orphan if session dead
+
+	binDir := t.TempDir()
+	bdPath := filepath.Join(binDir, "bd")
+
+	// Create mock bd that returns in_progress beads with polecat assignees
+	script := `#!/bin/sh
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;; # skip flags
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
+  list)
+    cat <<'JSONEOF'
+[
+  {"id":"gt-orphan1","assignee":"testrig/polecats/alpha"},
+  {"id":"gt-alive1","assignee":"testrig/polecats/bravo"},
+  {"id":"gt-nocrew","assignee":"testrig/crew/sean"},
+  {"id":"gt-noassign","assignee":""}
+]
+JSONEOF
+    exit 0
+    ;;
+  update)
+    # Log update calls for verification
+    echo "$@" >> "` + filepath.Join(binDir, "bd-update.log") + `"
+    exit 0
+    ;;
+  show)
+    # Return in_progress status for any bead query
+    echo '[{"status":"in_progress"}]'
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result := DetectOrphanedBeads(townRoot, rigName, nil)
+
+	// Should have checked 2 polecat assignees (alpha and bravo)
+	// "crew/sean" is not a polecat, "" has no assignee
+	if result.Checked != 2 {
+		t.Errorf("Checked = %d, want 2 (alpha + bravo)", result.Checked)
+	}
+
+	// Should have found 1 orphan (alpha — no dir, no session)
+	// bravo has directory so deferred to DetectZombiePolecats
+	if len(result.Orphans) != 1 {
+		t.Fatalf("Orphans = %d, want 1 (only alpha)", len(result.Orphans))
+	}
+
+	orphan := result.Orphans[0]
+	if orphan.BeadID != "gt-orphan1" {
+		t.Errorf("orphan BeadID = %q, want %q", orphan.BeadID, "gt-orphan1")
+	}
+	if orphan.PolecatName != "alpha" {
+		t.Errorf("orphan PolecatName = %q, want %q", orphan.PolecatName, "alpha")
+	}
+	if orphan.Assignee != "testrig/polecats/alpha" {
+		t.Errorf("orphan Assignee = %q, want %q", orphan.Assignee, "testrig/polecats/alpha")
 	}
 }

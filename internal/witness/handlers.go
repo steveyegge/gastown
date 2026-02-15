@@ -1342,6 +1342,99 @@ Please re-dispatch to an available polecat.`,
 	return true
 }
 
+// OrphanedBeadResult contains a single detected orphaned bead.
+type OrphanedBeadResult struct {
+	BeadID       string
+	Assignee     string // Original assignee (e.g. "gastown/polecats/alpha")
+	PolecatName  string // Extracted polecat name
+	BeadRecovered bool
+	Error        error
+}
+
+// DetectOrphanedBeadsResult contains the results of an orphaned bead scan.
+type DetectOrphanedBeadsResult struct {
+	Checked int
+	Orphans []OrphanedBeadResult
+	Errors  []error
+}
+
+// DetectOrphanedBeads finds IN_PROGRESS beads assigned to non-existent polecats.
+//
+// This complements DetectZombiePolecats which scans FROM polecat directories.
+// If a polecat was nuked and its directory removed, DetectZombiePolecats won't
+// see it, but the bead remains IN_PROGRESS. This function scans FROM beads to
+// catch that case.
+func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOrphanedBeadsResult {
+	result := &DetectOrphanedBeadsResult{}
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	// List all in_progress beads
+	output, err := util.ExecWithOutput(workDir, "bd", "list", "--status=in_progress", "--json")
+	if err != nil || output == "" {
+		return result
+	}
+
+	var beadList []struct {
+		ID       string `json:"id"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal([]byte(output), &beadList); err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("parsing in_progress beads: %w", err))
+		return result
+	}
+
+	t := tmux.NewTmux()
+
+	for _, bead := range beadList {
+		if bead.Assignee == "" {
+			continue // No assignee — not a dead-polecat orphan
+		}
+
+		// Parse assignee: "rigname/polecats/polecatname"
+		parts := strings.Split(bead.Assignee, "/")
+		if len(parts) != 3 || parts[1] != "polecats" {
+			continue // Not a polecat assignee (crew, refinery, etc.)
+		}
+		assigneeRig := parts[0]
+		polecatName := parts[2]
+		result.Checked++
+
+		// Check if the polecat's tmux session exists
+		sessionName := fmt.Sprintf("gt-%s-%s", assigneeRig, polecatName)
+		sessionAlive, err := t.HasSession(sessionName)
+		if err != nil {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking session %s for bead %s: %w", sessionName, bead.ID, err))
+			continue
+		}
+		if sessionAlive {
+			continue // Polecat is alive — not an orphan
+		}
+
+		// Session is dead. Also check if polecat directory still exists
+		// (if dir exists, DetectZombiePolecats will handle it)
+		polecatsDir := filepath.Join(townRoot, assigneeRig, "polecats", polecatName)
+		if _, err := os.Stat(polecatsDir); err == nil {
+			continue // Directory exists — DetectZombiePolecats handles this case
+		}
+
+		// Polecat is truly gone (no session, no directory). Reset the bead.
+		orphan := OrphanedBeadResult{
+			BeadID:      bead.ID,
+			Assignee:    bead.Assignee,
+			PolecatName: polecatName,
+		}
+		orphan.BeadRecovered = resetAbandonedBead(workDir, assigneeRig, bead.ID, polecatName, router)
+		result.Orphans = append(result.Orphans, orphan)
+	}
+
+	return result
+}
+
 // DoneIntent represents a parsed done-intent label from an agent bead.
 type DoneIntent struct {
 	ExitType  string
