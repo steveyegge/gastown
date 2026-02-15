@@ -49,7 +49,8 @@ var primeCmd = &cobra.Command{
 	Long: `Detect the agent role from the current directory and output context.
 
 Role detection:
-  - Town root, mayor/, or <rig>/mayor/ → Mayor context
+  - Town root → Neutral (no role inferred; use GT_ROLE)
+  - mayor/ or <rig>/mayor/ → Mayor context
   - <rig>/witness/rig/ → Witness context
   - <rig>/refinery/rig/ → Refinery context
   - <rig>/polecats/<name>/ → Polecat context
