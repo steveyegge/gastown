@@ -236,6 +236,132 @@ func TestFindAnyCleanupWisp_NoBdAvailable(t *testing.T) {
 	}
 }
 
+// installFakeBd creates a fake bd script that logs all invocations to a file.
+// Returns the path to the args log file.
+func installFakeBd(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	argsLog := filepath.Join(binDir, "bd_args.log")
+
+	// Create a fake bd that logs its args and returns valid JSON
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+# Return empty JSON array for list commands, success for others
+case "$1" in
+  list) echo "[]" ;;
+  update) exit 0 ;;
+  *) echo "{}" ;;
+esac
+`, argsLog)
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsLog
+}
+
+func TestFindCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	_, _ = findCleanupWisp(workDir, "nux")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --label (singular), NOT --labels (plural)
+	if !contains(got, "--label") {
+		t.Errorf("findCleanupWisp: expected --label flag, got: %s", got)
+	}
+	if contains(got, "--labels") {
+		t.Errorf("findCleanupWisp: must not use --labels (plural), got: %s", got)
+	}
+
+	// Must NOT use --ephemeral (invalid for bd list)
+	if contains(got, "--ephemeral") {
+		t.Errorf("findCleanupWisp: must not use --ephemeral (invalid for bd list), got: %s", got)
+	}
+
+	// Must include the polecat label filter
+	if !contains(got, "polecat:nux") {
+		t.Errorf("findCleanupWisp: expected polecat:nux label, got: %s", got)
+	}
+}
+
+func TestFindAnyCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	_ = findAnyCleanupWisp(workDir, "bravo")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --label (singular), NOT --labels (plural)
+	if !contains(got, "--label") {
+		t.Errorf("findAnyCleanupWisp: expected --label flag, got: %s", got)
+	}
+	if contains(got, "--labels") {
+		t.Errorf("findAnyCleanupWisp: must not use --labels (plural), got: %s", got)
+	}
+
+	// Must NOT use --ephemeral (invalid for bd list)
+	if contains(got, "--ephemeral") {
+		t.Errorf("findAnyCleanupWisp: must not use --ephemeral (invalid for bd list), got: %s", got)
+	}
+
+	// Must include the polecat label filter
+	if !contains(got, "polecat:bravo") {
+		t.Errorf("findAnyCleanupWisp: expected polecat:bravo label, got: %s", got)
+	}
+}
+
+func TestUpdateCleanupWispState_UsesCorrectBdUpdateFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	// UpdateCleanupWispState first calls "bd show <id> --json", then "bd update".
+	// Our fake bd returns "{}" for show, which means extractPolecatFromJSON
+	// returns "" → polecatName defaults to "unknown". Then it calls bd update.
+	_ = UpdateCleanupWispState(workDir, "gt-wisp-abc", "merged")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --set-labels, NOT --labels
+	if !contains(got, "--set-labels") {
+		t.Errorf("UpdateCleanupWispState: expected --set-labels flag, got: %s", got)
+	}
+	if contains(got, " --labels ") {
+		t.Errorf("UpdateCleanupWispState: must not use --labels (invalid for bd update), got: %s", got)
+	}
+}
+
+// contains checks if s contains substr. Using a helper to avoid importing strings
+// in tests (the production code already imports it).
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestExtractDoneIntent_Valid(t *testing.T) {
 	ts := time.Now().Add(-45 * time.Second)
 	labels := []string{
