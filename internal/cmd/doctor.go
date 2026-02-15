@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,85 +18,33 @@ var (
 	doctorRig             string
 	doctorRestartSessions bool
 	doctorSlow            string
+	doctorDryRun          bool
 )
 
 var doctorCmd = &cobra.Command{
-	Use:     "doctor",
+	Use:     "doctor [check-name | category]...",
 	GroupID: GroupDiag,
 	Short:   "Run health checks on the workspace",
 	Long: `Run diagnostic checks on the Gas Town workspace.
 
-Doctor checks for common configuration issues, missing files,
-and other problems that could affect workspace operation.
+Run all checks (default), specific checks by name, or all checks in a category.
 
-Workspace checks:
-  - town-config-exists       Check mayor/town.json exists
-  - town-config-valid        Check mayor/town.json is valid
-  - rigs-registry-exists     Check mayor/rigs.json exists (fixable)
-  - rigs-registry-valid      Check registered rigs exist (fixable)
-  - mayor-exists             Check mayor/ directory structure
-
-Town root protection:
-  - town-git                 Verify town root is under version control
-  - town-root-branch         Verify town root is on main branch (fixable)
-  - pre-checkout-hook        Verify pre-checkout hook prevents branch switches (fixable)
-
-Infrastructure checks:
-  - stale-binary             Check if gt binary is up to date with repo
-  - daemon                   Check if daemon is running (fixable)
-  - repo-fingerprint         Check database has valid repo fingerprint (fixable)
-  - boot-health              Check Boot watchdog health (vet mode)
-
-Cleanup checks (fixable):
-  - orphan-sessions          Detect orphaned tmux sessions
-  - orphan-processes         Detect orphaned Claude processes
-  - wisp-gc                  Detect and clean abandoned wisps (>1h)
-  - stale-beads-redirect     Detect stale files in .beads directories with redirects
-
-Clone divergence checks:
-  - persistent-role-branches Detect crew/witness/refinery not on main
-  - clone-divergence         Detect clones significantly behind origin/main
-  - default-branch-all-rigs  Verify default_branch exists on remote for all rigs
-  - worktree-gitdir-valid    Verify worktree .git files reference existing paths (fixable)
-
-Crew workspace checks:
-  - crew-state               Validate crew worker state.json files (fixable)
-  - crew-worktrees           Detect stale cross-rig worktrees (fixable)
-
-Migration checks (fixable):
-  - sparse-checkout          Detect legacy sparse checkout across all rigs
-
-Rig checks (with --rig flag):
-  - rig-is-git-repo          Verify rig is a valid git repository
-  - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
-  - bare-repo-exists         Verify .repo.git exists when worktrees depend on it (fixable)
-  - witness-exists           Verify witness/ structure exists (fixable)
-  - refinery-exists          Verify refinery/ structure exists (fixable)
-  - mayor-clone-exists       Verify mayor/rig/ clone exists (fixable)
-  - polecat-clones-valid     Verify polecat directories are valid clones
-  - beads-config-valid       Verify beads configuration (fixable)
-
-Routing checks (fixable):
-  - routes-config            Check beads routing configuration
-  - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
-  - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
-
-Session hook checks:
-  - session-hooks            Check settings.json use session-start.sh
-  - claude-settings          Check Claude settings.json match templates (fixable)
-  - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
-
-Patrol checks:
-  - patrol-molecules-exist   Verify patrol molecules exist
-  - patrol-hooks-wired       Verify daemon triggers patrols
-  - patrol-not-stuck         Detect stale wisps (>1h)
-  - patrol-plugins-accessible Verify plugin directories
-  - patrol-roles-have-prompts Verify role prompts exist
+Examples:
+  gt doctor                                  # Run all checks
+  gt doctor orphan-sessions                  # Run one check
+  gt doctor orphan-sessions wisp-gc          # Run multiple checks
+  gt doctor cleanup                          # Run all Cleanup checks
+  gt doctor orphan-sessions --fix            # Run and fix one check
+  gt doctor orphan-sessions --fix --dry-run  # Preview fixes
+  gt doctor list                             # Show available checks
 
 Use --fix to attempt automatic fixes for issues that support it.
 Use --rig to check a specific rig instead of the entire workspace.
-Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`,
-	RunE: runDoctor,
+Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).
+Use --dry-run with --fix to preview what would be fixed without applying changes.`,
+	Args:              cobra.ArbitraryArgs,
+	RunE:              runDoctor,
+	ValidArgsFunction: completeDoctorArgs,
 }
 
 func init() {
@@ -106,7 +55,40 @@ func init() {
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
 	// Allow --slow without a value (uses default 1s)
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
+	doctorCmd.Flags().BoolVar(&doctorDryRun, "dry-run", false, "Preview fixes without applying (use with --fix)")
 	rootCmd.AddCommand(doctorCmd)
+}
+
+// completeDoctorArgs provides tab completion for check names and category names.
+func completeDoctorArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	baseChecks, rigChecks := allDoctorChecks()
+	var completions []string
+	seen := make(map[string]bool)
+
+	for _, c := range baseChecks {
+		if !seen[c.Name()] {
+			completions = append(completions, c.Name())
+			seen[c.Name()] = true
+		}
+	}
+	if doctorRig != "" {
+		for _, c := range rigChecks {
+			if !seen[c.Name()] {
+				completions = append(completions, c.Name())
+				seen[c.Name()] = true
+			}
+		}
+	}
+
+	for _, cat := range doctor.CategoryOrder {
+		lower := strings.ToLower(cat)
+		if !seen[lower] {
+			completions = append(completions, lower)
+			seen[lower] = true
+		}
+	}
+
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -228,10 +210,51 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		d.RegisterAll(doctor.RigChecks()...)
 	}
 
+	allChecks := d.Checks()
+
+	// Handle reserved word "all"
+	for _, arg := range args {
+		if strings.EqualFold(arg, "all") {
+			return fmt.Errorf("unknown check %q. Run \"gt doctor\" with no arguments to run all checks", "all")
+		}
+	}
+
+	// Filter checks if args provided
+	isTargeted := len(args) > 0
+	var checks []doctor.Check
+	var categoryName string
+
+	if isTargeted {
+		result := doctor.FilterChecks(allChecks, args)
+
+		if len(result.Unmatched) > 0 {
+			return formatUnmatchedError(allChecks, result.Unmatched)
+		}
+
+		checks = result.Matched
+
+		// Detect category mode: single arg that matched multiple checks
+		if len(args) == 1 && len(checks) > 1 {
+			for _, cat := range doctor.CategoryOrder {
+				if strings.EqualFold(cat, args[0]) {
+					categoryName = cat
+					break
+				}
+			}
+		}
+	} else {
+		checks = allChecks
+	}
+
+	isSingleCheck := isTargeted && len(checks) == 1
+
+	// Create filtered doctor with only selected checks
+	filtered := doctor.NewDoctor()
+	filtered.RegisterAll(checks...)
+
 	// Parse slow threshold (0 = disabled)
 	var slowThreshold time.Duration
 	if doctorSlow != "" {
-		var err error
 		slowThreshold, err = time.ParseDuration(doctorSlow)
 		if err != nil {
 			return fmt.Errorf("invalid --slow duration %q: %w", doctorSlow, err)
@@ -241,17 +264,61 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Detect TTY for output formatting
 	isTTY := ui.IsTerminal()
 
-	// Run checks with streaming output
-	fmt.Println() // Initial blank line
-	var report *doctor.Report
-	if doctorFix {
-		report = d.FixStreaming(ctx, os.Stdout, slowThreshold, isTTY)
-	} else {
-		report = d.RunStreaming(ctx, os.Stdout, slowThreshold, isTTY)
+	// Print header
+	fmt.Println()
+	if isTargeted {
+		header := "Running: "
+		if isSingleCheck {
+			header += checks[0].Name()
+		} else if categoryName != "" {
+			header += fmt.Sprintf("%s (%d checks)", categoryName, len(checks))
+		} else {
+			header += fmt.Sprintf("%d checks", len(checks))
+		}
+		if doctorFix && doctorDryRun {
+			header += " (dry run)"
+		}
+		fmt.Println(header)
 	}
 
-	// Print summary (checks were already printed during streaming)
-	report.PrintSummaryOnly(os.Stdout, doctorVerbose, slowThreshold)
+	// Execute checks
+	var report *doctor.Report
+	if doctorFix && !doctorDryRun {
+		report = filtered.FixStreaming(ctx, os.Stdout, slowThreshold, isTTY)
+	} else {
+		// Normal run and dry-run both use RunStreaming (dry-run skips Fix)
+		report = filtered.RunStreaming(ctx, os.Stdout, slowThreshold, isTTY)
+	}
+
+	// Dry-run: show "Would fix:" hints for fixable checks with issues
+	if doctorFix && doctorDryRun {
+		printDryRunHints(report, checks, isTTY)
+	}
+
+	// Single check + --fix on non-fixable: add hint
+	if isSingleCheck && doctorFix && !doctorDryRun && !checks[0].CanFix() {
+		for _, r := range report.Checks {
+			if r.Status != doctor.StatusOK {
+				if isTTY {
+					fmt.Fprintf(os.Stdout, "     %s%s\n",
+						ui.MutedStyle.Render(ui.TreeLast),
+						ui.RenderMuted("This check does not support auto-fix."))
+				} else {
+					fmt.Fprintln(os.Stdout, "     This check does not support auto-fix.")
+				}
+			}
+		}
+	}
+
+	// Print summary (skip for single check runs)
+	if !isSingleCheck {
+		report.PrintSummaryOnly(os.Stdout, doctorVerbose, slowThreshold)
+	}
+
+	// Dry-run always exits 0 (no action taken)
+	if doctorFix && doctorDryRun {
+		return nil
+	}
 
 	// Exit with error code if there are errors
 	if report.HasErrors() {
@@ -261,3 +328,58 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// formatUnmatchedError builds an error message for unknown check names with suggestions.
+func formatUnmatchedError(allChecks []doctor.Check, unmatched []string) error {
+	var b strings.Builder
+
+	if len(unmatched) == 1 {
+		name := unmatched[0]
+		fmt.Fprintf(&b, "unknown check %q", name)
+
+		suggestions := doctor.SuggestCheck(allChecks, name)
+		if len(suggestions) == 1 {
+			fmt.Fprintf(&b, "\n\n  Did you mean: %s?", suggestions[0])
+		} else if len(suggestions) > 1 {
+			fmt.Fprintf(&b, "\n\n  Did you mean one of: %s?", strings.Join(suggestions, ", "))
+		}
+	} else {
+		quoted := make([]string, len(unmatched))
+		for i, name := range unmatched {
+			quoted[i] = fmt.Sprintf("%q", name)
+		}
+		fmt.Fprintf(&b, "unknown checks %s", strings.Join(quoted, ", "))
+	}
+
+	b.WriteString("\n\n  Run \"gt doctor list\" to see all available checks.")
+	if doctorRig == "" {
+		b.WriteString("\n  Some checks require --rig. Run \"gt doctor list --rig <name>\".")
+	}
+
+	return fmt.Errorf("%s", b.String())
+}
+
+// printDryRunHints shows "Would fix:" lines for fixable checks that have issues.
+func printDryRunHints(report *doctor.Report, checks []doctor.Check, isTTY bool) {
+	fixable := make(map[string]bool)
+	for _, c := range checks {
+		if c.CanFix() {
+			fixable[c.Name()] = true
+		}
+	}
+
+	for _, result := range report.Checks {
+		if result.Status != doctor.StatusOK && fixable[result.Name] {
+			hint := fmt.Sprintf("Would fix: %s", result.Name)
+			if result.Message != "" {
+				hint = fmt.Sprintf("Would fix: %s", result.Message)
+			}
+			if isTTY {
+				fmt.Fprintf(os.Stdout, "     %s%s\n",
+					ui.MutedStyle.Render(ui.TreeLast),
+					ui.RenderMuted(hint))
+			} else {
+				fmt.Fprintf(os.Stdout, "     %s\n", hint)
+			}
+		}
+	}
+}
