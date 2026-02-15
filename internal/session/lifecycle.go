@@ -7,7 +7,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -147,7 +147,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 	if settingsDir == "" {
 		settingsDir = cfg.WorkDir
 	}
-	if err := runtimelifecycle.EnsureSettingsForRole(settingsDir, cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
+	if err := lifecycle.EnsureSettingsForRole(settingsDir, cfg.WorkDir, cfg.Role, runtimeConfig); err != nil {
 		return nil, fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -228,7 +228,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 
 	// 11. Ready delay.
 	if cfg.ReadyDelay {
-		runtimelifecycle.SleepForReadyDelay(runtimeConfig)
+		lifecycle.SleepForReadyDelay(runtimeConfig)
 	}
 
 	// 12. Verify session survived startup.
@@ -325,7 +325,7 @@ func buildCommand(cfg SessionConfig, prompt string) (string, error) {
 // Exposed for callers that need to call it independently (e.g., when
 // using a pre-built StartResult).
 func ReadyDelay(rc *config.RuntimeConfig) {
-	runtimelifecycle.SleepForReadyDelay(rc)
+	lifecycle.SleepForReadyDelay(rc)
 }
 
 // ShutdownDelay is the standard delay after session creation.

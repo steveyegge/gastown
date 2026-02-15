@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
-	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -123,7 +123,7 @@ func RunStartupBootstrapIfNeeded(t startupNudger, sessionID, role, startupPrompt
 	if !plan.SendPromptNudge && !plan.RunPrimeFallback {
 		return nil
 	}
-	runtimelifecycle.SleepForReadyDelay(rc)
+	lifecycle.SleepForReadyDelay(rc)
 	return runStartupBootstrapWithPlan(t, sessionID, role, startupPrompt, rc, plan)
 }
 

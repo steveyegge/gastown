@@ -14,7 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -126,7 +126,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
 	refinerySettingsDir := config.RoleSettingsDir("refinery", m.rig.Path)
-	if err := runtimelifecycle.EnsureSettingsForRole(refinerySettingsDir, refineryRigDir, "refinery", runtimeConfig); err != nil {
+	if err := lifecycle.EnsureSettingsForRole(refinerySettingsDir, refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

@@ -14,7 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
-	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -234,7 +234,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	addTownRoot := filepath.Dir(m.rig.Path)
 	addRuntimeConfig := config.ResolveRoleAgentConfig("crew", addTownRoot, m.rig.Path)
 	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
-	if err := runtimelifecycle.EnsureSettingsForRole(crewSettingsDir, crewPath, "crew", addRuntimeConfig); err != nil {
+	if err := lifecycle.EnsureSettingsForRole(crewSettingsDir, crewPath, "crew", addRuntimeConfig); err != nil {
 		// Non-fatal - log warning but continue
 		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
@@ -612,7 +612,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
 	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
-	if err := runtimelifecycle.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
+	if err := lifecycle.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

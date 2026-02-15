@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
-	runtimelifecycle "github.com/steveyegge/gastown/internal/lifecycle"
+	"github.com/steveyegge/gastown/internal/lifecycle"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -699,7 +699,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				// Town-root .claude/settings{.local}.json → recreate at mayor/.claude/
 				if err := os.MkdirAll(mayorDir, 0755); err == nil {
 					runtimeConfig := config.ResolveRoleAgentConfig("mayor", ctx.TownRoot, mayorDir)
-					_ = runtimelifecycle.EnsureSettingsForRole(mayorDir, mayorDir, "mayor", runtimeConfig)
+					_ = lifecycle.EnsureSettingsForRole(mayorDir, mayorDir, "mayor", runtimeConfig)
 				}
 			}
 
@@ -729,7 +729,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			}
 		}
 		runtimeConfig := config.ResolveRoleAgentConfig(sf.agentType, ctx.TownRoot, rigPath)
-		if err := runtimelifecycle.EnsureSettingsForRole(settingsDir, workDir, sf.agentType, runtimeConfig); err != nil {
+		if err := lifecycle.EnsureSettingsForRole(settingsDir, workDir, sf.agentType, runtimeConfig); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to recreate settings for %s: %v", sf.path, err))
 			continue
 		}
