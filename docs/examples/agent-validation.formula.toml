@@ -42,7 +42,20 @@ which pi       # Should resolve to ~/.bun/bin/pi
 which claude   # Should resolve to ~/.local/bin/claude
 ```
 
-**4. After slinging, run the mayor-side validation protocol:**
+**4. Clean up stale beads before slinging:**
+Polecat names are recycled from the namepool. If a previous polecat with the
+same name left beads in HOOKED or IN_PROGRESS state, the new polecat will pick
+those up instead of the formula wisps.
+
+```bash
+# Check what name will be allocated (or sling and note the name)
+# Then close any stale beads assigned to that polecat:
+bd list --status=open --assignee=sfgastown/polecats/<name> 2>/dev/null
+# Close any that appear:
+bd close <stale-id> --reason "stale bead from previous polecat session"
+```
+
+**5. Sling and run the mayor-side validation protocol:**
 
 ```bash
 # 1. Sling the formula
