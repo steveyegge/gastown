@@ -426,6 +426,24 @@ func (b *Beads) Ready() ([]*Issue, error) {
 	return issues, nil
 }
 
+// ReadyForMol returns ready steps within a specific molecule.
+// Delegates to bd ready --mol which uses beads' canonical blocking semantics
+// (blocked_issues_cache), handling all blocking types, transitive propagation,
+// and conditional-blocks resolution.
+func (b *Beads) ReadyForMol(moleculeID string) ([]*Issue, error) {
+	out, err := b.run("ready", "--mol", moleculeID, "--json", "-n", "100")
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd ready --mol output: %w", err)
+	}
+
+	return issues, nil
+}
+
 // ReadyWithType returns ready issues filtered by label.
 // Uses bd ready --label flag for server-side filtering.
 // The issueType is converted to a gt:<type> label (e.g., "molecule" -> "gt:molecule").

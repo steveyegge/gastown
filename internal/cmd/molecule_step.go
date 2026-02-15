@@ -203,8 +203,15 @@ func extractMoleculeIDFromStep(stepID string) string {
 // Returns (readySteps, allComplete, error).
 // If all steps are complete, returns (nil, true, nil).
 // If no steps are ready but some are blocked/in_progress, returns (nil, false, nil).
+//
+// Delegates readiness calculation to beads' canonical bd ready --mol command,
+// which uses the materialized blocked_issues_cache for correct handling of all
+// blocking types (blocks, conditional-blocks, waits-for), transitive propagation,
+// and cross-rig dependencies. See #1420.
 func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool, error) {
-	// Get all children of the molecule
+	// Check completion: list all children to detect "all closed" state.
+	// bd ready --mol only returns open+unblocked steps, so it can't distinguish
+	// "all complete" from "all blocked".
 	children, err := b.List(beads.ListOptions{
 		Parent:   moleculeID,
 		Status:   "all",
@@ -218,63 +225,25 @@ func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool,
 		return nil, true, nil // No steps = complete
 	}
 
-	// Build set of closed step IDs and collect open step IDs
-	closedIDs := make(map[string]bool)
-	var openStepIDs []string
-	hasNonClosedSteps := false
-
+	// Check if all steps are closed
+	allClosed := true
 	for _, child := range children {
-		switch child.Status {
-		case "closed":
-			closedIDs[child.ID] = true
-		case "open":
-			openStepIDs = append(openStepIDs, child.ID)
-			hasNonClosedSteps = true
-		default:
-			hasNonClosedSteps = true
+		if child.Status != "closed" {
+			allClosed = false
+			break
 		}
 	}
-
-	// Check if all complete
-	if !hasNonClosedSteps {
+	if allClosed {
 		return nil, true, nil
 	}
 
-	// No open steps to check
-	if len(openStepIDs) == 0 {
-		return nil, false, nil
-	}
-
-	// Fetch full details for open steps to get dependency info
-	openStepsMap, err := b.ShowMultiple(openStepIDs)
+	// Delegate readiness to beads' canonical ready-work semantics.
+	// This replaces manual dependency walking with isBlockingDepType,
+	// using beads' blocked_issues_cache which handles all blocking types,
+	// transitive propagation, and conditional-blocks resolution.
+	readySteps, err := b.ReadyForMol(moleculeID)
 	if err != nil {
-		return nil, false, fmt.Errorf("fetching step details: %w", err)
-	}
-
-	// Find ALL ready steps (open steps with all dependencies closed)
-	var readySteps []*beads.Issue
-	for _, stepID := range openStepIDs {
-		step, ok := openStepsMap[stepID]
-		if !ok {
-			continue
-		}
-
-		allDepsClosed := true
-		hasBlockingDeps := false
-		for _, dep := range step.Dependencies {
-			if !isBlockingDepType(dep.DependencyType) {
-				continue
-			}
-			hasBlockingDeps = true
-			if !closedIDs[dep.ID] {
-				allDepsClosed = false
-				break
-			}
-		}
-
-		if !hasBlockingDeps || allDepsClosed {
-			readySteps = append(readySteps, step)
-		}
+		return nil, false, fmt.Errorf("finding ready steps: %w", err)
 	}
 
 	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
