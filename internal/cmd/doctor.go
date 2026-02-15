@@ -394,7 +394,14 @@ func formatUnmatchedError(allChecks []doctor.Check, unmatched []string) error {
 		fmt.Fprintf(&b, "unknown checks %s", strings.Join(quoted, ", "))
 	}
 
-	b.WriteString("\n\n  Run \"gt doctor list\" to see all available checks.")
+	// Show available categories
+	cats := make([]string, len(doctor.CategoryOrder))
+	for i, cat := range doctor.CategoryOrder {
+		cats[i] = strings.ToLower(cat)
+	}
+	fmt.Fprintf(&b, "\n\n  Available categories: %s", strings.Join(cats, ", "))
+
+	b.WriteString("\n  Run \"gt doctor list\" to see all available checks.")
 	if doctorRig == "" {
 		b.WriteString("\n  Some checks require --rig. Run \"gt doctor list --rig <name>\".")
 	}
