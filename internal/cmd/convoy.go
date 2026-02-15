@@ -253,18 +253,17 @@ Examples:
 
 var convoyStrandedCmd = &cobra.Command{
 	Use:   "stranded",
-	Short: "Find stranded convoys with ready work but no workers",
-	Long: `Find convoys that have ready issues but no workers processing them.
+	Short: "Find stranded convoys (ready work or empty) needing attention",
+	Long: `Find convoys that have ready issues but no workers processing them,
+or empty convoys (0 tracked issues) that need cleanup.
 
 A convoy is "stranded" when:
-- Convoy is open
-- Has tracked issues where:
-  - status = open (not in_progress, not closed)
-  - not blocked (all dependencies met)
-  - no assignee OR assignee session is dead
+- Convoy is open AND either:
+  - Has tracked issues that are ready but unassigned, OR
+  - Has 0 tracked issues (empty — needs auto-close via convoy check)
 
-Use this to detect convoys that need feeding. The Deacon patrol runs this
-periodically and dispatches dogs to feed stranded convoys.
+Use this to detect convoys that need feeding or cleanup. The Deacon patrol
+runs this periodically and dispatches dogs to feed stranded convoys.
 
 Examples:
   gt convoy stranded              # Show stranded convoys
@@ -910,16 +909,41 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Found %d stranded convoy(s):\n\n", style.Warning.Render("⚠"), len(stranded))
 	for _, s := range stranded {
 		fmt.Printf("  🚚 %s: %s\n", s.ID, s.Title)
-		fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
-		for _, issueID := range s.ReadyIssues {
-			fmt.Printf("       • %s\n", issueID)
+		if s.ReadyCount == 0 {
+			fmt.Printf("     Empty convoy (0 tracked issues) — needs cleanup\n")
+		} else {
+			fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
+			for _, issueID := range s.ReadyIssues {
+				fmt.Printf("       • %s\n", issueID)
+			}
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("To feed stranded convoys, run:")
+	// Separate feed advice (convoys with ready work) from cleanup advice (empty convoys).
+	var feedable, empty []strandedConvoyInfo
 	for _, s := range stranded {
-		fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+		if s.ReadyCount > 0 {
+			feedable = append(feedable, s)
+		} else {
+			empty = append(empty, s)
+		}
+	}
+
+	if len(feedable) > 0 {
+		fmt.Println("To feed stranded convoys, run:")
+		for _, s := range feedable {
+			fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+		}
+	}
+	if len(empty) > 0 {
+		if len(feedable) > 0 {
+			fmt.Println()
+		}
+		fmt.Println("To close empty convoys, run:")
+		for _, s := range empty {
+			fmt.Printf("  gt convoy check %s\n", s.ID)
+		}
 	}
 	fmt.Println()
 	fmt.Println(style.Dim.Render("  Note: Pool dispatch auto-creates dogs if pool is under capacity."))

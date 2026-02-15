@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -138,5 +139,119 @@ func TestFindStrandedConvoys_EmptyConvoyFlagged(t *testing.T) {
 	}
 	if len(s.ReadyIssues) != 0 {
 		t.Errorf("stranded ReadyIssues = %v, want empty", s.ReadyIssues)
+	}
+}
+
+// TestFindStrandedConvoys_MixedConvoys verifies that findStrandedConvoys
+// correctly returns both empty (cleanup) and feedable (has ready issues)
+// convoys, and that the JSON output shape is correct for each type.
+func TestFindStrandedConvoys_MixedConvoys(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping convoy test on Windows")
+	}
+
+	binDir := t.TempDir()
+	townRoot := t.TempDir()
+	townBeads := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatalf("mkdir townBeads: %v", err)
+	}
+
+	bdPath := filepath.Join(binDir, "bd")
+
+	// Mock bd that returns two convoys: one empty, one with a ready issue.
+	// Uses positional arg parsing to dispatch on convoy ID for dep commands.
+	script := `#!/bin/sh
+# Collect positional args (skip flags)
+i=0
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) eval "pos$i=\"$arg\""; i=$((i+1)) ;;
+  esac
+done
+
+case "$pos0" in
+  list)
+    echo '[{"id":"hq-empty-mix","title":"Empty convoy"},{"id":"hq-feed-mix","title":"Feedable convoy"}]'
+    exit 0
+    ;;
+  dep)
+    # pos2 is the convoy ID (dep list <convoy-id> ...)
+    case "$pos2" in
+      hq-empty-mix)
+        echo '[]'
+        ;;
+      hq-feed-mix)
+        echo '[{"id":"gt-ready1","title":"Ready issue","status":"open","issue_type":"task","assignee":"","dependency_type":"tracks"}]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    exit 0
+    ;;
+  show)
+    # Return issue details for any show query
+    echo '[{"id":"gt-ready1","title":"Ready issue","status":"open","issue_type":"task","assignee":"","blocked_by":[],"blocked_by_count":0,"dependencies":[]}]'
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stranded, err := findStrandedConvoys(townBeads)
+	if err != nil {
+		t.Fatalf("findStrandedConvoys() error: %v", err)
+	}
+
+	if len(stranded) != 2 {
+		t.Fatalf("expected 2 stranded convoys, got %d", len(stranded))
+	}
+
+	// Build a map for easier assertions
+	byID := map[string]strandedConvoyInfo{}
+	for _, s := range stranded {
+		byID[s.ID] = s
+	}
+
+	// Verify empty convoy
+	empty, ok := byID["hq-empty-mix"]
+	if !ok {
+		t.Fatal("missing empty convoy hq-empty-mix in stranded results")
+	}
+	if empty.ReadyCount != 0 {
+		t.Errorf("empty convoy ReadyCount = %d, want 0", empty.ReadyCount)
+	}
+	if len(empty.ReadyIssues) != 0 {
+		t.Errorf("empty convoy ReadyIssues = %v, want empty", empty.ReadyIssues)
+	}
+
+	// Verify feedable convoy
+	feedable, ok := byID["hq-feed-mix"]
+	if !ok {
+		t.Fatal("missing feedable convoy hq-feed-mix in stranded results")
+	}
+	if feedable.ReadyCount != 1 {
+		t.Errorf("feedable convoy ReadyCount = %d, want 1", feedable.ReadyCount)
+	}
+	if len(feedable.ReadyIssues) != 1 || feedable.ReadyIssues[0] != "gt-ready1" {
+		t.Errorf("feedable convoy ReadyIssues = %v, want [gt-ready1]", feedable.ReadyIssues)
+	}
+
+	// Verify JSON encoding shape — empty slice encodes as [] not null
+	jsonBytes, err := json.Marshal(stranded)
+	if err != nil {
+		t.Fatalf("json.Marshal(stranded): %v", err)
+	}
+	jsonStr := string(jsonBytes)
+	if strings.Contains(jsonStr, `"ready_issues":null`) {
+		t.Error("JSON output contains ready_issues:null — should be [] for empty convoys")
 	}
 }
