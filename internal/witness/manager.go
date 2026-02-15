@@ -245,7 +245,7 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		Recipient: fmt.Sprintf("%s/witness", rigName),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.", runtimeConfig)
+	}, "Run `gt prime --hook` and begin patrol.", runtimeConfig)
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), initialPrompt, nil
 	}
