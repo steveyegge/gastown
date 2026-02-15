@@ -1260,6 +1260,101 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 	return result
 }
 
+// StalledResult represents a single stalled polecat detection.
+type StalledResult struct {
+	PolecatName string // e.g., "alpha"
+	StallType   string // "bypass-permissions", "unknown-prompt"
+	Action      string // "auto-dismissed", "escalated"
+	Error       error
+}
+
+// DetectStalledPolecatsResult holds aggregate results.
+type DetectStalledPolecatsResult struct {
+	Checked int             // Number of live polecats inspected
+	Stalled []StalledResult // Stalled polecats found and processed
+	Errors  []error         // Transient errors
+}
+
+// DetectStalledPolecats checks live polecat sessions for agents stuck on
+// interactive prompts (e.g., the "Bypass Permissions mode" startup warning).
+// Unlike zombie detection which looks for dead sessions/agents, this targets
+// alive-but-stuck agents that will never make progress without intervention.
+//
+// For each qualifying polecat (live session + alive agent):
+//   - Captures pane content (last 30 lines)
+//   - Checks for known stall patterns
+//   - Auto-dismisses known prompts (bypass-permissions) or escalates
+//
+// This is idempotent: calling AcceptBypassPermissionsWarning on a non-stalled
+// session is harmless, so no dedup or TOCTOU guards are needed.
+func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult {
+	result := &DetectStalledPolecatsResult{}
+
+	// Find town root for path resolution
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	// List all polecat directories
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return result // No polecats directory
+	}
+
+	t := tmux.NewTmux()
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		polecatName := entry.Name()
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		result.Checked++
+
+		// Only check live sessions with alive agents (the opposite of zombie detection)
+		sessionAlive, err := t.HasSession(sessionName)
+		if err != nil {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking session %s: %w", sessionName, err))
+			continue
+		}
+		if !sessionAlive {
+			continue // Dead session — zombie detection handles this
+		}
+		if !t.IsAgentAlive(sessionName) {
+			continue // Dead agent — zombie detection handles this
+		}
+
+		// Agent is alive. Capture pane to check for known stall patterns.
+		content, err := t.CapturePane(sessionName, 30)
+		if err != nil {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("capturing pane for %s: %w", sessionName, err))
+			continue
+		}
+
+		// Check for bypass-permissions prompt
+		if strings.Contains(content, "Bypass Permissions mode") {
+			stalled := StalledResult{
+				PolecatName: polecatName,
+				StallType:   "bypass-permissions",
+			}
+			if err := t.AcceptBypassPermissionsWarning(sessionName); err != nil {
+				stalled.Action = "escalated"
+				stalled.Error = fmt.Errorf("auto-dismiss failed: %w", err)
+			} else {
+				stalled.Action = "auto-dismissed"
+			}
+			result.Stalled = append(result.Stalled, stalled)
+		}
+	}
+
+	return result
+}
+
 // getAgentBeadState reads agent_state and hook_bead from an agent bead.
 // Returns the agent_state string and hook_bead ID.
 func getAgentBeadState(workDir, agentBeadID string) (agentState, hookBead string) {

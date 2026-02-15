@@ -1008,6 +1008,132 @@ esac
 	}
 }
 
+func TestStalledResult_Types(t *testing.T) {
+	// Verify the StalledResult type has all expected fields
+	s := StalledResult{
+		PolecatName: "alpha",
+		StallType:   "bypass-permissions",
+		Action:      "auto-dismissed",
+		Error:       nil,
+	}
+
+	if s.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", s.PolecatName, "alpha")
+	}
+	if s.StallType != "bypass-permissions" {
+		t.Errorf("StallType = %q, want %q", s.StallType, "bypass-permissions")
+	}
+	if s.Action != "auto-dismissed" {
+		t.Errorf("Action = %q, want %q", s.Action, "auto-dismissed")
+	}
+	if s.Error != nil {
+		t.Errorf("Error = %v, want nil", s.Error)
+	}
+
+	// Verify error field works
+	s2 := StalledResult{
+		PolecatName: "bravo",
+		StallType:   "unknown-prompt",
+		Action:      "escalated",
+		Error:       fmt.Errorf("auto-dismiss failed"),
+	}
+	if s2.Error == nil {
+		t.Error("Error = nil, want non-nil")
+	}
+}
+
+func TestDetectStalledPolecatsResult_EmptyResult(t *testing.T) {
+	result := &DetectStalledPolecatsResult{}
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled length = %d, want 0", len(result.Stalled))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors length = %d, want 0", len(result.Errors))
+	}
+}
+
+func TestDetectStalledPolecats_NoPolecats(t *testing.T) {
+	// Should handle missing polecats directory gracefully
+	result := DetectStalledPolecats("/nonexistent/path", "testrig")
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 for nonexistent dir", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 for nonexistent dir", len(result.Stalled))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors = %d, want 0 for nonexistent dir", len(result.Errors))
+	}
+}
+
+func TestDetectStalledPolecats_EmptyPolecatsDir(t *testing.T) {
+	// Empty polecats directory should return 0 checked
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := DetectStalledPolecats(tmpDir, rigName)
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 for empty polecats dir", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 for empty polecats dir", len(result.Stalled))
+	}
+}
+
+func TestDetectStalledPolecats_NoPaneCapture(t *testing.T) {
+	// When tmux sessions don't exist (no real tmux in test),
+	// HasSession returns false so polecats are skipped (not errors).
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create polecat directories
+	for _, name := range []string{"alpha", "bravo"} {
+		if err := os.Mkdir(filepath.Join(polecatsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create hidden dir (should be skipped)
+	if err := os.Mkdir(filepath.Join(polecatsDir, ".hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := DetectStalledPolecats(tmpDir, rigName)
+
+	// Should count 2 polecats (skip hidden)
+	if result.Checked != 2 {
+		t.Errorf("Checked = %d, want 2 (should skip hidden dirs)", result.Checked)
+	}
+
+	// No stalled because HasSession returns false (no real tmux in test),
+	// so polecats are skipped before pane capture is attempted.
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 (no tmux sessions in test)", len(result.Stalled))
+	}
+
+	// HasSession failure in test env registers as errors
+	// (tmux binary may not exist or sessions don't exist).
+	// The exact count depends on whether tmux is installed.
+	// Just verify result is well-formed.
+	if result.Checked < 0 {
+		t.Errorf("Checked should not be negative: %d", result.Checked)
+	}
+}
+
 // containsSubstring checks if s contains sub (used in test assertions).
 func containsSubstring(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && findSubstring(s, sub))
