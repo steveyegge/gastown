@@ -47,6 +47,12 @@ type Curator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
+	startOnce       sync.Once // prevents concurrent Start() calls from spawning multiple goroutines
+
+	// feedMu guards in-process access to the feed file. The flock in
+	// readRecentFeedEvents/writeFeedEvent coordinates across processes;
+	// this mutex coordinates goroutines within the same process.
+	feedMu sync.Mutex
 
 	// Configurable deduplication/aggregation settings (from TownSettings.FeedCurator)
 	doneDedupeWindow     time.Duration
@@ -85,26 +91,31 @@ func NewCurator(townRoot string) *Curator {
 	}
 }
 
-// Start begins the curator goroutine.
+// Start begins the curator goroutine. It is safe to call concurrently;
+// only the first call starts the goroutine — subsequent calls are no-ops.
 func (c *Curator) Start() error {
-	eventsPath := filepath.Join(c.townRoot, events.EventsFile)
+	var startErr error
+	c.startOnce.Do(func() {
+		eventsPath := filepath.Join(c.townRoot, events.EventsFile)
 
-	// Open events file, creating if needed
-	file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return fmt.Errorf("opening events file: %w", err)
-	}
+		// Open events file, creating if needed
+		file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0600)
+		if err != nil {
+			startErr = fmt.Errorf("opening events file: %w", err)
+			return
+		}
 
-	// Seek to end to only process new events
-	if _, err := file.Seek(0, io.SeekEnd); err != nil {
-		_ = file.Close() //nolint:gosec // G104: best effort cleanup on error
-		return fmt.Errorf("seeking to end: %w", err)
-	}
+		// Seek to end to only process new events
+		if _, err := file.Seek(0, io.SeekEnd); err != nil {
+			_ = file.Close() //nolint:gosec // G104: best effort cleanup on error
+			startErr = fmt.Errorf("seeking to end: %w", err)
+			return
+		}
 
-	c.wg.Add(1)
-	go c.run(file)
-
-	return nil
+		c.wg.Add(1)
+		go c.run(file)
+	})
+	return startErr
 }
 
 // Stop gracefully stops the curator.
@@ -200,6 +211,10 @@ const tailReadSize int64 = 1 << 20
 // Reads at most tailReadSize bytes from the end to bound memory usage.
 func (c *Curator) readRecentFeedEvents(window time.Duration) []FeedEvent {
 	feedPath := filepath.Join(c.townRoot, FeedFile)
+
+	// In-process mutex complements the flock (which only coordinates across processes).
+	c.feedMu.Lock()
+	defer c.feedMu.Unlock()
 
 	// Acquire shared read lock to prevent partial reads during concurrent writes
 	fl := flock.New(feedPath + ".lock")
@@ -340,6 +355,10 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	data = append(data, '\n')
 
 	feedPath := filepath.Join(c.townRoot, FeedFile)
+
+	// In-process mutex complements the flock (which only coordinates across processes).
+	c.feedMu.Lock()
+	defer c.feedMu.Unlock()
 
 	// Acquire cross-process file lock to prevent interleaved writes
 	fl := flock.New(feedPath + ".lock")
