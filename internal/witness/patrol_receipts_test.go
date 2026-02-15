@@ -145,3 +145,30 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 		t.Fatalf("decoded evidence.hook_bead = %v, want %q", evidence["hook_bead"], "gt-123")
 	}
 }
+
+func TestBuildPatrolReceipts_DeterministicStaleOrphanOrdering(t *testing.T) {
+	receipts := BuildPatrolReceipts("gastown", &DetectZombiePolecatsResult{
+		Zombies: []ZombieResult{
+			{
+				PolecatName: "atlas",
+				AgentState:  "working",
+				HookBead:    "gt-123",
+				Action:      "auto-nuked",
+			},
+			{
+				PolecatName: "echo",
+				AgentState:  "idle",
+				Action:      "cleanup-wisp-created",
+			},
+		},
+	})
+	if len(receipts) != 2 {
+		t.Fatalf("len(receipts) = %d, want 2", len(receipts))
+	}
+	if receipts[0].Polecat != "atlas" || receipts[0].Verdict != PatrolVerdictStale {
+		t.Fatalf("first receipt = %+v, want polecat=atlas verdict=%q", receipts[0], PatrolVerdictStale)
+	}
+	if receipts[1].Polecat != "echo" || receipts[1].Verdict != PatrolVerdictOrphan {
+		t.Fatalf("second receipt = %+v, want polecat=echo verdict=%q", receipts[1], PatrolVerdictOrphan)
+	}
+}
