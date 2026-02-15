@@ -1434,11 +1434,10 @@ Please re-dispatch to an available polecat.`,
 
 // OrphanedBeadResult contains a single detected orphaned bead.
 type OrphanedBeadResult struct {
-	BeadID       string
-	Assignee     string // Original assignee (e.g. "gastown/polecats/alpha")
-	PolecatName  string // Extracted polecat name
+	BeadID        string
+	Assignee      string // Original assignee (e.g. "gastown/polecats/alpha")
+	PolecatName   string // Extracted polecat name
 	BeadRecovered bool
-	Error        error
 }
 
 // DetectOrphanedBeadsResult contains the results of an orphaned bead scan.
@@ -1448,12 +1447,12 @@ type DetectOrphanedBeadsResult struct {
 	Errors  []error
 }
 
-// DetectOrphanedBeads finds IN_PROGRESS beads assigned to non-existent polecats.
+// DetectOrphanedBeads finds in_progress or hooked beads assigned to non-existent polecats.
 //
 // This complements DetectZombiePolecats which scans FROM polecat directories.
 // If a polecat was nuked and its directory removed, DetectZombiePolecats won't
-// see it, but the bead remains IN_PROGRESS. This function scans FROM beads to
-// catch that case.
+// see it, but the bead remains in_progress/hooked. This function scans FROM
+// beads to catch that case.
 func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOrphanedBeadsResult {
 	result := &DetectOrphanedBeadsResult{}
 
@@ -1462,19 +1461,30 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 		townRoot = workDir
 	}
 
-	// List all in_progress beads
-	output, err := util.ExecWithOutput(workDir, "bd", "list", "--status=in_progress", "--json")
-	if err != nil || output == "" {
-		return result
-	}
-
+	// Scan both in_progress and hooked beads — resetAbandonedBead handles both
+	// states, and orphaned beads can be stuck in either.
 	var beadList []struct {
 		ID       string `json:"id"`
 		Assignee string `json:"assignee"`
 	}
-	if err := json.Unmarshal([]byte(output), &beadList); err != nil {
-		result.Errors = append(result.Errors, fmt.Errorf("parsing in_progress beads: %w", err))
-		return result
+	for _, status := range []string{"in_progress", "hooked"} {
+		output, err := util.ExecWithOutput(workDir, "bd", "list", "--status="+status, "--json", "--limit=0")
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("listing %s beads: %w", status, err))
+			continue
+		}
+		if output == "" {
+			continue
+		}
+		var batch []struct {
+			ID       string `json:"id"`
+			Assignee string `json:"assignee"`
+		}
+		if err := json.Unmarshal([]byte(output), &batch); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("parsing %s beads: %w", status, err))
+			continue
+		}
+		beadList = append(beadList, batch...)
 	}
 
 	t := tmux.NewTmux()
@@ -1491,6 +1501,11 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 		}
 		assigneeRig := parts[0]
 		polecatName := parts[2]
+
+		// Only check beads assigned to polecats in this rig
+		if assigneeRig != rigName {
+			continue
+		}
 		result.Checked++
 
 		// Check if the polecat's tmux session exists
@@ -1508,8 +1523,27 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 		// Session is dead. Also check if polecat directory still exists
 		// (if dir exists, DetectZombiePolecats will handle it)
 		polecatsDir := filepath.Join(townRoot, assigneeRig, "polecats", polecatName)
-		if _, err := os.Stat(polecatsDir); err == nil {
+		if _, statErr := os.Stat(polecatsDir); statErr == nil {
 			continue // Directory exists — DetectZombiePolecats handles this case
+		} else if !os.IsNotExist(statErr) {
+			// Transient error (permission denied, I/O error) — skip to avoid false recovery
+			result.Errors = append(result.Errors,
+				fmt.Errorf("checking polecat dir %s for bead %s: %w", polecatsDir, bead.ID, statErr))
+			continue
+		}
+
+		// Re-check directory and session immediately before reset to narrow the
+		// TOCTOU window — a polecat could have been recreated between the first
+		// checks and now.
+		if _, statErr := os.Stat(polecatsDir); statErr == nil {
+			continue // Directory reappeared — skip, not an orphan anymore
+		} else if !os.IsNotExist(statErr) {
+			result.Errors = append(result.Errors,
+				fmt.Errorf("re-checking polecat dir %s for bead %s: %w", polecatsDir, bead.ID, statErr))
+			continue
+		}
+		if alive, _ := t.HasSession(sessionName); alive {
+			continue // Session reappeared — polecat was respawned, not an orphan
 		}
 
 		// Polecat is truly gone (no session, no directory). Reset the bead.

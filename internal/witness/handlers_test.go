@@ -799,7 +799,6 @@ func TestDetectOrphanedBeads_ResultTypes(t *testing.T) {
 		Assignee:      "testrig/polecats/alpha",
 		PolecatName:   "alpha",
 		BeadRecovered: true,
-		Error:         nil,
 	}
 
 	if o.BeadID != "gt-orphan1" {
@@ -837,13 +836,18 @@ func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
 
 	// "alpha" has NO directory and NO tmux session — true orphan
 	// "bravo" has directory but no session — deferred to DetectZombiePolecats
-	// "charlie" has no directory, assigned to different rig — still orphan if session dead
+	// "charlie" is hooked, no dir, no session — also an orphan
+	// "delta" is assigned to a different rig — skipped by rigName filter
 
 	binDir := t.TempDir()
 	bdPath := filepath.Join(binDir, "bd")
 
-	// Create mock bd that returns in_progress beads with polecat assignees
+	// Create mock bd that returns beads for both in_progress and hooked statuses
+	bdListLog := filepath.Join(binDir, "bd-list.log")
 	script := `#!/bin/sh
+# Log all invocations for assertion
+echo "$@" >> "` + bdListLog + `"
+
 cmd=""
 for arg in "$@"; do
   case "$arg" in
@@ -854,14 +858,27 @@ done
 
 case "$cmd" in
   list)
-    cat <<'JSONEOF'
+    # Check which status is being queried
+    case "$*" in
+      *--status=in_progress*)
+        cat <<'JSONEOF'
 [
   {"id":"gt-orphan1","assignee":"testrig/polecats/alpha"},
   {"id":"gt-alive1","assignee":"testrig/polecats/bravo"},
   {"id":"gt-nocrew","assignee":"testrig/crew/sean"},
-  {"id":"gt-noassign","assignee":""}
+  {"id":"gt-noassign","assignee":""},
+  {"id":"gt-otherrig","assignee":"otherrig/polecats/delta"}
 ]
 JSONEOF
+        ;;
+      *--status=hooked*)
+        cat <<'JSONEOF'
+[
+  {"id":"gt-hooked1","assignee":"testrig/polecats/charlie"}
+]
+JSONEOF
+        ;;
+    esac
     exit 0
     ;;
   update)
@@ -886,30 +903,98 @@ esac
 
 	result := DetectOrphanedBeads(townRoot, rigName, nil)
 
-	// Should have checked 2 polecat assignees (alpha and bravo)
-	// "crew/sean" is not a polecat, "" has no assignee
-	if result.Checked != 2 {
-		t.Errorf("Checked = %d, want 2 (alpha + bravo)", result.Checked)
+	// Verify --limit=0 was passed in bd list invocations
+	logContent, err := os.ReadFile(bdListLog)
+	if err != nil {
+		t.Fatalf("Failed to read bd-list.log: %v", err)
+	}
+	logStr := string(logContent)
+	if !strings.Contains(logStr, "--limit=0") {
+		t.Errorf("bd list was not called with --limit=0; log:\n%s", logStr)
+	}
+	// Verify both statuses were queried
+	if !strings.Contains(logStr, "--status=in_progress") {
+		t.Errorf("bd list was not called with --status=in_progress; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "--status=hooked") {
+		t.Errorf("bd list was not called with --status=hooked; log:\n%s", logStr)
 	}
 
-	// Should have found 1 orphan (alpha — no dir, no session)
+	// Should have checked 3 polecat assignees in "testrig":
+	// alpha (in_progress), bravo (in_progress), charlie (hooked)
+	// "crew/sean" is not a polecat, "" has no assignee,
+	// "otherrig/polecats/delta" is filtered out by rigName
+	if result.Checked != 3 {
+		t.Errorf("Checked = %d, want 3 (alpha + bravo from in_progress, charlie from hooked)", result.Checked)
+	}
+
+	// Should have found 2 orphans:
+	// alpha (in_progress, no dir, no session) and charlie (hooked, no dir, no session)
 	// bravo has directory so deferred to DetectZombiePolecats
-	if len(result.Orphans) != 1 {
-		t.Fatalf("Orphans = %d, want 1 (only alpha)", len(result.Orphans))
+	if len(result.Orphans) != 2 {
+		t.Fatalf("Orphans = %d, want 2 (alpha + charlie)", len(result.Orphans))
 	}
 
+	// Verify first orphan (alpha from in_progress scan)
 	orphan := result.Orphans[0]
 	if orphan.BeadID != "gt-orphan1" {
-		t.Errorf("orphan BeadID = %q, want %q", orphan.BeadID, "gt-orphan1")
+		t.Errorf("orphan[0] BeadID = %q, want %q", orphan.BeadID, "gt-orphan1")
 	}
 	if orphan.PolecatName != "alpha" {
-		t.Errorf("orphan PolecatName = %q, want %q", orphan.PolecatName, "alpha")
+		t.Errorf("orphan[0] PolecatName = %q, want %q", orphan.PolecatName, "alpha")
 	}
 	if orphan.Assignee != "testrig/polecats/alpha" {
-		t.Errorf("orphan Assignee = %q, want %q", orphan.Assignee, "testrig/polecats/alpha")
+		t.Errorf("orphan[0] Assignee = %q, want %q", orphan.Assignee, "testrig/polecats/alpha")
+	}
+	// BeadRecovered should be true (mock bd update succeeds)
+	if !orphan.BeadRecovered {
+		t.Error("orphan[0] BeadRecovered = false, want true")
+	}
+
+	// Verify second orphan (charlie from hooked scan)
+	orphan2 := result.Orphans[1]
+	if orphan2.BeadID != "gt-hooked1" {
+		t.Errorf("orphan[1] BeadID = %q, want %q", orphan2.BeadID, "gt-hooked1")
+	}
+	if orphan2.PolecatName != "charlie" {
+		t.Errorf("orphan[1] PolecatName = %q, want %q", orphan2.PolecatName, "charlie")
+	}
+
+	// Verify no unexpected errors
+	if len(result.Errors) != 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
 	}
 }
 
+func TestDetectOrphanedBeads_ErrorPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping mock bd test on Windows")
+	}
+
+	// Set up with a mock bd that fails on list
+	binDir := t.TempDir()
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+echo "bd: connection refused" >&2
+exit 1
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result := DetectOrphanedBeads(t.TempDir(), "testrig", nil)
+
+	if len(result.Errors) == 0 {
+		t.Error("expected errors when bd fails, got none")
+	}
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 when bd fails", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("Orphans = %d, want 0 when bd fails", len(result.Orphans))
+	}
+}
 
 // --- DetectOrphanedMolecules tests ---
 
