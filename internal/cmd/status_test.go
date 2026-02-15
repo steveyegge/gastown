@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -234,5 +235,205 @@ func TestRunStatusWatch_RejectsJSONCombo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be used together") {
 		t.Errorf("error %q should mention 'cannot be used together'", err.Error())
+	}
+}
+
+func TestIsKnownAgent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		base string
+		want bool
+	}{
+		{"claude", true},
+		{"pi", true},
+		{"opencode", true},
+		{"codex", true},
+		{"gemini", true},
+		{"cursor", true},
+		{"auggie", true},
+		{"amp", true},
+		{"aider", true},
+		{"bash", false},
+		{"node", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.base, func(t *testing.T) {
+			if got := isKnownAgent(tt.base); got != tt.want {
+				t.Errorf("isKnownAgent(%q) = %v, want %v", tt.base, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAgentWrapper(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		base string
+		want bool
+	}{
+		{"node", true},
+		{"bun", true},
+		{"npx", true},
+		{"bunx", true},
+		{"claude", false},
+		{"pi", false},
+		{"bash", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.base, func(t *testing.T) {
+			if got := isAgentWrapper(tt.base); got != tt.want {
+				t.Errorf("isAgentWrapper(%q) = %v, want %v", tt.base, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRuntimeInfo(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		cmdline string
+		want    string
+	}{
+		{
+			name:    "claude with model",
+			cmdline: "claude\x00--model\x00opus\x00--dangerously-skip-permissions",
+			want:    "claude/opus",
+		},
+		{
+			name:    "pi with model",
+			cmdline: "pi\x00-e\x00gastown-hooks.js\x00--model\x00google-antigravity/gemini-3-flash",
+			want:    "pi/google-antigravity/gemini-3-flash",
+		},
+		{
+			name:    "cgroup-wrap then claude",
+			cmdline: "cgroup-wrap\x00claude\x00--model\x00opus\x00--dangerously-skip-permissions",
+			want:    "claude/opus",
+		},
+		{
+			name:    "opencode with -m flag",
+			cmdline: "opencode\x00-m\x00kimi-for-coding/kimi-k2.5",
+			want:    "opencode/kimi-for-coding/kimi-k2.5",
+		},
+		{
+			name:    "empty cmdline",
+			cmdline: "",
+			want:    ".", // filepath.Base("") returns "."
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseRuntimeInfo(tt.cmdline)
+			if got != tt.want {
+				t.Errorf("parseRuntimeInfo(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRuntimeInfo_PiBare(t *testing.T) {
+	t.Parallel()
+	// Bare pi (no --model flag) calls readPiDefaults() which reads
+	// ~/.pi/agent/settings.json. The result is either "pi" (if no settings)
+	// or "pi/<default-model>" (if settings exist). Both are valid.
+	cmdline := "pi\x00-e\x00gastown-hooks.js"
+	got := parseRuntimeInfo(cmdline)
+	if !strings.HasPrefix(got, "pi") {
+		t.Errorf("parseRuntimeInfo(pi bare) = %q, want prefix 'pi'", got)
+	}
+}
+
+func TestBuildInfoFromConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		rc   *config.RuntimeConfig
+		want string
+	}{
+		{
+			name: "claude with model",
+			rc:   &config.RuntimeConfig{Command: "claude", Args: []string{"--model", "opus"}},
+			want: "claude/opus",
+		},
+		{
+			name: "cgroup-wrap claude",
+			rc:   &config.RuntimeConfig{Command: "cgroup-wrap", Args: []string{"claude", "--model", "opus"}},
+			want: "claude/opus",
+		},
+		{
+			name: "pi bare",
+			rc:   &config.RuntimeConfig{Command: "pi", Args: []string{"-e", "hooks.js"}},
+			want: "pi",
+		},
+		{
+			name: "opencode with -m",
+			rc:   &config.RuntimeConfig{Command: "opencode", Args: []string{"-m", "gpt-5"}},
+			want: "opencode/gpt-5",
+		},
+		{
+			name: "empty command",
+			rc:   &config.RuntimeConfig{Command: ""},
+			want: ".", // filepath.Base("") returns "."
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildInfoFromConfig(tt.rc)
+			if got != tt.want {
+				t.Errorf("buildInfoFromConfig(%s) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAgentCmdline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{"claude direct", "claude\x00--model\x00opus", true},
+		{"pi direct", "pi\x00-e\x00hooks.js", true},
+		{"node wrapper with pi", "node\x00/path/to/pi\x00-e\x00hooks.js", true},
+		{"bun wrapper with opencode", "bun\x00/path/to/opencode", true},
+		{"bash not agent", "bash\x00-c\x00echo hi", false},
+		{"node without agent", "node\x00/path/to/server.js", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAgentCmdline(tt.cmdline)
+			if got != tt.want {
+				t.Errorf("isAgentCmdline(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractBaseName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		cmdline string
+		want    string
+	}{
+		{"claude\x00--model\x00opus", "claude"},
+		{"/usr/bin/node\x00/path/pi", "node"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := extractBaseName(tt.cmdline)
+			if got != tt.want {
+				t.Errorf("extractBaseName(%q) = %q, want %q", tt.cmdline, got, tt.want)
+			}
+		})
 	}
 }

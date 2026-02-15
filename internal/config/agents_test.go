@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentPi}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -52,6 +52,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"amp", AgentAmp, false},
 		{"aider", "", true},               // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
+		{"pi", AgentPi, false},            // Pi Coding Agent
 		{"unknown", "", true},
 	}
 
@@ -131,6 +132,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"amp", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", true},  // Built-in multi-model CLI agent
+		{"pi", true},        // Pi Coding Agent
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -391,6 +393,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
 		{"opencode", []string{"opencode", "node", "bun"}},
+		{"pi", []string{"pi", "node", "bun"}},
 		{"unknown", []string{"node", "claude"}}, // Falls back to Claude's process
 	}
 
@@ -413,7 +416,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentPi}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -776,5 +779,109 @@ func TestOpenCodeRuntimeConfigFromPreset(t *testing.T) {
 	original := GetAgentPreset(AgentOpenCode)
 	if _, exists := original.Env["MUTATED"]; exists {
 		t.Error("Mutation of RuntimeConfig.Env affected original preset")
+	}
+}
+
+func TestPiAgentPreset(t *testing.T) {
+	t.Parallel()
+	info := GetAgentPreset(AgentPi)
+	if info == nil {
+		t.Fatal("pi preset not found")
+	}
+
+	// Check command
+	if info.Command != "pi" {
+		t.Errorf("pi command = %q, want pi", info.Command)
+	}
+
+	// Args should be empty (extension loaded via -e flag in town settings)
+	if len(info.Args) != 0 {
+		t.Errorf("pi args = %v, want empty", info.Args)
+	}
+
+	// Check ProcessNames for detection (pi, node, bun)
+	if len(info.ProcessNames) != 3 {
+		t.Errorf("pi ProcessNames length = %d, want 3", len(info.ProcessNames))
+	}
+	expectedNames := []string{"pi", "node", "bun"}
+	for i, want := range expectedNames {
+		if i < len(info.ProcessNames) && info.ProcessNames[i] != want {
+			t.Errorf("pi ProcessNames[%d] = %q, want %q", i, info.ProcessNames[i], want)
+		}
+	}
+
+	// Check hooks support (uses .pi/extensions/gastown-hooks.js)
+	if !info.SupportsHooks {
+		t.Error("pi should support hooks")
+	}
+
+	// Check fork session (not supported)
+	if info.SupportsForkSession {
+		t.Error("pi should not support fork session")
+	}
+
+	// Check session ID env
+	if info.SessionIDEnv != "PI_SESSION_ID" {
+		t.Errorf("pi SessionIDEnv = %q, want PI_SESSION_ID", info.SessionIDEnv)
+	}
+
+	// Check NonInteractive config
+	if info.NonInteractive == nil {
+		t.Fatal("pi NonInteractive is nil")
+	}
+	if info.NonInteractive.PromptFlag != "-p" {
+		t.Errorf("pi NonInteractive.PromptFlag = %q, want -p", info.NonInteractive.PromptFlag)
+	}
+}
+
+func TestPiProviderDefaults(t *testing.T) {
+	t.Parallel()
+
+	// Pi's defaults (processNames, readyDelayMs, promptMode) are set in
+	// fillRuntimeDefaults, not the defaultXxx() helpers. This test verifies
+	// that fillRuntimeDefaults produces the correct pi config.
+	input := &RuntimeConfig{Command: "pi"}
+	result := fillRuntimeDefaults(input)
+
+	// Tmux should be auto-filled
+	if result.Tmux == nil {
+		t.Fatal("fillRuntimeDefaults(pi) should auto-fill Tmux")
+	}
+	if result.Tmux.ReadyDelayMs != 3000 {
+		t.Errorf("Tmux.ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+	}
+	wantNames := []string{"pi", "node", "bun"}
+	if len(result.Tmux.ProcessNames) != len(wantNames) {
+		t.Errorf("Tmux.ProcessNames = %v, want %v", result.Tmux.ProcessNames, wantNames)
+	}
+
+	// PromptMode should be "arg"
+	if result.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want arg", result.PromptMode)
+	}
+
+	// Hooks should be auto-filled
+	if result.Hooks == nil {
+		t.Fatal("fillRuntimeDefaults(pi) should auto-fill Hooks")
+	}
+	if result.Hooks.Provider != "pi" {
+		t.Errorf("Hooks.Provider = %q, want pi", result.Hooks.Provider)
+	}
+}
+
+func TestPiRuntimeConfigFromPreset(t *testing.T) {
+	t.Parallel()
+	rc := RuntimeConfigFromPreset(AgentPi)
+	if rc == nil {
+		t.Fatal("RuntimeConfigFromPreset(pi) returned nil")
+	}
+
+	if rc.Command != "pi" {
+		t.Errorf("RuntimeConfig.Command = %q, want pi", rc.Command)
+	}
+
+	// Pi preset has no Env
+	if rc.Env != nil && len(rc.Env) > 0 {
+		t.Errorf("Expected nil/empty Env for Pi preset, got %v", rc.Env)
 	}
 }
