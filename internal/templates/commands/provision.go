@@ -34,6 +34,7 @@ type Agent struct {
 var Agents = map[string]Agent{
 	"claude":   {ConfigDir: ".claude"},
 	"opencode": {ConfigDir: ".opencode"},
+	"copilot":  {ConfigDir: ".copilot"},
 }
 
 // Commands is the registry of available commands.
