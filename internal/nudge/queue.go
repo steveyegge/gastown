@@ -31,12 +31,32 @@ const (
 	PriorityUrgent = "urgent"
 )
 
+// Operational limits and defaults.
+const (
+	// DefaultNormalTTL is the time-to-live for normal-priority nudges.
+	// After this duration, undelivered nudges are discarded by Drain.
+	DefaultNormalTTL = 30 * time.Minute
+
+	// DefaultUrgentTTL is the time-to-live for urgent-priority nudges.
+	DefaultUrgentTTL = 2 * time.Hour
+
+	// MaxQueueDepth is the maximum number of pending nudges per session.
+	// Enqueue returns an error if the queue is full, preventing runaway senders
+	// from exhausting disk space.
+	MaxQueueDepth = 50
+
+	// staleClaimThreshold is how long a .claimed file must be untouched
+	// before Drain considers it orphaned (from a crashed drainer) and removes it.
+	staleClaimThreshold = 5 * time.Minute
+)
+
 // QueuedNudge represents a nudge message stored in the queue.
 type QueuedNudge struct {
 	Sender    string    `json:"sender"`
 	Message   string    `json:"message"`
 	Priority  string    `json:"priority"`
 	Timestamp time.Time `json:"timestamp"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
 // queueDir returns the nudge queue directory for a given session.
@@ -57,10 +77,17 @@ func randomSuffix() string {
 
 // Enqueue writes a nudge to the queue for the given session.
 // The nudge will be picked up by the agent's hook at the next turn boundary.
+// Returns an error if the queue is full (MaxQueueDepth reached).
 func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 	dir := queueDir(townRoot, session)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating nudge queue dir: %w", err)
+	}
+
+	// Check queue depth before writing to prevent runaway senders.
+	pending, _ := Pending(townRoot, session)
+	if pending >= MaxQueueDepth {
+		return fmt.Errorf("nudge queue for %s is full (%d/%d pending)", session, pending, MaxQueueDepth)
 	}
 
 	if nudge.Timestamp.IsZero() {
@@ -68,6 +95,16 @@ func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 	}
 	if nudge.Priority == "" {
 		nudge.Priority = PriorityNormal
+	}
+
+	// Set expiry if not already specified by the caller.
+	if nudge.ExpiresAt.IsZero() {
+		switch nudge.Priority {
+		case PriorityUrgent:
+			nudge.ExpiresAt = nudge.Timestamp.Add(DefaultUrgentTTL)
+		default:
+			nudge.ExpiresAt = nudge.Timestamp.Add(DefaultNormalTTL)
+		}
 	}
 
 	data, err := json.MarshalIndent(nudge, "", "  ")
@@ -94,6 +131,9 @@ func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 // Uses rename-then-process to prevent concurrent Drain calls from delivering
 // the same nudge twice: each file is atomically renamed to a .claimed suffix
 // before reading, so only one caller can claim each nudge.
+//
+// Expired nudges (past ExpiresAt) are silently discarded during drain.
+// Orphaned .claimed files from crashed drainers are swept if older than 5 minutes.
 func Drain(townRoot, session string) ([]QueuedNudge, error) {
 	dir := queueDir(townRoot, session)
 
@@ -103,6 +143,26 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("reading nudge queue: %w", err)
+	}
+
+	// Sweep orphaned .claimed files from crashed drainers.
+	// A .claimed file older than staleClaimThreshold is certainly orphaned —
+	// normal processing completes in milliseconds.
+	now := time.Now()
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".claimed") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > staleClaimThreshold {
+			orphanPath := filepath.Join(dir, entry.Name())
+			if err := os.Remove(orphanPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove orphaned claim %s: %v\n", entry.Name(), err)
+			}
+		}
 	}
 
 	// Sort by name (timestamp-based) for FIFO ordering
@@ -130,27 +190,42 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		data, err := os.ReadFile(claimPath)
 		if err != nil {
 			// Unreadable — clean up so it doesn't become a ghost entry
-			_ = os.Remove(claimPath)
+			if rmErr := os.Remove(claimPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove unreadable claim %s: %v\n", entry.Name(), rmErr)
+			}
 			continue
 		}
 
 		var n QueuedNudge
 		if err := json.Unmarshal(data, &n); err != nil {
 			// Malformed — clean up
-			_ = os.Remove(claimPath)
+			if rmErr := os.Remove(claimPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove malformed claim %s: %v\n", entry.Name(), rmErr)
+			}
+			continue
+		}
+
+		// Skip expired nudges — stale messages create noise, not value.
+		if !n.ExpiresAt.IsZero() && now.After(n.ExpiresAt) {
+			if rmErr := os.Remove(claimPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove expired nudge %s: %v\n", entry.Name(), rmErr)
+			}
 			continue
 		}
 
 		nudges = append(nudges, n)
 
 		// Remove the claimed file after successful processing
-		_ = os.Remove(claimPath)
+		if rmErr := os.Remove(claimPath); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove processed claim %s: %v\n", entry.Name(), rmErr)
+		}
 	}
 
 	return nudges, nil
 }
 
 // Pending returns the count of queued nudges for a session without draining.
+// This is an approximate count — it does not check expiry or read file contents.
 func Pending(townRoot, session string) (int, error) {
 	dir := queueDir(townRoot, session)
 

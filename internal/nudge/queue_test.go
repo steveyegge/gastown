@@ -208,6 +208,233 @@ func TestEnqueueDefaults(t *testing.T) {
 	if nudges[0].Timestamp.IsZero() {
 		t.Error("Timestamp should have been set to non-zero default")
 	}
+	if nudges[0].ExpiresAt.IsZero() {
+		t.Error("ExpiresAt should have been set to non-zero default")
+	}
+	// Normal priority should get DefaultNormalTTL
+	expectedExpiry := nudges[0].Timestamp.Add(DefaultNormalTTL)
+	if !nudges[0].ExpiresAt.Equal(expectedExpiry) {
+		t.Errorf("ExpiresAt = %v, want %v (Timestamp + DefaultNormalTTL)", nudges[0].ExpiresAt, expectedExpiry)
+	}
+}
+
+func TestEnqueueUrgentTTL(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-urgent-ttl"
+
+	n := QueuedNudge{
+		Sender:   "test",
+		Message:  "urgent message",
+		Priority: PriorityUrgent,
+	}
+	if err := Enqueue(townRoot, session, n); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("got %d nudges, want 1", len(nudges))
+	}
+	// Urgent priority should get DefaultUrgentTTL
+	expectedExpiry := nudges[0].Timestamp.Add(DefaultUrgentTTL)
+	if !nudges[0].ExpiresAt.Equal(expectedExpiry) {
+		t.Errorf("ExpiresAt = %v, want %v (Timestamp + DefaultUrgentTTL)", nudges[0].ExpiresAt, expectedExpiry)
+	}
+}
+
+func TestEnqueueCustomExpiry(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-custom-expiry"
+
+	customExpiry := time.Now().Add(5 * time.Minute)
+	n := QueuedNudge{
+		Sender:    "test",
+		Message:   "custom expiry",
+		ExpiresAt: customExpiry,
+	}
+	if err := Enqueue(townRoot, session, n); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("got %d nudges, want 1", len(nudges))
+	}
+	// Custom expiry should be preserved, not overwritten by default TTL
+	if !nudges[0].ExpiresAt.Equal(customExpiry) {
+		t.Errorf("ExpiresAt = %v, want %v (custom)", nudges[0].ExpiresAt, customExpiry)
+	}
+}
+
+func TestDrainSkipsExpired(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-expired"
+
+	// Enqueue an already-expired nudge
+	expired := QueuedNudge{
+		Sender:    "old-sender",
+		Message:   "stale message",
+		Timestamp: time.Now().Add(-time.Hour),
+		ExpiresAt: time.Now().Add(-30 * time.Minute), // expired 30 min ago
+	}
+	if err := Enqueue(townRoot, session, expired); err != nil {
+		t.Fatalf("Enqueue expired: %v", err)
+	}
+
+	// Enqueue a fresh nudge
+	time.Sleep(time.Millisecond)
+	fresh := QueuedNudge{
+		Sender:  "new-sender",
+		Message: "fresh message",
+	}
+	if err := Enqueue(townRoot, session, fresh); err != nil {
+		t.Fatalf("Enqueue fresh: %v", err)
+	}
+
+	// Pending counts both (doesn't check expiry)
+	pending, err := Pending(townRoot, session)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if pending != 2 {
+		t.Errorf("Pending = %d, want 2 (counts all files)", pending)
+	}
+
+	// Drain should skip the expired nudge
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("Drain returned %d nudges, want 1 (expired should be skipped)", len(nudges))
+	}
+	if nudges[0].Sender != "new-sender" {
+		t.Errorf("got sender %q, want %q", nudges[0].Sender, "new-sender")
+	}
+
+	// After drain, queue dir should be empty (both files removed)
+	dir := filepath.Join(townRoot, ".runtime", "nudge_queue", session)
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Errorf("queue dir should be empty after drain, got %d entries", len(entries))
+	}
+}
+
+func TestEnqueueQueueDepthLimit(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-depth"
+
+	// Fill the queue to MaxQueueDepth
+	for i := 0; i < MaxQueueDepth; i++ {
+		n := QueuedNudge{
+			Sender:  "sender",
+			Message: "msg",
+		}
+		if err := Enqueue(townRoot, session, n); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+	}
+
+	// Next enqueue should fail
+	overflow := QueuedNudge{
+		Sender:  "sender",
+		Message: "overflow",
+	}
+	err := Enqueue(townRoot, session, overflow)
+	if err == nil {
+		t.Fatal("expected error when queue is full")
+	}
+	if !strings.Contains(err.Error(), "is full") {
+		t.Errorf("got error %q, want to contain 'is full'", err.Error())
+	}
+
+	// Verify pending count is at max
+	pending, _ := Pending(townRoot, session)
+	if pending != MaxQueueDepth {
+		t.Errorf("Pending = %d, want %d", pending, MaxQueueDepth)
+	}
+
+	// After draining, enqueue should work again
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != MaxQueueDepth {
+		t.Errorf("Drain returned %d, want %d", len(nudges), MaxQueueDepth)
+	}
+
+	err = Enqueue(townRoot, session, overflow)
+	if err != nil {
+		t.Errorf("Enqueue after drain should succeed: %v", err)
+	}
+}
+
+func TestDrainSweepsOrphanedClaims(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-orphans"
+
+	dir := filepath.Join(townRoot, ".runtime", "nudge_queue", session)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an orphaned .claimed file with old mod time
+	orphanPath := filepath.Join(dir, "100.json.claimed")
+	if err := os.WriteFile(orphanPath, []byte(`{"sender":"ghost"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Set mod time to well past the stale threshold
+	oldTime := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(orphanPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a fresh .claimed file (should NOT be swept)
+	freshClaimPath := filepath.Join(dir, "200.json.claimed")
+	if err := os.WriteFile(freshClaimPath, []byte(`{"sender":"active"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enqueue a valid nudge
+	n := QueuedNudge{Sender: "test", Message: "valid"}
+	if err := Enqueue(townRoot, session, n); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drain should sweep the orphaned claim, keep the fresh one, and return the valid nudge
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("got %d nudges, want 1", len(nudges))
+	}
+	if nudges[0].Message != "valid" {
+		t.Errorf("got message %q, want %q", nudges[0].Message, "valid")
+	}
+
+	// Check directory: orphaned claim should be gone, fresh claim should remain
+	entries, _ := os.ReadDir(dir)
+	var remaining []string
+	for _, e := range entries {
+		remaining = append(remaining, e.Name())
+	}
+
+	// The orphaned (old) claim should have been swept
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Error("orphaned .claimed file should have been swept")
+	}
+
+	// The fresh claim should still exist (not old enough to sweep)
+	if _, err := os.Stat(freshClaimPath); os.IsNotExist(err) {
+		t.Error("fresh .claimed file should NOT have been swept")
+	}
 }
 
 func TestConcurrentEnqueueNoDuplicateLoss(t *testing.T) {
