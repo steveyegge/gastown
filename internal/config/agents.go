@@ -106,10 +106,13 @@ const CurrentAgentRegistryVersion = 1
 // builtinPresets contains the default presets for supported agents.
 var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentClaude: {
-		Name:                AgentClaude,
-		Command:             "claude",
-		Args:                []string{"--dangerously-skip-permissions"},
-		ProcessNames:        []string{"node", "claude"}, // Claude runs as Node.js
+		Name:    AgentClaude,
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions"},
+		// Claude may surface as either "claude" or "node".
+		// NOTE: "node" intentionally overlaps with Codex; tmux liveness checks
+		// disambiguate by session-scoped GT_AGENT before matching ProcessNames.
+		ProcessNames:        []string{"node", "claude"},
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -133,10 +136,13 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 	},
 	AgentCodex: {
-		Name:                AgentCodex,
-		Command:             "codex",
-		Args:                []string{"--yolo"},
-		ProcessNames:        []string{"codex", "node"}, // Codex can run as binary or node-backed
+		Name:    AgentCodex,
+		Command: "codex",
+		Args:    []string{"--yolo"},
+		// Codex may surface as either "codex" or "node" depending on launcher path.
+		// NOTE: "node" intentionally overlaps with Claude; callers must resolve this
+		// list using the session's GT_AGENT (see tmux.IsAgentAlive/FindAgentPane).
+		ProcessNames:        []string{"codex", "node"},
 		SessionIDEnv:        "", // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
@@ -193,10 +199,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
 		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
-		SessionIDEnv:        "",                           // OpenCode manages sessions internally
-		ResumeFlag:          "",                           // No resume support yet
+		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
+		ResumeFlag:          "",                                  // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -365,9 +371,9 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 
 	rc := &RuntimeConfig{
 		Provider: string(info.Name),
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Command:  info.Command,
+		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:      envCopy,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)
@@ -427,7 +433,9 @@ func GetSessionIDEnvVar(agentName string) string {
 
 // GetProcessNames returns the process names used to detect if an agent is running.
 // Used by tmux.IsAgentRunning to check pane_current_command.
-// Returns ["node"] for Claude (default) if agent is not found or has no ProcessNames.
+// Process names are interpreted in a session-scoped context using GT_AGENT.
+// Shared names (for example "node" for Claude/Codex/OpenCode) are expected.
+// Returns Claude defaults if agent is not found or has no ProcessNames.
 func GetProcessNames(agentName string) []string {
 	info := GetAgentPresetByName(agentName)
 	if info == nil || len(info.ProcessNames) == 0 {

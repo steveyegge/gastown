@@ -50,7 +50,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},               // Not built-in, can be added via config
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"unknown", "", true},
 	}
@@ -129,8 +129,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
-		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", true},  // Built-in multi-model CLI agent
+		{"aider", false},   // Not built-in, can be added via config
+		{"opencode", true}, // Built-in multi-model CLI agent
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -362,10 +362,10 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},    // Codex uses JSONL output instead
-		{"cursor", ""},   // Cursor uses --resume with chatId directly
-		{"auggie", ""},   // Auggie uses --resume directly
-		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"codex", ""},  // Codex uses JSONL output instead
+		{"cursor", ""}, // Cursor uses --resume with chatId directly
+		{"auggie", ""}, // Auggie uses --resume directly
+		{"amp", ""},    // AMP uses 'threads continue' subcommand
 		{"unknown", ""},
 	}
 
@@ -407,6 +407,45 @@ func TestGetProcessNames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetProcessNames_NodeOverlapHasAgentSpecificDiscriminator(t *testing.T) {
+	t.Parallel()
+
+	claude := GetProcessNames("claude")
+	codex := GetProcessNames("codex")
+
+	contains := func(names []string, want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// "node" intentionally overlaps across runtimes.
+	if !contains(claude, "node") {
+		t.Fatalf("claude process names should include node, got %v", claude)
+	}
+	if !contains(codex, "node") {
+		t.Fatalf("codex process names should include node, got %v", codex)
+	}
+
+	// Session-scoped GT_AGENT selection must still leave a unique discriminator
+	// for each runtime's process-name list.
+	if !contains(claude, "claude") {
+		t.Fatalf("claude process names should include claude discriminator, got %v", claude)
+	}
+	if contains(codex, "claude") {
+		t.Fatalf("codex process names should not include claude discriminator, got %v", codex)
+	}
+	if !contains(codex, "codex") {
+		t.Fatalf("codex process names should include codex discriminator, got %v", codex)
+	}
+	if contains(claude, "codex") {
+		t.Fatalf("claude process names should not include codex discriminator, got %v", claude)
 	}
 }
 

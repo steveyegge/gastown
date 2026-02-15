@@ -37,10 +37,10 @@ var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer            = errors.New("no tmux server running")
-	ErrSessionExists       = errors.New("session already exists")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrInvalidSessionName  = errors.New("invalid session name")
+	ErrNoServer           = errors.New("no tmux server running")
+	ErrSessionExists      = errors.New("session already exists")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrInvalidSessionName = errors.New("invalid session name")
 )
 
 // validateSessionName checks that a session name contains only safe characters.
@@ -1111,7 +1111,9 @@ func (t *Tmux) FindAgentPane(session string) (string, error) {
 		return "", nil
 	}
 
-	// Get agent process names from session environment
+	// Get agent process names from session environment.
+	// This session-scoped lookup is required because some runtimes intentionally
+	// share process names (for example "node" for Claude and Codex).
 	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
 	processNames := config.GetProcessNames(agentName)
 
@@ -1517,6 +1519,8 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
 // It reads GT_AGENT from the session environment to determine which process names to check.
 // Falls back to Claude's process names if GT_AGENT is not set (legacy sessions).
+// Shared process names (for example "node") are safe in normal operation because
+// matching is scoped to the session's configured GT_AGENT.
 // This is the preferred method for zombie detection across all agent types.
 func (t *Tmux) IsAgentAlive(session string) bool {
 	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
