@@ -52,9 +52,15 @@ type APIHandler struct {
 	optionsCache     *OptionsResponse
 	optionsCacheTime time.Time
 	optionsCacheMu   sync.RWMutex
+	// cmdSem limits concurrent command executions to prevent resource exhaustion.
+	cmdSem chan struct{}
 }
 
 const optionsCacheTTL = 30 * time.Second
+
+// maxConcurrentCommands limits how many gt subprocesses can run at once.
+// handleOptions alone spawns 7; allow headroom for other concurrent handlers.
+const maxConcurrentCommands = 12
 
 // NewAPIHandler creates a new API handler with the given run timeouts.
 func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
@@ -66,6 +72,7 @@ func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
 		workDir:           workDir,
 		defaultRunTimeout: defaultRunTimeout,
 		maxRunTimeout:     maxRunTimeout,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
 	}
 }
 
@@ -190,6 +197,14 @@ func (h *APIHandler) handleCommands(w http.ResponseWriter, _ *http.Request) {
 
 // runGtCommand executes a gt command with the given args.
 func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	// Acquire semaphore slot to limit concurrent subprocess spawns.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("context cancelled waiting for command slot: %w", ctx.Err())
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -501,14 +516,14 @@ type OptionsResponse struct {
 // handleOptions returns dynamic options for command arguments.
 // Results are cached for 30 seconds to avoid slow repeated fetches.
 func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
-	// Check cache first
+	// Check cache first — hold read lock through Encode so the cached
+	// pointer can't be replaced while we're serializing it.
 	h.optionsCacheMu.RLock()
 	if h.optionsCache != nil && time.Since(h.optionsCacheTime) < optionsCacheTTL {
-		cached := h.optionsCache
-		h.optionsCacheMu.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Cache", "HIT")
-		_ = json.NewEncoder(w).Encode(cached)
+		_ = json.NewEncoder(w).Encode(h.optionsCache)
+		h.optionsCacheMu.RUnlock()
 		return
 	}
 	h.optionsCacheMu.RUnlock()

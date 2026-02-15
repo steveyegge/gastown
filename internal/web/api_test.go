@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -697,4 +698,128 @@ func TestAPIHandler_SSE_ContentType(t *testing.T) {
 	if !strings.Contains(body, "event: connected") {
 		t.Error("SSE response should contain initial 'connected' event")
 	}
+}
+
+// TestOptionsCacheConcurrentAccess verifies that concurrent cache reads and
+// writes don't race. The read lock is held through serialization so a
+// concurrent writer can't replace the cached pointer mid-encode.
+//
+// Regression test for steveyegge/gastown#1230 item 4.
+func TestOptionsCacheConcurrentAccess(t *testing.T) {
+	h := &APIHandler{
+		gtPath:            "echo", // won't actually be called for cache hits
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
+	}
+
+	// Pre-populate cache so reads hit.
+	h.optionsCacheMu.Lock()
+	h.optionsCache = &OptionsResponse{
+		Rigs: []string{"rig-a", "rig-b"},
+		Crew: []string{"alice"},
+	}
+	h.optionsCacheTime = time.Now()
+	h.optionsCacheMu.Unlock()
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	// Half readers, half writers — run with -race to detect data races.
+	for i := 0; i < goroutines; i++ {
+		if i%2 == 0 {
+			go func() {
+				defer wg.Done()
+				req := httptest.NewRequest(http.MethodGet, "/api/options", nil)
+				w := httptest.NewRecorder()
+				h.handleOptions(w, req)
+				if w.Code != http.StatusOK {
+					t.Errorf("handleOptions returned %d", w.Code)
+				}
+			}()
+		} else {
+			go func(n int) {
+				defer wg.Done()
+				h.optionsCacheMu.Lock()
+				h.optionsCache = &OptionsResponse{
+					Rigs: []string{strings.Repeat("x", n)},
+				}
+				h.optionsCacheTime = time.Now()
+				h.optionsCacheMu.Unlock()
+			}(i)
+		}
+	}
+
+	wg.Wait()
+}
+
+// TestRunGtCommandSemaphore verifies that runGtCommand limits concurrent
+// command execution via a semaphore. With a 1-slot semaphore and 3 commands
+// each sleeping 0.1s, total time must be >= 0.25s (serialized), proving the
+// semaphore prevents all 3 from running simultaneously (~0.1s).
+//
+// Regression test for steveyegge/gastown#1230 item 5.
+func TestRunGtCommandSemaphore(t *testing.T) {
+	// Create handler with a 1-slot semaphore — fully serialized execution.
+	h := &APIHandler{
+		gtPath:            "sleep",
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, 1),
+	}
+
+	const numCmds = 3
+	var wg sync.WaitGroup
+	wg.Add(numCmds)
+
+	start := time.Now()
+	for i := 0; i < numCmds; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = h.runGtCommand(context.Background(), 2*time.Second, []string{"0.1"})
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// With 1-slot semaphore, 3 x 0.1s sleeps must run serially: >= 0.25s.
+	// Without semaphore they'd all run in ~0.1s.
+	if elapsed < 250*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 250ms (commands should be serialized by semaphore)", elapsed)
+	}
+}
+
+// TestRunGtCommandSemaphoreContextCancel verifies that a cancelled context
+// returns immediately instead of blocking on a full semaphore.
+//
+// Regression test for steveyegge/gastown#1230 item 5.
+func TestRunGtCommandSemaphoreContextCancel(t *testing.T) {
+	h := &APIHandler{
+		gtPath:            "sleep",
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, 1), // 1 slot
+	}
+
+	// Fill the semaphore.
+	h.cmdSem <- struct{}{}
+
+	// Try to run a command with a context that expires quickly.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := h.runGtCommand(ctx, 5*time.Second, []string{"10"})
+	if err == nil {
+		t.Fatal("expected error when semaphore full and context cancelled")
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Errorf("error = %q, want context-related error", err)
+	}
+
+	// Drain the slot we manually added.
+	<-h.cmdSem
 }
