@@ -41,6 +41,7 @@ var (
 	ErrSessionExists       = errors.New("session already exists")
 	ErrSessionNotFound     = errors.New("session not found")
 	ErrInvalidSessionName  = errors.New("invalid session name")
+	ErrIdleTimeout         = errors.New("agent not idle before timeout")
 )
 
 // validateSessionName checks that a session name contains only safe characters.
@@ -1668,6 +1669,12 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		lines, err := t.CapturePaneLines(session, 5)
 		if err != nil {
+			// Distinguish terminal errors from transient ones.
+			// Session not found or no server means the session is gone —
+			// no point in polling further.
+			if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
+				return err
+			}
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -1679,13 +1686,13 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			if trimmed == "" {
 				continue
 			}
-			if strings.HasPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
+			if matchesPromptPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
 				return nil
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("agent not idle after %s", timeout)
+	return ErrIdleTimeout
 }
 
 // GetSessionInfo returns detailed information about a session.

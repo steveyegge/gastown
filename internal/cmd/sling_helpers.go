@@ -459,10 +459,12 @@ func wakeRigAgents(rigName string) {
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		_ = nudge.Enqueue(townRoot, witnessSession, nudge.QueuedNudge{
+		if err := nudge.Enqueue(townRoot, witnessSession, nudge.QueuedNudge{
 			Sender:  "sling",
 			Message: "Polecat dispatched - check for work",
-		})
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to queue nudge for %s: %v\n", witnessSession, err)
+		}
 	} else {
 		// Fallback to direct nudge if town root unavailable
 		t := tmux.NewTmux()
@@ -490,10 +492,12 @@ func nudgeRefinery(rigName, message string) {
 	// Queue for cooperative delivery at refinery's next turn boundary
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		_ = nudge.Enqueue(townRoot, refinerySession, nudge.QueuedNudge{
+		if err := nudge.Enqueue(townRoot, refinerySession, nudge.QueuedNudge{
 			Sender:  "sling",
 			Message: message,
-		})
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to queue nudge for %s: %v\n", refinerySession, err)
+		}
 	} else {
 		// Fallback to direct nudge if town root unavailable
 		t := tmux.NewTmux()

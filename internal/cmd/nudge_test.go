@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/nudge"
 )
 
 func TestNudgeStdinConflict(t *testing.T) {
@@ -193,6 +195,117 @@ func TestSessionNameToAddress(t *testing.T) {
 	}
 }
 
+func TestNudgeInvalidMode(t *testing.T) {
+	// Save and restore package-level flags
+	origMode := nudgeModeFlag
+	origPriority := nudgePriorityFlag
+	origMessage := nudgeMessageFlag
+	origStdin := nudgeStdinFlag
+	defer func() {
+		nudgeModeFlag = origMode
+		nudgePriorityFlag = origPriority
+		nudgeMessageFlag = origMessage
+		nudgeStdinFlag = origStdin
+	}()
+
+	nudgeStdinFlag = false
+	nudgeMessageFlag = "test"
+
+	tests := []struct {
+		name     string
+		mode     string
+		wantErr  string
+	}{
+		{"bogus mode", "bogus", `invalid --mode "bogus"`},
+		{"empty mode", "", `invalid --mode ""`},
+		{"typo immediate", "imediate", `invalid --mode "imediate"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nudgeModeFlag = tt.mode
+			nudgePriorityFlag = "normal"
+			err := runNudge(nudgeCmd, []string{"gastown/alpha", "hello"})
+			if err == nil {
+				t.Fatal("expected error for invalid mode")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("got error %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNudgeInvalidPriority(t *testing.T) {
+	// Save and restore package-level flags
+	origMode := nudgeModeFlag
+	origPriority := nudgePriorityFlag
+	origMessage := nudgeMessageFlag
+	origStdin := nudgeStdinFlag
+	defer func() {
+		nudgeModeFlag = origMode
+		nudgePriorityFlag = origPriority
+		nudgeMessageFlag = origMessage
+		nudgeStdinFlag = origStdin
+	}()
+
+	nudgeStdinFlag = false
+	nudgeMessageFlag = "test"
+	nudgeModeFlag = NudgeModeImmediate
+
+	tests := []struct {
+		name     string
+		priority string
+		wantErr  string
+	}{
+		{"bogus priority", "bogus", `invalid --priority "bogus"`},
+		{"empty priority", "", `invalid --priority ""`},
+		{"high priority", "high", `invalid --priority "high"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nudgePriorityFlag = tt.priority
+			err := runNudge(nudgeCmd, []string{"gastown/alpha", "hello"})
+			if err == nil {
+				t.Fatal("expected error for invalid priority")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("got error %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNudgeValidModesAccepted(t *testing.T) {
+	// Verify all valid modes pass the validation check (they'll fail later
+	// on tmux operations, but should NOT fail on mode validation).
+	origMode := nudgeModeFlag
+	origPriority := nudgePriorityFlag
+	origMessage := nudgeMessageFlag
+	origStdin := nudgeStdinFlag
+	defer func() {
+		nudgeModeFlag = origMode
+		nudgePriorityFlag = origPriority
+		nudgeMessageFlag = origMessage
+		nudgeStdinFlag = origStdin
+	}()
+
+	nudgeStdinFlag = false
+	nudgeMessageFlag = "test"
+	nudgePriorityFlag = "normal"
+
+	for _, mode := range []string{NudgeModeImmediate, NudgeModeQueue, NudgeModeWaitIdle} {
+		t.Run(mode, func(t *testing.T) {
+			nudgeModeFlag = mode
+			err := runNudge(nudgeCmd, []string{"gastown/alpha", "hello"})
+			// The error should NOT be about invalid mode — it will fail on
+			// tmux or workspace, which is fine.
+			if err != nil && strings.Contains(err.Error(), "invalid --mode") {
+				t.Errorf("valid mode %q was rejected: %v", mode, err)
+			}
+		})
+	}
+}
+
 func TestIfFreshMaxAge(t *testing.T) {
 	// Verify the constant is 60 seconds as specified in the design.
 	if ifFreshMaxAge != 60*time.Second {
@@ -241,5 +354,21 @@ func TestIfFreshSessionAgeCheck(t *testing.T) {
 				t.Errorf("age=%v: shouldNudge=%v, want %v", age, shouldNudge, tt.shouldNudge)
 			}
 		})
+	}
+}
+
+func TestValidModeMapsMatchConstants(t *testing.T) {
+	// Ensure the validation maps cover all defined mode constants.
+	modes := []string{NudgeModeImmediate, NudgeModeQueue, NudgeModeWaitIdle}
+	for _, m := range modes {
+		if !validNudgeModes[m] {
+			t.Errorf("mode constant %q missing from validNudgeModes", m)
+		}
+	}
+	priorities := []string{nudge.PriorityNormal, nudge.PriorityUrgent}
+	for _, p := range priorities {
+		if !validNudgePriorities[p] {
+			t.Errorf("priority constant %q missing from validNudgePriorities", p)
+		}
 	}
 }

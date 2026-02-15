@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -145,7 +146,12 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			// Agent is idle — safe to deliver directly
 			return t.NudgeSession(sessionName, prefixedMessage)
 		}
-		// Agent busy — queue instead
+		// Terminal errors (session gone, no server) — propagate, don't queue.
+		// Queueing a nudge for a dead session means it will never be delivered.
+		if errors.Is(err, tmux.ErrSessionNotFound) || errors.Is(err, tmux.ErrNoServer) {
+			return fmt.Errorf("wait-idle: %w", err)
+		}
+		// Timeout (agent busy) — queue instead
 		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
 			Sender:   sender,
 			Message:  message,
@@ -157,7 +163,28 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	}
 }
 
+// validNudgeModes is the set of allowed --mode values.
+var validNudgeModes = map[string]bool{
+	NudgeModeImmediate: true,
+	NudgeModeQueue:     true,
+	NudgeModeWaitIdle:  true,
+}
+
+// validNudgePriorities is the set of allowed --priority values.
+var validNudgePriorities = map[string]bool{
+	nudge.PriorityNormal: true,
+	nudge.PriorityUrgent: true,
+}
+
 func runNudge(cmd *cobra.Command, args []string) error {
+	// Validate --mode and --priority before doing anything else.
+	if !validNudgeModes[nudgeModeFlag] {
+		return fmt.Errorf("invalid --mode %q: must be one of immediate, queue, wait-idle", nudgeModeFlag)
+	}
+	if !validNudgePriorities[nudgePriorityFlag] {
+		return fmt.Errorf("invalid --priority %q: must be one of normal, urgent", nudgePriorityFlag)
+	}
+
 	// --if-fresh: skip nudge if the caller's tmux session is older than 60s.
 	// This prevents compaction/clear SessionStart hooks from spamming the deacon.
 	if nudgeIfFreshFlag {
@@ -199,13 +226,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("message required: use -m flag or provide as second argument")
 	}
 
-	// Handle channel syntax: channel:<name>
-	if strings.HasPrefix(target, "channel:") {
-		channelName := strings.TrimPrefix(target, "channel:")
-		return runNudgeChannel(channelName, message)
-	}
-
-	// Identify sender for message prefix
+	// Identify sender for message prefix (needed before channel check)
 	sender := "unknown"
 	if roleInfo, err := GetRole(); err == nil {
 		switch roleInfo.Role {
@@ -226,9 +247,15 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Handle channel syntax: channel:<name>
+	if strings.HasPrefix(target, "channel:") {
+		channelName := strings.TrimPrefix(target, "channel:")
+		return runNudgeChannel(channelName, message, sender)
+	}
+
 	// Check DND status for target (unless force flag or channel target)
 	townRoot, _ := workspace.FindFromCwd()
-	if townRoot != "" && !nudgeForceFlag && !strings.HasPrefix(target, "channel:") {
+	if townRoot != "" && !nudgeForceFlag {
 		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
 		if !shouldSend {
 			fmt.Printf("%s Target has DND enabled (%s) - nudge skipped\n", style.Dim.Render("○"), level)
@@ -358,7 +385,8 @@ func runNudge(cmd *cobra.Command, args []string) error {
 }
 
 // runNudgeChannel nudges all members of a named channel.
-func runNudgeChannel(channelName, message string) error {
+// Routes each target through deliverNudge so --mode is respected.
+func runNudgeChannel(channelName, message, sender string) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -381,30 +409,6 @@ func runNudgeChannel(channelName, message string) error {
 	if len(patterns) == 0 {
 		return fmt.Errorf("nudge channel %q has no members", channelName)
 	}
-
-	// Identify sender for message prefix
-	sender := "unknown"
-	if roleInfo, err := GetRole(); err == nil {
-		switch roleInfo.Role {
-		case RoleMayor:
-			sender = "mayor"
-		case RoleCrew:
-			sender = fmt.Sprintf("%s/crew/%s", roleInfo.Rig, roleInfo.Polecat)
-		case RolePolecat:
-			sender = fmt.Sprintf("%s/%s", roleInfo.Rig, roleInfo.Polecat)
-		case RoleWitness:
-			sender = fmt.Sprintf("%s/witness", roleInfo.Rig)
-		case RoleRefinery:
-			sender = fmt.Sprintf("%s/refinery", roleInfo.Rig)
-		case RoleDeacon:
-			sender = "deacon"
-		default:
-			sender = string(roleInfo.Role)
-		}
-	}
-
-	// Prefix message with sender
-	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
 
 	// Get all running sessions for pattern matching
 	agents, err := getAgentSessions(true)
@@ -431,12 +435,12 @@ func runNudgeChannel(channelName, message string) error {
 		return nil
 	}
 
-	// Send nudges
+	// Send nudges via deliverNudge (respects --mode flag)
 	t := tmux.NewTmux()
 	var succeeded, failed, skipped int
 	var failures []string
 
-	fmt.Printf("Nudging channel %q (%d target(s))...\n\n", channelName, len(targets))
+	fmt.Printf("Nudging channel %q (%d target(s), mode=%s)...\n\n", channelName, len(targets), nudgeModeFlag)
 
 	for i, sessionName := range targets {
 		// Check DND status before nudging each target
@@ -450,7 +454,7 @@ func runNudgeChannel(channelName, message string) error {
 			}
 		}
 
-		if err := t.NudgeSession(sessionName, prefixedMessage); err != nil {
+		if err := deliverNudge(t, sessionName, message, sender); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", sessionName, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, sessionName)

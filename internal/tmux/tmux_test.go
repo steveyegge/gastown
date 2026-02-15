@@ -1814,8 +1814,8 @@ func TestWaitForIdle_Timeout(t *testing.T) {
 	if err == nil {
 		t.Error("WaitForIdle should have timed out for a busy session")
 	}
-	if err != nil && !strings.Contains(err.Error(), "not idle") {
-		t.Errorf("unexpected error: %v", err)
+	if !errors.Is(err, ErrIdleTimeout) {
+		t.Errorf("expected ErrIdleTimeout, got: %v", err)
 	}
 }
 
