@@ -154,10 +154,36 @@ func getWitnessManager(rigName string) (*witness.Manager, error) {
 	return mgr, nil
 }
 
+// checkForLegacySession checks if a legacy-format session exists and returns an error if found.
+// Legacy format: {prefix}-{rigname}-{role} (e.g., gt-gastown-witness)
+// New format: {prefix}-{role} (e.g., gt-witness)
+func checkForLegacySession(rigName, role string) error {
+	prefix := session.PrefixFor(rigName)
+	legacySessionName := fmt.Sprintf("%s-%s-%s", prefix, rigName, role)
+
+	t := tmux.NewTmux()
+	exists, err := t.HasSession(legacySessionName)
+	if err != nil {
+		// Non-fatal: if we can't check, proceed anyway
+		return nil
+	}
+
+	if exists {
+		return fmt.Errorf("found legacy session %q\n\nSession naming format changed. Run this command to fix:\n  gt doctor --fix-session-names", legacySessionName)
+	}
+
+	return nil
+}
+
 func runWitnessStart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
 	if err := checkRigNotParkedOrDocked(rigName); err != nil {
+		return err
+	}
+
+	// Check for legacy session format before creating new session
+	if err := checkForLegacySession(rigName, "witness"); err != nil {
 		return err
 	}
 
