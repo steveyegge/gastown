@@ -175,13 +175,13 @@ func runStatusWatch(_ *cobra.Command, _ []string) error {
 		status, err := gatherStatus()
 		if err != nil {
 			fmt.Fprintf(&buf, "Error: %v\n", err)
-		} else {
-			outputStatusText(&buf, status)
+		} else if err := outputStatusText(&buf, status); err != nil {
+			fmt.Fprintf(&buf, "Error: %v\n", err)
 		}
 
 		// Write the entire frame atomically to prevent the terminal from
 		// rendering a blank screen between the clear and the content.
-		os.Stdout.Write(buf.Bytes())
+		_, _ = os.Stdout.Write(buf.Bytes())
 
 		select {
 		case <-sigChan:
