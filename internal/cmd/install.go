@@ -535,6 +535,16 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not set allowed_prefixes: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(prefixOutput)))
 	}
 
+	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
+	// Without issues.jsonl, bd's auto-export might write issues to routes.jsonl instead.
+	// This mirrors the same guard in rig/manager.go's AddRig path.
+	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")
+	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
+		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
+			fmt.Printf("   %s Could not create issues.jsonl: %v\n", style.Dim.Render("⚠"), err)
+		}
+	}
+
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
 	// This keeps hq-* operations stable even when invoked from rig worktrees.
 	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {

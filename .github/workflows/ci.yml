@@ -45,6 +45,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Build without go:generate
         run: |
@@ -75,6 +76,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Configure Git
         run: |
@@ -110,6 +112,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Download Coverage Data
         uses: actions/download-artifact@v4
@@ -211,6 +214,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -228,13 +232,22 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Configure Git
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Cache beads (bd)
+        id: cache-beads-int
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/bd
+          key: beads-${{ hashFiles('.github/workflows/ci.yml') }}
+
       - name: Install beads (bd)
+        if: steps.cache-beads-int.outputs.cache-hit != 'true'
         run: go install github.com/steveyegge/beads/cmd/bd@v0.50.2
 
       - name: Build gt

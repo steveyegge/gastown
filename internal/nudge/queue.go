@@ -208,8 +208,10 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 				// File vanished between rename and read — treat as lost race
 				continue
 			}
-			// Genuinely unreadable — clean up so it doesn't become a ghost entry
-			_ = os.Remove(claimPath)
+			// Transient read error (e.g., Windows AV/indexer holding a share
+			// lock) — unclaim so the nudge can be retried on a future Drain
+			// call rather than permanently lost.
+			_ = os.Rename(claimPath, path) // best-effort unclaim; orphan sweep catches failures
 			continue
 		}
 

@@ -94,7 +94,6 @@ Patrol checks:
   - patrol-hooks-wired       Verify daemon triggers patrols
   - patrol-not-stuck         Detect stale wisps (>1h)
   - patrol-plugins-accessible Verify plugin directories
-  - patrol-roles-have-prompts Verify role prompts exist
 
 Use --fix to attempt automatic fixes for issues that support it.
 Use --rig to check a specific rig instead of the entire workspace.
@@ -174,7 +173,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolHooksWiredCheck())
 	d.Register(doctor.NewPatrolNotStuckCheck())
 	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
-	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 	d.Register(doctor.NewAgentBeadsCheck())
 	d.Register(doctor.NewStaleAgentBeadsCheck())
 	d.Register(doctor.NewRigBeadsCheck())

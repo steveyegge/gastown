@@ -541,7 +541,26 @@ func TestConcurrentDrainNoDoubleDeli(t *testing.T) {
 		total += len(nudges)
 	}
 
+	// On Windows, transient sharing violations (antivirus, search indexer)
+	// can prevent all concurrent drainers from claiming a file.  The nudge
+	// stays as .json and is picked up on the next Drain — mirror that here
+	// with a straggler sweep so the test validates no-loss, not one-shot
+	// completeness.
+	for retries := 0; retries < 3 && total < count; retries++ {
+		time.Sleep(50 * time.Millisecond)
+		stragglers, err := Drain(townRoot, session)
+		if err != nil {
+			t.Fatalf("straggler Drain: %v", err)
+		}
+		total += len(stragglers)
+	}
+
 	if total != count {
 		t.Errorf("concurrent Drains delivered %d total nudges, want exactly %d (double-delivery or loss)", total, count)
+	}
+
+	// Verify no double-delivery: total must be exactly count, not more.
+	if total > count {
+		t.Errorf("double delivery detected: got %d total nudges, want exactly %d", total, count)
 	}
 }

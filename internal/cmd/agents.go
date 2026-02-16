@@ -175,6 +175,10 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 		if agent.Type == AgentPolecat && !includePolecats {
 			continue
 		}
+		// Skip boot sessions (utility session, not a user-facing agent)
+		if agent.Name == session.BootSessionName() {
+			continue
+		}
 		agents = append(agents, agent)
 	}
 

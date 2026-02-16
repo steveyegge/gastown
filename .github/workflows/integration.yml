@@ -29,13 +29,21 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Cache beads (bd)
+        id: cache-beads
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/bd
+          key: beads-${{ hashFiles('.github/workflows/integration.yml') }}
+
       - name: Install beads (bd)
+        if: steps.cache-beads.outputs.cache-hit != 'true'
         run: go install github.com/steveyegge/beads/cmd/bd@v0.50.2
 
       - name: Install Dolt
         run: |
-          git clone --depth 1 https://github.com/dolthub/dolt /tmp/dolt
-          cd /tmp/dolt/go && go install ./cmd/dolt
+          curl -sL https://github.com/dolthub/dolt/releases/latest/download/dolt-linux-amd64.tar.gz | tar xz
+          mv dolt-linux-amd64/bin/dolt ~/go/bin/dolt
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH

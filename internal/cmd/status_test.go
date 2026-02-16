@@ -87,9 +87,9 @@ func TestRenderAgentDetails_UsesRigPrefix(t *testing.T) {
 		Running: true,
 	}
 
-	output := captureStdout(t, func() {
-		renderAgentDetails(agent, "", nil, townRoot)
-	})
+	var buf bytes.Buffer
+	renderAgentDetails(&buf, agent, "", nil, townRoot)
+	output := buf.String()
 
 	if !strings.Contains(output, "bd-beads-witness") {
 		t.Fatalf("output %q does not contain rig-prefixed bead ID", output)
