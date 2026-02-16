@@ -207,28 +207,6 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
-// GetAllRoleTemplates returns all role templates as a map of filename to content.
-func GetAllRoleTemplates() (map[string][]byte, error) {
-	entries, err := templateFS.ReadDir("roles")
-	if err != nil {
-		return nil, fmt.Errorf("reading roles directory: %w", err)
-	}
-
-	result := make(map[string][]byte)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		content, err := templateFS.ReadFile("roles/" + entry.Name())
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
-		result[entry.Name()] = content
-	}
-
-	return result, nil
-}
-
 // ProvisionCommands creates the .claude/commands/ directory with standard slash commands.
 // This ensures crew/polecat workspaces have the handoff command and other utilities
 // even if the source repo doesn't have them tracked.
