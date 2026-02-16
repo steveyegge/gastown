@@ -121,7 +121,7 @@ each other's work. When everything is ready, one command lands it all.
 
 | Aspect | Without | With Integration Branch |
 |--------|---------|------------------------|
-| MR target | main | integration/{epic} |
+| MR target | main | `integration/{epic}` |
 | Land timing | Each MR lands independently | All MRs land together |
 | Cross-child deps | Risky—depends on merge order | Safe—children share a branch |
 | Rollback | Revert individual commits | Revert one merge commit |
