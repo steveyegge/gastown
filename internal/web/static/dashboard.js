@@ -761,6 +761,19 @@
             return;
         }
 
+        // Escape closes expanded panels when palette is not open
+        if (!isPaletteOpen && e.key === 'Escape') {
+            var expanded = document.querySelector('.panel.expanded');
+            if (expanded) {
+                e.preventDefault();
+                expanded.classList.remove('expanded');
+                var expandBtn = expanded.querySelector('.expand-btn');
+                if (expandBtn) expandBtn.textContent = 'Expand';
+                window.pauseRefresh = false;
+                return;
+            }
+        }
+
         // Rest only when palette is open
         if (!isPaletteOpen) return;
 
