@@ -122,6 +122,7 @@ func setDoltGlobalConfig(key, value string) error {
 
 // Default configuration
 const (
+	DefaultHost           = "127.0.0.1"
 	DefaultPort           = 3307
 	DefaultUser           = "root" // Default Dolt user (no password for local access)
 	DefaultMaxConnections = 50     // Conservative default to prevent connection storms
@@ -143,11 +144,17 @@ type Config struct {
 	// TownRoot is the Gas Town workspace root.
 	TownRoot string
 
-	// Port is the MySQL protocol port.
+	// Host is the Dolt server hostname or IP address.
+	Host string
+
+	// Port is the Dolt SQL server port.
 	Port int
 
-	// User is the MySQL user name.
+	// User is the Dolt authentication user.
 	User string
+
+	// Password is the Dolt authentication password (empty for no password).
+	Password string
 
 	// DataDir is the root directory containing all rig databases.
 	// Each subdirectory is a separate database that will be served.
@@ -166,17 +173,64 @@ type Config struct {
 }
 
 // DefaultConfig returns the default Dolt server configuration.
+// Configuration can be overridden via environment variables:
+//   - GT_DOLT_HOST: server hostname (default "127.0.0.1")
+//   - GT_DOLT_PORT: server port (default 3307)
+//   - GT_DOLT_USER: Dolt user (default "root")
+//   - GT_DOLT_PASSWORD: Dolt password (default empty, no authentication)
 func DefaultConfig(townRoot string) *Config {
 	daemonDir := filepath.Join(townRoot, "daemon")
+	host := os.Getenv("GT_DOLT_HOST")
+	if host == "" {
+		host = DefaultHost
+	}
+	port := DefaultPort
+	if envPort := os.Getenv("GT_DOLT_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
+			port = p
+		}
+	}
+	user := DefaultUser
+	if envUser := os.Getenv("GT_DOLT_USER"); envUser != "" {
+		user = envUser
+	}
+	password := os.Getenv("GT_DOLT_PASSWORD")
 	return &Config{
 		TownRoot:       townRoot,
-		Port:           DefaultPort,
-		User:           DefaultUser,
+		Host:           host,
+		Port:           port,
+		User:           user,
+		Password:       password,
 		DataDir:        filepath.Join(townRoot, ".dolt-data"),
 		LogFile:        filepath.Join(daemonDir, "dolt.log"),
 		PidFile:        filepath.Join(daemonDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
 	}
+}
+
+// IsRemote returns true if the Dolt server is on a remote host
+// (i.e., not localhost). When remote, dolt CLI commands need explicit
+// connection flags instead of relying on data-directory auto-detection.
+func (c *Config) IsRemote() bool {
+	return c.Host != "127.0.0.1" && c.Host != "localhost" && c.Host != ""
+}
+
+// SQLArgs returns the base dolt sql arguments with connection flags
+// when the server is remote. For local servers, returns an empty slice
+// (relying on data-directory auto-detection).
+func (c *Config) SQLArgs() []string {
+	if !c.IsRemote() {
+		return nil
+	}
+	args := []string{
+		"--host", c.Host,
+		"--port", strconv.Itoa(c.Port),
+		"--user", c.User,
+	}
+	if c.Password != "" {
+		args = append(args, "--password", c.Password)
+	}
+	return args
 }
 
 // RigDatabaseDir returns the database directory for a specific rig.
@@ -610,17 +664,25 @@ func Stop(townRoot string) error {
 	return nil
 }
 
-// GetConnectionString returns the MySQL connection string for the server.
+// GetConnectionString returns the Dolt DSN connection string for the server.
 // Use GetConnectionStringForRig for a specific database.
 func GetConnectionString(townRoot string) string {
 	config := DefaultConfig(townRoot)
-	return fmt.Sprintf("%s@tcp(127.0.0.1:%d)/", config.User, config.Port)
+	return fmt.Sprintf("%s@tcp(%s:%d)/", config.userDSN(), config.Host, config.Port)
 }
 
-// GetConnectionStringForRig returns the MySQL connection string for a specific rig database.
+// GetConnectionStringForRig returns the Dolt DSN connection string for a specific rig database.
 func GetConnectionStringForRig(townRoot, rigName string) string {
 	config := DefaultConfig(townRoot)
-	return fmt.Sprintf("%s@tcp(127.0.0.1:%d)/%s", config.User, config.Port, rigName)
+	return fmt.Sprintf("%s@tcp(%s:%d)/%s", config.userDSN(), config.Host, config.Port, rigName)
+}
+
+// userDSN returns the user[:password] portion of a DSN connection string.
+func (c *Config) userDSN() string {
+	if c.Password != "" {
+		return c.User + ":" + c.Password
+	}
+	return c.User
 }
 
 // ListDatabases returns the list of available rig databases in the data directory.
@@ -1519,12 +1581,12 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx,
-		"dolt", "sql",
-		"-r", "csv",
-		"-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
-	)
-	cmd.Dir = config.DataDir
+	args := append([]string{"sql"}, config.SQLArgs()...)
+	args = append(args, "-r", "csv", "-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST")
+	cmd := exec.CommandContext(ctx, "dolt", args...)
+	if !config.IsRemote() {
+		cmd.Dir = config.DataDir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("querying connection count: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1897,8 +1959,12 @@ func doltSQL(townRoot, rigDB, query string) error {
 
 	// Prepend USE <db> to select the target database.
 	fullQuery := fmt.Sprintf("USE %s; %s", rigDB, query)
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", fullQuery)
-	cmd.Dir = config.DataDir
+	args := append([]string{"sql"}, config.SQLArgs()...)
+	args = append(args, "-q", fullQuery)
+	cmd := exec.CommandContext(ctx, "dolt", args...)
+	if !config.IsRemote() {
+		cmd.Dir = config.DataDir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -2097,8 +2163,12 @@ func doltSQLScript(townRoot, script string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "--file", tmpFile.Name())
-	cmd.Dir = config.DataDir
+	args := append([]string{"sql"}, config.SQLArgs()...)
+	args = append(args, "--file", tmpFile.Name())
+	cmd := exec.CommandContext(ctx, "dolt", args...)
+	if !config.IsRemote() {
+		cmd.Dir = config.DataDir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))

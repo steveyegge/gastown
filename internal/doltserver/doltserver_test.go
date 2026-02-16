@@ -1945,6 +1945,11 @@ func TestListDatabases_MixedContent(t *testing.T) {
 // =============================================================================
 
 func TestGetConnectionString(t *testing.T) {
+	// Clear env vars to test defaults
+	t.Setenv("GT_DOLT_HOST", "")
+	t.Setenv("GT_DOLT_PORT", "")
+	t.Setenv("GT_DOLT_USER", "")
+
 	townRoot := t.TempDir()
 	s := GetConnectionString(townRoot)
 	if s != "root@tcp(127.0.0.1:3307)/" {
@@ -1953,10 +1958,108 @@ func TestGetConnectionString(t *testing.T) {
 }
 
 func TestGetConnectionStringForRig(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "")
+	t.Setenv("GT_DOLT_PORT", "")
+	t.Setenv("GT_DOLT_USER", "")
+
 	townRoot := t.TempDir()
 	s := GetConnectionStringForRig(townRoot, "hq")
 	if s != "root@tcp(127.0.0.1:3307)/hq" {
 		t.Errorf("got %q, want root@tcp(127.0.0.1:3307)/hq", s)
+	}
+}
+
+func TestGetConnectionStringEnvOverride(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "dolt-server")
+	t.Setenv("GT_DOLT_PORT", "3308")
+	t.Setenv("GT_DOLT_USER", "admin")
+	t.Setenv("GT_DOLT_PASSWORD", "")
+
+	townRoot := t.TempDir()
+
+	s := GetConnectionString(townRoot)
+	if s != "admin@tcp(dolt-server:3308)/" {
+		t.Errorf("got %q, want admin@tcp(dolt-server:3308)/", s)
+	}
+
+	s = GetConnectionStringForRig(townRoot, "hq")
+	if s != "admin@tcp(dolt-server:3308)/hq" {
+		t.Errorf("got %q, want admin@tcp(dolt-server:3308)/hq", s)
+	}
+}
+
+func TestGetConnectionStringWithPassword(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "dolt-server")
+	t.Setenv("GT_DOLT_PORT", "3307")
+	t.Setenv("GT_DOLT_USER", "admin")
+	t.Setenv("GT_DOLT_PASSWORD", "secret")
+
+	townRoot := t.TempDir()
+
+	s := GetConnectionString(townRoot)
+	if s != "admin:secret@tcp(dolt-server:3307)/" {
+		t.Errorf("got %q, want admin:secret@tcp(dolt-server:3307)/", s)
+	}
+
+	s = GetConnectionStringForRig(townRoot, "hq")
+	if s != "admin:secret@tcp(dolt-server:3307)/hq" {
+		t.Errorf("got %q, want admin:secret@tcp(dolt-server:3307)/hq", s)
+	}
+}
+
+func TestConfigIsRemote(t *testing.T) {
+	tests := []struct {
+		host   string
+		remote bool
+	}{
+		{"127.0.0.1", false},
+		{"localhost", false},
+		{"", false},
+		{"dolt", true},
+		{"dolt-server", true},
+		{"192.168.1.100", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			c := &Config{Host: tt.host}
+			if c.IsRemote() != tt.remote {
+				t.Errorf("Config{Host: %q}.IsRemote() = %v, want %v", tt.host, c.IsRemote(), tt.remote)
+			}
+		})
+	}
+}
+
+func TestConfigSQLArgs(t *testing.T) {
+	// Local: no extra args
+	c := &Config{Host: "127.0.0.1", Port: 3307, User: "root"}
+	if args := c.SQLArgs(); len(args) != 0 {
+		t.Errorf("local config should return empty args, got %v", args)
+	}
+
+	// Remote: connection flags without password
+	c = &Config{Host: "dolt", Port: 3308, User: "admin"}
+	args := c.SQLArgs()
+	if len(args) != 6 {
+		t.Fatalf("remote config without password should return 6 args, got %d: %v", len(args), args)
+	}
+	expected := []string{"--host", "dolt", "--port", "3308", "--user", "admin"}
+	for i, v := range expected {
+		if args[i] != v {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], v)
+		}
+	}
+
+	// Remote: connection flags with password
+	c = &Config{Host: "dolt", Port: 3308, User: "admin", Password: "secret"}
+	args = c.SQLArgs()
+	if len(args) != 8 {
+		t.Fatalf("remote config with password should return 8 args, got %d: %v", len(args), args)
+	}
+	expected = []string{"--host", "dolt", "--port", "3308", "--user", "admin", "--password", "secret"}
+	for i, v := range expected {
+		if args[i] != v {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], v)
+		}
 	}
 }
 
