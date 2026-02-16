@@ -308,6 +308,11 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Check for legacy session format before creating new session
+	if err := checkForLegacySession(rigName, "refinery"); err != nil {
+		return err
+	}
+
 	fmt.Printf("Starting refinery for %s...\n", rigName)
 
 	if err := mgr.Start(refineryForeground, refineryAgentOverride); err != nil {
