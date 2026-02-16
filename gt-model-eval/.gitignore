@@ -5,6 +5,9 @@ results*.json
 results*.html
 results*.csv
 
+# Environment
+.env
+
 # Node
 node_modules/
 package-lock.json

@@ -2,16 +2,18 @@
 # Format promptfoo eval results as markdown and optionally post to GitHub Discussions.
 #
 # Usage:
-#   ./scripts/results-to-discussion.sh results.json                # dry-run (stdout)
-#   ./scripts/results-to-discussion.sh results.json --post         # post to Discussions
+#   ./scripts/results-to-discussion.sh results.json                         # dry-run (stdout)
+#   ./scripts/results-to-discussion.sh results.json --post                  # create new Discussion
+#   ./scripts/results-to-discussion.sh results.json --comment 1542          # comment on existing Discussion
 #   ./scripts/results-to-discussion.sh results.json --post --repo owner/repo
 #
-# Requires: jq, gh (if --post)
+# Requires: jq, gh (if --post or --comment)
 
 set -euo pipefail
 
 RESULTS_FILE="${1:?Usage: $0 results.json [--post] [--repo owner/repo]}"
 POST=false
+COMMENT_NUM=""
 REPO="steveyegge/gastown"
 CATEGORY="Ideas"
 
@@ -19,6 +21,7 @@ shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --post) POST=true; shift ;;
+    --comment) COMMENT_NUM="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --category) CATEGORY="$2"; shift 2 ;;
     *) echo "Unknown flag: $1" >&2; exit 1 ;;
@@ -68,18 +71,15 @@ generate_summary() {
 generate_suite_breakdown() {
   local file="$1"
   jq -r '
-    # Extract suite name from test description or vars.role
+    # Extract suite name from testCase.description or vars
     [.results.results[] | {
       provider: .provider.label,
       success: .success,
       suite: (
-        if (.vars.role // "" | length) > 0 then
-          # Determine suite from description prefix and role
-          if (.description // "" | test("^\\[Class A\\]")) then
-            "class-a-" + .vars.role
-          else
-            .vars.role + "/" + (.vars.formula_step // "unknown")
-          end
+        if ((.testCase.description // "") | test("^\\[Class A\\]")) then
+          "class-a-" + .vars.role
+        elif (.vars.role // "" | length) > 0 then
+          .vars.role + "/" + (.vars.formula_step // "unknown")
         else
           "unknown"
         end
@@ -112,6 +112,8 @@ MARKDOWN="$(cat <<HEADER
 **Framework commit**: \`${GIT_SHA}\`
 **Promptfoo version**: \`${PROMPTFOO_VER}\`
 **Related**: [Discussion #1542](https://github.com/${REPO}/discussions/1542) | [Issue #1545](https://github.com/${REPO}/issues/1545)
+
+> **Note**: Cost and latency values may reflect cached results if the eval was re-run. Re-run with \`--no-cache\` for accurate timing data.
 
 ### Aggregate Summary
 
@@ -163,13 +165,13 @@ fi
 FAILED_TESTS=$(jq -r '
   [.results.results[] | select(.success == false) | {
     provider: .provider.label,
-    desc: .description,
+    desc: (.testCase.description // (.vars.role + "/" + .vars.formula_step) // "unknown"),
     action: ((.response.output // "") | try (fromjson | .action) catch "PARSE_ERROR")
   }]
   | group_by(.desc)
   | map({
       desc: .[0].desc,
-      failures: [.[] | .provider] | join(", ")
+      failures: [.[] | "\(.provider) → \(.action)"] | join(", ")
     })
   | .[:20]
   | .[] | "| \(.desc) | \(.failures) |"
@@ -210,7 +212,41 @@ npx promptfoo@latest eval --output results.json
 
 # --- Output or post ---
 
-if [ "$POST" = true ]; then
+if [ -n "$COMMENT_NUM" ]; then
+  # Post as comment on existing discussion
+  if ! command -v gh &>/dev/null; then
+    echo "Error: gh CLI required for --comment" >&2
+    exit 1
+  fi
+
+  # Get discussion node ID from number
+  DISCUSSION_ID=$(gh api graphql -f query='
+    query($owner: String!, $repo: String!, $num: Int!) {
+      repository(owner: $owner, name: $repo) {
+        discussion(number: $num) { id }
+      }
+    }
+  ' -f owner="${REPO%%/*}" -f repo="${REPO##*/}" -F num="$COMMENT_NUM" \
+    --jq '.data.repository.discussion.id' 2>/dev/null)
+
+  if [ -z "$DISCUSSION_ID" ]; then
+    echo "Error: could not find Discussion #${COMMENT_NUM}" >&2
+    exit 1
+  fi
+
+  RESULT=$(gh api graphql -f query='
+    mutation($discussionId: ID!, $body: String!) {
+      addDiscussionComment(input: {discussionId: $discussionId, body: $body}) {
+        comment { url }
+      }
+    }
+  ' -f discussionId="$DISCUSSION_ID" -f body="$MARKDOWN")
+
+  URL=$(echo "$RESULT" | jq -r '.data.addDiscussionComment.comment.url')
+  echo "Commented on Discussion #${COMMENT_NUM}: $URL"
+
+elif [ "$POST" = true ]; then
+  # Create new discussion
   if ! command -v gh &>/dev/null; then
     echo "Error: gh CLI required for --post" >&2
     exit 1

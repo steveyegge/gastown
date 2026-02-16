@@ -37,8 +37,8 @@ defaultTest:
   options:
     # Use Opus as the grading model — grader must be stronger than all test subjects
     provider: anthropic:messages:claude-opus-4-6
-  # Strip markdown code fences (```json ... ```) that models sometimes add
-  transform: "output.replace(/^```(?:json)?\\s*\\n?/gm, '').replace(/\\n?```\\s*$/gm, '').trim()"
+    # Strip markdown code fences (```json ... ```) that models sometimes add
+    transform: "output.replace(/^```(?:json)?\\s*\\n?/gm, '').replace(/\\n?```\\s*$/gm, '').trim()"
   assert:
     # Every response must be valid JSON
     - type: is-json
