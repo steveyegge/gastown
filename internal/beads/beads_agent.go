@@ -370,7 +370,9 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 // which caused inconsistencies with bd slot commands (see GH #gt-9v52).
 func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) error {
 	// Update agent state using bd agent state command
-	_, err := b.run("agent", "state", id, state)
+	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
+	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
+	_, err := b.runWithRouting("agent", "state", id, state)
 	if err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
