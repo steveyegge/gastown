@@ -513,6 +513,149 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// configSetCmd sets a town config value by dot-notation key.
+var configSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a configuration value",
+	Long: `Set a town configuration value using dot-notation keys.
+
+Supported keys:
+  convoy.notify_on_complete   Push notification to Mayor session on convoy
+                              completion (true/false, default: false)
+  cli_theme                   CLI color scheme ("dark", "light", "auto")
+  default_agent               Default agent preset name
+
+Examples:
+  gt config set convoy.notify_on_complete true
+  gt config set cli_theme dark
+  gt config set default_agent claude`,
+	Args: cobra.ExactArgs(2),
+	RunE: runConfigSet,
+}
+
+// configGetCmd gets a town config value by dot-notation key.
+var configGetCmd = &cobra.Command{
+	Use:   "get <key>",
+	Short: "Get a configuration value",
+	Long: `Get a town configuration value using dot-notation keys.
+
+Supported keys:
+  convoy.notify_on_complete   Push notification to Mayor session on convoy
+                              completion (true/false, default: false)
+  cli_theme                   CLI color scheme
+  default_agent               Default agent preset name
+
+Examples:
+  gt config get convoy.notify_on_complete
+  gt config get cli_theme`,
+	Args: cobra.ExactArgs(1),
+	RunE: runConfigGet,
+}
+
+func runConfigSet(cmd *cobra.Command, args []string) error {
+	key := args[0]
+	value := args[1]
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	switch key {
+	case "convoy.notify_on_complete":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w (expected true/false)", key, err)
+		}
+		if townSettings.Convoy == nil {
+			townSettings.Convoy = &config.ConvoyConfig{}
+		}
+		townSettings.Convoy.NotifyOnComplete = b
+
+	case "cli_theme":
+		switch value {
+		case "dark", "light", "auto":
+			townSettings.CLITheme = value
+		default:
+			return fmt.Errorf("invalid cli_theme: %q (expected dark, light, or auto)", value)
+		}
+
+	case "default_agent":
+		townSettings.DefaultAgent = value
+
+	default:
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent", key)
+	}
+
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	fmt.Printf("Set %s = %s\n", style.Bold.Render(key), value)
+	return nil
+}
+
+func runConfigGet(cmd *cobra.Command, args []string) error {
+	key := args[0]
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	var value string
+	switch key {
+	case "convoy.notify_on_complete":
+		if townSettings.Convoy != nil && townSettings.Convoy.NotifyOnComplete {
+			value = "true"
+		} else {
+			value = "false"
+		}
+
+	case "cli_theme":
+		value = townSettings.CLITheme
+		if value == "" {
+			value = "auto"
+		}
+
+	case "default_agent":
+		value = townSettings.DefaultAgent
+		if value == "" {
+			value = "claude"
+		}
+
+	default:
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent", key)
+	}
+
+	fmt.Println(value)
+	return nil
+}
+
+// parseBool parses a boolean string (true/false, yes/no, 1/0).
+func parseBool(s string) (bool, error) {
+	switch strings.ToLower(s) {
+	case "true", "yes", "1", "on":
+		return true, nil
+	case "false", "no", "0", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("cannot parse %q as boolean", s)
+	}
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
@@ -521,7 +664,11 @@ func init() {
 	configAgentCmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Manage agent configuration",
-		RunE:  requireSubcommand,
+		Long: `Manage per-agent configuration settings.
+
+Subcommands allow listing, getting, setting, and removing agent-specific
+config values such as the default AI model or provider.`,
+		RunE: requireSubcommand,
 	}
 	configAgentCmd.AddCommand(configAgentListCmd)
 	configAgentCmd.AddCommand(configAgentGetCmd)
@@ -532,6 +679,8 @@ func init() {
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configGetCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)

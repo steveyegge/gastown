@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,16 +12,34 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-var nudgeMessageFlag string
-var nudgeForceFlag bool
-var nudgeStdinFlag bool
-var nudgeIfFreshFlag bool
+var (
+	nudgeMessageFlag  string
+	nudgeForceFlag    bool
+	nudgeStdinFlag    bool
+	nudgeIfFreshFlag  bool
+	nudgeModeFlag     string
+	nudgePriorityFlag string
+)
+
+// Nudge delivery modes.
+const (
+	// NudgeModeImmediate sends directly via tmux send-keys (current behavior).
+	// This interrupts in-flight work but guarantees immediate delivery.
+	NudgeModeImmediate = "immediate"
+	// NudgeModeQueue writes to a file queue; agent picks up via hook at next
+	// turn boundary. Zero interruption but delivery depends on agent turn frequency.
+	NudgeModeQueue = "queue"
+	// NudgeModeWaitIdle waits for the agent to become idle (prompt visible),
+	// then delivers directly. Falls back to queue on timeout. Best of both worlds.
+	NudgeModeWaitIdle = "wait-idle"
+)
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
@@ -28,22 +47,33 @@ func init() {
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
 	nudgeCmd.Flags().BoolVar(&nudgeStdinFlag, "stdin", false, "Read message from stdin (avoids shell quoting issues)")
 	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
+	nudgeCmd.Flags().StringVar(&nudgeModeFlag, "mode", NudgeModeImmediate, "Delivery mode: immediate (default), queue, or wait-idle")
+	nudgeCmd.Flags().StringVar(&nudgePriorityFlag, "priority", nudge.PriorityNormal, "Queue priority: normal (default) or urgent")
 }
 
 var nudgeCmd = &cobra.Command{
 	Use:     "nudge <target> [message]",
 	GroupID: GroupComm,
 	Short:   "Send a synchronous message to any Gas Town worker",
-	Long: `Universal synchronous messaging API for Gas Town worker-to-worker communication.
+	Long: `Universal messaging API for Gas Town worker-to-worker communication.
 
-Delivers a message directly to any worker's Claude Code session: polecats, crew,
-witness, refinery, mayor, or deacon. Use this for real-time coordination when
-you need immediate attention from another worker.
+Delivers a message to any worker's Claude Code session: polecats, crew,
+witness, refinery, mayor, or deacon.
 
-Uses a reliable delivery pattern:
-1. Sends text in literal mode (-l flag)
-2. Waits 500ms for paste to complete
-3. Sends Enter as a separate command
+Delivery modes (--mode):
+  immediate  Send directly via tmux send-keys (default). Interrupts in-flight
+             work but guarantees immediate delivery.
+  queue      Write to a file queue; agent picks up via hook at next turn
+             boundary. Zero interruption. Use for non-urgent coordination.
+  wait-idle  Wait for agent to become idle (prompt visible), then deliver
+             directly. Falls back to queue on timeout. If both idle-wait and
+             queue fail, falls back to immediate delivery as a last resort.
+
+Queue and wait-idle modes require the target agent to support hooks
+(UserPromptSubmit) for drain. Agents without hook support should use immediate.
+
+The default is immediate for backward compatibility. For non-urgent messages
+where you don't want to interrupt the agent's current work, use --mode=queue.
 
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.
@@ -85,7 +115,90 @@ Examples:
 // Sessions older than this are considered compaction/clear restarts, not new sessions.
 const ifFreshMaxAge = 60 * time.Second
 
+// waitIdleTimeout is how long --mode=wait-idle will poll before falling back to queue.
+// This is a var (not const) so tests can override it to avoid 15s waits.
+var waitIdleTimeout = 15 * time.Second
+
+// deliverNudge routes a nudge based on the --mode flag.
+// For "immediate" mode: sends directly via tmux (current behavior).
+// For "queue" mode: writes to the nudge queue for cooperative delivery.
+// For "wait-idle" mode: waits for idle, then delivers or falls back to queue.
+func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
+	townRoot, _ := workspace.FindFromCwd()
+
+	// For direct tmux delivery, prefix with sender attribution.
+	// Queue-based delivery stores Sender as a separate field and
+	// FormatForInjection adds the prefix, so we must NOT double-prefix.
+	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
+
+	switch nudgeModeFlag {
+	case NudgeModeQueue:
+		if townRoot == "" {
+			return fmt.Errorf("--mode=queue requires a Gas Town workspace")
+		}
+		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			Sender:   sender,
+			Message:  message,
+			Priority: nudgePriorityFlag,
+		})
+
+	case NudgeModeWaitIdle:
+		if townRoot == "" {
+			// wait-idle needs workspace for queue fallback — fail explicitly
+			// rather than silently degrading to immediate (destructive) delivery.
+			return fmt.Errorf("--mode=wait-idle requires a Gas Town workspace")
+		}
+		// Try to wait for idle
+		err := t.WaitForIdle(sessionName, waitIdleTimeout)
+		if err == nil {
+			// Agent is idle — safe to deliver directly
+			return t.NudgeSession(sessionName, prefixedMessage)
+		}
+		// Terminal errors (session gone, no server) — propagate, don't queue.
+		// Queueing a nudge for a dead session means it will never be delivered.
+		if errors.Is(err, tmux.ErrSessionNotFound) || errors.Is(err, tmux.ErrNoServer) {
+			return fmt.Errorf("wait-idle: %w", err)
+		}
+		// Timeout (agent busy) — queue instead
+		if qErr := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			Sender:   sender,
+			Message:  message,
+			Priority: nudgePriorityFlag,
+		}); qErr != nil {
+			// Queue failed — fall back to immediate as last resort.
+			// Better to interrupt than lose the message entirely.
+			fmt.Fprintf(os.Stderr, "Warning: queue fallback failed (%v), delivering immediately\n", qErr)
+			return t.NudgeSession(sessionName, prefixedMessage)
+		}
+		return nil
+
+	default: // NudgeModeImmediate
+		return t.NudgeSession(sessionName, prefixedMessage)
+	}
+}
+
+// validNudgeModes is the set of allowed --mode values.
+var validNudgeModes = map[string]bool{
+	NudgeModeImmediate: true,
+	NudgeModeQueue:     true,
+	NudgeModeWaitIdle:  true,
+}
+
+// validNudgePriorities is the set of allowed --priority values.
+var validNudgePriorities = map[string]bool{
+	nudge.PriorityNormal: true,
+	nudge.PriorityUrgent: true,
+}
+
 func runNudge(cmd *cobra.Command, args []string) error {
+	// Validate --mode and --priority before doing anything else.
+	if !validNudgeModes[nudgeModeFlag] {
+		return fmt.Errorf("invalid --mode %q: must be one of immediate, queue, wait-idle", nudgeModeFlag)
+	}
+	if !validNudgePriorities[nudgePriorityFlag] {
+		return fmt.Errorf("invalid --priority %q: must be one of normal, urgent", nudgePriorityFlag)
+	}
+
 	// --if-fresh: skip nudge if the caller's tmux session is older than 60s.
 	// This prevents compaction/clear SessionStart hooks from spamming the deacon.
 	if nudgeIfFreshFlag {
@@ -127,13 +240,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("message required: use -m flag or provide as second argument")
 	}
 
-	// Handle channel syntax: channel:<name>
-	if strings.HasPrefix(target, "channel:") {
-		channelName := strings.TrimPrefix(target, "channel:")
-		return runNudgeChannel(channelName, message)
-	}
-
-	// Identify sender for message prefix
+	// Identify sender for message prefix (needed before channel check)
 	sender := "unknown"
 	if roleInfo, err := GetRole(); err == nil {
 		switch roleInfo.Role {
@@ -154,12 +261,15 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Prefix message with sender
-	message = fmt.Sprintf("[from %s] %s", sender, message)
+	// Handle channel syntax: channel:<name>
+	if strings.HasPrefix(target, "channel:") {
+		channelName := strings.TrimPrefix(target, "channel:")
+		return runNudgeChannel(channelName, message, sender)
+	}
 
 	// Check DND status for target (unless force flag or channel target)
 	townRoot, _ := workspace.FindFromCwd()
-	if townRoot != "" && !nudgeForceFlag && !strings.HasPrefix(target, "channel:") {
+	if townRoot != "" && !nudgeForceFlag {
 		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
 		if !shouldSend {
 			fmt.Printf("%s Target has DND enabled (%s) - nudge skipped\n", style.Dim.Render("○"), level)
@@ -184,10 +294,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		if roleInfo.Rig == "" {
 			return fmt.Errorf("cannot determine rig for %s shortcut (not in a rig context)", target)
 		}
+		rigPrefix := session.PrefixFor(roleInfo.Rig)
 		if target == "witness" {
-			target = session.WitnessSessionName(roleInfo.Rig)
+			target = session.WitnessSessionName(rigPrefix)
 		} else {
-			target = session.RefinerySessionName(roleInfo.Rig)
+			target = session.RefinerySessionName(rigPrefix)
 		}
 	}
 
@@ -205,11 +316,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		if err := t.NudgeSession(deaconSession, message); err != nil {
+		if err := deliverNudge(t, deaconSession, message, sender); err != nil {
 			return fmt.Errorf("nudging deacon: %w", err)
 		}
 
-		fmt.Printf("%s Nudged deacon\n", style.Bold.Render("✓"))
+		fmt.Printf("%s Nudged deacon (%s)\n", style.Bold.Render("✓"), nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -250,12 +361,25 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Send nudge using the reliable NudgeSession
-		if err := t.NudgeSession(sessionName, message); err != nil {
+		// For queue/wait-idle modes, verify session exists before enqueuing.
+		// Without this, queue mode silently succeeds for nonexistent sessions —
+		// the file is written but never drained.
+		if nudgeModeFlag != NudgeModeImmediate {
+			exists, err := t.HasSession(sessionName)
+			if err != nil {
+				return fmt.Errorf("checking session: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("session %q not found (cannot queue nudge for nonexistent session)", sessionName)
+			}
+		}
+
+		// Send nudge using the configured delivery mode
+		if err := deliverNudge(t, sessionName, message, sender); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
-		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)
+		fmt.Printf("%s Nudged %s/%s (%s)\n", style.Bold.Render("✓"), rigName, polecatName, nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -272,11 +396,11 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := t.NudgeSession(target, message); err != nil {
+		if err := deliverNudge(t, target, message, sender); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
-		fmt.Printf("✓ Nudged %s\n", target)
+		fmt.Printf("✓ Nudged %s (%s)\n", target, nudgeModeFlag)
 
 		// Log nudge event
 		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -289,7 +413,8 @@ func runNudge(cmd *cobra.Command, args []string) error {
 }
 
 // runNudgeChannel nudges all members of a named channel.
-func runNudgeChannel(channelName, message string) error {
+// Routes each target through deliverNudge so --mode is respected.
+func runNudgeChannel(channelName, message, sender string) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -312,30 +437,6 @@ func runNudgeChannel(channelName, message string) error {
 	if len(patterns) == 0 {
 		return fmt.Errorf("nudge channel %q has no members", channelName)
 	}
-
-	// Identify sender for message prefix
-	sender := "unknown"
-	if roleInfo, err := GetRole(); err == nil {
-		switch roleInfo.Role {
-		case RoleMayor:
-			sender = "mayor"
-		case RoleCrew:
-			sender = fmt.Sprintf("%s/crew/%s", roleInfo.Rig, roleInfo.Polecat)
-		case RolePolecat:
-			sender = fmt.Sprintf("%s/%s", roleInfo.Rig, roleInfo.Polecat)
-		case RoleWitness:
-			sender = fmt.Sprintf("%s/witness", roleInfo.Rig)
-		case RoleRefinery:
-			sender = fmt.Sprintf("%s/refinery", roleInfo.Rig)
-		case RoleDeacon:
-			sender = "deacon"
-		default:
-			sender = string(roleInfo.Role)
-		}
-	}
-
-	// Prefix message with sender
-	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
 
 	// Get all running sessions for pattern matching
 	agents, err := getAgentSessions(true)
@@ -362,12 +463,12 @@ func runNudgeChannel(channelName, message string) error {
 		return nil
 	}
 
-	// Send nudges
+	// Send nudges via deliverNudge (respects --mode flag)
 	t := tmux.NewTmux()
 	var succeeded, failed, skipped int
 	var failures []string
 
-	fmt.Printf("Nudging channel %q (%d target(s))...\n\n", channelName, len(targets))
+	fmt.Printf("Nudging channel %q (%d target(s), mode=%s)...\n\n", channelName, len(targets), nudgeModeFlag)
 
 	for i, sessionName := range targets {
 		// Check DND status before nudging each target
@@ -381,7 +482,7 @@ func runNudgeChannel(channelName, message string) error {
 			}
 		}
 
-		if err := t.NudgeSession(sessionName, prefixedMessage); err != nil {
+		if err := deliverNudge(t, sessionName, message, sender); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", sessionName, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, sessionName)
@@ -531,42 +632,28 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 //   - "hq-mayor" -> "mayor"
 //   - "hq-deacon" -> "deacon"
 func sessionNameToAddress(sessionName string) string {
-	if sessionName == session.MayorSessionName() {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
+		return ""
+	}
+
+	// Use short address format: rig/name (not rig/polecats/name)
+	switch identity.Role {
+	case session.RoleMayor:
 		return "mayor"
-	}
-	if sessionName == session.DeaconSessionName() {
+	case session.RoleDeacon:
 		return "deacon"
-	}
-
-	// Expected format: gt-<rig>-<rest>
-	if !strings.HasPrefix(sessionName, "gt-") {
+	case session.RoleWitness:
+		return fmt.Sprintf("%s/witness", identity.Rig)
+	case session.RoleRefinery:
+		return fmt.Sprintf("%s/refinery", identity.Rig)
+	case session.RoleCrew:
+		return fmt.Sprintf("%s/crew/%s", identity.Rig, identity.Name)
+	case session.RolePolecat:
+		return fmt.Sprintf("%s/%s", identity.Rig, identity.Name)
+	default:
 		return ""
 	}
-	rest := strings.TrimPrefix(sessionName, "gt-")
-
-	// Try to split into rig and target components
-	// Format: rig-crew-name or rig-witness or rig-refinery or rig-name
-	parts := strings.SplitN(rest, "-", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	rig := parts[0]
-	target := parts[1]
-
-	// Check for crew prefix: crew-<name>
-	if strings.HasPrefix(target, "crew-") {
-		crewName := strings.TrimPrefix(target, "crew-")
-		return fmt.Sprintf("%s/crew/%s", rig, crewName)
-	}
-
-	// Infrastructure roles
-	if target == "witness" || target == "refinery" {
-		return fmt.Sprintf("%s/%s", rig, target)
-	}
-
-	// Polecat (simple name after rig)
-	return fmt.Sprintf("%s/%s", rig, target)
 }
 
 // addressToAgentBeadID converts a target address to an agent bead ID.
@@ -601,15 +688,15 @@ func addressToAgentBeadID(address string) string {
 
 	switch role {
 	case "witness":
-		return fmt.Sprintf("gt-%s-witness", rig)
+		return session.WitnessSessionName(session.PrefixFor(rig))
 	case "refinery":
-		return fmt.Sprintf("gt-%s-refinery", rig)
+		return session.RefinerySessionName(session.PrefixFor(rig))
 	default:
 		// Assume polecat
 		if strings.HasPrefix(role, "crew/") {
 			crewName := strings.TrimPrefix(role, "crew/")
-			return fmt.Sprintf("gt-%s-crew-%s", rig, crewName)
+			return session.CrewSessionName(session.PrefixFor(rig), crewName)
 		}
-		return fmt.Sprintf("gt-%s-polecat-%s", rig, role)
+		return session.PolecatSessionName(session.PrefixFor(rig), role)
 	}
 }

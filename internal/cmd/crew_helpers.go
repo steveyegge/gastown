@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -40,7 +41,7 @@ func getCrewManager(rigName string) (*crew.Manager, *rig.Rig, error) {
 
 // crewSessionName generates the tmux session name for a crew worker.
 func crewSessionName(rigName, crewName string) string {
-	return fmt.Sprintf("gt-%s-crew-%s", rigName, crewName)
+	return session.CrewSessionName(session.PrefixFor(rigName), crewName)
 }
 
 // crewDetection holds the result of detecting crew workspace from cwd.
@@ -95,31 +96,20 @@ func detectCrewFromCwd() (*crewDetection, error) {
 }
 
 // parseCrewSessionName extracts rig and crew name from a tmux session name.
-// Format: gt-<rig>-crew-<name>
+// Format: <prefix>-crew-<name>
 // Returns empty strings and false if the format doesn't match.
 func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool) {
-	// Must start with "gt-" and contain "-crew-"
-	if !strings.HasPrefix(sessionName, "gt-") {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
 		return "", "", false
 	}
-
-	// Remove "gt-" prefix
-	rest := sessionName[3:]
-
-	// Find "-crew-" separator
-	idx := strings.Index(rest, "-crew-")
-	if idx == -1 {
+	if identity.Role != session.RoleCrew {
 		return "", "", false
 	}
-
-	rigName = rest[:idx]
-	crewName = rest[idx+6:] // len("-crew-") = 6
-
-	if rigName == "" || crewName == "" {
+	if identity.Rig == "" || identity.Name == "" {
 		return "", "", false
 	}
-
-	return rigName, crewName, true
+	return identity.Rig, identity.Name, true
 }
 
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
@@ -132,7 +122,7 @@ func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam //
 		return nil, nil
 	}
 
-	prefix := fmt.Sprintf("gt-%s-crew-", rigName)
+	prefix := session.PrefixFor(rigName) + "-crew-"
 	var sessions []string
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {

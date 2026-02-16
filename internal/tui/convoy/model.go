@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -52,11 +53,16 @@ type Model struct {
 	showHelp bool
 	width    int
 	height   int
+
+	// mu protects all fields read by View() from concurrent access:
+	// convoys, cursor, err, showHelp, help, width, height.
+	// Write lock is held during Update mutations; read lock during View/render.
+	mu sync.RWMutex
 }
 
 // New creates a new convoy TUI model.
-func New(townBeads string) Model {
-	return Model{
+func New(townBeads string) *Model {
+	return &Model{
 		townBeads: townBeads,
 		keys:      DefaultKeyMap(),
 		help:      help.New(),
@@ -65,7 +71,7 @@ func New(townBeads string) Model {
 }
 
 // Init initializes the model.
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return m.fetchConvoys
 }
 
@@ -76,7 +82,7 @@ type fetchConvoysMsg struct {
 }
 
 // fetchConvoys fetches convoy data from beads.
-func (m Model) fetchConvoys() tea.Msg {
+func (m *Model) fetchConvoys() tea.Msg {
 	convoys, err := loadConvoys(m.townBeads)
 	return fetchConvoysMsg{convoys: convoys, err: err}
 }
@@ -241,17 +247,21 @@ func refreshIssueStatus(ctx context.Context, tracked []struct {
 }
 
 // Update handles messages.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.mu.Lock()
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
+		m.mu.Unlock()
 		return m, nil
 
 	case fetchConvoysMsg:
+		m.mu.Lock()
 		m.err = msg.err
 		m.convoys = msg.convoys
+		m.mu.Unlock()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -260,40 +270,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Help):
+			m.mu.Lock()
 			m.showHelp = !m.showHelp
+			m.mu.Unlock()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Up):
+			m.mu.Lock()
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			m.mu.Unlock()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
-			max := m.maxCursor()
+			m.mu.Lock()
+			max := m.maxCursorLocked()
 			if m.cursor < max {
 				m.cursor++
 			}
+			m.mu.Unlock()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Top):
+			m.mu.Lock()
 			m.cursor = 0
+			m.mu.Unlock()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Bottom):
-			m.cursor = m.maxCursor()
+			m.mu.Lock()
+			m.cursor = m.maxCursorLocked()
+			m.mu.Unlock()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Toggle):
-			m.toggleExpand()
+			m.mu.Lock()
+			m.toggleExpandLocked()
+			m.mu.Unlock()
 			return m, nil
 
 		// Number keys for direct convoy access
 		case msg.String() >= "1" && msg.String() <= "9":
 			n := int(msg.String()[0] - '0')
+			m.mu.Lock()
 			if n <= len(m.convoys) {
-				m.jumpToConvoy(n - 1)
+				m.jumpToConvoyLocked(n - 1)
 			}
+			m.mu.Unlock()
 			return m, nil
 		}
 	}
@@ -301,8 +325,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// maxCursor returns the maximum valid cursor position.
-func (m Model) maxCursor() int {
+// maxCursorLocked returns the maximum valid cursor position.
+// Caller must hold m.mu (read or write).
+func (m *Model) maxCursorLocked() int {
 	count := 0
 	for _, c := range m.convoys {
 		count++ // convoy itself
@@ -316,9 +341,10 @@ func (m Model) maxCursor() int {
 	return count - 1
 }
 
-// cursorToConvoyIndex returns the convoy index and issue index for the current cursor.
+// cursorToConvoyIndexLocked returns the convoy index and issue index for the current cursor.
 // Returns (convoyIdx, issueIdx) where issueIdx is -1 if on a convoy row.
-func (m Model) cursorToConvoyIndex() (int, int) {
+// Caller must hold m.mu (read or write).
+func (m *Model) cursorToConvoyIndexLocked() (int, int) {
 	pos := 0
 	for ci, c := range m.convoys {
 		if pos == m.cursor {
@@ -337,17 +363,19 @@ func (m Model) cursorToConvoyIndex() (int, int) {
 	return -1, -1
 }
 
-// toggleExpand toggles expansion of the convoy at the current cursor.
-func (m *Model) toggleExpand() {
-	ci, ii := m.cursorToConvoyIndex()
+// toggleExpandLocked toggles expansion of the convoy at the current cursor.
+// Caller must hold m.mu write lock.
+func (m *Model) toggleExpandLocked() {
+	ci, ii := m.cursorToConvoyIndexLocked()
 	if ci >= 0 && ii == -1 {
 		// On a convoy row, toggle it
 		m.convoys[ci].Expanded = !m.convoys[ci].Expanded
 	}
 }
 
-// jumpToConvoy moves the cursor to a specific convoy by index.
-func (m *Model) jumpToConvoy(convoyIdx int) {
+// jumpToConvoyLocked moves the cursor to a specific convoy by index.
+// Caller must hold m.mu write lock.
+func (m *Model) jumpToConvoyLocked(convoyIdx int) {
 	if convoyIdx < 0 || convoyIdx >= len(m.convoys) {
 		return
 	}
@@ -365,6 +393,9 @@ func (m *Model) jumpToConvoy(convoyIdx int) {
 }
 
 // View renders the model.
-func (m Model) View() string {
+// Acquires read lock to safely access all View-visible fields.
+func (m *Model) View() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.renderView()
 }

@@ -567,15 +567,11 @@ func runDogClear(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check for live tmux session
-	townRoot, _ := workspace.FindFromCwd()
-	if townRoot != "" && !dogForce {
-		townName, err := workspace.GetTownName(townRoot)
-		if err == nil {
-			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
-			tm := tmux.NewTmux()
-			if has, _ := tm.HasSession(sessionName); has {
-				return fmt.Errorf("dog %s has an active session (%s)\nUse --force to clear anyway", name, sessionName)
-			}
+	if !dogForce {
+		sessionName := fmt.Sprintf("hq-dog-%s", name)
+		tm := tmux.NewTmux()
+		if has, _ := tm.HasSession(sessionName); has {
+			return fmt.Errorf("dog %s has an active session (%s)\nUse --force to clear anyway", name, sessionName)
 		}
 	}
 
@@ -702,16 +698,10 @@ func showDogStatus(mgr *dog.Manager, name string) error {
 	}
 
 	// Check for tmux session
-	townRoot, _ := workspace.FindFromCwd()
-	if townRoot != "" {
-		townName, err := workspace.GetTownName(townRoot)
-		if err == nil {
-			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
-			tm := tmux.NewTmux()
-			if has, _ := tm.HasSession(sessionName); has {
-				fmt.Printf("\nSession: %s (running)\n", sessionName)
-			}
-		}
+	sessionName := fmt.Sprintf("hq-dog-%s", name)
+	tm := tmux.NewTmux()
+	if has, _ := tm.HasSession(sessionName); has {
+		fmt.Printf("\nSession: %s (running)\n", sessionName)
 	}
 
 	return nil

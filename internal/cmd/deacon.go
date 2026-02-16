@@ -84,8 +84,15 @@ Detach with Ctrl-B D.`,
 var deaconStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check Deacon session status",
-	Long:  `Check if the Deacon tmux session is currently running.`,
-	RunE:  runDeaconStatus,
+	Long: `Check if the Deacon tmux session is currently running.
+
+Shows whether the Deacon has an active tmux session and reports
+its session name. The Deacon is the town-level watchdog that
+receives heartbeats from the daemon.
+
+Examples:
+  gt deacon status`,
+	RunE: runDeaconStatus,
 }
 
 var deaconRestartCmd = &cobra.Command{
@@ -287,8 +294,52 @@ Examples:
 	RunE: runDeaconZombieScan,
 }
 
+var deaconRedispatchCmd = &cobra.Command{
+	Use:   "redispatch <bead-id>",
+	Short: "Re-dispatch a recovered bead to an available polecat",
+	Long: `Re-dispatch a recovered bead from a dead polecat to an available polecat.
+
+When the Witness detects a dead polecat with abandoned work, it resets the bead
+to open status and sends a RECOVERED_BEAD mail to the Deacon. This command
+handles the re-dispatch:
+
+1. Checks re-dispatch state (how many times this bead has been re-dispatched)
+2. Rate-limits to prevent thrashing (cooldown between re-dispatches)
+3. If under the limit: runs 'gt sling <bead> <rig>' to re-dispatch
+4. If over the limit: escalates to Mayor instead of re-slinging
+
+Exit codes:
+  0 - Bead successfully re-dispatched or escalated
+  1 - Error occurred
+  2 - Bead in cooldown (try again later)
+  3 - Bead skipped (already claimed or non-open status)
+
+Examples:
+  gt deacon redispatch gt-abc123                    # Auto-detect rig from prefix
+  gt deacon redispatch gt-abc123 --rig gastown      # Explicit target rig
+  gt deacon redispatch gt-abc123 --max-attempts 5   # Allow 5 attempts before escalation
+  gt deacon redispatch gt-abc123 --cooldown 10m     # 10 minute cooldown between attempts`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDeaconRedispatch,
+}
+
+var deaconRedispatchStateCmd = &cobra.Command{
+	Use:   "redispatch-state",
+	Short: "Show re-dispatch state for recovered beads",
+	Long: `Display the current re-dispatch tracking state including:
+- Attempt counts per bead
+- Cooldown status
+- Escalation history
+
+This helps the Deacon understand which recovered beads need attention.`,
+	RunE: runDeaconRedispatchState,
+}
+
 var (
 	triggerTimeout time.Duration
+
+	// Status flags
+	deaconStatusJSON bool
 
 	// Health check flags
 	healthCheckTimeout  time.Duration
@@ -308,6 +359,11 @@ var (
 
 	// Zombie scan flags
 	zombieScanDryRun bool
+
+	// Redispatch flags
+	redispatchRig         string
+	redispatchMaxAttempts int
+	redispatchCooldown    time.Duration
 )
 
 func init() {
@@ -326,6 +382,11 @@ func init() {
 	deaconCmd.AddCommand(deaconResumeCmd)
 	deaconCmd.AddCommand(deaconCleanupOrphansCmd)
 	deaconCmd.AddCommand(deaconZombieScanCmd)
+	deaconCmd.AddCommand(deaconRedispatchCmd)
+	deaconCmd.AddCommand(deaconRedispatchStateCmd)
+
+	// Flags for status
+	deaconStatusCmd.Flags().BoolVar(&deaconStatusJSON, "json", false, "Output as JSON")
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -358,6 +419,14 @@ func init() {
 	// Flags for zombie-scan
 	deaconZombieScanCmd.Flags().BoolVar(&zombieScanDryRun, "dry-run", false,
 		"List zombies without killing them")
+
+	// Flags for redispatch
+	deaconRedispatchCmd.Flags().StringVar(&redispatchRig, "rig", "",
+		"Target rig to re-dispatch to (auto-detected from bead prefix if omitted)")
+	deaconRedispatchCmd.Flags().IntVar(&redispatchMaxAttempts, "max-attempts", 0,
+		"Max re-dispatch attempts before escalating to Mayor (default: 3)")
+	deaconRedispatchCmd.Flags().DurationVar(&redispatchCooldown, "cooldown", 0,
+		"Minimum time between re-dispatches of same bead (default: 5m)")
 
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
@@ -409,7 +478,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Ensure runtime settings exist (autonomous role needs mail in SessionStart)
 	runtimeConfig := config.ResolveRoleAgentConfig("deacon", townRoot, deaconDir)
-	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -516,31 +585,87 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 	return attachToTmuxSession(sessionName)
 }
 
+// DeaconStatusOutput is the JSON-serializable status of the Deacon.
+type DeaconStatusOutput struct {
+	Running   bool             `json:"running"`
+	Paused    bool             `json:"paused"`
+	Session   string           `json:"session"`
+	Heartbeat *HeartbeatStatus `json:"heartbeat,omitempty"`
+}
+
+// HeartbeatStatus is the JSON-serializable heartbeat info.
+type HeartbeatStatus struct {
+	Timestamp  time.Time `json:"timestamp"`
+	AgeSec     float64   `json:"age_seconds"`
+	Cycle      int64     `json:"cycle"`
+	LastAction string    `json:"last_action,omitempty"`
+	Fresh      bool      `json:"fresh"`
+	Stale      bool      `json:"stale"`
+	VeryStale  bool      `json:"very_stale"`
+}
+
 func runDeaconStatus(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 
 	sessionName := getDeaconSessionName()
-
-	// Check pause state first (most important)
 	townRoot, _ := workspace.FindFromCwdOrError()
+
+	// Gather state
+	paused := false
+	var pauseState *deacon.PauseState
 	if townRoot != "" {
-		paused, state, err := deacon.IsPaused(townRoot)
-		if err == nil && paused {
-			fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
-			if state.Reason != "" {
-				fmt.Printf("  Reason: %s\n", state.Reason)
-			}
-			fmt.Printf("  Paused at: %s\n", state.PausedAt.Format(time.RFC3339))
-			fmt.Printf("  Paused by: %s\n", state.PausedBy)
-			fmt.Println()
-			fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
-			fmt.Println()
+		var err error
+		paused, pauseState, err = deacon.IsPaused(townRoot)
+		if err != nil {
+			paused = false
 		}
 	}
 
 	running, err := t.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
+	}
+
+	// Read heartbeat
+	var hbStatus *HeartbeatStatus
+	if townRoot != "" {
+		if hb := deacon.ReadHeartbeat(townRoot); hb != nil {
+			hbStatus = &HeartbeatStatus{
+				Timestamp:  hb.Timestamp,
+				AgeSec:     hb.Age().Seconds(),
+				Cycle:      hb.Cycle,
+				LastAction: hb.LastAction,
+				Fresh:      hb.IsFresh(),
+				Stale:      hb.IsStale(),
+				VeryStale:  hb.IsVeryStale(),
+			}
+		}
+	}
+
+	// JSON output
+	if deaconStatusJSON {
+		out := DeaconStatusOutput{
+			Running:   running,
+			Paused:    paused,
+			Session:   sessionName,
+			Heartbeat: hbStatus,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+
+	// Human-readable output
+	if paused && pauseState != nil {
+		fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
+		if pauseState.Reason != "" {
+			fmt.Printf("  Reason: %s\n", pauseState.Reason)
+		}
+		fmt.Printf("  Paused at: %s\n", pauseState.PausedAt.Format(time.RFC3339))
+		fmt.Printf("  Paused by: %s\n", pauseState.PausedBy)
+		fmt.Println()
+		fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
+		fmt.Println()
 	}
 
 	if running {
@@ -556,7 +681,6 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 				style.Bold.Render("running"))
 			fmt.Printf("  Status: %s\n", status)
 			fmt.Printf("  Created: %s\n", info.Created)
-			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 		} else {
 			fmt.Printf("%s Deacon session is %s\n",
 				style.Bold.Render("●"),
@@ -567,6 +691,31 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 			style.Dim.Render("○"),
 			"not running")
 		fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt deacon start"))
+	}
+
+	// Heartbeat info (shown after session status)
+	if hbStatus != nil {
+		fmt.Println()
+		ageDur := time.Duration(hbStatus.AgeSec * float64(time.Second))
+		fmt.Printf("  Heartbeat: %s ago (cycle %d)\n",
+			ageDur.Round(time.Second), hbStatus.Cycle)
+		if hbStatus.LastAction != "" {
+			fmt.Printf("  Last action: %s\n", hbStatus.LastAction)
+		}
+		health := "fresh"
+		if hbStatus.VeryStale {
+			health = "very stale"
+		} else if hbStatus.Stale {
+			health = "stale"
+		}
+		fmt.Printf("  Health: %s\n", health)
+	} else if townRoot != "" {
+		fmt.Println()
+		fmt.Printf("  Heartbeat: %s\n", style.Dim.Render("no heartbeat file"))
+	}
+
+	if running {
+		fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 	}
 
 	return nil
@@ -743,9 +892,13 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	// Record ping
 	agentState.RecordPing()
 
-	// Send health check nudge
-	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
-		return fmt.Errorf("sending nudge: %w", err)
+	// Send health check nudge via immediate delivery (not queued).
+	// Health checks MUST interrupt to test liveness — queued delivery would
+	// defer until the next turn boundary, causing the 30s timeout to expire
+	// and producing false negatives that kill healthy agents.
+	healthMsg := "HEALTH_CHECK: respond with any action to confirm responsiveness"
+	if err := t.NudgeSession(sessionName, healthMsg); err != nil {
+		return fmt.Errorf("sending health check nudge: %w", err)
 	}
 
 	// Get baseline time AFTER sending nudge to avoid false positives.
@@ -815,7 +968,7 @@ Done:
 	// Check if force-kill threshold reached
 	if agentState.ShouldForceKill(healthCheckFailures) {
 		fmt.Printf("%s Agent %s should be force-killed\n", style.Bold.Render("✗"), agent)
-		os.Exit(2) // Exit code 2 = should force-kill
+		return NewSilentExit(2) // Exit code 2 = should force-kill
 	}
 
 	return nil
@@ -971,9 +1124,9 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 		rig, role := parts[0], parts[1]
 		switch role {
 		case "witness":
-			return fmt.Sprintf("gt-%s-witness", rig), fmt.Sprintf("gt-%s-witness", rig), nil
+			return session.WitnessSessionName(session.PrefixFor(rig)), session.WitnessSessionName(session.PrefixFor(rig)), nil
 		case "refinery":
-			return fmt.Sprintf("gt-%s-refinery", rig), fmt.Sprintf("gt-%s-refinery", rig), nil
+			return session.RefinerySessionName(session.PrefixFor(rig)), session.RefinerySessionName(session.PrefixFor(rig)), nil
 		default:
 			return "", "", fmt.Errorf("unknown role: %s", role)
 		}
@@ -982,9 +1135,9 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 		rig, agentType, name := parts[0], parts[1], parts[2]
 		switch agentType {
 		case "polecats":
-			return fmt.Sprintf("gt-%s-polecat-%s", rig, name), fmt.Sprintf("gt-%s-%s", rig, name), nil
+			return session.PolecatSessionName(session.PrefixFor(rig), name), session.PolecatSessionName(session.PrefixFor(rig), name), nil
 		case "crew":
-			return fmt.Sprintf("gt-%s-crew-%s", rig, name), fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
+			return session.CrewSessionName(session.PrefixFor(rig), name), session.CrewSessionName(session.PrefixFor(rig), name), nil
 		default:
 			return "", "", fmt.Errorf("unknown agent type: %s", agentType)
 		}
@@ -1307,6 +1460,98 @@ func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
 			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
 		}
 		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
+	}
+
+	return nil
+}
+
+// runDeaconRedispatch handles re-dispatching a recovered bead.
+func runDeaconRedispatch(cmd *cobra.Command, args []string) error {
+	beadID := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	result := deacon.Redispatch(townRoot, beadID, redispatchRig, redispatchMaxAttempts, redispatchCooldown)
+
+	switch result.Action {
+	case "redispatched":
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), result.Message)
+		return nil
+
+	case "escalated":
+		fmt.Printf("%s %s\n", style.Bold.Render("⚠"), result.Message)
+		if result.Error != nil {
+			return result.Error
+		}
+		return nil
+
+	case "already-escalated":
+		fmt.Printf("%s %s\n", style.Dim.Render("○"), result.Message)
+		return nil
+
+	case "cooldown":
+		fmt.Printf("%s %s\n", style.Dim.Render("○"), result.Message)
+		return NewSilentExit(2)
+
+	case "skipped":
+		fmt.Printf("%s %s\n", style.Dim.Render("○"), result.Message)
+		return NewSilentExit(3)
+
+	case "error":
+		if result.Error != nil {
+			return result.Error
+		}
+		return fmt.Errorf("redispatch failed: %s", result.Message)
+
+	default:
+		return fmt.Errorf("unexpected redispatch result: %s", result.Action)
+	}
+}
+
+// runDeaconRedispatchState shows the current re-dispatch state.
+func runDeaconRedispatchState(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	state, err := deacon.LoadRedispatchState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading redispatch state: %w", err)
+	}
+
+	if len(state.Beads) == 0 {
+		fmt.Printf("%s No re-dispatch state recorded\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Re-dispatch State (updated %s)\n\n",
+		style.Bold.Render("●"),
+		state.LastUpdated.Format(time.RFC3339))
+
+	for beadID, beadState := range state.Beads {
+		fmt.Printf("Bead: %s\n", style.Bold.Render(beadID))
+		fmt.Printf("  Attempts: %d\n", beadState.AttemptCount)
+
+		if !beadState.LastAttemptTime.IsZero() {
+			fmt.Printf("  Last attempt: %s ago\n", time.Since(beadState.LastAttemptTime).Round(time.Second))
+		}
+		if beadState.LastRig != "" {
+			fmt.Printf("  Last rig: %s\n", beadState.LastRig)
+		}
+		if beadState.Escalated {
+			fmt.Printf("  Escalated: YES (at %s)\n", beadState.EscalatedAt.Format(time.RFC3339))
+		}
+
+		cooldown := deacon.DefaultRedispatchCooldown
+		if beadState.IsInCooldown(cooldown) {
+			remaining := beadState.CooldownRemaining(cooldown)
+			fmt.Printf("  Cooldown: %s remaining\n", remaining.Round(time.Second))
+		}
+		fmt.Println()
 	}
 
 	return nil

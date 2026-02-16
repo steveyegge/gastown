@@ -165,10 +165,15 @@ The slot:
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Refinery: merge queue                     │
-│  → Rebase and merge to main                                │
+│  → Rebase and merge to target branch                       │
+│    (main or integration branch — see below)                │
 │  → Close the issue                                         │
 │  → If conflict: spawn FRESH polecat to re-implement        │
 │    (never send work back to original polecat - it's gone)  │
+│                                                             │
+│  Integration branch path:                                  │
+│  → MRs from epic children merge to integration/<epic>      │
+│  → When all children closed: land to main as one commit    │
 └─────────────────────────────────────────────────────────────┘
 ```
 

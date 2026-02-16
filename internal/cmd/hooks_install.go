@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,12 +79,17 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(targets) == 0 {
-		// No role specified, install to current worktree
+		if installRole != "" {
+			return fmt.Errorf("no targets found for role %q in workspace", installRole)
+		}
+		// No role specified — resolve CWD to the correct settings directory.
+		// For shared-parent roles (crew, polecats, witness, refinery), the
+		// settings live in the role parent dir, not the individual worktree.
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		targets = []string{cwd}
+		targets = []string{resolveSettingsTarget(townRoot, cwd)}
 	}
 
 	// Install to each target
@@ -155,56 +159,32 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 		}
 	}
 
-	// Find worktrees for the role in each rig
+	// Find settings directories for the role in each rig.
+	// Settings are installed in shared parent directories (not per-worktree),
+	// matching the model used by DiscoverTargets and EnsureSettingsForRole.
 	for _, rig := range rigs {
 		rigPath := filepath.Join(townRoot, rig)
 
 		switch role {
 		case "crew":
 			crewDir := filepath.Join(rigPath, "crew")
-			if entries, err := os.ReadDir(crewDir); err == nil {
-				for _, e := range entries {
-					if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-						targets = append(targets, filepath.Join(crewDir, e.Name()))
-					}
-				}
+			if info, err := os.Stat(crewDir); err == nil && info.IsDir() {
+				targets = append(targets, crewDir)
 			}
 		case "polecat":
 			polecatsDir := filepath.Join(rigPath, "polecats")
-			if entries, err := os.ReadDir(polecatsDir); err == nil {
-				for _, e := range entries {
-					if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-						// New layout: polecats/<name>/<rigname>/ is the worktree
-						// Fall back to polecats/<name>/ for legacy layout
-						polecatWorkDir := filepath.Join(polecatsDir, e.Name(), rig)
-						if _, err := os.Stat(polecatWorkDir); err != nil {
-							polecatWorkDir = filepath.Join(polecatsDir, e.Name())
-						}
-						targets = append(targets, polecatWorkDir)
-					}
-				}
+			if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
+				targets = append(targets, polecatsDir)
 			}
 		case "witness":
-			// Working directory is witness/rig/ if it exists, else witness/
-			witnessRigPath := filepath.Join(rigPath, "witness", "rig")
-			if _, err := os.Stat(witnessRigPath); err == nil {
-				targets = append(targets, witnessRigPath)
-			} else {
-				witnessPath := filepath.Join(rigPath, "witness")
-				if _, err := os.Stat(witnessPath); err == nil {
-					targets = append(targets, witnessPath)
-				}
+			witnessDir := filepath.Join(rigPath, "witness")
+			if info, err := os.Stat(witnessDir); err == nil && info.IsDir() {
+				targets = append(targets, witnessDir)
 			}
 		case "refinery":
-			// Working directory is refinery/rig/ if it exists, else refinery/
-			refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
-			if _, err := os.Stat(refineryRigPath); err == nil {
-				targets = append(targets, refineryRigPath)
-			} else {
-				refineryPath := filepath.Join(rigPath, "refinery")
-				if _, err := os.Stat(refineryPath); err == nil {
-					targets = append(targets, refineryPath)
-				}
+			refineryDir := filepath.Join(rigPath, "refinery")
+			if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
+				targets = append(targets, refineryDir)
 			}
 		}
 	}
@@ -212,9 +192,32 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 	return targets, nil
 }
 
+// resolveSettingsTarget resolves a working directory to the appropriate settings
+// target directory. For shared-parent roles (crew, polecats, witness, refinery),
+// this returns the role parent directory rather than the individual worktree,
+// matching the shared settings model used by DiscoverTargets and EnsureSettingsForRole.
+func resolveSettingsTarget(townRoot, cwd string) string {
+	relPath, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		return cwd
+	}
+	parts := strings.Split(relPath, string(filepath.Separator))
+	if len(parts) < 2 {
+		return cwd // At town root or top-level dir (mayor/deacon)
+	}
+	// parts[0] = rig name (or mayor/deacon), parts[1] = role dir
+	roleDir := parts[1]
+	switch roleDir {
+	case "crew", "polecats", "witness", "refinery":
+		return filepath.Join(townRoot, parts[0], roleDir)
+	default:
+		return cwd
+	}
+}
+
 // installHookTo installs a hook to a specific worktree.
 func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) error {
-	settingsPath := filepath.Join(worktreePath, ".claude", "settings.local.json")
+	settingsPath := filepath.Join(worktreePath, ".claude", "settings.json")
 
 	// Load existing settings or create new
 	settings, err := hooks.LoadSettings(settingsPath)
@@ -259,8 +262,9 @@ func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) err
 		return fmt.Errorf("creating .claude directory: %w", err)
 	}
 
-	// Write settings
-	data, err := json.MarshalIndent(settings, "", "  ")
+	// Write settings using MarshalSettings to preserve custom field handling
+	// (SettingsJSON uses json:"-" tags, so encoding/json would produce {})
+	data, err := hooks.MarshalSettings(settings)
 	if err != nil {
 		return fmt.Errorf("marshaling settings: %w", err)
 	}

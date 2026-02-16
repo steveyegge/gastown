@@ -3,6 +3,8 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -60,6 +62,70 @@ func TestFindOrphanedClaudeProcesses(t *testing.T) {
 	t.Logf("Found %d orphaned claude processes", len(orphans))
 	for _, o := range orphans {
 		t.Logf("  PID %d: %s", o.PID, o.Cmd)
+	}
+}
+
+func TestGetProcessCwd(t *testing.T) {
+	// Our own process should have a valid cwd
+	cwd := getProcessCwd(os.Getpid())
+	if cwd == "" {
+		t.Fatal("getProcessCwd(self) returned empty string")
+	}
+	// Verify it matches os.Getwd
+	expected, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error: %v", err)
+	}
+	if cwd != expected {
+		t.Errorf("getProcessCwd(self) = %q, want %q", cwd, expected)
+	}
+}
+
+func TestIsInGasTownWorkspace(t *testing.T) {
+	// NOTE: This test uses os.Chdir on the process-global cwd.
+	// Do NOT add t.Parallel() here or to any test in this file—concurrent
+	// tests sharing the same process would race on the working directory.
+
+	// Create a temporary directory structure simulating a Gas Town workspace
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	townJSON := filepath.Join(mayorDir, "town.json")
+	if err := os.WriteFile(townJSON, []byte(`{"name":"test-town"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Our process is NOT in the temp workspace, so should return false
+	if isInGasTownWorkspace(os.Getpid()) {
+		t.Error("isInGasTownWorkspace(self) = true, want false (not in a GT workspace)")
+	}
+
+	// Change to the workspace dir and verify it detects correctly
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	if !isInGasTownWorkspace(os.Getpid()) {
+		t.Error("isInGasTownWorkspace(self) = false, want true (in GT workspace root)")
+	}
+
+	// Test from a subdirectory of the workspace
+	subDir := filepath.Join(tmpDir, "polecats", "test-polecat")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatal(err)
+	}
+	if !isInGasTownWorkspace(os.Getpid()) {
+		t.Error("isInGasTownWorkspace(self) = false, want true (in GT workspace subdir)")
 	}
 }
 

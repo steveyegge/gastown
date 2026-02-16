@@ -349,8 +349,6 @@ func isNoiseCommit(subject string) bool {
 		"On ",              // "On branch: message"
 		"stash@{",          // Direct stash reference
 		"untracked files ", // Stash with untracked
-		"bd sync:",         // Beads sync commits (routine)
-		"bd sync: ",        // Beads sync commits (routine)
 	}
 
 	for _, prefix := range noisePrefixes {

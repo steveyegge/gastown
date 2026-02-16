@@ -40,11 +40,11 @@ func init() {
 }
 
 func runHooksOverride(cmd *cobra.Command, args []string) error {
-	target := args[0]
-
-	if !hooks.ValidTarget(target) {
-		return fmt.Errorf("invalid target %q; valid targets are roles (crew, witness, refinery, polecats, mayor, deacon) or rig/role (gastown/crew, etc.)", target)
+	normalized, ok := hooks.NormalizeTarget(args[0])
+	if !ok {
+		return fmt.Errorf("invalid target %q; valid targets are roles (crew, witness, refinery, polecats, mayor, deacon) or rig/role (gastown/crew, etc.)", args[0])
 	}
+	target := normalized
 
 	cfg, err := hooks.LoadOverride(target)
 	if err != nil {

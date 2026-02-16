@@ -16,7 +16,9 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -26,16 +28,17 @@ import (
 )
 
 var (
-	installForce      bool
-	installName       string
-	installOwner      string
-	installPublicName string
-	installNoBeads    bool
-	installGit        bool
-	installGitHub     string
-	installPublic     bool
-	installShell      bool
-	installWrappers   bool
+	installForce        bool
+	installName         string
+	installOwner        string
+	installPublicName   string
+	installNoBeads      bool
+	installGit          bool
+	installGitHub       string
+	installPublic       bool
+	installShell        bool
+	installWrappers     bool
+	installSupervisor   bool
 )
 
 var installCmd = &cobra.Command{
@@ -62,13 +65,14 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --supervisor                 # Configure launchd/systemd for daemon auto-restart`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
 
 func init() {
-	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Overwrite existing HQ")
+	installCmd.Flags().BoolVarP(&installForce, "force", "f", false, "Re-run install in existing HQ (preserves town.json and rigs.json)")
 	installCmd.Flags().StringVarP(&installName, "name", "n", "", "Town name (defaults to directory name)")
 	installCmd.Flags().StringVar(&installOwner, "owner", "", "Owner email for entity identity (defaults to git config user.email)")
 	installCmd.Flags().StringVar(&installPublicName, "public-name", "", "Public display name (defaults to town name)")
@@ -77,7 +81,8 @@ func init() {
 	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
-	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-gemini/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installSupervisor, "supervisor", false, "Configure launchd/systemd for daemon auto-restart")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -115,7 +120,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			if err := wrappers.Install(); err != nil {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
-			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			fmt.Printf("✓ Installed gt-codex, gt-gemini, and gt-opencode to %s\n", wrappers.BinDir())
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
@@ -134,6 +139,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if !installNoBeads {
 		if err := deps.EnsureBeads(true); err != nil {
 			return fmt.Errorf("beads dependency check failed: %w", err)
+		}
+	}
+
+	// Preflight: ensure dolt identity before any workspace mutations.
+	// This prevents a partial install that can't be retried without --force.
+	if !installNoBeads {
+		if _, err := exec.LookPath("dolt"); err == nil {
+			if err := doltserver.EnsureDoltIdentity(); err != nil {
+				return fmt.Errorf("dolt identity setup failed (required for beads): %w\n\nTo fix, run:\n  dolt config --global --add user.name \"Your Name\"\n  dolt config --global --add user.email \"you@example.com\"", err)
+			}
 		}
 	}
 
@@ -167,31 +182,48 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		publicName = townName
 	}
 
-	// Create town.json in mayor/
-	townConfig := &config.TownConfig{
-		Type:       "town",
-		Version:    config.CurrentTownVersion,
-		Name:       townName,
-		Owner:      owner,
-		PublicName: publicName,
-		CreatedAt:  time.Now(),
-	}
+	// Create town.json in mayor/ (only if it doesn't already exist).
 	townPath := filepath.Join(mayorDir, "town.json")
-	if err := config.SaveTownConfig(townPath, townConfig); err != nil {
-		return fmt.Errorf("writing town.json: %w", err)
+	if townInfo, err := os.Stat(townPath); os.IsNotExist(err) {
+		townConfig := &config.TownConfig{
+			Type:       "town",
+			Version:    config.CurrentTownVersion,
+			Name:       townName,
+			Owner:      owner,
+			PublicName: publicName,
+			CreatedAt:  time.Now(),
+		}
+		if err := config.SaveTownConfig(townPath, townConfig); err != nil {
+			return fmt.Errorf("writing town.json: %w", err)
+		}
+		fmt.Printf("   ✓ Created mayor/town.json\n")
+	} else if err != nil {
+		return fmt.Errorf("checking town.json: %w", err)
+	} else if !townInfo.Mode().IsRegular() {
+		return fmt.Errorf("town.json exists but is not a regular file")
+	} else {
+		fmt.Printf("   • mayor/town.json already exists, preserving\n")
 	}
-	fmt.Printf("   ✓ Created mayor/town.json\n")
 
-	// Create rigs.json in mayor/
-	rigsConfig := &config.RigsConfig{
-		Version: config.CurrentRigsVersion,
-		Rigs:    make(map[string]config.RigEntry),
-	}
+	// Create rigs.json in mayor/ (only if it doesn't already exist).
+	// Re-running install must NOT clobber existing rig registrations.
 	rigsPath := filepath.Join(mayorDir, "rigs.json")
-	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
-		return fmt.Errorf("writing rigs.json: %w", err)
+	if rigsInfo, err := os.Stat(rigsPath); os.IsNotExist(err) {
+		rigsConfig := &config.RigsConfig{
+			Version: config.CurrentRigsVersion,
+			Rigs:    make(map[string]config.RigEntry),
+		}
+		if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+			return fmt.Errorf("writing rigs.json: %w", err)
+		}
+		fmt.Printf("   ✓ Created mayor/rigs.json\n")
+	} else if err != nil {
+		return fmt.Errorf("checking rigs.json: %w", err)
+	} else if !rigsInfo.Mode().IsRegular() {
+		return fmt.Errorf("rigs.json exists but is not a regular file")
+	} else {
+		fmt.Printf("   • mayor/rigs.json already exists, preserving\n")
 	}
-	fmt.Printf("   ✓ Created mayor/rigs.json\n")
 
 	// Create a generic CLAUDE.md at the town root as an identity anchor.
 	// Claude Code sets its CWD to the git root (~/gt/), so mayor/CLAUDE.md is
@@ -216,10 +248,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		mayorRuntimeConfig := config.ResolveRoleAgentConfig("mayor", absPath, mayorDir)
-		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
+		if err := runtime.EnsureSettingsForRole(mayorDir, mayorDir, "mayor", mayorRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created mayor/.claude/settings.local.json\n")
+			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
 		}
 	}
 
@@ -229,10 +261,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		deaconRuntimeConfig := config.ResolveRoleAgentConfig("deacon", absPath, deaconDir)
-		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
+		if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", deaconRuntimeConfig); err != nil {
 			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Created deacon/.claude/settings.local.json\n")
+			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
 		}
 	}
 
@@ -273,6 +305,28 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
+		// Set up Dolt: identity → init-rig hq → server start.
+		// This ordering works because InitRig falls through to `dolt init`
+		// when the server isn't running yet.
+		if _, err := exec.LookPath("dolt"); err == nil {
+			// Identity was verified in preflight above.
+			// Create HQ database before starting server.
+			if _, _, err := doltserver.InitRig(absPath, "hq"); err != nil {
+				fmt.Printf("   %s Could not init HQ database: %v\n", style.Dim.Render("⚠"), err)
+			}
+
+			// Start the Dolt server — bd commands need a running server.
+			// The server stays running after install (it's lightweight infrastructure,
+			// like a database). Stop it with 'gt dolt stop' when not needed.
+			if err := doltserver.Start(absPath); err != nil {
+				if !strings.Contains(err.Error(), "already running") {
+					fmt.Printf("   %s Could not start Dolt server: %v\n", style.Dim.Render("⚠"), err)
+				}
+			}
+		} else {
+			fmt.Printf("   %s dolt not found in PATH — Dolt backend may not fully initialize\n", style.Dim.Render("⚠"))
+		}
+
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -291,6 +345,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// These use hq- prefix and are stored in town beads for cross-rig coordination.
 		if err := initTownAgentBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
+		}
+
+		// Set beads routing mode to explicit (required by gt doctor).
+		routingCmd := exec.Command("bd", "config", "set", "routing.mode", "explicit")
+		routingCmd.Dir = absPath
+		if out, err := routingCmd.CombinedOutput(); err != nil {
+			fmt.Printf("   %s Could not set routing.mode: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(out)))
 		}
 	}
 
@@ -323,6 +384,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Created .claude/commands/ (slash commands for all agents)\n")
 	}
 
+	// Sync hooks to generate .claude/settings.json files for all targets.
+	if targets, err := hooks.DiscoverTargets(absPath); err == nil {
+		synced := 0
+		for _, target := range targets {
+			if _, err := syncTarget(target, false); err == nil {
+				synced++
+			}
+		}
+		if synced > 0 {
+			fmt.Printf("   ✓ Synced %d hook target(s)\n", synced)
+		}
+	}
+
 	if installShell {
 		fmt.Println()
 		if err := shell.Install(); err != nil {
@@ -346,6 +420,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Configure supervisor (launchd/systemd) for daemon auto-restart
+	if installSupervisor {
+		fmt.Println()
+		if msg, err := templates.ProvisionSupervisor(absPath); err != nil {
+			fmt.Printf("   %s Could not configure supervisor: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ %s\n", msg)
+		}
+	}
+
 	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
 	fmt.Println("Next steps:")
@@ -359,6 +443,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %d. (Optional) Configure agents: %s\n", step, style.Dim.Render("gt config agent list"))
 	step++
 	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
+	fmt.Println()
+	fmt.Printf("Note: Dolt server is running (stop with %s)\n", style.Dim.Render("gt dolt stop"))
 
 	return nil
 }
@@ -449,24 +535,6 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not set allowed_prefixes: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(prefixOutput)))
 	}
 
-	// Ensure database has repository fingerprint (GH #25).
-	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
-	// Without fingerprint, the bd daemon fails to start silently.
-	if err := ensureRepoFingerprint(townPath); err != nil {
-		// Non-fatal: fingerprint is optional for functionality, just daemon optimization
-		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
-	}
-
-	// Ensure issues.jsonl exists BEFORE creating routes.jsonl.
-	// If routes.jsonl is created first, bd's auto-export will write issues to routes.jsonl,
-	// corrupting it. Creating an empty issues.jsonl prevents this.
-	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")
-	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
-		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
-			fmt.Printf("   %s Could not create issues.jsonl: %v\n", style.Dim.Render("⚠"), err)
-		}
-	}
-
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
 	// This keeps hq-* operations stable even when invoked from rig worktrees.
 	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
@@ -480,19 +548,6 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not register convoy prefix: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	return nil
-}
-
-// ensureRepoFingerprint runs bd migrate --update-repo-id to ensure the database
-// has a repository fingerprint. Legacy databases (pre-0.17.5) lack this, which
-// prevents the daemon from starting properly.
-func ensureRepoFingerprint(beadsPath string) error {
-	cmd := exec.Command("bd", "migrate", "--update-repo-id")
-	cmd.Dir = beadsPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
-	}
 	return nil
 }
 

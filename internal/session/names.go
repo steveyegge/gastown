@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// Prefix is the common prefix for rig-level Gas Town tmux sessions.
-const Prefix = "gt-"
+// DefaultPrefix is the default beads prefix used when no rig-specific prefix is known.
+const DefaultPrefix = "gt"
 
 // HQPrefix is the prefix for town-level services (Mayor, Deacon).
 const HQPrefix = "hq-"
@@ -24,23 +24,27 @@ func DeaconSessionName() string {
 }
 
 // WitnessSessionName returns the session name for a rig's Witness agent.
-func WitnessSessionName(rig string) string {
-	return fmt.Sprintf("%s%s-witness", Prefix, rig)
+// rigPrefix is the rig's beads prefix (e.g., "gt" for gastown, "bd" for beads).
+func WitnessSessionName(rigPrefix string) string {
+	return fmt.Sprintf("%s-witness", rigPrefix)
 }
 
 // RefinerySessionName returns the session name for a rig's Refinery agent.
-func RefinerySessionName(rig string) string {
-	return fmt.Sprintf("%s%s-refinery", Prefix, rig)
+// rigPrefix is the rig's beads prefix (e.g., "gt" for gastown, "bd" for beads).
+func RefinerySessionName(rigPrefix string) string {
+	return fmt.Sprintf("%s-refinery", rigPrefix)
 }
 
 // CrewSessionName returns the session name for a crew worker in a rig.
-func CrewSessionName(rig, name string) string {
-	return fmt.Sprintf("%s%s-crew-%s", Prefix, rig, name)
+// rigPrefix is the rig's beads prefix (e.g., "gt" for gastown, "bd" for beads).
+func CrewSessionName(rigPrefix, name string) string {
+	return fmt.Sprintf("%s-crew-%s", rigPrefix, name)
 }
 
 // PolecatSessionName returns the session name for a polecat in a rig.
-func PolecatSessionName(rig, name string) string {
-	return fmt.Sprintf("%s%s-%s", Prefix, rig, name)
+// rigPrefix is the rig's beads prefix (e.g., "gt" for gastown, "bd" for beads).
+func PolecatSessionName(rigPrefix, name string) string {
+	return fmt.Sprintf("%s-%s", rigPrefix, name)
 }
 
 // OverseerSessionName returns the session name for the human operator.
@@ -50,11 +54,8 @@ func OverseerSessionName() string {
 }
 
 // BootSessionName returns the session name for the Boot watchdog.
-// Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
-// matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"
-// would match when checking for "hq-deacon", causing HasSession("hq-deacon")
-// to return true when only Boot is running.
+// Boot is town-level (launched by deacon), so it uses the hq- prefix.
+// "hq-boot" avoids tmux prefix-matching collisions with "hq-deacon".
 func BootSessionName() string {
-	return Prefix + "boot"
+	return HQPrefix + "boot"
 }
-

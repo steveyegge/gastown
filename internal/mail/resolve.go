@@ -378,23 +378,45 @@ func agentBeadIDToAddress(id string) string {
 		return ""
 	}
 
+	// Agent bead IDs include the role explicitly: <prefix>-<rig>-<role>[-<name>]
+	// Scan from right for known role markers to handle hyphenated rig names.
 	parts := strings.Split(rest, "-")
 
-	switch len(parts) {
-	case 1:
+	if len(parts) == 1 {
 		// Town-level: gt-mayor → mayor/
 		return parts[0] + "/"
-	case 2:
-		// Rig singleton: gt-gastown-witness → gastown/witness
-		return parts[0] + "/" + parts[1]
-	default:
-		// Rig named agent: gt-gastown-crew-max → gastown/crew/max
-		if len(parts) >= 3 {
-			name := strings.Join(parts[2:], "-")
-			return parts[0] + "/" + parts[1] + "/" + name
-		}
-		return ""
 	}
+
+	// Scan from right for known role markers
+	for i := len(parts) - 1; i >= 1; i-- {
+		switch parts[i] {
+		case "witness", "refinery":
+			// Singleton role: rig is everything before the role
+			rig := strings.Join(parts[:i], "-")
+			return rig + "/" + parts[i]
+		case "crew", "polecat":
+			// Named role: rig/role/name
+			rig := strings.Join(parts[:i], "-")
+			if i+1 < len(parts) {
+				name := strings.Join(parts[i+1:], "-")
+				return rig + "/" + parts[i] + "/" + name
+			}
+			return rig + "/" + parts[i]
+		case "dog":
+			// Town-level named: gt-dog-alpha
+			if i+1 < len(parts) {
+				name := strings.Join(parts[i+1:], "-")
+				return "dog/" + name
+			}
+			return "dog/"
+		}
+	}
+
+	// Fallback: assume rig/role format
+	if len(parts) == 2 {
+		return parts[0] + "/" + parts[1]
+	}
+	return ""
 }
 
 // matchPattern checks if an address matches a wildcard pattern.

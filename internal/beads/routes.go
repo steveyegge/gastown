@@ -123,30 +123,43 @@ func WriteRoutes(beadsDir string, routes []Route) error {
 
 	routesPath := filepath.Join(beadsDir, RoutesFileName)
 
-	file, err := os.Create(routesPath)
+	tmp, err := os.CreateTemp(beadsDir, ".routes-*.tmp")
 	if err != nil {
-		return fmt.Errorf("creating routes file: %w", err)
+		return fmt.Errorf("creating temp routes file: %w", err)
 	}
-	defer file.Close()
+	tmpPath := tmp.Name()
 
 	for _, r := range routes {
 		data, err := json.Marshal(r)
 		if err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
 			return fmt.Errorf("marshaling route: %w", err)
 		}
-		if _, err := file.Write(data); err != nil {
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
 			return fmt.Errorf("writing route: %w", err)
 		}
-		if _, err := file.WriteString("\n"); err != nil {
+		if _, err := tmp.WriteString("\n"); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
 			return fmt.Errorf("writing newline: %w", err)
 		}
 	}
 
-	if err := file.Sync(); err != nil {
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("syncing routes file: %w", err)
 	}
 
-	return nil
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing routes file: %w", err)
+	}
+
+	return os.Rename(tmpPath, routesPath)
 }
 
 // GetTownBeadsPath returns the path to town-level beads directory.

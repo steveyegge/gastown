@@ -2,6 +2,7 @@
 package polecat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -26,6 +28,8 @@ func debugSession(context string, err error) {
 		fmt.Fprintf(os.Stderr, "[session-debug] %s: %v\n", context, err)
 	}
 }
+
+const bdCommandTimeout = 30 * time.Second
 
 // Session errors
 var (
@@ -99,8 +103,42 @@ type SessionInfo struct {
 }
 
 // SessionName generates the tmux session name for a polecat.
+// Validates that the polecat name doesn't contain the rig prefix to prevent
+// double-prefix bugs (e.g., "gt-gastown_manager-gastown_manager-142").
 func (m *SessionManager) SessionName(polecat string) string {
-	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
+	sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), polecat)
+
+	// Validate session name format to detect double-prefix bugs
+	if err := validateSessionName(sessionName, m.rig.Name); err != nil {
+		// Log warning but don't fail - allow the session to be created
+		// so we can track and clean up malformed sessions later
+		fmt.Fprintf(os.Stderr, "Warning: malformed session name: %v\n", err)
+	}
+
+	return sessionName
+}
+
+// validateSessionName checks for double-prefix session names.
+// Returns an error if the session name has the rig prefix duplicated.
+// Example bad name: "gt-gastown_manager-gastown_manager-142"
+func validateSessionName(sessionName, rigName string) error {
+	// Expected format: gt-<rig>-<name>
+	// Check if the name part starts with the rig prefix (indicates double-prefix bug)
+	prefix := session.PrefixFor(rigName) + "-"
+	if !strings.HasPrefix(sessionName, prefix) {
+		return nil // Not our rig, can't validate
+	}
+
+	namePart := strings.TrimPrefix(sessionName, prefix)
+
+	// Check if name part starts with rig name followed by hyphen
+	// This indicates overflow name included rig prefix: gt-<rig>-<rig>-N
+	if strings.HasPrefix(namePart, rigName+"-") {
+		return fmt.Errorf("double-prefix detected: %s (expected format: gt-%s-<name>)",
+			sessionName, rigName)
+	}
+
+	return nil
 }
 
 // polecatDir returns the parent directory for a polecat.
@@ -188,10 +226,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 
-	// Ensure runtime settings exist INSIDE the worktree so Claude Code can find them.
-	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
-	// See: https://github.com/anthropics/claude-code/issues/12962
-	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in the shared polecats parent directory.
+	// Settings are passed to Claude Code via --settings flag.
+	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, workDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -230,6 +268,30 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// under concurrent load (gt-5cc2p). Changes merge at gt done time.
 	command = config.PrependEnv(command, map[string]string{"BD_DOLT_AUTO_COMMIT": "off"})
 
+	// FIX (ga-6s284): Prepend GT_RIG, GT_POLECAT, GT_ROLE to startup command
+	// so they're inherited by Kimi and other agents. Setting via tmux.SetEnvironment
+	// after session creation doesn't work for all agent types.
+	//
+	// GT_BRANCH and GT_POLECAT_PATH are critical for gt done's nuked-worktree fallback:
+	// when the polecat's cwd is deleted before gt done finishes, these env vars allow
+	// branch detection and path resolution without a working directory.
+	polecatGitBranch := ""
+	if g := git.NewGit(workDir); g != nil {
+		if b, err := g.CurrentBranch(); err == nil {
+			polecatGitBranch = b
+		}
+	}
+	envVarsToInject := map[string]string{
+		"GT_RIG":          m.rig.Name,
+		"GT_POLECAT":      polecat,
+		"GT_ROLE":         fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
+		"GT_POLECAT_PATH": workDir,
+	}
+	if polecatGitBranch != "" {
+		envVarsToInject["GT_BRANCH"] = polecatGitBranch
+	}
+	command = config.PrependEnv(command, envVarsToInject)
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
@@ -249,6 +311,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
+
+	// Set GT_BRANCH and GT_POLECAT_PATH in tmux session environment.
+	// This ensures respawned processes also inherit these for gt done fallback.
+	if polecatGitBranch != "" {
+		debugSession("SetEnvironment GT_BRANCH", m.tmux.SetEnvironment(sessionID, "GT_BRANCH", polecatGitBranch))
+	}
+	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
 
 	// Branch-per-polecat: set BD_BRANCH in tmux session environment
 	// This ensures respawned processes also inherit the branch setting.
@@ -431,7 +500,7 @@ func (m *SessionManager) List() ([]SessionInfo, error) {
 		return nil, err
 	}
 
-	prefix := fmt.Sprintf("gt-%s-", m.rig.Name)
+	prefix := session.PrefixFor(m.rig.Name) + "-"
 	var infos []SessionInfo
 
 	for _, sessionID := range sessions {
@@ -565,7 +634,9 @@ func (m *SessionManager) resolveBeadsDir(issueID, fallbackDir string) string {
 func (m *SessionManager) validateIssue(issueID, workDir string) error {
 	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
 
-	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
+	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", "show", issueID, "--json") //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = bdWorkDir
 	output, err := cmd.Output()
 	if err != nil {
@@ -591,7 +662,9 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
 
-	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
+	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = bdWorkDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

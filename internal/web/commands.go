@@ -29,7 +29,8 @@ var AllowedCommands = map[string]CommandMeta{
 	"status":      {Safe: true, Desc: "Show town status", Category: "Status"},
 	"agents list": {Safe: true, Desc: "List active agents", Category: "Status"},
 	"convoy list": {Safe: true, Desc: "List convoys", Category: "Convoys"},
-	"convoy show": {Safe: true, Desc: "Show convoy details", Category: "Convoys", Args: "<convoy-id>", ArgType: "convoys"},
+	"convoy show":   {Safe: true, Desc: "Show convoy details", Category: "Convoys", Args: "<convoy-id>", ArgType: "convoys"},
+	"convoy status": {Safe: true, Desc: "Show convoy status with issues", Category: "Convoys", Args: "<convoy-id>", ArgType: "convoys"},
 	"mail inbox":  {Safe: true, Desc: "Check inbox", Category: "Mail"},
 	"mail check":  {Safe: true, Desc: "Check for new mail", Category: "Mail"},
 	"mail peek":   {Safe: true, Desc: "Peek at message", Category: "Mail", Args: "<message-id>"},
@@ -59,7 +60,9 @@ var AllowedCommands = map[string]CommandMeta{
 	"mail reply":     {Confirm: true, Desc: "Reply to message", Category: "Mail", Args: "<message-id> -m <message>", ArgType: "messages"},
 
 	// Escalation actions
-	"escalate ack": {Confirm: true, Desc: "Acknowledge escalation", Category: "Escalations", Args: "<escalation-id>", ArgType: "escalations"},
+	"escalate ack":      {Confirm: true, Desc: "Acknowledge escalation", Category: "Escalations", Args: "<escalation-id>", ArgType: "escalations"},
+	"escalate resolve":  {Confirm: true, Desc: "Resolve escalation", Category: "Escalations", Args: "<escalation-id>", ArgType: "escalations"},
+	"escalate reassign": {Confirm: true, Desc: "Reassign escalation", Category: "Escalations", Args: "<escalation-id> <agent>", ArgType: "escalations"},
 
 	// Convoy actions
 	"convoy create":  {Confirm: true, Desc: "Create convoy", Category: "Convoys", Args: "<name>"},

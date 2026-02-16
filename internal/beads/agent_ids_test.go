@@ -153,7 +153,15 @@ func TestValidateAgentID(t *testing.T) {
 		{"polecat no name", "gt-gastown-polecat", true, "requires name"},
 		{"dog no name", "gt-dog", true, "requires name"},
 
-		// Invalid: witness/refinery with extra parts
+		// Valid: worker name collides with role keyword
+		{"polecat named witness", "gt-gastown-polecat-witness", false, ""},
+		{"polecat named refinery", "gt-gastown-polecat-refinery", false, ""},
+		{"crew named witness", "gt-gastown-crew-witness", false, ""},
+		{"crew named refinery", "gt-gastown-crew-refinery", false, ""},
+		{"polecat named crew", "gt-gastown-polecat-crew", false, ""},
+		{"crew named polecat", "gt-gastown-crew-polecat", false, ""},
+
+		// Invalid: witness/refinery with extra parts (no named role to the left)
 		{"witness with name", "gt-gastown-witness-extra", true, "cannot have name suffix"},
 		{"refinery with name", "gt-beads-refinery-extra", true, "cannot have name suffix"},
 
@@ -221,3 +229,4 @@ func TestExtractAgentPrefix(t *testing.T) {
 		})
 	}
 }
+

@@ -250,7 +250,8 @@ func outputUnknownContext(ctx RoleContext) {
 	fmt.Println("- `<rig>/polecats/<name>/` - Polecat role")
 	fmt.Println("- `<rig>/witness/rig/` - Witness role")
 	fmt.Println("- `<rig>/refinery/rig/` - Refinery role")
-	fmt.Println("- Town root or `mayor/` - Mayor role")
+	fmt.Println("- `mayor/` or `<rig>/mayor/` - Mayor role")
+	fmt.Println("- Town root is neutral (set GT_ROLE or cd into a role directory)")
 	fmt.Println()
 	fmt.Printf("Town root: %s\n", style.Dim.Render(ctx.TownRoot))
 }
@@ -289,7 +290,7 @@ func outputCommandQuickReference(ctx RoleContext) {
 		fmt.Println("|------------|----------------|----------------|")
 		fmt.Printf("| Signal work complete | `%s done` | ~~bd close <root-issue>~~ (Refinery closes it) |\n", c)
 		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
-		fmt.Println("| Check workflow steps | `bd ready` | ~~gt mol status~~ (less useful) |")
+		fmt.Println("| Check workflow steps | `bd mol current` | ~~bd ready~~ (excludes molecule steps) |")
 		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
 		fmt.Printf("| Escalate blocker | `%s escalate \"desc\" -s HIGH` | ~~waiting for human~~ (never wait) |\n", c)
 
@@ -401,7 +402,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-witness-patrol`")
+		fmt.Println("   - If no mol → create patrol: `" + cli.Name() + " patrol new`")
 	case RolePolecat:
 		fmt.Println()
 		fmt.Println("---")
@@ -426,7 +427,7 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("3. Check mail: `" + cli.Name() + " mail inbox` - look for 🤝 HANDOFF messages")
 		fmt.Println("4. Check for attached patrol: `" + cli.Name() + " hook`")
 		fmt.Println("   - If mol attached → **RUN IT** (resume from current step)")
-		fmt.Println("   - If no mol → create patrol: `bd mol wisp mol-refinery-patrol`")
+		fmt.Println("   - If no mol → create patrol: `" + cli.Name() + " patrol new`")
 	case RoleCrew:
 		fmt.Println()
 		fmt.Println("---")

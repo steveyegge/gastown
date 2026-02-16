@@ -1,4 +1,4 @@
-.PHONY: build install clean test generate check-up-to-date
+.PHONY: build install clean test test-e2e-container generate check-up-to-date
 
 BINARY := gt
 BUILD_DIR := .
@@ -56,3 +56,8 @@ clean:
 
 test:
 	go test ./...
+
+# Run e2e tests in isolated container (the only supported way to run them)
+test-e2e-container:
+	docker build -f Dockerfile.e2e -t gastown-test .
+	docker run --rm gastown-test

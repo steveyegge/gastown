@@ -321,6 +321,33 @@ func runSynthesisClose(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Read convoy to validate lifecycle state before closing
+	showArgs := []string{"show", convoyID, "--json"}
+	showCmd := exec.Command("bd", showArgs...)
+	showCmd.Dir = townBeads
+	var showOut bytes.Buffer
+	showCmd.Stdout = &showOut
+	if err := showCmd.Run(); err != nil {
+		return fmt.Errorf("reading convoy '%s': %w", convoyID, err)
+	}
+	var convoys []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(showOut.Bytes(), &convoys); err != nil || len(convoys) == 0 {
+		return fmt.Errorf("parsing convoy '%s': invalid response", convoyID)
+	}
+	status := convoys[0].Status
+
+	if err := ensureKnownConvoyStatus(status); err != nil {
+		return fmt.Errorf("convoy '%s' has invalid lifecycle state: %w", convoyID, err)
+	}
+
+	// Idempotent: if already closed, just report it
+	if normalizeConvoyStatus(status) == convoyStatusClosed {
+		fmt.Printf("%s Convoy %s is already closed\n", style.Dim.Render("○"), convoyID)
+		return nil
+	}
+
 	// Close the convoy
 	closeArgs := []string{"close", convoyID, "--reason=synthesis complete"}
 	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {

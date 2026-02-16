@@ -30,13 +30,20 @@ jobs:
           git config --global user.email "ci@gastown.test"
 
       - name: Install beads (bd)
-        # Clone and build to handle replace directives that break go install @version
+        run: go install github.com/steveyegge/beads/cmd/bd@v0.50.2
+
+      - name: Install Dolt
         run: |
-          git clone --depth 1 https://github.com/steveyegge/beads /tmp/beads
-          cd /tmp/beads && go install ./cmd/bd
+          git clone --depth 1 https://github.com/dolthub/dolt /tmp/dolt
+          cd /tmp/dolt/go && go install ./cmd/dolt
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Configure Dolt
+        run: |
+          dolt config --global --add user.name "CI Bot"
+          dolt config --global --add user.email "ci@gastown.test"
 
       - name: Generate embedded files
         run: go generate ./internal/formula/...

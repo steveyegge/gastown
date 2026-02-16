@@ -68,10 +68,11 @@ type Daemon struct {
 	syncFailures map[string]int
 
 	// PATCH-006: Resolved binary paths to avoid PATH issues in subprocesses.
-	// The daemon may be started with a limited PATH, causing exec.Command("gt", ...)
-	// to fail with "executable file not found in $PATH".
 	gtPath string
 	bdPath string
+
+	// Restart tracking with exponential backoff to prevent crash loops
+	restartTracker *RestartTracker
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -103,6 +104,9 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize session prefix registry from rigs.json.
+	_ = session.InitRegistry(config.TownRoot)
+
 	// Load patrol config from mayor/daemon.json (optional - nil if missing)
 	patrolConfig := LoadPatrolConfig(config.TownRoot)
 	if patrolConfig != nil {
@@ -118,29 +122,35 @@ func New(config *Config) (*Daemon, error) {
 		}
 	}
 
-	// PATCH-006: Resolve binary paths at startup to avoid PATH issues in subprocesses.
-	// If not found, fall back to bare command names (will use PATH at runtime).
+	// PATCH-006: Resolve binary paths at startup.
 	gtPath, err := exec.LookPath("gt")
 	if err != nil {
-		gtPath = "gt" // Fallback - will fail with helpful error if not in PATH
+		gtPath = "gt"
 		logger.Printf("Warning: gt not found in PATH, subprocess calls may fail")
 	}
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
-		bdPath = "bd" // Fallback
+		bdPath = "bd"
 		logger.Printf("Warning: bd not found in PATH, subprocess calls may fail")
 	}
 
+	// Initialize restart tracker with exponential backoff
+	restartTracker := NewRestartTracker(config.TownRoot)
+	if err := restartTracker.Load(); err != nil {
+		logger.Printf("Warning: failed to load restart state: %v", err)
+	}
+
 	return &Daemon{
-		config:       config,
-		patrolConfig: patrolConfig,
-		tmux:         tmux.NewTmux(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
-		doltServer:   doltServer,
-		gtPath:       gtPath,
-		bdPath:       bdPath,
+		config:         config,
+		patrolConfig:   patrolConfig,
+		tmux:           tmux.NewTmux(),
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		doltServer:     doltServer,
+		gtPath:         gtPath,
+		bdPath:         bdPath,
+		restartTracker: restartTracker,
 	}, nil
 }
 
@@ -409,12 +419,7 @@ func (d *Daemon) heartbeat(state *State) {
 	// This is a safety net - Deacon patrol also does this more frequently.
 	d.cleanupOrphanedProcesses()
 
-	// 13. Clean up errant .beads directories in town-level service directories.
-	// Mayor and Deacon should use town beads (~/gt/.beads) via parent directory walk.
-	// If they have local .beads with databases, bd uses the wrong database.
-	d.cleanupTownServiceBeads()
-
-	// 14. Prune stale local polecat tracking branches across all rig clones.
+	// 13. Prune stale local polecat tracking branches across all rig clones.
 	// When polecats push branches to origin, other clones create local tracking
 	// branches via git fetch. After merge, remote branches are deleted but local
 	// branches persist indefinitely. This cleans them up periodically.
@@ -567,15 +572,41 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 // ensureDeaconRunning ensures the Deacon is running.
 // Uses deacon.Manager for consistent startup behavior (WaitForShellReady, GUPP, etc.).
 func (d *Daemon) ensureDeaconRunning() {
+	const agentID = "deacon"
+
+	// Check restart tracker for backoff/crash loop
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Deacon is in crash loop, skipping restart (use 'gt daemon clear-backoff deacon' to reset)")
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Deacon restart in backoff, %s remaining", remaining.Round(time.Second))
+			return
+		}
+	}
+
 	mgr := deacon.NewManager(d.config.TownRoot)
 
 	if err := mgr.Start(""); err != nil {
 		if err == deacon.ErrAlreadyRunning {
-			// Deacon is running - nothing to do
+			// Deacon is running - record success to reset backoff
+			if d.restartTracker != nil {
+				d.restartTracker.RecordSuccess(agentID)
+			}
 			return
 		}
 		d.logger.Printf("Error starting Deacon: %v", err)
 		return
+	}
+
+	// Record this restart attempt for backoff tracking
+	if d.restartTracker != nil {
+		d.restartTracker.RecordRestart(agentID)
+		if err := d.restartTracker.Save(); err != nil {
+			d.logger.Printf("Warning: failed to save restart state: %v", err)
+		}
 	}
 
 	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
@@ -816,7 +847,7 @@ func (d *Daemon) killDeaconSessions() {
 // Called when the witness patrol is disabled. (hq-2mstj)
 func (d *Daemon) killWitnessSessions() {
 	for _, rigName := range d.getKnownRigs() {
-		name := session.WitnessSessionName(rigName)
+		name := session.WitnessSessionName(session.PrefixFor(rigName))
 		exists, _ := d.tmux.HasSession(name)
 		if exists {
 			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
@@ -831,7 +862,7 @@ func (d *Daemon) killWitnessSessions() {
 // Called when the refinery patrol is disabled. (hq-2mstj)
 func (d *Daemon) killRefinerySessions() {
 	for _, rigName := range d.getKnownRigs() {
-		name := session.RefinerySessionName(rigName)
+		name := session.RefinerySessionName(session.PrefixFor(rigName))
 		exists, _ := d.tmux.HasSession(name)
 		if exists {
 			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
@@ -984,171 +1015,6 @@ func (d *Daemon) triggerPendingSpawns() {
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {
 	d.ProcessLifecycleRequests()
-}
-
-// cleanupTownServiceBeads detects and cleans up errant .beads directories in town-level service directories.
-// Mayor and Deacon should use the town beads database (~/gt/.beads) via parent directory walk.
-// If they have local .beads directories with databases, bd commands use the wrong database.
-// This can happen if an agent runs "bd init" from the wrong directory.
-//
-// Process:
-// 1. Pipe issues from errant db to town db (bd export | bd import)
-// 2. Remove the errant .beads directory
-//
-// This uses bd export/import which are backend-agnostic.
-func (d *Daemon) cleanupTownServiceBeads() {
-	// Town-level service directories that should NOT have their own .beads
-	serviceDirs := []string{"mayor", "deacon"}
-	townBeadsDir := filepath.Join(d.config.TownRoot, ".beads")
-
-	for _, svc := range serviceDirs {
-		svcBeadsDir := filepath.Join(d.config.TownRoot, svc, ".beads")
-
-		// Check if .beads directory exists
-		info, err := os.Stat(svcBeadsDir)
-		if err != nil || !info.IsDir() {
-			continue // No .beads directory, nothing to clean
-		}
-
-		// Check if it has a redirect file (that's ok - it's pointing elsewhere)
-		redirectPath := filepath.Join(svcBeadsDir, "redirect")
-		if _, err := os.Stat(redirectPath); err == nil {
-			continue // Has redirect, working as expected
-		}
-
-		// Check if it has database files (the actual problem)
-		hasDB := false
-		dbPatterns := []string{"*.db", "dolt"}
-		for _, pattern := range dbPatterns {
-			matches, _ := filepath.Glob(filepath.Join(svcBeadsDir, pattern))
-			if len(matches) > 0 {
-				hasDB = true
-				break
-			}
-		}
-
-		if !hasDB {
-			continue // No database, probably just empty or has other files
-		}
-
-		d.logger.Printf("Found errant .beads in %s - migrating to town beads", svc)
-
-		// Migrate: pipe export from errant db directly to import in town db
-		// This avoids temporary files and is backend-agnostic
-		if err := d.migrateBeadsToTown(svcBeadsDir, townBeadsDir); err != nil {
-			d.logger.Printf("Warning: failed to migrate %s/.beads: %v", svc, err)
-			continue
-		}
-
-		// Remove the errant .beads directory
-		if err := os.RemoveAll(svcBeadsDir); err != nil {
-			d.logger.Printf("Warning: failed to remove %s/.beads: %v", svc, err)
-		} else {
-			d.logger.Printf("Migrated %s/.beads to town beads and cleaned up", svc)
-		}
-	}
-}
-
-// migrateBeadsToTown pipes issues from source beads dir to town beads dir.
-// Uses bd export | bd import which is backend-agnostic.
-func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
-	// Kill any bd daemon for the source beads directory first.
-	// The daemon holds the database lock, preventing export from reading.
-	d.killBeadsDaemon(srcBeadsDir)
-
-	// Set up export command (reads from source)
-	exportCmd := exec.Command(d.bdPath, "export")
-	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
-	exportCmd.Dir = filepath.Dir(srcBeadsDir)
-
-	// Set up import command (writes to destination)
-	importCmd := exec.Command(d.bdPath, "import")
-	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
-	importCmd.Dir = filepath.Dir(dstBeadsDir)
-
-	// Pipe export stdout to import stdin
-	pipe, err := exportCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
-	}
-	importCmd.Stdin = pipe
-
-	// Capture stderr for error reporting
-	var exportStderr, importStderr strings.Builder
-	exportCmd.Stderr = &exportStderr
-	importCmd.Stderr = &importStderr
-
-	// Start both commands
-	if err := exportCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start export: %w", err)
-	}
-	if err := importCmd.Start(); err != nil {
-		_ = exportCmd.Process.Kill()
-		return fmt.Errorf("failed to start import: %w", err)
-	}
-
-	// Wait for both commands concurrently to avoid pipe deadlock.
-	// If we wait for export first, it may block on a full pipe buffer
-	// while import is also blocked, causing a deadlock.
-	// By waiting concurrently, we allow both processes to make progress.
-	var exportErr, importErr error
-	done := make(chan struct{})
-	go func() {
-		exportErr = exportCmd.Wait()
-		close(done)
-	}()
-	importErr = importCmd.Wait()
-	<-done // Wait for export goroutine to complete
-
-	if exportErr != nil {
-		return fmt.Errorf("export failed: %s", strings.TrimSpace(exportStderr.String()))
-	}
-	if importErr != nil {
-		return fmt.Errorf("import failed: %s", strings.TrimSpace(importStderr.String()))
-	}
-
-	return nil
-}
-
-// killBeadsDaemon kills any bd daemon running for the given beads directory.
-// This is needed before export because the daemon holds the database lock.
-func (d *Daemon) killBeadsDaemon(beadsDir string) {
-	pidFile := filepath.Join(beadsDir, "daemon.pid")
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return // No daemon.pid file, nothing to kill
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return // Invalid PID
-	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-
-	// Check if process is alive
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return // Process not running
-	}
-
-	// Kill the daemon
-	d.logger.Printf("Killing bd daemon (PID %d) for errant beads at %s", pid, beadsDir)
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		d.logger.Printf("Warning: failed to send SIGTERM to bd daemon: %v", err)
-		return
-	}
-
-	// Wait briefly for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
-
-	// Force kill if still alive
-	if err := process.Signal(syscall.Signal(0)); err == nil {
-		_ = process.Signal(syscall.SIGKILL)
-		time.Sleep(50 * time.Millisecond)
-	}
 }
 
 // shutdown performs graceful shutdown.
@@ -1483,7 +1349,7 @@ func listPolecatWorktrees(polecatsDir string) ([]string, error) {
 // If the polecat has work-on-hook but the tmux session is dead, it's restarted.
 func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	// Build the expected tmux session name
-	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 
 	// Check if tmux session exists
 	sessionAlive, err := d.tmux.HasSession(sessionName)

@@ -3,6 +3,7 @@ package doctor
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1173,13 +1174,480 @@ func (c *BareRepoRefspecCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
+// DefaultBranchExistsCheck verifies that the configured default_branch exists
+// as a remote tracking ref in the bare repo.
+type DefaultBranchExistsCheck struct {
+	BaseCheck
+}
+
+// NewDefaultBranchExistsCheck creates a new default branch exists check.
+func NewDefaultBranchExistsCheck() *DefaultBranchExistsCheck {
+	return &DefaultBranchExistsCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "default-branch-exists",
+			CheckDescription: "Verify configured default_branch exists on remote",
+			CheckCategory:    CategoryRig,
+		},
+	}
+}
+
+// Run checks if the configured default_branch exists as origin/<branch> in the bare repo.
+func (c *DefaultBranchExistsCheck) Run(ctx *CheckContext) *CheckResult {
+	rigPath := ctx.RigPath()
+	if rigPath == "" {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: "No rig specified",
+		}
+	}
+
+	// Load rig config to get default_branch
+	configPath := filepath.Join(rigPath, "config.json")
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "No config.json found",
+		}
+	}
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: fmt.Sprintf("Cannot read config.json: %v", err),
+		}
+	}
+
+	// Parse just the default_branch field
+	type rigConfig struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	var cfg rigConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: fmt.Sprintf("Cannot parse config.json: %v", err),
+		}
+	}
+
+	if cfg.DefaultBranch == "" {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No default_branch configured (will use 'main')",
+		}
+	}
+
+	// Check bare repo for the ref
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No shared bare repo (skipping ref check)",
+		}
+	}
+
+	ref := fmt.Sprintf("refs/remotes/origin/%s", cfg.DefaultBranch)
+	cmd := exec.Command("git", "-C", bareRepoPath, "rev-parse", "--verify", ref)
+	if err := cmd.Run(); err != nil {
+		return &CheckResult{
+			Name:   c.Name(),
+			Status: StatusError,
+			Message: fmt.Sprintf("default_branch %q not found on remote", cfg.DefaultBranch),
+			Details: []string{
+				fmt.Sprintf("Ref %s does not exist in bare repo", ref),
+				"Polecat spawn will fail with a cryptic git error",
+			},
+			FixHint: fmt.Sprintf("Fix the branch name in %s/config.json, or create the branch on the remote", rigPath),
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusOK,
+		Message: fmt.Sprintf("default_branch %q exists on remote", cfg.DefaultBranch),
+	}
+}
+
+// DefaultBranchAllRigsCheck validates default_branch for all rigs in the workspace.
+// Unlike DefaultBranchExistsCheck (which requires --rig), this runs globally.
+type DefaultBranchAllRigsCheck struct {
+	BaseCheck
+}
+
+// NewDefaultBranchAllRigsCheck creates a new global default branch check.
+func NewDefaultBranchAllRigsCheck() *DefaultBranchAllRigsCheck {
+	return &DefaultBranchAllRigsCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "default-branch-all-rigs",
+			CheckDescription: "Verify default_branch exists on remote for all rigs",
+			CheckCategory:    CategoryRig,
+		},
+	}
+}
+
+// Run checks default_branch for every discovered rig.
+func (c *DefaultBranchAllRigsCheck) Run(ctx *CheckContext) *CheckResult {
+	entries, err := os.ReadDir(ctx.TownRoot)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: fmt.Sprintf("Cannot read town root: %v", err),
+		}
+	}
+
+	var errors []string
+	rigsChecked := 0
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || entry.Name() == "mayor" || entry.Name() == "docs" || entry.Name() == "scripts" {
+			continue
+		}
+
+		rigPath := filepath.Join(ctx.TownRoot, entry.Name())
+		configPath := filepath.Join(rigPath, "config.json")
+
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			continue // No config.json = not a rig or no default_branch configured
+		}
+
+		type rigConfig struct {
+			DefaultBranch string `json:"default_branch"`
+		}
+		var cfg rigConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			continue
+		}
+
+		if cfg.DefaultBranch == "" {
+			continue // Using default "main", skip
+		}
+
+		rigsChecked++
+
+		// Check bare repo for the ref
+		bareRepoPath := filepath.Join(rigPath, ".repo.git")
+		if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
+			continue // No bare repo, skip
+		}
+
+		ref := fmt.Sprintf("refs/remotes/origin/%s", cfg.DefaultBranch)
+		cmd := exec.Command("git", "-C", bareRepoPath, "rev-parse", "--verify", ref)
+		if err := cmd.Run(); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: default_branch %q not found on remote", entry.Name(), cfg.DefaultBranch))
+		}
+	}
+
+	if len(errors) > 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: fmt.Sprintf("%d rig(s) with invalid default_branch", len(errors)),
+			Details: errors,
+			FixHint: "Fix the branch name in <rig>/config.json, or create the branch on the remote",
+		}
+	}
+
+	if rigsChecked == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No rigs with custom default_branch configured",
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusOK,
+		Message: fmt.Sprintf("All %d rig(s) with custom default_branch validated", rigsChecked),
+	}
+}
+
+// BareRepoExistsCheck verifies that .repo.git exists when worktrees depend on it.
+// Worktrees (refinery/rig, polecats) created from the shared bare repo have .git files
+// pointing to .repo.git/worktrees/<name>. If .repo.git is missing (deleted, moved, or
+// never created), all those worktrees break with "fatal: not a git repository".
+type BareRepoExistsCheck struct {
+	FixableCheck
+	brokenWorktrees []string // worktree paths with broken .repo.git references
+}
+
+// NewBareRepoExistsCheck creates a new bare repo exists check.
+func NewBareRepoExistsCheck() *BareRepoExistsCheck {
+	return &BareRepoExistsCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "bare-repo-exists",
+				CheckDescription: "Verify .repo.git exists when worktrees depend on it",
+				CheckCategory:    CategoryRig,
+			},
+		},
+	}
+}
+
+// Run checks if .repo.git exists when worktrees reference it.
+func (c *BareRepoExistsCheck) Run(ctx *CheckContext) *CheckResult {
+	if ctx.RigName == "" {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No rig specified (skipping bare repo check)",
+			Category: c.Category(),
+		}
+	}
+
+	rigPath := ctx.RigPath()
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+
+	// Find worktrees that reference .repo.git
+	c.brokenWorktrees = nil
+	worktreeDirs := c.findWorktreeDirs(rigPath, ctx.RigName)
+
+	for _, wtDir := range worktreeDirs {
+		gitFile := filepath.Join(wtDir, ".git")
+		info, err := os.Stat(gitFile)
+		if err != nil {
+			continue // no .git entry, skip
+		}
+
+		// Only check .git files (worktrees), not .git directories (regular clones)
+		if info.IsDir() {
+			continue
+		}
+
+		content, err := os.ReadFile(gitFile)
+		if err != nil {
+			continue
+		}
+
+		line := strings.TrimSpace(string(content))
+		if !strings.HasPrefix(line, "gitdir: ") {
+			continue
+		}
+
+		gitdir := strings.TrimPrefix(line, "gitdir: ")
+		// Check if this worktree references .repo.git
+		if strings.Contains(gitdir, ".repo.git") {
+			// Resolve the target path
+			targetPath := gitdir
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(wtDir, targetPath)
+			}
+
+			// Check if the target exists
+			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+				relPath, _ := filepath.Rel(rigPath, wtDir)
+				if relPath == "" {
+					relPath = wtDir
+				}
+				c.brokenWorktrees = append(c.brokenWorktrees, relPath)
+			}
+		}
+	}
+
+	// If .repo.git exists and no broken worktrees, all good
+	if _, err := os.Stat(bareRepoPath); err == nil && len(c.brokenWorktrees) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "Shared bare repo exists and worktrees are valid",
+			Category: c.Category(),
+		}
+	}
+
+	// .repo.git missing but no worktrees depend on it
+	if len(c.brokenWorktrees) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No worktrees depend on .repo.git",
+			Category: c.Category(),
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: fmt.Sprintf("%d worktree(s) reference missing .repo.git", len(c.brokenWorktrees)),
+		Details: append(
+			[]string{"Missing: " + bareRepoPath},
+			c.brokenWorktrees...,
+		),
+		FixHint:  "Run 'gt doctor --fix --rig " + ctx.RigName + "' to recreate .repo.git from remote",
+		Category: c.Category(),
+	}
+}
+
+// Fix recreates the .repo.git bare repo from the rig's git_url and re-registers
+// existing worktrees.
+func (c *BareRepoExistsCheck) Fix(ctx *CheckContext) error {
+	if ctx.RigName == "" || len(c.brokenWorktrees) == 0 {
+		return nil
+	}
+
+	rigPath := ctx.RigPath()
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+
+	// Don't recreate if it already exists
+	if _, err := os.Stat(bareRepoPath); err == nil {
+		return nil
+	}
+
+	// Read git_url from config.json
+	configPath := filepath.Join(rigPath, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("cannot read config.json to get git_url: %w", err)
+	}
+
+	var cfg struct {
+		GitURL string `json:"git_url"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("cannot parse config.json: %w", err)
+	}
+	if cfg.GitURL == "" {
+		return fmt.Errorf("config.json has no git_url, cannot recreate .repo.git")
+	}
+
+	// Clone bare repo
+	cmd := exec.Command("git", "clone", "--bare", cfg.GitURL, bareRepoPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cloning bare repo: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	// Configure refspec so worktrees can fetch origin/* refs
+	stderr.Reset()
+	configCmd := exec.Command("git", "-C", bareRepoPath, "config",
+		"remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	configCmd.Stderr = &stderr
+	if err := configCmd.Run(); err != nil {
+		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	// Fetch to populate remote refs
+	stderr.Reset()
+	fetchCmd := exec.Command("git", "-C", bareRepoPath, "fetch", "origin")
+	fetchCmd.Stderr = &stderr
+	if err := fetchCmd.Run(); err != nil {
+		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	// Re-register broken worktrees so the bare repo knows about them.
+	// Git worktrees are tracked in .repo.git/worktrees/<name>/ with a gitdir file
+	// pointing back to the worktree. We need to create these metadata entries.
+	for _, relPath := range c.brokenWorktrees {
+		wtPath := filepath.Join(rigPath, relPath)
+		gitFile := filepath.Join(wtPath, ".git")
+
+		content, err := os.ReadFile(gitFile)
+		if err != nil {
+			continue
+		}
+
+		line := strings.TrimSpace(string(content))
+		if !strings.HasPrefix(line, "gitdir: ") {
+			continue
+		}
+
+		gitdir := strings.TrimPrefix(line, "gitdir: ")
+		if !filepath.IsAbs(gitdir) {
+			gitdir = filepath.Join(wtPath, gitdir)
+		}
+		gitdir = filepath.Clean(gitdir)
+
+		// Extract worktree name from path (e.g., .repo.git/worktrees/rig -> "rig")
+		worktreeName := filepath.Base(gitdir)
+
+		// Create worktree metadata directory
+		wtMetaDir := filepath.Join(bareRepoPath, "worktrees", worktreeName)
+		if err := os.MkdirAll(wtMetaDir, 0755); err != nil {
+			continue
+		}
+
+		// Write gitdir file (points back to the worktree's .git file)
+		gitdirFile := filepath.Join(wtMetaDir, "gitdir")
+		if err := os.WriteFile(gitdirFile, []byte(wtPath+"/.git\n"), 0644); err != nil {
+			continue
+		}
+
+		// Detect which branch the worktree was on by looking at HEAD in the worktree.
+		// If we can't determine, default to HEAD.
+		headContent := "ref: refs/heads/main\n"
+		// Try to read the old HEAD from the worktree's git metadata
+		oldHeadPath := filepath.Join(gitdir, "HEAD")
+		if oldHead, err := os.ReadFile(oldHeadPath); err == nil {
+			headContent = string(oldHead)
+		}
+
+		headFile := filepath.Join(wtMetaDir, "HEAD")
+		if err := os.WriteFile(headFile, []byte(headContent), 0644); err != nil {
+			continue
+		}
+	}
+
+	return nil
+}
+
+// findWorktreeDirs returns paths to directories that may be git worktrees within a rig.
+// Checks refinery/rig and all polecat worktree directories.
+func (c *BareRepoExistsCheck) findWorktreeDirs(rigPath, rigName string) []string {
+	var dirs []string
+
+	// refinery/rig
+	refineryRig := filepath.Join(rigPath, "refinery", "rig")
+	if _, err := os.Stat(refineryRig); err == nil {
+		dirs = append(dirs, refineryRig)
+	}
+
+	// witness/rig
+	witnessRig := filepath.Join(rigPath, "witness", "rig")
+	if _, err := os.Stat(witnessRig); err == nil {
+		dirs = append(dirs, witnessRig)
+	}
+
+	// polecats/<name>/<rigname>/
+	polecatsDir := filepath.Join(rigPath, "polecats")
+	if entries, err := os.ReadDir(polecatsDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			// New structure: polecats/<name>/<rigname>/
+			newPath := filepath.Join(polecatsDir, entry.Name(), rigName)
+			if _, err := os.Stat(newPath); err == nil {
+				dirs = append(dirs, newPath)
+			}
+			// Old structure: polecats/<name>/
+			oldPath := filepath.Join(polecatsDir, entry.Name())
+			if oldPath != newPath {
+				if _, err := os.Stat(filepath.Join(oldPath, ".git")); err == nil {
+					dirs = append(dirs, oldPath)
+				}
+			}
+		}
+	}
+
+	return dirs
+}
+
 // RigChecks returns all rig-level health checks.
 func RigChecks() []Check {
 	return []Check{
 		NewRigIsGitRepoCheck(),
 		NewGitExcludeConfiguredCheck(),
 		NewHooksPathConfiguredCheck(),
+		NewBareRepoExistsCheck(),
 		NewBareRepoRefspecCheck(),
+		NewDefaultBranchExistsCheck(),
 		NewWitnessExistsCheck(),
 		NewRefineryExistsCheck(),
 		NewMayorCloneExistsCheck(),

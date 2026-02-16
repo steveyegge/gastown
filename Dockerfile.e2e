@@ -1,0 +1,56 @@
+# Dockerfile.e2e - Isolated environment for e2e testing
+#
+# This container provides full isolation for integration tests that require:
+# - No interference from host tmux sessions
+# - Clean filesystem without existing Gas Town installations
+# - Independent beads daemon and Dolt server
+#
+# Usage:
+#   docker build -f Dockerfile.e2e -t gastown-test .
+#   docker run --rm gastown-test
+
+FROM golang:1.25-alpine
+
+# Install dependencies including CGO build requirements for beads daemon
+# procps and lsof are required by gt dolt start for process verification
+RUN apk add --no-cache \
+    git \
+    bash \
+    sqlite \
+    build-base \
+    zstd-dev \
+    icu-dev \
+    procps \
+    lsof
+
+# Install beads daemon (bd)
+RUN go install github.com/steveyegge/beads/cmd/bd@v0.50.2
+
+# Install Dolt (required for beads database server)
+RUN git clone --depth 1 https://github.com/dolthub/dolt /tmp/dolt && \
+    cd /tmp/dolt/go && go install ./cmd/dolt && \
+    rm -rf /tmp/dolt
+
+# Configure git and dolt identity (required for gt install --git and dolt init)
+RUN git config --global user.name "Test User" && \
+    git config --global user.email "test@test.com" && \
+    git config --global init.defaultBranch main && \
+    dolt config --global --add user.name "Test User" && \
+    dolt config --global --add user.email "test@test.com"
+
+# Set up workspace
+WORKDIR /app
+
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build gt binary
+RUN go build -ldflags "-X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1" -o /usr/local/bin/gt ./cmd/gt
+
+# Run e2e tests (all TestInstall* functions from install_integration_test.go)
+# Note: Using -count=1 to disable test caching, -parallel 1 for sequential execution
+CMD ["go", "test", "-tags=e2e", "-timeout=5m", "-v", "-count=1", "-parallel", "1", "-run", "TestInstall", "./internal/cmd/..."]

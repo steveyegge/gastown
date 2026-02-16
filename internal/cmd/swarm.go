@@ -243,7 +243,7 @@ func runSwarmCreate(cmd *cobra.Command, args []string) error {
 			"create",
 			"--type=epic",
 			"--mol-type=swarm",
-			"--title", swarmEpic,
+			"--title=" + swarmEpic,
 			"--silent",
 		}
 		createCmd := exec.Command("bd", createArgs...)

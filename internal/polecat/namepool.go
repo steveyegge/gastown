@@ -80,7 +80,8 @@ var BuiltinThemes = map[string][]string{
 // freshly-spawned polecat.
 //
 // Names are drawn from a themed pool (mad-max by default).
-// When the pool is exhausted, overflow names use rigname-N format.
+// When the pool is exhausted, overflow names use N format (just numbers).
+// The rig prefix is added by SessionName to create session names like "gt-<rig>-N".
 type NamePool struct {
 	mu sync.RWMutex
 
@@ -343,8 +344,10 @@ func (p *NamePool) Reconcile(existingPolecats []string) {
 }
 
 // formatOverflowName formats an overflow sequence number as a name.
+// Returns just the number (e.g., "51") since SessionName will add the rig prefix.
+// This prevents double-prefix bugs like "gt-gastown_manager-gastown_manager-51".
 func (p *NamePool) formatOverflowName(seq int) string {
-	return fmt.Sprintf("%s-%d", p.RigName, seq)
+	return fmt.Sprintf("%d", seq)
 }
 
 // GetTheme returns the current theme name.

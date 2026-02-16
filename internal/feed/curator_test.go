@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -516,5 +517,173 @@ func TestCurator_DefaultMaxFeedFileSize(t *testing.T) {
 	curator := NewCurator(t.TempDir())
 	if curator.maxFeedFileSize != maxFeedFileSize {
 		t.Errorf("maxFeedFileSize = %d, want %d", curator.maxFeedFileSize, maxFeedFileSize)
+	}
+}
+
+// TestCurator_ConcurrentStartIsIdempotent verifies that calling Start()
+// concurrently from multiple goroutines only spawns one curator goroutine.
+// Without the sync.Once guard, each call would open the events file and
+// spawn a separate run() goroutine, causing duplicate event processing
+// and data races on the shared bufio.Reader (if file handles were shared).
+//
+// Regression test for steveyegge/gastown#1230 item 6.
+func TestCurator_ConcurrentStartIsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	eventsPath := filepath.Join(tmpDir, events.EventsFile)
+	if err := os.WriteFile(eventsPath, []byte{}, 0644); err != nil {
+		t.Fatalf("creating events file: %v", err)
+	}
+
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	// Call Start() from 10 goroutines concurrently.
+	const goroutines = 10
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = curator.Start()
+		}(i)
+	}
+	wg.Wait()
+
+	// All calls should succeed (startErr is nil when init succeeds).
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("Start() goroutine %d: unexpected error: %v", i, err)
+		}
+	}
+
+	// Write one event and verify exactly one feed event is produced
+	// (not N duplicates from N goroutines).
+	time.Sleep(50 * time.Millisecond)
+
+	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := events.Event{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Source:     "gt",
+		Type:       events.TypeDone,
+		Actor:      "test-actor",
+		Payload:    map[string]interface{}{"bead": "test"},
+		Visibility: events.VisibilityFeed,
+	}
+	data, _ := json.Marshal(ev)
+	f.Write(append(data, '\n'))
+	f.Close()
+
+	time.Sleep(300 * time.Millisecond)
+
+	feedPath := filepath.Join(tmpDir, FeedFile)
+	feedContent, err := os.ReadFile(feedPath)
+	if err != nil {
+		t.Fatalf("reading feed: %v", err)
+	}
+
+	lines := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(feedContent)), "\n") {
+		if line != "" {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Errorf("expected exactly 1 feed event, got %d (concurrent Start spawned multiple goroutines?)", lines)
+	}
+}
+
+// TestCurator_ConcurrentFeedReadWrite verifies that concurrent reads and
+// writes to the feed file don't race. The in-process feedMu mutex
+// coordinates goroutines within the same process, while flock coordinates
+// across processes.
+//
+// Regression test for steveyegge/gastown#1230 item 7.
+func TestCurator_ConcurrentFeedReadWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	curator := NewCurator(tmpDir)
+	defer curator.Stop()
+
+	// Seed the feed file with one event so reads have something to find.
+	curator.writeFeedEvent(&events.Event{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Source:     "gt",
+		Type:       events.TypeDone,
+		Actor:      "seed-actor",
+		Payload:    map[string]interface{}{"bead": "seed"},
+		Visibility: events.VisibilityFeed,
+	})
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	// Half writers, half readers — run with -race to detect data races.
+	for i := 0; i < goroutines; i++ {
+		if i%2 == 0 {
+			go func(n int) {
+				defer wg.Done()
+				curator.writeFeedEvent(&events.Event{
+					Timestamp:  time.Now().UTC().Format(time.RFC3339),
+					Source:     "gt",
+					Type:       events.TypeDone,
+					Actor:      fmt.Sprintf("actor-%d", n),
+					Payload:    map[string]interface{}{"bead": fmt.Sprintf("bead-%d", n)},
+					Visibility: events.VisibilityFeed,
+				})
+			}(i)
+		} else {
+			go func() {
+				defer wg.Done()
+				_ = curator.readRecentFeedEvents(10 * time.Second)
+			}()
+		}
+	}
+
+	wg.Wait()
+
+	// Verify feed file is valid JSONL (no partial/interleaved lines).
+	feedPath := filepath.Join(tmpDir, FeedFile)
+	content, err := os.ReadFile(feedPath)
+	if err != nil {
+		t.Fatalf("reading feed: %v", err)
+	}
+	for i, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev FeedEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Errorf("line %d: malformed JSON after concurrent writes: %v", i, err)
+		}
+	}
+}
+
+// TestCurator_StartErrorPersistsAcrossCalls verifies that if Start() fails
+// (e.g., events file cannot be created), subsequent calls return the same
+// error rather than silently returning nil.
+//
+// Regression test: startErr must be a struct field (not function-local) so
+// sync.Once's happens-before guarantee makes it visible to all callers.
+func TestCurator_StartErrorPersistsAcrossCalls(t *testing.T) {
+	// Use a non-existent directory so OpenFile fails.
+	curator := NewCurator("/nonexistent/path/that/does/not/exist")
+	defer curator.Stop()
+
+	err1 := curator.Start()
+	if err1 == nil {
+		t.Fatal("first Start() should have failed with a non-existent town root")
+	}
+
+	// Second call must return the same error, not nil.
+	err2 := curator.Start()
+	if err2 == nil {
+		t.Fatal("second Start() returned nil after first call failed — startErr not persisted")
+	}
+	if err1.Error() != err2.Error() {
+		t.Errorf("error mismatch: first=%q, second=%q", err1, err2)
 	}
 }

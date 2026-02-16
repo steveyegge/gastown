@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 //go:embed bodies/*.md
@@ -25,15 +27,14 @@ type Command struct {
 	AgentFields map[string][]Field
 }
 
-// Agent defines an agent's configuration directory.
-type Agent struct {
-	ConfigDir string // .claude, .opencode, etc.
-}
-
-// Agents maps agent names to their configurations.
-var Agents = map[string]Agent{
-	"claude":   {ConfigDir: ".claude"},
-	"opencode": {ConfigDir: ".opencode"},
+// getAgentConfigDir returns the config directory for an agent from the preset registry.
+// Returns empty string if the agent has no config directory.
+func getAgentConfigDir(agent string) string {
+	preset := config.GetAgentPresetByName(agent)
+	if preset == nil {
+		return ""
+	}
+	return preset.ConfigDir
 }
 
 // Commands is the registry of available commands.
@@ -77,12 +78,12 @@ func BuildCommand(cmd Command, agent string) (string, error) {
 // ProvisionFor provisions commands for an agent.
 func ProvisionFor(workspacePath, agent string) error {
 	agent = strings.ToLower(agent)
-	cfg, ok := Agents[agent]
-	if !ok {
-		return fmt.Errorf("unknown agent: %s", agent)
+	configDir := getAgentConfigDir(agent)
+	if configDir == "" {
+		return fmt.Errorf("unknown agent or no config dir: %s", agent)
 	}
 
-	dir := filepath.Join(workspacePath, cfg.ConfigDir, "commands")
+	dir := filepath.Join(workspacePath, configDir, "commands")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating dir: %w", err)
 	}
@@ -111,12 +112,12 @@ func ProvisionFor(workspacePath, agent string) error {
 // MissingFor returns commands missing for an agent.
 func MissingFor(workspacePath, agent string) []string {
 	agent = strings.ToLower(agent)
-	cfg, ok := Agents[agent]
-	if !ok {
+	configDir := getAgentConfigDir(agent)
+	if configDir == "" {
 		return nil
 	}
 
-	dir := filepath.Join(workspacePath, cfg.ConfigDir, "commands")
+	dir := filepath.Join(workspacePath, configDir, "commands")
 	var missing []string
 
 	for _, cmd := range Commands {
@@ -138,8 +139,7 @@ func Names() []string {
 	return names
 }
 
-// IsKnownAgent returns true if the agent is registered.
+// IsKnownAgent returns true if the agent has a config directory for command provisioning.
 func IsKnownAgent(agent string) bool {
-	_, ok := Agents[strings.ToLower(agent)]
-	return ok
+	return getAgentConfigDir(strings.ToLower(agent)) != ""
 }

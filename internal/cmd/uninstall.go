@@ -30,7 +30,7 @@ var uninstallCmd = &cobra.Command{
 
 By default, removes:
   - Shell integration (~/.zshrc or ~/.bashrc)
-  - Wrapper scripts (~/bin/gt-codex, ~/bin/gt-opencode)
+  - Wrapper scripts (~/bin/gt-codex, ~/bin/gt-gemini, ~/bin/gt-opencode)
   - State directory (~/.local/state/gastown/)
   - Config directory (~/.config/gastown/)
   - Cache directory (~/.cache/gastown/)

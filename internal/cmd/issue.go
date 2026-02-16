@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -12,25 +13,40 @@ var issueCmd = &cobra.Command{
 	Use:     "issue",
 	GroupID: GroupConfig,
 	Short:   "Manage current issue for status line display",
+	Long: `Manage the current issue displayed in the tmux status line.
+
+Sets, clears, or shows the active issue ID stored in the tmux session
+environment. The status line uses this to display what you're working on.`,
 }
 
 var issueSetCmd = &cobra.Command{
 	Use:   "set <issue-id>",
 	Short: "Set the current issue (shown in tmux status line)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runIssueSet,
+	Long: `Set the current issue ID in the tmux session environment.
+
+The issue ID appears in the tmux status line so you can see at a glance
+what you're working on. Requires an active tmux session.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runIssueSet,
 }
 
 var issueClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Clear the current issue from status line",
-	RunE:  runIssueClear,
+	Long: `Clear the current issue from the tmux session environment.
+
+Removes the issue ID so it no longer appears in the tmux status line.`,
+	RunE: runIssueClear,
 }
 
 var issueShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the current issue",
-	RunE:  runIssueShow,
+	Long: `Show the current issue ID from the tmux session environment.
+
+Displays the issue ID currently set for the tmux status line, or
+indicates that no issue is set.`,
+	RunE: runIssueShow,
 }
 
 func init() {
@@ -113,10 +129,10 @@ func detectCurrentSession() string {
 
 	if rig != "" {
 		if polecat != "" {
-			return fmt.Sprintf("gt-%s-%s", rig, polecat)
+			return session.PolecatSessionName(session.PrefixFor(rig), polecat)
 		}
 		if crew != "" {
-			return fmt.Sprintf("gt-%s-crew-%s", rig, crew)
+			return session.CrewSessionName(session.PrefixFor(rig), crew)
 		}
 	}
 

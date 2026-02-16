@@ -167,6 +167,11 @@ func ParseEscalationFields(description string) *EscalationFields {
 // CreateEscalationBead creates an escalation bead for tracking escalations.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateEscalationBead(title string, fields *EscalationFields) (*Issue, error) {
+	// Guard against flag-like titles (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(title) {
+		return nil, fmt.Errorf("refusing to create escalation bead: %w (got %q)", ErrFlagTitle, title)
+	}
+
 	description := FormatEscalationDescription(title, fields)
 
 	args := []string{"create", "--json",

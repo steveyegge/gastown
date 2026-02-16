@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 )
@@ -25,10 +27,18 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	// Create beads wrapper for the rig - use BeadsPath() to get the git-synced location
 	b := beads.New(r.BeadsPath())
 
-	// Build list options - query for merge-request type
+	// Create git client for branch verification when --verify is set
+	var gitClient *git.Git
+	if mqListVerify {
+		// Use the refinery's rig worktree to check branches
+		refineryRigPath := filepath.Join(r.Path, "refinery", "rig")
+		gitClient = git.NewGit(refineryRigPath)
+	}
+
+	// Build list options - query for merge-request label
 	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only)
 	opts := beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Priority: -1,
 	}
 
@@ -64,9 +74,11 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	// Apply additional filters and calculate scores
 	now := time.Now()
 	type scoredIssue struct {
-		issue  *beads.Issue
-		fields *beads.MRFields
-		score  float64
+		issue          *beads.Issue
+		fields         *beads.MRFields
+		score          float64
+		branchMissing  bool // true if branch doesn't exist in git (when --verify is set)
+		branchVerifyErr bool // true if git check errored (corrupt repo, permission, etc.)
 	}
 	var scored []scoredIssue
 
@@ -107,15 +119,18 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			if fields != nil {
 				target = fields.Target
 			}
-			expectedTarget := "integration/" + mqListEpic
+			expectedTarget := resolveIntegrationBranchName(b, r.Path, mqListEpic)
 			if target != expectedTarget {
 				continue
 			}
 		}
 
+		// Check branch existence if --verify is set (local + remote-tracking refs)
+		branchMissing, branchVerifyErr := verifyBranch(mqListVerify, gitClient, fields)
+
 		// Calculate priority score
 		score := calculateMRScore(issue, fields, now)
-		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score})
+		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score, branchMissing: branchMissing, branchVerifyErr: branchVerifyErr})
 	}
 
 	// Sort by score descending (highest priority first)
@@ -131,6 +146,28 @@ func runMQList(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if mqListJSON {
+		if mqListVerify {
+			// Extend JSON with verification results
+			type verifiedIssue struct {
+				*beads.Issue
+				BranchExists *bool  `json:"branch_exists,omitempty"`
+				VerifyError  bool   `json:"verify_error,omitempty"`
+			}
+			var verified []verifiedIssue
+			for _, s := range scored {
+				vi := verifiedIssue{Issue: s.issue}
+				if s.fields != nil && s.fields.Branch != "" {
+					if s.branchVerifyErr {
+						vi.VerifyError = true
+					} else {
+						exists := !s.branchMissing
+						vi.BranchExists = &exists
+					}
+				}
+				verified = append(verified, vi)
+			}
+			return outputJSON(verified)
+		}
 		return outputJSON(filtered)
 	}
 
@@ -142,16 +179,21 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create styled table with SCORE column
-	table := style.NewTable(
-		style.Column{Name: "ID", Width: 12},
-		style.Column{Name: "SCORE", Width: 7, Align: style.AlignRight},
-		style.Column{Name: "PRI", Width: 4},
-		style.Column{Name: "CONVOY", Width: 12},
-		style.Column{Name: "BRANCH", Width: 24},
-		style.Column{Name: "STATUS", Width: 10},
-		style.Column{Name: "AGE", Width: 6, Align: style.AlignRight},
-	)
+	// Create styled table - add GIT column when --verify is set
+	columns := []style.Column{
+		{Name: "ID", Width: 12},
+		{Name: "SCORE", Width: 7, Align: style.AlignRight},
+		{Name: "PRI", Width: 4},
+		{Name: "CONVOY", Width: 12},
+		{Name: "BRANCH", Width: 24},
+		{Name: "STATUS", Width: 10},
+	}
+	if mqListVerify {
+		columns = append(columns, style.Column{Name: "GIT", Width: 8})
+	}
+	columns = append(columns, style.Column{Name: "AGE", Width: 6, Align: style.AlignRight})
+
+	table := style.NewTable(columns...)
 
 	// Add rows using scored items (already sorted by score)
 	for _, item := range scored {
@@ -210,6 +252,18 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		// Format score
 		scoreStr := fmt.Sprintf("%.1f", item.score)
 
+		// Format branch status when --verify is set
+		gitStatus := ""
+		if mqListVerify {
+			if item.branchVerifyErr {
+				gitStatus = style.Warning.Render("ERR")
+			} else if item.branchMissing {
+				gitStatus = style.Error.Render("MISSING")
+			} else {
+				gitStatus = style.Success.Render("OK")
+			}
+		}
+
 		// Calculate age
 		age := formatMRAge(issue.CreatedAt)
 
@@ -219,10 +273,30 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			displayID = displayID[:12]
 		}
 
-		table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, style.Dim.Render(age))
+		// Build row with conditional GIT column
+		if mqListVerify {
+			table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, gitStatus, style.Dim.Render(age))
+		} else {
+			table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, style.Dim.Render(age))
+		}
 	}
 
 	fmt.Print(table.Render())
+
+	// Show summary of missing branches when --verify is set
+	if mqListVerify {
+		missingCount := 0
+		for _, item := range scored {
+			if item.branchMissing {
+				missingCount++
+			}
+		}
+		if missingCount > 0 {
+			fmt.Printf("\n  %s %d MR(s) with missing branches\n",
+				style.Error.Render("⚠"),
+				missingCount)
+		}
+	}
 
 	// Show blocking details below table
 	for _, item := range scored {
@@ -308,4 +382,34 @@ func calculateMRScore(issue *beads.Issue, fields *beads.MRFields, now time.Time)
 	}
 
 	return refinery.ScoreMRWithDefaults(input)
+}
+
+// branchVerifier abstracts git branch existence checks for testability.
+type branchVerifier interface {
+	BranchExists(branch string) (bool, error)
+	RemoteTrackingBranchExists(remote, branch string) (bool, error)
+}
+
+// verifyBranch checks if a branch exists locally or as a remote-tracking ref.
+// Returns (missing, verifyErr).
+func verifyBranch(verify bool, client branchVerifier, fields *beads.MRFields) (bool, bool) {
+	if !verify || client == nil || fields == nil || fields.Branch == "" {
+		return false, false
+	}
+	localExists, err := client.BranchExists(fields.Branch)
+	if err != nil {
+		return false, true
+	}
+	if localExists {
+		return false, false
+	}
+	// Also check remote-tracking ref (polecats often only have origin refs)
+	remoteExists, rerr := client.RemoteTrackingBranchExists("origin", fields.Branch)
+	if rerr != nil {
+		return false, true
+	}
+	if !remoteExists {
+		return true, false
+	}
+	return false, false
 }

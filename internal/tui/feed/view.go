@@ -81,7 +81,8 @@ func (m *Model) renderFeedPanel() string {
 	return style.Width(m.width - 2).Render(m.feedViewport.View())
 }
 
-// renderTree renders the agent tree content
+// renderTree renders the agent tree content.
+// Caller must hold m.mu.
 func (m *Model) renderTree() string {
 	if len(m.rigs) == 0 {
 		return AgentIdleStyle.Render("No agents active")
@@ -213,7 +214,8 @@ func (m *Model) renderAgent(icon string, agent *Agent, indent int) string {
 	return line
 }
 
-// renderFeed renders the event feed content
+// renderFeed renders the event feed content.
+// Caller must hold m.mu.
 func (m *Model) renderFeed() string {
 	if len(m.events) == 0 {
 		return AgentIdleStyle.Render("No events yet")
@@ -299,7 +301,7 @@ func (m *Model) renderEvent(e Event) string {
 	return fmt.Sprintf("%s %s %s%s", ts, styledSymbol, actor, msg)
 }
 
-// renderStatusBar renders the bottom status bar
+// renderStatusBar renders the bottom status bar.
 func (m *Model) renderStatusBar() string {
 	// Panel indicator
 	var panelName string

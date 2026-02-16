@@ -52,7 +52,7 @@ func (m *Manager) SetOutput(w io.Writer) {
 
 // SessionName returns the tmux session name for this refinery.
 func (m *Manager) SessionName() string {
-	return fmt.Sprintf("gt-%s-refinery", m.rig.Name)
+	return session.RefinerySessionName(session.PrefixFor(m.rig.Name))
 }
 
 // IsRunning checks if the refinery session is active.
@@ -120,17 +120,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
-	// Ensure runtime settings exist in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Ensure runtime settings exist in the shared refinery parent directory.
+	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(refineryRigDir, "refinery", runtimeConfig); err != nil {
+	refinerySettingsDir := config.RoleSettingsDir("refinery", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(refinerySettingsDir, refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
-	// so settings.local.json doesn't dirty the source repo worktree.
+	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(refineryRigDir); err != nil {
 		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
 	}
@@ -139,7 +138,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "Check your hook and begin patrol.")
+	}, "Run `gt prime --hook` and begin patrol.")
 
 	var command string
 	if agentOverride != "" {
@@ -217,11 +216,11 @@ func (m *Manager) Stop() error {
 // Uses beads merge-request issues as the source of truth (not git branches).
 // ZFC-compliant: beads is the source of truth, no state file.
 func (m *Manager) Queue() ([]QueueItem, error) {
-	// Query beads for open merge-request type issues
+	// Query beads for open merge-request issues
 	// BeadsPath() returns the git-synced beads location
 	b := beads.New(m.rig.BeadsPath())
 	issues, err := b.List(beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	})

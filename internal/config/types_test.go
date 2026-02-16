@@ -208,6 +208,68 @@ func TestFeedCuratorConfig_JSONRoundTrip(t *testing.T) {
 
 // --- TownSettings with/without new config fields ---
 
+// --- Gemini provider defaults ---
+
+func TestGeminiProviderDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaultRuntimeCommand", func(t *testing.T) {
+		cmd := defaultRuntimeCommand("gemini")
+		if cmd != "gemini" {
+			t.Errorf("defaultRuntimeCommand(gemini) = %q, want %q", cmd, "gemini")
+		}
+	})
+
+	t.Run("defaultSessionIDEnv", func(t *testing.T) {
+		env := defaultSessionIDEnv("gemini")
+		if env != "GEMINI_SESSION_ID" {
+			t.Errorf("defaultSessionIDEnv(gemini) = %q, want %q", env, "GEMINI_SESSION_ID")
+		}
+	})
+
+	t.Run("defaultHooksProvider", func(t *testing.T) {
+		provider := defaultHooksProvider("gemini")
+		if provider != "gemini" {
+			t.Errorf("defaultHooksProvider(gemini) = %q, want %q", provider, "gemini")
+		}
+	})
+
+	t.Run("defaultHooksDir", func(t *testing.T) {
+		dir := defaultHooksDir("gemini")
+		if dir != ".gemini" {
+			t.Errorf("defaultHooksDir(gemini) = %q, want %q", dir, ".gemini")
+		}
+	})
+
+	t.Run("defaultHooksFile", func(t *testing.T) {
+		file := defaultHooksFile("gemini")
+		if file != "settings.json" {
+			t.Errorf("defaultHooksFile(gemini) = %q, want %q", file, "settings.json")
+		}
+	})
+
+	t.Run("defaultProcessNames", func(t *testing.T) {
+		names := defaultProcessNames("gemini", "gemini")
+		if len(names) != 1 || names[0] != "gemini" {
+			t.Errorf("defaultProcessNames(gemini) = %v, want [gemini]", names)
+		}
+	})
+
+	t.Run("defaultReadyDelayMs", func(t *testing.T) {
+		delay := defaultReadyDelayMs("gemini")
+		if delay != 5000 {
+			t.Errorf("defaultReadyDelayMs(gemini) = %d, want 5000", delay)
+		}
+	})
+
+	t.Run("defaultInstructionsFile", func(t *testing.T) {
+		file := defaultInstructionsFile("gemini")
+		if file != "AGENTS.md" {
+			t.Errorf("defaultInstructionsFile(gemini) = %q, want %q", file, "AGENTS.md")
+		}
+	})
+}
+
 func TestTownSettings_WithoutNewFields_LoadsDefaults(t *testing.T) {
 	t.Parallel()
 	// Simulate a pre-existing settings/config.json that has NO new config fields.

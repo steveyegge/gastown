@@ -1,9 +1,27 @@
 package cmd
 
 import (
+	"context"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestActivityFollowCmd_IncludesSinceFlag(t *testing.T) {
+	// Regression test: the --since 0s flag prevents stale event replay
+	// from causing await-signal to fire immediately. Without it, the
+	// deacon patrol loop busy-loops consuming context and resources.
+	cmd := activityFollowCmd(context.Background(), "/tmp/test-workdir")
+
+	wantArgs := []string{"bd", "activity", "--follow", "--since", "0s"}
+	if !reflect.DeepEqual(cmd.Args, wantArgs) {
+		t.Errorf("activityFollowCmd args = %v, want %v", cmd.Args, wantArgs)
+	}
+
+	if cmd.Dir != "/tmp/test-workdir" {
+		t.Errorf("activityFollowCmd Dir = %q, want %q", cmd.Dir, "/tmp/test-workdir")
+	}
+}
 
 func TestCalculateEffectiveTimeout(t *testing.T) {
 	tests := []struct {

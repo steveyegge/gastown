@@ -157,9 +157,9 @@ func buildDAG(b *beads.Beads, root *beads.Issue, children []*beads.Issue) (*DAGI
 			Status: child.Status,
 		}
 
-		// Extract dependencies (only "blocks" type)
+		// Extract dependencies (all blocking types)
 		for _, dep := range step.Dependencies {
-			if dep.DependencyType == "blocks" {
+			if isBlockingDepType(dep.DependencyType) {
 				node.Dependencies = append(node.Dependencies, dep.ID)
 			}
 		}

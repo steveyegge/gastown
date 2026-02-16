@@ -29,9 +29,11 @@ Polecats can file a bead and delegate. Refinery must resolve inline.
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| role | auto-detected | Agent role (crew/polecat/refinery/witness) |
-| build_command | config or default | Build command (default: `go build ./...`) |
+| setup_command | config | Setup/install command (empty = skip) |
+| typecheck_command | config | Type check command (empty = skip) |
+| lint_command | config | Lint command (empty = skip) |
 | test_command | config or default | Test command (default: `go test ./...`) |
+| build_command | config | Build command (empty = skip) |
 
 ## Failure Modes
 
@@ -42,9 +44,9 @@ Polecats can file a bead and delegate. Refinery must resolve inline.
 | Untracked files | Warn, let agent decide (keep/delete/gitignore) |
 | bd doctor errors | Report findings, agent triages |
 | Test failures | File bead if not already tracked, don't block sync |
-| Build failure | Must be resolved before marking sync complete |"""
+| Quality check failure | Must be resolved before marking sync complete |"""
 formula = "mol-sync-workspace"
-version = 1
+version = 2
 
 [[steps]]
 id = "assess-state"
@@ -128,6 +130,40 @@ Old stashes (>1 week) are likely stale. Consider dropping.
 Recent stashes may contain valuable WIP - preserve or commit.
 
 **Exit criteria:** Working tree clean or explicitly stashed."""
+
+[[steps]]
+id = "cleanup-worktrees"
+title = "Clean up stale worktrees"
+needs = ["handle-dirty-state"]
+description = """
+Remove orphaned worktrees from cross-rig work.
+
+**1. List worktrees:**
+```bash
+git worktree list
+```
+
+**2. Identify stale worktrees:**
+- Worktrees for branches that no longer exist on remote
+- Worktrees older than 1 week without recent commits
+- Worktrees for completed/merged work
+
+**3. Remove stale worktrees:**
+```bash
+git worktree remove <path>
+# Or force if needed:
+git worktree remove --force <path>
+```
+
+**4. Prune worktree metadata:**
+```bash
+git worktree prune
+```
+
+**CAUTION:** Don't remove worktrees for active cross-rig work.
+Check with `gt worktree list` if available.
+
+**Exit criteria:** Stale worktrees removed."""
 
 [[steps]]
 id = "sync-git"
@@ -229,7 +265,7 @@ a conflict, the queue backs up and polecats' completed work never lands.
 
    ```bash
    git rebase --abort
-   gt mail send {{ rig }}/polecats/<worker> -s "Rebase needed" \
+   gt mail send <rig>/polecats/<worker> -s "Rebase needed" \
      -m "Your branch conflicts with main in <files>. Please rebase and resubmit via gt done."
    # Skip this branch, continue with queue
    ```
@@ -302,20 +338,28 @@ bd doctor
 
 [[steps]]
 id = "verify-build"
-title = "Verify project builds"
+title = "Run quality checks and verify build"
 needs = ["run-doctor"]
 description = """
-Ensure the codebase compiles.
+Run configured quality checks and ensure the codebase compiles.
+
+**1. Run quality checks (skip any that are not configured):**
+
+If setup_command is set: `{{setup_command}}`
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If build_command is set: `{{build_command}}`
 
 ```bash
-{{build_command}}
-# Default: go build ./...
-# Configured per-rig in settings/config.json
+{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{build_command}}           # Make sure it builds (if command set)
 ```
 
-**If build succeeds:** Continue to next step.
+Empty commands mean "not configured for this project" — skip silently.
 
-**If build fails:**
+**2. If quality checks fail:**
 
 This is a blocking issue. Options:
 
@@ -323,18 +367,20 @@ This is a blocking issue. Options:
    ```bash
    # Fix the issue
    git add <files>
-   git commit -m "fix: build failure from sync"
+   git commit -m "fix: quality check failure from sync"
    git push
    ```
 
 2. **Non-trivial fix:** File and escalate
    ```bash
-   bd create --title "Build broken on main" --type bug --priority 0
-   gt mail send --human -s "ALERT: Main doesn't build" -m "Details..."
+   bd create --title "Quality check failing on main" --type bug --priority 0
+   gt mail send --human -s "ALERT: Main failing quality checks" -m "Details..."
    ```
-   Cannot mark sync complete with broken build.
+   Cannot mark sync complete with failing quality checks.
 
-**Exit criteria:** Project builds successfully."""
+**If all checks pass (or all skipped):** Continue to next step.
+
+**Exit criteria:** All configured quality checks pass (or skipped if not configured)."""
 
 [[steps]]
 id = "run-tests"
@@ -344,9 +390,7 @@ description = """
 Verify tests pass on current baseline.
 
 ```bash
-{{test_command}}
-# Default: go test ./...
-# Configured per-rig in settings/config.json
+{{test_command}}            # Run tests (configured per-rig)
 ```
 
 **If tests pass:** Continue to next step.
@@ -370,40 +414,6 @@ However, they must be tracked.
    Note which tests are failing so batch assignment accounts for it.
 
 **Exit criteria:** Test results documented, failures tracked in beads."""
-
-[[steps]]
-id = "cleanup-worktrees"
-title = "Clean up stale worktrees"
-needs = ["handle-dirty-state"]
-description = """
-Remove orphaned worktrees from cross-rig work.
-
-**1. List worktrees:**
-```bash
-git worktree list
-```
-
-**2. Identify stale worktrees:**
-- Worktrees for branches that no longer exist on remote
-- Worktrees older than 1 week without recent commits
-- Worktrees for completed/merged work
-
-**3. Remove stale worktrees:**
-```bash
-git worktree remove <path>
-# Or force if needed:
-git worktree remove --force <path>
-```
-
-**4. Prune worktree metadata:**
-```bash
-git worktree prune
-```
-
-**CAUTION:** Don't remove worktrees for active cross-rig work.
-Check with `gt worktree list` if available.
-
-**Exit criteria:** Stale worktrees removed."""
 
 [[steps]]
 id = "generate-report"
@@ -436,7 +446,7 @@ Beads:
   - Sync status: OK
   - Doctor findings: <count> (fixed: <n>, filed: <n>, deferred: <n>)
 
-Build: PASS
+Quality checks: PASS
 Tests: PASS | FAIL (<count> failures, tracked in <bead-ids>)
 
 Worktrees cleaned: <count>
@@ -483,7 +493,7 @@ gt mail send <coordinator> -s "SYNC_COMPLETE $(hostname)" -m "<report>"
 - Log the report
 - Update any relevant agent status
 
-**If sync failed (couldn't build):**
+**If sync failed (couldn't pass quality checks):**
 ```bash
 gt mail send --human -s "SYNC_FAILED $(hostname)" -m "<report with failure details>"
 ```
@@ -491,10 +501,22 @@ gt mail send --human -s "SYNC_FAILED $(hostname)" -m "<report with failure detai
 **Exit criteria:** Readiness signaled, molecule complete."""
 
 [vars]
+[vars.setup_command]
+description = "Setup/install command (e.g., pnpm install). Empty = skip."
+default = ""
+
+[vars.typecheck_command]
+description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+default = ""
+
+[vars.lint_command]
+description = "Lint command (e.g., eslint .). Empty = skip."
+default = ""
+
 [vars.test_command]
 description = "Command to run tests (auto-detected from rig settings)"
 default = "go test ./..."
 
 [vars.build_command]
-description = "Command to run build (auto-detected from rig settings)"
-default = "go build ./..."
+description = "Command to run build. Empty = skip."
+default = ""

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -340,22 +341,14 @@ func targetToSessionName(target string) (string, error) {
 	// Handle different target formats
 	switch {
 	case len(parts) == 3 && parts[1] == "polecats":
-		// gastown/polecats/alpha -> gt-gastown-alpha
-		return fmt.Sprintf("gt-%s-%s", parts[0], parts[2]), nil
+		// gastown/polecats/alpha -> {prefix}-alpha
+		return session.PolecatSessionName(session.PrefixFor(parts[0]), parts[2]), nil
 	case len(parts) == 2 && parts[0] == "deacon" && parts[1] == "dogs":
 		// This shouldn't happen - need dog name
 		return "", fmt.Errorf("invalid target: need dog name (e.g., deacon/dogs/alpha)")
 	case len(parts) == 3 && parts[0] == "deacon" && parts[1] == "dogs":
-		// deacon/dogs/alpha -> gt-dog-alpha (or gt-<town>-deacon-alpha)
-		townRoot, err := workspace.FindFromCwd()
-		if err != nil {
-			return fmt.Sprintf("gt-dog-%s", parts[2]), nil
-		}
-		townName, err := workspace.GetTownName(townRoot)
-		if err != nil {
-			return fmt.Sprintf("gt-dog-%s", parts[2]), nil
-		}
-		return fmt.Sprintf("gt-%s-deacon-%s", townName, parts[2]), nil
+		// deacon/dogs/alpha -> hq-dog-alpha
+		return fmt.Sprintf("hq-dog-%s", parts[2]), nil
 	default:
 		// Fallback: just use the target with dashes
 		return "gt-" + strings.ReplaceAll(target, "/", "-"), nil

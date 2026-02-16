@@ -2,7 +2,6 @@
 package beads
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -31,15 +30,3 @@ func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
 	return nil, nil
 }
 
-// AddGateWaiter registers an agent as a waiter on a gate bead.
-// When the gate closes, the waiter will receive a wake notification via gt gate wake.
-// The waiter is typically the polecat's address (e.g., "gastown/polecats/Toast").
-func (b *Beads) AddGateWaiter(gateID, waiter string) error {
-	// Use bd gate add-waiter to register the waiter on the gate
-	// This adds the waiter to the gate's native waiters field
-	_, err := b.run("gate", "add-waiter", gateID, waiter)
-	if err != nil {
-		return fmt.Errorf("adding gate waiter: %w", err)
-	}
-	return nil
-}

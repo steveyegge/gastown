@@ -1,0 +1,20 @@
+name: E2E Tests
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC
+  workflow_dispatch:       # Allow manual trigger
+
+jobs:
+  e2e:
+    name: E2E Tests (Container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build test container
+        run: docker build -f Dockerfile.e2e -t gastown-test .
+
+      - name: Run E2E tests
+        run: docker run --rm gastown-test

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,11 +15,12 @@ import (
 func TestZombieResult_Types(t *testing.T) {
 	// Verify the ZombieResult type has all expected fields
 	z := ZombieResult{
-		PolecatName: "nux",
-		AgentState:  "working",
-		HookBead:    "gt-abc123",
-		Action:      "auto-nuked",
-		Error:       nil,
+		PolecatName:   "nux",
+		AgentState:    "working",
+		HookBead:      "gt-abc123",
+		Action:        "auto-nuked",
+		BeadRecovered: true,
+		Error:         nil,
 	}
 
 	if z.PolecatName != "nux" {
@@ -31,6 +34,9 @@ func TestZombieResult_Types(t *testing.T) {
 	}
 	if z.Action != "auto-nuked" {
 		t.Errorf("Action = %q, want %q", z.Action, "auto-nuked")
+	}
+	if !z.BeadRecovered {
+		t.Error("BeadRecovered = false, want true")
 	}
 }
 
@@ -229,6 +235,138 @@ func TestFindAnyCleanupWisp_NoBdAvailable(t *testing.T) {
 	result := findAnyCleanupWisp("/nonexistent", "testpolecat")
 	if result != "" {
 		t.Errorf("findAnyCleanupWisp = %q, want empty when bd unavailable", result)
+	}
+}
+
+// installFakeBd creates a fake bd script that logs all invocations to a file.
+// Returns the path to the args log file.
+func installFakeBd(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	argsLog := filepath.Join(binDir, "bd_args.log")
+
+	if runtime.GOOS == "windows" {
+		// Windows: create a .bat file since shell scripts don't work
+		script := fmt.Sprintf("@echo off\r\necho %%* >> %q\r\nif \"%%1\"==\"list\" (\r\n  echo []\r\n) else if \"%%1\"==\"update\" (\r\n  exit /b 0\r\n) else if \"%%1\"==\"show\" (\r\n  echo [{\"labels\":[\"cleanup\",\"polecat:testpol\",\"state:pending\"]}]\r\n) else (\r\n  echo {}\r\n)\r\n", argsLog)
+		bdPath := filepath.Join(binDir, "bd.bat")
+		if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake bd.bat: %v", err)
+		}
+	} else {
+		// Unix: create a shell script
+		script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+case "$1" in
+  list) echo "[]" ;;
+  update) exit 0 ;;
+  show) echo '[{"labels":["cleanup","polecat:testpol","state:pending"]}]' ;;
+  *) echo "{}" ;;
+esac
+`, argsLog)
+		bdPath := filepath.Join(binDir, "bd")
+		if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake bd: %v", err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsLog
+}
+
+func TestFindCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	_, _ = findCleanupWisp(workDir, "nux")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --label (singular), NOT --labels (plural)
+	if !strings.Contains(got, "--label") {
+		t.Errorf("findCleanupWisp: expected --label flag, got: %s", got)
+	}
+	if strings.Contains(got, "--labels") {
+		t.Errorf("findCleanupWisp: must not use --labels (plural), got: %s", got)
+	}
+
+	// Must NOT use --ephemeral (invalid for bd list)
+	if strings.Contains(got, "--ephemeral") {
+		t.Errorf("findCleanupWisp: must not use --ephemeral (invalid for bd list), got: %s", got)
+	}
+
+	// Must include the polecat label filter
+	if !strings.Contains(got, "polecat:nux") {
+		t.Errorf("findCleanupWisp: expected polecat:nux label, got: %s", got)
+	}
+}
+
+func TestFindAnyCleanupWisp_UsesCorrectBdListFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	_ = findAnyCleanupWisp(workDir, "bravo")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --label (singular), NOT --labels (plural)
+	if !strings.Contains(got, "--label") {
+		t.Errorf("findAnyCleanupWisp: expected --label flag, got: %s", got)
+	}
+	if strings.Contains(got, "--labels") {
+		t.Errorf("findAnyCleanupWisp: must not use --labels (plural), got: %s", got)
+	}
+
+	// Must NOT use --ephemeral (invalid for bd list)
+	if strings.Contains(got, "--ephemeral") {
+		t.Errorf("findAnyCleanupWisp: must not use --ephemeral (invalid for bd list), got: %s", got)
+	}
+
+	// Must include the polecat label filter
+	if !strings.Contains(got, "polecat:bravo") {
+		t.Errorf("findAnyCleanupWisp: expected polecat:bravo label, got: %s", got)
+	}
+}
+
+func TestUpdateCleanupWispState_UsesCorrectBdUpdateFlags(t *testing.T) {
+	argsLog := installFakeBd(t)
+	workDir := t.TempDir()
+
+	// UpdateCleanupWispState first calls "bd show <id> --json", then "bd update".
+	// Our fake bd returns valid JSON for show with polecat:testpol label,
+	// so polecatName will be "testpol". Then it calls bd update with new labels.
+	_ = UpdateCleanupWispState(workDir, "gt-wisp-abc", "merged")
+
+	args, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("read args log: %v", err)
+	}
+	got := string(args)
+
+	// Must use --set-labels=<label> per label (not --labels)
+	if !strings.Contains(got, "--set-labels=") {
+		t.Errorf("UpdateCleanupWispState: expected --set-labels=<label> flags, got: %s", got)
+	}
+	// Check for invalid --labels flag in both " --labels " and "--labels=" forms
+	if strings.Contains(got, "--labels") && !strings.Contains(got, "--set-labels") {
+		t.Errorf("UpdateCleanupWispState: must not use --labels (invalid for bd update), got: %s", got)
+	}
+
+	// Verify individual per-label arguments with correct polecat name from show output
+	if !strings.Contains(got, "--set-labels=cleanup") {
+		t.Errorf("UpdateCleanupWispState: expected --set-labels=cleanup, got: %s", got)
+	}
+	if !strings.Contains(got, "--set-labels=polecat:testpol") {
+		t.Errorf("UpdateCleanupWispState: expected --set-labels=polecat:testpol, got: %s", got)
+	}
+	if !strings.Contains(got, "--set-labels=state:merged") {
+		t.Errorf("UpdateCleanupWispState: expected --set-labels=state:merged, got: %s", got)
 	}
 }
 
@@ -495,3 +633,619 @@ func TestDetectZombie_BeadClosedVsDoneIntent(t *testing.T) {
 		t.Error("closed-bead check should not run when done-intent exists")
 	}
 }
+
+func TestResetAbandonedBead_EmptyHookBead(t *testing.T) {
+	// resetAbandonedBead should return false for empty hookBead
+	result := resetAbandonedBead("/tmp", "testrig", "", "nux", nil)
+	if result {
+		t.Error("resetAbandonedBead should return false for empty hookBead")
+	}
+}
+
+func TestResetAbandonedBead_NoRouter(t *testing.T) {
+	// resetAbandonedBead with nil router should not panic even if bead exists.
+	// It will return false because bd won't find the bead, but shouldn't crash.
+	result := resetAbandonedBead("/tmp/nonexistent", "testrig", "gt-fake123", "nux", nil)
+	if result {
+		t.Error("resetAbandonedBead should return false when bd commands fail")
+	}
+}
+
+func TestBeadRecoveredField_DefaultFalse(t *testing.T) {
+	// BeadRecovered should default to false (zero value)
+	z := ZombieResult{
+		PolecatName: "nux",
+		AgentState:  "working",
+	}
+	if z.BeadRecovered {
+		t.Error("BeadRecovered should default to false")
+	}
+}
+
+func TestStalledResult_Types(t *testing.T) {
+	// Verify the StalledResult type has all expected fields
+	s := StalledResult{
+		PolecatName: "alpha",
+		StallType:   "bypass-permissions",
+		Action:      "auto-dismissed",
+		Error:       nil,
+	}
+
+	if s.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", s.PolecatName, "alpha")
+	}
+	if s.StallType != "bypass-permissions" {
+		t.Errorf("StallType = %q, want %q", s.StallType, "bypass-permissions")
+	}
+	if s.Action != "auto-dismissed" {
+		t.Errorf("Action = %q, want %q", s.Action, "auto-dismissed")
+	}
+	if s.Error != nil {
+		t.Errorf("Error = %v, want nil", s.Error)
+	}
+
+	// Verify error field works
+	s2 := StalledResult{
+		PolecatName: "bravo",
+		StallType:   "unknown-prompt",
+		Action:      "escalated",
+		Error:       fmt.Errorf("auto-dismiss failed"),
+	}
+	if s2.Error == nil {
+		t.Error("Error = nil, want non-nil")
+	}
+}
+
+func TestDetectStalledPolecatsResult_Empty(t *testing.T) {
+	result := &DetectStalledPolecatsResult{}
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled length = %d, want 0", len(result.Stalled))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors length = %d, want 0", len(result.Errors))
+	}
+}
+
+func TestDetectStalledPolecats_NoPolecats(t *testing.T) {
+	// Should handle missing polecats directory gracefully
+	result := DetectStalledPolecats("/nonexistent/path", "testrig")
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 for nonexistent dir", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 for nonexistent dir", len(result.Stalled))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors = %d, want 0 for nonexistent dir", len(result.Errors))
+	}
+}
+
+func TestDetectStalledPolecats_EmptyPolecatsDir(t *testing.T) {
+	// Empty polecats directory should return 0 checked
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := DetectStalledPolecats(tmpDir, rigName)
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 for empty polecats dir", result.Checked)
+	}
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 for empty polecats dir", len(result.Stalled))
+	}
+}
+
+func TestDetectStalledPolecats_NoPaneCapture(t *testing.T) {
+	// When tmux sessions don't exist (no real tmux in test),
+	// HasSession returns false so polecats are skipped (not errors).
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create polecat directories
+	for _, name := range []string{"alpha", "bravo"} {
+		if err := os.Mkdir(filepath.Join(polecatsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create hidden dir (should be skipped)
+	if err := os.Mkdir(filepath.Join(polecatsDir, ".hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := DetectStalledPolecats(tmpDir, rigName)
+
+	// Should count 2 polecats (skip hidden)
+	if result.Checked != 2 {
+		t.Errorf("Checked = %d, want 2 (should skip hidden dirs)", result.Checked)
+	}
+
+	// No stalled because HasSession returns false (no real tmux in test),
+	// so polecats are skipped before pane capture is attempted.
+	if len(result.Stalled) != 0 {
+		t.Errorf("Stalled = %d, want 0 (no tmux sessions in test)", len(result.Stalled))
+	}
+}
+
+func TestDetectOrphanedBeads_NoBdAvailable(t *testing.T) {
+	// When bd is not available (test environment), should return empty result
+	result := DetectOrphanedBeads("/nonexistent", "testrig", nil)
+
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 when bd unavailable", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("Orphans = %d, want 0 when bd unavailable", len(result.Orphans))
+	}
+}
+
+func TestDetectOrphanedBeads_ResultTypes(t *testing.T) {
+	// Verify the OrphanedBeadResult type has all expected fields
+	o := OrphanedBeadResult{
+		BeadID:        "gt-orphan1",
+		Assignee:      "testrig/polecats/alpha",
+		PolecatName:   "alpha",
+		BeadRecovered: true,
+	}
+
+	if o.BeadID != "gt-orphan1" {
+		t.Errorf("BeadID = %q, want %q", o.BeadID, "gt-orphan1")
+	}
+	if o.Assignee != "testrig/polecats/alpha" {
+		t.Errorf("Assignee = %q, want %q", o.Assignee, "testrig/polecats/alpha")
+	}
+	if o.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", o.PolecatName, "alpha")
+	}
+	if !o.BeadRecovered {
+		t.Error("BeadRecovered = false, want true")
+	}
+}
+
+func TestDetectOrphanedBeads_WithMockBd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping mock bd test on Windows")
+	}
+
+	// Set up town directory structure
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a polecat directory for "bravo" (alive dir, dead session)
+	// This case should be SKIPPED (deferred to DetectZombiePolecats)
+	if err := os.Mkdir(filepath.Join(polecatsDir, "bravo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// "alpha" has NO directory and NO tmux session — true orphan
+	// "bravo" has directory but no session — deferred to DetectZombiePolecats
+	// "charlie" is hooked, no dir, no session — also an orphan
+	// "delta" is assigned to a different rig — skipped by rigName filter
+
+	binDir := t.TempDir()
+	bdPath := filepath.Join(binDir, "bd")
+
+	// Create mock bd that returns beads for both in_progress and hooked statuses
+	bdListLog := filepath.Join(binDir, "bd-list.log")
+	script := `#!/bin/sh
+# Log all invocations for assertion
+echo "$@" >> "` + bdListLog + `"
+
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;; # skip flags
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
+  list)
+    # Check which status is being queried
+    case "$*" in
+      *--status=in_progress*)
+        cat <<'JSONEOF'
+[
+  {"id":"gt-orphan1","assignee":"testrig/polecats/alpha"},
+  {"id":"gt-alive1","assignee":"testrig/polecats/bravo"},
+  {"id":"gt-nocrew","assignee":"testrig/crew/sean"},
+  {"id":"gt-noassign","assignee":""},
+  {"id":"gt-otherrig","assignee":"otherrig/polecats/delta"}
+]
+JSONEOF
+        ;;
+      *--status=hooked*)
+        cat <<'JSONEOF'
+[
+  {"id":"gt-hooked1","assignee":"testrig/polecats/charlie"}
+]
+JSONEOF
+        ;;
+    esac
+    exit 0
+    ;;
+  update)
+    # Log update calls for verification
+    echo "$@" >> "` + filepath.Join(binDir, "bd-update.log") + `"
+    exit 0
+    ;;
+  show)
+    # Return in_progress status for any bead query
+    echo '[{"status":"in_progress"}]'
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result := DetectOrphanedBeads(townRoot, rigName, nil)
+
+	// Verify --limit=0 was passed in bd list invocations
+	logContent, err := os.ReadFile(bdListLog)
+	if err != nil {
+		t.Fatalf("Failed to read bd-list.log: %v", err)
+	}
+	logStr := string(logContent)
+	if !strings.Contains(logStr, "--limit=0") {
+		t.Errorf("bd list was not called with --limit=0; log:\n%s", logStr)
+	}
+	// Verify both statuses were queried
+	if !strings.Contains(logStr, "--status=in_progress") {
+		t.Errorf("bd list was not called with --status=in_progress; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "--status=hooked") {
+		t.Errorf("bd list was not called with --status=hooked; log:\n%s", logStr)
+	}
+
+	// Should have checked 3 polecat assignees in "testrig":
+	// alpha (in_progress), bravo (in_progress), charlie (hooked)
+	// "crew/sean" is not a polecat, "" has no assignee,
+	// "otherrig/polecats/delta" is filtered out by rigName
+	if result.Checked != 3 {
+		t.Errorf("Checked = %d, want 3 (alpha + bravo from in_progress, charlie from hooked)", result.Checked)
+	}
+
+	// Should have found 2 orphans:
+	// alpha (in_progress, no dir, no session) and charlie (hooked, no dir, no session)
+	// bravo has directory so deferred to DetectZombiePolecats
+	if len(result.Orphans) != 2 {
+		t.Fatalf("Orphans = %d, want 2 (alpha + charlie)", len(result.Orphans))
+	}
+
+	// Verify first orphan (alpha from in_progress scan)
+	orphan := result.Orphans[0]
+	if orphan.BeadID != "gt-orphan1" {
+		t.Errorf("orphan[0] BeadID = %q, want %q", orphan.BeadID, "gt-orphan1")
+	}
+	if orphan.PolecatName != "alpha" {
+		t.Errorf("orphan[0] PolecatName = %q, want %q", orphan.PolecatName, "alpha")
+	}
+	if orphan.Assignee != "testrig/polecats/alpha" {
+		t.Errorf("orphan[0] Assignee = %q, want %q", orphan.Assignee, "testrig/polecats/alpha")
+	}
+	// BeadRecovered should be true (mock bd update succeeds)
+	if !orphan.BeadRecovered {
+		t.Error("orphan[0] BeadRecovered = false, want true")
+	}
+
+	// Verify second orphan (charlie from hooked scan)
+	orphan2 := result.Orphans[1]
+	if orphan2.BeadID != "gt-hooked1" {
+		t.Errorf("orphan[1] BeadID = %q, want %q", orphan2.BeadID, "gt-hooked1")
+	}
+	if orphan2.PolecatName != "charlie" {
+		t.Errorf("orphan[1] PolecatName = %q, want %q", orphan2.PolecatName, "charlie")
+	}
+
+	// Verify no unexpected errors
+	if len(result.Errors) != 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
+}
+
+func TestDetectOrphanedBeads_ErrorPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping mock bd test on Windows")
+	}
+
+	// Set up with a mock bd that fails on list
+	binDir := t.TempDir()
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+echo "bd: connection refused" >&2
+exit 1
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result := DetectOrphanedBeads(t.TempDir(), "testrig", nil)
+
+	if len(result.Errors) == 0 {
+		t.Error("expected errors when bd fails, got none")
+	}
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0 when bd fails", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("Orphans = %d, want 0 when bd fails", len(result.Orphans))
+	}
+}
+
+// --- DetectOrphanedMolecules tests ---
+
+func TestOrphanedMoleculeResult_Types(t *testing.T) {
+	// Verify the result types have all expected fields.
+	r := OrphanedMoleculeResult{
+		BeadID:        "gt-work-123",
+		MoleculeID:    "gt-mol-456",
+		Assignee:      "testrig/polecats/alpha",
+		PolecatName:   "alpha",
+		Closed:        5,
+		BeadRecovered: true,
+		Error:         nil,
+	}
+	if r.BeadID != "gt-work-123" {
+		t.Errorf("BeadID = %q, want %q", r.BeadID, "gt-work-123")
+	}
+	if r.MoleculeID != "gt-mol-456" {
+		t.Errorf("MoleculeID = %q, want %q", r.MoleculeID, "gt-mol-456")
+	}
+	if r.PolecatName != "alpha" {
+		t.Errorf("PolecatName = %q, want %q", r.PolecatName, "alpha")
+	}
+	if r.Closed != 5 {
+		t.Errorf("Closed = %d, want 5", r.Closed)
+	}
+	if !r.BeadRecovered {
+		t.Error("BeadRecovered = false, want true")
+	}
+
+	// Aggregate result
+	agg := DetectOrphanedMoleculesResult{
+		Checked: 10,
+		Orphans: []OrphanedMoleculeResult{r},
+		Errors:  []error{fmt.Errorf("test error")},
+	}
+	if agg.Checked != 10 {
+		t.Errorf("Checked = %d, want 10", agg.Checked)
+	}
+	if len(agg.Orphans) != 1 {
+		t.Errorf("len(Orphans) = %d, want 1", len(agg.Orphans))
+	}
+	if len(agg.Errors) != 1 {
+		t.Errorf("len(Errors) = %d, want 1", len(agg.Errors))
+	}
+}
+
+func TestDetectOrphanedMolecules_NoBdAvailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix-style PATH override not compatible with Windows")
+	}
+	// When bd is not in PATH, should return empty result with errors.
+	t.Setenv("PATH", "/nonexistent")
+	result := DetectOrphanedMolecules("/tmp/nonexistent", "testrig", nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+	// Should have errors from failed bd list commands
+	if len(result.Errors) == 0 {
+		t.Error("expected errors when bd is not available")
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("expected no orphans, got %d", len(result.Orphans))
+	}
+}
+
+func TestDetectOrphanedMolecules_EmptyResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
+	// With a mock bd that returns empty lists, should get empty result.
+	tmpDir := t.TempDir()
+	mockBd := filepath.Join(tmpDir, "bd")
+	if err := os.WriteFile(mockBd, []byte("#!/bin/sh\necho '[]'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmpDir)
+
+	result := DetectOrphanedMolecules(tmpDir, "testrig", nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+	if result.Checked != 0 {
+		t.Errorf("Checked = %d, want 0", result.Checked)
+	}
+	if len(result.Orphans) != 0 {
+		t.Errorf("len(Orphans) = %d, want 0", len(result.Orphans))
+	}
+}
+
+func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix-style PATH override not compatible with Windows")
+	}
+	// When bd show returns empty, should return empty string.
+	t.Setenv("PATH", "/nonexistent")
+	result := getAttachedMoleculeID("/tmp", "gt-fake-123")
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
+	// Full test with mock bd returning beads assigned to dead polecats.
+	//
+	// Setup:
+	// - alpha: dead polecat (no tmux, no directory) with attached molecule → orphaned
+	// - bravo: alive polecat (directory exists) → skip
+	// - crew/sean: non-polecat assignee → skip
+	// - empty assignee → skip
+
+	tmpDir := t.TempDir()
+
+	// Create town structure: tmpDir is the "town root"
+	rigName := "testrig"
+	polecatsDir := filepath.Join(tmpDir, rigName, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create bravo's directory (alive polecat)
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "bravo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// No directory for alpha (dead polecat)
+
+	// Create workspace.Find marker
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gt-root"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock bd that handles list and show commands
+	logFile := filepath.Join(tmpDir, "bd.log")
+	mockBd := filepath.Join(tmpDir, "bd")
+	mockScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+case "$1" in
+  list)
+    case "$*" in
+      *--status=hooked*)
+        cat <<'EOJSON'
+[
+  {"id":"gt-work-001","assignee":"testrig/polecats/alpha"},
+  {"id":"gt-work-002","assignee":"testrig/polecats/bravo"},
+  {"id":"gt-work-003","assignee":"testrig/crew/sean"},
+  {"id":"gt-work-004","assignee":""}
+]
+EOJSON
+        ;;
+      *--status=in_progress*)
+        echo '[]'
+        ;;
+      *--parent=gt-mol-orphan*)
+        cat <<'EOJSON'
+[
+  {"id":"gt-step-001","status":"open"},
+  {"id":"gt-step-002","status":"open"},
+  {"id":"gt-step-003","status":"closed"}
+]
+EOJSON
+        ;;
+      *--parent=*)
+        echo '[]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    ;;
+  show)
+    case "$2" in
+      gt-work-001)
+        echo '[{"status":"hooked","description":"attached_molecule: gt-mol-orphan\\nattached_at: 2026-01-15T10:00:00Z\\ndispatched_by: mayor"}]'
+        ;;
+      gt-mol-orphan)
+        echo '[{"status":"open"}]'
+        ;;
+      *)
+        echo '[{"status":"open","description":""}]'
+        ;;
+    esac
+    ;;
+  close)
+    # Accept close commands silently
+    ;;
+  update)
+    # Accept update commands (used by resetAbandonedBead)
+    ;;
+  *)
+    ;;
+esac
+`, logFile)
+
+	if err := os.WriteFile(mockBd, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+
+	result := DetectOrphanedMolecules(tmpDir, rigName, nil)
+	if result == nil {
+		t.Fatal("result should not be nil")
+	}
+
+	// Should have checked 2 polecat-assigned beads (alpha and bravo)
+	if result.Checked != 2 {
+		t.Errorf("Checked = %d, want 2 (alpha + bravo)", result.Checked)
+	}
+
+	// Should have found 1 orphan (alpha's molecule)
+	if len(result.Orphans) != 1 {
+		t.Fatalf("len(Orphans) = %d, want 1", len(result.Orphans))
+	}
+
+	orphan := result.Orphans[0]
+	if orphan.BeadID != "gt-work-001" {
+		t.Errorf("orphan.BeadID = %q, want %q", orphan.BeadID, "gt-work-001")
+	}
+	if orphan.MoleculeID != "gt-mol-orphan" {
+		t.Errorf("orphan.MoleculeID = %q, want %q", orphan.MoleculeID, "gt-mol-orphan")
+	}
+	if orphan.PolecatName != "alpha" {
+		t.Errorf("orphan.PolecatName = %q, want %q", orphan.PolecatName, "alpha")
+	}
+	// Closed should be 3: 2 open step children + 1 molecule itself
+	if orphan.Closed != 3 {
+		t.Errorf("orphan.Closed = %d, want 3 (2 open steps + 1 molecule)", orphan.Closed)
+	}
+	if orphan.Error != nil {
+		t.Errorf("orphan.Error = %v, want nil", orphan.Error)
+	}
+
+	// Verify bd close was called by checking the log
+	logBytes, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("reading bd log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "close gt-step-001 gt-step-002") {
+		t.Errorf("expected bd close for step children, got log:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "close gt-mol-orphan") {
+		t.Errorf("expected bd close for molecule, got log:\n%s", logContent)
+	}
+	// Verify bead was recovered (resetAbandonedBead called bd update)
+	if !orphan.BeadRecovered {
+		t.Error("orphan.BeadRecovered = false, want true (resetAbandonedBead should have reset the bead)")
+	}
+	if !strings.Contains(logContent, "update gt-work-001") {
+		t.Errorf("expected bd update for bead reset, got log:\n%s", logContent)
+	}
+}
+

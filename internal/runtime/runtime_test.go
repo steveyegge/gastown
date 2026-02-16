@@ -255,7 +255,7 @@ func TestStartupFallbackCommands_RoleCasing(t *testing.T) {
 
 func TestEnsureSettingsForRole_NilConfig(t *testing.T) {
 	// Should not panic with nil config
-	err := EnsureSettingsForRole("/tmp/test", "polecat", nil)
+	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", nil)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with nil config should not error, got %v", err)
 	}
@@ -266,7 +266,7 @@ func TestEnsureSettingsForRole_NilHooks(t *testing.T) {
 		Hooks: nil,
 	}
 
-	err := EnsureSettingsForRole("/tmp/test", "polecat", rc)
+	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with nil hooks should not error, got %v", err)
 	}
@@ -279,9 +279,64 @@ func TestEnsureSettingsForRole_UnknownProvider(t *testing.T) {
 		},
 	}
 
-	err := EnsureSettingsForRole("/tmp/test", "polecat", rc)
+	err := EnsureSettingsForRole("/tmp/test", "/tmp/test", "polecat", rc)
 	if err != nil {
 		t.Errorf("EnsureSettingsForRole() with unknown provider should not error, got %v", err)
+	}
+}
+
+func TestEnsureSettingsForRole_OpenCodeUsesWorkDir(t *testing.T) {
+	// OpenCode plugins must be installed in workDir (not settingsDir) because
+	// OpenCode has no --settings equivalent for path redirection.
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "opencode",
+			Dir:          "plugins",
+			SettingsFile: "gastown.js",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	// Plugin should be in workDir, not settingsDir
+	if _, err := os.Stat(settingsDir + "/plugins/gastown.js"); err == nil {
+		t.Error("OpenCode plugin should NOT be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/plugins/gastown.js"); err != nil {
+		t.Error("OpenCode plugin should be in workDir")
+	}
+}
+
+func TestEnsureSettingsForRole_ClaudeUsesSettingsDir(t *testing.T) {
+	// Claude settings must be installed in settingsDir (passed via --settings flag).
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "claude",
+			Dir:          ".claude",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	// Settings should be in settingsDir, not workDir
+	if _, err := os.Stat(settingsDir + "/.claude/settings.json"); err != nil {
+		t.Error("Claude settings should be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/.claude/settings.json"); err == nil {
+		t.Error("Claude settings should NOT be in workDir when dirs differ")
 	}
 }
 
@@ -387,6 +442,99 @@ func TestStartupNudgeContent(t *testing.T) {
 	}
 	if !contains(content, "gt hook") {
 		t.Error("StartupNudgeContent should mention gt hook")
+	}
+}
+
+func TestEnsureSettingsForRole_CopilotUsesWorkDir(t *testing.T) {
+	// Copilot instructions must be installed in workDir (not settingsDir) because
+	// Copilot has no --settings equivalent for path redirection.
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "copilot",
+			Dir:          ".copilot",
+			SettingsFile: "copilot-instructions.md",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	// Instructions should be in workDir, not settingsDir
+	if _, err := os.Stat(settingsDir + "/.copilot/copilot-instructions.md"); err == nil {
+		t.Error("Copilot instructions should NOT be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/.copilot/copilot-instructions.md"); err != nil {
+		t.Error("Copilot instructions should be in workDir")
+	}
+}
+
+func TestGetStartupFallbackInfo_InformationalHooks(t *testing.T) {
+	// Copilot: hooks provider set but informational (instructions file, not executable).
+	// Should be treated as having NO hooks for startup fallback purposes.
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:      "copilot",
+			Informational: true,
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if !info.IncludePrimeInBeacon {
+		t.Error("Informational hooks should include prime instruction in beacon")
+	}
+	if !info.SendStartupNudge {
+		t.Error("Informational hooks should need startup nudge")
+	}
+	if info.SendBeaconNudge {
+		t.Error("Informational hooks with prompt should NOT need beacon nudge")
+	}
+}
+
+func TestStartupFallbackCommands_InformationalHooks(t *testing.T) {
+	// Copilot has hooks provider set but informational — should still get fallback commands.
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:      "copilot",
+			Informational: true,
+		},
+	}
+
+	commands := StartupFallbackCommands("polecat", rc)
+	if commands == nil {
+		t.Error("StartupFallbackCommands() with informational hooks should return commands")
+	}
+}
+
+func TestEnsureSettingsForRole_GeminiUsesWorkDir(t *testing.T) {
+	// Gemini CLI has no --settings flag; settings must go to workDir (like OpenCode).
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "gemini",
+			Dir:          ".gemini",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	// Settings should be in workDir, not settingsDir
+	if _, err := os.Stat(settingsDir + "/.gemini/settings.json"); err == nil {
+		t.Error("Gemini settings should NOT be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/.gemini/settings.json"); err != nil {
+		t.Error("Gemini settings should be in workDir")
 	}
 }
 

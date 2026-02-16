@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/version"
@@ -61,6 +62,7 @@ var beadsExemptCommands = map[string]bool{
 	"install":    true,
 	"tap":        true,
 	"dnd":        true,
+	"signal":        true, // Hook signal handlers must be fast, handle beads internally
 	"krc":           true, // KRC doesn't require beads
 	"run-migration": true, // Migration orchestrator handles its own beads checks
 }
@@ -81,7 +83,9 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Check if binary was built properly (via make build, not raw go build).
 	// Raw go build produces unsigned binaries that macOS may kill.
 	// Warning only - doesn't block execution.
-	if BuiltProperly == "" {
+	// Skip warning when Build was set by a package manager (e.g. Homebrew sets
+	// Build to "Homebrew" via ldflags but doesn't set BuiltProperly).
+	if BuiltProperly == "" && Build == "dev" {
 		fmt.Fprintln(os.Stderr, "WARNING: This binary was built with 'go build' directly.")
 		fmt.Fprintln(os.Stderr, "         Use 'make build' to create a properly signed binary.")
 		if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
@@ -91,6 +95,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
+
+	// Initialize session prefix registry from rigs.json.
+	// Best-effort: if town root not found, the default "gt" prefix is used.
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		_ = session.InitRegistry(townRoot)
+	}
 
 	// Get the root command name being run
 	cmdName := cmd.Name()

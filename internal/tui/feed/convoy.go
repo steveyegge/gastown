@@ -299,6 +299,8 @@ func (m *Model) renderConvoyPanel() string {
 }
 
 // renderConvoys renders the convoy panel content
+// renderConvoys renders the convoy status content.
+// Caller must hold m.mu.
 func (m *Model) renderConvoys() string {
 	if m.convoyState == nil {
 		return AgentIdleStyle.Render("Loading convoys...")

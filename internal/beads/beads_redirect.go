@@ -111,20 +111,14 @@ func cleanBeadsRuntimeFiles(beadsDir string) error {
 
 	// Runtime files/patterns that are gitignored and safe to remove
 	runtimePatterns := []string{
-		// Legacy SQLite database files (pre-Dolt migration)
-		"*.db", "*.db-*", "*.db?*",
 		// Daemon runtime
 		"daemon.lock", "daemon.log", "daemon.pid", "bd.sock",
 		// Sync state
-		"sync-state.json", "last-touched", "metadata.json",
+		"last-touched", "metadata.json",
 		// Version tracking
 		".local_version",
 		// Redirect file (we're about to recreate it)
 		"redirect",
-		// Merge artifacts
-		"beads.base.*", "beads.left.*", "beads.right.*",
-		// JSONL files (tracked but will be redirected, safe to remove in worktrees)
-		"issues.jsonl", "interactions.jsonl",
 		// Runtime directories
 		"mq",
 	}
@@ -198,6 +192,10 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 			rigHasDB = true
 		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "beads.db")); err == nil {
 			rigHasDB = true
+		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "redirect")); err == nil {
+			// A redirect file is a valid beads configuration (tracked beads case).
+			// initBeads creates this to point to mayor/rig/.beads.
+			rigHasDB = true
 		}
 	}
 
@@ -264,15 +262,21 @@ func SetupRedirect(townRoot, worktreePath string) error {
 		return err
 	}
 
-	// Warn if using mayor fallback (detected by checking the computed redirect path)
+	// Warn only when using mayor fallback WITHOUT a redirect file.
+	// When rig/.beads/redirect exists pointing to mayor/rig/.beads, that's the
+	// intended configuration for tracked beads — not a fallback worth warning about.
 	if strings.Contains(redirectPath, "mayor/rig/.beads") {
 		relPath, _ := filepath.Rel(townRoot, worktreePath)
 		parts := strings.Split(filepath.ToSlash(relPath), "/")
 		rigRoot := filepath.Join(townRoot, parts[0])
-		rigBeadsPath := filepath.Join(rigRoot, ".beads")
-		mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
-		fmt.Fprintf(os.Stderr, "Warning: rig .beads not found at %s, using %s\n", rigBeadsPath, mayorBeadsPath)
-		fmt.Fprintf(os.Stderr, "  Run 'bd doctor' to fix rig beads configuration\n")
+		rigRedirectPath := filepath.Join(rigRoot, ".beads", "redirect")
+		if _, err := os.Stat(rigRedirectPath); os.IsNotExist(err) {
+			// No redirect file — this is an unexpected fallback
+			rigBeadsPath := filepath.Join(rigRoot, ".beads")
+			mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
+			fmt.Fprintf(os.Stderr, "Warning: rig .beads not found at %s, using %s\n", rigBeadsPath, mayorBeadsPath)
+			fmt.Fprintf(os.Stderr, "  Run 'bd doctor' to fix rig beads configuration\n")
+		}
 	}
 
 	// Clean up runtime files in .beads/ but preserve tracked files (formulas/, README.md, etc.)

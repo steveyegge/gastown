@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/nudge"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -186,6 +189,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	}
 
 	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Dir = resolveBeadDir(beadID)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -267,9 +271,9 @@ func ensureAgentReady(sessionName string) error {
 		}
 	}
 
-	// Claude-only: accept bypass permissions warning if present
+	// Accept bypass permissions warning if the agent emits one on startup
 	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
-	if agentName == "" || agentName == "claude" {
+	if shouldAcceptPermissionWarning(agentName) {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
 	}
 
@@ -451,19 +455,29 @@ func wakeRigAgents(rigName string) {
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
-	// Nudge witness to clear any backoff
-	t := tmux.NewTmux()
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-
-	// Silent nudge - session might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	// Queue nudge to witness for cooperative delivery.
+	// This avoids interrupting in-flight tool calls.
+	witnessSession := session.WitnessSessionName(session.PrefixFor(rigName))
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		if err := nudge.Enqueue(townRoot, witnessSession, nudge.QueuedNudge{
+			Sender:  "sling",
+			Message: "Polecat dispatched - check for work",
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to queue nudge for %s: %v\n", witnessSession, err)
+		}
+	} else {
+		// Fallback to direct nudge if town root unavailable
+		t := tmux.NewTmux()
+		_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+	}
 }
 
-// nudgeRefinery wakes the refinery for a rig after an MR is created.
-// This ensures the refinery picks up the new merge request promptly
-// instead of waiting for its next poll cycle.
+// nudgeRefinery queues a nudge for the refinery after an MR is created.
+// Uses the nudge queue for cooperative delivery so we don't interrupt
+// in-flight tool calls. The refinery picks this up at its next turn boundary.
 func nudgeRefinery(rigName, message string) {
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+	refinerySession := session.RefinerySessionName(session.PrefixFor(rigName))
 
 	// Test hook: log nudge for test observability (same pattern as GT_TEST_ATTACHED_MOLECULE_LOG)
 	if logPath := os.Getenv("GT_TEST_NUDGE_LOG"); logPath != "" {
@@ -476,8 +490,20 @@ func nudgeRefinery(rigName, message string) {
 		return // Don't actually nudge tmux in tests
 	}
 
-	t := tmux.NewTmux()
-	_ = t.NudgeSession(refinerySession, message)
+	// Queue for cooperative delivery at refinery's next turn boundary
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		if err := nudge.Enqueue(townRoot, refinerySession, nudge.QueuedNudge{
+			Sender:  "sling",
+			Message: message,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to queue nudge for %s: %v\n", refinerySession, err)
+		}
+	} else {
+		// Fallback to direct nudge if town root unavailable
+		t := tmux.NewTmux()
+		_ = t.NudgeSession(refinerySession, message)
+	}
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.
@@ -697,4 +723,49 @@ func isSlingConfigError(err error) bool {
 		strings.Contains(msg, "no database") ||
 		strings.Contains(msg, "database not found") ||
 		strings.Contains(msg, "connection refused")
+}
+
+// loadRigCommandVars reads rig settings and returns --var key=value strings
+// for all configured build pipeline commands (setup, typecheck, lint, test, build).
+// Only non-empty commands are included; empty means "skip" in the formula.
+func loadRigCommandVars(townRoot, rig string) []string {
+	if townRoot == "" || rig == "" {
+		return nil
+	}
+	settingsPath := filepath.Join(townRoot, rig, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil || settings == nil || settings.MergeQueue == nil {
+		return nil
+	}
+	mq := settings.MergeQueue
+	var vars []string
+	if mq.SetupCommand != "" {
+		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
+	}
+	if mq.TypecheckCommand != "" {
+		vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
+	}
+	if mq.LintCommand != "" {
+		vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
+	}
+	if mq.TestCommand != "" {
+		vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
+	}
+	if mq.BuildCommand != "" {
+		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+	}
+	return vars
+}
+
+// shouldAcceptPermissionWarning checks if the agent emits a bypass-permissions
+// warning on startup that needs to be acknowledged via tmux.
+func shouldAcceptPermissionWarning(agentName string) bool {
+	if agentName == "" {
+		agentName = "claude" // Default sessions without GT_AGENT are Claude
+	}
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil {
+		return false
+	}
+	return preset.EmitsPermissionWarning
 }

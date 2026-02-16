@@ -33,7 +33,7 @@ memorize steps or wait for instructions - discover them:
 ```bash
 gt hook              # What's on my hook?
 bd mol current         # Where am I in the molecule?
-bd ready               # What step is next?
+bd mol current         # What step is next?
 bd show <step-id>      # What does this step require?
 ```
 
@@ -44,7 +44,7 @@ bd show <step-id>      # What does this step require?
 # Finish step 3
 bd close gt-abc.3
 # Figure out what's next
-bd ready --parent=gt-abc
+bd mol current
 # Manually claim it
 bd update gt-abc.4 --status=in_progress
 # Now finally work on it

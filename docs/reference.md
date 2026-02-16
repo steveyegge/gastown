@@ -68,9 +68,16 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
   "type": "rig",
   "name": "myproject",
   "git_url": "https://github.com/...",
+  "default_branch": "main",
   "beads": { "prefix": "mp" }
 }
 ```
+
+**Rig config fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `default_branch` | `string` | `"main"` | Default branch for the rig. Auto-detected from remote during `gt rig add`. Used as the merge target by the Refinery and as the base for polecats when no integration branch is active. |
 
 ### Settings (`settings/config.json`)
 
@@ -78,9 +85,49 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 {
   "theme": "desert",
   "max_workers": 5,
-  "merge_queue": { "enabled": true }
+  "merge_queue": {
+    "enabled": true,
+    "run_tests": true,
+    "setup_command": "",
+    "typecheck_command": "",
+    "lint_command": "",
+    "test_command": "go test ./...",
+    "build_command": "",
+    "on_conflict": "assign_back",
+    "delete_merged_branches": true,
+    "retry_flaky_tests": 1,
+    "poll_interval": "30s",
+    "max_concurrent": 1,
+    "integration_branch_polecat_enabled": true,
+    "integration_branch_refinery_enabled": true,
+    "integration_branch_template": "integration/{title}",
+    "integration_branch_auto_land": false
+  }
 }
 ```
+
+**Merge queue fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether the merge queue is active |
+| `run_tests` | `bool` | `true` | Run tests before merging |
+| `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
+| `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`) |
+| `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
+| `test_command` | `string` | `"go test ./..."` | Test command to run |
+| `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
+| `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
+| `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
+| `retry_flaky_tests` | `int` | `1` | Number of times to retry flaky tests |
+| `poll_interval` | `string` | `"30s"` | How often Refinery polls for new MRs |
+| `max_concurrent` | `int` | `1` | Maximum concurrent merges |
+| `integration_branch_polecat_enabled` | `*bool` | `true` | Polecats auto-source worktrees from integration branches |
+| `integration_branch_refinery_enabled` | `*bool` | `true` | `gt done` / `gt mq submit` auto-target integration branches |
+| `integration_branch_template` | `string` | `"integration/{title}"` | Branch name template (`{title}`, `{epic}`, `{prefix}`, `{user}`) |
+| `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol auto-lands when all children closed |
+
+See [Integration Branches](concepts/integration-branches.md) for integration branch details.
 
 ### Runtime (`.runtime/` - gitignored)
 
@@ -330,20 +377,22 @@ a git clone that holds the canonical `.beads/` database for that rig.
 
 ### Settings File Locations
 
-Claude Code does NOT traverse parent directories for `settings.local.json` —
-it only reads settings from the working directory. Settings are installed at
-each agent's working directory at startup:
+Settings are installed in gastown-managed parent directories and passed to
+Claude Code via the `--settings` flag. This keeps customer repos clean:
 
 ```
 ~/gt/
-├── mayor/.claude/settings.local.json              # Mayor settings
-├── deacon/.claude/settings.local.json             # Deacon settings
+├── mayor/.claude/settings.json              # Mayor settings (cwd = settings dir)
+├── deacon/.claude/settings.json             # Deacon settings (cwd = settings dir)
 └── <rig>/
-    ├── witness/rig/.claude/settings.local.json    # Witness settings
-    ├── refinery/rig/.claude/settings.local.json   # Refinery settings
-    ├── crew/<name>/.claude/settings.local.json    # Per-crew-member settings
-    └── polecats/<name>/<rig>/.claude/settings.local.json  # Per-polecat settings
+    ├── crew/.claude/settings.json           # Shared by all crew members
+    ├── polecats/.claude/settings.json       # Shared by all polecats
+    ├── witness/.claude/settings.json        # Witness settings
+    └── refinery/.claude/settings.json       # Refinery settings
 ```
+
+The `--settings` flag loads these as a separate priority tier that merges
+additively with any project-level settings in the customer repo.
 
 ### CLAUDE.md
 
@@ -369,12 +418,12 @@ Gas Town's context comes from the town-root `CLAUDE.md` identity anchor
 `gt prime` via the SessionStart hook, and the customer repo's own `CLAUDE.md`.
 These coexist safely because:
 
-- **`settings.local.json` takes precedence** over `settings.json` in Claude Code,
-  so Gas Town's agent-specific settings always win
+- **`--settings` flag provides Gas Town settings** as a separate tier that merges
+  additively with customer project settings, so both coexist cleanly
 - **`gt prime` injects role context** ephemerally via SessionStart hook, which is
   additive with the customer's `CLAUDE.md` — both are loaded
-- Only `.claude/settings.local.json` is gitignored (not the entire `.claude/` directory),
-  so customer skills, settings, and other `.claude/` files are visible
+- Gas Town settings live in parent directories (not in customer repos), so
+  customer `.claude/` files are fully preserved
 
 **Doctor check**: `gt doctor` warns if legacy sparse checkout is still configured.
 Run `gt doctor --fix` to remove it. Tracked `settings.json` files in worktrees are
@@ -382,14 +431,16 @@ recognized as customer project config and are not flagged as stale.
 
 ### Settings Inheritance
 
-Claude Code's settings search order (first match wins):
+Claude Code's settings are layered from multiple sources:
 
-1. `.claude/settings.json` in current working directory
+1. `.claude/settings.json` in current working directory (customer project)
 2. `.claude/settings.json` in parent directories (traversing up)
 3. `~/.claude/settings.json` (user global settings)
+4. `--settings <path>` flag (loaded as a separate additive tier)
 
-Gas Town places settings at each agent's working directory root, so agents
-find their role-specific settings before reaching any parent or global config.
+Gas Town uses the `--settings` flag to inject role-specific settings from
+gastown-managed parent directories. This merges additively with customer
+project settings rather than overriding them.
 
 ### Settings Templates
 
@@ -407,8 +458,8 @@ at session start. Interactive agents wait for user prompts.
 
 | Problem | Solution |
 |---------|----------|
-| Agent using wrong settings | Check `gt doctor`, verify settings.local.json |
-| Settings not found | Ensure `.claude/settings.local.json` exists at role home |
+| Agent using wrong settings | Check `gt doctor`, verify `.claude/settings.json` in role parent dir |
+| Settings not found | Run `gt install` to recreate settings, or `gt doctor --fix` |
 | Source repo settings leaking | Run `gt doctor --fix` to remove legacy sparse checkout |
 | Mayor settings affecting polecats | Mayor should run in `mayor/`, not town root |
 
@@ -597,6 +648,22 @@ gt mq retry <id>             # Retry a failed merge request
 gt mq reject <id>            # Reject a merge request
 ```
 
+#### Integration Branch Commands
+
+```bash
+gt mq integration create <epic-id>              # Create integration branch
+gt mq integration create <epic-id> --branch "feat/{title}"  # Custom template
+gt mq integration create <epic-id> --base-branch develop   # Non-main base
+gt mq integration status <epic-id>              # Show branch status
+gt mq integration status <epic-id> --json       # JSON output
+gt mq integration land <epic-id>                # Merge to base branch (default: main)
+gt mq integration land <epic-id> --dry-run      # Preview only
+gt mq integration land <epic-id> --force        # Land with open MRs
+gt mq integration land <epic-id> --skip-tests   # Skip test run
+```
+
+See [Integration Branches](concepts/integration-branches.md) for the full workflow.
+
 ## Beads Commands (bd)
 
 ```bash
@@ -618,7 +685,7 @@ Deacon, Witness, and Refinery run continuous patrol loops using wisps:
 |-------|-----------------|----------------|
 | **Deacon** | `mol-deacon-patrol` | Agent lifecycle, plugin execution, health checks |
 | **Witness** | `mol-witness-patrol` | Monitor polecats, nudge stuck workers |
-| **Refinery** | `mol-refinery-patrol` | Process merge queue, review MRs |
+| **Refinery** | `mol-refinery-patrol` | Process merge queue, review MRs, check integration branches |
 
 ```
 1. bd mol wisp mol-<role>-patrol

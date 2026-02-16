@@ -39,27 +39,43 @@ Examples:
 var namepoolThemesCmd = &cobra.Command{
 	Use:   "themes [theme]",
 	Short: "List available themes and their names",
-	RunE:  runNamepoolThemes,
+	Long: `List available namepool themes or show names in a specific theme.
+
+Without arguments, lists all themes with a preview of their names.
+With a theme name argument, shows all names in that theme.`,
+	RunE: runNamepoolThemes,
 }
 
 var namepoolSetCmd = &cobra.Command{
 	Use:   "set <theme>",
 	Short: "Set the namepool theme for this rig",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runNamepoolSet,
+	Long: `Set the namepool theme used for naming new polecats in this rig.
+
+Changes the theme and saves it to the rig settings. Existing polecat
+names are not affected. Use 'gt namepool themes' to see available themes.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNamepoolSet,
 }
 
 var namepoolAddCmd = &cobra.Command{
 	Use:   "add <name>",
 	Short: "Add a custom name to the pool",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runNamepoolAdd,
+	Long: `Add a custom name to the rig's polecat name pool.
+
+The name is appended to the pool and saved in the rig settings.
+Duplicate names are silently ignored.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNamepoolAdd,
 }
 
 var namepoolResetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Reset the pool state (release all names)",
-	RunE:  runNamepoolReset,
+	Long: `Reset the polecat name pool, releasing all claimed names.
+
+All names become available for reuse. This does not change the theme
+or remove custom names from the configuration.`,
+	RunE: runNamepoolReset,
 }
 
 func init() {

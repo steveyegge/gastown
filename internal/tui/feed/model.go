@@ -86,6 +86,13 @@ type Model struct {
 	eventChan <-chan Event
 	done      chan struct{}
 	closeOnce sync.Once
+
+	// mu protects all fields read by View() from concurrent access:
+	// events, rigs, convoyState, eventChan, townRoot, width, height,
+	// focusedPanel, showHelp, help, filter, and the three viewports.
+	// Write lock is held during Update/handleKey mutations; read lock
+	// is held during View/render.
+	mu sync.RWMutex
 }
 
 // NewModel creates a new feed TUI model
@@ -106,9 +113,12 @@ func NewModel() *Model {
 	}
 }
 
-// SetTownRoot sets the town root for convoy fetching
+// SetTownRoot sets the town root for convoy fetching.
+// Safe to call concurrently with the Bubble Tea event loop.
 func (m *Model) SetTownRoot(townRoot string) {
+	m.mu.Lock()
 	m.townRoot = townRoot
+	m.mu.Unlock()
 }
 
 // Init initializes the model
@@ -131,14 +141,17 @@ type convoyUpdateMsg struct {
 // tickMsg is sent periodically to refresh the view
 type tickMsg time.Time
 
-// listenForEvents returns a command that listens for events
+// listenForEvents returns a command that listens for events.
+// Captures channels under the read lock to avoid racing with SetEventChannel.
 func (m *Model) listenForEvents() tea.Cmd {
-	if m.eventChan == nil {
-		return nil
-	}
-	// Capture channels to avoid race with Model mutations
+	m.mu.RLock()
 	eventChan := m.eventChan
 	done := m.done
+	m.mu.RUnlock()
+
+	if eventChan == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		select {
 		case event, ok := <-eventChan:
@@ -159,12 +172,16 @@ func tick() tea.Cmd {
 	})
 }
 
-// fetchConvoys returns a command that fetches convoy data
+// fetchConvoys returns a command that fetches convoy data.
+// Captures townRoot under the read lock to avoid racing with SetTownRoot.
 func (m *Model) fetchConvoys() tea.Cmd {
-	if m.townRoot == "" {
+	m.mu.RLock()
+	townRoot := m.townRoot
+	m.mu.RUnlock()
+
+	if townRoot == "" {
 		return nil
 	}
-	townRoot := m.townRoot
 	return func() tea.Msg {
 		state, _ := FetchConvoys(townRoot)
 		return convoyUpdateMsg{state: state}
@@ -187,8 +204,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
+		m.mu.Lock()
 		m.width = msg.Width
 		m.height = msg.Height
+		m.mu.Unlock()
 		m.updateViewportSizes()
 
 	case eventMsg:
@@ -198,8 +217,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case convoyUpdateMsg:
 		if msg.state != nil {
 			// Fresh data arrived - update state and schedule next tick
+			m.mu.Lock()
 			m.convoyState = msg.state
-			m.updateViewContent()
+			m.updateViewContentLocked()
+			m.mu.Unlock()
 			cmds = append(cmds, m.convoyRefreshTick())
 		} else {
 			// Tick fired - fetch new data
@@ -210,7 +231,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tick())
 	}
 
-	// Update viewports
+	// Update viewports (under lock to protect from concurrent View)
+	m.mu.Lock()
 	var cmd tea.Cmd
 	switch m.focusedPanel {
 	case PanelTree:
@@ -220,6 +242,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
 	}
+	m.mu.Unlock()
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
@@ -233,12 +256,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
+		m.mu.Lock()
 		m.showHelp = !m.showHelp
 		m.help.ShowAll = m.showHelp
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Tab):
 		// Cycle: Tree -> Convoy -> Feed -> Tree
+		m.mu.Lock()
 		switch m.focusedPanel {
 		case PanelTree:
 			m.focusedPanel = PanelConvoy
@@ -247,18 +273,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case PanelFeed:
 			m.focusedPanel = PanelTree
 		}
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusTree):
+		m.mu.Lock()
 		m.focusedPanel = PanelTree
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusFeed):
+		m.mu.Lock()
 		m.focusedPanel = PanelFeed
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusConvoy):
+		m.mu.Lock()
 		m.focusedPanel = PanelConvoy
+		m.mu.Unlock()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Refresh):
@@ -266,7 +299,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Pass to focused viewport
+	// Pass to focused viewport (under lock to protect from concurrent View)
+	m.mu.Lock()
 	var cmd tea.Cmd
 	switch m.focusedPanel {
 	case PanelTree:
@@ -276,11 +310,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
 	}
+	m.mu.Unlock()
 	return m, cmd
 }
 
-// updateViewportSizes recalculates viewport dimensions
+// updateViewportSizes recalculates viewport dimensions.
+// Acquires the write lock for the entire operation so that reads of
+// width/height/showHelp and writes to viewports are atomic with View().
 func (m *Model) updateViewportSizes() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Reserve space: header (1) + borders (6 for 3 panels) + status bar (1) + help (1-2)
 	headerHeight := 1
 	statusHeight := 1
@@ -322,19 +362,40 @@ func (m *Model) updateViewportSizes() {
 	m.convoyViewport.Height = convoyHeight
 	m.feedViewport.Width = contentWidth
 	m.feedViewport.Height = feedHeight
-
-	m.updateViewContent()
+	m.updateViewContentLocked()
 }
 
-// updateViewContent refreshes the content of all viewports
+// updateViewContent refreshes the content of all viewports.
+// Acquires the write lock to protect viewport and data access.
 func (m *Model) updateViewContent() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateViewContentLocked()
+}
+
+// updateViewContentLocked refreshes viewport content.
+// Caller must hold m.mu.
+func (m *Model) updateViewContentLocked() {
 	m.treeViewport.SetContent(m.renderTree())
 	m.convoyViewport.SetContent(m.renderConvoys())
 	m.feedViewport.SetContent(m.renderFeed())
 }
 
-// addEvent adds an event and updates the agent tree
+// addEvent adds an event and updates the agent tree.
+// Acquires mu for the entire operation including view updates.
 func (m *Model) addEvent(e Event) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.addEventLocked(e) {
+		m.updateViewContentLocked()
+	}
+}
+
+// addEventLocked performs the actual event mutation under the write lock.
+// Returns true if the caller should call updateViewContent afterward.
+// Caller must hold m.mu write lock.
+func (m *Model) addEventLocked(e Event) bool {
 	// Update agent tree first (always do this for status tracking)
 	if e.Rig != "" {
 		rig, ok := m.rigs[e.Rig]
@@ -365,7 +426,7 @@ func (m *Model) addEvent(e Event) {
 
 	// Filter out events with empty bead IDs (malformed mutations)
 	if e.Type == "update" && e.Target == "" {
-		return
+		return false
 	}
 
 	// Filter out noisy agent session updates from the event feed.
@@ -376,8 +437,7 @@ func (m *Model) addEvent(e Event) {
 	if e.Type == "update" && beads.IsAgentSessionBead(e.Target) {
 		// Skip adding to event feed, but still refresh the view
 		// (agent tree was updated above)
-		m.updateViewContent()
-		return
+		return true
 	}
 
 	// Deduplicate rapid updates to the same bead within 2 seconds.
@@ -387,7 +447,7 @@ func (m *Model) addEvent(e Event) {
 		if lastEvent.Type == "update" && lastEvent.Target == e.Target {
 			// Same bead updated within 2 seconds - skip duplicate
 			if e.Time.Sub(lastEvent.Time) < 2*time.Second {
-				return
+				return false
 			}
 		}
 	}
@@ -400,15 +460,21 @@ func (m *Model) addEvent(e Event) {
 		m.events = m.events[len(m.events)-maxEventHistory:]
 	}
 
-	m.updateViewContent()
+	return true
 }
 
-// SetEventChannel sets the channel to receive events from
+// SetEventChannel sets the channel to receive events from.
+// Safe to call concurrently with the Bubble Tea event loop.
 func (m *Model) SetEventChannel(ch <-chan Event) {
+	m.mu.Lock()
 	m.eventChan = ch
+	m.mu.Unlock()
 }
 
-// View renders the TUI
+// View renders the TUI.
+// Acquires the read lock to safely access model state from the render path.
 func (m *Model) View() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.render()
 }

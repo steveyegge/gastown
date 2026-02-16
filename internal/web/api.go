@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 
@@ -51,9 +54,15 @@ type APIHandler struct {
 	optionsCache     *OptionsResponse
 	optionsCacheTime time.Time
 	optionsCacheMu   sync.RWMutex
+	// cmdSem limits concurrent command executions to prevent resource exhaustion.
+	cmdSem chan struct{}
 }
 
 const optionsCacheTTL = 30 * time.Second
+
+// maxConcurrentCommands limits how many gt subprocesses can run at once.
+// handleOptions alone spawns 7; allow headroom for other concurrent handlers.
+const maxConcurrentCommands = 12
 
 // NewAPIHandler creates a new API handler with the given run timeouts.
 func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
@@ -65,6 +74,7 @@ func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
 		workDir:           workDir,
 		defaultRunTimeout: defaultRunTimeout,
 		maxRunTimeout:     maxRunTimeout,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
 	}
 }
 
@@ -98,12 +108,18 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleIssueShow(w, r)
 	case path == "/issues/create" && r.Method == http.MethodPost:
 		h.handleIssueCreate(w, r)
+	case path == "/issues/close" && r.Method == http.MethodPost:
+		h.handleIssueClose(w, r)
+	case path == "/issues/update" && r.Method == http.MethodPost:
+		h.handleIssueUpdate(w, r)
 	case path == "/pr/show" && r.Method == http.MethodGet:
 		h.handlePRShow(w, r)
 	case path == "/crew" && r.Method == http.MethodGet:
 		h.handleCrew(w, r)
 	case path == "/ready" && r.Method == http.MethodGet:
 		h.handleReady(w, r)
+	case path == "/events" && r.Method == http.MethodGet:
+		h.handleSSE(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -183,8 +199,17 @@ func (h *APIHandler) handleCommands(w http.ResponseWriter, _ *http.Request) {
 
 // runGtCommand executes a gt command with the given args.
 func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	// Apply timeout first so it bounds both semaphore wait and command execution.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Acquire semaphore slot to limit concurrent subprocess spawns.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
 
 	cmd := exec.CommandContext(ctx, h.gtPath, args...)
 	if h.workDir != "" {
@@ -494,17 +519,24 @@ type OptionsResponse struct {
 // handleOptions returns dynamic options for command arguments.
 // Results are cached for 30 seconds to avoid slow repeated fetches.
 func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
-	// Check cache first
+	// Check cache first — serialize under RLock to a buffer so we don't
+	// hold the lock while writing to the ResponseWriter (which can block
+	// on slow clients).
 	h.optionsCacheMu.RLock()
 	if h.optionsCache != nil && time.Since(h.optionsCacheTime) < optionsCacheTTL {
-		cached := h.optionsCache
+		data, err := json.Marshal(h.optionsCache)
 		h.optionsCacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache", "HIT")
-		_ = json.NewEncoder(w).Encode(cached)
-		return
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Cache", "HIT")
+			_, _ = w.Write(data)
+			_, _ = w.Write([]byte("\n"))
+			return
+		}
+		// Marshal failure is unexpected; fall through to refetch.
+	} else {
+		h.optionsCacheMu.RUnlock()
 	}
-	h.optionsCacheMu.RUnlock()
 
 	// Cache miss - fetch fresh data
 	resp := &OptionsResponse{}
@@ -783,6 +815,7 @@ type IssueShowResponse struct {
 	Type        string   `json:"type,omitempty"`
 	Status      string   `json:"status,omitempty"`
 	Priority    string   `json:"priority,omitempty"`
+	Owner       string   `json:"owner,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Created     string   `json:"created,omitempty"`
 	Updated     string   `json:"updated,omitempty"`
@@ -948,10 +981,136 @@ func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// IssueCloseRequest is the request body for closing an issue.
+type IssueCloseRequest struct {
+	ID string `json:"id"`
+}
+
+// handleIssueClose closes an issue via bd close.
+func (h *APIHandler) handleIssueClose(w http.ResponseWriter, r *http.Request) {
+	var req IssueCloseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, []string{"close", req.ID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to close issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue closed",
+		"output":  output,
+	})
+}
+
+// IssueUpdateRequest is the request body for updating an issue.
+type IssueUpdateRequest struct {
+	ID       string `json:"id"`
+	Status   string `json:"status,omitempty"`   // "open", "in_progress"
+	Priority int    `json:"priority,omitempty"` // 1-4
+	Assignee string `json:"assignee,omitempty"`
+}
+
+// handleIssueUpdate updates issue fields via bd update.
+func (h *APIHandler) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
+	var req IssueUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Build bd update args
+	args := []string{"update", req.ID}
+	hasUpdate := false
+
+	if req.Status != "" {
+		// Validate allowed status values
+		switch req.Status {
+		case "open", "in_progress":
+			args = append(args, "--status="+req.Status)
+			hasUpdate = true
+		default:
+			h.sendError(w, "Invalid status (allowed: open, in_progress)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.Priority >= 1 && req.Priority <= 4 {
+		args = append(args, fmt.Sprintf("--priority=%d", req.Priority))
+		hasUpdate = true
+	}
+
+	if req.Assignee != "" {
+		if !isValidID(req.Assignee) {
+			h.sendError(w, "Invalid assignee format", http.StatusBadRequest)
+			return
+		}
+		args = append(args, "--assignee="+req.Assignee)
+		hasUpdate = true
+	}
+
+	if !hasUpdate {
+		h.sendError(w, "No update fields provided", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, args)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to update issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue updated",
+		"output":  output,
+	})
+}
+
 // runBdCommand executes a bd command with the given args.
 func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Acquire semaphore slot — shared with runGtCommand/runGhCommand.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
 
 	cmd := exec.CommandContext(ctx, "bd", args...)
 	if h.workDir != "" {
@@ -994,6 +1153,7 @@ func parseIssueShowJSON(output string) (IssueShowResponse, bool) {
 		Status      string   `json:"status"`
 		Priority    int      `json:"priority"`
 		Type        string   `json:"issue_type"`
+		Owner       string   `json:"owner"`
 		CreatedAt   string   `json:"created_at"`
 		UpdatedAt   string   `json:"updated_at"`
 		DependsOn   []string `json:"depends_on,omitempty"`
@@ -1015,6 +1175,7 @@ func parseIssueShowJSON(output string) (IssueShowResponse, bool) {
 		Type:        item.Type,
 		Status:      item.Status,
 		Priority:    priority,
+		Owner:       item.Owner,
 		Description: item.Description,
 		Created:     item.CreatedAt,
 		Updated:     item.UpdatedAt,
@@ -1075,7 +1236,16 @@ func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
 			continue
 		}
 
-		if strings.HasPrefix(line, "Type:") {
+		if strings.HasPrefix(line, "Owner:") {
+			// Format: "Owner: mayor · Type: task"
+			ownerLine := strings.TrimPrefix(line, "Owner:")
+			ownerParts := strings.Split(ownerLine, "·")
+			resp.Owner = strings.TrimSpace(ownerParts[0])
+			if len(ownerParts) >= 2 {
+				typePart := strings.TrimSpace(ownerParts[1])
+				resp.Type = strings.TrimSpace(strings.TrimPrefix(typePart, "Type:"))
+			}
+		} else if strings.HasPrefix(line, "Type:") {
 			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
 		} else if strings.HasPrefix(line, "Created:") {
 			// Split always returns >= 1 element; parts[0] is safe unconditionally
@@ -1211,6 +1381,14 @@ func (h *APIHandler) handlePRShow(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) runGhCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Acquire semaphore slot — shared with runGtCommand/runBdCommand.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
 
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	if h.workDir != "" {
@@ -1390,7 +1568,7 @@ func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to CrewMember format with state detection
 	for _, c := range crewData {
-		sessionName := fmt.Sprintf("gt-%s-crew-%s", c.Rig, c.Name)
+		sessionName := session.CrewSessionName(session.PrefixFor(c.Rig), c.Name)
 		state, lastActive, sessionStatus := h.detectCrewState(ctx, sessionName, c.Hook)
 
 		member := CrewMember{
@@ -1468,18 +1646,22 @@ func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook stri
 
 // isClaudeRunningInSession checks if Claude/agent is actively running.
 func (h *APIHandler) isClaudeRunningInSession(ctx context.Context, sessionName string) bool {
-	// Check for claude, codex, or other agent processes in the pane
-	cmd := exec.CommandContext(ctx, "tmux", "list-panes", "-t", sessionName, "-F", "#{pane_current_command}")
+	// Target pane 0 explicitly (:0.0) to avoid false positives from
+	// user-created split panes running shells or other commands.
+	cmd := exec.CommandContext(ctx, "tmux", "display-message", "-t", sessionName+":0.0", "-p", "#{pane_current_command}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
 		return false
 	}
-	
-	output := strings.ToLower(stdout.String())
+
+	output := strings.ToLower(strings.TrimSpace(stdout.String()))
+	if output == "" {
+		return false
+	}
 	// Check for common agent commands
-	return strings.Contains(output, "claude") || 
-	       strings.Contains(output, "node") || 
+	return strings.Contains(output, "claude") ||
+	       strings.Contains(output, "node") ||
 	       strings.Contains(output, "codex") ||
 	       strings.Contains(output, "opencode")
 }
@@ -1667,4 +1849,105 @@ func parseCommandArgs(command string) []string {
 	}
 
 	return args
+}
+
+// handleSSE streams Server-Sent Events to the dashboard client.
+// It polls key dashboard state every 2 seconds and sends an event when
+// changes are detected, allowing the client to trigger a re-render.
+// Falls through gracefully if the client disconnects.
+func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ctx := r.Context()
+
+	// Send initial connection event
+	fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
+	flusher.Flush()
+
+	var lastHash string
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Send keepalive comment every 15 seconds to prevent connection timeouts
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-ticker.C:
+			hash := h.computeDashboardHash(ctx)
+			if hash != "" && hash != lastHash {
+				lastHash = hash
+				fmt.Fprintf(w, "event: dashboard-update\ndata: %s\n\n", hash)
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// computeDashboardHash generates a lightweight hash of key dashboard state.
+// It runs quick commands in parallel and hashes their output to detect changes.
+func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	var parts []string
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Check worker/polecat state
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"status", "--json"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "status:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	// Check hooks state
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"hooks", "list"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "hooks:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	// Check mail count
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"mail", "inbox"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "mail:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	h256 := sha256.Sum256([]byte(strings.Join(parts, "|")))
+	return fmt.Sprintf("%x", h256[:8])
 }

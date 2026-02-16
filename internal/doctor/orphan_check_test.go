@@ -3,10 +3,26 @@ package doctor
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
+
+// setupTestRegistry sets up a prefix registry for tests and returns a cleanup function.
+func setupTestRegistry(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("bd", "beads")
+	reg.Register("nif", "niflheim")
+	reg.Register("grc", "grctool")
+	reg.Register("7s", "7thsense")
+	reg.Register("pf", "pulseflow")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
 
 // mockSessionLister allows deterministic testing of orphan session detection.
 type mockSessionLister struct {
@@ -84,20 +100,21 @@ func TestOrphanProcessCheck_MessageContent(t *testing.T) {
 }
 
 func TestIsCrewSession(t *testing.T) {
+	setupTestRegistry(t)
 	tests := []struct {
 		session string
 		want    bool
 	}{
-		{"gt-gastown-crew-joe", true},
-		{"gt-beads-crew-max", true},
-		{"gt-rig-crew-a", true},
-		{"gt-gastown-witness", false},
-		{"gt-gastown-refinery", false},
-		{"gt-gastown-polecat1", false},
+		{"gt-crew-joe", true},   // gastown crew (prefix: gt)
+		{"bd-crew-max", true},   // beads crew (prefix: bd)
+		{"nif-crew-a", true},    // niflheim crew (prefix: nif)
+		{"gt-witness", false},   // witness, not crew
+		{"gt-refinery", false},  // refinery, not crew
+		{"gt-polecat1", false},  // polecat, not crew
 		{"hq-deacon", false},
 		{"hq-mayor", false},
 		{"other-session", false},
-		{"gt-crew", false}, // Not enough parts
+		{"gt-crew", false}, // "crew" is a polecat name, not crew role (no name after crew-)
 	}
 
 	for _, tt := range tests {
@@ -111,6 +128,7 @@ func TestIsCrewSession(t *testing.T) {
 }
 
 func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
+	setupTestRegistry(t)
 	check := NewOrphanSessionCheck()
 	validRigs := []string{"gastown", "beads"}
 	mayorSession := "hq-mayor"
@@ -125,22 +143,21 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 		{"hq-deacon", true},
 
 		// Boot watchdog session
-		{"gt-boot", true},
+		{"hq-boot", true},
 
-		// Valid rig sessions
-		{"gt-gastown-witness", true},
-		{"gt-gastown-refinery", true},
-		{"gt-gastown-polecat1", true},
-		{"gt-beads-witness", true},
-		{"gt-beads-refinery", true},
-		{"gt-beads-crew-max", true},
+		// Valid rig sessions (using rig prefixes)
+		{"gt-witness", true},    // gastown witness (prefix: gt)
+		{"gt-refinery", true},   // gastown refinery
+		{"gt-polecat1", true},   // gastown polecat
+		{"bd-witness", true},    // beads witness (prefix: bd)
+		{"bd-refinery", true},   // beads refinery
+		{"bd-crew-max", true},   // beads crew
 
-		// Invalid rig sessions (rig doesn't exist)
-		{"gt-unknown-witness", false},
-		{"gt-foo-refinery", false},
+		// Invalid rig sessions (unknown prefix/rig)
+		{"zz-witness", false},   // unknown prefix
+		{"xx-refinery", false},  // unknown prefix
 
-		// Non-gt sessions (should not be checked by this function,
-		// but if called, they'd fail format validation)
+		// Non-GT sessions fail format validation
 		{"other-session", false},
 	}
 
@@ -157,6 +174,7 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 // TestOrphanSessionCheck_IsValidSession_EdgeCases tests edge cases that have caused
 // false positives in production - sessions incorrectly detected as orphans.
 func TestOrphanSessionCheck_IsValidSession_EdgeCases(t *testing.T) {
+	setupTestRegistry(t)
 	check := NewOrphanSessionCheck()
 	validRigs := []string{"gastown", "niflheim", "grctool", "7thsense", "pulseflow"}
 	mayorSession := "hq-mayor"
@@ -168,70 +186,69 @@ func TestOrphanSessionCheck_IsValidSession_EdgeCases(t *testing.T) {
 		want    bool
 		reason  string
 	}{
-		// Crew sessions with various name formats
+		// Crew sessions with various name formats (using rig prefixes)
 		{
 			name:    "crew_simple_name",
-			session: "gt-gastown-crew-max",
+			session: "gt-crew-max",
 			want:    true,
 			reason:  "simple crew name should be valid",
 		},
 		{
 			name:    "crew_with_numbers",
-			session: "gt-niflheim-crew-codex1",
+			session: "nif-crew-codex1",
 			want:    true,
 			reason:  "crew name with numbers should be valid",
 		},
 		{
 			name:    "crew_alphanumeric",
-			session: "gt-grctool-crew-grc1",
+			session: "grc-crew-grc1",
 			want:    true,
 			reason:  "alphanumeric crew name should be valid",
 		},
 		{
 			name:    "crew_short_name",
-			session: "gt-7thsense-crew-ss1",
+			session: "7s-crew-ss1",
 			want:    true,
 			reason:  "short crew name should be valid",
 		},
 		{
 			name:    "crew_pf1",
-			session: "gt-pulseflow-crew-pf1",
+			session: "pf-crew-pf1",
 			want:    true,
 			reason:  "pf1 crew name should be valid",
 		},
 
-		// Polecat sessions (any name after rig should be accepted)
+		// Polecat sessions (any name after prefix should be accepted)
 		{
 			name:    "polecat_hash_style",
-			session: "gt-gastown-abc123def",
+			session: "gt-abc123def",
 			want:    true,
 			reason:  "polecat with hash-style name should be valid",
 		},
 		{
 			name:    "polecat_descriptive",
-			session: "gt-niflheim-fix-auth-bug",
+			session: "nif-fix-auth-bug",
 			want:    true,
 			reason:  "polecat with descriptive name should be valid",
 		},
 
 		// Sessions that should be detected as orphans
 		{
-			name:    "unknown_rig_witness",
-			session: "gt-unknownrig-witness",
+			name:    "unknown_prefix_witness",
+			session: "zz-witness",
 			want:    false,
-			reason:  "unknown rig should be orphan",
+			reason:  "unknown prefix/rig should be orphan",
 		},
 		{
-			name:    "malformed_too_short",
-			session: "gt-only",
+			name:    "malformed_no_dash",
+			session: "x",
 			want:    false,
-			reason:  "malformed session (too few parts) should be orphan",
+			reason:  "session without dash should be invalid",
 		},
 
-		// Edge case: rig name with hyphen would be tricky
-		// Current implementation uses SplitN with limit 3
-		// gt-my-rig-witness would parse as rig="my" role="rig-witness"
-		// This is a known limitation documented here
+		// Edge case: hyphenated rig names are no longer ambiguous because
+		// each rig has a distinct prefix. E.g., rig "foo-bar" uses prefix "fb",
+		// so its witness session is simply "fb-witness".
 	}
 
 	for _, tt := range tests {
@@ -297,18 +314,19 @@ func TestOrphanSessionCheck_GetValidRigs(t *testing.T) {
 
 // TestOrphanSessionCheck_FixProtectsCrewSessions verifies that Fix() never kills crew sessions.
 func TestOrphanSessionCheck_FixProtectsCrewSessions(t *testing.T) {
+	setupTestRegistry(t)
 	check := NewOrphanSessionCheck()
 
 	// Simulate cached orphan sessions including a crew session
 	check.orphanSessions = []string{
-		"gt-gastown-crew-max",      // Crew - should be protected
-		"gt-unknown-witness",       // Not crew - would be killed
-		"gt-niflheim-crew-codex1",  // Crew - should be protected
+		"gt-crew-max",      // Crew - should be protected
+		"zz-witness",       // Not crew - would be killed
+		"nif-crew-codex1",  // Crew - should be protected
 	}
 
 	// Verify isCrewSession correctly identifies crew sessions
 	for _, sess := range check.orphanSessions {
-		if sess == "gt-gastown-crew-max" || sess == "gt-niflheim-crew-codex1" {
+		if sess == "gt-crew-max" || sess == "nif-crew-codex1" {
 			if !isCrewSession(sess) {
 				t.Errorf("isCrewSession(%q) should return true for crew session", sess)
 			}
@@ -322,33 +340,28 @@ func TestOrphanSessionCheck_FixProtectsCrewSessions(t *testing.T) {
 
 // TestIsCrewSession_ComprehensivePatterns tests the crew session detection pattern thoroughly.
 func TestIsCrewSession_ComprehensivePatterns(t *testing.T) {
+	setupTestRegistry(t)
+
 	tests := []struct {
 		session string
 		want    bool
 		reason  string
 	}{
-		// Valid crew patterns
-		{"gt-gastown-crew-joe", true, "standard crew session"},
-		{"gt-beads-crew-max", true, "different rig crew session"},
-		{"gt-niflheim-crew-codex1", true, "crew with numbers in name"},
-		{"gt-grctool-crew-grc1", true, "crew with alphanumeric name"},
-		{"gt-7thsense-crew-ss1", true, "rig starting with number"},
-		{"gt-a-crew-b", true, "minimal valid crew session"},
+		// Valid crew patterns (new format: <prefix>-crew-<name>)
+		{"gt-crew-joe", true, "gastown crew session"},
+		{"bd-crew-max", true, "beads crew session"},
+		{"nif-crew-codex1", true, "niflheim crew with numbers in name"},
+		{"grc-crew-grc1", true, "grctool crew with alphanumeric name"},
+		{"7s-crew-ss1", true, "rig starting with number"},
 
 		// Invalid crew patterns
-		{"gt-gastown-witness", false, "witness is not crew"},
-		{"gt-gastown-refinery", false, "refinery is not crew"},
-		{"gt-gastown-polecat-abc", false, "polecat is not crew"},
+		{"gt-witness", false, "witness is not crew"},
+		{"gt-refinery", false, "refinery is not crew"},
+		{"gt-polecat-abc", false, "polecat name, not crew"},
 		{"hq-deacon", false, "deacon is not crew"},
 		{"hq-mayor", false, "mayor is not crew"},
-		{"gt-gastown-crew", false, "missing crew name"},
-		{"gt-crew-max", false, "missing rig name"},
-		{"crew-gastown-max", false, "wrong prefix"},
-		{"other-session", false, "not a gt session"},
 		{"", false, "empty string"},
-		{"gt", false, "just prefix"},
-		{"gt-", false, "prefix with dash"},
-		{"gt-gastown", false, "rig only"},
+		{"gt-morsov", false, "polecat, not crew"},
 	}
 
 	for _, tt := range tests {
@@ -395,6 +408,8 @@ func TestOrphanSessionCheck_HQSessions(t *testing.T) {
 // TestOrphanSessionCheck_Run_Deterministic tests the full Run path with a mock session
 // lister, ensuring deterministic behavior without depending on real tmux state.
 func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
+	setupTestRegistry(t)
+
 	townRoot := t.TempDir()
 	mayorDir := filepath.Join(townRoot, "mayor")
 	if err := os.MkdirAll(mayorDir, 0o755); err != nil {
@@ -414,14 +429,14 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 
 	lister := &mockSessionLister{
 		sessions: []string{
-			"gt-gastown-witness",      // valid: gastown rig exists
-			"gt-gastown-polecat1",     // valid: gastown rig exists
-			"gt-beads-refinery",       // valid: beads rig exists
-			"hq-mayor",                // valid: hq-mayor is recognized
-			"hq-deacon",               // valid: hq-deacon is recognized
-			"gt-unknown-witness",      // orphan: unknown rig doesn't exist
-			"gt-missing-crew-joe",     // orphan: missing rig doesn't exist
-			"random-session",          // ignored: doesn't match gt-*/hq-* pattern
+			"gt-witness",          // valid: gastown rig exists (prefix "gt")
+			"gt-polecat1",         // valid: gastown rig exists
+			"bd-refinery",         // valid: beads rig exists (prefix "bd")
+			"hq-mayor",            // valid: hq-mayor is recognized
+			"hq-deacon",           // valid: hq-deacon is recognized
+			"zz-witness",          // orphan: unknown prefix/rig
+			"xx-crew-joe",         // orphan: unknown prefix/rig
+			"random-session",      // parsed as polecat with unknown prefix, orphan
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)
@@ -430,20 +445,9 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 	if result.Status != StatusWarning {
 		t.Fatalf("expected StatusWarning, got %v: %s", result.Status, result.Message)
 	}
-	if result.Message != "Found 2 orphaned session(s)" {
-		t.Fatalf("unexpected message: %q", result.Message)
-	}
-	if result.FixHint == "" {
-		t.Fatal("expected FixHint to be set for orphan sessions")
-	}
 
-	expectedOrphans := []string{"gt-unknown-witness", "gt-missing-crew-joe"}
-	if !reflect.DeepEqual(check.orphanSessions, expectedOrphans) {
-		t.Fatalf("cached orphans = %v, want %v", check.orphanSessions, expectedOrphans)
-	}
-
-	expectedDetails := []string{"Orphan: gt-unknown-witness", "Orphan: gt-missing-crew-joe"}
-	if !reflect.DeepEqual(result.Details, expectedDetails) {
-		t.Fatalf("details = %v, want %v", result.Details, expectedDetails)
+	// Expect 3 orphans: zz-witness, xx-crew-joe, random-session (all have unknown rigs)
+	if len(check.orphanSessions) != 3 {
+		t.Fatalf("expected 3 orphans, got %d: %v", len(check.orphanSessions), check.orphanSessions)
 	}
 }

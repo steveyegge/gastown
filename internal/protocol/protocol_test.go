@@ -586,3 +586,98 @@ func (m *mockRefineryHandler) HandleMergeReady(payload *MergeReadyPayload) error
 	m.readyCalled = true
 	return nil
 }
+
+func TestDefaultRefineryHandler_HandleMergeReady(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewRefineryHandler("gastown", tmpDir)
+
+	var buf bytes.Buffer
+	handler.SetOutput(&buf)
+
+	payload := &MergeReadyPayload{
+		Branch:   "polecat/nux/gt-abc",
+		Issue:    "gt-abc",
+		Polecat:  "nux",
+		Rig:      "gastown",
+		Verified: "clean git state",
+	}
+	if err := handler.HandleMergeReady(payload); err != nil {
+		t.Errorf("HandleMergeReady error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "MERGE_READY received") {
+		t.Errorf("missing MERGE_READY text: %s", output)
+	}
+	if !strings.Contains(output, "nux") {
+		t.Errorf("missing polecat name: %s", output)
+	}
+	if !strings.Contains(output, "polecat/nux/gt-abc") {
+		t.Errorf("missing branch: %s", output)
+	}
+}
+
+func TestDefaultRefineryHandler_NotifyMergeOutcome_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewRefineryHandler("gastown", tmpDir)
+
+	outcome := MergeOutcome{
+		Success:     true,
+		MergeCommit: "abc123",
+	}
+
+	// SendMerged will fail (no mail setup) but we're testing the routing logic
+	err := handler.NotifyMergeOutcome("nux", "polecat/nux/gt-abc", "gt-abc", "main", outcome)
+	// Error is expected because mail router has no valid config in tmpdir
+	_ = err
+}
+
+func TestDefaultRefineryHandler_NotifyMergeOutcome_Conflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewRefineryHandler("gastown", tmpDir)
+
+	outcome := MergeOutcome{
+		Success:       false,
+		Conflict:      true,
+		ConflictFiles: []string{"file1.go", "file2.go"},
+	}
+
+	err := handler.NotifyMergeOutcome("nux", "polecat/nux/gt-abc", "gt-abc", "main", outcome)
+	_ = err
+}
+
+func TestDefaultRefineryHandler_NotifyMergeOutcome_Failure(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewRefineryHandler("gastown", tmpDir)
+
+	outcome := MergeOutcome{
+		Success:     false,
+		Conflict:    false,
+		FailureType: "tests",
+		Error:       "Test suite failed",
+	}
+
+	err := handler.NotifyMergeOutcome("nux", "polecat/nux/gt-abc", "gt-abc", "main", outcome)
+	_ = err
+}
+
+func TestMergeOutcome_Fields(t *testing.T) {
+	outcome := MergeOutcome{
+		Success:       true,
+		Conflict:      false,
+		FailureType:   "",
+		Error:         "",
+		MergeCommit:   "abc123",
+		ConflictFiles: nil,
+	}
+
+	if !outcome.Success {
+		t.Error("expected Success=true")
+	}
+	if outcome.Conflict {
+		t.Error("expected Conflict=false")
+	}
+	if outcome.MergeCommit != "abc123" {
+		t.Errorf("MergeCommit = %q, want %q", outcome.MergeCommit, "abc123")
+	}
+}

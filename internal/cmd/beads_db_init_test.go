@@ -120,8 +120,12 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping test")
 	}
+	// Dolt server required: bd init --backend dolt (auto-detects server on 3307),
+	// and gt rig add --adopt uses --server mode for re-initialization.
+	requireDoltServer(t)
 
 	tmpDir := t.TempDir()
+	configureTestGitIdentity(t, tmpDir)
 	gtBinary := buildGT(t)
 
 	t.Run("TrackedRepoWithExistingPrefix", func(t *testing.T) {
@@ -465,11 +469,11 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 
 // removeDBFiles removes gitignored database files from a beads directory to simulate a clone.
 // Only removes files that match patterns in .beads/.gitignore. Files NOT in .gitignore
-// (metadata.json, dolt/, config.yaml, issues.jsonl, etc.) are tracked by git and survive clones.
+// (metadata.json, config.yaml, issues.jsonl, etc.) are tracked by git and survive clones.
 //
 // Anchored to .beads/.gitignore patterns as of 2026-02: *.db, *.db-*, daemon.*, bd.sock,
-// sync-state.json, redirect, db.sqlite, bd.db, export-state/, etc.
-// metadata.json and dolt/ are NOT gitignored — they are tracked and present after clone.
+// sync-state.json, redirect, db.sqlite, bd.db, export-state/, dolt/, dolt-access.lock.
+// metadata.json is NOT gitignored — it is tracked and present after clone.
 func removeDBFiles(t *testing.T, beadsDir string) {
 	t.Helper()
 
@@ -482,16 +486,18 @@ func removeDBFiles(t *testing.T, beadsDir string) {
 		}
 	}
 	// Remove gitignored runtime state files
-	for _, name := range []string{"sync-state.json", "redirect", ".local_version"} {
+	for _, name := range []string{"sync-state.json", "redirect", ".local_version", "dolt-access.lock"} {
 		os.Remove(filepath.Join(beadsDir, name))
 	}
 	os.RemoveAll(filepath.Join(beadsDir, "export-state"))
+	// Remove Dolt database directory (gitignored since bd v0.50+; managed by Dolt remotes, not git)
+	os.RemoveAll(filepath.Join(beadsDir, "dolt"))
 
-	// Verify our assumptions: metadata.json and dolt/ must NOT be removed.
-	// If .beads/.gitignore ever starts ignoring these, this assertion catches drift.
+	// Verify our assumptions: metadata.json must NOT be removed.
+	// If .beads/.gitignore ever starts ignoring it, this assertion catches drift.
 	gitignorePath := filepath.Join(beadsDir, ".gitignore")
 	if content, err := os.ReadFile(gitignorePath); err == nil {
-		for _, tracked := range []string{"metadata.json", "dolt"} {
+		for _, tracked := range []string{"metadata.json"} {
 			if strings.Contains(string(content), tracked) {
 				t.Fatalf("clone simulation assumption violated: %s found in .beads/.gitignore — "+
 					"removeDBFiles must be updated if tracked file set changes", tracked)

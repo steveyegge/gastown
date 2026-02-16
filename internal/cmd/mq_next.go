@@ -60,7 +60,7 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 
 	// Query for open merge-requests (ready to process)
 	opts := beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	}

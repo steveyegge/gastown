@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -22,16 +24,36 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
+// DefaultStaleClaimTimeout is the default duration after which a claimed MR
+// is considered abandoned and eligible for re-claim. This is conservative
+// to avoid re-claiming MRs that are legitimately processing long test suites.
+// Can be overridden per-rig via MergeQueueConfig.StaleClaimTimeout.
+const DefaultStaleClaimTimeout = 30 * time.Minute
+
+// isClaimStale checks if a claimed MR should be considered abandoned based on
+// its UpdatedAt timestamp and configured timeout. Returns true if the claim
+// is stale (eligible for re-claim), false if the claim is recent or the
+// timestamp is invalid/missing.
+func isClaimStale(updatedAt string, timeout time.Duration) (stale bool, parseErr error) {
+	if updatedAt == "" {
+		return false, nil // No timestamp - assume claim is valid
+	}
+	t, err := time.Parse(time.RFC3339, updatedAt)
+	if err != nil {
+		return false, err // Caller should log the parse error
+	}
+	return time.Since(t) >= timeout, nil
+}
+
 // MergeQueueConfig holds configuration for the merge queue processor.
+//
+// Note: Integration branch gating (polecat/refinery enabled flags) is handled at
+// MR creation time via config.MergeQueueConfig and formula injection, not here.
+// The Engineer's job is to merge whatever target the MR specifies — it doesn't
+// need to know whether integration branches are enabled.
 type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
 	Enabled bool `json:"enabled"`
-
-	// TargetBranch is the default branch to merge to (e.g., "main").
-	TargetBranch string `json:"target_branch"`
-
-	// IntegrationBranches enables per-epic integration branches.
-	IntegrationBranches bool `json:"integration_branches"`
 
 	// OnConflict is the strategy for handling conflicts: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
@@ -53,21 +75,28 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of MRs to process concurrently.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// StaleClaimTimeout is how long a claimed MR can go without updates before
+	// being considered abandoned and eligible for re-claim. This handles the
+	// case where a refinery crashes mid-merge, leaving an MR permanently claimed.
+	// Set conservatively to avoid re-claiming MRs with long-running test suites.
+	// NOTE: Only one refinery instance runs per rig (enforced by ErrAlreadyRunning
+	// in manager.go), so concurrent re-claim is not a concern in practice.
+	StaleClaimTimeout time.Duration `json:"stale_claim_timeout"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:              true,
-		TargetBranch:         "main",
-		IntegrationBranches:  true,
-		OnConflict:           "assign_back",
-		RunTests:             true,
-		TestCommand:          "",
-		DeleteMergedBranches: true,
-		RetryFlakyTests:      1,
-		PollInterval:         30 * time.Second,
-		MaxConcurrent:        1,
+		Enabled:    true,
+		OnConflict: "assign_back",
+		RunTests:                         true,
+		TestCommand:                      "",
+		DeleteMergedBranches:             true,
+		RetryFlakyTests:                  1,
+		PollInterval:                     30 * time.Second,
+		MaxConcurrent:                    1,
+		StaleClaimTimeout:               DefaultStaleClaimTimeout,
 	}
 }
 
@@ -112,23 +141,37 @@ const (
 	staleClaimCriticalAfter = 6 * time.Hour
 )
 
+// errMergeSlotTimeout is returned by acquireMainPushSlot when retries are
+// exhausted due to slot contention. Infrastructure errors (beads down,
+// permission errors) return a different error so callers can distinguish
+// transient contention from real failures that need operator attention.
+var errMergeSlotTimeout = errors.New("merge slot contention timeout")
+
+// mergeSlotSeq is a package-level counter for unique merge slot holder IDs.
+// Using time.Now().UnixNano() alone is insufficient on Windows where timer
+// resolution can cause identical timestamps across concurrent goroutines.
+var mergeSlotSeq uint64
+
 // Engineer is the merge queue processor that polls for ready merge-requests
 // and processes them according to the merge queue design.
 type Engineer struct {
-	rig     *rig.Rig
-	beads   *beads.Beads
-	git     *git.Git
-	config  *MergeQueueConfig
-	workDir string
-	output  io.Writer    // Output destination for user-facing messages
-	router  *mail.Router // Mail router for sending protocol messages
+	rig                   *rig.Rig
+	beads                 *beads.Beads
+	git                   *git.Git
+	config                *MergeQueueConfig
+	workDir               string
+	output                io.Writer    // Output destination for user-facing messages
+	router                *mail.Router // Mail router for sending protocol messages
+	mergeSlotEnsureExists func() (string, error)
+	mergeSlotAcquire      func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error)
+	mergeSlotRelease      func(holder string) error
+	mergeSlotMaxRetries   int           // Max retries for slot acquisition (0 = no retry)
+	mergeSlotRetryBackoff time.Duration // Initial backoff between retries
 }
 
 // NewEngineer creates a new Engineer for the given rig.
 func NewEngineer(r *rig.Rig) *Engineer {
 	cfg := DefaultMergeQueueConfig()
-	// Override target branch with rig's configured default branch
-	cfg.TargetBranch = r.DefaultBranch()
 
 	// Determine the git working directory for refinery operations.
 	// Prefer refinery/rig worktree, fall back to mayor/rig (legacy architecture).
@@ -137,15 +180,27 @@ func NewEngineer(r *rig.Rig) *Engineer {
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
 		gitDir = filepath.Join(r.Path, "mayor", "rig")
 	}
+	beadsClient := beads.New(r.Path)
 
 	return &Engineer{
 		rig:     r,
-		beads:   beads.New(r.Path),
+		beads:   beadsClient,
 		git:     git.NewGit(gitDir),
 		config:  cfg,
 		workDir: gitDir,
 		output:  os.Stdout,
 		router:  mail.NewRouter(r.Path),
+		mergeSlotEnsureExists: func() (string, error) {
+			return beadsClient.MergeSlotEnsureExists()
+		},
+		mergeSlotAcquire: func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error) {
+			return beadsClient.MergeSlotAcquire(holder, addWaiter)
+		},
+		mergeSlotRelease: func(holder string) error {
+			return beadsClient.MergeSlotRelease(holder)
+		},
+		mergeSlotMaxRetries:   10,
+		mergeSlotRetryBackoff: 500 * time.Millisecond,
 	}
 }
 
@@ -183,16 +238,15 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled              *bool   `json:"enabled"`
-		TargetBranch         *string `json:"target_branch"`
-		IntegrationBranches  *bool   `json:"integration_branches"`
-		OnConflict           *string `json:"on_conflict"`
-		RunTests             *bool   `json:"run_tests"`
-		TestCommand          *string `json:"test_command"`
-		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
-		PollInterval         *string `json:"poll_interval"`
-		MaxConcurrent        *int    `json:"max_concurrent"`
+		Enabled    *bool   `json:"enabled"`
+		OnConflict *string `json:"on_conflict"`
+		RunTests                         *bool   `json:"run_tests"`
+		TestCommand                      *string `json:"test_command"`
+		DeleteMergedBranches             *bool   `json:"delete_merged_branches"`
+		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
+		PollInterval                     *string `json:"poll_interval"`
+		MaxConcurrent                    *int    `json:"max_concurrent"`
+		StaleClaimTimeout                *string `json:"stale_claim_timeout"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -202,12 +256,6 @@ func (e *Engineer) LoadConfig() error {
 	// Apply non-nil values to config (preserving defaults for missing fields)
 	if mqRaw.Enabled != nil {
 		e.config.Enabled = *mqRaw.Enabled
-	}
-	if mqRaw.TargetBranch != nil {
-		e.config.TargetBranch = *mqRaw.TargetBranch
-	}
-	if mqRaw.IntegrationBranches != nil {
-		e.config.IntegrationBranches = *mqRaw.IntegrationBranches
 	}
 	if mqRaw.OnConflict != nil {
 		e.config.OnConflict = *mqRaw.OnConflict
@@ -234,6 +282,16 @@ func (e *Engineer) LoadConfig() error {
 		}
 		e.config.PollInterval = dur
 	}
+	if mqRaw.StaleClaimTimeout != nil {
+		dur, err := time.ParseDuration(*mqRaw.StaleClaimTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid stale_claim_timeout %q: %w", *mqRaw.StaleClaimTimeout, err)
+		}
+		if dur <= 0 {
+			return fmt.Errorf("stale_claim_timeout must be positive, got %v", dur)
+		}
+		e.config.StaleClaimTimeout = dur
+	}
 
 	return nil
 }
@@ -250,30 +308,10 @@ type ProcessResult struct {
 	Error       string
 	Conflict    bool
 	TestsFailed bool
-}
-
-// ProcessMR processes a single merge request from a beads issue.
-func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult {
-	// Parse MR fields from description
-	mrFields := beads.ParseMRFields(mr)
-	if mrFields == nil {
-		return ProcessResult{
-			Success: false,
-			Error:   "no MR fields found in description",
-		}
-	}
-
-	// Log what we're processing
-	_, _ = fmt.Fprintln(e.output, "[Engineer] Processing MR:")
-	_, _ = fmt.Fprintf(e.output, "  Branch: %s\n", mrFields.Branch)
-	_, _ = fmt.Fprintf(e.output, "  Target: %s\n", mrFields.Target)
-	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mrFields.Worker)
-
-	return e.doMerge(ctx, mrFields.Branch, mrFields.Target, mrFields.SourceIssue)
+	SlotTimeout bool // Merge slot contention timeout (distinct from build/test failure)
 }
 
 // doMerge performs the actual git merge operation.
-// This is the core merge logic shared by ProcessMR and ProcessMRFromQueue.
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
 	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
@@ -322,6 +360,36 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			Conflict: true,
 			Error:    fmt.Sprintf("merge conflicts in: %v", conflicts),
 		}
+	}
+
+	// Step 3.5: Push submodule commits if the branch changes submodule pointers.
+	// The refinery owns all remote pushes — submodule commits must land before the
+	// parent pointer is merged, otherwise main gets dangling submodule references.
+	subChanges, err := e.git.SubmoduleChanges(target, branch)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not check submodule changes: %v\n", err)
+	}
+	if len(subChanges) > 0 {
+		// Ensure submodules are initialized in the refinery worktree
+		if initErr := git.InitSubmodules(e.git.WorkDir()); initErr != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to init submodules in refinery worktree: %v", initErr),
+			}
+		}
+		for _, sc := range subChanges {
+			if sc.NewSHA == "" {
+				continue // Submodule removed, nothing to push
+			}
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing submodule %s (commit %s)...\n", sc.Path, sc.NewSHA[:8])
+			if pushErr := e.git.PushSubmoduleCommit(sc.Path, sc.NewSHA, "origin"); pushErr != nil {
+				return ProcessResult{
+					Success: false,
+					Error:   fmt.Sprintf("failed to push submodule %s: %v", sc.Path, pushErr),
+				}
+			}
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Pushed %d submodule(s)\n", len(subChanges))
 	}
 
 	// Step 4: Run tests if configured
@@ -378,9 +446,47 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
-	// Step 7: Push to origin
+	// Step 7: Acquire merge slot before push to serialize writes to the default branch.
+	// Only serialize pushes to the rig's default branch (typically main).
+	// Integration-branch and feature-branch pushes don't need serialization.
+	var pushHolder string
+	if target == e.rig.DefaultBranch() {
+		var slotErr error
+		pushHolder, slotErr = e.acquireMainPushSlot(ctx)
+		if slotErr != nil {
+			// Reset the checked-out target branch to origin to undo the local squash commit.
+			// ResetHard is required because target is the current branch (checked out in Step 2).
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after slot failure: %v\n", target, resetErr)
+			}
+			// Only classify as SlotTimeout for actual contention (retries exhausted).
+			// Infrastructure errors (beads down, permission errors) should surface
+			// through the normal failure/notification path for operator visibility.
+			return ProcessResult{
+				Success:     false,
+				SlotTimeout: errors.Is(slotErr, errMergeSlotTimeout),
+				Error:       fmt.Sprintf("failed to acquire merge slot before push: %v", slotErr),
+			}
+		}
+		defer func() {
+			// pushHolder is empty when the self-conflict bypass fires — conflict-resolution
+			// owns the slot, so we must not release it here.
+			if pushHolder != "" {
+				if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+				}
+			}
+		}()
+	}
+
+	// Step 8: Push to origin
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
 	if err := e.git.Push("origin", target, false); err != nil {
+		// Reset the checked-out target branch to undo the local squash commit.
+		// Without this, the next retry could see stale local state from the failed push.
+		if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after push failure: %v\n", target, resetErr)
+		}
 		return ProcessResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to push to origin: %v", err),
@@ -392,6 +498,57 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		Success:     true,
 		MergeCommit: mergeCommit,
 	}
+}
+
+func (e *Engineer) acquireMainPushSlot(ctx context.Context) (string, error) {
+	slotID, err := e.mergeSlotEnsureExists()
+	if err != nil {
+		return "", fmt.Errorf("ensure merge slot exists: %w", err)
+	}
+
+	seq := atomic.AddUint64(&mergeSlotSeq, 1)
+	holder := fmt.Sprintf("%s/refinery/push/%d-%d", e.rig.Name, time.Now().UnixNano(), seq)
+
+	// The conflict-resolution path holds the slot with holder "rigName/refinery".
+	// Both push and conflict-resolution run in the same single-threaded refinery
+	// agent, so if our own rig holds the slot for conflict resolution, we can
+	// safely proceed without re-acquiring — no concurrent push is possible.
+	selfConflictHolder := e.rig.Name + "/refinery"
+
+	backoff := e.mergeSlotRetryBackoff
+	if backoff == 0 {
+		backoff = 500 * time.Millisecond
+	}
+
+	for attempt := 0; attempt <= e.mergeSlotMaxRetries; attempt++ {
+		if attempt > 0 {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Merge slot held, retrying in %v (attempt %d/%d)...\n", backoff, attempt, e.mergeSlotMaxRetries)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			backoff = min(backoff*2, 10*time.Second)
+		}
+
+		status, err := e.mergeSlotAcquire(holder, false)
+		if err != nil {
+			return "", fmt.Errorf("acquire merge slot %s (%s): %w", slotID, holder, err)
+		}
+		if status == nil {
+			return "", fmt.Errorf("acquire merge slot %s (%s): empty status", slotID, holder)
+		}
+		if status.Available || status.Holder == holder {
+			return holder, nil
+		}
+		// Slot held by our own conflict-resolution path — safe to proceed.
+		if status.Holder == selfConflictHolder {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Merge slot held by conflict-resolution path, proceeding\n")
+			return "", nil // No holder to release — conflict-resolution owns the slot
+		}
+	}
+
+	return "", fmt.Errorf("merge slot %s: %w after %d retries", slotID, errMergeSlotTimeout, e.mergeSlotMaxRetries)
 }
 
 // ValidateTestCommand validates that a test command is safe to execute.
@@ -458,80 +615,6 @@ func (e *Engineer) runTests(ctx context.Context) ProcessResult {
 	}
 }
 
-// handleSuccess handles a successful merge completion.
-// Steps:
-// 1. Update MR with merge_commit SHA
-// 2. Close MR with reason 'merged'
-// 3. Close source issue with reference to MR
-// 4. Delete source branch if configured
-// 5. Log success
-func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
-	// Parse MR fields from description
-	mrFields := beads.ParseMRFields(mr)
-	if mrFields == nil {
-		mrFields = &beads.MRFields{}
-	}
-
-	// 1. Update MR with merge_commit SHA
-	mrFields.MergeCommit = result.MergeCommit
-	mrFields.CloseReason = "merged"
-	newDesc := beads.SetMRFields(mr, mrFields)
-	if err := e.beads.Update(mr.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to update MR %s with merge commit: %v\n", mr.ID, err)
-	}
-
-	// 2. Close MR with reason 'merged'
-	if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
-	}
-
-	// 3. Close source issue with reference to MR
-	if mrFields.SourceIssue != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := e.beads.CloseWithReason(closeReason, mrFields.SourceIssue); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mrFields.SourceIssue, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
-
-			// Redundant convoy observer: check if merged issue is tracked by a convoy
-			logger := func(format string, args ...interface{}) {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
-			}
-			convoy.CheckConvoysForIssue(e.rig.Path, mrFields.SourceIssue, "refinery", logger)
-		}
-	}
-
-	// 3.5. Clear agent bead's active_mr reference (traceability cleanup)
-	if mrFields.AgentBead != "" {
-		if err := e.beads.UpdateAgentActiveMR(mrFields.AgentBead, ""); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to clear agent bead %s active_mr: %v\n", mrFields.AgentBead, err)
-		}
-	}
-
-	// 4. Delete source branch if configured (local and remote)
-	// Since the self-cleaning model (Jan 10), polecats push to origin before gt done,
-	// so we need to clean up both local and remote branches after merge.
-	if e.config.DeleteMergedBranches && mrFields.Branch != "" {
-		if err := e.git.DeleteBranch(mrFields.Branch, true); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mrFields.Branch, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mrFields.Branch)
-		}
-		// Also delete the remote branch (non-fatal if it doesn't exist)
-		if err := e.git.DeleteRemoteBranch("origin", mrFields.Branch); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s: %v\n", mrFields.Branch, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: origin/%s\n", mrFields.Branch)
-		}
-	}
-
-	// 5. Sync crew workspaces with the newly pushed changes
-	e.syncCrewWorkspaces()
-
-	// 6. Log success
-	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
-}
-
 // syncCrewWorkspaces pulls latest changes to all crew workspaces.
 // This ensures crew members have access to newly merged code without manual sync.
 func (e *Engineer) syncCrewWorkspaces() {
@@ -564,19 +647,6 @@ func (e *Engineer) syncCrewWorkspaces() {
 	}
 }
 
-// handleFailure handles a failed merge request.
-// Reopens the MR for rework and logs the failure.
-func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
-	// Reopen the MR (back to open status for rework)
-	open := "open"
-	if err := e.beads.Update(mr.ID, beads.UpdateOptions{Status: &open}); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reopen MR %s: %v\n", mr.ID, err)
-	}
-
-	// Log the failure
-	_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
-}
-
 // ProcessMRInfo processes a merge request from MRInfo.
 func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult {
 	// MR fields are directly on the struct
@@ -595,13 +665,10 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 	// Release merge slot if this was a conflict resolution
 	// The slot is held while conflict resolution is in progress
 	holder := e.rig.Name + "/refinery"
-	if err := e.beads.MergeSlotRelease(holder); err != nil {
-		// Not an error if slot wasn't held - it's optional
-		// Only log if it seems like an actual issue
-		errStr := err.Error()
-		if !strings.Contains(errStr, "not held") && !strings.Contains(errStr, "not found") {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot: %v\n", err)
-		}
+	if err := e.mergeSlotRelease(holder); err != nil {
+		// Best-effort: slot release failures are always non-fatal.
+		// Slot may not have been held (optional acquisition) or may have expired.
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Note: merge slot release: %v\n", err)
 	} else {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Released merge slot\n")
 	}
@@ -672,8 +739,18 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 
 // HandleMRInfoFailure handles a failed merge from MRInfo.
 // For conflicts, creates a resolution task and blocks the MR until resolved.
+// For slot timeouts, the MR stays in queue for automatic retry without notifying polecats.
 // This enables non-blocking delegation: the queue continues to the next MR.
 func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
+	// Slot timeout is transient infrastructure contention — not a build/test/conflict failure.
+	// The MR stays in queue and will be retried on the next poll cycle.
+	// No polecat notification needed since there's nothing for a worker to fix.
+	if result.SlotTimeout {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Slot timeout: %s - %s\n", mr.ID, result.Error)
+		_, _ = fmt.Fprintln(e.output, "[Engineer] MR remains in queue for automatic retry (slot contention)")
+		return
+	}
+
 	// Notify Witness of the failure so polecat can be alerted
 	// Determine failure type from result
 	failureType := "build"
@@ -735,16 +812,20 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 func (e *Engineer) createConflictResolutionTaskForMR(mr *MRInfo, _ ProcessResult) (string, error) { // result unused but kept for future merge diagnostics
 	// === MERGE SLOT GATE: Serialize conflict resolution ===
 	// Ensure merge slot exists (idempotent)
-	slotID, err := e.beads.MergeSlotEnsureExists()
+	slotID, err := e.mergeSlotEnsureExists()
+	slotHolder := "" // tracks acquired slot for cleanup on error
 	if err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not ensure merge slot: %v\n", err)
 		// Continue anyway - slot is optional for now
 	} else {
 		// Try to acquire the merge slot
 		holder := e.rig.Name + "/refinery"
-		status, err := e.beads.MergeSlotAcquire(holder, false)
+		status, err := e.mergeSlotAcquire(holder, false)
 		if err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not acquire merge slot: %v\n", err)
+			// Continue anyway - slot is optional
+		} else if status == nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: merge slot returned nil status\n")
 			// Continue anyway - slot is optional
 		} else if !status.Available && status.Holder != "" && status.Holder != holder {
 			// Slot is held by someone else - skip creating the task
@@ -752,9 +833,16 @@ func (e *Engineer) createConflictResolutionTaskForMR(mr *MRInfo, _ ProcessResult
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Merge slot held by %s - deferring conflict resolution\n", status.Holder)
 			_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s will retry after current resolution completes\n", mr.ID)
 			return "", nil // Not an error - just deferred
+		} else {
+			slotHolder = holder
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Acquired merge slot: %s\n", slotID)
 		}
-		// Either we acquired the slot, or status indicates we already hold it
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Acquired merge slot: %s\n", slotID)
+	}
+	// Release slot on error to prevent permanent blockage
+	releaseSlotOnError := func() {
+		if slotHolder != "" {
+			_ = e.mergeSlotRelease(slotHolder)
+		}
 	}
 
 	// Get the current main SHA for conflict tracking
@@ -820,6 +908,7 @@ The Refinery will automatically retry the merge after you force-push.`,
 		Actor:       e.rig.Name + "/refinery",
 	})
 	if err != nil {
+		releaseSlotOnError()
 		return "", fmt.Errorf("creating conflict resolution task: %w", err)
 	}
 
@@ -919,14 +1008,33 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			continue
 		}
 
+		// Belt-and-suspenders: skip MRs labeled gt:owned-direct.
+		// These MRs shouldn't exist (gt done skips MR creation for owned+direct
+		// convoys), but if one slips through, the refinery should not process it.
+		if beads.HasLabel(issue, "gt:owned-direct") {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Skipping MR %s: owned+direct convoy (belt-and-suspenders)\n", issue.ID)
+			continue
+		}
+
 		fields := beads.ParseMRFields(issue)
 		if fields == nil {
 			continue // Skip issues without MR fields
 		}
 
-		// Skip if already assigned (claimed by another worker)
+		// Skip if already assigned, unless claim is stale (allows re-claim after crash).
+		// NOTE: Only one refinery runs per rig (enforced by ErrAlreadyRunning in
+		// manager.go), so concurrent re-claim race conditions are not a concern.
 		if issue.Assignee != "" {
-			continue
+			stale, parseErr := isClaimStale(issue.UpdatedAt, e.config.StaleClaimTimeout)
+			if parseErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not parse UpdatedAt for %s: %v (treating claim as valid)\n",
+					issue.ID, parseErr)
+			}
+			if !stale {
+				continue
+			}
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Stale claim detected: %s (assignee: %s, updated: %s) — eligible for re-claim\n",
+				issue.ID, issue.Assignee, issue.UpdatedAt)
 		}
 
 		mrs = append(mrs, issueToMRInfo(issue, fields))

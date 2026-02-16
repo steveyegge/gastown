@@ -70,3 +70,69 @@ func TestFeedNextReadyIssue_FindsReadyIssue(t *testing.T) {
 		t.Errorf("expected first ready issue to be gt-ready, got %s", foundReady)
 	}
 }
+
+func TestCheckConvoysForIssue_NilLogger(t *testing.T) {
+	// Nil logger should not panic — gets replaced with no-op internally.
+	result := CheckConvoysForIssue("/nonexistent/path", "gt-test", "test", nil)
+	if result != nil {
+		t.Errorf("expected nil for non-existent path, got %v", result)
+	}
+}
+
+func TestCheckConvoysForIssue_NoConvoys(t *testing.T) {
+	// With a non-existent town root, no convoys should be found.
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, format)
+	}
+
+	result := CheckConvoysForIssue("/nonexistent/path", "gt-test", "test", logger)
+	if result != nil {
+		t.Errorf("expected nil result, got %v", result)
+	}
+	if len(logged) != 0 {
+		t.Errorf("expected no logs, got %d", len(logged))
+	}
+}
+
+func TestGetTrackingConvoys_CommandFailure(t *testing.T) {
+	// When bd is not available or fails, should return nil gracefully.
+	result := getTrackingConvoys("/nonexistent/path", "gt-test")
+	if result != nil {
+		t.Errorf("expected nil on command failure, got %v", result)
+	}
+}
+
+func TestIsConvoyClosed_CommandFailure(t *testing.T) {
+	// When bd is not available, should return false (not closed).
+	result := isConvoyClosed("/nonexistent/path", "gt-test")
+	if result {
+		t.Error("expected false on command failure")
+	}
+}
+
+func TestBatchShowIssues_Empty(t *testing.T) {
+	// Empty issue IDs should return empty map without calling bd.
+	result := batchShowIssues("/nonexistent/path", nil)
+	if len(result) != 0 {
+		t.Errorf("expected empty map for nil input, got %d entries", len(result))
+	}
+
+	result = batchShowIssues("/nonexistent/path", []string{})
+	if len(result) != 0 {
+		t.Errorf("expected empty map for empty input, got %d entries", len(result))
+	}
+}
+
+func TestFeedNextReadyIssue_EmptyTracked(t *testing.T) {
+	// feedNextReadyIssue should handle empty tracked issues without panic.
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, format)
+	}
+
+	feedNextReadyIssue("/nonexistent/path", "convoy-1", "test", logger)
+	if len(logged) != 0 {
+		t.Errorf("expected no logs for empty tracked issues, got %d", len(logged))
+	}
+}

@@ -38,11 +38,21 @@ func (m *mockBeads) List(opts beads.ListOptions) ([]*beads.Issue, error) {
 	}
 	var result []*beads.Issue
 	for _, issue := range m.issues {
-		// Apply basic filtering
-		if opts.Type != "" && issue.Type != opts.Type {
+		// Apply basic filtering — Label and Type are mutually exclusive
+		// (matches real beads.List: Label takes precedence, Type is ignored when Label is set)
+		if opts.Label != "" {
+			if !beads.HasLabel(issue, opts.Label) {
+				continue
+			}
+		} else if opts.Type != "" && issue.Type != opts.Type {
 			continue
 		}
-		if opts.Status != "" && issue.Status != opts.Status {
+		// Match real bd behavior: no --status flag defaults to non-closed issues
+		if opts.Status == "" {
+			if issue.Status == "closed" {
+				continue
+			}
+		} else if opts.Status != "all" && issue.Status != opts.Status {
 			continue
 		}
 		result = append(result, issue)
@@ -86,9 +96,10 @@ func makeTestMR(id, branch, target, worker string, status string) *beads.Issue {
 	return &beads.Issue{
 		ID:          id,
 		Title:       "Merge: " + branch,
-		Type:        "merge-request",
+		Type:        "task",
 		Status:      status,
 		Priority:    2,
+		Labels:      []string{"gt:merge-request"},
 		Description: desc,
 		CreatedAt:   "2025-01-01T12:00:00Z",
 		UpdatedAt:   "2025-01-01T12:00:00Z",

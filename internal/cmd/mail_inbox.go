@@ -65,6 +65,9 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("listing messages: %w", err)
 	}
+	if messages == nil {
+		messages = make([]*mail.Message, 0)
+	}
 
 	// JSON output
 	if mailInboxJSON {

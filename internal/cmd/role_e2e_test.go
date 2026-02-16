@@ -554,6 +554,48 @@ func TestRoleShowMismatch(t *testing.T) {
 	}
 }
 
+// TestRoleShowNoMismatchAtTownRoot validates that town root + GT_ROLE does not
+// trigger a mismatch warning, since town root returns RoleUnknown (not RoleMayor).
+// Regression test for https://github.com/steveyegge/gastown/issues/1496
+func TestRoleShowNoMismatchAtTownRoot(t *testing.T) {
+	tmpDir := resolveSymlinks(t, t.TempDir())
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	gtBinary := buildGT(t)
+
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Run from town root with GT_ROLE=mayor — should NOT show mismatch
+	cmd = exec.Command(gtBinary, "role", "show")
+	cmd.Dir = hqPath
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir, "GT_ROLE=mayor")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt role show failed: %v\nOutput: %s", err, output)
+	}
+
+	got := string(output)
+
+	// GT_ROLE takes precedence, so role should be mayor
+	if !strings.Contains(got, "mayor") {
+		t.Errorf("should show 'mayor' from GT_ROLE, got: %s", got)
+	}
+
+	// Source should be env
+	if !strings.Contains(got, "Source: env") {
+		t.Errorf("source should be 'env', got: %s", got)
+	}
+
+	// Should NOT show mismatch warning — town root is neutral (RoleUnknown)
+	if strings.Contains(got, "ROLE MISMATCH") {
+		t.Errorf("should NOT show ROLE MISMATCH at town root\ngot: %s", got)
+	}
+}
+
 // TestRoleDetectE2E validates gt role detect uses cwd and ignores GT_ROLE.
 func TestRoleDetectE2E(t *testing.T) {
 	tmpDir := resolveSymlinks(t, t.TempDir())
@@ -588,6 +630,11 @@ func TestRoleDetectE2E(t *testing.T) {
 		wantRig     string
 		wantWorker  string
 	}{
+		{
+			name:     "town root returns unknown",
+			cwd:      hqPath,
+			wantRole: "unknown",
+		},
 		{
 			name:     "mayor from mayor dir",
 			cwd:      filepath.Join(hqPath, "mayor"),

@@ -96,7 +96,11 @@ TTL format: 1h, 12h, 1d, 7d, 30d, etc.`,
 var krcConfigResetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Reset TTL configuration to defaults",
-	RunE:  runKrcConfigReset,
+	Long: `Reset the KRC TTL configuration file to built-in defaults.
+
+This overwrites any custom TTL patterns and restores the default
+prune interval, minimum retain count, and per-type TTLs.`,
+	RunE: runKrcConfigReset,
 }
 
 var krcDecayCmd = &cobra.Command{

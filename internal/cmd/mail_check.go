@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 func runMailCheck(cmd *cobra.Command, args []string) error {
@@ -63,8 +66,9 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Inject mode: notify agent of mail with priority-appropriate framing.
-	// Urgent mail interrupts (agent should act now). Normal mail is delivered
-	// as background context that does NOT interrupt the current task.
+	// Three tiers: urgent interrupts immediately, high-priority is processed
+	// at the next task boundary, normal/low is informational but still
+	// checked before going idle (prevents mail from sitting unread).
 	if mailCheckInject {
 		if unread > 0 {
 			messages, listErr := mailbox.ListUnread()
@@ -73,43 +77,21 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 				return nil
 			}
 
-			// Separate urgent from non-urgent
-			var urgent, normal []*mail.Message
-			for _, msg := range messages {
-				if msg.Priority == mail.PriorityUrgent {
-					urgent = append(urgent, msg)
-				} else {
-					normal = append(normal, msg)
-				}
-			}
+			fmt.Print(formatInjectOutput(messages))
+		}
 
-			if len(urgent) > 0 {
-				// Urgent mail: interrupt — agent should stop and read
-				fmt.Println("<system-reminder>")
-				fmt.Printf("URGENT: %d urgent message(s) require immediate attention.\n\n", len(urgent))
-				for _, msg := range urgent {
-					fmt.Printf("- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
-				}
-				if len(normal) > 0 {
-					fmt.Printf("\n(Plus %d non-urgent message(s) — read after current task.)\n", len(normal))
-				}
-				fmt.Println()
-				fmt.Println("Run 'gt mail read <id>' to read urgent messages.")
-				fmt.Println("</system-reminder>")
-			} else {
-				// Non-urgent mail only: deliver as background notification.
-				// Explicitly tell the agent NOT to interrupt current work.
-				fmt.Println("<system-reminder>")
-				fmt.Printf("You have %d unread message(s) in your inbox.\n\n", len(normal))
-				for _, msg := range normal {
-					fmt.Printf("- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
-				}
-				fmt.Println()
-				fmt.Println("This is a background notification. Do NOT stop or interrupt your current task.")
-				fmt.Println("Read these messages when your current work is complete: 'gt mail inbox'")
-				fmt.Println("</system-reminder>")
+		// Also drain queued nudges (from --mode=queue or --mode=wait-idle fallback).
+		// The nudge queue is per-session; detect our session name.
+		sessionName := tmux.CurrentSessionName()
+		if sessionName != "" {
+			queuedNudges, drainErr := nudge.Drain(workDir, sessionName)
+			if drainErr != nil {
+				fmt.Fprintf(os.Stderr, "gt mail check: nudge queue drain error: %v\n", drainErr)
+			} else if len(queuedNudges) > 0 {
+				fmt.Print(nudge.FormatForInjection(queuedNudges))
 			}
 		}
+
 		return nil
 	}
 
@@ -120,4 +102,70 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("No new mail")
 	return NewSilentExit(1)
+}
+
+// formatInjectOutput builds the system-reminder text for inject mode.
+// It separates messages into three tiers (urgent, high, normal/low) and
+// formats them with priority-appropriate framing for the agent.
+func formatInjectOutput(messages []*mail.Message) string {
+	var urgent, high, normal []*mail.Message
+	for _, msg := range messages {
+		switch msg.Priority {
+		case mail.PriorityUrgent:
+			urgent = append(urgent, msg)
+		case mail.PriorityHigh:
+			high = append(high, msg)
+		default:
+			normal = append(normal, msg)
+		}
+	}
+
+	var b strings.Builder
+
+	if len(urgent) > 0 {
+		// Urgent mail: interrupt — agent should stop and read.
+		b.WriteString("<system-reminder>\n")
+		fmt.Fprintf(&b, "URGENT: %d urgent message(s) require immediate attention.\n\n", len(urgent))
+		for _, msg := range urgent {
+			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
+		}
+		// Show high-priority messages separately so their "process before idle"
+		// framing is preserved even when urgent messages are present.
+		if len(high) > 0 {
+			fmt.Fprintf(&b, "\nAlso %d high-priority message(s) — process before going idle:\n", len(high))
+			for _, msg := range high {
+				fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
+			}
+		}
+		if len(normal) > 0 {
+			fmt.Fprintf(&b, "\n(Plus %d additional message(s) — check after current task.)\n", len(normal))
+		}
+		b.WriteString("\nRun 'gt mail read <id>' to read urgent messages.\n")
+		b.WriteString("</system-reminder>\n")
+	} else if len(high) > 0 {
+		// High-priority mail: don't interrupt, but process promptly at task boundary.
+		b.WriteString("<system-reminder>\n")
+		fmt.Fprintf(&b, "You have %d high-priority message(s) in your inbox.\n\n", len(high))
+		for _, msg := range high {
+			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
+		}
+		if len(normal) > 0 {
+			fmt.Fprintf(&b, "\n(Plus %d additional message(s).)\n", len(normal))
+		}
+		b.WriteString("\nContinue your current task. When it completes, process these messages\n")
+		b.WriteString("before going idle: 'gt mail inbox'\n")
+		b.WriteString("</system-reminder>\n")
+	} else {
+		// Normal/low mail: informational, process at next task boundary.
+		b.WriteString("<system-reminder>\n")
+		fmt.Fprintf(&b, "You have %d unread message(s) in your inbox.\n\n", len(normal))
+		for _, msg := range normal {
+			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
+		}
+		b.WriteString("\nContinue your current task. When it completes, check these messages\n")
+		b.WriteString("before going idle: 'gt mail inbox'\n")
+		b.WriteString("</system-reminder>\n")
+	}
+
+	return b.String()
 }

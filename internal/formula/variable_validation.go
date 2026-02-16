@@ -112,15 +112,43 @@ func (f *Formula) ValidateTemplateVariables() error {
 		allText.WriteString("\n")
 	}
 
+	// Prompts
+	for _, prompt := range f.Prompts {
+		allText.WriteString(prompt)
+		allText.WriteString("\n")
+	}
+
+	// Inputs (descriptions may contain variable references)
+	for _, input := range f.Inputs {
+		allText.WriteString(input.Description)
+		allText.WriteString("\n")
+		allText.WriteString(input.Default)
+		allText.WriteString("\n")
+	}
+
+	// Output
+	if f.Output != nil {
+		allText.WriteString(f.Output.Directory)
+		allText.WriteString("\n")
+		allText.WriteString(f.Output.LegPattern)
+		allText.WriteString("\n")
+		allText.WriteString(f.Output.Synthesis)
+		allText.WriteString("\n")
+	}
+
 	// Extract all variables used
 	usedVars := ExtractTemplateVariables(allText.String())
 
-	// Check each against defined vars
+	// Check each against defined vars and inputs
 	var undefined []string
 	for _, v := range usedVars {
-		if _, defined := f.Vars[v]; !defined {
-			undefined = append(undefined, v)
+		if _, defined := f.Vars[v]; defined {
+			continue
 		}
+		if _, defined := f.Inputs[v]; defined {
+			continue
+		}
+		undefined = append(undefined, v)
 	}
 
 	if len(undefined) > 0 {

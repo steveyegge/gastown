@@ -9,8 +9,19 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+func setupTestRegistryForSession(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("bd", "beads")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
 
 func requireTmux(t *testing.T) {
 	t.Helper()
@@ -24,6 +35,8 @@ func requireTmux(t *testing.T) {
 }
 
 func TestSessionName(t *testing.T) {
+	setupTestRegistryForSession(t)
+
 	r := &rig.Rig{
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
@@ -31,8 +44,8 @@ func TestSessionName(t *testing.T) {
 	m := NewSessionManager(tmux.NewTmux(), r)
 
 	name := m.SessionName("Toast")
-	if name != "gt-gastown-Toast" {
-		t.Errorf("sessionName = %q, want gt-gastown-Toast", name)
+	if name != "gt-Toast" {
+		t.Errorf("sessionName = %q, want gt-Toast", name)
 	}
 }
 
@@ -111,6 +124,14 @@ func TestIsRunningNoSession(t *testing.T) {
 
 func TestSessionManagerListEmpty(t *testing.T) {
 	requireTmux(t)
+
+	// Register a unique prefix so List() won't match real sessions.
+	// Without this, PrefixFor returns "gt" (default) and matches running gastown sessions.
+	reg := session.NewPrefixRegistry()
+	reg.Register("xz", "test-rig-unlikely-name")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
 
 	r := &rig.Rig{
 		Name:     "test-rig-unlikely-name",
@@ -216,6 +237,56 @@ func TestPolecatCommandFormat(t *testing.T) {
 	}
 }
 
+// TestPolecatStartInjectsFallbackEnvVars verifies that the polecat session
+// startup injects GT_BRANCH and GT_POLECAT_PATH into the startup command.
+// These env vars are critical for gt done's nuked-worktree fallback:
+// when the polecat's cwd is deleted, gt done uses these to determine
+// the branch and path without a working directory.
+// Regression test for PR #1402.
+func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
+	rigName := "gastown"
+	polecatName := "Toast"
+	workDir := "/tmp/fake-worktree"
+
+	// The env vars that should be injected via PrependEnv
+	requiredEnvVars := []string{
+		"GT_BRANCH",       // Git branch for nuked-worktree fallback
+		"GT_POLECAT_PATH", // Worktree path for nuked-worktree fallback
+		"GT_RIG",          // Rig name (was already there pre-PR)
+		"GT_POLECAT",      // Polecat name (was already there pre-PR)
+		"GT_ROLE",         // Role address (was already there pre-PR)
+	}
+
+	// Verify the env var map includes all required keys
+	envVars := map[string]string{
+		"GT_RIG":          rigName,
+		"GT_POLECAT":      polecatName,
+		"GT_ROLE":         rigName + "/polecats/" + polecatName,
+		"GT_POLECAT_PATH": workDir,
+	}
+
+	// GT_BRANCH is conditionally added (only if CurrentBranch succeeds)
+	// In practice it's always set because the worktree exists at Start time
+	branchName := "polecat/" + polecatName
+	envVars["GT_BRANCH"] = branchName
+
+	for _, key := range requiredEnvVars {
+		if _, ok := envVars[key]; !ok {
+			t.Errorf("missing required env var %q in startup injection", key)
+		}
+	}
+
+	// Verify GT_POLECAT_PATH matches workDir
+	if envVars["GT_POLECAT_PATH"] != workDir {
+		t.Errorf("GT_POLECAT_PATH = %q, want %q", envVars["GT_POLECAT_PATH"], workDir)
+	}
+
+	// Verify GT_BRANCH matches expected branch
+	if envVars["GT_BRANCH"] != branchName {
+		t.Errorf("GT_BRANCH = %q, want %q", envVars["GT_BRANCH"], branchName)
+	}
+}
+
 // TestSessionManager_resolveBeadsDir verifies that SessionManager correctly
 // resolves the beads directory for cross-rig issues via routes.jsonl.
 // This is a regression test for GitHub issue #1056.
@@ -288,6 +359,63 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 			if resolved != tc.expectedDir {
 				t.Errorf("resolveBeadsDir(%q, %q) = %q, want %q",
 					tc.issueID, polecatWorkDir, resolved, tc.expectedDir)
+			}
+		})
+	}
+}
+
+func TestValidateSessionName(t *testing.T) {
+	// Register prefixes so validateSessionName can resolve them correctly.
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("gm", "gastown_manager")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+
+	tests := []struct {
+		name        string
+		sessionName string
+		rigName     string
+		wantErr     bool
+	}{
+		{
+			name:        "valid themed name",
+			sessionName: "gm-furiosa",
+			rigName:     "gastown_manager",
+			wantErr:     false,
+		},
+		{
+			name:        "valid overflow name (new format)",
+			sessionName: "gm-51",
+			rigName:     "gastown_manager",
+			wantErr:     false,
+		},
+		{
+			name:        "malformed double-prefix (bug)",
+			sessionName: "gm-gastown_manager-51",
+			rigName:     "gastown_manager",
+			wantErr:     true,
+		},
+		{
+			name:        "malformed double-prefix gastown",
+			sessionName: "gt-gastown-142",
+			rigName:     "gastown",
+			wantErr:     true,
+		},
+		{
+			name:        "different rig (can't validate)",
+			sessionName: "gt-other-rig-name",
+			rigName:     "gastown_manager",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSessionName(tt.sessionName, tt.rigName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSessionName() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

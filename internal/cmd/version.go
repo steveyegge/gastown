@@ -12,7 +12,7 @@ import (
 
 // Version information - set at build time via ldflags
 var (
-	Version = "0.5.0"
+	Version = "0.7.0"
 	// Build can be set via ldflags at compile time
 	Build = "dev"
 	// Commit and Branch - the git revision the binary was built from (optional ldflag)
@@ -27,6 +27,10 @@ var versionCmd = &cobra.Command{
 	Use:     "version",
 	GroupID: GroupDiag,
 	Short:   "Print version information",
+	Long: `Print the gt version, build type, git branch, and commit hash.
+
+Output includes the semantic version, whether this is a dev or release build,
+and the git revision the binary was built from (if available).`,
 	Run: func(cmd *cobra.Command, args []string) {
 		commit := resolveCommitHash()
 		branch := resolveBranch()

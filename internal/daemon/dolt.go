@@ -33,8 +33,14 @@ type DoltServerConfig struct {
 	// Port is the MySQL protocol port (default 3306).
 	Port int `json:"port,omitempty"`
 
-	// Host is the bind address (default 127.0.0.1).
+	// Host is the bind/connect address (default 127.0.0.1).
 	Host string `json:"host,omitempty"`
+
+	// User is the MySQL user name (default root).
+	User string `json:"user,omitempty"`
+
+	// Password is the MySQL password. Empty means no password.
+	Password string `json:"password,omitempty"`
 
 	// DataDir is the directory containing Dolt databases.
 	// Each subdirectory becomes a database.
@@ -76,6 +82,7 @@ func DefaultDoltServerConfig(townRoot string) *DoltServerConfig {
 		Enabled:              false, // Opt-in
 		Port:                 3306,
 		Host:                 "127.0.0.1",
+		User:                 "root",
 		DataDir:              filepath.Join(townRoot, "dolt"),
 		LogFile:              filepath.Join(townRoot, "daemon", "dolt-server.log"),
 		AutoRestart:          true,
@@ -173,6 +180,55 @@ func (m *DoltServerManager) IsEnabled() bool {
 // IsExternal returns whether the Dolt server is externally managed.
 func (m *DoltServerManager) IsExternal() bool {
 	return m.config != nil && m.config.External
+}
+
+// isRemote returns true when the daemon's Dolt config points to a non-local server.
+func (m *DoltServerManager) isRemote() bool {
+	if m.config == nil {
+		return false
+	}
+	switch strings.ToLower(m.config.Host) {
+	case "", "127.0.0.1", "localhost", "::1", "[::1]":
+		return false
+	}
+	return true
+}
+
+// buildDoltSQLCmd constructs a dolt sql command using daemon config, mirroring
+// the doltserver.buildDoltSQLCmd pattern for local-vs-remote command construction.
+func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string) *exec.Cmd {
+	var fullArgs []string
+	fullArgs = append(fullArgs, "sql")
+
+	if m.isRemote() {
+		host := m.config.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		user := m.config.User
+		if user == "" {
+			user = "root"
+		}
+		fullArgs = append(fullArgs,
+			"--host", host,
+			"--port", strconv.Itoa(m.config.Port),
+			"--user", user,
+			"--no-tls",
+		)
+	}
+
+	fullArgs = append(fullArgs, args...)
+	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
+
+	if !m.isRemote() {
+		cmd.Dir = m.config.DataDir
+	}
+
+	if m.isRemote() && m.config.Password != "" {
+		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)
+	}
+
+	return cmd
 }
 
 // HealthCheckInterval returns the configured health check interval,
@@ -805,8 +861,7 @@ func (m *DoltServerManager) checkHealthLocked() error {
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", "SELECT 1")
-	cmd.Dir = m.config.DataDir
+	cmd := m.buildDoltSQLCmd(ctx, "-q", "SELECT 1")
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -834,11 +889,10 @@ func (m *DoltServerManager) checkHealthLocked() error {
 func (m *DoltServerManager) checkConnectionCount() {
 	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "dolt", "sql",
+	cmd := m.buildDoltSQLCmd(ctx,
 		"-r", "csv",
 		"-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
 	)
-	cmd.Dir = m.config.DataDir
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -918,8 +972,7 @@ func (m *DoltServerManager) checkWriteHealthLocked() error {
 		"USE `%s`; CREATE TABLE IF NOT EXISTS `__gt_health_probe` (v INT PRIMARY KEY); REPLACE INTO `__gt_health_probe` VALUES (1); DROP TABLE IF EXISTS `__gt_health_probe`",
 		db,
 	)
-	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
-	cmd.Dir = m.config.DataDir
+	cmd := m.buildDoltSQLCmd(ctx, "-q", query)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1011,11 +1064,10 @@ func (m *DoltServerManager) getDoltVersion() (string, error) {
 func (m *DoltServerManager) listDatabases() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "dolt", "sql",
+	cmd := m.buildDoltSQLCmd(ctx,
 		"-r", "json",
 		"-q", "SHOW DATABASES",
 	)
-	cmd.Dir = m.config.DataDir
 
 	output, err := cmd.Output()
 	if err != nil {

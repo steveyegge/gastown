@@ -481,6 +481,78 @@ func TestIsRuntimeRunning_ShellWithNodeChild(t *testing.T) {
 	}
 }
 
+// TestGetPaneCommand_MultiPane verifies that GetPaneCommand returns pane 0's
+// command even when a split pane exists and is active. This is the core fix
+// for gs-2v7: without explicit pane 0 targeting, health checks would see the
+// split pane's shell and falsely report the agent as dead.
+func TestGetPaneCommand_MultiPane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-multipane-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+
+	// Create session running sleep (simulates an agent process in pane 0)
+	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 300"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Verify pane 0 shows "sleep"
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand before split: %v", err)
+	}
+	if cmd != "sleep" {
+		t.Fatalf("expected pane 0 command to be 'sleep', got %q", cmd)
+	}
+
+	// Capture pane 0's PID and working directory before the split
+	pidBefore, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID before split: %v", err)
+	}
+	wdBefore, err := tm.GetPaneWorkDir(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneWorkDir before split: %v", err)
+	}
+
+	// Split the window — creates a new pane running a shell, which becomes active
+	if _, err := tm.run("split-window", "-t", sessionName, "-d"); err != nil {
+		t.Fatalf("split-window: %v", err)
+	}
+
+	// GetPaneCommand should still return "sleep" (pane 0), not the shell
+	cmd, err = tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand after split: %v", err)
+	}
+	if cmd != "sleep" {
+		t.Errorf("after split, GetPaneCommand should return pane 0 command 'sleep', got %q", cmd)
+	}
+
+	// GetPanePID should return pane 0's PID, matching the pre-split value
+	pid, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID after split: %v", err)
+	}
+	if pid != pidBefore {
+		t.Errorf("GetPanePID changed after split: before=%s, after=%s", pidBefore, pid)
+	}
+
+	// GetPaneWorkDir should still return pane 0's working directory
+	wd, err := tm.GetPaneWorkDir(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneWorkDir after split: %v", err)
+	}
+	if wd != wdBefore {
+		t.Errorf("GetPaneWorkDir changed after split: before=%s, after=%s", wdBefore, wd)
+	}
+}
+
 func TestHasChildWithNames(t *testing.T) {
 	// Test the hasChildWithNames helper function directly
 
@@ -1550,5 +1622,209 @@ func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
 	}
 	if !has {
 		t.Fatal("expected session to exist after creation with empty env")
+	}
+}
+
+func TestIsTransientSendKeysError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"not in a mode", fmt.Errorf("tmux send-keys: not in a mode"), true},
+		{"not in a mode wrapped", fmt.Errorf("nudge: %w", fmt.Errorf("tmux send-keys: not in a mode")), true},
+		{"session not found", ErrSessionNotFound, false},
+		{"no server", ErrNoServer, false},
+		{"generic error", fmt.Errorf("something else"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransientSendKeysError(tt.err)
+			if got != tt.want {
+				t.Errorf("isTransientSendKeysError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendKeysLiteralWithRetry_ImmediateSuccess(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-retry-ok-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	// Create a session that's ready to accept input
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Should succeed immediately — no retry needed
+	err := tm.sendKeysLiteralWithRetry(sessionName, "hello", 5*time.Second)
+	if err != nil {
+		t.Errorf("sendKeysLiteralWithRetry() = %v, want nil", err)
+	}
+}
+
+func TestSendKeysLiteralWithRetry_NonTransientFails(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Target a session that doesn't exist — should fail immediately, not retry
+	start := time.Now()
+	err := tm.sendKeysLiteralWithRetry("gt-nonexistent-session-xyz", "hello", 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error for nonexistent session, got nil")
+	}
+	// Should fail fast (< 1s), not wait the full 5s timeout
+	if elapsed > 2*time.Second {
+		t.Errorf("non-transient error took %v, expected fast failure", elapsed)
+	}
+}
+
+func TestSendKeysLiteralWithRetry_NonTransientFailsFast(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	// Use a nonexistent session — tmux returns "session not found" which is
+	// non-transient, so the function should fail fast (well under the timeout).
+	start := time.Now()
+	err := tm.sendKeysLiteralWithRetry("gt-nonexistent-session-fast-fail", "hello", 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error for nonexistent session, got nil")
+	}
+	// Non-transient errors should fail immediately, not wait for timeout.
+	if elapsed > 2*time.Second {
+		t.Errorf("non-transient error took %v — should have failed fast, not retried until timeout", elapsed)
+	}
+}
+
+func TestNudgeSession_WithRetry(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-retry-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	// Create a ready session
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Give shell a moment to initialize
+	time.Sleep(200 * time.Millisecond)
+
+	// NudgeSession should succeed on a ready session
+	err := tm.NudgeSession(sessionName, "test message")
+	if err != nil {
+		t.Errorf("NudgeSession() = %v, want nil", err)
+	}
+}
+
+// TestMatchesPromptPrefix verifies that prompt matching handles non-breaking
+// spaces (NBSP, U+00A0) correctly. Claude Code uses NBSP after its ❯ prompt
+// character, but the default ReadyPromptPrefix uses a regular space.
+// Regression test for https://github.com/steveyegge/gastown/issues/1387.
+func TestMatchesPromptPrefix(t *testing.T) {
+	const (
+		nbsp          = "\u00a0" // non-breaking space
+		regularPrefix = "❯ "    // default: ❯ + regular space
+	)
+
+	tests := []struct {
+		name   string
+		line   string
+		prefix string
+		want   bool
+	}{
+		// Regular space in both line and prefix (baseline)
+		{"regular space matches", "❯ ", regularPrefix, true},
+		{"regular space with trailing content", "❯ some input", regularPrefix, true},
+
+		// NBSP in line, regular space in prefix (the bug scenario)
+		{"NBSP bare prompt matches", "❯" + nbsp, regularPrefix, true},
+		{"NBSP with content matches", "❯" + nbsp + "claude --help", regularPrefix, true},
+		{"NBSP with leading whitespace", "  ❯" + nbsp, regularPrefix, true},
+
+		// NBSP in prefix (defensive: user could configure it either way)
+		{"NBSP prefix matches NBSP line", "❯" + nbsp + "hello", "❯" + nbsp, true},
+		{"NBSP prefix matches regular space line", "❯ hello", "❯" + nbsp, true},
+
+		// Empty prefix never matches
+		{"empty prefix", "❯ ", "", false},
+
+		// No prompt character at all
+		{"no prompt", "hello world", regularPrefix, false},
+		{"empty line", "", regularPrefix, false},
+		{"whitespace only", "   ", regularPrefix, false},
+
+		// Bare prompt character without any space
+		{"bare prompt no space", "❯", regularPrefix, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesPromptPrefix(tt.line, tt.prefix)
+			if got != tt.want {
+				t.Errorf("matchesPromptPrefix(%q, %q) = %v, want %v",
+					tt.line, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWaitForIdle_Timeout(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if os.Getenv("TMUX") == "" {
+		t.Skip("not inside tmux")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("test requires unix")
+	}
+
+	tm := NewTmux()
+
+	// Create a session running a long sleep (no prompt visible)
+	sessionName := fmt.Sprintf("gt-test-idle-%d", time.Now().UnixNano())
+	if err := tm.NewSessionWithCommand(sessionName, os.TempDir(), "sleep 60"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// WaitForIdle should timeout quickly since the session is running sleep, not a prompt
+	err := tm.WaitForIdle(sessionName, 500*time.Millisecond)
+	if err == nil {
+		t.Error("WaitForIdle should have timed out for a busy session")
+	}
+	if !errors.Is(err, ErrIdleTimeout) {
+		t.Errorf("expected ErrIdleTimeout, got: %v", err)
+	}
+}
+
+func TestDefaultReadyPromptPrefix(t *testing.T) {
+	// Verify the constant is set correctly
+	if DefaultReadyPromptPrefix == "" {
+		t.Error("DefaultReadyPromptPrefix should not be empty")
+	}
+	if !strings.Contains(DefaultReadyPromptPrefix, "❯") {
+		t.Errorf("DefaultReadyPromptPrefix = %q, want to contain ❯", DefaultReadyPromptPrefix)
 	}
 }

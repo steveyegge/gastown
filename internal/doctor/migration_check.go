@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -248,9 +249,9 @@ func NewDoltServerReachableCheck() *DoltServerReachableCheck {
 
 // Run checks if any rig has server-mode metadata but the server is unreachable.
 func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
-	// Find rigs configured for server mode
-	serverRigs := c.findServerModeRigs(ctx.TownRoot)
-	if len(serverRigs) == 0 {
+	// Find rigs configured for server mode, grouped by server address
+	rigsByAddr := c.findServerModeRigsByAddr(ctx.TownRoot)
+	if len(rigsByAddr) == 0 {
 		return &CheckResult{
 			Name:     c.Name(),
 			Status:   StatusOK,
@@ -259,43 +260,55 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Server mode is configured — check if the server is actually reachable
-	port := 3307 // default Dolt server port
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
-	if err != nil {
+	// Check connectivity to each unique server address
+	var unreachable []string
+	var details []string
+	totalRigs := 0
+	unreachableRigs := 0
+	for addr, rigs := range rigsByAddr {
+		totalRigs += len(rigs)
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			unreachable = append(unreachable, addr)
+			unreachableRigs += len(rigs)
+			details = append(details, fmt.Sprintf("Server %s unreachable (rigs: %s)", addr, strings.Join(rigs, ", ")))
+		} else {
+			_ = conn.Close()
+		}
+	}
+
+	if len(unreachable) > 0 {
 		return &CheckResult{
 			Name:   c.Name(),
 			Status: StatusError,
 			Message: fmt.Sprintf("SPLIT-BRAIN RISK: %d rig(s) configured for Dolt server mode but server unreachable at %s",
-				len(serverRigs), addr),
-			Details: []string{
-				fmt.Sprintf("Rigs expecting server: %s", strings.Join(serverRigs, ", ")),
+				unreachableRigs, strings.Join(unreachable, ", ")),
+			Details: append(details,
 				"bd commands will fail or create isolated local databases",
 				"This is the split-brain scenario — data written now may be invisible to the server later",
-			},
-			FixHint:  "Run 'gt dolt start' to start the Dolt server",
+			),
+			FixHint:  "Check dolt server connectivity or run 'gt dolt start' for local server",
 			Category: c.CheckCategory,
 		}
 	}
-	_ = conn.Close()
 
 	return &CheckResult{
 		Name:     c.Name(),
 		Status:   StatusOK,
-		Message:  fmt.Sprintf("Dolt server reachable (%d rig(s) in server mode)", len(serverRigs)),
+		Message:  fmt.Sprintf("Dolt server reachable (%d rig(s) in server mode)", totalRigs),
 		Category: c.CheckCategory,
 	}
 }
 
-// findServerModeRigs returns rig names whose metadata.json has dolt_mode=server.
-func (c *DoltServerReachableCheck) findServerModeRigs(townRoot string) []string {
-	var serverRigs []string
+// findServerModeRigsByAddr returns rig names grouped by their configured server address.
+// Rigs without explicit host/port fall back to the default local server (127.0.0.1:3307).
+func (c *DoltServerReachableCheck) findServerModeRigsByAddr(townRoot string) map[string][]string {
+	result := make(map[string][]string)
 
 	// Check town-level beads (hq)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if c.hasServerModeMetadata(townBeadsDir) {
-		serverRigs = append(serverRigs, "hq")
+	if addr, ok := c.getServerAddr(townBeadsDir); ok {
+		result[addr] = append(result[addr], "hq")
 	}
 
 	// Check rig-level beads
@@ -307,26 +320,125 @@ func (c *DoltServerReachableCheck) findServerModeRigs(townRoot string) []string 
 		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 			beadsDir = filepath.Join(townRoot, rigName, ".beads")
 		}
-		if c.hasServerModeMetadata(beadsDir) {
-			serverRigs = append(serverRigs, rigName)
+		if addr, ok := c.getServerAddr(beadsDir); ok {
+			result[addr] = append(result[addr], rigName)
 		}
 	}
 
-	return serverRigs
+	return result
 }
 
-// hasServerModeMetadata reads metadata.json and checks if dolt_mode is "server".
-func (c *DoltServerReachableCheck) hasServerModeMetadata(beadsDir string) bool {
+// getServerAddr reads metadata.json and returns the configured server address if dolt_mode is "server".
+// Returns the address string (host:port) and true if server mode is configured.
+func (c *DoltServerReachableCheck) getServerAddr(beadsDir string) (string, bool) {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
-		return false
+		return "", false
 	}
 	var metadata struct {
-		DoltMode string `json:"dolt_mode"`
+		DoltMode       string `json:"dolt_mode"`
+		DoltServerHost string `json:"dolt_server_host"`
+		DoltServerPort int    `json:"dolt_server_port"`
 	}
 	if err := json.Unmarshal(data, &metadata); err != nil {
-		return false
+		return "", false
 	}
-	return metadata.DoltMode == "server"
+	if metadata.DoltMode != "server" {
+		return "", false
+	}
+
+	host := metadata.DoltServerHost
+	port := metadata.DoltServerPort
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == 0 {
+		port = doltserver.DefaultPort
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port)), true
+}
+
+// DoltOrphanedDatabaseCheck detects databases in .dolt-data/ that are not
+// referenced by any rig's metadata.json. These orphans waste disk space and
+// are served unnecessarily by the Dolt server.
+type DoltOrphanedDatabaseCheck struct {
+	FixableCheck
+	orphanNames []string // Cached during Run for use in Fix
+}
+
+// NewDoltOrphanedDatabaseCheck creates a new orphaned database check.
+func NewDoltOrphanedDatabaseCheck() *DoltOrphanedDatabaseCheck {
+	return &DoltOrphanedDatabaseCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "dolt-orphaned-databases",
+				CheckDescription: "Detect orphaned databases in .dolt-data/",
+				CheckCategory:    CategoryCleanup,
+			},
+		},
+	}
+}
+
+// Run checks for orphaned databases.
+func (c *DoltOrphanedDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
+	c.orphanNames = nil
+
+	orphans, err := doltserver.FindOrphanedDatabases(ctx.TownRoot)
+	if err != nil {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusWarning,
+			Message:  fmt.Sprintf("Could not check for orphaned databases: %v", err),
+			Category: c.CheckCategory,
+		}
+	}
+
+	if len(orphans) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No orphaned databases in .dolt-data/",
+			Category: c.CheckCategory,
+		}
+	}
+
+	details := make([]string, len(orphans))
+	for i, o := range orphans {
+		details[i] = fmt.Sprintf("Orphaned: %s (%s)", o.Name, formatBytes(o.SizeBytes))
+		c.orphanNames = append(c.orphanNames, o.Name)
+	}
+
+	return &CheckResult{
+		Name:     c.Name(),
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("%d orphaned database(s) in .dolt-data/", len(orphans)),
+		Details:  details,
+		FixHint:  "Run 'gt dolt cleanup' to remove orphaned databases",
+		Category: c.CheckCategory,
+	}
+}
+
+// Fix removes orphaned databases.
+func (c *DoltOrphanedDatabaseCheck) Fix(ctx *CheckContext) error {
+	for _, name := range c.orphanNames {
+		if err := doltserver.RemoveDatabase(ctx.TownRoot, name); err != nil {
+			return fmt.Errorf("removing orphaned database %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// formatBytes returns a human-readable size string.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

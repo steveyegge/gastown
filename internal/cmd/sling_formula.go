@@ -108,6 +108,14 @@ func runSlingFormula(args []string) error {
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
 
+	rollbackSpawned := func(beadID string) {
+		if resolved.NewPolecatInfo == nil {
+			return
+		}
+		fmt.Printf("%s Rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), resolved.NewPolecatInfo.PolecatName)
+		rollbackSlingArtifactsFn(resolved.NewPolecatInfo, beadID, formulaWorkDir)
+	}
+
 	if slingDryRun {
 		fmt.Printf("Would cook formula: %s\n", formulaName)
 		fmt.Printf("Would create wisp and pin to: %s\n", targetAgent)
@@ -131,6 +139,7 @@ func runSlingFormula(args []string) error {
 	cookCmd.Dir = formulaWorkDir
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
+		rollbackSpawned("")
 		return fmt.Errorf("cooking formula: %w", err)
 	}
 
@@ -147,12 +156,14 @@ func runSlingFormula(args []string) error {
 	wispCmd.Stderr = os.Stderr // Show wisp errors to user
 	wispOut, err := wispCmd.Output()
 	if err != nil {
+		rollbackSpawned("")
 		return fmt.Errorf("creating wisp: %w", err)
 	}
 
 	// Parse wisp output to get the root ID
 	wispRootID, err := parseWispIDFromJSON(wispOut)
 	if err != nil {
+		rollbackSpawned("")
 		return fmt.Errorf("parsing wisp output: %w", err)
 	}
 
@@ -207,7 +218,7 @@ func runSlingFormula(args []string) error {
 	if resolved.NewPolecatInfo != nil && resolved.NewPolecatInfo.DoltBranch != "" {
 		if err := resolved.NewPolecatInfo.CreateDoltBranch(); err != nil {
 			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
-			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "")
 			return fmt.Errorf("creating Dolt branch: %w", err)
 		}
 	}
@@ -218,7 +229,7 @@ func runSlingFormula(args []string) error {
 		pane, err := resolved.NewPolecatInfo.StartSession()
 		if err != nil {
 			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
-			rollbackSlingArtifacts(resolved.NewPolecatInfo, wispRootID, "")
+			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane

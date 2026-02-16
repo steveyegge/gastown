@@ -2,10 +2,29 @@
 # Block PRs by preventing pushes to arbitrary feature branches.
 # Gas Town agents push to main (crew) or polecat/* branches (polecats).
 # PRs are for external contributors only.
+#
+# Also enforces integration branch landing guardrails: pushes to the default
+# branch that introduce integration branch content are blocked unless
+# GT_INTEGRATION_LAND=1 is set (only gt mq integration land sets this).
+
+# Detect the rig's default branch dynamically.
+# Fallback chain matches Go implementation (git.RemoteDefaultBranch):
+# 1. origin/HEAD symref
+# 2. origin/master (if it exists)
+# 3. origin/main (final fallback)
+default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's#refs/remotes/origin/##')
+if [[ -z "$default_branch" ]]; then
+  if git rev-parse --verify origin/master &>/dev/null; then
+    default_branch=master
+  else
+    default_branch=main
+  fi
+fi
 
 # Allowed patterns:
-#   main, beads-sync  - Direct work branches
-#   polecat/*         - Polecat working branches (Refinery merges these)
+#   <default_branch>, beads-sync  - Direct work branches
+#   polecat/*                     - Polecat working branches (Refinery merges these)
+#   integration/*                 - Integration branches (created by gt mq integration)
 
 while read local_ref local_sha remote_ref remote_sha; do
   # Skip tags - they're allowed for releases
@@ -16,7 +35,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   branch="${remote_ref#refs/heads/}"
 
   case "$branch" in
-    main|beads-sync|polecat/*)
+    "${default_branch}"|beads-sync|polecat/*|integration/*)
       # Allowed branches
       ;;
     *)
@@ -29,8 +48,9 @@ while read local_ref local_sha remote_ref remote_sha; do
         echo "Blocked push to: $branch"
         echo ""
         echo "Allowed branches:"
-        echo "  main        - Crew workers push here directly"
+        echo "  ${default_branch}        - Crew workers push here directly"
         echo "  polecat/*   - Polecat working branches"
+        echo "  integration/* - Integration branches"
         echo "  beads-sync  - Beads synchronization"
         echo ""
         echo "Do NOT create PRs. Push to main or let Refinery merge polecat work."
@@ -38,6 +58,41 @@ while read local_ref local_sha remote_ref remote_sha; do
       fi
       ;;
   esac
+
+  # Integration branch landing guardrail: when pushing to the default branch,
+  # check if any integration branch tip is newly reachable from this push.
+  # This catches merges (--no-ff, --ff-only, default) and rebases.
+  # Only cherry-picks (new SHAs) are not detected — Layer 1 covers those.
+  if [[ "$branch" == "$default_branch" ]] && [[ "$GT_INTEGRATION_LAND" != "1" ]]; then
+    # Skip for deletions or initial pushes
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]] || \
+       [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+      continue
+    fi
+    # Check if any integration branch tip is newly reachable from this push.
+    # Use ls-remote instead of for-each-ref to avoid false positives from stale
+    # local tracking refs that may linger after branch deletion.
+    # Fail closed: if ls-remote fails (network error), block the push rather than
+    # silently allowing unverified integration branch content through.
+    integration_refs=$(git ls-remote --quiet origin "refs/heads/integration/*" 2>&1) || {
+      echo "WARNING: Cannot verify integration branches (remote unreachable)."
+      echo "Push to $default_branch blocked. Retry when network is available,"
+      echo "or set GT_INTEGRATION_LAND=1 if this is an intentional land operation."
+      exit 1
+    }
+    for ref in $(echo "$integration_refs" | awk '{print $1}'); do
+      if git merge-base --is-ancestor "$ref" "$local_sha" && \
+         ! git merge-base --is-ancestor "$ref" "$remote_sha"; then
+        echo "BLOCKED: Push to $default_branch introduces integration branch content."
+        echo ""
+        echo "Integration branches must be landed via: gt mq integration land <epic-id>"
+        echo ""
+        echo "This guardrail prevents accidental landing of integration branches."
+        echo "The gt mq integration land command sets GT_INTEGRATION_LAND=1 to bypass this check."
+        exit 1
+      fi
+    done
+  fi
 done
 
 exit 0

@@ -38,7 +38,8 @@ var (
 )
 
 // renderView renders the entire view.
-func (m Model) renderView() string {
+// Caller must hold m.mu.
+func (m *Model) renderView() string {
 	var b strings.Builder
 
 	// Title

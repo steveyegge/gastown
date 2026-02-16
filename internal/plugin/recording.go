@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
+
+const bdCommandTimeout = 30 * time.Second
 
 // RunResult represents the outcome of a plugin execution.
 type RunResult string
@@ -77,7 +80,9 @@ func (r *Recorder) RecordRun(record PluginRunRecord) (string, error) {
 		args = append(args, "--description="+record.Body)
 	}
 
-	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
+	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot
 	// Set BEADS_DIR explicitly to prevent inherited env vars from causing
 	// prefix mismatches when redirects are in play.
@@ -143,7 +148,9 @@ func (r *Recorder) queryRuns(pluginName string, limit int, since string) ([]*Plu
 		args = append(args, "--created-after="+sinceArg)
 	}
 
-	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
+	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot
 	// Set BEADS_DIR explicitly to prevent inherited env vars from causing
 	// prefix mismatches when redirects are in play.

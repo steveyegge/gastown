@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -226,6 +228,15 @@ type BeadEntry struct {
 	UpdateRel string    `json:"updated_relative"`
 }
 
+// HookEntry represents a hook/unhook event for output.
+type HookEntry struct {
+	Type      string    `json:"type"`
+	Actor     string    `json:"actor"`
+	Bead      string    `json:"bead,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	TimeRel   string    `json:"time_relative"`
+}
+
 func runTrailBeads(cmd *cobra.Command, args []string) error {
 	// Find beads directory
 	beadsDir, err := findBeadsDir()
@@ -330,21 +341,130 @@ func runTrailBeadsSimple(beadsDir string) error {
 }
 
 func runTrailHooks(cmd *cobra.Command, args []string) error {
-	// For now, show current hooks status since we don't have hook history
-	// TODO: Implement hook activity log with HookEntry tracking
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	var since time.Time
+	if trailSince != "" {
+		duration, err := parseDuration(trailSince)
+		if err != nil {
+			return fmt.Errorf("invalid --since value: %w", err)
+		}
+		since = time.Now().Add(-duration)
+	}
+
+	entries, err := readHookTrailEntries(filepath.Join(townRoot, events.EventsFile), since, trailLimit)
+	if err != nil {
+		return err
+	}
 
 	if trailJSON {
-		// Return empty array for now
-		fmt.Println("[]")
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(entries)
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No hook activity found")
 		return nil
 	}
 
 	fmt.Printf("%s\n\n", style.Bold.Render("Hook Activity"))
-	fmt.Printf("%s Hook activity tracking not yet implemented.\n", style.Dim.Render("Note:"))
-	fmt.Printf("%s Showing current hook status instead.\n\n", style.Dim.Render("     "))
+	for _, entry := range entries {
+		action := "hooked"
+		if entry.Type == events.TypeUnhook {
+			action = "unhooked"
+		}
+		target := "a bead"
+		if entry.Bead != "" {
+			target = entry.Bead
+		}
+		fmt.Printf(
+			"%s %s %s %s\n",
+			style.Dim.Render(entry.Timestamp.Format("2006-01-02 15:04")),
+			style.Bold.Render(entry.Actor),
+			action,
+			style.Bold.Render(target),
+		)
+		if entry.TimeRel != "" {
+			fmt.Printf("    %s\n", style.Dim.Render(entry.TimeRel))
+		}
+	}
 
-	// Call the internal hook show function directly instead of spawning subprocess
-	return runHookShow(cmd, nil)
+	return nil
+}
+
+func readHookTrailEntries(eventsPath string, since time.Time, limit int) ([]HookEntry, error) {
+	if limit <= 0 {
+		return []HookEntry{}, nil
+	}
+
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading events file: %w", err)
+	}
+
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	entryCap := len(lines)
+	if limit < entryCap {
+		entryCap = limit
+	}
+	entries := make([]HookEntry, 0, entryCap)
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+
+		var event events.Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+		if event.Type != events.TypeHook && event.Type != events.TypeUnhook {
+			continue
+		}
+
+		ts, err := time.Parse(time.RFC3339, event.Timestamp)
+		if err != nil {
+			continue
+		}
+		if !since.IsZero() && ts.Before(since) {
+			continue
+		}
+
+		bead := ""
+		if rawBead, ok := event.Payload["bead"]; ok && rawBead != nil {
+			bead = strings.TrimSpace(fmt.Sprint(rawBead))
+		}
+
+		actor := strings.TrimSpace(event.Actor)
+		if actor == "" {
+			actor = "unknown"
+		}
+
+		entries = append(entries, HookEntry{
+			Type:      event.Type,
+			Actor:     actor,
+			Bead:      bead,
+			Timestamp: ts,
+			TimeRel:   relativeTime(ts),
+		})
+		if len(entries) >= limit {
+			break
+		}
+	}
+
+	return entries, nil
 }
 
 func findBeadsDir() (string, error) {

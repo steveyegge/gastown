@@ -77,6 +77,27 @@ gt mail archive <message-id>
 Dogs return to idle automatically. The report is informational - no action needed
 unless the dog reports errors that require escalation.
 
+**RECOVERED_BEAD messages** (from Witness):
+When a Witness detects a dead polecat with abandoned work, it resets the bead
+to open status and sends a RECOVERED_BEAD mail. The Deacon auto re-dispatches:
+Subject format: `RECOVERED_BEAD <bead-id>`
+```bash
+# For each RECOVERED_BEAD message:
+gt mail read <id>
+# Extract bead ID from subject
+gt deacon redispatch <bead-id>
+gt mail archive <message-id>
+```
+
+The `redispatch` command handles:
+- Rate-limiting (5-minute cooldown between re-dispatches of same bead)
+- Failure tracking (after 3 failures, escalates to Mayor instead of re-slinging)
+- Auto-detection of target rig from bead prefix
+- Skipping beads that were already claimed by another polecat
+
+Exit codes: 0=dispatched, 2=cooldown, 3=skipped. Non-zero non-error codes are
+informational - archive the message regardless.
+
 Callbacks may spawn new polecats, update issue state, or trigger other actions.
 
 **Hygiene principle**: Archive messages after they're fully processed.
@@ -265,10 +286,13 @@ id = "feed-stranded-convoys"
 title = "Feed stranded convoys"
 needs = ["check-convoy-completion"]
 description = """
-Detect stranded convoys and dispatch dogs to feed them.
+Detect stranded convoys and dispatch dogs to feed them, or auto-close empty convoys.
 
-A convoy is "stranded" when it has ready issues (open, unblocked, no assignee)
-but no workers are processing them. This step ensures work doesn't stall.
+A convoy is "stranded" when it is open AND either:
+- Has ready issues (open, unblocked, no assignee) but no workers, OR
+- Has 0 tracked issues (empty — needs auto-close via convoy check)
+
+This step ensures work doesn't stall and empty convoys get cleaned up.
 
 **Step 1: Check for stranded convoys**
 ```bash
@@ -277,30 +301,38 @@ gt convoy stranded --json
 
 If no stranded convoys, skip to exit criteria.
 
-**Step 2: For each stranded convoy, dispatch a dog**
+**Step 2: Handle each stranded convoy based on ready_count**
+
+For convoys with `ready_count > 0` (has ready work), dispatch a dog to feed:
 ```bash
-# For each convoy in the stranded list:
 gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
 ```
 
-The dog will:
+For convoys with `ready_count == 0` (empty, needs cleanup), auto-close directly:
+```bash
+gt convoy check <convoy-id>
+```
+
+The feed dog will:
 1. Load the convoy and find ready issues
 2. Check polecat capacity across rigs
 3. Dispatch ready issues using `gt sling`
 4. Return to kennel
 
 **Step 3: Log dispatches**
-Note which convoys were fed for observability:
+Note which convoys were handled for observability:
 ```bash
 # Convoy <convoy-id> dispatched to dog for feeding (<N> ready issues)
+# Convoy <convoy-id> auto-closed (empty, 0 tracked issues)
 ```
 
-**If no idle dogs available:**
+**If no idle dogs available (for feedable convoys only):**
 Pool dispatch auto-creates a dog when the pool is under capacity (max 4).
 If the pool is at capacity, log warning and continue - the convoy will be
 detected again next cycle when a dog becomes idle.
+Note: empty convoy cleanup (`gt convoy check`) does not require a dog — run it directly regardless of pool capacity.
 
-**Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
+**Exit criteria:** All stranded convoys have been handled — feedable ones dispatched to dogs, empty ones auto-closed directly via `gt convoy check`."""
 
 [[steps]]
 id = "resolve-external-deps"
@@ -418,15 +450,15 @@ gt witness status <rig>
 gt refinery status <rig>
 
 # ONLY if active work exists - health ping (clears backoff as side effect)
-gt nudge <rig>/witness 'HEALTH_CHECK from deacon'
-gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
+# Use --mode=queue to avoid interrupting in-flight tool calls
+gt nudge --mode=queue <rig>/witness 'HEALTH_CHECK from deacon'
+gt nudge --mode=queue <rig>/refinery 'HEALTH_CHECK from deacon'
 ```
 
-**Health Ping Benefit**: The nudge commands serve dual purposes:
-1. **Liveness verification** - Agent responds to prove it's alive
-2. **Backoff reset** - Any nudge resets agent's backoff to base interval
-
-This ensures patrol agents remain responsive during active work periods.
+**Health Ping Benefit**: The queued nudge commands serve as a **backoff reset** —
+any nudge resets the agent's backoff to base interval, ensuring patrol agents
+remain responsive during active work periods. Formal liveness verification is
+handled separately by `gt deacon health-check` (which uses immediate delivery).
 
 **Signals to assess:**
 
@@ -941,14 +973,13 @@ This enables the Deacon to burn and respawn cleanly."""
 
 [[steps]]
 id = "loop-or-exit"
-title = "Burn and respawn or loop"
+title = "Loop or exit for respawn"
 needs = ["context-check"]
 description = """
-Burn and let daemon respawn, or exit if context high.
+End of patrol cycle decision.
 
-Decision point at end of patrol cycle:
+**If context LOW** (can continue patrolling):
 
-If context is LOW:
 Use await-signal with exponential backoff to wait for activity:
 
 ```bash
@@ -971,27 +1002,30 @@ Reset the idle counter and start next patrol cycle:
 ```bash
 gt agent state hq-deacon --set idle=0
 ```
-Then return to inbox-check step.
 
 **On timeout** (no activity):
 The idle counter was auto-incremented. Continue to next patrol cycle
-(the longer backoff will apply next time). Return to inbox-check step.
+(the longer backoff will apply next time).
 
-**Why this approach?**
-- Any `gt` or `bd` command triggers beads activity, waking the Deacon
-- Idle towns let the Deacon sleep longer (up to 5 min between patrols)
-- Active work wakes the Deacon immediately via the feed
-- No polling or fixed sleep intervals
-
-If context is HIGH:
-- Write state to persistent storage
-- Exit cleanly
-- Let the daemon orchestrator respawn a fresh Deacon
-
-The daemon ensures Deacon is always running:
+After await-signal returns (either by signal or timeout):
+1. Generate a brief summary of this patrol cycle
+2. Squash the current wisp:
 ```bash
-# Daemon respawns on exit
-gt daemon status
+bd mol squash <mol-id> --summary "<patrol-summary>"
 ```
+3. Create and hook a new patrol wisp:
+```bash
+NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=deacon
+```
+4. Continue executing from the inbox-check step of the new wisp
 
-This enables infinite patrol duration via context-aware respawning."""
+**If context HIGH** (approaching limit):
+1. Write handoff mail with notable observations:
+```bash
+gt handoff -s "Deacon patrol handoff" -m "<observations>"
+```
+2. Exit cleanly - the daemon will respawn a fresh Deacon session
+
+**IMPORTANT**: You must either create a new wisp (context LOW) or exit (context HIGH).
+Never leave the session idle without work on your hook."""

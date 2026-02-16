@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -20,8 +21,13 @@ var (
 )
 
 var statusLineCmd = &cobra.Command{
-	Use:    "status-line",
-	Short:  "Output status line content for tmux (internal use)",
+	Use:   "status-line",
+	Short: "Output status line content for tmux (internal use)",
+	Long: `Output formatted status line content for the tmux status bar.
+
+Called internally by the tmux status-right configuration. Displays
+the current rig, role, worker name, and active issue. Pass --session
+to specify which tmux session to query.`,
 	Hidden: true, // Internal command called by tmux
 	RunE:   runStatusLine,
 }
@@ -363,7 +369,14 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		if led == "🅿️" {
 			space = "  "
 		}
-		rigParts = append(rigParts, led+space+rig.name)
+		// Abbreviate rig names to beads prefix when >2 rigs
+		displayName := rig.name
+		if len(rigs) > 2 && townRoot != "" {
+			if prefix := config.GetRigPrefix(townRoot, rig.name); prefix != "" {
+				displayName = prefix
+			}
+		}
+		rigParts = append(rigParts, led+space+displayName)
 	}
 
 	if len(rigParts) > 0 {
@@ -467,15 +480,15 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 // Note: Polecats excluded - their sessions are ephemeral and idle detection is a GC concern
 func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
-		// Try to extract from session name: gt-<rig>-witness
-		if strings.HasSuffix(statusLineSession, "-witness") && strings.HasPrefix(statusLineSession, "gt-") {
-			rigName = strings.TrimPrefix(strings.TrimSuffix(statusLineSession, "-witness"), "gt-")
+		// Try to extract from session name: <prefix>-witness
+		if identity, err := session.ParseSessionName(statusLineSession); err == nil && identity.Role == session.RoleWitness {
+			rigName = identity.Rig
 		}
 	}
 
 	// Get town root from witness pane's working directory
 	var townRoot string
-	sessionName := fmt.Sprintf("gt-%s-witness", rigName)
+	sessionName := session.WitnessSessionName(session.PrefixFor(rigName))
 	paneDir, err := t.GetPaneWorkDir(sessionName)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
@@ -534,10 +547,9 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 // Shows: MQ length, current item, hook or mail preview
 func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
-		// Try to extract from session name: gt-<rig>-refinery
-		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-refinery") {
-			rigName = strings.TrimPrefix(statusLineSession, "gt-")
-			rigName = strings.TrimSuffix(rigName, "-refinery")
+		// Try to extract from session name: <prefix>-refinery
+		if identity, err := session.ParseSessionName(statusLineSession); err == nil && identity.Role == session.RoleRefinery {
+			rigName = identity.Rig
 		}
 	}
 
@@ -548,7 +560,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 
 	// Get town root from refinery pane's working directory
 	var townRoot string
-	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+	sessionName := session.RefinerySessionName(session.PrefixFor(rigName))
 	paneDir, err := t.GetPaneWorkDir(sessionName)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)

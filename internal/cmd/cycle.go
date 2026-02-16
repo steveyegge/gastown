@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"fmt"
 	"os/exec"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
+	sessionpkg "github.com/steveyegge/gastown/internal/session"
 )
 
 // cycleSession is the --session flag for cycle next/prev commands.
@@ -34,7 +33,11 @@ Session groups:
 - Rig infra sessions: Witness ↔ Refinery (per rig)
 - Polecat sessions: All polecats in the same rig (e.g., greenplace/Toast ↔ greenplace/Nux)
 
-The appropriate cycling is detected automatically from the session name.`,
+The appropriate cycling is detected automatically from the session name.
+
+Examples:
+  gt cycle next    # Switch to next session in group
+  gt cycle prev    # Switch to previous session in group`,
 }
 
 var cycleNextCmd = &cobra.Command{
@@ -44,7 +47,11 @@ var cycleNextCmd = &cobra.Command{
 
 This command is typically invoked via the C-b n keybinding. It automatically
 detects whether you're in a town-level session (Mayor/Deacon) or a crew session
-and cycles within the appropriate group.`,
+and cycles within the appropriate group.
+
+Examples:
+  gt cycle next
+  gt cycle next --session gt-gastown-witness  # Explicit session context`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cycleToSession(1, cycleSession)
 	},
@@ -57,7 +64,11 @@ var cyclePrevCmd = &cobra.Command{
 
 This command is typically invoked via the C-b p keybinding. It automatically
 detects whether you're in a town-level session (Mayor/Deacon) or a crew session
-and cycles within the appropriate group.`,
+and cycles within the appropriate group.
+
+Examples:
+  gt cycle prev
+  gt cycle prev --session gt-gastown-witness  # Explicit session context`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cycleToSession(-1, cycleSession)
 	},
@@ -86,8 +97,8 @@ func cycleToSession(direction int, sessionOverride string) error {
 		}
 	}
 
-	// Check if it's a crew session (format: gt-<rig>-crew-<name>)
-	if strings.HasPrefix(session, "gt-") && strings.Contains(session, "-crew-") {
+	// Check if it's a crew session (format: <prefix>-crew-<name>)
+	if identity, err := sessionpkg.ParseSessionName(session); err == nil && identity.Role == sessionpkg.RoleCrew {
 		return cycleCrewSession(direction, session)
 	}
 
@@ -107,19 +118,14 @@ func cycleToSession(direction int, sessionOverride string) error {
 
 // parseRigInfraSession extracts rig name if this is a witness or refinery session.
 // Returns empty string if not a rig infra session.
-// Format: gt-<rig>-witness or gt-<rig>-refinery
-func parseRigInfraSession(session string) string {
-	if !strings.HasPrefix(session, "gt-") {
+// Format: <prefix>-witness or <prefix>-refinery
+func parseRigInfraSession(sess string) string {
+	identity, err := sessionpkg.ParseSessionName(sess)
+	if err != nil {
 		return ""
 	}
-	rest := session[3:] // Remove "gt-" prefix
-
-	// Check for -witness or -refinery suffix
-	if strings.HasSuffix(rest, "-witness") {
-		return strings.TrimSuffix(rest, "-witness")
-	}
-	if strings.HasSuffix(rest, "-refinery") {
-		return strings.TrimSuffix(rest, "-refinery")
+	if identity.Role == sessionpkg.RoleWitness || identity.Role == sessionpkg.RoleRefinery {
+		return identity.Rig
 	}
 	return ""
 }
@@ -127,8 +133,8 @@ func parseRigInfraSession(session string) string {
 // cycleRigInfraSession cycles between witness and refinery sessions for a rig.
 func cycleRigInfraSession(direction int, currentSession, rig string) error {
 	// Find running infra sessions for this rig
-	witnessSession := fmt.Sprintf("gt-%s-witness", rig)
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rig)
+	witnessSession := sessionpkg.WitnessSessionName(sessionpkg.PrefixFor(rig))
+	refinerySession := sessionpkg.RefinerySessionName(sessionpkg.PrefixFor(rig))
 
 	var sessions []string
 	allSessions, err := listTmuxSessions()
@@ -170,7 +176,7 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 	}
 
 	// Switch to target session
-	cmd := exec.Command("tmux", "switch-client", "-t", sessions[targetIdx])
+	cmd := exec.Command("tmux", "-u", "switch-client", "-t", sessions[targetIdx])
 	return cmd.Run()
 }
 

@@ -22,11 +22,13 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping test")
 	}
+	requireDoltServer(t)
 
 	t.Run("TownLevelRoutesNotCorrupted", func(t *testing.T) {
 		// Test that gt install creates issues.jsonl before routes.jsonl
 		// so that bd auto-export doesn't corrupt routes.jsonl
 		tmpDir := t.TempDir()
+		configureTestGitIdentity(t, tmpDir)
 		townRoot := filepath.Join(tmpDir, "test-town")
 
 		gtBinary := buildGT(t)
@@ -84,6 +86,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 		// Test that gt rig add does NOT create routes.jsonl in rig beads
 		// (rig-level routes.jsonl breaks bd's walk-up routing to town routes)
 		tmpDir := t.TempDir()
+		configureTestGitIdentity(t, tmpDir)
 		townRoot := filepath.Join(tmpDir, "test-town")
 
 		gtBinary := buildGT(t)
@@ -159,10 +162,7 @@ func TestRoutesJSONLCorruption(t *testing.T) {
 
 		// If routes.jsonl contains "title", it was corrupted with issue data
 		if strings.Contains(string(newRoutesContent), `"title"`) {
-			t.Log("BUG REPRODUCED: routes.jsonl was corrupted with issue data")
-			t.Log("Content:", string(newRoutesContent))
-			// This is expected behavior WITHOUT the fix
-			// The test passes if the fix prevents this
+			t.Errorf("routes.jsonl was corrupted with issue data: %s", string(newRoutesContent))
 		}
 	})
 }

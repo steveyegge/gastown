@@ -151,7 +151,7 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	var allMsgs []BeadsMessage
 	if err := json.Unmarshal(stdout, &allMsgs); err != nil {
 		if len(stdout) == 0 || string(stdout) == "null" {
-			return nil, nil
+			return make([]*Message, 0), nil
 		}
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	}
 
 	// Filter: assignee match (open/hooked) OR CC match (open only)
-	var messages []*Message
+	messages := make([]*Message, 0)
 	for i := range allMsgs {
 		bm := &allMsgs[i]
 
@@ -210,13 +210,13 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return make([]*Message, 0), nil
 		}
 		return nil, err
 	}
 	defer func() { _ = file.Close() }() // non-fatal: OS will close on exit
 
-	var messages []*Message
+	messages := make([]*Message, 0)
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
 	for scanner.Scan() {
@@ -252,7 +252,7 @@ func (m *Mailbox) ListUnread() ([]*Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	var unread []*Message
+	unread := make([]*Message, 0)
 	for _, msg := range all {
 		if !msg.Read {
 			unread = append(unread, msg)

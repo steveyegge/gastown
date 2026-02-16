@@ -47,7 +47,7 @@ func (m *Manager) IsRunning() (bool, error) {
 
 // SessionName returns the tmux session name for this witness.
 func (m *Manager) SessionName() string {
-	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
+	return session.WitnessSessionName(session.PrefixFor(m.rig.Name))
 }
 
 // Status returns information about the witness session.
@@ -117,17 +117,19 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure runtime settings exist in the working directory.
-	// Claude Code does NOT traverse parent directories for settings.json.
-	// See: https://github.com/anthropics/claude-code/issues/12962
+	// Ensure runtime settings exist in the shared witness parent directory.
+	// Settings are passed to Claude Code via --settings flag.
+	// ResolveRoleAgentConfig is internally serialized (resolveConfigMu in
+	// package config) to prevent concurrent rig starts from corrupting the
+	// global agent registry.
 	townRoot := m.townRoot()
 	runtimeConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(witnessDir, "witness", runtimeConfig); err != nil {
+	witnessSettingsDir := config.RoleSettingsDir("witness", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(witnessSettingsDir, witnessDir, "witness", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns (including .claude/settings.local.json)
-	// so settings.local.json doesn't dirty the source repo worktree.
+	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(witnessDir); err != nil {
 		fmt.Printf("Warning: could not update witness .gitignore: %v\n", err)
 	}
@@ -240,7 +242,7 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		Recipient: fmt.Sprintf("%s/witness", rigName),
 		Sender:    "deacon",
 		Topic:     "patrol",
-	}, "I am Witness for "+rigName+". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it.")
+	}, "Run `gt prime --hook` and begin patrol.")
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)

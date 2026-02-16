@@ -2,6 +2,69 @@
     'use strict';
 
     // ============================================
+    // SSE (Server-Sent Events) CONNECTION
+    // ============================================
+    window.sseConnected = false;
+    var evtSource = null;
+    var sseReconnectDelay = 1000;
+    var sseMaxReconnectDelay = 30000;
+
+    function connectSSE() {
+        if (evtSource) {
+            evtSource.close();
+        }
+
+        evtSource = new EventSource('/api/events');
+
+        evtSource.addEventListener('connected', function() {
+            window.sseConnected = true;
+            sseReconnectDelay = 1000;
+            updateConnectionStatus('live');
+        });
+
+        evtSource.addEventListener('dashboard-update', function(e) {
+            if (window.pauseRefresh) return;
+            // Trigger HTMX to re-fetch the dashboard
+            var dashboard = document.getElementById('dashboard-main');
+            if (dashboard && typeof htmx !== 'undefined') {
+                htmx.trigger(dashboard, 'sse:dashboard-update');
+            }
+        });
+
+        evtSource.onerror = function() {
+            window.sseConnected = false;
+            updateConnectionStatus('reconnecting');
+            evtSource.close();
+            // Exponential backoff reconnect
+            setTimeout(function() {
+                sseReconnectDelay = Math.min(sseReconnectDelay * 2, sseMaxReconnectDelay);
+                connectSSE();
+            }, sseReconnectDelay);
+        };
+    }
+
+    function updateConnectionStatus(state) {
+        var el = document.getElementById('connection-status');
+        if (!el) return;
+        switch (state) {
+            case 'live':
+                el.textContent = 'Live';
+                el.className = 'connection-live';
+                break;
+            case 'reconnecting':
+                el.textContent = 'Reconnecting...';
+                el.className = 'connection-reconnecting';
+                break;
+            default:
+                el.textContent = 'Connecting...';
+                el.className = '';
+        }
+    }
+
+    // Start SSE connection
+    connectSSE();
+
+    // ============================================
     // EXPAND BUTTON HANDLER
     // ============================================
     document.addEventListener('click', function(e) {
@@ -30,6 +93,20 @@
         }
     });
 
+    // ============================================
+    // COLLAPSE BUTTON HANDLER
+    // ============================================
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.collapse-btn');
+        if (!btn) return;
+
+        e.preventDefault();
+        var panel = btn.closest('.panel');
+        if (!panel) return;
+
+        panel.classList.toggle('collapsed');
+    });
+
     // After HTMX swap - morph preserves most state, but we need to re-init some things
     document.body.addEventListener('htmx:afterSwap', function() {
         // Morph preserves expanded class, so we don't need to close panels anymore
@@ -39,16 +116,22 @@
         var mailCompose = document.getElementById('mail-compose');
         var issueDetail = document.getElementById('issue-detail');
         var prDetail = document.getElementById('pr-detail');
+        var convoyDetailView = document.getElementById('convoy-detail');
+        var convoyCreateView = document.getElementById('convoy-create-form');
         var inDetailView = (mailDetail && mailDetail.style.display !== 'none') ||
                           (mailCompose && mailCompose.style.display !== 'none') ||
                           (issueDetail && issueDetail.style.display !== 'none') ||
-                          (prDetail && prDetail.style.display !== 'none');
+                          (prDetail && prDetail.style.display !== 'none') ||
+                          (convoyDetailView && convoyDetailView.style.display !== 'none') ||
+                          (convoyCreateView && convoyCreateView.style.display !== 'none');
         if (!inDetailView && !hasExpanded) {
             window.pauseRefresh = false;
         }
         // Reload dynamic panels after swap (handled via window functions)
         if (window.refreshCrewPanel) window.refreshCrewPanel();
         if (window.refreshReadyPanel) window.refreshReadyPanel();
+        // Update connection status indicator after morph
+        updateConnectionStatus(window.sseConnected ? 'live' : 'reconnecting');
     });
 
     // ============================================
@@ -61,6 +144,108 @@
     var executionLock = false;
     var pendingCommand = null; // Command waiting for args
     var cachedOptions = null;  // Cached options from /api/options
+    var recentCommands = [];   // Recently executed commands (from localStorage)
+    var MAX_RECENT = 10;
+    var RECENT_STORAGE_KEY = 'gt-palette-recent';
+
+    // Load recent commands from localStorage
+    function loadRecentCommands() {
+        try {
+            var stored = localStorage.getItem(RECENT_STORAGE_KEY);
+            if (stored) {
+                recentCommands = JSON.parse(stored);
+                if (!Array.isArray(recentCommands)) recentCommands = [];
+                // Cap at MAX_RECENT
+                recentCommands = recentCommands.slice(0, MAX_RECENT);
+            }
+        } catch (e) {
+            recentCommands = [];
+        }
+    }
+
+    // Save a command to recent history
+    function saveRecentCommand(cmdName) {
+        // Remove duplicate if exists
+        recentCommands = recentCommands.filter(function(c) { return c !== cmdName; });
+        // Add to front
+        recentCommands.unshift(cmdName);
+        // Cap at MAX_RECENT
+        recentCommands = recentCommands.slice(0, MAX_RECENT);
+        try {
+            localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(recentCommands));
+        } catch (e) {
+            // localStorage full or unavailable, ignore
+        }
+    }
+
+    // Detect active context based on expanded panel or visible detail view
+    function detectActiveContext() {
+        var expandedPanel = document.querySelector('.panel.expanded');
+        if (expandedPanel) {
+            var panelId = expandedPanel.id || '';
+            if (panelId.indexOf('mail') !== -1) return 'Mail';
+            if (panelId.indexOf('crew') !== -1) return 'Crew';
+            if (panelId.indexOf('issue') !== -1 || panelId.indexOf('work') !== -1) return 'Work';
+            if (panelId.indexOf('ready') !== -1) return 'Work';
+            if (panelId.indexOf('pr') !== -1 || panelId.indexOf('merge') !== -1) return 'Status';
+        }
+        // Check detail views
+        var mailDetail = document.getElementById('mail-detail');
+        var mailCompose = document.getElementById('mail-compose');
+        if ((mailDetail && mailDetail.style.display !== 'none') ||
+            (mailCompose && mailCompose.style.display !== 'none')) return 'Mail';
+        var issueDetail = document.getElementById('issue-detail');
+        if (issueDetail && issueDetail.style.display !== 'none') return 'Work';
+        var prDetail = document.getElementById('pr-detail');
+        if (prDetail && prDetail.style.display !== 'none') return 'Status';
+        return null;
+    }
+
+    // Score a command for fuzzy matching. Returns -1 for no match, higher is better.
+    function scoreCommand(cmd, query) {
+        var name = cmd.name.toLowerCase();
+        var desc = cmd.desc.toLowerCase();
+        var cat = cmd.category.toLowerCase();
+        var q = query.toLowerCase();
+
+        // Exact prefix match on name is best
+        if (name.indexOf(q) === 0) return 100 + (50 - name.length);
+        // Prefix match on a word within the name
+        var nameParts = name.split(' ');
+        for (var i = 0; i < nameParts.length; i++) {
+            if (nameParts[i].indexOf(q) === 0) return 80 + (50 - name.length);
+        }
+        // Substring match in name
+        if (name.indexOf(q) !== -1) return 60 + (50 - name.length);
+        // Match in description
+        if (desc.indexOf(q) !== -1) return 40;
+        // Match in category
+        if (cat.indexOf(q) !== -1) return 20;
+        // Fuzzy: all query chars appear in order in name
+        var ni = 0;
+        for (var qi = 0; qi < q.length; qi++) {
+            ni = name.indexOf(q[qi], ni);
+            if (ni === -1) return -1;
+            ni++;
+        }
+        return 10;
+    }
+
+    // Highlight matching portions in text for display
+    function highlightMatch(text, query) {
+        if (!query) return escapeHtml(text);
+        var lowerText = text.toLowerCase();
+        var lowerQuery = query.toLowerCase();
+        var idx = lowerText.indexOf(lowerQuery);
+        if (idx !== -1) {
+            return escapeHtml(text.substring(0, idx)) +
+                '<mark>' + escapeHtml(text.substring(idx, idx + query.length)) + '</mark>' +
+                escapeHtml(text.substring(idx + query.length));
+        }
+        return escapeHtml(text);
+    }
+
+    loadRecentCommands();
 
     var overlay = document.getElementById('command-palette-overlay');
     var searchInput = document.getElementById('command-palette-input');
@@ -260,18 +445,50 @@
             resultsDiv.innerHTML = '<div class="command-palette-empty">No matching commands</div>';
             return;
         }
+        var currentQuery = searchInput ? searchInput.value.trim() : '';
         var html = '';
-        for (var i = 0; i < visibleCommands.length; i++) {
-            var cmd = visibleCommands[i];
-            var cls = 'command-item' + (i === selectedIdx ? ' selected' : '');
-            var argsHint = cmd.args ? ' <span class="command-args">' + escapeHtml(cmd.args) + '</span>' : '';
-            html += '<div class="' + cls + '" data-cmd-name="' + escapeHtml(cmd.name) + '" data-cmd-args="' + escapeHtml(cmd.args || '') + '">' +
-                '<span class="command-name">gt ' + escapeHtml(cmd.name) + argsHint + '</span>' +
-                '<span class="command-desc">' + escapeHtml(cmd.desc) + '</span>' +
-                '<span class="command-category">' + escapeHtml(cmd.category) + '</span>' +
-                '</div>';
+
+        if (currentQuery) {
+            // Search mode: flat list with highlights
+            for (var i = 0; i < visibleCommands.length; i++) {
+                var cmd = visibleCommands[i];
+                var cls = 'command-item' + (i === selectedIdx ? ' selected' : '');
+                var argsHint = cmd.args ? ' <span class="command-args">' + escapeHtml(cmd.args) + '</span>' : '';
+                var nameHtml = highlightMatch('gt ' + cmd.name, currentQuery);
+                html += '<div class="' + cls + '" data-cmd-name="' + escapeHtml(cmd.name) + '" data-cmd-args="' + escapeHtml(cmd.args || '') + '">' +
+                    '<span class="command-name">' + nameHtml + argsHint + '</span>' +
+                    '<span class="command-desc">' + escapeHtml(cmd.desc) + '</span>' +
+                    '<span class="command-category">' + escapeHtml(cmd.category) + '</span>' +
+                    '</div>';
+            }
+        } else {
+            // Browse mode: show Recent, Contextual, then All Commands
+            // visibleCommands was rebuilt by filterCommands with sections baked in
+            for (var j = 0; j < visibleCommands.length; j++) {
+                var item = visibleCommands[j];
+                if (item._section) {
+                    // Section header
+                    html += '<div class="command-section-header">' + escapeHtml(item._section) + '</div>';
+                    continue;
+                }
+                var cls2 = 'command-item' + (j === selectedIdx ? ' selected' : '');
+                var argsHint2 = item.args ? ' <span class="command-args">' + escapeHtml(item.args) + '</span>' : '';
+                var icon = item._recent ? '<span class="command-recent-icon">&#8635;</span>' : '';
+                html += '<div class="' + cls2 + '" data-cmd-name="' + escapeHtml(item.name) + '" data-cmd-args="' + escapeHtml(item.args || '') + '">' +
+                    icon +
+                    '<span class="command-name">gt ' + escapeHtml(item.name) + argsHint2 + '</span>' +
+                    '<span class="command-desc">' + escapeHtml(item.desc) + '</span>' +
+                    '<span class="command-category">' + escapeHtml(item.category) + '</span>' +
+                    '</div>';
+            }
         }
         resultsDiv.innerHTML = html;
+
+        // Scroll selected item into view
+        var selectedEl = resultsDiv.querySelector('.command-item.selected');
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ block: 'nearest' });
+        }
     }
 
     function runWithArgsFromForm(fieldCount) {
@@ -310,17 +527,68 @@
     }
 
     function filterCommands(query) {
-        query = (query || '').toLowerCase();
+        query = (query || '').trim();
         if (!query) {
-            visibleCommands = allCommands.slice();
+            // Build sectioned list: Recent, Contextual, All Commands
+            visibleCommands = [];
+            var shownNames = {};
+
+            // Recent section
+            var recentItems = [];
+            for (var ri = 0; ri < recentCommands.length; ri++) {
+                var recentCmd = allCommands.find(function(c) { return c.name === recentCommands[ri]; });
+                if (recentCmd) recentItems.push(recentCmd);
+            }
+            if (recentItems.length > 0) {
+                visibleCommands.push({ _section: 'Recent' });
+                for (var ri2 = 0; ri2 < recentItems.length; ri2++) {
+                    var rcmd = Object.assign({}, recentItems[ri2], { _recent: true });
+                    visibleCommands.push(rcmd);
+                    shownNames[rcmd.name] = true;
+                }
+            }
+
+            // Contextual section
+            var context = detectActiveContext();
+            if (context) {
+                var contextItems = allCommands.filter(function(c) {
+                    return c.category === context && !shownNames[c.name];
+                });
+                if (contextItems.length > 0) {
+                    visibleCommands.push({ _section: 'Suggested \u2014 ' + context });
+                    for (var ci = 0; ci < contextItems.length; ci++) {
+                        visibleCommands.push(contextItems[ci]);
+                        shownNames[contextItems[ci].name] = true;
+                    }
+                }
+            }
+
+            // All commands section (remaining)
+            var remaining = allCommands.filter(function(c) { return !shownNames[c.name]; });
+            remaining.sort(function(a, b) { return a.name.localeCompare(b.name); });
+            if (remaining.length > 0) {
+                visibleCommands.push({ _section: 'All Commands' });
+                for (var ai = 0; ai < remaining.length; ai++) {
+                    visibleCommands.push(remaining[ai]);
+                }
+            }
         } else {
-            visibleCommands = allCommands.filter(function(cmd) {
-                return cmd.name.toLowerCase().indexOf(query) !== -1 ||
-                       cmd.desc.toLowerCase().indexOf(query) !== -1 ||
-                       cmd.category.toLowerCase().indexOf(query) !== -1;
-            });
+            // Score and sort by relevance
+            var scored = [];
+            for (var i = 0; i < allCommands.length; i++) {
+                var s = scoreCommand(allCommands[i], query);
+                if (s > 0) {
+                    scored.push({ cmd: allCommands[i], score: s });
+                }
+            }
+            scored.sort(function(a, b) { return b.score - a.score; });
+            visibleCommands = scored.map(function(item) { return item.cmd; });
         }
         selectedIdx = 0;
+        // In browse mode, skip section headers for initial selection
+        while (selectedIdx < visibleCommands.length && visibleCommands[selectedIdx]._section) {
+            selectedIdx++;
+        }
         renderResults();
     }
 
@@ -389,6 +657,12 @@
 
         // Close palette FIRST before anything else
         closePalette();
+
+        // Save to recent commands history
+        // Extract base command name (without args) for history
+        var baseName = cmdName.split(' ').slice(0, 3).join(' ');
+        var matchedCmd = allCommands.find(function(c) { return cmdName.indexOf(c.name) === 0; });
+        saveRecentCommand(matchedCmd ? matchedCmd.name : baseName);
 
         executionLock = true;
         console.log('Running command:', cmdName);
@@ -487,6 +761,19 @@
             return;
         }
 
+        // Escape closes expanded panels when palette is not open
+        if (!isPaletteOpen && e.key === 'Escape') {
+            var expanded = document.querySelector('.panel.expanded');
+            if (expanded) {
+                e.preventDefault();
+                expanded.classList.remove('expanded');
+                var expandBtn = expanded.querySelector('.expand-btn');
+                if (expandBtn) expandBtn.textContent = 'Expand';
+                window.pauseRefresh = false;
+                return;
+            }
+        }
+
         // Rest only when palette is open
         if (!isPaletteOpen) return;
 
@@ -502,7 +789,10 @@
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             if (visibleCommands.length > 0) {
-                selectedIdx = Math.min(selectedIdx + 1, visibleCommands.length - 1);
+                var next = selectedIdx + 1;
+                // Skip section headers
+                while (next < visibleCommands.length && visibleCommands[next]._section) next++;
+                if (next < visibleCommands.length) selectedIdx = next;
                 renderResults();
             }
             return;
@@ -510,16 +800,19 @@
 
         if (e.key === 'ArrowUp') {
             e.preventDefault();
-            selectedIdx = Math.max(selectedIdx - 1, 0);
+            var prev = selectedIdx - 1;
+            // Skip section headers
+            while (prev >= 0 && visibleCommands[prev]._section) prev--;
+            if (prev >= 0) selectedIdx = prev;
             renderResults();
             return;
         }
 
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (visibleCommands[selectedIdx]) {
-                var cmd = visibleCommands[selectedIdx];
-                selectCommand(cmd.name, cmd.args);
+            var selected = visibleCommands[selectedIdx];
+            if (selected && !selected._section) {
+                selectCommand(selected.name, selected.args);
             }
             return;
         }
@@ -829,6 +1122,174 @@
 
 
     // ============================================
+    // HOOK MANAGEMENT
+    // ============================================
+
+    function detachHook(btn) {
+        var beadId = btn.getAttribute('data-hook-id');
+        if (!beadId) return;
+
+        if (!confirm('Detach hook ' + beadId + '?')) return;
+
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'hook detach ' + beadId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Detached', beadId + ' detached from hook');
+                // Refresh the page to update the hooks panel
+                if (typeof htmx !== 'undefined') {
+                    htmx.trigger(document.body, 'htmx:load');
+                }
+            } else {
+                showToast('error', 'Failed', data.error || 'Failed to detach hook');
+                btn.disabled = false;
+                btn.textContent = 'Detach';
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+            btn.disabled = false;
+            btn.textContent = 'Detach';
+        });
+    }
+    window.detachHook = detachHook;
+
+    function openHookAttachForm() {
+        var form = document.getElementById('hook-attach-form');
+        if (form) {
+            form.style.display = 'block';
+            var input = document.getElementById('hook-attach-bead');
+            if (input) {
+                input.value = '';
+                setTimeout(function() { input.focus(); }, 50);
+            }
+        }
+    }
+    window.openHookAttachForm = openHookAttachForm;
+
+    function closeHookAttachForm() {
+        var form = document.getElementById('hook-attach-form');
+        if (form) {
+            form.style.display = 'none';
+        }
+    }
+    window.closeHookAttachForm = closeHookAttachForm;
+
+    function submitHookAttach() {
+        var input = document.getElementById('hook-attach-bead');
+        var beadId = input ? input.value.trim() : '';
+
+        if (!beadId) {
+            showToast('error', 'Missing', 'Bead ID is required');
+            return;
+        }
+
+        var submitBtn = document.querySelector('.hook-attach-submit');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '...';
+        }
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'hook attach ' + beadId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Attached', beadId + ' attached to hook');
+                closeHookAttachForm();
+                if (typeof htmx !== 'undefined') {
+                    htmx.trigger(document.body, 'htmx:load');
+                }
+            } else {
+                showToast('error', 'Failed', data.error || 'Failed to attach hook');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        })
+        .finally(function() {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Attach';
+            }
+        });
+    }
+    window.submitHookAttach = submitHookAttach;
+
+    function clearAllHooks() {
+        if (!confirm('Clear ALL hooks? This will detach all hooked work.')) return;
+
+        var rows = document.querySelectorAll('.hook-detach-btn');
+        if (rows.length === 0) {
+            showToast('info', 'Nothing', 'No hooks to clear');
+            return;
+        }
+
+        var beadIds = [];
+        for (var i = 0; i < rows.length; i++) {
+            var id = rows[i].getAttribute('data-hook-id');
+            if (id) beadIds.push(id);
+        }
+
+        var completed = 0;
+        var errors = 0;
+
+        beadIds.forEach(function(beadId) {
+            fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'hook detach ' + beadId })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    completed++;
+                } else {
+                    errors++;
+                }
+            })
+            .catch(function() {
+                errors++;
+            })
+            .finally(function() {
+                if (completed + errors === beadIds.length) {
+                    if (errors > 0) {
+                        showToast('error', 'Partial', completed + ' detached, ' + errors + ' failed');
+                    } else {
+                        showToast('success', 'Cleared', completed + ' hook(s) cleared');
+                    }
+                    if (typeof htmx !== 'undefined') {
+                        htmx.trigger(document.body, 'htmx:load');
+                    }
+                }
+            });
+        });
+    }
+    window.clearAllHooks = clearAllHooks;
+
+    // Handle Enter key in hook attach input
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && e.target.id === 'hook-attach-bead') {
+            e.preventDefault();
+            submitHookAttach();
+        }
+        if (e.key === 'Escape' && e.target.id === 'hook-attach-bead') {
+            e.preventDefault();
+            closeHookAttachForm();
+        }
+    });
+
+    // ============================================
     // ISSUE CREATION MODAL
     // ============================================
     function openIssueModal() {
@@ -1003,7 +1464,8 @@
                             '<td>' + priBadge + '</td>' +
                             '<td><span class="ready-id">' + escapeHtml(item.id) + '</span></td>' +
                             '<td><span class="ready-title">' + escapeHtml(item.title || '') + '</span></td>' +
-                            '<td><span class="' + sourceClass + '">' + escapeHtml(item.source) + '</span></td>';
+                            '<td><span class="' + sourceClass + '">' + escapeHtml(item.source) + '</span></td>' +
+                            '<td><button class="sling-btn" data-bead-id="' + escapeHtml(item.id) + '" title="Sling to rig">Sling</button></td>';
                         tbody.appendChild(tr);
                     });
 
@@ -1024,6 +1486,322 @@
     loadReady();
     // Expose for refresh after HTMX swaps
     window.refreshReadyPanel = loadReady;
+
+    // ============================================
+    // CONVOY PANEL INTERACTIONS
+    // ============================================
+    var convoyList = document.getElementById('convoy-list');
+    var convoyDetail = document.getElementById('convoy-detail');
+    var convoyCreateForm = document.getElementById('convoy-create-form');
+    var currentConvoyId = null;
+
+    // Click on convoy row to view details
+    document.addEventListener('click', function(e) {
+        var convoyRow = e.target.closest('.convoy-row');
+        if (convoyRow && convoyRow.hasAttribute('data-convoy-id')) {
+            e.preventDefault();
+            var convoyId = convoyRow.getAttribute('data-convoy-id');
+            if (convoyId) {
+                openConvoyDetail(convoyId);
+            }
+        }
+    });
+
+    function openConvoyDetail(convoyId) {
+        currentConvoyId = convoyId;
+        window.pauseRefresh = true;
+
+        // Reset views
+        document.getElementById('convoy-detail-id').textContent = convoyId;
+        document.getElementById('convoy-detail-title').textContent = 'Convoy: ' + convoyId;
+        document.getElementById('convoy-detail-status').textContent = '';
+        document.getElementById('convoy-detail-progress').textContent = '';
+        document.getElementById('convoy-issues-loading').style.display = 'block';
+        document.getElementById('convoy-issues-table').style.display = 'none';
+        document.getElementById('convoy-issues-empty').style.display = 'none';
+        document.getElementById('convoy-add-issue-form').style.display = 'none';
+
+        // Show detail, hide list and create form
+        convoyList.style.display = 'none';
+        convoyCreateForm.style.display = 'none';
+        convoyDetail.style.display = 'block';
+
+        // Fetch convoy status via /api/run
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'convoy status ' + convoyId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('convoy-issues-loading').style.display = 'none';
+
+            if (!data.success) {
+                document.getElementById('convoy-issues-empty').style.display = 'block';
+                document.getElementById('convoy-issues-empty').querySelector('p').textContent = data.error || 'Failed to load convoy';
+                return;
+            }
+
+            var issues = parseConvoyStatusOutput(data.output || '');
+            if (issues.length === 0) {
+                document.getElementById('convoy-issues-empty').style.display = 'block';
+                return;
+            }
+
+            var tbody = document.getElementById('convoy-issues-tbody');
+            tbody.innerHTML = '';
+            issues.forEach(function(issue) {
+                var tr = document.createElement('tr');
+                var statusBadge = '';
+                var statusLower = (issue.status || '').toLowerCase();
+                if (statusLower === 'closed' || statusLower === 'complete' || statusLower === 'done') {
+                    statusBadge = '<span class="badge badge-green">Done</span>';
+                } else if (statusLower === 'in_progress' || statusLower === 'in progress' || statusLower === 'working') {
+                    statusBadge = '<span class="badge badge-yellow">In Progress</span>';
+                } else if (statusLower === 'open' || statusLower === 'ready') {
+                    statusBadge = '<span class="badge badge-blue">Open</span>';
+                } else if (statusLower === 'blocked') {
+                    statusBadge = '<span class="badge badge-red">Blocked</span>';
+                } else {
+                    statusBadge = '<span class="badge badge-muted">' + escapeHtml(issue.status || 'Unknown') + '</span>';
+                }
+
+                tr.innerHTML =
+                    '<td class="convoy-issue-status">' + statusBadge + '</td>' +
+                    '<td><span class="issue-id">' + escapeHtml(issue.id) + '</span></td>' +
+                    '<td class="issue-title">' + escapeHtml(issue.title || '') + '</td>' +
+                    '<td>' + (issue.assignee ? '<span class="badge badge-blue">' + escapeHtml(issue.assignee) + '</span>' : '<span class="badge badge-muted">Unassigned</span>') + '</td>' +
+                    '<td>' + escapeHtml(issue.progress || '') + '</td>';
+                tbody.appendChild(tr);
+            });
+            document.getElementById('convoy-issues-table').style.display = 'table';
+        })
+        .catch(function(err) {
+            document.getElementById('convoy-issues-loading').style.display = 'none';
+            document.getElementById('convoy-issues-empty').style.display = 'block';
+            document.getElementById('convoy-issues-empty').querySelector('p').textContent = 'Error: ' + err.message;
+        });
+    }
+
+    // Parse convoy status text output into issue objects
+    function parseConvoyStatusOutput(output) {
+        var issues = [];
+        var lines = output.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            // Skip header lines and convoy summary lines
+            if (line.startsWith('Convoy') || line.startsWith('===') || line.startsWith('---') ||
+                line.startsWith('Status:') || line.startsWith('Progress:') || line.startsWith('Created:') ||
+                line.startsWith('Title:') || line.startsWith('Issues:') || line.startsWith('Name:')) {
+                // Extract convoy-level status/progress for the detail header
+                if (line.startsWith('Status:')) {
+                    var statusEl = document.getElementById('convoy-detail-status');
+                    var statusVal = line.replace('Status:', '').trim().toLowerCase();
+                    statusEl.textContent = statusVal;
+                    statusEl.className = 'badge';
+                    if (statusVal === 'active') statusEl.classList.add('badge-green');
+                    else if (statusVal === 'stale') statusEl.classList.add('badge-yellow');
+                    else if (statusVal === 'stuck') statusEl.classList.add('badge-red');
+                    else if (statusVal === 'complete') statusEl.classList.add('badge-green');
+                    else statusEl.classList.add('badge-muted');
+                }
+                if (line.startsWith('Progress:')) {
+                    document.getElementById('convoy-detail-progress').textContent = line.replace('Progress:', '').trim();
+                }
+                continue;
+            }
+            // Look for issue lines - typically formatted as:
+            // "○ id · title [● P2 · STATUS]" or similar bead-style output
+            // Or tabular: "id   title   status   assignee"
+            var issue = parseConvoyIssueLine(line);
+            if (issue) {
+                issues.push(issue);
+            }
+        }
+        return issues;
+    }
+
+    // Parse a single issue line from convoy status output
+    function parseConvoyIssueLine(line) {
+        // Try bead-style format: "○ id · title   [● P2 · OPEN]"
+        // or "◐ id · title   [● P2 · IN_PROGRESS]"
+        var beadMatch = line.match(/^[○◐●✓]\s+(\S+)\s+[·:]\s+(.+?)(?:\s+\[.*?([A-Z_]+)\])?$/);
+        if (beadMatch) {
+            var statusFromBracket = '';
+            if (beadMatch[3]) {
+                statusFromBracket = beadMatch[3].toLowerCase().replace('_', ' ');
+            } else {
+                // Infer from icon
+                if (line.startsWith('✓')) statusFromBracket = 'closed';
+                else if (line.startsWith('◐')) statusFromBracket = 'in progress';
+                else statusFromBracket = 'open';
+            }
+            return {
+                id: beadMatch[1],
+                title: beadMatch[2].trim(),
+                status: statusFromBracket,
+                assignee: '',
+                progress: ''
+            };
+        }
+
+        // Try simple "id title" format (at least an ID-like token)
+        var parts = line.split(/\s{2,}/);
+        if (parts.length >= 2 && parts[0].match(/^[a-zA-Z0-9_-]+$/)) {
+            return {
+                id: parts[0],
+                title: parts[1] || '',
+                status: parts[2] || '',
+                assignee: parts[3] || '',
+                progress: parts[4] || ''
+            };
+        }
+
+        return null;
+    }
+
+    // Back button from convoy detail
+    document.getElementById('convoy-back-btn').addEventListener('click', function() {
+        convoyDetail.style.display = 'none';
+        convoyList.style.display = 'block';
+        currentConvoyId = null;
+        window.pauseRefresh = false;
+    });
+
+    // New Convoy button
+    document.getElementById('new-convoy-btn').addEventListener('click', function() {
+        window.pauseRefresh = true;
+        convoyList.style.display = 'none';
+        convoyDetail.style.display = 'none';
+        convoyCreateForm.style.display = 'block';
+        document.getElementById('convoy-create-name').value = '';
+        document.getElementById('convoy-create-issues').value = '';
+        document.getElementById('convoy-create-name').focus();
+    });
+
+    // Cancel create convoy
+    document.getElementById('convoy-create-back-btn').addEventListener('click', cancelConvoyCreate);
+    document.getElementById('convoy-create-cancel-btn').addEventListener('click', cancelConvoyCreate);
+
+    function cancelConvoyCreate() {
+        convoyCreateForm.style.display = 'none';
+        convoyList.style.display = 'block';
+        window.pauseRefresh = false;
+    }
+
+    // Submit create convoy
+    document.getElementById('convoy-create-submit-btn').addEventListener('click', function() {
+        var name = document.getElementById('convoy-create-name').value.trim();
+        var issuesStr = document.getElementById('convoy-create-issues').value.trim();
+
+        if (!name) {
+            showToast('error', 'Missing', 'Convoy name is required');
+            return;
+        }
+
+        var btn = document.getElementById('convoy-create-submit-btn');
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+
+        // Build command: convoy create <name> [issue1 issue2 ...]
+        var cmd = 'convoy create ' + name;
+        if (issuesStr) {
+            cmd += ' ' + issuesStr;
+        }
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Created', 'Convoy "' + name + '" created');
+                cancelConvoyCreate();
+                if (data.output && data.output.trim()) {
+                    showOutput(cmd, data.output);
+                }
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = 'Create Convoy';
+        });
+    });
+
+    // Add Issue button in convoy detail
+    document.getElementById('convoy-add-issue-btn').addEventListener('click', function() {
+        var form = document.getElementById('convoy-add-issue-form');
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+        if (form.style.display !== 'none') {
+            document.getElementById('convoy-add-issue-input').value = '';
+            document.getElementById('convoy-add-issue-input').focus();
+        }
+    });
+
+    // Cancel add issue
+    document.getElementById('convoy-add-issue-cancel').addEventListener('click', function() {
+        document.getElementById('convoy-add-issue-form').style.display = 'none';
+    });
+
+    // Submit add issue to convoy
+    document.getElementById('convoy-add-issue-submit').addEventListener('click', submitAddIssueToConvoy);
+
+    // Enter key in add issue input
+    document.getElementById('convoy-add-issue-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            submitAddIssueToConvoy();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            document.getElementById('convoy-add-issue-form').style.display = 'none';
+        }
+    });
+
+    function submitAddIssueToConvoy() {
+        var issueId = document.getElementById('convoy-add-issue-input').value.trim();
+        if (!issueId || !currentConvoyId) {
+            showToast('error', 'Missing', 'Issue ID is required');
+            return;
+        }
+
+        var btn = document.getElementById('convoy-add-issue-submit');
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+
+        var cmd = 'convoy add ' + currentConvoyId + ' ' + issueId;
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Added', 'Issue ' + issueId + ' added to convoy');
+                document.getElementById('convoy-add-issue-form').style.display = 'none';
+                // Refresh the convoy detail view
+                openConvoyDetail(currentConvoyId);
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = 'Add';
+        });
+    }
 
     // Click on mail row to read message
     document.addEventListener('click', function(e) {
@@ -1310,6 +2088,8 @@
         document.getElementById('issue-detail-status').textContent = '';
         document.getElementById('issue-detail-type').textContent = '';
         document.getElementById('issue-detail-created').textContent = '';
+        document.getElementById('issue-detail-owner').textContent = '';
+        document.getElementById('issue-detail-actions').innerHTML = '';
         document.getElementById('issue-detail-depends-on').innerHTML = '';
         document.getElementById('issue-detail-blocks').innerHTML = '';
         document.getElementById('issue-detail-deps').style.display = 'none';
@@ -1355,9 +2135,15 @@
                 if (data.type) {
                     document.getElementById('issue-detail-type').textContent = 'Type: ' + data.type;
                 }
+                if (data.owner) {
+                    document.getElementById('issue-detail-owner').textContent = 'Owner: ' + data.owner;
+                }
                 if (data.created) {
                     document.getElementById('issue-detail-created').textContent = 'Created: ' + data.created;
                 }
+
+                // Render action buttons
+                renderIssueActions(issueId, data);
 
                 // Dependencies
                 if (data.depends_on && data.depends_on.length > 0) {
@@ -1394,6 +2180,206 @@
             window.pauseRefresh = false;
         });
     }
+
+    // ============================================
+    // ISSUE ACTION BUTTONS
+    // ============================================
+
+    // Render action buttons based on current issue state
+    function renderIssueActions(issueId, data) {
+        var actionsEl = document.getElementById('issue-detail-actions');
+        if (!actionsEl) return;
+
+        var status = (data.status || '').toUpperCase();
+        var isClosed = status === 'CLOSED';
+        var currentPriority = data.priority || 'P2';
+        // Extract numeric priority (P1 -> 1, P2 -> 2, etc.)
+        var priNum = currentPriority.length === 2 ? parseInt(currentPriority[1], 10) : 2;
+
+        var html = '<div class="issue-actions-bar">';
+
+        // Close / Reopen button
+        if (isClosed) {
+            html += '<button class="issue-action-btn reopen" onclick="reopenIssue(\'' + escapeHtml(issueId) + '\')">↺ Reopen</button>';
+        } else {
+            html += '<button class="issue-action-btn close" onclick="closeIssue(\'' + escapeHtml(issueId) + '\')">✓ Close</button>';
+        }
+
+        // Priority dropdown
+        html += '<div class="issue-action-group">';
+        html += '<label class="issue-action-label">Priority</label>';
+        html += '<select class="issue-action-select" id="issue-action-priority" onchange="updateIssuePriority(\'' + escapeHtml(issueId) + '\', this.value)">';
+        for (var p = 1; p <= 4; p++) {
+            var sel = p === priNum ? ' selected' : '';
+            var pLabel = p === 1 ? 'P1 - Critical' : p === 2 ? 'P2 - High' : p === 3 ? 'P3 - Medium' : 'P4 - Low';
+            html += '<option value="' + p + '"' + sel + '>' + pLabel + '</option>';
+        }
+        html += '</select>';
+        html += '</div>';
+
+        // Assignee dropdown
+        html += '<div class="issue-action-group">';
+        html += '<label class="issue-action-label">Assign</label>';
+        html += '<select class="issue-action-select" id="issue-action-assignee" onchange="assignIssue(\'' + escapeHtml(issueId) + '\', this.value)">';
+        html += '<option value="">Unassigned</option>';
+        html += '<option value="" disabled>Loading agents...</option>';
+        html += '</select>';
+        html += '</div>';
+
+        html += '</div>';
+        actionsEl.innerHTML = html;
+
+        // Load agents for assignee dropdown
+        loadAssigneeOptions(data.owner || '');
+    }
+
+    // Load agent options into the assignee dropdown
+    function loadAssigneeOptions(currentOwner) {
+        var select = document.getElementById('issue-action-assignee');
+        if (!select) return;
+
+        fetch('/api/options')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                // Rebuild dropdown
+                var html = '<option value="">Unassigned</option>';
+                var agents = data.agents || [];
+                var polecats = data.polecats || [];
+
+                // Combine agents and polecats for assignee options
+                var seen = {};
+                var allOptions = [];
+
+                agents.forEach(function(agent) {
+                    var name = typeof agent === 'string' ? agent : agent.name;
+                    if (!seen[name]) {
+                        seen[name] = true;
+                        allOptions.push(name);
+                    }
+                });
+
+                polecats.forEach(function(polecat) {
+                    if (!seen[polecat]) {
+                        seen[polecat] = true;
+                        allOptions.push(polecat);
+                    }
+                });
+
+                allOptions.forEach(function(name) {
+                    var sel = name === currentOwner ? ' selected' : '';
+                    html += '<option value="' + escapeHtml(name) + '"' + sel + '>' + escapeHtml(name) + '</option>';
+                });
+
+                select.innerHTML = html;
+            })
+            .catch(function() {
+                select.innerHTML = '<option value="">Unassigned</option>';
+            });
+    }
+
+    // Close an issue
+    function closeIssue(issueId) {
+        if (!confirm('Close issue ' + issueId + '?')) return;
+
+        showToast('info', 'Closing...', issueId);
+
+        fetch('/api/issues/close', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: issueId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Closed', issueId + ' closed');
+                // Re-fetch to update the detail view
+                openIssueDetail(issueId);
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        });
+    }
+    window.closeIssue = closeIssue;
+
+    // Reopen an issue
+    function reopenIssue(issueId) {
+        showToast('info', 'Reopening...', issueId);
+
+        fetch('/api/issues/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: issueId, status: 'open' })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Reopened', issueId + ' reopened');
+                openIssueDetail(issueId);
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        });
+    }
+    window.reopenIssue = reopenIssue;
+
+    // Update issue priority
+    function updateIssuePriority(issueId, priority) {
+        var priNum = parseInt(priority, 10);
+        if (priNum < 1 || priNum > 4) return;
+
+        showToast('info', 'Updating...', 'Setting priority to P' + priNum);
+
+        fetch('/api/issues/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: issueId, priority: priNum })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Updated', 'Priority set to P' + priNum);
+                openIssueDetail(issueId);
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        });
+    }
+    window.updateIssuePriority = updateIssuePriority;
+
+    // Assign issue to agent
+    function assignIssue(issueId, assignee) {
+        if (!assignee) return; // Unassigned selected, no-op for now
+
+        showToast('info', 'Assigning...', 'Assigning to ' + assignee);
+
+        fetch('/api/issues/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: issueId, assignee: assignee })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Assigned', 'Assigned to ' + assignee);
+                openIssueDetail(issueId);
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message);
+        });
+    }
+    window.assignIssue = assignIssue;
 
     // ============================================
     // PR/MERGE QUEUE PANEL INTERACTIONS
@@ -1524,5 +2510,376 @@
             window.pauseRefresh = false;
         });
     }
+
+    // ============================================
+    // SLING BUTTONS
+    // ============================================
+    var activeSlingDropdown = null;
+
+    function closeSlingDropdown() {
+        if (activeSlingDropdown) {
+            activeSlingDropdown.remove();
+            activeSlingDropdown = null;
+        }
+    }
+
+    function openSlingDropdown(btn) {
+        closeSlingDropdown();
+
+        var beadId = btn.getAttribute('data-bead-id');
+        if (!beadId) return;
+
+        var dropdown = document.createElement('div');
+        dropdown.className = 'sling-dropdown';
+        dropdown.innerHTML = '<div class="sling-dropdown-loading">Loading rigs...</div>';
+
+        // Position dropdown below the button
+        var rect = btn.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+        dropdown.style.left = rect.left + 'px';
+        dropdown.style.zIndex = '10001';
+        document.body.appendChild(dropdown);
+        activeSlingDropdown = dropdown;
+
+        // Fetch rig options
+        fetch('/api/options?type=rigs')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var rigs = data.rigs || [];
+                if (rigs.length === 0) {
+                    dropdown.innerHTML = '<div class="sling-dropdown-empty">No rigs available</div>';
+                    return;
+                }
+                var html = '<div class="sling-dropdown-header">Sling ' + escapeHtml(beadId) + ' to:</div>';
+                for (var i = 0; i < rigs.length; i++) {
+                    html += '<button class="sling-dropdown-item" data-rig="' + escapeHtml(rigs[i]) + '">' + escapeHtml(rigs[i]) + '</button>';
+                }
+                dropdown.innerHTML = html;
+
+                // Handle rig selection
+                dropdown.addEventListener('click', function(e) {
+                    var item = e.target.closest('.sling-dropdown-item');
+                    if (!item) return;
+                    var rig = item.getAttribute('data-rig');
+                    closeSlingDropdown();
+                    executeSling(beadId, rig);
+                });
+            })
+            .catch(function() {
+                dropdown.innerHTML = '<div class="sling-dropdown-empty">Failed to load rigs</div>';
+            });
+    }
+
+    function executeSling(beadId, rig) {
+        var cmd = 'sling ' + beadId + ' ' + rig;
+        showToast('info', 'Slinging...', beadId + ' → ' + rig);
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Slung', beadId + ' → ' + rig);
+                if (data.output && data.output.trim()) {
+                    showOutput(cmd, data.output);
+                }
+            } else {
+                showToast('error', 'Sling failed', data.error || 'Unknown error');
+                if (data.output) {
+                    showOutput(cmd, data.output);
+                }
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message || 'Request failed');
+        });
+    }
+
+    // Click handler for sling buttons
+    document.addEventListener('click', function(e) {
+        var slingBtn = e.target.closest('.sling-btn');
+        if (slingBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            openSlingDropdown(slingBtn);
+            return;
+        }
+        // Close dropdown when clicking outside
+        if (activeSlingDropdown && !e.target.closest('.sling-dropdown')) {
+            closeSlingDropdown();
+        }
+    });
+
+
+
+    // ============================================
+    // ESCALATION ACTIONS
+    // ============================================
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.esc-btn');
+        if (!btn) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        var action = btn.getAttribute('data-action');
+        var id = btn.getAttribute('data-id');
+        if (!action || !id) return;
+
+        if (action === 'reassign') {
+            showReassignPicker(btn, id);
+            return;
+        }
+
+        // Ack or Resolve - run directly
+        var cmdName = 'escalate ' + action + ' ' + id;
+        btn.disabled = true;
+        btn.textContent = action === 'ack' ? 'Acking...' : 'Resolving...';
+
+        runEscalationAction(cmdName, btn, action);
+    });
+
+    function runEscalationAction(cmdName, btn, action) {
+        showToast('info', 'Running...', 'gt ' + cmdName);
+
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmdName })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showToast('success', 'Success', 'gt ' + cmdName);
+                // Remove ack button or fade row on resolve
+                var row = btn.closest('.escalation-row');
+                if (action === 'resolve' && row) {
+                    row.style.opacity = '0.4';
+                    row.style.pointerEvents = 'none';
+                } else if (action === 'ack' && row) {
+                    // Replace ack button with ACK badge
+                    btn.outerHTML = '<span class="badge badge-cyan">ACK</span>';
+                }
+            } else {
+                showToast('error', 'Failed', data.error || 'Unknown error');
+                btn.disabled = false;
+                btn.textContent = action === 'ack' ? '👍 Ack' : '✓ Resolve';
+            }
+        })
+        .catch(function(err) {
+            showToast('error', 'Error', err.message || 'Request failed');
+            btn.disabled = false;
+            btn.textContent = action === 'ack' ? '👍 Ack' : '✓ Resolve';
+        });
+    }
+
+    function showReassignPicker(btn, escalationId) {
+        // Check if picker already open
+        var existing = btn.parentNode.querySelector('.reassign-picker');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+
+        var picker = document.createElement('div');
+        picker.className = 'reassign-picker';
+        picker.innerHTML = '<select class="reassign-select"><option value="">Loading...</option></select>' +
+            '<button class="esc-btn esc-reassign-confirm">Go</button>' +
+            '<button class="esc-btn esc-reassign-cancel">✕</button>';
+        btn.parentNode.appendChild(picker);
+
+        var select = picker.querySelector('.reassign-select');
+
+        // Pause refresh while picker is open
+        window.pauseRefresh = true;
+
+        // Load agents
+        fetch('/api/options')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                select.innerHTML = '<option value="">Select agent...</option>';
+                var agents = data.agents || [];
+                agents.forEach(function(agent) {
+                    var name = typeof agent === 'string' ? agent : agent.name;
+                    var running = typeof agent === 'object' ? agent.running : true;
+                    var opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name + (running ? '' : ' (stopped)');
+                    select.appendChild(opt);
+                });
+            })
+            .catch(function() {
+                select.innerHTML = '<option value="">Failed to load</option>';
+            });
+
+        // Confirm reassign
+        picker.querySelector('.esc-reassign-confirm').addEventListener('click', function() {
+            var agent = select.value;
+            if (!agent) {
+                showToast('error', 'Missing', 'Select an agent to reassign to');
+                return;
+            }
+            picker.remove();
+            window.pauseRefresh = false;
+
+            var cmdName = 'escalate reassign ' + escalationId + ' ' + agent;
+            btn.disabled = true;
+            btn.textContent = 'Reassigning...';
+
+            showToast('info', 'Running...', 'gt ' + cmdName);
+
+            fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmdName })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    showToast('success', 'Reassigned', 'Escalation reassigned to ' + agent);
+                    var row = btn.closest('.escalation-row');
+                    if (row) {
+                        // Update the "From" cell to show new assignee
+                        var fromCell = row.querySelectorAll('td')[2];
+                        if (fromCell) fromCell.textContent = '→ ' + agent;
+                    }
+                } else {
+                    showToast('error', 'Failed', data.error || 'Unknown error');
+                }
+                btn.disabled = false;
+                btn.textContent = '↻ Reassign';
+            })
+            .catch(function(err) {
+                showToast('error', 'Error', err.message || 'Request failed');
+                btn.disabled = false;
+                btn.textContent = '↻ Reassign';
+            });
+        });
+
+        // Cancel
+        picker.querySelector('.esc-reassign-cancel').addEventListener('click', function() {
+            picker.remove();
+            window.pauseRefresh = false;
+        });
+    }
+
+
+
+    // ============================================
+    // ACTIVITY TIMELINE FILTERS
+    // ============================================
+
+    function initTimelineFilters() {
+        var timeline = document.getElementById('activity-timeline');
+        if (!timeline) return;
+
+        var entries = timeline.querySelectorAll('.tl-entry');
+        var rigFilter = document.getElementById('tl-rig-filter');
+        var agentFilter = document.getElementById('tl-agent-filter');
+        var emptyMsg = document.getElementById('tl-empty-filtered');
+
+        // Collect unique rigs and agents for dropdowns
+        var rigs = {};
+        var agents = {};
+        entries.forEach(function(entry) {
+            var rig = entry.getAttribute('data-rig');
+            var agent = entry.getAttribute('data-agent');
+            if (rig) rigs[rig] = true;
+            if (agent) agents[agent] = true;
+        });
+
+        // Populate rig dropdown
+        if (rigFilter) {
+            Object.keys(rigs).sort().forEach(function(rig) {
+                var opt = document.createElement('option');
+                opt.value = rig;
+                opt.textContent = rig;
+                rigFilter.appendChild(opt);
+            });
+        }
+
+        // Populate agent dropdown
+        if (agentFilter) {
+            Object.keys(agents).sort().forEach(function(agent) {
+                var opt = document.createElement('option');
+                opt.value = agent;
+                opt.textContent = agent;
+                agentFilter.appendChild(opt);
+            });
+        }
+
+        // Current filter state
+        var activeCategory = 'all';
+
+        function applyFilters() {
+            var selectedRig = rigFilter ? rigFilter.value : 'all';
+            var selectedAgent = agentFilter ? agentFilter.value : 'all';
+            var visibleCount = 0;
+
+            entries.forEach(function(entry) {
+                var show = true;
+
+                if (activeCategory !== 'all' && entry.getAttribute('data-category') !== activeCategory) {
+                    show = false;
+                }
+                if (selectedRig !== 'all' && entry.getAttribute('data-rig') !== selectedRig) {
+                    show = false;
+                }
+                if (selectedAgent !== 'all' && entry.getAttribute('data-agent') !== selectedAgent) {
+                    show = false;
+                }
+
+                if (show) {
+                    entry.classList.remove('tl-hidden');
+                    visibleCount++;
+                } else {
+                    entry.classList.add('tl-hidden');
+                }
+            });
+
+            if (emptyMsg) {
+                emptyMsg.style.display = visibleCount === 0 ? 'block' : 'none';
+            }
+        }
+
+        // Category filter buttons
+        document.addEventListener('click', function(e) {
+            var btn = e.target.closest('.tl-filter-btn');
+            if (!btn) return;
+            if (btn.getAttribute('data-filter') !== 'category') return;
+
+            // Update active state
+            var group = btn.closest('.tl-filter-group');
+            if (group) {
+                group.querySelectorAll('.tl-filter-btn').forEach(function(b) {
+                    b.classList.remove('active');
+                });
+            }
+            btn.classList.add('active');
+            activeCategory = btn.getAttribute('data-value');
+            applyFilters();
+        });
+
+        // Dropdown filters
+        if (rigFilter) {
+            rigFilter.addEventListener('change', applyFilters);
+        }
+        if (agentFilter) {
+            agentFilter.addEventListener('change', applyFilters);
+        }
+    }
+
+    // Init on page load
+    initTimelineFilters();
+
+    // Re-init after HTMX swaps
+    document.body.addEventListener('htmx:afterSwap', function() {
+        initTimelineFilters();
+    });
+
 
 })();

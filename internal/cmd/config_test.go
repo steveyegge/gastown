@@ -581,3 +581,191 @@ func TestConfigDefaultAgent(t *testing.T) {
 		}
 	})
 }
+
+func TestConfigSetGet(t *testing.T) {
+	t.Run("set and get convoy.notify_on_complete", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Set convoy.notify_on_complete to true
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"convoy.notify_on_complete", "true"})
+		if err != nil {
+			t.Fatalf("runConfigSet failed: %v", err)
+		}
+
+		// Verify persisted
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if loaded.Convoy == nil {
+			t.Fatal("Convoy config is nil after set")
+		}
+		if !loaded.Convoy.NotifyOnComplete {
+			t.Error("NotifyOnComplete should be true")
+		}
+
+		// Get the value back
+		err = runConfigGet(cmd, []string{"convoy.notify_on_complete"})
+		if err != nil {
+			t.Fatalf("runConfigGet failed: %v", err)
+		}
+
+		// Set back to false
+		err = runConfigSet(cmd, []string{"convoy.notify_on_complete", "false"})
+		if err != nil {
+			t.Fatalf("runConfigSet(false) failed: %v", err)
+		}
+
+		loaded, err = config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if loaded.Convoy != nil && loaded.Convoy.NotifyOnComplete {
+			t.Error("NotifyOnComplete should be false after setting to false")
+		}
+	})
+
+	t.Run("set and get cli_theme", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"cli_theme", "dark"})
+		if err != nil {
+			t.Fatalf("runConfigSet failed: %v", err)
+		}
+
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		if loaded.CLITheme != "dark" {
+			t.Errorf("CLITheme = %q, want 'dark'", loaded.CLITheme)
+		}
+	})
+
+	t.Run("set cli_theme rejects invalid value", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"cli_theme", "neon"})
+		if err == nil {
+			t.Fatal("expected error for invalid cli_theme")
+		}
+		if !strings.Contains(err.Error(), "invalid cli_theme") {
+			t.Errorf("error = %v, want 'invalid cli_theme'", err)
+		}
+	})
+
+	t.Run("set rejects unknown key", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"nonexistent.key", "value"})
+		if err == nil {
+			t.Fatal("expected error for unknown key")
+		}
+		if !strings.Contains(err.Error(), "unknown config key") {
+			t.Errorf("error = %v, want 'unknown config key'", err)
+		}
+	})
+
+	t.Run("get rejects unknown key", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigGet(cmd, []string{"nonexistent.key"})
+		if err == nil {
+			t.Fatal("expected error for unknown key")
+		}
+		if !strings.Contains(err.Error(), "unknown config key") {
+			t.Errorf("error = %v, want 'unknown config key'", err)
+		}
+	})
+
+	t.Run("convoy.notify_on_complete rejects non-boolean", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"convoy.notify_on_complete", "maybe"})
+		if err == nil {
+			t.Fatal("expected error for non-boolean value")
+		}
+		if !strings.Contains(err.Error(), "invalid value") {
+			t.Errorf("error = %v, want 'invalid value'", err)
+		}
+	})
+}
+
+func TestParseBool(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+		err   bool
+	}{
+		{"true", true, false},
+		{"True", true, false},
+		{"TRUE", true, false},
+		{"yes", true, false},
+		{"1", true, false},
+		{"on", true, false},
+		{"false", false, false},
+		{"False", false, false},
+		{"no", false, false},
+		{"0", false, false},
+		{"off", false, false},
+		{"maybe", false, true},
+		{"", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseBool(tt.input)
+			if (err != nil) != tt.err {
+				t.Errorf("parseBool(%q) error = %v, wantErr %v", tt.input, err, tt.err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("parseBool(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

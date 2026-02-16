@@ -76,25 +76,27 @@ func isInTmuxSession(targetSession string) bool {
 
 // attachToTmuxSession attaches to a tmux session.
 // If already inside tmux, uses switch-client instead of attach-session.
+// Uses syscall.Exec to replace the Go process with tmux for direct terminal
+// control, and passes -u for UTF-8 support regardless of locale settings.
+// See: https://github.com/steveyegge/gastown/issues/1219
 func attachToTmuxSession(sessionID string) error {
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
 
-	// Check if we're already inside a tmux session
-	var cmd *exec.Cmd
+	// Build args with -u for UTF-8 support
+	var args []string
 	if os.Getenv("TMUX") != "" {
 		// Inside tmux: switch to the target session
-		cmd = exec.Command(tmuxPath, "switch-client", "-t", sessionID)
+		args = []string{"tmux", "-u", "switch-client", "-t", sessionID}
 	} else {
 		// Outside tmux: attach to the session
-		cmd = exec.Command(tmuxPath, "attach-session", "-t", sessionID)
+		args = []string{"tmux", "-u", "attach-session", "-t", sessionID}
 	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+
+	// Replace the Go process with tmux for direct terminal control
+	return syscall.Exec(tmuxPath, args, os.Environ())
 }
 
 // isShellCommand checks if the command is a shell (meaning the runtime has exited).

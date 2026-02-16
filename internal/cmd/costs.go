@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -258,20 +259,20 @@ func runLiveCosts() error {
 	var costs []SessionCost
 	var total float64
 
-	for _, session := range sessions {
-		// Only process Gas Town sessions (start with "gt-")
-		if !strings.HasPrefix(session, constants.SessionPrefix) {
+	for _, sess := range sessions {
+		// Only process Gas Town sessions
+		if !session.IsKnownSession(sess) {
 			continue
 		}
 
 		// Parse session name to get role/rig/worker
-		role, rig, worker := parseSessionName(session)
+		role, rig, worker := parseSessionName(sess)
 
 		// Get working directory of the session
-		workDir, err := getTmuxSessionWorkDir(session)
+		workDir, err := getTmuxSessionWorkDir(sess)
 		if err != nil {
 			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", sess, err)
 			}
 			continue
 		}
@@ -280,17 +281,17 @@ func runLiveCosts() error {
 		cost, err := extractCostFromWorkDir(workDir)
 		if err != nil {
 			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] could not extract cost for %s: %v\n", session, err)
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost for %s: %v\n", sess, err)
 			}
 			// Still include the session with zero cost
 			cost = 0.0
 		}
 
 		// Check if an agent appears to be running
-		running := t.IsAgentRunning(session)
+		running := t.IsAgentRunning(sess)
 
 		costs = append(costs, SessionCost{
-			Session: session,
+			Session: sess,
 			Role:    role,
 			Rig:     rig,
 			Worker:  worker,
@@ -632,58 +633,49 @@ func queryDigestBeads(days int) ([]CostEntry, error) {
 			continue
 		}
 
-		// Extract individual session entries from the digest
-		entries = append(entries, digest.Sessions...)
+		// If the digest has per-session data (old format), use it directly.
+		// Otherwise, synthesize entries from the aggregate ByRole data.
+		if len(digest.Sessions) > 0 {
+			entries = append(entries, digest.Sessions...)
+		} else {
+			for role, cost := range digest.ByRole {
+				entries = append(entries, CostEntry{
+					SessionID: fmt.Sprintf("digest-%s-%s", digest.Date, role),
+					Role:      role,
+					CostUSD:   cost,
+					EndedAt:   digestDate,
+				})
+			}
+		}
 	}
 
 	return entries, nil
 }
 
 // parseSessionName extracts role, rig, and worker from a session name.
-// Session names follow the pattern: gt-<rig>-<worker> or gt-<global-agent>
-// Examples:
-//   - gt-mayor -> role=mayor, rig="", worker="mayor"
-//   - gt-deacon -> role=deacon, rig="", worker="deacon"
-//   - gt-gastown-toast -> role=polecat, rig=gastown, worker=toast
-//   - gt-gastown-witness -> role=witness, rig=gastown, worker=""
-//   - gt-gastown-refinery -> role=refinery, rig=gastown, worker=""
-//   - gt-gastown-crew-joe -> role=crew, rig=gastown, worker=joe
-func parseSessionName(session string) (role, rig, worker string) {
-	// Remove gt- prefix
-	name := strings.TrimPrefix(session, constants.SessionPrefix)
+// Delegates to session.ParseSessionName for correct handling of hyphenated rig names.
+func parseSessionName(sess string) (role, rig, worker string) {
+	identity, err := session.ParseSessionName(sess)
+	if err != nil {
+		return "unknown", "", strings.TrimPrefix(sess, constants.SessionPrefix)
+	}
 
-	// Check for global agents
-	switch name {
-	case "mayor":
+	switch identity.Role {
+	case session.RoleMayor:
 		return constants.RoleMayor, "", "mayor"
-	case "deacon":
+	case session.RoleDeacon:
 		return constants.RoleDeacon, "", "deacon"
+	case session.RoleWitness:
+		return constants.RoleWitness, identity.Rig, ""
+	case session.RoleRefinery:
+		return constants.RoleRefinery, identity.Rig, ""
+	case session.RoleCrew:
+		return constants.RoleCrew, identity.Rig, identity.Name
+	case session.RolePolecat:
+		return constants.RolePolecat, identity.Rig, identity.Name
+	default:
+		return "unknown", identity.Rig, identity.Name
 	}
-
-	// Parse rig-based session: rig-worker or rig-crew-name
-	parts := strings.SplitN(name, "-", 3)
-	if len(parts) < 2 {
-		return "unknown", "", name
-	}
-
-	rig = parts[0]
-	worker = parts[1]
-
-	// Check for crew pattern: rig-crew-name
-	if worker == "crew" && len(parts) >= 3 {
-		return constants.RoleCrew, rig, parts[2]
-	}
-
-	// Check for special workers
-	switch worker {
-	case "witness":
-		return constants.RoleWitness, rig, ""
-	case "refinery":
-		return constants.RoleRefinery, rig, ""
-	}
-
-	// Default to polecat
-	return constants.RolePolecat, rig, worker
 }
 
 // extractCost finds the most recent cost value in pane content.
@@ -1064,40 +1056,42 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 }
 
 // deriveSessionName derives the tmux session name from GT_* environment variables.
-// Session naming patterns:
-//   - Polecats: gt-{rig}-{polecat} (e.g., gt-gastown-toast)
-//   - Crew: gt-{rig}-crew-{crew} (e.g., gt-gastown-crew-max)
-//   - Witness/Refinery: gt-{rig}-{role} (e.g., gt-gastown-witness)
-//   - Mayor/Deacon: gt-{town}-{role} (e.g., gt-ai-mayor)
+// Uses session.* helpers for canonical naming.
 func deriveSessionName() string {
 	role := os.Getenv("GT_ROLE")
 	rig := os.Getenv("GT_RIG")
 	polecat := os.Getenv("GT_POLECAT")
 	crew := os.Getenv("GT_CREW")
-	town := os.Getenv("GT_TOWN")
 
-	// Polecat: gt-{rig}-{polecat}
+	// Polecat: {prefix}-{polecat}
 	if polecat != "" && rig != "" {
-		return fmt.Sprintf("gt-%s-%s", rig, polecat)
+		return session.PolecatSessionName(session.PrefixFor(rig), polecat)
 	}
 
-	// Crew: gt-{rig}-crew-{crew}
+	// Crew: {prefix}-crew-{crew}
 	if crew != "" && rig != "" {
-		return fmt.Sprintf("gt-%s-crew-%s", rig, crew)
+		return session.CrewSessionName(session.PrefixFor(rig), crew)
 	}
 
-	// Town-level roles (mayor, deacon): gt-{town}-{role} or gt-{role}
+	// Town-level roles (mayor, deacon)
 	if role == "mayor" || role == "deacon" {
-		if town != "" {
-			return fmt.Sprintf("gt-%s-%s", town, role)
+		if role == "mayor" {
+			return session.MayorSessionName()
 		}
-		// No town set - use simple gt-{role} pattern
-		return fmt.Sprintf("gt-%s", role)
+		return session.DeaconSessionName()
 	}
 
-	// Rig-based roles (witness, refinery): gt-{rig}-{role}
+	// Rig-based roles (witness, refinery): {prefix}-{role}
 	if role != "" && rig != "" {
-		return fmt.Sprintf("gt-%s-%s", rig, role)
+		prefix := session.PrefixFor(rig)
+		switch role {
+		case "witness":
+			return session.WitnessSessionName(prefix)
+		case "refinery":
+			return session.RefinerySessionName(prefix)
+		default:
+			return session.PolecatSessionName(prefix, role)
+		}
 	}
 
 	return ""
@@ -1128,7 +1122,17 @@ type CostDigest struct {
 	Date         string             `json:"date"`
 	TotalUSD     float64            `json:"total_usd"`
 	SessionCount int                `json:"session_count"`
-	Sessions     []CostEntry        `json:"sessions"`
+	Sessions     []CostEntry        `json:"sessions,omitempty"`
+	ByRole       map[string]float64 `json:"by_role"`
+	ByRig        map[string]float64 `json:"by_rig,omitempty"`
+}
+
+// CostDigestPayload is the compact payload stored in the bead.
+// It excludes per-session details to avoid exceeding Dolt column size limits.
+type CostDigestPayload struct {
+	Date         string             `json:"date"`
+	TotalUSD     float64            `json:"total_usd"`
+	SessionCount int                `json:"session_count"`
 	ByRole       map[string]float64 `json:"by_role"`
 	ByRig        map[string]float64 `json:"by_rig,omitempty"`
 }
@@ -1303,8 +1307,16 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 		desc.WriteString("\n")
 	}
 
-	// Build payload JSON with full session details
-	payloadJSON, err := json.Marshal(digest)
+	// Build compact payload (aggregate only, no per-session details).
+	// Per-session details can be thousands of records and exceed Dolt column limits.
+	compactPayload := CostDigestPayload{
+		Date:         digest.Date,
+		TotalUSD:     digest.TotalUSD,
+		SessionCount: digest.SessionCount,
+		ByRole:       digest.ByRole,
+		ByRig:        digest.ByRig,
+	}
+	payloadJSON, err := json.Marshal(compactPayload)
 	if err != nil {
 		return "", fmt.Errorf("marshaling digest payload: %w", err)
 	}

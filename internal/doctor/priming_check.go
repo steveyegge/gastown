@@ -148,7 +148,7 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
-	settingsPath := filepath.Join(agentPath, ".claude", "settings.local.json")
+	settingsPath := filepath.Join(agentPath, ".claude", "settings.json")
 
 	// Check for SessionStart hook with gt prime
 	if fileExists(settingsPath) {
@@ -213,8 +213,9 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 			continue
 		}
 
-		// Check PRIME.md exists at rig level
-		primeMdPath := filepath.Join(rigPath, ".beads", "PRIME.md")
+		// Check PRIME.md exists at rig level (follow redirects for tracked beads)
+		resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
+		primeMdPath := filepath.Join(resolvedBeadsDir, "PRIME.md")
 		if !fileExists(primeMdPath) {
 			issues = append(issues, primingIssue{
 				location:    rigName,

@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -40,29 +42,68 @@ The daemon will run until stopped with 'gt daemon stop'.`,
 var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the daemon",
-	Long:  `Stop the running Gas Town daemon.`,
-	RunE:  runDaemonStop,
+	Long: `Stop the running Gas Town daemon.
+
+Sends a stop signal to the daemon process and waits for it to exit.
+The daemon must be running or this command returns an error.
+
+Examples:
+  gt daemon stop`,
+	RunE: runDaemonStop,
 }
 
 var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
-	Long:  `Show the current status of the Gas Town daemon.`,
-	RunE:  runDaemonStatus,
+	Long: `Show the current status of the Gas Town daemon.
+
+Displays whether the daemon is running, its PID, uptime, heartbeat
+count, and whether the binary has been rebuilt since the daemon started.
+
+Examples:
+  gt daemon status`,
+	RunE: runDaemonStatus,
 }
 
 var daemonLogsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "View daemon logs",
-	Long:  `View the daemon log file.`,
-	RunE:  runDaemonLogs,
+	Long: `View the daemon log file.
+
+Shows the most recent log entries from the daemon. Use -n to control
+how many lines to display, or -f to follow the log in real time.
+
+Examples:
+  gt daemon logs             # Show last 50 lines
+  gt daemon logs -n 100      # Show last 100 lines
+  gt daemon logs -f           # Follow log output in real time`,
+	RunE: runDaemonLogs,
 }
 
 var daemonRunCmd = &cobra.Command{
-	Use:    "run",
-	Short:  "Run daemon in foreground (internal)",
+	Use:   "run",
+	Short: "Run daemon in foreground (internal)",
+	Long: `Run the Gas Town daemon in the foreground.
+
+This is called internally by the daemon start process and supervisor
+services (launchd/systemd). Use 'gt daemon start' to start the daemon
+normally in the background.`,
 	Hidden: true,
 	RunE:   runDaemonRun,
+}
+
+var daemonEnableSupervisorCmd = &cobra.Command{
+	Use:   "enable-supervisor",
+	Short: "Configure launchd/systemd for daemon auto-restart",
+	Long: `Configure external supervision for the Gas Town daemon.
+
+This command creates and enables a supervisor service (launchd on macOS,
+systemd on Linux) that will automatically restart the daemon if it crashes
+or terminates. The daemon will also start automatically on login/boot.
+
+Examples:
+  gt daemon enable-supervisor    # Configure launchd/systemd`,
+	RunE: runDaemonEnableSupervisor,
 }
 
 var (
@@ -76,6 +117,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
+	daemonCmd.AddCommand(daemonEnableSupervisorCmd)
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
 	daemonLogsCmd.Flags().BoolVarP(&daemonLogFollow, "follow", "f", false, "Follow log output")
@@ -264,4 +306,29 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return d.Run()
+}
+
+func runDaemonEnableSupervisor(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	msg, err := templates.ProvisionSupervisor(townRoot)
+	if err != nil {
+		return fmt.Errorf("configuring supervisor: %w", err)
+	}
+
+	fmt.Printf("%s %s\n", style.Bold.Render("✓"), msg)
+	fmt.Println("\nThe daemon will now:")
+	fmt.Println("  - Auto-restart if it crashes")
+	fmt.Println("  - Start automatically on login/boot")
+	fmt.Println("\nTo stop the supervised daemon:")
+	if runtime.GOOS == "darwin" {
+		fmt.Println("  launchctl unload ~/Library/LaunchAgents/com.gastown.daemon.plist")
+	} else {
+		fmt.Println("  systemctl --user stop gastown-daemon.service")
+		fmt.Println("  systemctl --user disable gastown-daemon.service")
+	}
+	return nil
 }

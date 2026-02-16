@@ -73,7 +73,7 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 	targetSession := sessions[targetIdx]
 
 	// Switch to target session
-	cmd := exec.Command("tmux", "switch-client", "-t", targetSession)
+	cmd := exec.Command("tmux", "-u", "switch-client", "-t", targetSession)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("switching to %s: %w", targetSession, err)
 	}
@@ -119,7 +119,7 @@ func findRigPolecatSessions(rigName string) ([]string, error) { //nolint:unparam
 		return nil, nil
 	}
 
-	prefix := fmt.Sprintf("gt-%s-", rigName)
+	prefix := session.PrefixFor(rigName) + "-"
 	var sessions []string
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {

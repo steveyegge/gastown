@@ -88,7 +88,7 @@ func TestSessionStartHooksHaveHookFlag(t *testing.T) {
 		if err != nil {
 			return nil // Skip inaccessible paths
 		}
-		if (info.Name() == "settings.local.json" || info.Name() == "settings.json") && strings.Contains(path, ".claude") {
+		if info.Name() == "settings.json" && strings.Contains(path, ".claude") {
 			settingsFiles = append(settingsFiles, path)
 		}
 		return nil
@@ -98,7 +98,7 @@ func TestSessionStartHooksHaveHookFlag(t *testing.T) {
 	}
 
 	if len(settingsFiles) == 0 {
-		t.Skip("No .claude/settings.local.json or .claude/settings.json files found")
+		t.Skip("No .claude/settings.json files found")
 	}
 
 	var failures []string
@@ -205,4 +205,93 @@ func TestPreCompactPrimeDoesNotNeedHookFlag(t *testing.T) {
 	// If this test fails, it means someone added --hook to PreCompact
 	// which is harmless but unnecessary.
 	t.Log("PreCompact hooks don't need --hook (session ID already persisted at SessionStart)")
+}
+
+// --- Cross-agent settings validation ---
+//
+// These tests ensure all agent settings templates (not just Claude) maintain
+// required invariants. As new agents are added (gemini, copilot, etc.),
+// this catches misconfiguration in their embedded templates.
+
+// agentSettingsPattern describes where to find settings files for each agent.
+type agentSettingsPattern struct {
+	dirGlob  string // e.g. ".gemini"
+	fileName string // e.g. "settings.json"
+	format   string // "json" or "md"
+}
+
+// knownAgentPatterns lists all agent settings that should be validated.
+// Add new agents here as they're integrated.
+var knownAgentPatterns = []agentSettingsPattern{
+	{".claude", "settings.json", "json"},
+	{".gemini", "settings.json", "json"},
+	// copilot uses .copilot/copilot-instructions.md (markdown, not JSON hooks)
+	// opencode uses .opencode/plugin/gastown.js (JS, not JSON hooks)
+}
+
+// TestAllAgentSessionStartHooksHaveHookFlag validates that across all agent
+// settings files in the town, any SessionStart hook containing "gt prime"
+// includes the "--hook" flag. This extends TestSessionStartHooksHaveHookFlag
+// to cover non-Claude agents.
+func TestAllAgentSessionStartHooksHaveHookFlag(t *testing.T) {
+	townRoot, err := findTownRoot()
+	if err != nil {
+		t.Skip("Not running inside Gas Town directory structure")
+	}
+
+	var failures []string
+
+	for _, pattern := range knownAgentPatterns {
+		if pattern.format != "json" {
+			continue // Only JSON settings have structured hooks
+		}
+
+		err := filepath.Walk(townRoot, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			// Match agent settings dir + file name
+			if info.Name() != pattern.fileName {
+				return nil
+			}
+			if !strings.Contains(path, pattern.dirGlob) {
+				return nil
+			}
+
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+
+			var settings ClaudeSettings // Same JSON structure for gemini hooks
+			if jsonErr := json.Unmarshal(data, &settings); jsonErr != nil {
+				return nil
+			}
+
+			sessionStartHooks, ok := settings.Hooks["SessionStart"]
+			if !ok {
+				return nil
+			}
+
+			for _, entry := range sessionStartHooks {
+				for _, hook := range entry.Hooks {
+					if strings.Contains(hook.Command, "gt prime") && !strings.Contains(hook.Command, "--hook") {
+						relPath, _ := filepath.Rel(townRoot, path)
+						failures = append(failures, relPath)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Logf("Warning: walk error for pattern %s: %v", pattern.dirGlob, err)
+		}
+	}
+
+	if len(failures) > 0 {
+		t.Errorf("SessionStart hooks missing --hook flag in gt prime command:\n  %s\n\n"+
+			"The --hook flag is required for seance to discover predecessor sessions.\n"+
+			"This validation covers all JSON-based agent settings (Claude, Gemini, etc.).",
+			strings.Join(failures, "\n  "))
+	}
 }

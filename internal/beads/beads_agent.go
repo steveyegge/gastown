@@ -376,17 +376,19 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 	}
 
 	// Update hook_bead if provided
+	// Use runWithRouting for slot ops so bd can resolve cross-prefix beads
+	// (e.g., hq-* hook beads on gt-* agent beads) via routes.jsonl.
 	if hookBead != nil {
 		if *hookBead != "" {
 			// Set the hook using bd slot set
-			_, err = b.run("slot", "set", id, "hook", *hookBead)
+			_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
 			if err != nil {
 				// If slot is already occupied, clear it first then retry
 				// This handles re-slinging scenarios where we're updating the hook
 				errStr := err.Error()
 				if strings.Contains(errStr, "already occupied") {
-					_, _ = b.run("slot", "clear", id, "hook")
-					_, err = b.run("slot", "set", id, "hook", *hookBead)
+					_, _ = b.runWithRouting("slot", "clear", id, "hook")
+					_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
 				}
 				if err != nil {
 					return fmt.Errorf("setting hook: %w", err)
@@ -394,7 +396,7 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 			}
 		} else {
 			// Clear the hook
-			_, err = b.run("slot", "clear", id, "hook")
+			_, err = b.runWithRouting("slot", "clear", id, "hook")
 			if err != nil {
 				return fmt.Errorf("clearing hook: %w", err)
 			}
@@ -410,13 +412,15 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 // and should not be recorded in beads ("discover, don't track" principle).
 func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
 	// Set the hook using bd slot set
-	_, err := b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+	// Use runWithRouting so bd can resolve cross-prefix beads (e.g., hq-* hook
+	// beads on gt-* agent beads) via routes.jsonl instead of BEADS_DIR.
+	_, err := b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
 	if err != nil {
 		// If slot is already occupied, clear it first then retry
 		errStr := err.Error()
 		if strings.Contains(errStr, "already occupied") {
-			_, _ = b.run("slot", "clear", agentBeadID, "hook")
-			_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+			_, _ = b.runWithRouting("slot", "clear", agentBeadID, "hook")
+			_, err = b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
 		}
 		if err != nil {
 			return fmt.Errorf("setting hook: %w", err)
@@ -428,7 +432,8 @@ func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
 // ClearHookBead clears the hook_bead slot on an agent bead.
 // Used when work is complete or unslung.
 func (b *Beads) ClearHookBead(agentBeadID string) error {
-	_, err := b.run("slot", "clear", agentBeadID, "hook")
+	// Use runWithRouting so bd can resolve cross-prefix beads via routes.jsonl.
+	_, err := b.runWithRouting("slot", "clear", agentBeadID, "hook")
 	if err != nil {
 		return fmt.Errorf("clearing hook: %w", err)
 	}

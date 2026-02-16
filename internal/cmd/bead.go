@@ -16,7 +16,16 @@ var beadCmd = &cobra.Command{
 	Aliases: []string{"bd"},
 	GroupID: GroupWork,
 	Short:   "Bead management utilities",
-	Long:    `Utilities for managing beads across repositories.`,
+	Long: `Utilities for managing beads across repositories.
+
+Provides operations that span multiple beads repositories, such as
+moving beads between repos and viewing beads by ID with automatic
+prefix-based routing.
+
+Subcommands:
+  move    Move a bead from one repository to another
+  show    Show details of a bead (routes by prefix)
+  read    Alias for show`,
 }
 
 var beadMoveCmd = &cobra.Command{
@@ -142,7 +151,7 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	createArgs := []string{
 		"create",
 		"--prefix", targetPrefix,
-		"--title", source.Title,
+		"--title=" + source.Title,
 		"--type", source.Type,
 		"--priority", fmt.Sprintf("%d", source.Priority),
 		"--silent", // Only output the ID

@@ -277,6 +277,55 @@ func TestParseMergeReady_InvalidSubject(t *testing.T) {
 	}
 }
 
+func TestParseSwarmStart(t *testing.T) {
+	body := `SwarmID: batch-123
+Beads: bd-a, bd-b, bd-c
+Total: 3`
+
+	payload, err := ParseSwarmStart(body)
+	if err != nil {
+		t.Fatalf("ParseSwarmStart() error = %v", err)
+	}
+
+	if payload.SwarmID != "batch-123" {
+		t.Errorf("SwarmID = %q, want %q", payload.SwarmID, "batch-123")
+	}
+	if payload.Total != 3 {
+		t.Errorf("Total = %d, want %d", payload.Total, 3)
+	}
+	expectedBeads := []string{"bd-a", "bd-b", "bd-c"}
+	if len(payload.BeadIDs) != len(expectedBeads) {
+		t.Fatalf("BeadIDs has %d items, want %d", len(payload.BeadIDs), len(expectedBeads))
+	}
+	for i, b := range payload.BeadIDs {
+		if b != expectedBeads[i] {
+			t.Errorf("BeadIDs[%d] = %q, want %q", i, b, expectedBeads[i])
+		}
+	}
+	if payload.StartedAt.IsZero() {
+		t.Error("StartedAt should not be zero")
+	}
+}
+
+func TestParseSwarmStart_MinimalBody(t *testing.T) {
+	body := "SwarmID: batch-456"
+
+	payload, err := ParseSwarmStart(body)
+	if err != nil {
+		t.Fatalf("ParseSwarmStart() error = %v", err)
+	}
+
+	if payload.SwarmID != "batch-456" {
+		t.Errorf("SwarmID = %q, want %q", payload.SwarmID, "batch-456")
+	}
+	if payload.Total != 0 {
+		t.Errorf("Total = %d, want 0", payload.Total)
+	}
+	if len(payload.BeadIDs) != 0 {
+		t.Errorf("BeadIDs = %v, want empty", payload.BeadIDs)
+	}
+}
+
 func TestCleanupWispLabels(t *testing.T) {
 	labels := CleanupWispLabels("nux", "pending")
 

@@ -237,14 +237,24 @@ func ValidateAgentID(id string) error {
 
 	// For 3+ parts, scan from the right to find a known role.
 	// This allows rig names to contain hyphens (e.g., "my-project").
+	// When a worker name collides with a role keyword (e.g., polecat named
+	// "witness"), prefer the named-role interpretation over singleton.
 	roleIdx := -1
 	var role string
 	for i := len(parts) - 1; i >= 0; i-- {
-		if isValidRole(parts[i]) {
-			roleIdx = i
-			role = parts[i]
+		if !isValidRole(parts[i]) {
+			continue
+		}
+		// Found a role keyword. Check if the part to its left is a named
+		// role — if so, the keyword is actually the worker's name.
+		if i >= 2 && isNamedRole(parts[i-1]) {
+			roleIdx = i - 1
+			role = parts[i-1]
 			break
 		}
+		roleIdx = i
+		role = parts[i]
+		break
 	}
 
 	if roleIdx == -1 {
@@ -415,34 +425,61 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	rest := id[hyphenIdx+1:]
 	parts := strings.Split(rest, "-")
 
-	switch len(parts) {
-	case 1:
-		// Town-level: gt-mayor, bd-deacon
-		return "", parts[0], "", true
-	case 2:
-		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (gt-dog-alpha for dogs)
-		if parts[0] == "dog" {
-			// Dogs are town-level named agents: gt-dog-<name>
-			return "", "dog", parts[1], true
-		}
-		// Rig-level singleton: gt-gastown-witness
-		return parts[0], parts[1], "", true
-	case 3:
-		// Rig-level named: gt-gastown-crew-max, bd-beads-polecat-pearl
-		return parts[0], parts[1], parts[2], true
-	default:
-		// Handle names with hyphens: gt-gastown-polecat-my-agent-name
-		// or gt-dog-my-agent-name
-		if len(parts) >= 3 {
-			if parts[0] == "dog" {
-				// Dog with hyphenated name: gt-dog-my-dog-name
-				return "", "dog", strings.Join(parts[1:], "-"), true
-			}
-			return parts[0], parts[1], strings.Join(parts[2:], "-"), true
-		}
+	if len(parts) == 0 {
 		return "", "", "", false
 	}
+
+	// Single part: town-level role (gt-mayor, bd-deacon) or unknown
+	if len(parts) == 1 {
+		return "", parts[0], "", true
+	}
+
+	// Check for town-level named roles (dog) first
+	if parts[0] == "dog" {
+		return "", "dog", strings.Join(parts[1:], "-"), true
+	}
+
+	// Scan from right for known role markers to handle hyphenated rig names.
+	// Format: <rig>-<role>[-<name>] where rig may contain hyphens.
+	//
+	// When a worker name collides with a role keyword (e.g., a polecat named
+	// "witness"), we prefer the named-role interpretation. A named role like
+	// "polecat" at position i-1 consuming the keyword at position i as its
+	// name is more specific than treating the keyword as a singleton role.
+	for i := len(parts) - 1; i >= 1; i-- {
+		p := parts[i]
+		if isNamedRole(p) && i < len(parts)-1 {
+			// Named roles with a name following: crew, polecat
+			return strings.Join(parts[:i], "-"), p, strings.Join(parts[i+1:], "-"), true
+		}
+		if isRigLevelRole(p) {
+			// Before accepting as singleton, check if the part to the left
+			// is a named role — if so, this keyword is actually the worker's
+			// name, not a singleton role marker.
+			if i >= 2 && isNamedRole(parts[i-1]) {
+				return strings.Join(parts[:i-1], "-"), parts[i-1], strings.Join(parts[i:], "-"), true
+			}
+			// Genuine singleton role: witness, refinery
+			return strings.Join(parts[:i], "-"), p, "", true
+		}
+		if isNamedRole(p) && i == len(parts)-1 {
+			// Named role at the end without a following name. Check if the
+			// part to the left is also a named role — if so, this keyword
+			// is the worker's name for that role.
+			if i >= 2 && isNamedRole(parts[i-1]) {
+				return strings.Join(parts[:i-1], "-"), parts[i-1], p, true
+			}
+			// Named role without a name (invalid but handle gracefully)
+			return strings.Join(parts[:i], "-"), p, "", true
+		}
+	}
+
+	// Fallback: assume 2-part rig/role pattern
+	if len(parts) == 2 {
+		return parts[0], parts[1], "", true
+	}
+
+	return "", "", "", false
 }
 
 // IsAgentSessionBead returns true if the bead ID represents an agent session molecule.

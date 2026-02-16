@@ -111,8 +111,8 @@ func (m *Manager) Stop() error {
 	_ = t.SendKeysRaw(sessionID, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	// Kill the session and all its processes
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

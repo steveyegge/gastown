@@ -31,14 +31,90 @@ Witness                    Refinery                      Git
 ```
 
 After successful merge, Refinery sends MERGED mail back to Witness so it can
-complete cleanup (nuke the polecat worktree)."""
+complete cleanup (nuke the polecat worktree).
+
+## CRITICAL: Read Step Instructions Before Acting
+
+Before executing ANY step, you MUST run `bd show <step-id>` and read the full
+description. Steps contain **Config:** values that override default behavior.
+If a config says to skip, you skip. If it specifies a command, you use that
+exact command — not your own assumption. Do NOT guess what a step requires
+based on the step title or your role knowledge. The step description is the
+source of truth.
+
+## Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| wisp_type | patrol | Type of wisp created for this molecule |
+| integration_branch_refinery_enabled | true | Whether refinery merges to integration branches |
+| integration_branch_auto_land | false | Whether to auto-land integration branches when epic children all closed |
+| run_tests | true | Whether to run tests before merging |
+| setup_command | (empty) | Setup/install command (e.g., `pnpm install`). Empty = skip. |
+| typecheck_command | (empty) | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
+| lint_command | (empty) | Lint command (e.g., `eslint .`). Empty = skip. |
+| test_command | go test ./... | Test command to run (if run_tests is true) |
+| build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
+| target_branch | main | Default target branch for merges |
+| delete_merged_branches | true | Whether to delete source branches after merge |
+
+## FORBIDDEN Actions
+
+- FORBIDDEN: Landing integration branches to the default branch via raw git commands (`git merge`, `git push`).
+  Integration branches may ONLY be landed via `gt mq integration land <epic-id>`.
+  This applies regardless of `auto_land` configuration. The pre-push hook enforces this.
+
+## Step Execution Order
+
+You MUST process steps in strict DAG order. Walk through each step sequentially,
+unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 5
+version = 6
 
 [vars]
 [vars.wisp_type]
 description = "Type of wisp created for this molecule"
 default = "patrol"
+
+[vars.integration_branch_refinery_enabled]
+description = "Whether the refinery merges to integration branches (true) or always to target_branch (false)"
+default = "true"
+
+[vars.integration_branch_auto_land]
+description = "Whether to auto-land integration branches when epic children are all closed"
+default = "false"
+
+[vars.run_tests]
+description = "Whether to run tests before merging"
+default = "true"
+
+[vars.setup_command]
+description = "Setup/install command (e.g., pnpm install). Empty = skip."
+default = ""
+
+[vars.typecheck_command]
+description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+default = ""
+
+[vars.lint_command]
+description = "Lint command (e.g., eslint .). Empty = skip."
+default = ""
+
+[vars.test_command]
+description = "Test command to run (if run_tests is true)"
+default = "go test ./..."
+
+[vars.build_command]
+description = "Build command (e.g., go build ./...). Empty = skip."
+default = ""
+
+[vars.target_branch]
+description = "Default target branch for merges"
+default = "main"
+
+[vars.delete_merged_branches]
+description = "Whether to delete source branches after merge"
+default = "true"
 
 [[steps]]
 id = "inbox-check"
@@ -114,7 +190,7 @@ gt mq list <rig>
 The beads MQ tracks all pending merge requests. Do NOT rely on `git branch -r | grep polecat`
 as branches may exist without MR beads, or MR beads may exist for already-merged work.
 
-If queue empty, skip to context-check step.
+If queue empty, skip to "check-integration-branches" step.
 
 For each MR in the queue, verify the branch still exists:
 ```bash
@@ -134,10 +210,12 @@ needs = ["queue-scan"]
 description = """
 Pick next branch from queue. Attempt mechanical rebase on current main.
 
+**Config: target_branch = {{target_branch}}**
+
 **Step 1: Checkout and attempt rebase**
 ```bash
 git checkout -b temp origin/<polecat-branch>
-git rebase origin/main
+git rebase origin/{{target_branch}}
 ```
 
 **Step 2: Check rebase result**
@@ -205,28 +283,60 @@ Track: rebase result (success/conflict), conflict task ID if created."""
 
 [[steps]]
 id = "run-tests"
-title = "Run test suite"
+title = "Run quality checks and tests"
 needs = ["process-branch"]
 description = """
-Run the test suite.
+**Config: run_tests = {{run_tests}}**
+**Config: test_command = {{test_command}}**
+**Config: setup_command = {{setup_command}}**
+**Config: typecheck_command = {{typecheck_command}}**
+**Config: lint_command = {{lint_command}}**
+**Config: build_command = {{build_command}}**
+
+**1. Run quality checks (skip any that are not configured):**
+
+If setup_command is set: `{{setup_command}}`
+If typecheck_command is set: `{{typecheck_command}}`
+If lint_command is set: `{{lint_command}}`
+If build_command is set: `{{build_command}}`
 
 ```bash
-go test ./...
+{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
+{{typecheck_command}}       # Check for type errors (if command set)
+{{lint_command}}            # Check for lint errors (if command set)
+{{build_command}}           # Make sure it builds (if command set)
+```
+
+Empty commands mean "not configured for this project" — skip silently.
+
+**2. If quality checks fail:**
+
+Proceed to handle-failures step. Track which specific check failed
+(setup/typecheck/lint/build) for the failure diagnosis.
+
+**3. Run the test suite:**
+
+If run_tests = "false": Skip this step entirely. Proceed to handle-failures.
+
+If run_tests = "true":
+
+```bash
+{{test_command}}            # Run tests (configured per-rig)
 ```
 
 Track results: pass count, fail count, specific failures."""
 
 [[steps]]
 id = "handle-failures"
-title = "Handle test failures"
+title = "Handle quality check or test failures"
 needs = ["run-tests"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 
-If tests PASSED: This step auto-completes. Proceed to merge.
+If all checks and tests PASSED: This step auto-completes. Proceed to merge.
 
-If tests FAILED:
-1. Diagnose: Is this a branch regression or pre-existing on main?
+If any check or test FAILED:
+1. Diagnose: Is this a branch regression or pre-existing on the target branch?
 2. If branch caused it:
    - Abort merge
    - **REOPEN the source issue** so it returns to the ready queue:
@@ -240,7 +350,7 @@ If tests FAILED:
      Issue: <issue-id>
      Polecat: <polecat-name>
      Rig: <rig>
-     FailureType: tests
+     FailureType: quality-check
      Error: <failure description>"
      ```
    - Close the MR bead as rejected:
@@ -253,9 +363,9 @@ If tests FAILED:
      ```
    - Archive the MERGE_READY message
    - Skip to loop-check
-3. If pre-existing on main:
+3. If pre-existing on the target branch:
    - File a bead: bd create --type=bug --priority=1 --title="..."
-   - FORBIDDEN: Writing code to fix test failures. You merge branches, you do not develop.
+   - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
 **REJECTION CHECKLIST** (all required before skipping to loop-check):
@@ -266,7 +376,7 @@ If tests FAILED:
 - [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
-- Tests passing, OR
+- All quality checks and tests passing, OR
 - Bead filed for the pre-existing failure
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
@@ -276,16 +386,25 @@ This is non-negotiable. Never disavow. Never "note and proceed." """
 
 [[steps]]
 id = "merge-push"
-title = "Merge and push to main"
+title = "Merge and push"
 needs = ["handle-failures"]
 description = """
-Merge to main and push. CRITICAL: Notifications come IMMEDIATELY after push.
+Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
+
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
+**Config: target_branch = {{target_branch}}**
+**Config: delete_merged_branches = {{delete_merged_branches}}**
+
+When integration_branch_refinery_enabled = "true", the MR's target branch
+may be an integration branch (not just {{target_branch}}). Check the MR's target field and use
+that as the merge destination. Only fall back to {{target_branch}} if no explicit target is set.
 
 **Step 1: Merge and Push**
+Determine the merge target: use the MR's target field if set, otherwise {{target_branch}}.
 ```bash
-git checkout main
+git checkout <merge-target>
 git merge --ff-only temp
-git push origin main
+git push origin <merge-target>
 ```
 
 **Step 1.5: VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
@@ -293,8 +412,8 @@ git push origin main
 Push can fail silently (network, auth, hooks). IMMEDIATELY verify:
 ```bash
 git fetch origin
-LOCAL_SHA=$(git rev-parse main)
-REMOTE_SHA=$(git rev-parse origin/main)
+LOCAL_SHA=$(git rev-parse <merge-target>)
+REMOTE_SHA=$(git rev-parse origin/<merge-target>)
 echo "Local:  $LOCAL_SHA"
 echo "Remote: $REMOTE_SHA"
 ```
@@ -325,18 +444,18 @@ POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
 
 **Step 3: Close MR Bead (REQUIRED - DO THIS IMMEDIATELY)**
 
-⚠️ **VERIFICATION BEFORE CLOSING**: Confirm the work is actually on main:
+⚠️ **VERIFICATION BEFORE CLOSING**: Confirm the work is actually on the merge target:
 ```bash
 # Get the commit message/issue from the branch
-git log origin/main --oneline | grep "<issue-id>"
-# OR verify the commit SHA is on main:
-git branch --contains <commit-sha> | grep main
+git log origin/<merge-target> --oneline | grep "<issue-id>"
+# OR verify the commit SHA is on the target:
+git branch --contains <commit-sha> | grep <merge-target>
 ```
 
-If work is NOT on main, DO NOT close the MR bead. Investigate first.
+If work is NOT on the merge target, DO NOT close the MR bead. Investigate first.
 
 ```bash
-bd close <mr-bead-id> --reason "Merged to main at $(git rev-parse --short HEAD)"
+bd close <mr-bead-id> --reason "Merged to <merge-target> at $(git rev-parse --short HEAD)"
 ```
 
 The MR bead ID was in the MERGE_READY message or find via:
@@ -356,8 +475,16 @@ The message ID was tracked when you processed inbox-check.
 **Step 5: Cleanup (only after Steps 2-4 confirmed)**
 ```bash
 git branch -d temp
+```
+
+delete_merged_branches (see config above) controls whether to delete the remote source branch.
+
+If delete_merged_branches is "true":
+```bash
 git push origin --delete <polecat-branch>
 ```
+
+If delete_merged_branches is "false": Leave the remote branch intact.
 
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
@@ -366,7 +493,7 @@ git push origin --delete <polecat-branch>
 
 If you skipped notifications or archiving, GO BACK AND DO THEM NOW.
 
-Main has moved. Any remaining branches need rebasing on new baseline."""
+Target branch has moved. Any remaining branches need rebasing on new baseline."""
 
 [[steps]]
 id = "loop-check"
@@ -420,9 +547,32 @@ conflict, it may indicate main is moving too fast or branches are too stale.
 This becomes the digest when the patrol is squashed."""
 
 [[steps]]
+id = "check-integration-branches"
+title = "Check integration branches for landing"
+needs = ["generate-summary"]
+description = """
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
+**Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
+
+Read the two config values above, then:
+
+- If integration_branch_refinery_enabled = "false": Say "Integration branches disabled." Close step.
+- If integration_branch_auto_land = "false": Say "Auto-land disabled, nothing to do." Close step.
+  FORBIDDEN: If auto_land is false, you MUST NOT land integration branches yourself using
+  raw git commands. Do not merge integration branches to the default/target branch. Do not push
+  integration branch merges. The auto_land=false setting means landing requires a human
+  to run `gt mq integration land` manually. Respect this boundary unconditionally.
+- If BOTH are "true":
+  1. `bd list --type=epic --status=open` to find epics
+  2. `gt mq integration status <epic-id>` for each epic
+  3. If `ready_to_land: true`: run `gt mq integration land <epic-id>`
+  4. If `ready_to_land: false`: do nothing, epic work is incomplete
+  Never land partial epics — ALL children must be closed first."""
+
+[[steps]]
 id = "context-check"
 title = "Assess session health"
-needs = ["generate-summary"]
+needs = ["check-integration-branches"]
 description = """
 Assess whether this session should continue or hand off to a fresh one.
 

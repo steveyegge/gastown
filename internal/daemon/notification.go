@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -23,8 +24,11 @@ type NotificationSlot struct {
 // It ensures that for a given (session, slot) pair, only one notification
 // is pending at a time. Sending a new notification to the same slot
 // replaces the previous one.
+//
+// All exported methods are safe for concurrent use.
 type NotificationManager struct {
-	stateDir string // Directory for slot state files
+	mu       sync.Mutex
+	stateDir string        // Directory for slot state files
 	maxAge   time.Duration // Max age before considering a slot stale
 }
 
@@ -51,6 +55,13 @@ func (m *NotificationManager) slotPath(session, slot string) string {
 
 // GetSlot reads the current state of a notification slot.
 func (m *NotificationManager) GetSlot(session, slot string) (*NotificationSlot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getSlotLocked(session, slot)
+}
+
+// getSlotLocked reads slot state; caller must hold m.mu.
+func (m *NotificationManager) getSlotLocked(session, slot string) (*NotificationSlot, error) {
 	path := m.slotPath(session, slot)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -74,7 +85,14 @@ func (m *NotificationManager) GetSlot(session, slot string) (*NotificationSlot, 
 // - The pending notification is stale (older than maxAge)
 // - The pending notification was consumed
 func (m *NotificationManager) ShouldSend(session, slot string) (bool, error) {
-	ns, err := m.GetSlot(session, slot)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.shouldSendLocked(session, slot)
+}
+
+// shouldSendLocked checks send eligibility; caller must hold m.mu.
+func (m *NotificationManager) shouldSendLocked(session, slot string) (bool, error) {
+	ns, err := m.getSlotLocked(session, slot)
 	if err != nil {
 		return true, err // On error, allow sending
 	}
@@ -97,6 +115,13 @@ func (m *NotificationManager) ShouldSend(session, slot string) (bool, error) {
 
 // RecordSend records that a notification was sent for a slot.
 func (m *NotificationManager) RecordSend(session, slot, message string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.recordSendLocked(session, slot, message)
+}
+
+// recordSendLocked writes a send record; caller must hold m.mu.
+func (m *NotificationManager) recordSendLocked(session, slot, message string) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(m.stateDir, 0755); err != nil {
 		return err
@@ -118,9 +143,30 @@ func (m *NotificationManager) RecordSend(session, slot, message string) error {
 	return os.WriteFile(m.slotPath(session, slot), data, 0600)
 }
 
+// SendIfReady atomically checks whether a notification should be sent for the
+// given slot and, if so, records the send. This eliminates the TOCTOU race
+// between separate ShouldSend and RecordSend calls.
+// Returns true if the notification was recorded (caller should send it).
+func (m *NotificationManager) SendIfReady(session, slot, message string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ok, err := m.shouldSendLocked(session, slot)
+	if err != nil {
+		return true, err // On error, allow sending (match ShouldSend behavior)
+	}
+	if !ok {
+		return false, nil
+	}
+	return true, m.recordSendLocked(session, slot, message)
+}
+
 // MarkConsumed marks a slot's notification as consumed (agent responded).
 func (m *NotificationManager) MarkConsumed(session, slot string) error {
-	ns, err := m.GetSlot(session, slot)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ns, err := m.getSlotLocked(session, slot)
 	if err != nil {
 		return err
 	}
@@ -143,6 +189,9 @@ func (m *NotificationManager) MarkConsumed(session, slot string) error {
 // MarkSessionActive marks all slots for a session as consumed.
 // Call this when the session shows activity (keepalive update).
 func (m *NotificationManager) MarkSessionActive(session string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// List all slot files for this session
 	pattern := filepath.Join(m.stateDir, fmt.Sprintf("slot-%s-*.json", session))
 	matches, err := filepath.Glob(pattern)
@@ -175,6 +224,9 @@ func (m *NotificationManager) MarkSessionActive(session string) error {
 
 // ClearSlot removes the state file for a slot.
 func (m *NotificationManager) ClearSlot(session, slot string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	path := m.slotPath(session, slot)
 	err := os.Remove(path)
 	if os.IsNotExist(err) {
@@ -185,6 +237,9 @@ func (m *NotificationManager) ClearSlot(session, slot string) error {
 
 // ClearStaleSlots removes slot files older than maxAge.
 func (m *NotificationManager) ClearStaleSlots() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	pattern := filepath.Join(m.stateDir, "slot-*.json")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {

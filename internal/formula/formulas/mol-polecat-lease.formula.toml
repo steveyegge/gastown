@@ -112,7 +112,8 @@ bd show {{issue}}             # Status should be 'closed'
 **If verification fails:**
 Nudge polecat to fix:
 ```bash
-gt nudge {{rig}}/polecats/{{polecat}} "Verification failed: <issue>. Please fix."
+# Use --mode=queue to avoid interrupting in-flight tool calls
+gt nudge --mode=queue {{rig}}/polecats/{{polecat}} "Verification failed: <issue>. Please fix."
 ```
 Return to working step.
 

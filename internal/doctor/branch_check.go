@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // BranchCheck detects persistent roles (crew, witness, refinery) that are
@@ -44,7 +46,7 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		if branch == "main" || branch == "master" {
+		if c.isExpectedBranch(ctx.TownRoot, dir, branch) {
 			onMain++
 		} else {
 			offMain = append(offMain, fmt.Sprintf("%s (on %s)", c.relativePath(ctx.TownRoot, dir), branch))
@@ -58,7 +60,7 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 		if err != nil {
 			continue
 		}
-		if branch != "main" && branch != "master" {
+		if !c.isExpectedBranch(ctx.TownRoot, dir, branch) {
 			c.offMainDirs = append(c.offMainDirs, dir)
 		}
 	}
@@ -113,6 +115,31 @@ func (c *BranchCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return lastErr
+}
+
+// isExpectedBranch checks if a directory is on the expected branch.
+// For rigs with a custom default_branch, that branch is expected.
+// Otherwise, main or master are expected.
+func (c *BranchCheck) isExpectedBranch(townRoot, dir, branch string) bool {
+	if branch == "main" || branch == "master" {
+		return true
+	}
+	// Derive the rig path from the directory.
+	// Directories are like <town>/<rig>/refinery/rig or <town>/<rig>/crew/<name>.
+	rel, err := filepath.Rel(townRoot, dir)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+	if len(parts) < 1 {
+		return false
+	}
+	rigPath := filepath.Join(townRoot, parts[0])
+	cfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil || cfg.DefaultBranch == "" {
+		return false
+	}
+	return branch == cfg.DefaultBranch
 }
 
 // findPersistentRoleDirs finds all directories that should be on main:
@@ -200,130 +227,6 @@ func (c *BranchCheck) relativePath(base, path string) string {
 		return path
 	}
 	return rel
-}
-
-// BeadsSyncOrphanCheck detects code changes on beads-sync branch that weren't
-// merged to main. This catches cases where merges lose code changes.
-type BeadsSyncOrphanCheck struct {
-	BaseCheck
-}
-
-// NewBeadsSyncOrphanCheck creates a new beads-sync orphan check.
-func NewBeadsSyncOrphanCheck() *BeadsSyncOrphanCheck {
-	return &BeadsSyncOrphanCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "beads-sync-orphans",
-			CheckDescription: "Detect orphaned code on beads-sync branch",
-			CheckCategory:    CategoryCleanup,
-		},
-	}
-}
-
-// Run checks for code differences between main and beads-sync.
-func (c *BeadsSyncOrphanCheck) Run(ctx *CheckContext) *CheckResult {
-	// Find the first rig with a crew member (that has beads-sync branch)
-	crewDirs := c.findCrewDirs(ctx.TownRoot)
-	if len(crewDirs) == 0 {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "No crew directories found",
-		}
-	}
-
-	// Use first crew dir to check beads-sync
-	crewDir := crewDirs[0]
-
-	// Check if beads-sync branch exists
-	cmd := exec.Command("git", "rev-parse", "--verify", "beads-sync")
-	cmd.Dir = crewDir
-	if err := cmd.Run(); err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "No beads-sync branch (single-clone setup)",
-		}
-	}
-
-	// Get diff between main and beads-sync, excluding .beads/
-	cmd = exec.Command("git", "diff", "--name-only", "main..beads-sync", "--", ".", ":(exclude).beads")
-	cmd.Dir = crewDir
-	out, err := cmd.Output()
-	if err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: "Could not diff main..beads-sync",
-			Details: []string{err.Error()},
-		}
-	}
-
-	files := strings.TrimSpace(string(out))
-	if files == "" {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "No orphaned code on beads-sync",
-		}
-	}
-
-	// Filter to code files only
-	var codeFiles []string
-	for _, f := range strings.Split(files, "\n") {
-		if f == "" {
-			continue
-		}
-		// Check if it's a code file
-		if strings.HasSuffix(f, ".go") || strings.HasSuffix(f, ".md") ||
-			strings.HasSuffix(f, ".toml") || strings.HasSuffix(f, ".json") ||
-			strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml") ||
-			strings.HasSuffix(f, ".tmpl") {
-			codeFiles = append(codeFiles, f)
-		}
-	}
-
-	if len(codeFiles) == 0 {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "No orphaned code on beads-sync (only non-code files differ)",
-		}
-	}
-
-	return &CheckResult{
-		Name:    c.Name(),
-		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d file(s) on beads-sync not in main", len(codeFiles)),
-		Details: codeFiles,
-		FixHint: "Review with: git diff main..beads-sync -- <file>",
-	}
-}
-
-// findCrewDirs returns crew directories that might have beads-sync.
-func (c *BeadsSyncOrphanCheck) findCrewDirs(townRoot string) []string {
-	var dirs []string
-
-	entries, err := os.ReadDir(townRoot)
-	if err != nil {
-		return dirs
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || entry.Name() == "mayor" {
-			continue
-		}
-
-		crewPath := filepath.Join(townRoot, entry.Name(), "crew")
-		if crewEntries, err := os.ReadDir(crewPath); err == nil {
-			for _, crew := range crewEntries {
-				if crew.IsDir() && !strings.HasPrefix(crew.Name(), ".") {
-					dirs = append(dirs, filepath.Join(crewPath, crew.Name()))
-				}
-			}
-		}
-	}
-
-	return dirs
 }
 
 // CloneDivergenceCheck detects when git clones have drifted significantly apart.

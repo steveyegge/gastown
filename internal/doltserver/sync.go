@@ -143,9 +143,29 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 		result.Remote = remote
 
 		if remote == "" {
-			result.Skipped = true
-			results = append(results, result)
-			continue
+			// Auto-setup DoltHub remote if credentials are available.
+			token := DoltHubToken()
+			org := DoltHubOrg()
+			if token != "" && org != "" {
+				if err := SetupDoltHubRemote(dbDir, org, db, token); err != nil {
+					// Setup failed — skip this database for now.
+					result.Error = fmt.Errorf("auto-setup DoltHub remote: %w", err)
+					results = append(results, result)
+					continue
+				}
+				// Remote is now configured; re-read it.
+				remote, err = HasRemote(dbDir)
+				if err != nil || remote == "" {
+					result.Error = fmt.Errorf("remote not found after auto-setup")
+					results = append(results, result)
+					continue
+				}
+				result.Remote = remote
+			} else {
+				result.Skipped = true
+				results = append(results, result)
+				continue
+			}
 		}
 
 		if opts.DryRun {

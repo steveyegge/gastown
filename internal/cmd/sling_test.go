@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/config"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
@@ -289,6 +291,318 @@ exit /b 0
 
 	if !gotCook || !gotWisp || !gotBond {
 		t.Fatalf("missing expected bd commands: cook=%v wisp=%v bond=%v (log: %q)", gotCook, gotWisp, gotBond, string(logBytes))
+	}
+}
+
+func TestSlingRollsBackSpawnedPolecatOnInstantiateFailure(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Register rig so IsRigName("gastown") succeeds.
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigs := &config.RigsConfig{
+		Version: 1,
+		Rigs: map[string]config.RigEntry{
+			"gastown": {
+				GitURL:    "git@github.com:test/gastown.git",
+				LocalRepo: "",
+				AddedAt:   time.Now().Truncate(time.Second),
+				BeadsConfig: &config.BeadsConfig{
+					Repo:   "local",
+					Prefix: "gt-",
+				},
+			},
+		},
+	}
+	if err := config.SaveRigsConfig(rigsPath, rigs); err != nil {
+		t.Fatalf("SaveRigsConfig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir rig beads dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown"), 0755); err != nil {
+		t.Fatalf("mkdir rig dir: %v", err)
+	}
+
+	// Routes: gt-* resolves to gastown's rig beads dir.
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Stub bd: make mol wisp fail to simulate missing required vars.
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdScript := `#!/bin/sh
+set -e
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    exit 0
+    ;;
+  update)
+    exit 0
+    ;;
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"
+    shift || true
+    case "$sub" in
+      wisp)
+        echo "missing required vars" 1>&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo missing required vars 1>&2
+    exit /b 1
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Ensure we don't leak global flag/seam state across tests.
+	prevNoConvoy := slingNoConvoy
+	prevNoBoot := slingNoBoot
+	prevDryRun := slingDryRun
+	prevHookRaw := slingHookRawBead
+	prevSpawn := spawnPolecatForSling
+	prevRollback := rollbackSlingArtifactsFn
+	t.Cleanup(func() {
+		slingNoConvoy = prevNoConvoy
+		slingNoBoot = prevNoBoot
+		slingDryRun = prevDryRun
+		slingHookRawBead = prevHookRaw
+		spawnPolecatForSling = prevSpawn
+		rollbackSlingArtifactsFn = prevRollback
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingNoBoot = true
+	slingHookRawBead = false
+
+	spawnPolecatForSling = func(rigName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
+		return &SpawnedPolecatInfo{
+			RigName:     rigName,
+			PolecatName: "Toast",
+			ClonePath:   filepath.Join(townRoot, "fake-polecat"),
+			DoltBranch:  "",
+		}, nil
+	}
+
+	rollbackCalled := false
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+		rollbackCalled = true
+		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
+			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)
+		}
+		if beadID != "gt-abc123" {
+			t.Fatalf("unexpected beadID in rollback: %q", beadID)
+		}
+		if want := filepath.Join(townRoot, "fake-polecat"); hookWorkDir != want {
+			t.Fatalf("unexpected hookWorkDir in rollback: got %q want %q", hookWorkDir, want)
+		}
+	}
+
+	err = runSling(nil, []string{"gt-abc123", "gastown"})
+	if err == nil {
+		t.Fatalf("expected error from runSling")
+	}
+	if !rollbackCalled {
+		t.Fatalf("expected rollbackSlingArtifacts to be called")
+	}
+}
+
+func TestSlingFormulaRollsBackSpawnedPolecatOnWispFailure(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Register rig so IsRigName("gastown") succeeds.
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigs := &config.RigsConfig{
+		Version: 1,
+		Rigs: map[string]config.RigEntry{
+			"gastown": {
+				GitURL:    "git@github.com:test/gastown.git",
+				LocalRepo: "",
+				AddedAt:   time.Now().Truncate(time.Second),
+				BeadsConfig: &config.BeadsConfig{
+					Repo:   "local",
+					Prefix: "gt-",
+				},
+			},
+		},
+	}
+	if err := config.SaveRigsConfig(rigsPath, rigs); err != nil {
+		t.Fatalf("SaveRigsConfig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir rig beads dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown"), 0755); err != nil {
+		t.Fatalf("mkdir rig dir: %v", err)
+	}
+
+	// Stub bd: cook succeeds; mol wisp fails to simulate missing required vars.
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdScript := `#!/bin/sh
+set -e
+cmd="$1"
+shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"
+    shift || true
+    case "$sub" in
+      wisp)
+        echo "missing required vars" 1>&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo missing required vars 1>&2
+    exit /b 1
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Ensure we don't leak global flag/seam state across tests.
+	prevNoBoot := slingNoBoot
+	prevDryRun := slingDryRun
+	prevSpawn := spawnPolecatForSling
+	prevRollback := rollbackSlingArtifactsFn
+	t.Cleanup(func() {
+		slingNoBoot = prevNoBoot
+		slingDryRun = prevDryRun
+		spawnPolecatForSling = prevSpawn
+		rollbackSlingArtifactsFn = prevRollback
+	})
+
+	slingDryRun = false
+	slingNoBoot = true
+
+	fakeWorkDir := filepath.Join(townRoot, "fake-polecat")
+	if err := os.MkdirAll(fakeWorkDir, 0755); err != nil {
+		t.Fatalf("mkdir fakeWorkDir: %v", err)
+	}
+	spawnPolecatForSling = func(rigName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
+		return &SpawnedPolecatInfo{
+			RigName:     rigName,
+			PolecatName: "Toast",
+			ClonePath:   fakeWorkDir,
+			DoltBranch:  "",
+		}, nil
+	}
+
+	rollbackCalled := false
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+		rollbackCalled = true
+		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
+			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)
+		}
+		if beadID != "" {
+			t.Fatalf("unexpected beadID in rollback: %q", beadID)
+		}
+		if hookWorkDir != fakeWorkDir {
+			t.Fatalf("unexpected hookWorkDir in rollback: got %q want %q", hookWorkDir, fakeWorkDir)
+		}
+	}
+
+	err = runSlingFormula([]string{"mol-anything", "gastown"})
+	if err == nil {
+		t.Fatalf("expected error from runSlingFormula")
+	}
+	if !rollbackCalled {
+		t.Fatalf("expected rollbackSlingArtifactsFn to be called")
 	}
 }
 

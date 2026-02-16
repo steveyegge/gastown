@@ -9,10 +9,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// resolveConfigMu serializes agent config resolution across all callers.
+// ResolveRoleAgentConfig and ResolveAgentConfig load rig-specific agents
+// into a global registry; concurrent calls for different rigs would corrupt
+// each other's lookups.
+var resolveConfigMu sync.Mutex
 
 var (
 	// ErrNotFound indicates the config file does not exist.
@@ -233,6 +240,17 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 		}
 	}
 
+	// Validate stale_claim_timeout if specified
+	if c.StaleClaimTimeout != "" {
+		dur, err := time.ParseDuration(c.StaleClaimTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid stale_claim_timeout: %w", err)
+		}
+		if dur <= 0 {
+			return fmt.Errorf("stale_claim_timeout must be positive, got %v", dur)
+		}
+	}
+
 	// Validate non-negative values
 	if c.RetryFlakyTests < 0 {
 		return fmt.Errorf("%w: retry_flaky_tests must be non-negative", ErrMissingField)
@@ -283,7 +301,32 @@ func LoadRigSettings(path string) (*RigSettings, error) {
 		return nil, err
 	}
 
+	// Check for deprecated merge_queue keys that were removed.
+	// These are silently ignored by json.Unmarshal but may indicate stale config.
+	warnDeprecatedMergeQueueKeys(data, path)
+
 	return &settings, nil
+}
+
+// DeprecatedMergeQueueKeys lists merge_queue config keys that have been removed.
+// target_branch and integration_branches were replaced by rig default_branch
+// and per-epic integration branch metadata.
+var DeprecatedMergeQueueKeys = []string{"target_branch", "integration_branches"}
+
+// warnDeprecatedMergeQueueKeys checks raw settings JSON for removed merge_queue keys
+// and prints a stderr warning. This is advisory only — not a validation error.
+func warnDeprecatedMergeQueueKeys(data []byte, path string) {
+	var raw struct {
+		MergeQueue map[string]json.RawMessage `json:"merge_queue"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || raw.MergeQueue == nil {
+		return
+	}
+	for _, key := range DeprecatedMergeQueueKeys {
+		if _, ok := raw.MergeQueue[key]; ok {
+			fmt.Fprintf(os.Stderr, "warning: %s: merge_queue.%s is deprecated and ignored (use rig default_branch instead)\n", path, key)
+		}
+	}
 }
 
 // SaveRigSettings saves rig settings to a file.
@@ -877,6 +920,14 @@ func SaveTownSettings(path string, settings *TownSettings) error {
 // townRoot is the path to the town directory (e.g., ~/gt).
 // rigPath is the path to the rig directory (e.g., ~/gt/gastown).
 func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+	return resolveAgentConfigInternal(townRoot, rigPath)
+}
+
+// resolveAgentConfigInternal is the lock-free version of ResolveAgentConfig.
+// Caller must hold resolveConfigMu.
+func resolveAgentConfigInternal(townRoot, rigPath string) *RuntimeConfig {
 	// Load rig settings
 	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
 	if err != nil {
@@ -919,6 +970,14 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 // Returns the resolved RuntimeConfig, the selected agent name, and an error if the override name
 // does not exist in town custom agents or built-in presets.
 func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*RuntimeConfig, string, error) {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+	return resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride)
+}
+
+// resolveAgentConfigWithOverrideInternal is the lock-free version.
+// Caller must hold resolveConfigMu.
+func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride string) (*RuntimeConfig, string, error) {
 	// Load rig settings
 	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
 	if err != nil {
@@ -1037,6 +1096,8 @@ func lookupAgentConfigIfExists(name string, townSettings *TownSettings, rigSetti
 // townRoot is the path to the town directory (e.g., ~/gt).
 // rigPath is the path to the rig directory (e.g., ~/gt/gastown), or empty for town-level roles.
 func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
 	rc := resolveRoleAgentConfigCore(role, townRoot, rigPath)
 	return withRoleSettingsFlag(rc, role, rigPath)
 }
@@ -1070,7 +1131,7 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 		return rc
 	}
 
-	settingsDir := roleSettingsDir(role, rigPath)
+	settingsDir := RoleSettingsDir(role, rigPath)
 	if settingsDir == "" {
 		return rc
 	}
@@ -1090,10 +1151,10 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 	return rc
 }
 
-// roleSettingsDir returns the shared settings directory for roles whose session
+// RoleSettingsDir returns the shared settings directory for roles whose session
 // working directory differs from their settings location. Returns empty for
 // roles where settings and session directory are the same (mayor, deacon).
-func roleSettingsDir(role, rigPath string) string {
+func RoleSettingsDir(role, rigPath string) string {
 	switch role {
 	case "crew", "witness", "refinery":
 		return filepath.Join(rigPath, role)
@@ -1156,7 +1217,8 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 	}
 
 	// Fall back to existing resolution (rig's Agent → town's DefaultAgent → "claude")
-	return ResolveAgentConfig(townRoot, rigPath)
+	// Use internal version — caller already holds resolveConfigMu.
+	return resolveAgentConfigInternal(townRoot, rigPath)
 }
 
 // ResolveRoleAgentName returns the agent name that would be used for a specific role.
@@ -1319,42 +1381,43 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		}
 	}
 
-	// Apply defaults for required fields
-	if result.Command == "" {
-		result.Command = "claude"
+	// Resolve preset for data-driven defaults.
+	// Use provider if set, otherwise try to match by command name.
+	presetName := result.Provider
+	if presetName == "" && result.Command != "" {
+		presetName = result.Command
 	}
-	if result.Args == nil {
-		result.Args = []string{"--dangerously-skip-permissions"}
+	preset := GetAgentPresetByName(presetName)
+	if preset == nil {
+		preset = GetAgentPreset(AgentClaude) // fall back to Claude defaults
 	}
 
-	// Auto-fill Hooks defaults based on command for agents that support hooks.
-	// This ensures EnsureSettingsForRole creates the correct settings/plugin
-	// for custom agents defined in town/rig settings.
-	if result.Hooks == nil {
-		switch result.Command {
-		case "claude":
-			result.Hooks = &RuntimeHooksConfig{
-				Provider:     "claude",
-				Dir:          ".claude",
-				SettingsFile: defaultHooksFile("claude"),
-			}
-		case "opencode":
-			result.Hooks = &RuntimeHooksConfig{
-				Provider:     "opencode",
-				Dir:          ".opencode/plugin",
-				SettingsFile: "gastown.js",
-			}
+	// Apply defaults for required fields from preset
+	if result.Command == "" && preset != nil {
+		result.Command = preset.Command
+	}
+	if result.Args == nil && preset != nil {
+		result.Args = append([]string(nil), preset.Args...)
+	}
+
+	// Auto-fill Hooks defaults from preset for agents that support hooks.
+	if result.Hooks == nil && preset != nil && preset.HooksProvider != "" {
+		result.Hooks = &RuntimeHooksConfig{
+			Provider:     preset.HooksProvider,
+			Dir:          preset.HooksDir,
+			SettingsFile: preset.HooksSettingsFile,
 		}
 	}
 
-	// Auto-fill Env defaults for opencode (YOLO mode).
-	// Custom opencode agents need OPENCODE_PERMISSION to run autonomously.
-	if result.Command == "opencode" {
+	// Auto-fill Env defaults from preset.
+	if preset != nil && len(preset.Env) > 0 {
 		if result.Env == nil {
 			result.Env = make(map[string]string)
 		}
-		if _, ok := result.Env["OPENCODE_PERMISSION"]; !ok {
-			result.Env["OPENCODE_PERMISSION"] = `{"*":"allow"}`
+		for k, v := range preset.Env {
+			if _, ok := result.Env[k]; !ok {
+				result.Env[k] = v
+			}
 		}
 	}
 

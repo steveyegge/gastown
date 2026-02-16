@@ -349,7 +349,7 @@ func TestInitBeads_TrackedBeads_CreatesRedirect(t *testing.T) {
 	}
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt"); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -398,7 +398,7 @@ exit 0
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt"); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -441,7 +441,7 @@ exit 1
 	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt"); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -482,7 +482,7 @@ exit 0
 	t.Setenv("BD_CMD_LOG", cmdLog)
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "myrig"); err != nil {
+	if err := manager.InitBeads(rigPath, "myrig"); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -657,7 +657,7 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 
 	for _, prefix := range tests {
 		t.Run(prefix, func(t *testing.T) {
-			err := manager.initBeads(rigPath, prefix)
+			err := manager.InitBeads(rigPath, prefix)
 			if err == nil {
 				t.Errorf("initBeads(%q) should have failed", prefix)
 			}

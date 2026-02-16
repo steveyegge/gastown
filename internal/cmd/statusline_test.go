@@ -1,34 +1,43 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
+)
+
+func setupCmdTestRegistry(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("mr", "myrig")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
 
 func TestCategorizeSessionRig(t *testing.T) {
+	setupCmdTestRegistry(t)
 	tests := []struct {
 		session string
 		wantRig string
 	}{
-		// Standard polecat sessions
-		{"gt-gastown-slit", "gastown"},
-		{"gt-gastown-Toast", "gastown"},
-		{"gt-myrig-worker", "myrig"},
+		// Standard polecat sessions (prefix-based)
+		{"gt-slit", "gastown"},
+		{"gt-Toast", "gastown"},
+		{"mr-worker", "myrig"},
 
 		// Crew sessions
-		{"gt-gastown-crew-max", "gastown"},
-		{"gt-myrig-crew-user", "myrig"},
+		{"gt-crew-max", "gastown"},
+		{"mr-crew-user", "myrig"},
 
-		// Witness sessions (canonical format: gt-<rig>-witness)
-		{"gt-gastown-witness", "gastown"},
-		{"gt-myrig-witness", "myrig"},
-		// Legacy format still works as fallback
-		{"gt-witness-gastown", "gastown"},
-		{"gt-witness-myrig", "myrig"},
+		// Witness sessions
+		{"gt-witness", "gastown"},
+		{"mr-witness", "myrig"},
 
 		// Refinery sessions
-		{"gt-gastown-refinery", "gastown"},
-		{"gt-myrig-refinery", "myrig"},
-
-		// Edge cases
-		{"gt-a-b", "a"}, // minimum valid
+		{"gt-refinery", "gastown"},
+		{"mr-refinery", "myrig"},
 
 		// Town-level agents (no rig, use hq- prefix)
 		{"hq-mayor", ""},
@@ -50,22 +59,21 @@ func TestCategorizeSessionRig(t *testing.T) {
 }
 
 func TestCategorizeSessionType(t *testing.T) {
+	setupCmdTestRegistry(t)
 	tests := []struct {
 		session  string
 		wantType AgentType
 	}{
 		// Polecat sessions
-		{"gt-gastown-slit", AgentPolecat},
-		{"gt-gastown-Toast", AgentPolecat},
-		{"gt-myrig-worker", AgentPolecat},
-		{"gt-a-b", AgentPolecat},
+		{"gt-slit", AgentPolecat},
+		{"gt-Toast", AgentPolecat},
+		{"mr-worker", AgentPolecat},
 
 		// Non-polecat sessions
-		{"gt-gastown-witness", AgentWitness}, // canonical format
-		{"gt-witness-gastown", AgentWitness}, // legacy fallback
-		{"gt-gastown-refinery", AgentRefinery},
-		{"gt-gastown-crew-max", AgentCrew},
-		{"gt-myrig-crew-user", AgentCrew},
+		{"gt-witness", AgentWitness},
+		{"gt-refinery", AgentRefinery},
+		{"gt-crew-max", AgentCrew},
+		{"mr-crew-user", AgentCrew},
 
 		// Town-level agents (hq- prefix)
 		{"hq-mayor", AgentMayor},

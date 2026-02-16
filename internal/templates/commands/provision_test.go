@@ -53,6 +53,30 @@ func TestBuildCommand_OpenCode(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_Copilot(t *testing.T) {
+	cmd := Commands[0] // handoff
+	content, err := BuildCommand(cmd, "copilot")
+	if err != nil {
+		t.Fatalf("BuildCommand failed: %v", err)
+	}
+
+	// Check frontmatter - only description, no Claude-specific fields
+	if !strings.Contains(content, "description: Hand off to fresh session") {
+		t.Error("missing description")
+	}
+	if strings.Contains(content, "allowed-tools") {
+		t.Error("Copilot should not have allowed-tools")
+	}
+	if strings.Contains(content, "argument-hint") {
+		t.Error("Copilot should not have argument-hint")
+	}
+
+	// Check body
+	if !strings.Contains(content, "$ARGUMENTS") {
+		t.Error("missing $ARGUMENTS in body")
+	}
+}
+
 func TestNames(t *testing.T) {
 	names := Names()
 	if len(names) == 0 {

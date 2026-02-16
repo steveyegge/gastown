@@ -42,7 +42,6 @@ Town root protection:
 Infrastructure checks:
   - stale-binary             Check if gt binary is up to date with repo
   - daemon                   Check if daemon is running (fixable)
-  - repo-fingerprint         Check database has valid repo fingerprint (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
 
 Cleanup checks (fixable):
@@ -54,6 +53,8 @@ Cleanup checks (fixable):
 Clone divergence checks:
   - persistent-role-branches Detect crew/witness/refinery not on main
   - clone-divergence         Detect clones significantly behind origin/main
+  - default-branch-all-rigs  Verify default_branch exists on remote for all rigs
+  - worktree-gitdir-valid    Verify worktree .git files reference existing paths (fixable)
 
 Crew workspace checks:
   - crew-state               Validate crew worker state.json files (fixable)
@@ -65,6 +66,7 @@ Migration checks (fixable):
 Rig checks (with --rig flag):
   - rig-is-git-repo          Verify rig is a valid git repository
   - git-exclude-configured   Check .git/info/exclude has Gas Town dirs (fixable)
+  - bare-repo-exists         Verify .repo.git exists when worktrees depend on it (fixable)
   - witness-exists           Verify witness/ structure exists (fixable)
   - refinery-exists          Verify refinery/ structure exists (fixable)
   - mayor-clone-exists       Verify mayor/rig/ clone exists (fixable)
@@ -77,8 +79,15 @@ Routing checks (fixable):
   - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
-  - session-hooks            Check settings.local.json use session-start.sh
-  - claude-settings          Check Claude settings.local.json match templates (fixable)
+  - session-hooks            Check settings.json use session-start.sh
+  - claude-settings          Check Claude settings.json match templates (fixable)
+  - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
+
+Dolt checks:
+  - dolt-binary              Check that dolt is installed and in PATH
+  - dolt-metadata            Check dolt metadata tables exist
+  - dolt-server-reachable    Check dolt sql-server is reachable
+  - dolt-orphaned-databases  Detect orphaned dolt databases
 
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
@@ -134,9 +143,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewTownRootBranchCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
 	d.Register(doctor.NewDaemonCheck())
-	d.Register(doctor.NewRepoFingerprintCheck())
 	d.Register(doctor.NewBootHealthCheck())
-	d.Register(doctor.NewBeadsDatabaseCheck())
 	d.Register(doctor.NewCustomTypesCheck())
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
@@ -154,9 +161,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewStaleBeadsRedirectCheck())
 	d.Register(doctor.NewBranchCheck())
-	d.Register(doctor.NewBeadsSyncOrphanCheck())
-	d.Register(doctor.NewBeadsSyncWorktreeCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
+	d.Register(doctor.NewDefaultBranchAllRigsCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
 	d.Register(doctor.NewThemeCheck())
@@ -182,6 +188,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 	d.Register(doctor.NewClaudeSettingsCheck())
+	d.Register(doctor.NewDeprecatedMergeQueueKeysCheck())
+	d.Register(doctor.NewLandWorktreeGitignoreCheck())
+	d.Register(doctor.NewHooksPathAllRigsCheck())
 
 	// Sparse checkout migration (runs across all rigs, not just --rig mode)
 	d.Register(doctor.NewSparseCheckoutCheck())
@@ -201,14 +210,18 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
-	d.Register(doctor.NewDoltHooksCheck())
 
 	// Hooks sync check
 	d.Register(doctor.NewHooksSyncCheck())
 
 	// Dolt health checks
+	d.Register(doctor.NewDoltBinaryCheck())
 	d.Register(doctor.NewDoltMetadataCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())
+	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
+
+	// Worktree gitdir validity (runs across all rigs, or specific rig with --rig)
+	d.Register(doctor.NewWorktreeGitdirCheck())
 
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {

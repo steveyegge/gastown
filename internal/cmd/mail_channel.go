@@ -50,15 +50,24 @@ Examples:
 var channelListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all channels",
-	Args:  cobra.NoArgs,
-	RunE:  runChannelList,
+	Long: `List all broadcast channels in the workspace.
+
+Displays each channel's name, retention policy, status, and creator.
+Use --json for machine-readable output.`,
+	Args: cobra.NoArgs,
+	RunE: runChannelList,
 }
 
 var channelShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show channel messages",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runChannelShow,
+	Long: `Show messages from a broadcast channel.
+
+Displays the channel's retention policy and all messages sorted by
+creation time, including sender, timestamp, and a body preview.
+Use --json for machine-readable output.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelShow,
 }
 
 var channelCreateCmd = &cobra.Command{
@@ -76,8 +85,13 @@ Retention policy:
 var channelDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Delete a channel",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runChannelDelete,
+	Long: `Delete a broadcast channel and its configuration.
+
+This removes the channel bead. Existing messages that were broadcast
+to the channel are not deleted but will no longer be queryable by
+channel name.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelDelete,
 }
 
 var channelSubscribeCmd = &cobra.Command{

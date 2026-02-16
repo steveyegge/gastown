@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
@@ -69,10 +68,10 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Filter to Gas Town sessions only (gt-* and hq-*)
+	// Filter to Gas Town sessions only (known rig prefixes and hq-*)
 	var gtSessions []string
 	for _, sess := range sessions {
-		if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
+		if session.IsKnownSession(sess) {
 			gtSessions = append(gtSessions, sess)
 		}
 	}

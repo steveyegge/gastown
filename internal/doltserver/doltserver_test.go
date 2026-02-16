@@ -465,6 +465,21 @@ func TestEnsureAllMetadata(t *testing.T) {
 func TestFindRigBeadsDir(t *testing.T) {
 	townRoot := t.TempDir()
 
+	// Test empty rigName returns empty string
+	if dir := FindRigBeadsDir(townRoot, ""); dir != "" {
+		t.Errorf("empty rigName: got %q, want empty string", dir)
+	}
+
+	// Test empty townRoot returns empty string
+	if dir := FindRigBeadsDir("", "myrig"); dir != "" {
+		t.Errorf("empty townRoot: got %q, want empty string", dir)
+	}
+
+	// Test both empty returns empty string
+	if dir := FindRigBeadsDir("", ""); dir != "" {
+		t.Errorf("both empty: got %q, want empty string", dir)
+	}
+
 	// Test HQ
 	if dir := FindRigBeadsDir(townRoot, "hq"); dir != filepath.Join(townRoot, ".beads") {
 		t.Errorf("hq beads dir = %q, want %q", dir, filepath.Join(townRoot, ".beads"))
@@ -488,15 +503,30 @@ func TestFindRigBeadsDir(t *testing.T) {
 		t.Errorf("otherrig beads dir = %q, want %q", dir, rigBeads)
 	}
 
-	// Test rig with neither directory existing — should return mayor path for creation
+	// Test rig with neither directory existing — should return rig-root path
 	neitherRig := "newrig"
-	expectedMayor := filepath.Join(townRoot, neitherRig, "mayor", "rig", ".beads")
-	if dir := FindRigBeadsDir(townRoot, neitherRig); dir != expectedMayor {
-		t.Errorf("newrig (neither exists) beads dir = %q, want %q (mayor path for creation)", dir, expectedMayor)
+	expectedRigRoot := filepath.Join(townRoot, neitherRig, ".beads")
+	if dir := FindRigBeadsDir(townRoot, neitherRig); dir != expectedRigRoot {
+		t.Errorf("newrig (neither exists) beads dir = %q, want %q (rig-root path)", dir, expectedRigRoot)
 	}
 }
 
 func TestFindOrCreateRigBeadsDir(t *testing.T) {
+	t.Run("empty rigName returns error", func(t *testing.T) {
+		townRoot := t.TempDir()
+		_, err := FindOrCreateRigBeadsDir(townRoot, "")
+		if err == nil {
+			t.Error("expected error for empty rigName, got nil")
+		}
+	})
+
+	t.Run("empty townRoot returns error", func(t *testing.T) {
+		_, err := FindOrCreateRigBeadsDir("", "myrig")
+		if err == nil {
+			t.Error("expected error for empty townRoot, got nil")
+		}
+	})
+
 	t.Run("hq creates directory", func(t *testing.T) {
 		townRoot := t.TempDir()
 		dir, err := FindOrCreateRigBeadsDir(townRoot, "hq")
@@ -543,19 +573,24 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 		}
 	})
 
-	t.Run("neither exists creates mayor path", func(t *testing.T) {
+	t.Run("neither exists creates rig-root path", func(t *testing.T) {
 		townRoot := t.TempDir()
 		dir, err := FindOrCreateRigBeadsDir(townRoot, "newrig")
 		if err != nil {
 			t.Fatal(err)
 		}
-		expectedMayor := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
-		if dir != expectedMayor {
-			t.Errorf("newrig beads dir = %q, want %q", dir, expectedMayor)
+		expectedRig := filepath.Join(townRoot, "newrig", ".beads")
+		if dir != expectedRig {
+			t.Errorf("newrig beads dir = %q, want %q", dir, expectedRig)
 		}
 		// Verify directory was actually created
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			t.Error("mayor .beads directory was not created")
+			t.Error("rig-root .beads directory was not created")
+		}
+		// Verify mayor path was NOT created (would confuse InitBeads)
+		mayorBeads := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorBeads); err == nil {
+			t.Error("mayor/rig/.beads should NOT be created for untracked repos")
 		}
 	})
 
@@ -575,19 +610,51 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 		}
 		wg.Wait()
 
-		expectedMayor := filepath.Join(townRoot, "racerig", "mayor", "rig", ".beads")
+		expectedRig := filepath.Join(townRoot, "racerig", ".beads")
 		for i := 0; i < goroutines; i++ {
 			if errs[i] != nil {
 				t.Errorf("goroutine %d: unexpected error: %v", i, errs[i])
 			}
-			if results[i] != expectedMayor {
-				t.Errorf("goroutine %d: got %q, want %q", i, results[i], expectedMayor)
+			if results[i] != expectedRig {
+				t.Errorf("goroutine %d: got %q, want %q", i, results[i], expectedRig)
 			}
 		}
 
 		// Verify directory exists
-		if _, err := os.Stat(expectedMayor); os.IsNotExist(err) {
+		if _, err := os.Stat(expectedRig); os.IsNotExist(err) {
 			t.Error("directory was not created after concurrent calls")
+		}
+	})
+
+	t.Run("does not create mayor path for untracked repo", func(t *testing.T) {
+		// Regression test: FindOrCreateRigBeadsDir must not create
+		// mayor/rig/.beads for new rigs. If it does, InitBeads
+		// misdetects the rig as having tracked beads and takes the
+		// redirect path, skipping config.yaml and issues.jsonl creation.
+		townRoot := t.TempDir()
+
+		// Simulate rig directory existing (after git clone) but with
+		// NO mayor/rig/.beads (untracked repo).
+		rigDir := filepath.Join(townRoot, "untracked", "mayor", "rig")
+		if err := os.MkdirAll(rigDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "untracked")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Should return rig-root .beads, NOT mayor/rig/.beads
+		expectedRig := filepath.Join(townRoot, "untracked", ".beads")
+		if dir != expectedRig {
+			t.Errorf("got %q, want %q", dir, expectedRig)
+		}
+
+		// mayor/rig/.beads must NOT exist
+		mayorBeads := filepath.Join(townRoot, "untracked", "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorBeads); err == nil {
+			t.Error("mayor/rig/.beads was created — would break InitBeads for untracked repos")
 		}
 	})
 }
@@ -1751,7 +1818,7 @@ func TestEnsureMetadata_SetsDefaultJSONLExport(t *testing.T) {
 
 func TestInitRig_EmptyName(t *testing.T) {
 	townRoot := t.TempDir()
-	_, err := InitRig(townRoot, "")
+	_, _, err := InitRig(townRoot, "")
 	if err == nil {
 		t.Fatal("expected error for empty rig name")
 	}
@@ -1760,12 +1827,13 @@ func TestInitRig_EmptyName(t *testing.T) {
 func TestInitRig_InvalidCharacters(t *testing.T) {
 	townRoot := t.TempDir()
 	for _, name := range []string{"my rig", "rig/name", "rig.name", "rig@name"} {
-		_, err := InitRig(townRoot, name)
+		_, _, err := InitRig(townRoot, name)
 		if err == nil {
 			t.Errorf("expected error for invalid rig name %q", name)
 		}
 	}
 }
+
 
 // =============================================================================
 // ListDatabases edge cases
@@ -1840,6 +1908,18 @@ func TestGetConnectionStringForRig(t *testing.T) {
 	s := GetConnectionStringForRig(townRoot, "hq")
 	if s != "root@tcp(127.0.0.1:3307)/hq" {
 		t.Errorf("got %q, want root@tcp(127.0.0.1:3307)/hq", s)
+	}
+}
+
+func TestGetConnectionString_MasksPassword(t *testing.T) {
+	townRoot := t.TempDir()
+	t.Setenv("GT_DOLT_PASSWORD", "supersecret")
+	s := GetConnectionString(townRoot)
+	if strings.Contains(s, "supersecret") {
+		t.Errorf("connection string should not contain raw password, got %q", s)
+	}
+	if !strings.Contains(s, "****") {
+		t.Errorf("connection string should mask password with ****, got %q", s)
 	}
 }
 
@@ -2480,5 +2560,857 @@ func TestMergePolecatBranch_ValidBranchName(t *testing.T) {
 	// Should NOT be a validation error
 	if strings.Contains(err.Error(), "invalid") {
 		t.Errorf("valid branch name rejected: %v", err)
+	}
+}
+
+// =============================================================================
+// VerifyDatabases tests
+// =============================================================================
+
+func TestParseShowDatabases_JSON(t *testing.T) {
+	input := `{"rows":[{"Database":"hq"},{"Database":"gastown"},{"Database":"information_schema"}]}`
+	got, err := parseShowDatabases([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 databases, got %d: %v", len(got), got)
+	}
+	// Check that information_schema is filtered out.
+	for _, db := range got {
+		if db == "information_schema" {
+			t.Error("information_schema should be filtered out")
+		}
+	}
+	// Both hq and gastown should be present.
+	found := map[string]bool{}
+	for _, db := range got {
+		found[db] = true
+	}
+	if !found["hq"] || !found["gastown"] {
+		t.Errorf("expected hq and gastown, got %v", got)
+	}
+}
+
+func TestParseShowDatabases_JSONEmpty(t *testing.T) {
+	input := `{"rows":[]}`
+	got, err := parseShowDatabases([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 databases, got %d: %v", len(got), got)
+	}
+}
+
+func TestParseShowDatabases_JSONEmptyDatabase(t *testing.T) {
+	// Rows with empty Database field should be filtered.
+	input := `{"rows":[{"Database":"hq"},{"Database":""}]}`
+	got, err := parseShowDatabases([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 database, got %d: %v", len(got), got)
+	}
+	if got[0] != "hq" {
+		t.Errorf("expected hq, got %s", got[0])
+	}
+}
+
+func TestParseShowDatabases_UnexpectedJSONSchema(t *testing.T) {
+	// Valid JSON missing the expected "rows" key should return a parse error
+	// rather than silently returning zero databases (which would be
+	// misinterpreted as "all databases are missing" in the migration path).
+	input := `{"unexpected_key":[{"db":"hq"}]}`
+	_, err := parseShowDatabases([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for JSON missing 'rows' key, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing expected 'rows' key") {
+		t.Errorf("expected 'rows' key error, got: %v", err)
+	}
+}
+
+func TestParseShowDatabases_BrokenJSON(t *testing.T) {
+	// Corrupt JSON that starts with { should return an error.
+	input := `{"rows": invalid json}`
+	_, err := parseShowDatabases([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for broken JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "looks like JSON") {
+		t.Errorf("expected JSON guard error, got: %v", err)
+	}
+}
+
+func TestParseShowDatabases_LineFallback(t *testing.T) {
+	// Non-JSON table-formatted output: all lines start with + or |,
+	// so the line parser filters them all out. Since the output is
+	// non-empty but yields zero databases, the parser returns an error
+	// to surface the format mismatch rather than silently reporting
+	// all databases as missing.
+	input := `+--------------------+
+| Database           |
++--------------------+
+| hq                 |
+| gastown            |
+| information_schema |
++--------------------+`
+	_, err := parseShowDatabases([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for table format yielding zero databases, got nil")
+	}
+	if !strings.Contains(err.Error(), "fallback parser returned zero databases") {
+		t.Errorf("expected fallback zero-result error, got: %v", err)
+	}
+}
+
+func TestParseShowDatabases_PlainText(t *testing.T) {
+	// Plain-text output (no JSON, no table formatting).
+	input := "hq\ngastown\ninformation_schema\n"
+	got, err := parseShowDatabases([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 databases, got %d: %v", len(got), got)
+	}
+	found := map[string]bool{}
+	for _, db := range got {
+		found[db] = true
+	}
+	if !found["hq"] || !found["gastown"] {
+		t.Errorf("expected hq and gastown, got %v", got)
+	}
+}
+
+func TestFindMissingDatabases_NoneServed(t *testing.T) {
+	served := []string{}
+	fs := []string{"hq", "gastown"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 2 {
+		t.Errorf("expected 2 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestFindMissingDatabases_AllServed(t *testing.T) {
+	served := []string{"hq", "gastown", "beads"}
+	fs := []string{"hq", "gastown"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestFindMissingDatabases_PartialMissing(t *testing.T) {
+	served := []string{"hq"}
+	fs := []string{"hq", "gastown", "beads"}
+	missing := findMissingDatabases(served, fs)
+	if len(missing) != 2 {
+		t.Fatalf("expected 2 missing, got %d: %v", len(missing), missing)
+	}
+	found := map[string]bool{}
+	for _, db := range missing {
+		found[db] = true
+	}
+	if !found["gastown"] || !found["beads"] {
+		t.Errorf("expected gastown and beads missing, got %v", missing)
+	}
+}
+
+func TestFindMissingDatabases_BothEmpty(t *testing.T) {
+	missing := findMissingDatabases(nil, nil)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing, got %d: %v", len(missing), missing)
+	}
+}
+
+func TestVerifyDatabases_NoServer(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// VerifyDatabases should return an error when no server is running
+	// or when the data directory doesn't exist. If a real server happens
+	// to be on port 3307, the TCP check will pass but dolt sql will fail
+	// due to missing data dir — either way, we expect an error.
+	served, _, err := VerifyDatabases(townRoot)
+	if err == nil {
+		// Server is running AND somehow succeeded — skip.
+		t.Skip("A server is running and dolt sql succeeded against temp dir")
+	}
+	if served != nil {
+		t.Errorf("expected nil served on error, got %v", served)
+	}
+	// Error should mention either "server not reachable" or "SHOW DATABASES".
+	if !strings.Contains(err.Error(), "server not reachable") &&
+		!strings.Contains(err.Error(), "SHOW DATABASES") {
+		t.Errorf("expected reachability or query error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// Orphaned database detection tests
+// =============================================================================
+
+// setupDoltDB creates a fake Dolt database directory with a .dolt subdirectory
+// and some data to simulate a real database for size calculations.
+func setupDoltDB(t *testing.T, dataDir, dbName string) string {
+	t.Helper()
+	dbPath := filepath.Join(dataDir, dbName)
+	doltDir := filepath.Join(dbPath, ".dolt")
+	if err := os.MkdirAll(doltDir, 0755); err != nil {
+		t.Fatalf("creating dolt dir for %s: %v", dbName, err)
+	}
+	// Write a small file so dirSize returns non-zero
+	if err := os.WriteFile(filepath.Join(doltDir, "manifest"), []byte("test"), 0644); err != nil {
+		t.Fatalf("writing manifest for %s: %v", dbName, err)
+	}
+	return dbPath
+}
+
+// setupRigsJSON creates a rigs.json with the given rig names.
+func setupRigsJSON(t *testing.T, townRoot string, rigNames []string) {
+	t.Helper()
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+	rigs := make(map[string]interface{})
+	for _, name := range rigNames {
+		rigs[name] = map[string]interface{}{}
+	}
+	data, err := json.Marshal(map[string]interface{}{"rigs": rigs})
+	if err != nil {
+		t.Fatalf("marshaling rigs.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), data, 0644); err != nil {
+		t.Fatalf("writing rigs.json: %v", err)
+	}
+}
+
+// setupRigMetadata creates a .beads/metadata.json for a rig with Dolt server config.
+func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
+	t.Helper()
+	var beadsDir string
+	if rigName == "hq" {
+		beadsDir = filepath.Join(townRoot, ".beads")
+	} else {
+		beadsDir = filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	}
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("creating beads dir for %s: %v", rigName, err)
+	}
+	meta := map[string]interface{}{
+		"backend":       "dolt",
+		"dolt_mode":     "server",
+		"dolt_database": doltDatabase,
+		"jsonl_export":  "issues.jsonl",
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshaling metadata for %s: %v", rigName, err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0644); err != nil {
+		t.Fatalf("writing metadata for %s: %v", rigName, err)
+	}
+}
+
+func TestFindOrphanedDatabases_NoOrphans(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Create databases that are all referenced
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "gastown")
+
+	// Set up rigs and metadata
+	setupRigsJSON(t, townRoot, []string{"gastown"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "gastown", "gastown")
+
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans, got %d: %v", len(orphans), orphans)
+	}
+}
+
+func TestFindOrphanedDatabases_DetectsOrphans(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Create referenced databases
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "wyvern")
+
+	// Create orphaned database (old partial setup naming)
+	setupDoltDB(t, dataDir, "beads_wy")
+
+	// Set up rigs and metadata — only hq and wyvern are referenced
+	setupRigsJSON(t, townRoot, []string{"wyvern"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "wyvern", "wyvern")
+
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected 1 orphan, got %d: %v", len(orphans), orphans)
+	}
+	if orphans[0].Name != "beads_wy" {
+		t.Errorf("expected orphan name 'beads_wy', got %q", orphans[0].Name)
+	}
+	if orphans[0].SizeBytes <= 0 {
+		t.Errorf("expected positive size, got %d", orphans[0].SizeBytes)
+	}
+}
+
+func TestFindOrphanedDatabases_MultipleOrphans(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// One referenced database
+	setupDoltDB(t, dataDir, "gastown")
+
+	// Multiple orphans
+	setupDoltDB(t, dataDir, "old_setup")
+	setupDoltDB(t, dataDir, "beads_gt")
+	setupDoltDB(t, dataDir, "stale_backup")
+
+	setupRigsJSON(t, townRoot, []string{"gastown"})
+	setupRigMetadata(t, townRoot, "gastown", "gastown")
+
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 3 {
+		t.Fatalf("expected 3 orphans, got %d", len(orphans))
+	}
+
+	names := make(map[string]bool)
+	for _, o := range orphans {
+		names[o.Name] = true
+	}
+	for _, want := range []string{"old_setup", "beads_gt", "stale_backup"} {
+		if !names[want] {
+			t.Errorf("expected orphan %q not found", want)
+		}
+	}
+}
+
+func TestFindOrphanedDatabases_EmptyDataDir(t *testing.T) {
+	townRoot := t.TempDir()
+	// No .dolt-data directory at all
+
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans for missing data dir, got %d", len(orphans))
+	}
+}
+
+func TestFindOrphanedDatabases_IgnoresNonDoltDirs(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Create a referenced database
+	setupDoltDB(t, dataDir, "hq")
+	setupRigsJSON(t, townRoot, []string{})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+
+	// Create a directory WITHOUT .dolt — should be ignored entirely
+	nonDoltDir := filepath.Join(dataDir, "not_a_db")
+	if err := os.MkdirAll(nonDoltDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans (non-dolt dir should be ignored), got %d: %v", len(orphans), orphans)
+	}
+}
+
+func TestCollectReferencedDatabases_HQOnly(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Only HQ metadata, no rigs
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigsJSON(t, townRoot, []string{})
+
+	referenced := collectReferencedDatabases(townRoot)
+	if !referenced["hq"] {
+		t.Error("expected 'hq' to be referenced")
+	}
+	if len(referenced) != 1 {
+		t.Errorf("expected 1 referenced, got %d: %v", len(referenced), referenced)
+	}
+}
+
+func TestCollectReferencedDatabases_MultipleRigs(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigsJSON(t, townRoot, []string{"gastown", "beads", "wyvern"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "gastown", "gastown")
+	setupRigMetadata(t, townRoot, "beads", "beads")
+	setupRigMetadata(t, townRoot, "wyvern", "wyvern")
+
+	referenced := collectReferencedDatabases(townRoot)
+	for _, want := range []string{"hq", "gastown", "beads", "wyvern"} {
+		if !referenced[want] {
+			t.Errorf("expected %q to be referenced", want)
+		}
+	}
+	if len(referenced) != 4 {
+		t.Errorf("expected 4 referenced, got %d", len(referenced))
+	}
+}
+
+func TestCollectReferencedDatabases_CustomDatabaseName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Rig name differs from dolt_database name
+	setupRigsJSON(t, townRoot, []string{"myrig"})
+	setupRigMetadata(t, townRoot, "myrig", "custom_db_name")
+
+	referenced := collectReferencedDatabases(townRoot)
+	if !referenced["custom_db_name"] {
+		t.Error("expected 'custom_db_name' to be referenced")
+	}
+	if referenced["myrig"] {
+		t.Error("rig name 'myrig' should not be in referenced set (only dolt_database value)")
+	}
+}
+
+func TestCollectReferencedDatabases_NoMetadata(t *testing.T) {
+	townRoot := t.TempDir()
+	setupRigsJSON(t, townRoot, []string{"gastown"})
+	// No metadata.json for gastown — should not crash
+
+	referenced := collectReferencedDatabases(townRoot)
+	if len(referenced) != 0 {
+		t.Errorf("expected 0 referenced with no metadata, got %d: %v", len(referenced), referenced)
+	}
+}
+
+func TestCollectReferencedDatabases_NoRigsJSON(t *testing.T) {
+	townRoot := t.TempDir()
+	// No mayor/rigs.json at all — should only check HQ
+	setupRigMetadata(t, townRoot, "hq", "hq")
+
+	referenced := collectReferencedDatabases(townRoot)
+	if !referenced["hq"] {
+		t.Error("expected 'hq' to be referenced even without rigs.json")
+	}
+	if len(referenced) != 1 {
+		t.Errorf("expected 1 referenced, got %d", len(referenced))
+	}
+}
+
+func TestRemoveDatabase_RemovesDirectory(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Create an orphan database to remove
+	setupDoltDB(t, dataDir, "orphan_db")
+
+	// Verify it exists
+	dbPath := filepath.Join(dataDir, "orphan_db")
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("setup failed: orphan_db should exist: %v", err)
+	}
+
+	err := RemoveDatabase(townRoot, "orphan_db")
+	if err != nil {
+		t.Fatalf("RemoveDatabase: %v", err)
+	}
+
+	// Verify it's gone
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Errorf("expected orphan_db to be removed, but it still exists")
+	}
+}
+
+func TestRemoveDatabase_ErrorOnMissing(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := RemoveDatabase(townRoot, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent database")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestListDatabases_OnlyIncludesDoltDirs(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Valid dolt databases
+	setupDoltDB(t, dataDir, "db1")
+	setupDoltDB(t, dataDir, "db2")
+
+	// Non-dolt directories (should be excluded)
+	if err := os.MkdirAll(filepath.Join(dataDir, "plain_dir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// File (should be excluded)
+	if err := os.WriteFile(filepath.Join(dataDir, "a_file"), []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbs, err := ListDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("ListDatabases: %v", err)
+	}
+	if len(dbs) != 2 {
+		t.Fatalf("expected 2 databases, got %d: %v", len(dbs), dbs)
+	}
+
+	names := make(map[string]bool)
+	for _, db := range dbs {
+		names[db] = true
+	}
+	if !names["db1"] || !names["db2"] {
+		t.Errorf("expected db1 and db2, got %v", dbs)
+	}
+}
+
+func TestDatabaseExists_TrueForExisting(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "mydb")
+
+	if !DatabaseExists(townRoot, "mydb") {
+		t.Error("expected DatabaseExists to return true for existing database")
+	}
+}
+
+func TestDatabaseExists_FalseForMissing(t *testing.T) {
+	townRoot := t.TempDir()
+
+	if DatabaseExists(townRoot, "noexist") {
+		t.Error("expected DatabaseExists to return false for missing database")
+	}
+}
+
+func TestFindOrphanedDatabases_EndToEnd(t *testing.T) {
+	// Simulates the exact scenario from the bug report:
+	// .dolt-data/ contains beads_wy/ (old) and wyvern/ (new).
+	// Only wyvern is referenced. beads_wy should be detected as orphaned.
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "wyvern")
+	setupDoltDB(t, dataDir, "beads_wy") // orphan: old partial setup
+
+	setupRigsJSON(t, townRoot, []string{"wyvern"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "wyvern", "wyvern")
+
+	// Step 1: Detect orphans
+	orphans, err := FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("expected 1 orphan (beads_wy), got %d: %v", len(orphans), orphans)
+	}
+	if orphans[0].Name != "beads_wy" {
+		t.Errorf("expected orphan 'beads_wy', got %q", orphans[0].Name)
+	}
+
+	// Step 2: Remove the orphan
+	if err := RemoveDatabase(townRoot, "beads_wy"); err != nil {
+		t.Fatalf("RemoveDatabase: %v", err)
+	}
+
+	// Step 3: Verify no more orphans
+	orphans, err = FindOrphanedDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("FindOrphanedDatabases after cleanup: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans after cleanup, got %d", len(orphans))
+	}
+}
+
+// =============================================================================
+// Remote Dolt server config tests
+// =============================================================================
+
+func TestIsRemote(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"", false},
+		{"127.0.0.1", false},
+		{"localhost", false},
+		{"Localhost", false},
+		{"LOCALHOST", false},
+		{"::1", false},
+		{"[::1]", false},
+		{"10.0.0.5", true},
+		{"dolt.internal", true},
+		{"192.168.1.100", true},
+	}
+	for _, tt := range tests {
+		c := &Config{Host: tt.host}
+		got := c.IsRemote()
+		if got != tt.want {
+			t.Errorf("Config{Host: %q}.IsRemote() = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}
+
+func TestSQLArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		port int
+		user string
+		want []string
+	}{
+		{"local empty host", "", 3307, "root", nil},
+		{"local 127", "127.0.0.1", 3307, "root", nil},
+		{"local localhost", "localhost", 3307, "root", nil},
+		{"remote", "10.0.0.5", 3307, "gtuser", []string{
+			"--host", "10.0.0.5",
+			"--port", "3307",
+			"--user", "gtuser",
+			"--no-tls",
+		}},
+		{"remote custom port", "db.internal", 13306, "admin", []string{
+			"--host", "db.internal",
+			"--port", "13306",
+			"--user", "admin",
+			"--no-tls",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Config{Host: tt.host, Port: tt.port, User: tt.user}
+			got := c.SQLArgs()
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("SQLArgs() = %v, want nil", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("SQLArgs() len = %d, want %d; got %v", len(got), len(tt.want), got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("SQLArgs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestUserDSN(t *testing.T) {
+	tests := []struct {
+		user     string
+		password string
+		want     string
+	}{
+		{"root", "", "root"},
+		{"root", "secret", "root:secret"},
+		{"admin", "p@ss", "admin:p@ss"},
+	}
+	for _, tt := range tests {
+		c := &Config{User: tt.user, Password: tt.password}
+		got := c.userDSN()
+		if got != tt.want {
+			t.Errorf("Config{User:%q, Password:%q}.userDSN() = %q, want %q",
+				tt.user, tt.password, got, tt.want)
+		}
+	}
+}
+
+func TestHostPort(t *testing.T) {
+	tests := []struct {
+		host string
+		port int
+		want string
+	}{
+		{"", 3307, "127.0.0.1:3307"},
+		{"127.0.0.1", 3307, "127.0.0.1:3307"},
+		{"10.0.0.5", 13306, "10.0.0.5:13306"},
+		{"db.internal", 3307, "db.internal:3307"},
+	}
+	for _, tt := range tests {
+		c := &Config{Host: tt.host, Port: tt.port}
+		got := c.HostPort()
+		if got != tt.want {
+			t.Errorf("Config{Host:%q, Port:%d}.HostPort() = %q, want %q",
+				tt.host, tt.port, got, tt.want)
+		}
+	}
+}
+
+func TestDefaultConfig_EnvVarOverrides(t *testing.T) {
+	townRoot := t.TempDir()
+
+	t.Setenv("GT_DOLT_HOST", "10.0.0.5")
+	t.Setenv("GT_DOLT_PORT", "13306")
+	t.Setenv("GT_DOLT_USER", "myuser")
+	t.Setenv("GT_DOLT_PASSWORD", "mypass")
+
+	config := DefaultConfig(townRoot)
+
+	if config.Host != "10.0.0.5" {
+		t.Errorf("Host = %q, want %q", config.Host, "10.0.0.5")
+	}
+	if config.Port != 13306 {
+		t.Errorf("Port = %d, want %d", config.Port, 13306)
+	}
+	if config.User != "myuser" {
+		t.Errorf("User = %q, want %q", config.User, "myuser")
+	}
+	if config.Password != "mypass" {
+		t.Errorf("Password = %q, want %q", config.Password, "mypass")
+	}
+}
+
+func TestDefaultConfig_EnvVarPartialOverride(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Only override host, rest should keep defaults
+	t.Setenv("GT_DOLT_HOST", "remote.host")
+
+	config := DefaultConfig(townRoot)
+
+	if config.Host != "remote.host" {
+		t.Errorf("Host = %q, want %q", config.Host, "remote.host")
+	}
+	if config.Port != DefaultPort {
+		t.Errorf("Port = %d, want %d", config.Port, DefaultPort)
+	}
+	if config.User != DefaultUser {
+		t.Errorf("User = %q, want %q", config.User, DefaultUser)
+	}
+	if config.Password != "" {
+		t.Errorf("Password = %q, want empty", config.Password)
+	}
+}
+
+func TestDefaultConfig_InvalidPortIgnored(t *testing.T) {
+	townRoot := t.TempDir()
+
+	t.Setenv("GT_DOLT_PORT", "not-a-number")
+
+	config := DefaultConfig(townRoot)
+	if config.Port != DefaultPort {
+		t.Errorf("Port = %d, want default %d when env var is invalid", config.Port, DefaultPort)
+	}
+}
+
+func TestBuildDoltSQLCmd_Local(t *testing.T) {
+	config := &Config{
+		Host:    "",
+		Port:    3307,
+		User:    "root",
+		DataDir: "/tmp/dolt-data",
+	}
+
+	ctx := t.Context()
+	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
+
+	// Should set Dir for local
+	if cmd.Dir != "/tmp/dolt-data" {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, "/tmp/dolt-data")
+	}
+
+	// Should have: dolt sql -q "SELECT 1" (no connection flags)
+	args := cmd.Args
+	if len(args) < 4 {
+		t.Fatalf("expected at least 4 args, got %v", args)
+	}
+	if args[1] != "sql" {
+		t.Errorf("args[1] = %q, want 'sql'", args[1])
+	}
+	if args[2] != "-q" {
+		t.Errorf("args[2] = %q, want '-q'", args[2])
+	}
+	// Should NOT have --host flag
+	for _, arg := range args {
+		if arg == "--host" {
+			t.Error("local cmd should not have --host flag")
+		}
+	}
+}
+
+func TestBuildDoltSQLCmd_Remote(t *testing.T) {
+	config := &Config{
+		Host:     "10.0.0.5",
+		Port:     3307,
+		User:     "root",
+		Password: "secret",
+		DataDir:  "/tmp/dolt-data",
+	}
+
+	ctx := t.Context()
+	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
+
+	// Should NOT set Dir for remote
+	if cmd.Dir != "" {
+		t.Errorf("cmd.Dir = %q, want empty for remote", cmd.Dir)
+	}
+
+	// Should have connection flags
+	argStr := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"--host", "10.0.0.5", "--port", "3307", "--no-tls"} {
+		if !strings.Contains(argStr, want) {
+			t.Errorf("args %q missing expected %q", argStr, want)
+		}
+	}
+
+	// Should have DOLT_CLI_PASSWORD in env
+	found := false
+	for _, env := range cmd.Env {
+		if env == "DOLT_CLI_PASSWORD=secret" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("remote cmd with password should have DOLT_CLI_PASSWORD env var")
+	}
+}
+
+func TestBuildDoltSQLCmd_RemoteNoPassword(t *testing.T) {
+	config := &Config{
+		Host:    "10.0.0.5",
+		Port:    3307,
+		User:    "root",
+		DataDir: "/tmp/dolt-data",
+	}
+
+	ctx := t.Context()
+	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
+
+	// Should NOT have DOLT_CLI_PASSWORD in env
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "DOLT_CLI_PASSWORD=") {
+			t.Error("remote cmd without password should not have DOLT_CLI_PASSWORD env var")
+		}
 	}
 }

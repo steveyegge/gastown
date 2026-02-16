@@ -1,4 +1,4 @@
-//go:build integration
+//go:build e2e
 
 package cmd
 
@@ -63,23 +63,17 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 
 	// Verify Claude settings exist in mayor/.claude/ (not town root/.claude/)
 	// Mayor settings go here to avoid polluting child workspaces via directory traversal
-	// Uses settings.local.json (gitignored) instead of settings.json to avoid polluting user repos
-	mayorSettingsPath := filepath.Join(hqPath, "mayor", ".claude", "settings.local.json")
-	assertFileExists(t, mayorSettingsPath, "mayor/.claude/settings.local.json")
+	mayorSettingsPath := filepath.Join(hqPath, "mayor", ".claude", "settings.json")
+	assertFileExists(t, mayorSettingsPath, "mayor/.claude/settings.json")
 
 	// Verify deacon settings exist in deacon/.claude/
-	deaconSettingsPath := filepath.Join(hqPath, "deacon", ".claude", "settings.local.json")
-	assertFileExists(t, deaconSettingsPath, "deacon/.claude/settings.local.json")
+	deaconSettingsPath := filepath.Join(hqPath, "deacon", ".claude", "settings.json")
+	assertFileExists(t, deaconSettingsPath, "deacon/.claude/settings.json")
 }
 
 // TestInstallBeadsHasCorrectPrefix validates that beads is initialized
 // with the correct "hq-" prefix for town-level beads.
 func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
-	// Skip if bd is not available
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not installed, skipping beads prefix test")
-	}
-
 	tmpDir := t.TempDir()
 	hqPath := filepath.Join(tmpDir, "test-hq")
 
@@ -154,14 +148,143 @@ func TestInstallIdempotent(t *testing.T) {
 	}
 }
 
+// TestInstallForcePreservesConfigs validates that re-running gt install --force
+// preserves existing town.json and rigs.json rather than clobbering them.
+func TestInstallForcePreservesConfigs(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// First install
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("first install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Inject sentinel values into town.json and rigs.json
+	mayorDir := filepath.Join(hqPath, "mayor")
+	townPath := filepath.Join(mayorDir, "town.json")
+	rigsPath := filepath.Join(mayorDir, "rigs.json")
+
+	townData, err := os.ReadFile(townPath)
+	if err != nil {
+		t.Fatalf("reading town.json: %v", err)
+	}
+	var townConfig config.TownConfig
+	if err := json.Unmarshal(townData, &townConfig); err != nil {
+		t.Fatalf("parsing town.json: %v", err)
+	}
+	// Set a sentinel public name to detect clobbering
+	townConfig.PublicName = "sentinel-preserve-test"
+	sentinelTown, err := json.MarshalIndent(townConfig, "", "  ")
+	if err != nil {
+		t.Fatalf("marshaling town.json: %v", err)
+	}
+	if err := os.WriteFile(townPath, sentinelTown, 0644); err != nil {
+		t.Fatalf("writing sentinel town.json: %v", err)
+	}
+
+	// Add a sentinel rig entry
+	rigsData, err := os.ReadFile(rigsPath)
+	if err != nil {
+		t.Fatalf("reading rigs.json: %v", err)
+	}
+	var rigsConfig config.RigsConfig
+	if err := json.Unmarshal(rigsData, &rigsConfig); err != nil {
+		t.Fatalf("parsing rigs.json: %v", err)
+	}
+	rigsConfig.Rigs["sentinel-rig"] = config.RigEntry{GitURL: "https://example.com/sentinel"}
+	sentinelRigs, err := json.MarshalIndent(rigsConfig, "", "  ")
+	if err != nil {
+		t.Fatalf("marshaling rigs.json: %v", err)
+	}
+	if err := os.WriteFile(rigsPath, sentinelRigs, 0644); err != nil {
+		t.Fatalf("writing sentinel rigs.json: %v", err)
+	}
+
+	// Re-install with --force
+	cmd = exec.Command(gtBinary, "install", hqPath, "--no-beads", "--force")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install --force failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify preserve messages
+	outStr := string(output)
+	if !strings.Contains(outStr, "already exists, preserving") {
+		t.Errorf("expected 'already exists, preserving' message, got:\n%s", outStr)
+	}
+
+	// Verify town.json sentinel survived
+	townAfter, err := os.ReadFile(townPath)
+	if err != nil {
+		t.Fatalf("reading town.json after re-install: %v", err)
+	}
+	var townAfterConfig config.TownConfig
+	if err := json.Unmarshal(townAfter, &townAfterConfig); err != nil {
+		t.Fatalf("parsing town.json after re-install: %v", err)
+	}
+	if townAfterConfig.PublicName != "sentinel-preserve-test" {
+		t.Errorf("town.json was clobbered: PublicName = %q, want %q", townAfterConfig.PublicName, "sentinel-preserve-test")
+	}
+
+	// Verify rigs.json sentinel survived
+	rigsAfter, err := os.ReadFile(rigsPath)
+	if err != nil {
+		t.Fatalf("reading rigs.json after re-install: %v", err)
+	}
+	var rigsAfterConfig config.RigsConfig
+	if err := json.Unmarshal(rigsAfter, &rigsAfterConfig); err != nil {
+		t.Fatalf("parsing rigs.json after re-install: %v", err)
+	}
+	if _, ok := rigsAfterConfig.Rigs["sentinel-rig"]; !ok {
+		t.Errorf("rigs.json was clobbered: sentinel-rig entry missing")
+	}
+}
+
+// TestInstallForceRejectsNonRegularConfigs validates that gt install --force
+// errors when town.json or rigs.json exists as a directory instead of a file.
+func TestInstallForceRejectsNonRegularConfigs(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// First install
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("first install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Replace town.json with a directory
+	mayorDir := filepath.Join(hqPath, "mayor")
+	townPath := filepath.Join(mayorDir, "town.json")
+	if err := os.Remove(townPath); err != nil {
+		t.Fatalf("removing town.json: %v", err)
+	}
+	if err := os.Mkdir(townPath, 0755); err != nil {
+		t.Fatalf("creating town.json as directory: %v", err)
+	}
+
+	// Re-install with --force should fail
+	cmd = exec.Command(gtBinary, "install", hqPath, "--no-beads", "--force")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("install --force should have failed with directory town.json, output:\n%s", output)
+	}
+	if !strings.Contains(string(output), "not a regular file") {
+		t.Errorf("expected 'not a regular file' error, got:\n%s", output)
+	}
+}
+
 // TestInstallFormulasProvisioned validates that embedded formulas are copied
 // to .beads/formulas/ during installation.
 func TestInstallFormulasProvisioned(t *testing.T) {
-	// Skip if bd is not available
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not installed, skipping formulas test")
-	}
-
 	tmpDir := t.TempDir()
 	hqPath := filepath.Join(tmpDir, "test-hq")
 
@@ -336,5 +459,282 @@ func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 	}
 	if got != want {
 		t.Fatalf("slot %s for %s = %q, want %q", slot, issueID, got, want)
+	}
+}
+
+// TestInstallDoctorClean validates that gt install creates a functional system.
+// This test verifies:
+// 1. gt install succeeds with proper structure
+// 2. gt rig add succeeds
+// 3. gt crew add succeeds
+// 4. Basic commands work
+//
+// NOTE: Full doctor --fix verification is currently limited by known issues:
+// - Doctor fix has bugs with bead creation (UNIQUE constraint errors)
+// - Container environment lacks tmux for session checks
+// - Test repos don't satisfy priming expectations (AGENTS.md length)
+//
+// TODO: Enable full doctor verification once these issues are resolved.
+func TestInstallDoctorClean(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	gtBinary := buildGT(t)
+
+	// Clean environment for predictable behavior
+	env := cleanE2EEnv()
+	env = append(env, "HOME="+tmpDir)
+
+	// Kill any stale dolt from previous test BEFORE install to avoid port 3307 conflict.
+	_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
+
+	// Set up git identity in the test's temp HOME so EnsureDoltIdentity can copy it.
+	configureGitIdentity(t, env)
+
+	// 1. Install town with git (now includes dolt identity, HQ init, server start)
+	t.Run("install", func(t *testing.T) {
+		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
+	})
+	t.Cleanup(func() {
+		cmd := exec.Command(gtBinary, "dolt", "stop")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+
+	// 2. Verify core structure exists
+	t.Run("verify-structure", func(t *testing.T) {
+		assertDirExists(t, filepath.Join(hqPath, "mayor"), "mayor/")
+		assertDirExists(t, filepath.Join(hqPath, "deacon"), "deacon/")
+		assertDirExists(t, filepath.Join(hqPath, ".beads"), ".beads/")
+		assertFileExists(t, filepath.Join(hqPath, "mayor", "town.json"), "mayor/town.json")
+		assertFileExists(t, filepath.Join(hqPath, "mayor", "rigs.json"), "mayor/rigs.json")
+	})
+
+	// 3. Verify install bootstrapped dolt (identity, HQ database, server)
+	t.Run("verify-dolt-bootstrap", func(t *testing.T) {
+		// HQ database should exist
+		hqDoltDir := filepath.Join(hqPath, ".dolt-data", "hq", ".dolt")
+		assertDirExists(t, hqDoltDir, ".dolt-data/hq/.dolt")
+
+		// Dolt identity should have been copied from git config
+		nameCmd := exec.Command("dolt", "config", "--global", "--get", "user.name")
+		nameCmd.Env = env
+		nameOut, err := nameCmd.Output()
+		if err != nil {
+			t.Fatalf("dolt config --get user.name failed: %v", err)
+		}
+		if got := strings.TrimSpace(string(nameOut)); got != "Test User" {
+			t.Errorf("dolt user.name = %q, want %q", got, "Test User")
+		}
+
+		// Dolt server should be reachable
+		cmd := exec.Command(gtBinary, "dolt", "status")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("dolt status failed (server may not be running): %v\n%s", err, out)
+		}
+		if strings.Contains(string(out), "not running") {
+			t.Errorf("expected dolt server to be running, got: %s", out)
+		}
+
+		// init-rig hq again should be idempotent (no error, "already exists" message)
+		initCmd := exec.Command(gtBinary, "dolt", "init-rig", "hq")
+		initCmd.Dir = hqPath
+		initCmd.Env = env
+		initOut, err := initCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("re-running init-rig hq should be idempotent, got error: %v\n%s", err, initOut)
+		}
+		if !strings.Contains(string(initOut), "already exists") {
+			t.Errorf("expected 'already exists' message, got: %s", initOut)
+		}
+	})
+
+	// 4. Add a small public repo as a rig (CLI rejects local paths)
+	t.Run("rig-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "add", "testrig",
+			"https://github.com/octocat/Hello-World.git", "--prefix", "tr")
+	})
+
+	// 5. Verify rig structure exists
+	t.Run("verify-rig-structure", func(t *testing.T) {
+		rigPath := filepath.Join(hqPath, "testrig")
+		assertDirExists(t, rigPath, "testrig/")
+		assertDirExists(t, filepath.Join(rigPath, "witness"), "testrig/witness/")
+		assertDirExists(t, filepath.Join(rigPath, "refinery"), "testrig/refinery/")
+		assertDirExists(t, filepath.Join(rigPath, ".repo.git"), "testrig/.repo.git/")
+	})
+
+	// 6. Add a crew member
+	t.Run("crew-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
+	})
+
+	// 7. Verify crew structure exists
+	t.Run("verify-crew-structure", func(t *testing.T) {
+		crewPath := filepath.Join(hqPath, "testrig", "crew", "jayne")
+		assertDirExists(t, crewPath, "testrig/crew/jayne/")
+	})
+
+	// 8. Basic commands should work
+	// Note: mail inbox and hook are omitted — fresh Dolt databases lack the
+	// issues table, so these commands error with "table not found" until
+	// the first bead is created.
+	t.Run("commands", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "list")
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "list", "--rig", "testrig")
+	})
+
+	// 9. Doctor runs without crashing (may have warnings/errors but should not panic)
+	t.Run("doctor-runs", func(t *testing.T) {
+		cmd := exec.Command(gtBinary, "doctor", "-v")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, _ := cmd.CombinedOutput()
+		outStr := string(out)
+		t.Logf("Doctor output:\n%s", outStr)
+		// Fail on crashes/panics even though we tolerate doctor errors
+		for _, signal := range []string{"panic:", "SIGSEGV", "runtime error"} {
+			if strings.Contains(outStr, signal) {
+				t.Fatalf("doctor crashed with %s", signal)
+			}
+		}
+	})
+}
+
+// TestInstallWithDaemon validates that gt install creates a functional system
+// with the daemon running. This extends TestInstallDoctorClean by:
+// 1. Starting the daemon after install
+// 2. Verifying the daemon is healthy
+// 3. Running basic operations with daemon support
+func TestInstallWithDaemon(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	gtBinary := buildGT(t)
+
+	// Clean environment for predictable behavior
+	env := cleanE2EEnv()
+	env = append(env, "HOME="+tmpDir)
+
+	// Kill any stale dolt from previous test BEFORE install to avoid port 3307 conflict.
+	_ = exec.Command("pkill", "-f", "dolt sql-server").Run()
+
+	// Set up git identity in the test's temp HOME so EnsureDoltIdentity can copy it.
+	configureGitIdentity(t, env)
+
+	// 1. Install town with git (now includes dolt identity, HQ init, server start)
+	t.Run("install", func(t *testing.T) {
+		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
+	})
+	t.Cleanup(func() {
+		cmd := exec.Command(gtBinary, "dolt", "stop")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+
+	// 2. Start daemon
+	t.Run("daemon-start", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "daemon", "start")
+	})
+	t.Cleanup(func() {
+		cmd := exec.Command(gtBinary, "daemon", "stop")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+
+	// 4. Verify daemon is running
+	t.Run("daemon-status", func(t *testing.T) {
+		cmd := exec.Command(gtBinary, "daemon", "status")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("daemon status failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "running") {
+			t.Errorf("expected daemon to be running, got: %s", out)
+		}
+	})
+
+	// 5. Add a small public repo as a rig (CLI rejects local paths)
+	t.Run("rig-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "add", "testrig",
+			"https://github.com/octocat/Hello-World.git", "--prefix", "tr")
+	})
+
+	// 6. Add crew member
+	t.Run("crew-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
+	})
+
+	// 7. Verify commands work with daemon running
+	// Note: mail inbox and hook are omitted — fresh Dolt databases lack the
+	// issues table, so these commands error with "table not found" until
+	// the first bead is created.
+	t.Run("commands", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "list")
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "list", "--rig", "testrig")
+	})
+
+	// 8. Verify daemon shows in doctor output
+	t.Run("doctor-daemon-check", func(t *testing.T) {
+		cmd := exec.Command(gtBinary, "doctor", "-v")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, _ := cmd.CombinedOutput()
+		outStr := string(out)
+		t.Logf("Doctor output:\n%s", outStr)
+		// Fail on crashes/panics even though we tolerate doctor errors
+		for _, signal := range []string{"panic:", "SIGSEGV", "runtime error"} {
+			if strings.Contains(outStr, signal) {
+				t.Fatalf("doctor crashed with %s", signal)
+			}
+		}
+	})
+}
+
+// cleanE2EEnv returns os.Environ() with all GT_* variables removed.
+// This ensures tests don't inherit stale role environment from CI or previous tests.
+func cleanE2EEnv() []string {
+	var clean []string
+	for _, env := range os.Environ() {
+		if !strings.HasPrefix(env, "GT_") {
+			clean = append(clean, env)
+		}
+	}
+	return clean
+}
+
+// configureGitIdentity sets git global config in the test's temp HOME directory.
+// Tests override HOME to a temp dir for isolation, so git/dolt can't find the
+// container's build-time global config. EnsureDoltIdentity copies from git config,
+// so git identity must be available before gt install.
+func configureGitIdentity(t *testing.T, env []string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"config", "--global", "user.name", "Test User"},
+		{"config", "--global", "user.email", "test@test.com"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// runGTCmd runs a gt command and fails the test if it fails.
+func runGTCmd(t *testing.T, binary, dir string, env []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt %v failed: %v\n%s", args, err, out)
 	}
 }

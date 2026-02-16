@@ -32,6 +32,17 @@ const (
 	// meaningful graceful shutdown (saving files, committing, closing connections).
 	// The previous 100ms was effectively identical to a force-kill.
 	GracefulShutdownTimeout = 3 * time.Second
+
+	// NudgeReadyTimeout is how long NudgeSession waits for the target pane to
+	// accept input before giving up. Covers cold startup where Claude's TUI
+	// hasn't initialized yet (tmux returns "not in a mode").
+	// Kept well under nudgeLockTimeout (30s) so concurrent nudges don't
+	// starve waiting for the lock while a retry loop holds it.
+	NudgeReadyTimeout = 10 * time.Second
+
+	// NudgeRetryInterval is the base interval between send-keys retry attempts
+	// when a transient tmux error is encountered during nudge delivery.
+	NudgeRetryInterval = 500 * time.Millisecond
 )
 
 // Directory names within a Gas Town workspace.

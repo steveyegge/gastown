@@ -3,9 +3,24 @@ package cmd
 import (
 	"reflect"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
+func setupPolecatTestRegistry(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("gp", "greenplace")
+	reg.Register("bd", "beads")
+	reg.Register("mr", "my-rig")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
+
 func TestParsePolecatSessionName(t *testing.T) {
+	setupPolecatTestRegistry(t)
 	tests := []struct {
 		name        string
 		sessionName string
@@ -13,31 +28,31 @@ func TestParsePolecatSessionName(t *testing.T) {
 		wantPolecat string
 		wantOk      bool
 	}{
-		// Valid polecat sessions
+		// Valid polecat sessions (using rig prefixes)
 		{
 			name:        "simple polecat",
-			sessionName: "gt-greenplace-Toast",
+			sessionName: "gp-Toast",
 			wantRig:     "greenplace",
 			wantPolecat: "Toast",
 			wantOk:      true,
 		},
 		{
 			name:        "another polecat",
-			sessionName: "gt-greenplace-Nux",
+			sessionName: "gp-Nux",
 			wantRig:     "greenplace",
 			wantPolecat: "Nux",
 			wantOk:      true,
 		},
 		{
 			name:        "polecat in different rig",
-			sessionName: "gt-beads-Worker",
+			sessionName: "bd-Worker",
 			wantRig:     "beads",
 			wantPolecat: "Worker",
 			wantOk:      true,
 		},
 		{
 			name:        "hyphenated rig name",
-			sessionName: "gt-my-rig-Toast",
+			sessionName: "mr-Toast",
 			wantRig:     "my-rig",
 			wantPolecat: "Toast",
 			wantOk:      true,
@@ -46,42 +61,42 @@ func TestParsePolecatSessionName(t *testing.T) {
 		// Not polecat sessions (should return false)
 		{
 			name:        "crew session",
-			sessionName: "gt-greenplace-crew-jack",
+			sessionName: "gp-crew-jack",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
 		},
 		{
 			name:        "witness session",
-			sessionName: "gt-greenplace-witness",
+			sessionName: "gp-witness",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
 		},
 		{
 			name:        "refinery session",
-			sessionName: "gt-greenplace-refinery",
+			sessionName: "gp-refinery",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
 		},
 		{
 			name:        "mayor session",
-			sessionName: "gt-ai-mayor",
+			sessionName: "hq-mayor",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
 		},
 		{
 			name:        "deacon session",
-			sessionName: "gt-ai-deacon",
+			sessionName: "hq-deacon",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
 		},
 		{
-			name:        "no gt prefix",
-			sessionName: "gastown-Toast",
+			name:        "no known prefix",
+			sessionName: "plaintext",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,
@@ -102,7 +117,7 @@ func TestParsePolecatSessionName(t *testing.T) {
 		},
 		{
 			name:        "no name after rig",
-			sessionName: "gt-greenplace-",
+			sessionName: "gp-",
 			wantRig:     "",
 			wantPolecat: "",
 			wantOk:      false,

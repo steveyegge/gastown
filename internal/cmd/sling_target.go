@@ -9,6 +9,9 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
+// spawnPolecatForSling is a seam for tests. Production uses SpawnPolecatForSling.
+var spawnPolecatForSling = SpawnPolecatForSling
+
 // resolveTargetAgent converts a target spec to agent ID, pane, and hook root.
 func resolveTargetAgent(target string) (agentID string, pane string, hookRoot string, err error) {
 	// First resolve to session name
@@ -96,10 +99,11 @@ type ResolveTargetOptions struct {
 	Account  string
 	Agent    string
 	NoBoot   bool
-	HookBead string // Bead ID to set atomically during polecat spawn (empty = skip)
-	BeadID   string // For cross-rig guard checks (empty = skip guard)
-	TownRoot string
-	WorkDesc string // Description for dog dispatch (defaults to HookBead if empty)
+	HookBead   string // Bead ID to set atomically during polecat spawn (empty = skip)
+	BeadID     string // For cross-rig guard checks (empty = skip guard)
+	TownRoot   string
+	WorkDesc   string // Description for dog dispatch (defaults to HookBead if empty)
+	BaseBranch string // Override base branch for polecat worktree
 }
 
 // ResolvedTarget holds the results of target resolution.
@@ -182,13 +186,14 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 		}
 		fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
 		spawnOpts := SlingSpawnOptions{
-			Force:    opts.Force,
-			Account:  opts.Account,
-			Create:   opts.Create,
-			HookBead: opts.HookBead,
-			Agent:    opts.Agent,
+			Force:      opts.Force,
+			Account:    opts.Account,
+			Create:     opts.Create,
+			HookBead:   opts.HookBead,
+			Agent:      opts.Agent,
+			BaseBranch: opts.BaseBranch,
 		}
-		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
 			return nil, fmt.Errorf("spawning polecat: %w", err)
 		}
@@ -216,13 +221,14 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 				}
 				fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
 				spawnOpts := SlingSpawnOptions{
-					Force:    opts.Force,
-					Account:  opts.Account,
-					Create:   opts.Create,
-					HookBead: opts.HookBead,
-					Agent:    opts.Agent,
+					Force:      opts.Force,
+					Account:    opts.Account,
+					Create:     opts.Create,
+					HookBead:   opts.HookBead,
+					Agent:      opts.Agent,
+					BaseBranch: opts.BaseBranch,
 				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+				spawnInfo, spawnErr := spawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return nil, fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
 				}

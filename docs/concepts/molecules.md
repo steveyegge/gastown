@@ -44,13 +44,13 @@ bd create --title "Step 2: Branch setup" --type task
 bd cook mol-polecat-work
 bd mol pour mol-polecat-work --var issue=gt-xyz
 # Now work through the step beads that were created
-bd ready                    # Find next step
+bd mol current              # Find next step
 bd close <step-id>          # Complete it
 ```
 
 **Key insight:** Formulas are source templates (like source code). You never read
 them directly during work. The `cook` → `pour` pipeline creates step beads for you.
-Your molecule already has steps - use `bd ready` to find them.
+Your molecule already has steps - use `bd mol current` to find them.
 
 ## Navigating Molecules
 
@@ -89,7 +89,7 @@ bd close gt-abc.3 --no-auto    # Close but don't auto-claim next
 **The old way (3 commands):**
 ```bash
 bd close gt-abc.3
-bd ready --parent=gt-abc
+bd mol current
 bd update gt-abc.4 --status=in_progress
 ```
 

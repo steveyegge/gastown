@@ -43,8 +43,7 @@ type rigConfigLocal struct {
 }
 
 type rigConfigBeadsLocal struct {
-	Prefix     string `json:"prefix"`
-	SyncRemote string `json:"sync_remote,omitempty"`
+	Prefix string `json:"prefix"`
 }
 
 func loadRigConfigLocal(rigPath string) (*rigConfigLocal, error) {

@@ -94,8 +94,8 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* and hq-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		// Only check sessions that parse as Gas Town sessions
+		if _, err := session.ParseSessionName(sess); err != nil {
 			continue
 		}
 
@@ -160,14 +160,12 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 
 // isCrewSession returns true if the session name matches the crew pattern.
 // Crew sessions are gt-<rig>-crew-<name> and are protected from auto-cleanup.
-func isCrewSession(session string) bool {
-	// Pattern: gt-<rig>-crew-<name>
-	// Example: gt-gastown-crew-joe
-	parts := strings.Split(session, "-")
-	if len(parts) >= 4 && parts[0] == "gt" && parts[2] == "crew" {
-		return true
+func isCrewSession(sess string) bool {
+	identity, err := session.ParseSessionName(sess)
+	if err != nil {
+		return false
 	}
-	return false
+	return identity.Role == session.RoleCrew
 }
 
 // getValidRigs returns a list of valid rig names from the workspace.
@@ -224,17 +222,23 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		return true
 	}
 
-	// For rig-specific sessions, extract rig name
-	// Pattern: gt-<rig>-<role>
-	parts := strings.SplitN(sess, "-", 3)
-	if len(parts) < 3 {
-		// Invalid format - must be gt-<rig>-<something>
+	// For rig-specific sessions, extract rig name using canonical parser
+	identity, err := session.ParseSessionName(sess)
+	if err != nil {
 		return false
 	}
 
-	rigName := parts[1]
+	rigName := identity.Rig
+	if rigName == "" {
+		// Town-level session - not orphaned
+		return true
+	}
 
-	// Check if this rig exists
+	// Check if this rig exists.
+	// For polecats, ParseSessionName assumes rig = everything except last segment,
+	// but polecat names can contain hyphens (e.g., gt-niflheim-fix-auth-bug where
+	// rig=niflheim, name=fix-auth-bug). If the initial parse doesn't match a valid
+	// rig, check if any valid rig is a prefix of the session suffix.
 	rigFound := false
 	for _, r := range validRigs {
 		if r == rigName {
@@ -243,19 +247,29 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		}
 	}
 
+	if !rigFound && identity.Role == session.RolePolecat {
+		// Try alternate rig interpretations: check if any valid rig
+		// matches the parsed prefix (via the registry)
+		for _, r := range validRigs {
+			if session.PrefixFor(r) == identity.Prefix {
+				rigFound = true
+				break
+			}
+		}
+	}
+
 	if !rigFound {
 		// Unknown rig - this is an orphan
 		return false
 	}
 
-	role := parts[2]
-
-	// witness and refinery are valid roles
-	if role == "witness" || role == "refinery" {
+	// witness, refinery, crew, and polecat are all valid roles
+	switch identity.Role {
+	case session.RoleWitness, session.RoleRefinery, session.RoleCrew, session.RolePolecat:
 		return true
 	}
 
-	// Any other name is assumed to be a polecat or crew member
+	// Any other role is assumed valid if the rig exists
 	// We can't easily verify without reading state, so accept it
 	return true
 }

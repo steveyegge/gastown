@@ -6,11 +6,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
+func setupSlingTestRegistry(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", "gastown")
+	reg.Register("bd", "beads")
+	reg.Register("mp", "my-project")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
+
 // TestNudgeRefinerySessionName verifies that nudgeRefinery constructs the
-// correct tmux session name (gt-<rigName>-refinery) and passes the message.
+// correct tmux session name ({prefix}-refinery) and passes the message.
 func TestNudgeRefinerySessionName(t *testing.T) {
+	setupSlingTestRegistry(t)
 	logPath := filepath.Join(t.TempDir(), "nudge.log")
 	t.Setenv("GT_TEST_NUDGE_LOG", logPath)
 
@@ -24,13 +38,13 @@ func TestNudgeRefinerySessionName(t *testing.T) {
 			name:        "simple rig name",
 			rigName:     "gastown",
 			message:     "MR submitted: gt-abc branch=polecat/Nux/gt-abc",
-			wantSession: "gt-gastown-refinery",
+			wantSession: "gt-refinery",
 		},
 		{
 			name:        "hyphenated rig name",
 			rigName:     "my-project",
 			message:     "MR submitted: mp-xyz branch=polecat/Toast/mp-xyz",
-			wantSession: "gt-my-project-refinery",
+			wantSession: "mp-refinery",
 		},
 	}
 

@@ -535,6 +535,102 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	}
 }
 
+func TestRefExists_ValidRef(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// HEAD should exist
+	exists, err := g.RefExists("HEAD")
+	if err != nil {
+		t.Fatalf("RefExists(HEAD): %v", err)
+	}
+	if !exists {
+		t.Error("expected HEAD to exist")
+	}
+}
+
+func TestRefExists_InvalidRef(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// A ref that doesn't exist
+	exists, err := g.RefExists("refs/heads/nonexistent-branch")
+	if err != nil {
+		t.Fatalf("RefExists: %v", err)
+	}
+	if exists {
+		t.Error("expected nonexistent ref to not exist")
+	}
+}
+
+func TestRefExists_OriginRef(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a remote repo
+	remoteDir := filepath.Join(tmp, "remote")
+	if err := os.MkdirAll(remoteDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cmd := exec.Command("git", "init")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	if err := os.WriteFile(filepath.Join(remoteDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = remoteDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Get main branch name
+	cmd = exec.Command("git", "branch", "--show-current")
+	cmd.Dir = remoteDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+
+	// Clone bare
+	bareDir := filepath.Join(tmp, "bare.git")
+	g := NewGit(tmp)
+	if err := g.CloneBare(remoteDir, bareDir); err != nil {
+		t.Fatalf("CloneBare: %v", err)
+	}
+
+	bareGit := NewGitWithDir(bareDir, "")
+
+	// origin/<main> should exist
+	exists, err := bareGit.RefExists("origin/" + mainBranch)
+	if err != nil {
+		t.Fatalf("RefExists(origin/%s): %v", mainBranch, err)
+	}
+	if !exists {
+		t.Errorf("expected origin/%s to exist", mainBranch)
+	}
+
+	// origin/nonexistent should not exist
+	exists, err = bareGit.RefExists("origin/nonexistent")
+	if err != nil {
+		t.Fatalf("RefExists(origin/nonexistent): %v", err)
+	}
+	if exists {
+		t.Error("expected origin/nonexistent to not exist")
+	}
+}
+
 func stringContains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -813,6 +909,51 @@ func TestPruneStaleBranches_SkipsUnmerged(t *testing.T) {
 	}
 }
 
+func TestPushWithEnv(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Set up a pre-push hook that blocks unless GT_INTEGRATION_LAND=1
+	hooksDir := filepath.Join(localDir, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	hookScript := `#!/bin/bash
+if [[ "$GT_INTEGRATION_LAND" != "1" ]]; then
+  echo "BLOCKED: GT_INTEGRATION_LAND not set"
+  exit 1
+fi
+exit 0
+`
+	hookPath := filepath.Join(hooksDir, "pre-push")
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	// Make a commit to push
+	if err := os.WriteFile(filepath.Join(localDir, "env-test.txt"), []byte("test"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("env-test.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("env test"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Regular Push should fail (hook blocks without env var)
+	err := g.Push("origin", mainBranch, false)
+	if err == nil {
+		t.Fatal("expected Push to fail without GT_INTEGRATION_LAND")
+	}
+
+	// PushWithEnv with GT_INTEGRATION_LAND=1 should succeed
+	err = g.PushWithEnv("origin", mainBranch, false, []string{"GT_INTEGRATION_LAND=1"})
+	if err != nil {
+		t.Fatalf("PushWithEnv with GT_INTEGRATION_LAND=1 should succeed: %v", err)
+	}
+}
+
 func TestFetchPrune(t *testing.T) {
 	localDir, _, mainBranch := initTestRepoWithRemote(t)
 	g := NewGit(localDir)
@@ -857,5 +998,224 @@ func TestFetchPrune(t *testing.T) {
 	}
 	if exists {
 		t.Error("expected remote tracking branch to be pruned")
+	}
+}
+
+// initTestRepoWithSubmodule creates a parent repo with a submodule for testing.
+// Returns parentDir, submoduleRemoteDir (bare).
+func initTestRepoWithSubmodule(t *testing.T) (string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	// Create a "remote" bare repo for the submodule
+	subRemote := filepath.Join(tmp, "sub-remote.git")
+	runGit(t, tmp, "init", "--bare", "--initial-branch", "main", subRemote)
+
+	// Create a working clone of the submodule to add content
+	subWork := filepath.Join(tmp, "sub-work")
+	runGit(t, tmp, "clone", subRemote, subWork)
+	runGit(t, subWork, "config", "user.email", "test@test.com")
+	runGit(t, subWork, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(subWork, "lib.go"), []byte("package lib\n"), 0644); err != nil {
+		t.Fatalf("write sub file: %v", err)
+	}
+	runGit(t, subWork, "add", ".")
+	runGit(t, subWork, "commit", "-m", "initial sub commit")
+	runGit(t, subWork, "push", "origin", "main")
+
+	// Create the parent repo
+	parent := filepath.Join(tmp, "parent")
+	runGit(t, tmp, "init", "--initial-branch", "main", parent)
+	runGit(t, parent, "config", "user.email", "test@test.com")
+	runGit(t, parent, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(parent, "README.md"), []byte("# Parent\n"), 0644); err != nil {
+		t.Fatalf("write parent file: %v", err)
+	}
+	runGit(t, parent, "add", ".")
+	runGit(t, parent, "commit", "-m", "initial parent commit")
+
+	// Add the submodule
+	runGit(t, parent, "submodule", "add", subRemote, "libs/sub")
+	runGit(t, parent, "commit", "-m", "add submodule")
+
+	return parent, subRemote
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	// Prepend -c protocol.file.allow=always to allow local file:// transport
+	fullArgs := append([]string{"-c", "protocol.file.allow=always"}, args...)
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
+func TestInitSubmodules_NoSubmodules(t *testing.T) {
+	dir := initTestRepo(t)
+	// Should be a no-op, not an error
+	if err := InitSubmodules(dir); err != nil {
+		t.Fatalf("InitSubmodules on repo without submodules: %v", err)
+	}
+}
+
+func TestInitSubmodules_WithSubmodules(t *testing.T) {
+	parent, _ := initTestRepoWithSubmodule(t)
+
+	// The submodule should already be initialized from the test setup
+	libFile := filepath.Join(parent, "libs", "sub", "lib.go")
+	if _, err := os.Stat(libFile); err != nil {
+		t.Fatalf("expected submodule file to exist after setup: %v", err)
+	}
+
+	// Now test that InitSubmodules works on a fresh clone
+	tmp := t.TempDir()
+	cloneDest := filepath.Join(tmp, "clone")
+	// Clone without --recurse-submodules to simulate current behavior
+	cmd := exec.Command("git", "-c", "protocol.file.allow=always", "clone", parent, cloneDest)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+
+	// Submodule dir exists but is empty
+	subDir := filepath.Join(cloneDest, "libs", "sub")
+	entries, _ := os.ReadDir(subDir)
+	if len(entries) > 0 {
+		t.Fatal("expected empty submodule dir before init")
+	}
+
+	// Allow file:// transport for submodule init in test environment
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+
+	// InitSubmodules should populate it
+	if err := InitSubmodules(cloneDest); err != nil {
+		t.Fatalf("InitSubmodules: %v", err)
+	}
+
+	libFile = filepath.Join(cloneDest, "libs", "sub", "lib.go")
+	if _, err := os.Stat(libFile); err != nil {
+		t.Fatalf("expected submodule file after InitSubmodules: %v", err)
+	}
+}
+
+func TestSubmoduleChanges(t *testing.T) {
+	parent, subRemote := initTestRepoWithSubmodule(t)
+
+	// Create a branch with a submodule change
+	runGit(t, parent, "checkout", "-b", "feature")
+
+	// Make a new commit in the submodule
+	subPath := filepath.Join(parent, "libs", "sub")
+	if err := os.WriteFile(filepath.Join(subPath, "new.go"), []byte("package lib\n// new\n"), 0644); err != nil {
+		t.Fatalf("write new sub file: %v", err)
+	}
+	runGit(t, subPath, "add", ".")
+	runGit(t, subPath, "commit", "-m", "new sub commit")
+	runGit(t, subPath, "push", "origin", "HEAD:main")
+
+	// Update the parent's submodule pointer
+	runGit(t, parent, "add", "libs/sub")
+	runGit(t, parent, "commit", "-m", "update submodule pointer")
+
+	// Now check for submodule changes between main and feature
+	g := NewGit(parent)
+	changes, err := g.SubmoduleChanges("main", "feature")
+	if err != nil {
+		t.Fatalf("SubmoduleChanges: %v", err)
+	}
+
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 submodule change, got %d", len(changes))
+	}
+
+	sc := changes[0]
+	if sc.Path != "libs/sub" {
+		t.Errorf("expected path libs/sub, got %s", sc.Path)
+	}
+	if sc.OldSHA == "" {
+		t.Error("expected non-empty OldSHA")
+	}
+	if sc.NewSHA == "" {
+		t.Error("expected non-empty NewSHA")
+	}
+	if sc.OldSHA == sc.NewSHA {
+		t.Error("expected different SHAs")
+	}
+	if sc.URL != subRemote {
+		t.Errorf("expected URL %s, got %s", subRemote, sc.URL)
+	}
+}
+
+func TestSubmoduleChanges_NoSubmodules(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a branch with a regular file change
+	runGit(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "add file")
+
+	// Detect the default branch name (may be "main" or "master" depending on git config)
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--verify", "main")
+	defaultBranch := "main"
+	if cmd.Run() != nil {
+		defaultBranch = "master"
+	}
+
+	g := NewGit(dir)
+	changes, err := g.SubmoduleChanges(defaultBranch, "feature")
+	if err != nil {
+		t.Fatalf("SubmoduleChanges: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected 0 submodule changes, got %d", len(changes))
+	}
+}
+
+func TestPushSubmoduleCommit(t *testing.T) {
+	parent, subRemote := initTestRepoWithSubmodule(t)
+
+	// Make a new commit in the submodule (but don't push it)
+	subPath := filepath.Join(parent, "libs", "sub")
+	if err := os.WriteFile(filepath.Join(subPath, "pushed.go"), []byte("package lib\n// pushed\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, subPath, "add", ".")
+	runGit(t, subPath, "commit", "-m", "unpushed commit")
+
+	// Get the SHA of the new commit
+	cmd := exec.Command("git", "-C", subPath, "rev-parse", "HEAD")
+	shaBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	sha := strings.TrimSpace(string(shaBytes))
+
+	// Verify it's not on the remote yet
+	lsCmd := exec.Command("git", "ls-remote", subRemote, "refs/heads/main")
+	lsOut, _ := lsCmd.Output()
+	remoteSHA := strings.Fields(string(lsOut))[0]
+	if remoteSHA == sha {
+		t.Fatal("commit should not be on remote yet")
+	}
+
+	// Push it using PushSubmoduleCommit
+	g := NewGit(parent)
+	if err := g.PushSubmoduleCommit("libs/sub", sha, "origin"); err != nil {
+		t.Fatalf("PushSubmoduleCommit: %v", err)
+	}
+
+	// Verify it's now on the remote
+	lsCmd = exec.Command("git", "ls-remote", subRemote, "refs/heads/main")
+	lsOut, _ = lsCmd.Output()
+	remoteSHA = strings.Fields(string(lsOut))[0]
+	if remoteSHA != sha {
+		t.Errorf("expected remote main to be %s, got %s", sha, remoteSHA)
 	}
 }

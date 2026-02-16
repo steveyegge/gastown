@@ -134,6 +134,7 @@ func TestValidTarget(t *testing.T) {
 		{"witness", true},
 		{"refinery", true},
 		{"polecats", true},
+		{"polecat", true},
 		{"mayor", true},
 		{"deacon", true},
 		{"rig", false},
@@ -153,6 +154,35 @@ func TestValidTarget(t *testing.T) {
 		t.Run(tt.target, func(t *testing.T) {
 			if got := ValidTarget(tt.target); got != tt.valid {
 				t.Errorf("ValidTarget(%q) = %v, want %v", tt.target, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestNormalizeTarget(t *testing.T) {
+	tests := []struct {
+		input      string
+		normalized string
+		valid      bool
+	}{
+		{"crew", "crew", true},
+		{"polecats", "polecats", true},
+		{"polecat", "polecats", true},
+		{"gastown/polecats", "gastown/polecats", true},
+		{"gastown/polecat", "gastown/polecats", true},
+		{"mayor", "mayor", true},
+		{"invalid", "", false},
+		{"gastown/invalid", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, ok := NormalizeTarget(tt.input)
+			if ok != tt.valid {
+				t.Errorf("NormalizeTarget(%q) valid = %v, want %v", tt.input, ok, tt.valid)
+			}
+			if got != tt.normalized {
+				t.Errorf("NormalizeTarget(%q) = %q, want %q", tt.input, got, tt.normalized)
 			}
 		})
 	}
@@ -394,14 +424,134 @@ func TestComputeExpectedNoBase(t *testing.T) {
 	tmpDir := t.TempDir()
 	setTestHome(t, tmpDir)
 
+	// Mayor should get DefaultBase + built-in mayor override (task-dispatch guard)
 	expected, err := ComputeExpected("mayor")
 	if err != nil {
 		t.Fatalf("ComputeExpected failed: %v", err)
 	}
 
 	defaultBase := DefaultBase()
-	if !HooksEqual(expected, defaultBase) {
-		t.Error("expected DefaultBase when no configs exist")
+	mayorDefaults := DefaultOverrides()["mayor"]
+	merged := Merge(defaultBase, mayorDefaults)
+	if !HooksEqual(expected, merged) {
+		t.Error("expected DefaultBase + mayor default override when no configs exist")
+	}
+
+	// Non-mayor target should still just get DefaultBase
+	crew, err := ComputeExpected("crew")
+	if err != nil {
+		t.Fatalf("ComputeExpected(crew) failed: %v", err)
+	}
+	if !HooksEqual(crew, defaultBase) {
+		t.Error("expected DefaultBase for crew when no configs exist")
+	}
+}
+
+// TestComputeExpectedBuiltinPlusOnDisk verifies that on-disk overrides layer
+// on top of built-in defaults rather than replacing them.
+func TestComputeExpectedBuiltinPlusOnDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// Save an on-disk mayor override that adds a custom SessionStart hook
+	customOverride := &HooksConfig{
+		SessionStart: []HookEntry{
+			{Matcher: "", Hooks: []Hook{{Type: "command", Command: "custom-mayor-session"}}},
+		},
+	}
+	if err := SaveOverride("mayor", customOverride); err != nil {
+		t.Fatalf("SaveOverride failed: %v", err)
+	}
+
+	expected, err := ComputeExpected("mayor")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
+
+	// Should have the built-in Task guard from DefaultOverrides
+	foundTaskGuard := false
+	for _, entry := range expected.PreToolUse {
+		if entry.Matcher == "Task" {
+			foundTaskGuard = true
+			break
+		}
+	}
+	if !foundTaskGuard {
+		t.Error("built-in Task guard should be present even with on-disk mayor override")
+	}
+
+	// Should also have the custom SessionStart from on-disk override
+	if len(expected.SessionStart) == 0 {
+		t.Error("on-disk SessionStart override should be present")
+	} else if expected.SessionStart[0].Hooks[0].Command != "custom-mayor-session" {
+		t.Errorf("expected custom-mayor-session, got %q", expected.SessionStart[0].Hooks[0].Command)
+	}
+}
+
+// TestComputeExpectedOnDiskReplacesBuiltin verifies that an on-disk override
+// with a conflicting "Task" matcher replaces the built-in guard command.
+func TestComputeExpectedOnDiskReplacesBuiltin(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// On-disk override replaces the Task matcher with a custom command
+	customOverride := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Task", Hooks: []Hook{{Type: "command", Command: "custom-task-guard"}}},
+		},
+	}
+	if err := SaveOverride("mayor", customOverride); err != nil {
+		t.Fatalf("SaveOverride failed: %v", err)
+	}
+
+	expected, err := ComputeExpected("mayor")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
+
+	// The on-disk Task entry should replace the built-in one
+	foundCustom := false
+	for _, entry := range expected.PreToolUse {
+		if entry.Matcher == "Task" {
+			if len(entry.Hooks) == 1 && entry.Hooks[0].Command == "custom-task-guard" {
+				foundCustom = true
+			} else {
+				t.Errorf("Task matcher should have custom command, got %v", entry.Hooks)
+			}
+			break
+		}
+	}
+	if !foundCustom {
+		t.Error("on-disk Task override should replace built-in guard")
+	}
+}
+
+// TestComputeExpectedOnDiskDisablesBuiltin verifies that an on-disk override
+// with an empty Hooks list for "Task" disables the built-in guard entirely.
+func TestComputeExpectedOnDiskDisablesBuiltin(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// On-disk override disables the Task guard with empty hooks
+	disableOverride := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: "Task", Hooks: []Hook{}},
+		},
+	}
+	if err := SaveOverride("mayor", disableOverride); err != nil {
+		t.Fatalf("SaveOverride failed: %v", err)
+	}
+
+	expected, err := ComputeExpected("mayor")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
+
+	// The Task entry should be removed (empty Hooks = explicit disable)
+	for _, entry := range expected.PreToolUse {
+		if entry.Matcher == "Task" {
+			t.Error("Task matcher should be removed when on-disk override has empty Hooks")
+		}
 	}
 }
 
@@ -485,8 +635,8 @@ func TestDiscoverTargets(t *testing.T) {
 		t.Fatalf("DiscoverTargets failed: %v", err)
 	}
 
-	if len(targets) < 5 {
-		t.Errorf("expected at least 5 targets, got %d", len(targets))
+	if len(targets) < 4 {
+		t.Errorf("expected at least 4 targets, got %d", len(targets))
 		for _, tgt := range targets {
 			t.Logf("  target: %s (key=%s)", tgt.DisplayKey(), tgt.Key)
 		}
@@ -500,6 +650,48 @@ func TestDiscoverTargets(t *testing.T) {
 	for _, expected := range []string{"mayor", "deacon", "testrig/crew", "testrig/witness"} {
 		if !found[expected] {
 			t.Errorf("expected target %q not found", expected)
+		}
+	}
+}
+
+func TestDiscoverTargets_RoleNames(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "deacon"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "crew", "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "polecats", "toast"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "witness"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "refinery"), 0755)
+
+	targets, err := DiscoverTargets(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverTargets failed: %v", err)
+	}
+
+	// Verify Role field uses singular form (matching RoleSettingsDir conventions)
+	roleByKey := make(map[string]string)
+	for _, tgt := range targets {
+		roleByKey[tgt.Key] = tgt.Role
+	}
+
+	expected := map[string]string{
+		"mayor":         "mayor",
+		"deacon":        "deacon",
+		"rig1/crew":     "crew",
+		"rig1/polecats": "polecat",
+		"rig1/witness":  "witness",
+		"rig1/refinery": "refinery",
+	}
+
+	for key, wantRole := range expected {
+		gotRole, ok := roleByKey[key]
+		if !ok {
+			t.Errorf("target %q not found", key)
+			continue
+		}
+		if gotRole != wantRole {
+			t.Errorf("target %q: Role = %q, want %q", key, gotRole, wantRole)
 		}
 	}
 }

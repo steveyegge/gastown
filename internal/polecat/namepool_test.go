@@ -106,20 +106,20 @@ func TestNamePool_Overflow(t *testing.T) {
 		pool.Allocate()
 	}
 
-	// Next allocation should be overflow format
+	// Next allocation should be overflow format (just number, not rig-prefixed)
 	name, err := pool.Allocate()
 	if err != nil {
 		t.Fatalf("Allocate error: %v", err)
 	}
-	expected := "gastown-6"
+	expected := "6"
 	if name != expected {
 		t.Errorf("expected overflow name %s, got %s", expected, name)
 	}
 
 	// Next overflow
 	name, _ = pool.Allocate()
-	if name != "gastown-7" {
-		t.Errorf("expected gastown-7, got %s", name)
+	if name != "7" {
+		t.Errorf("expected 7, got %s", name)
 	}
 }
 
@@ -137,19 +137,19 @@ func TestNamePool_OverflowNotReusable(t *testing.T) {
 		pool.Allocate()
 	}
 
-	// Get overflow name
+	// Get overflow name (just number, not rig-prefixed)
 	overflow1, _ := pool.Allocate()
-	if overflow1 != "gastown-4" {
-		t.Fatalf("expected gastown-4, got %s", overflow1)
+	if overflow1 != "4" {
+		t.Fatalf("expected 4, got %s", overflow1)
 	}
 
 	// Release it - should not be reused
 	pool.Release(overflow1)
 
-	// Next allocation should be gastown-5, not gastown-4
+	// Next allocation should be 5, not 4 (overflow increments)
 	name, _ := pool.Allocate()
-	if name != "gastown-5" {
-		t.Errorf("expected gastown-5 (overflow increments), got %s", name)
+	if name != "5" {
+		t.Errorf("expected 5 (overflow increments), got %s", name)
 	}
 }
 
@@ -167,10 +167,10 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	pool.Allocate() // furiosa
 	pool.Allocate() // nux
 	pool.Allocate() // slit
-	overflowName, _ := pool.Allocate() // testrig-4 (overflow)
+	overflowName, _ := pool.Allocate() // 4 (overflow - just number, not rig-prefixed)
 
-	if overflowName != "testrig-4" {
-		t.Errorf("expected testrig-4 for first overflow, got %s", overflowName)
+	if overflowName != "4" {
+		t.Errorf("expected 4 for first overflow, got %s", overflowName)
 	}
 
 	// Save state
@@ -191,14 +191,14 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	}
 
 	// OverflowNext SHOULD persist - it's the one piece of state that can't be derived.
-	// Next overflow should be testrig-5, not testrig-4.
+	// Next overflow should be 5, not 4 (OverflowNext persisted).
 	pool2.Allocate() // furiosa (InUse empty, so starts from beginning)
 	pool2.Allocate() // nux
 	pool2.Allocate() // slit
-	overflowName2, _ := pool2.Allocate() // Should be testrig-5
+	overflowName2, _ := pool2.Allocate() // Should be 5
 
-	if overflowName2 != "testrig-5" {
-		t.Errorf("expected testrig-5 (OverflowNext persisted), got %s", overflowName2)
+	if overflowName2 != "5" {
+		t.Errorf("expected 5 (OverflowNext persisted), got %s", overflowName2)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestNamePool_IsPoolName(t *testing.T) {
 		{"furiosa", true},
 		{"nux", true},
 		{"max", true},
-		{"gastown-51", false}, // overflow format
+		{"51", false}, // overflow format (just number)
 		{"random-name", false},
 		{"polecat-01", false}, // old format
 	}

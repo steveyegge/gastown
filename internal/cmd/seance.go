@@ -191,9 +191,26 @@ func runSeanceList() error {
 	return nil
 }
 
+// resolveSeanceCommand finds the command for an agent that supports --fork-session.
+// Returns the resolved command path, or error if no agent supports fork session.
+func resolveSeanceCommand() (string, error) {
+	for _, name := range config.ListAgentPresets() {
+		preset := config.GetAgentPresetByName(name)
+		if preset != nil && preset.SupportsForkSession {
+			// Use RuntimeConfigFromPreset to resolve the actual command path
+			rc := config.RuntimeConfigFromPreset(preset.Name)
+			return rc.Command, nil
+		}
+	}
+	return "", fmt.Errorf("no agent supports fork session (seance requires --fork-session)")
+}
+
 func runSeanceTalk(sessionID, prompt string) error {
-	// Expand short IDs if needed (user might provide partial)
-	// For now, require full ID or let claude --resume handle it
+	// Resolve the agent command that supports fork session
+	agentCmd, err := resolveSeanceCommand()
+	if err != nil {
+		return err
+	}
 
 	// Clean up any orphaned symlinks from previous interrupted sessions
 	cleanupOrphanedSessionSymlinks()
@@ -201,7 +218,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)
 
 	// Find the session in another account and symlink it to the current account
-	// This allows Claude to load sessions from any account while keeping
+	// This allows the agent to load sessions from any account while keeping
 	// the forked session in the current account
 	townRoot, _ := workspace.FindFromCwd()
 	cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
@@ -220,7 +237,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 		// One-shot mode with --print
 		args = append(args, "--print", prompt)
 
-		cmd := exec.Command("claude", args...)
+		cmd := exec.Command(agentCmd, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
@@ -230,8 +247,8 @@ func runSeanceTalk(sessionID, prompt string) error {
 		return nil
 	}
 
-	// Interactive mode - just launch claude
-	cmd := exec.Command("claude", args...)
+	// Interactive mode
+	cmd := exec.Command(agentCmd, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

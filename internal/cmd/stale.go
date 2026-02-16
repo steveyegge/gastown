@@ -54,7 +54,7 @@ func runStale(cmd *cobra.Command, args []string) error {
 	repoRoot, err := version.GetRepoRoot()
 	if err != nil {
 		if staleQuiet {
-			os.Exit(2)
+			return NewSilentExit(2)
 		}
 		if staleJSON {
 			return outputStaleJSON(StaleOutput{Error: err.Error()})
@@ -68,7 +68,7 @@ func runStale(cmd *cobra.Command, args []string) error {
 	// Handle errors
 	if info.Error != nil {
 		if staleQuiet {
-			os.Exit(2)
+			return NewSilentExit(2)
 		}
 		if staleJSON {
 			return outputStaleJSON(StaleOutput{Error: info.Error.Error()})
@@ -79,9 +79,9 @@ func runStale(cmd *cobra.Command, args []string) error {
 	// Quiet mode: just exit with appropriate code
 	if staleQuiet {
 		if info.IsStale {
-			os.Exit(0)
+			return NewSilentExit(0)
 		}
-		os.Exit(1)
+		return NewSilentExit(1)
 	}
 
 	// Build output

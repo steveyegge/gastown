@@ -50,6 +50,38 @@ func TestCreateOptions(t *testing.T) {
 	}
 }
 
+// TestIsFlagLikeTitle verifies flag-like title detection (gt-e0kx5).
+func TestIsFlagLikeTitle(t *testing.T) {
+	tests := []struct {
+		title string
+		want  bool
+	}{
+		// Flag-like (should be rejected)
+		{"--help", true},
+		{"--json", true},
+		{"--verbose", true},
+		{"-h", true},
+		{"-v", true},
+		{"--dry-run", true},
+		{"--type=task", true},
+
+		// Normal titles (should be allowed)
+		{"Fix bug in parser", false},
+		{"Add --help flag handling", false},
+		{"Fix --help flag parsing", false},
+		{"", false},
+		{"hello", false},
+		{"- list item", false}, // single dash with space is fine (markdown)
+	}
+
+	for _, tt := range tests {
+		got := IsFlagLikeTitle(tt.title)
+		if got != tt.want {
+			t.Errorf("IsFlagLikeTitle(%q) = %v, want %v", tt.title, got, tt.want)
+		}
+	}
+}
+
 // TestUpdateOptions verifies UpdateOptions pointer fields.
 func TestUpdateOptions(t *testing.T) {
 	status := "in_progress"
@@ -76,11 +108,9 @@ func TestIsBeadsRepo(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	b := New(tmpDir)
-	// This should return false since there's no .beads directory
-	// and bd list will fail
+	// Should return false since there's no .beads directory
 	if b.IsBeadsRepo() {
-		// This might pass if bd handles missing .beads gracefully
-		t.Log("IsBeadsRepo returned true for non-beads directory (bd might initialize)")
+		t.Error("IsBeadsRepo returned true for non-beads directory")
 	}
 }
 
@@ -1111,6 +1141,15 @@ func TestParseAgentBeadID(t *testing.T) {
 		{"gt-gastown-polecat-capable", "gastown", "polecat", "capable", true},
 		// Names with hyphens
 		{"gt-gastown-polecat-my-agent", "gastown", "polecat", "my-agent", true},
+		// Worker name collides with role keyword
+		{"gt-gastown-polecat-witness", "gastown", "polecat", "witness", true},
+		{"gt-gastown-polecat-refinery", "gastown", "polecat", "refinery", true},
+		{"gt-gastown-crew-witness", "gastown", "crew", "witness", true},
+		{"gt-gastown-crew-refinery", "gastown", "crew", "refinery", true},
+		{"gt-gastown-polecat-crew", "gastown", "polecat", "crew", true},
+		{"gt-gastown-crew-polecat", "gastown", "crew", "polecat", true},
+		// Worker name collides with role keyword + hyphenated rig
+		{"gt-my-rig-polecat-witness", "my-rig", "polecat", "witness", true},
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
 		// Other prefixes (bd-, hq-)
@@ -1904,11 +1943,11 @@ func TestSetupRedirect(t *testing.T) {
 			t.Fatalf("mkdir crew beads: %v", err)
 		}
 		// Runtime files (should be removed)
-		if err := os.WriteFile(filepath.Join(crewBeads, "beads.db"), []byte("fake db"), 0644); err != nil {
-			t.Fatalf("write fake db: %v", err)
+		if err := os.WriteFile(filepath.Join(crewBeads, "daemon.lock"), []byte("1234"), 0644); err != nil {
+			t.Fatalf("write daemon.lock: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(crewBeads, "issues.jsonl"), []byte("{}"), 0644); err != nil {
-			t.Fatalf("write issues.jsonl: %v", err)
+		if err := os.WriteFile(filepath.Join(crewBeads, "metadata.json"), []byte("{}"), 0644); err != nil {
+			t.Fatalf("write metadata.json: %v", err)
 		}
 		// Tracked files (should be preserved)
 		if err := os.WriteFile(filepath.Join(crewBeads, "config.yaml"), []byte("prefix: test"), 0644); err != nil {
@@ -1923,11 +1962,11 @@ func TestSetupRedirect(t *testing.T) {
 		}
 
 		// Verify runtime files were cleaned up
-		if _, err := os.Stat(filepath.Join(crewBeads, "beads.db")); !os.IsNotExist(err) {
-			t.Error("beads.db should have been removed")
+		if _, err := os.Stat(filepath.Join(crewBeads, "daemon.lock")); !os.IsNotExist(err) {
+			t.Error("daemon.lock should have been removed")
 		}
-		if _, err := os.Stat(filepath.Join(crewBeads, "issues.jsonl")); !os.IsNotExist(err) {
-			t.Error("issues.jsonl should have been removed")
+		if _, err := os.Stat(filepath.Join(crewBeads, "metadata.json")); !os.IsNotExist(err) {
+			t.Error("metadata.json should have been removed")
 		}
 
 		// Verify tracked files were preserved

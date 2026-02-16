@@ -4,8 +4,9 @@ Centralized Claude Code hook management for Gas Town workspaces.
 
 ## Overview
 
-Gas Town manages `.claude/settings.local.json` files across all agent locations
-(mayor, deacon, crew, witness, refinery, polecats). The hooks system provides
+Gas Town manages `.claude/settings.json` files in gastown-managed parent directories
+and passes them to Claude Code via the `--settings` flag. This keeps customer repos
+clean while providing role-specific hook configuration. The hooks system provides
 a single source of truth with a base config and per-role/per-rig overrides.
 
 ## Architecture
@@ -28,25 +29,27 @@ For a target like `gastown/crew`:
 
 ## Generated targets
 
-Each rig generates settings for these locations:
+Each rig generates settings in shared parent directories (not per-worktree):
 
 | Target | Path | Override Key |
 |--------|------|--------------|
-| Rig root | `<rig>/.claude/settings.local.json` | `<rig>/rig` |
-| Crew (shared) | `<rig>/crew/.claude/settings.local.json` | `<rig>/crew` |
-| Witness | `<rig>/witness/.claude/settings.local.json` | `<rig>/witness` |
-| Refinery | `<rig>/refinery/.claude/settings.local.json` | `<rig>/refinery` |
-| Polecats (shared) | `<rig>/polecats/.claude/settings.local.json` | `<rig>/polecats` |
+| Crew (shared) | `<rig>/crew/.claude/settings.json` | `<rig>/crew` |
+| Witness | `<rig>/witness/.claude/settings.json` | `<rig>/witness` |
+| Refinery | `<rig>/refinery/.claude/settings.json` | `<rig>/refinery` |
+| Polecats (shared) | `<rig>/polecats/.claude/settings.json` | `<rig>/polecats` |
 
 Town-level targets:
-- `mayor/.claude/settings.local.json` (key: `mayor`)
-- `deacon/.claude/settings.local.json` (key: `deacon`)
+- `mayor/.claude/settings.json` (key: `mayor`)
+- `deacon/.claude/settings.json` (key: `deacon`)
+
+Settings are passed to Claude Code via `--settings <path>`, which loads them as
+a separate priority tier that merges additively with project settings.
 
 ## Commands
 
 ### `gt hooks sync`
 
-Regenerate all `.claude/settings.local.json` files from base + overrides.
+Regenerate all `.claude/settings.json` files from base + overrides.
 Preserves non-hooks fields (editorMode, enabledPlugins, etc.).
 
 ```bash

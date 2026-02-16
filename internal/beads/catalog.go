@@ -147,16 +147,17 @@ func (c *MoleculeCatalog) LoadFromFile(path, source string) error {
 	return scanner.Err()
 }
 
-// SaveToFile writes all molecules to a JSONL file.
-// This is useful for exporting the catalog or creating template files.
+// SaveToFile writes all molecules to a JSONL file atomically.
+// Writes to a temp file first then renames, preventing partial writes on crash.
 func (c *MoleculeCatalog) SaveToFile(path string) error {
-	file, err := os.Create(path)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".catalog-*.tmp")
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	tmpPath := tmp.Name()
 
-	encoder := json.NewEncoder(file)
+	encoder := json.NewEncoder(tmp)
 	for _, mol := range c.List() {
 		// Don't include source in exported file
 		exportMol := struct {
@@ -169,11 +170,18 @@ func (c *MoleculeCatalog) SaveToFile(path string) error {
 			Description: mol.Description,
 		}
 		if err := encoder.Encode(exportMol); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
 			return err
 		}
 	}
 
-	return nil
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	return os.Rename(tmpPath, path)
 }
 
 // ToIssue converts a catalog molecule to an Issue struct for compatibility.

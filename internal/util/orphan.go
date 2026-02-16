@@ -217,6 +217,69 @@ func processExists(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
+// getProcessCwd returns the current working directory of a process.
+// On Linux, reads /proc/<pid>/cwd. On macOS and other Unix, uses lsof.
+// Returns empty string if the cwd cannot be determined.
+//
+// On hardened Linux kernels (Ubuntu default: kernel.yama.ptrace_scope=1),
+// readlink(/proc/<pid>/cwd) fails with EACCES for non-descendant same-user
+// processes. The lsof fallback handles this when lsof is installed (it may
+// be setuid or hold CAP_SYS_PTRACE). If neither method works, "" is returned
+// and the caller fails safe by not killing the process.
+func getProcessCwd(pid int) string {
+	pidStr := strconv.Itoa(pid)
+
+	// Try /proc/<pid>/cwd first (Linux).
+	// Fails on hardened kernels (ptrace_scope>=1) for non-descendant processes.
+	if target, err := os.Readlink(filepath.Join("/proc", pidStr, "cwd")); err == nil {
+		// Linux appends " (deleted)" when the directory has been removed.
+		// Strip it so the walk-up in isInGasTownWorkspace can still match
+		// the workspace root (the process is definitely orphaned if its
+		// workspace was nuked).
+		return strings.TrimSuffix(target, " (deleted)")
+	}
+
+	// Fallback: lsof (macOS, and Linux when /proc is restricted by ptrace_scope).
+	// -a is required to AND the -p and -d conditions; without it lsof ORs them.
+	// lsof may be setuid or have CAP_SYS_PTRACE, letting it succeed where
+	// readlink failed. Not installed by default on Alpine or minimal Ubuntu images.
+	out, err := exec.Command("lsof", "-a", "-p", pidStr, "-d", "cwd", "-Fn").Output()
+	if err != nil {
+		return ""
+	}
+	// lsof -Fn output: lines starting with 'p' (pid) and 'n' (name/path)
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "n") {
+			return line[1:]
+		}
+	}
+	return ""
+}
+
+// isInGasTownWorkspace checks whether a process's working directory is inside
+// a Gas Town workspace (identified by the mayor/town.json marker).
+// Returns true if the process cwd is at or under a Gas Town workspace root.
+// Returns false if the cwd cannot be determined or is not under any workspace.
+func isInGasTownWorkspace(pid int) bool {
+	cwd := getProcessCwd(pid)
+	if cwd == "" {
+		return false // Can't determine cwd; don't kill
+	}
+
+	// Walk up from cwd looking for a Gas Town workspace marker
+	current := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(current, "mayor", "town.json")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false
+		}
+		current = parent
+	}
+}
+
 // isIDEClaudeProcess checks if a Claude process was spawned by an IDE extension
 // (VS Code, Cursor, etc.). IDE-launched Claude processes run with TTY "?" but
 // are legitimate — they're controlled by the IDE, not orphaned from dead sessions.
@@ -374,6 +437,14 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 			continue
 		}
 
+		// Skip processes NOT in a Gas Town workspace.
+		// Only kill orphaned Claude processes whose cwd is under a Gas Town
+		// workspace root. This prevents killing user's Claude Code instances
+		// running in repos outside ~/gt/ (or wherever the workspace is).
+		if !isInGasTownWorkspace(pid) {
+			continue
+		}
+
 		orphans = append(orphans, OrphanedProcess{
 			PID: pid,
 			Cmd: cmd,
@@ -472,6 +543,14 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 			continue
 		}
 		if age < minOrphanAge {
+			continue
+		}
+
+		// Skip processes NOT in a Gas Town workspace.
+		// Only kill zombie Claude processes whose cwd is under a Gas Town
+		// workspace root. This prevents killing user's Claude Code instances
+		// running in repos outside ~/gt/.
+		if !isInGasTownWorkspace(pid) {
 			continue
 		}
 

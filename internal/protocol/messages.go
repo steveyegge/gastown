@@ -333,6 +333,28 @@ func ParseReworkRequestPayload(body string) (*ReworkRequestPayload, error) {
 	return payload, nil
 }
 
+// ParsePolecatDonePayload parses a POLECAT_DONE notification body.
+// Unlike formal protocol messages, POLECAT_DONE is a mail convention — no
+// required fields are enforced. Returns a best-effort parse of available fields.
+func ParsePolecatDonePayload(polecatName, body string) *PolecatDonePayload {
+	payload := &PolecatDonePayload{
+		Polecat:       polecatName,
+		ExitType:      parseField(body, "Exit"),
+		Issue:         parseField(body, "Issue"),
+		Branch:        parseField(body, "Branch"),
+		MR:            parseField(body, "MR"),
+		ConvoyID:      parseField(body, "ConvoyID"),
+		MergeStrategy: parseField(body, "MergeStrategy"),
+		Errors:        parseField(body, "Errors"),
+	}
+
+	if parseField(body, "ConvoyOwned") == "true" {
+		payload.ConvoyOwned = true
+	}
+
+	return payload
+}
+
 // parseField extracts a field value from a key-value body format.
 // Format: "Key: value"
 func parseField(body, key string) string {

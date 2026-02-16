@@ -132,6 +132,147 @@ version = 1
 	}
 }
 
+func TestParsePluginMD_MalformedTOML(t *testing.T) {
+	content := []byte(`+++
+name = "broken
+description = no quotes
++++
+
+# Broken Plugin
+`)
+	_, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err == nil {
+		t.Error("expected error for malformed TOML")
+	}
+}
+
+func TestParsePluginMD_UnclosedFrontmatter(t *testing.T) {
+	content := []byte(`+++
+name = "unclosed"
+description = "No closing delimiter"
+`)
+	_, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err == nil {
+		t.Error("expected error for unclosed frontmatter")
+	}
+}
+
+func TestParsePluginMD_EmptyFrontmatter(t *testing.T) {
+	content := []byte(`+++
++++
+
+# Empty Plugin
+`)
+	_, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err == nil {
+		t.Error("expected error for empty frontmatter (missing name)")
+	}
+}
+
+func TestParsePluginMD_CooldownGateNoDuration(t *testing.T) {
+	content := []byte(`+++
+name = "no-duration"
+description = "Cooldown without duration"
+version = 1
+
+[gate]
+type = "cooldown"
++++
+
+# No Duration
+`)
+	// Currently accepted (no validation on gate fields beyond parsing)
+	plugin, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+	if plugin.Gate == nil {
+		t.Fatal("expected gate to be non-nil")
+	}
+	if plugin.Gate.Type != GateCooldown {
+		t.Errorf("expected gate type 'cooldown', got %q", plugin.Gate.Type)
+	}
+	if plugin.Gate.Duration != "" {
+		t.Errorf("expected empty duration, got %q", plugin.Gate.Duration)
+	}
+}
+
+func TestParsePluginMD_UnknownGateType(t *testing.T) {
+	content := []byte(`+++
+name = "unknown-gate"
+description = "Unknown gate type"
+version = 1
+
+[gate]
+type = "never-heard-of-this"
++++
+
+# Unknown Gate
+`)
+	// Currently accepted (no validation on gate type values)
+	plugin, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+	if plugin.Gate == nil {
+		t.Fatal("expected gate to be non-nil")
+	}
+	if plugin.Gate.Type != "never-heard-of-this" {
+		t.Errorf("expected unknown gate type preserved, got %q", plugin.Gate.Type)
+	}
+}
+
+func TestParsePluginMD_CronGate(t *testing.T) {
+	content := []byte(`+++
+name = "cron-plugin"
+description = "Runs on schedule"
+version = 1
+
+[gate]
+type = "cron"
+schedule = "*/5 * * * *"
++++
+
+# Cron Plugin
+`)
+	plugin, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+	if plugin.Gate == nil {
+		t.Fatal("expected gate to be non-nil")
+	}
+	if plugin.Gate.Type != GateCron {
+		t.Errorf("expected gate type 'cron', got %q", plugin.Gate.Type)
+	}
+	if plugin.Gate.Schedule != "*/5 * * * *" {
+		t.Errorf("expected schedule '*/5 * * * *', got %q", plugin.Gate.Schedule)
+	}
+}
+
+func TestParsePluginMD_InstructionsOnly(t *testing.T) {
+	content := []byte(`+++
+name = "minimal"
++++
+
+These are the instructions.
+Multiple lines.
+`)
+	plugin, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+	if plugin.Instructions == "" {
+		t.Error("expected non-empty instructions")
+	}
+	if plugin.Description != "" {
+		t.Errorf("expected empty description, got %q", plugin.Description)
+	}
+	if plugin.Version != 0 {
+		t.Errorf("expected version 0, got %d", plugin.Version)
+	}
+}
+
 func TestScanner_DiscoverAll(t *testing.T) {
 	// Create temp directory structure
 	tmpDir, err := os.MkdirTemp("", "plugin-test")

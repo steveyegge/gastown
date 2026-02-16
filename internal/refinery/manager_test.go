@@ -7,10 +7,21 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 )
+
+func setupTestRegistry(t *testing.T) {
+	t.Helper()
+	reg := session.NewPrefixRegistry()
+	reg.Register("tr", "testrig")
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
 
 func setupTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
+	setupTestRegistry(t)
 
 	// Create temp directory structure
 	tmpDir := t.TempDir()
@@ -30,7 +41,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 func TestManager_SessionName(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 
-	want := "gt-testrig-refinery"
+	want := "tr-refinery"
 	got := mgr.SessionName()
 	if got != want {
 		t.Errorf("SessionName() = %s, want %s", got, want)

@@ -115,7 +115,7 @@ func runGitCommit(args []string, name, email string) error {
 	if err := gitCmd.Run(); err != nil {
 		// Preserve git's exit code for proper wrapper behavior
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+			return NewSilentExit(exitErr.ExitCode())
 		}
 		return err
 	}

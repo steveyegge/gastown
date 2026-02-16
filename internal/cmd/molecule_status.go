@@ -44,6 +44,8 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 			return beads.MayorBeadIDTown()
 		case identity == "deacon":
 			return beads.DeaconBeadIDTown()
+		case identity == "deacon-boot":
+			return beads.DogBeadIDTown("boot")
 		case len(parts) == 2 && parts[1] == "witness":
 			return beads.WitnessBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		case len(parts) == 2 && parts[1] == "refinery":
@@ -91,6 +93,9 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 			return beads.CrewBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		}
 		return ""
+	case RoleBoot:
+		// Boot is a deacon dog — uses town-level dog bead ID
+		return beads.DogBeadIDTown("boot")
 	default:
 		return ""
 	}
@@ -228,7 +233,7 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 				deps = step.Dependencies
 			}
 			for _, dep := range deps {
-				if dep.DependencyType != "blocks" {
+				if !isBlockingDepType(dep.DependencyType) {
 					continue // Skip parent-child and other non-blocking relationships
 				}
 				hasBlockingDeps = true
@@ -245,6 +250,9 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepIDsBySequence(progress.ReadySteps)
 
 	// Calculate completion percentage
 	if progress.TotalSteps > 0 {
@@ -603,7 +611,7 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 				deps = step.Dependencies
 			}
 			for _, dep := range deps {
-				if dep.DependencyType != "blocks" {
+				if !isBlockingDepType(dep.DependencyType) {
 					continue // Skip parent-child and other non-blocking relationships
 				}
 				hasBlockingDeps = true
@@ -620,6 +628,9 @@ func getMoleculeProgressInfo(b *beads.Beads, moleculeRootID string) (*MoleculePr
 			}
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepIDsBySequence(progress.ReadySteps)
 
 	// Calculate completion percentage
 	if progress.TotalSteps > 0 {
@@ -893,11 +904,10 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 
 		// Check dependencies using Dependencies field (from bd show),
 		// not DependsOn (which is empty from bd list).
-		// Only "blocks" type dependencies block progress - ignore "parent-child".
 		allDepsClosed := true
 		hasBlockingDeps := false
 		for _, dep := range step.Dependencies {
-			if dep.DependencyType != "blocks" {
+			if !isBlockingDepType(dep.DependencyType) {
 				continue // Skip parent-child and other non-blocking relationships
 			}
 			hasBlockingDeps = true
@@ -910,6 +920,9 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 			readySteps = append(readySteps, step)
 		}
 	}
+
+	// Sort ready steps by sequence number so step 1 comes before step 2, etc.
+	sortStepsBySequence(readySteps)
 
 	// Determine current step and status
 	if info.StepsComplete == info.StepsTotal && info.StepsTotal > 0 {
@@ -985,7 +998,7 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "mayor/" ||
 		agentID == "deacon" || agentID == "deacon/" ||
-		agentID == "boot" || agentID == "deacon/boot"
+		agentID == "deacon/boot" || agentID == "deacon-boot"
 }
 
 // extractMailSender extracts the sender from mail bead labels.
