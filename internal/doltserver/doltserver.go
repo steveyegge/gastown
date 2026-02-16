@@ -415,27 +415,42 @@ func Start(townRoot string) error {
 		return fmt.Errorf("checking server status: %w", err)
 	}
 	if running {
-		// Server is running - verify PID file is correct (gm-ouur fix)
-		// If PID file is stale/missing but server is on port, update it
-		pidFromFile := 0
-		if data, err := os.ReadFile(config.PidFile); err == nil {
-			pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-		}
-		if pidFromFile != pid {
-			// PID file is stale/wrong - update it
-			fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
-			if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
+		// If data directory doesn't exist, this is an orphaned server (e.g., user
+		// deleted ~/gt and re-ran gt install). Kill it so we can start fresh.
+		if _, statErr := os.Stat(config.DataDir); os.IsNotExist(statErr) {
+			fmt.Fprintf(os.Stderr, "Warning: Dolt server (PID %d) is running but data directory %s does not exist — stopping orphaned server\n", pid, config.DataDir)
+			if stopErr := Stop(townRoot); stopErr != nil {
+				if pid > 0 {
+					if proc, findErr := os.FindProcess(pid); findErr == nil {
+						_ = proc.Kill()
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
 			}
-			// Update state too
-			state, _ := LoadState(townRoot)
-			if state != nil && state.PID != pid {
-				state.PID = pid
-				state.Running = true
-				_ = SaveState(townRoot, state)
+			// Fall through to start a new server
+		} else {
+			// Server is running with valid data dir - verify PID file is correct (gm-ouur fix)
+			// If PID file is stale/missing but server is on port, update it
+			pidFromFile := 0
+			if data, err := os.ReadFile(config.PidFile); err == nil {
+				pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 			}
+			if pidFromFile != pid {
+				// PID file is stale/wrong - update it
+				fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
+				if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
+				}
+				// Update state too
+				state, _ := LoadState(townRoot)
+				if state != nil && state.PID != pid {
+					state.PID = pid
+					state.Running = true
+					_ = SaveState(townRoot, state)
+				}
+			}
+			return fmt.Errorf("Dolt server already running (PID %d)", pid)
 		}
-		return fmt.Errorf("Dolt server already running (PID %d)", pid)
 	}
 
 	// Ensure data directory exists
@@ -865,7 +880,25 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, created bool, err
 	}
 
 	// Check if server is running
-	running, _, _ := IsRunning(townRoot)
+	running, runningPID, _ := IsRunning(townRoot)
+
+	if running {
+		// If the data directory doesn't exist, the server is orphaned (e.g., user
+		// deleted ~/gt and re-ran gt install while an old server was still running).
+		// Stop the orphaned server and fall through to the offline init path.
+		if _, err := os.Stat(config.DataDir); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: Dolt server (PID %d) is running but data directory %s does not exist — stopping orphaned server\n", runningPID, config.DataDir)
+			if stopErr := Stop(townRoot); stopErr != nil {
+				// Force-kill if graceful stop fails (no PID file for orphaned server)
+				if runningPID > 0 {
+					if proc, err := os.FindProcess(runningPID); err == nil {
+						_ = proc.Kill()
+					}
+				}
+			}
+			running = false
+		}
+	}
 
 	if running {
 		// Server is running: use CREATE DATABASE which both creates the
