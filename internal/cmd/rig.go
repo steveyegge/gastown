@@ -404,8 +404,13 @@ func checkUncommittedWork(r *rig.Rig, rigName, operation string, force bool) (pr
 	}
 
 	// Otherwise block with hint
-	fmt.Printf("\nUse %s to proceed with confirmation, or %s to skip all checks (DANGER: will lose work!)\n",
-		style.Bold.Render("--force"), style.Bold.Render("--nuclear"))
+	if force {
+		fmt.Printf("\n%s requires an interactive terminal. Use %s to skip all checks (DANGER: will lose work!)\n",
+			style.Bold.Render("--force"), style.Bold.Render("--nuclear"))
+	} else {
+		fmt.Printf("\nUse %s to proceed with confirmation, or %s to skip all checks (DANGER: will lose work!)\n",
+			style.Bold.Render("--force"), style.Bold.Render("--nuclear"))
+	}
 	return false
 }
 
