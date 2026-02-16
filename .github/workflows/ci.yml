@@ -45,6 +45,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Build without go:generate
         run: |
@@ -75,6 +76,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Configure Git
         run: |
@@ -110,6 +112,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Download Coverage Data
         uses: actions/download-artifact@v4
@@ -211,6 +214,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -228,6 +232,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
 
       - name: Configure Git
         run: |
