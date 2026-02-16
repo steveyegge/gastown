@@ -419,9 +419,9 @@ func getWispIDs(beadsPath string) map[string]bool {
 // These are status trackers, not actionable work items.
 //
 // Since bd ready --json doesn't include labels, we filter by:
-//   - issue_type "agent" (agent lifecycle beads)
-//   - Labels if present (gt:agent, gt:role, gt:rig)
+//   - Labels if present (gt:agent, gt:role, gt:rig) - agent beads use gt:agent
 //   - ID suffix "-role" (role definition beads like hq-crew-role)
+//   - Note: Agent beads use type=task but are identified by gt:agent label
 //   - ID prefix matching "<prefix>-rig-" (rig identity beads like gt-rig-gastown)
 func filterIdentityBeads(issues []*beads.Issue) []*beads.Issue {
 	identityLabels := map[string]bool{

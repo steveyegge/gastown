@@ -59,7 +59,7 @@ type Issue struct {
 	Labels      []string `json:"labels,omitempty"`
 	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
 
-	// Agent bead slots (type=agent only)
+	// Agent bead slots (identified by gt:agent label)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
 	// Note: role_bead field removed - role definitions are now config-based

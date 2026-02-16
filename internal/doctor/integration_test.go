@@ -746,14 +746,14 @@ func setupMockBeads(t *testing.T, townRoot, rigName string) {
 			"id":         prefix + "-" + rigName + "-witness",
 			"title":      "Witness for " + rigName,
 			"status":     "open",
-			"issue_type": "agent",
+			"issue_type": "task",
 			"labels":     []string{"gt:agent"},
 		},
 		{
 			"id":         prefix + "-" + rigName + "-refinery",
 			"title":      "Refinery for " + rigName,
 			"status":     "open",
-			"issue_type": "agent",
+			"issue_type": "task",
 			"labels":     []string{"gt:agent"},
 		},
 	}

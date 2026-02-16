@@ -113,12 +113,13 @@ const (
 	//   molecule      - Work decomposition (patrol checks, gt swarm)
 	//   gate          - Async coordination (bd gate wait, park/resume)
 	//   merge-request - Refinery MR processing (gt done, refinery)
-	BeadsCustomTypes = "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
+	//   Note: "agent" removed - agent beads use type=task with gt:agent label (gt-vja7b)
+	BeadsCustomTypes = "role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
 )
 
 // BeadsCustomTypesList returns the custom types as a slice.
 func BeadsCustomTypesList() []string {
-	return []string{"agent", "role", "rig", "convoy", "slot", "queue", "event", "message", "molecule", "gate", "merge-request"}
+	return []string{"role", "rig", "convoy", "slot", "queue", "event", "message", "molecule", "gate", "merge-request"}
 }
 
 // Git branch names.
