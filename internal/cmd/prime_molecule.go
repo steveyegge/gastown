@@ -101,7 +101,7 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 		fmt.Println()
 		fmt.Println("All steps are done. You may:")
 		fmt.Println("  - Report completion to supervisor")
-		fmt.Println("  - Check for new work: bd ready")
+		fmt.Println("  - Check for new work: bd mol current")
 	}
 }
 
@@ -168,7 +168,7 @@ func outputMoleculeContext(ctx RoleContext) {
 		fmt.Println()
 		fmt.Println("**Molecule Work Loop:**")
 		fmt.Println("1. Complete current step, then `bd close " + issue.ID + "`")
-		fmt.Println("2. Check for next steps: `bd ready --parent " + rootID + "`")
+		fmt.Println("2. Check for next steps: `bd mol current`")
 		fmt.Println("3. Work on next ready step(s)")
 		fmt.Println("4. When all steps done, run `" + cli.Name() + " done`")
 		break // Only show context for first molecule step found
@@ -256,10 +256,10 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		HeaderTitle:     "Patrol Status (Wisp-based)",
 		CheckInProgress: false,
 		WorkLoopSteps: []string{
-			"Check next step: `bd ready`",
+			"Check next step: `bd mol current`",
 			"Execute the step (heartbeat, mail, health checks, etc.)",
 			"Close step: `bd close <step-id>`",
-			"Check next: `bd ready`",
+			"Check next: `bd mol current`",
 			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
@@ -279,10 +279,10 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		CheckInProgress: true,
 		WorkLoopSteps: []string{
 			"Check inbox: `" + cli.Name() + " mail inbox`",
-			"Check next step: `bd ready`",
+			"Check next step: `bd mol current`",
 			"Execute the step (survey polecats, inspect, nudge, etc.)",
 			"Close step: `bd close <step-id>`",
-			"Check next: `bd ready`",
+			"Check next: `bd mol current`",
 			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
@@ -303,10 +303,10 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		ExtraVars:       buildRefineryPatrolVars(ctx),
 		WorkLoopSteps: []string{
 			"Check inbox: `" + cli.Name() + " mail inbox`",
-			"Check next step: `bd ready`",
+			"Check next step: `bd mol current`",
 			"Execute the step (queue scan, process branch, tests, merge)",
 			"Close step: `bd close <step-id>`",
-			"Check next: `bd ready`",
+			"Check next: `bd mol current`",
 			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}

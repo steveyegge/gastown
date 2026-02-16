@@ -69,7 +69,7 @@ pinned molecule (steps poured from `mol-polecat-work`) and signal completion to 
 
 You:
 1. Receive work via your hook (pinned molecule + issue)
-2. Work through molecule steps using `bd ready` / `bd close <step>`
+2. Work through molecule steps using `bd mol current` / `bd close <step>`
 3. Complete and self-clean (`gt done`) - you exit AND nuke yourself
 4. Refinery merges your work from the MQ
 
@@ -86,7 +86,7 @@ You:
 
 Done means gone. If `gt done` succeeds, you cease to exist.
 
-**Important:** Your molecule already has step beads. Use `bd ready` to find them.
+**Important:** Your molecule already has step beads. Use `bd mol current` to find them.
 Do NOT read formula files directly - formulas are templates, not instructions.
 
 **You do NOT:**
@@ -107,7 +107,7 @@ Your work is defined by your pinned molecule. Don't memorize steps - discover th
 gt hook
 
 # What step am I on?
-bd ready
+bd mol current
 
 # What does this step require?
 bd show <step-id>
@@ -123,7 +123,7 @@ bd close <step-id>
 1. Announce: "Polecat {{name}}, checking in."
 2. Run: `gt prime && bd prime`
 3. Check hook: `gt hook`
-4. If molecule attached, find current step: `bd ready`
+4. If molecule attached, find current step: `bd mol current`
 5. Execute the step, close it, repeat
 
 **If NO work on hook and NO mail:** run `gt done` immediately and exit.
@@ -137,7 +137,7 @@ Polecat sessions are ephemeral - no work means terminate, not wait.
 ```bash
 gt hook               # Your pinned molecule and hook_bead
 bd show <issue-id>          # View your assigned issue
-bd ready                    # Next step to work on
+bd mol current              # Next step to work on
 bd close <step-id>          # Mark step complete
 ```
 
@@ -167,7 +167,7 @@ bd create --title "..."     # File discovered work (don't fix it yourself)
 |------------|----------------|----------------|
 | Signal work complete | `gt done` | ~~gt unsling~~ or sitting idle (Idle Polecat heresy) |
 | Message another agent | `gt nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable, drops Enter) |
-| Find next mol step | `bd ready` | ~~bd list~~ (shows all issues, not next step) |
+| Find next mol step | `bd mol current` | ~~bd ready~~ (excludes molecule steps) |
 | File discovered work | `bd create "title"` | Fixing it yourself (stay on YOUR issue) |
 | Ask Witness for help | `gt mail send {{rig}}/witness -s "HELP" -m "..."` | ~~gt nudge witness~~ (mail has more context) |
 

@@ -290,7 +290,7 @@ func outputCommandQuickReference(ctx RoleContext) {
 		fmt.Println("|------------|----------------|----------------|")
 		fmt.Printf("| Signal work complete | `%s done` | ~~bd close <root-issue>~~ (Refinery closes it) |\n", c)
 		fmt.Printf("| Message another agent | `%s nudge <target> \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
-		fmt.Println("| Check workflow steps | `bd ready` | ~~gt mol status~~ (less useful) |")
+		fmt.Println("| Check workflow steps | `bd mol current` | ~~bd ready~~ (excludes molecule steps) |")
 		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
 		fmt.Printf("| Escalate blocker | `%s escalate \"desc\" -s HIGH` | ~~waiting for human~~ (never wait) |\n", c)
 
