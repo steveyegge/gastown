@@ -5,13 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -26,11 +31,11 @@ var (
 var moleculeAwaitSignalCmd = &cobra.Command{
 	Use:   "await-signal",
 	Short: "Wait for activity feed signal with timeout",
-	Long: `Wait for any activity on the beads feed, with optional backoff.
+	Long: `Wait for any activity on the events feed, with optional backoff.
 
-This command is the primary wake mechanism for patrol agents. It subscribes
-to 'bd activity --follow' and returns immediately when any line of output
-is received (indicating beads activity).
+This command is the primary wake mechanism for patrol agents. It tails
+~/gt/.events.jsonl and returns immediately when a new event is appended
+(indicating Gas Town activity such as slings, nudges, mail, spawns, etc.).
 
 If no activity occurs within the timeout, the command returns with exit code 0
 but sets the AWAIT_SIGNAL_REASON environment variable to "timeout".
@@ -47,8 +52,11 @@ exponential backoff that persists across invocations. When a signal is
 received, the caller should reset idle:0 on the agent bead.
 
 EXIT CODES:
-  0 - Signal received or timeout (check output for which)
-  1 - Error starting feed subscription
+  0 - Signal received, timeout, or feed error (check output for which)
+
+If the feed subscription fails (e.g., bd activity not available), the command
+treats it as a degraded timeout: logs a warning, increments the idle counter,
+and returns exit 0 so backoff logic works correctly.
 
 EXAMPLES:
   # Simple wait with 60s timeout
@@ -68,10 +76,11 @@ EXAMPLES:
 
 // AwaitSignalResult is the result of an await-signal operation.
 type AwaitSignalResult struct {
-	Reason     string        `json:"reason"`               // "signal" or "timeout"
+	Reason     string        `json:"reason"`               // "signal", "timeout", or "feed_error"
 	Elapsed    time.Duration `json:"elapsed"`              // how long we waited
 	Signal     string        `json:"signal,omitempty"`     // the line that woke us (if signal)
 	IdleCycles int           `json:"idle_cycles,omitempty"` // current idle cycle count (after update)
+	Error      string        `json:"error,omitempty"`      // error detail (if feed_error)
 }
 
 func init() {
@@ -176,19 +185,29 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 
 	startTime := time.Now()
 
-	// Start bd activity --follow
+	// Tail events file for new activity
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	result, err := waitForActivitySignal(ctx, workDir)
 	if err != nil {
-		return fmt.Errorf("feed subscription failed: %w", err)
+		// Feed subscription failed (e.g., bd activity command missing or Dolt
+		// connection issue). Treat as degraded timeout so idle counter and
+		// backoff logic still work correctly instead of hard-failing.
+		if !awaitSignalQuiet {
+			fmt.Printf("%s Feed subscription failed (treating as timeout): %v\n",
+				style.Dim.Render("⚠"), err)
+		}
+		result = &AwaitSignalResult{
+			Reason: "feed_error",
+			Error:  err.Error(),
+		}
 	}
 
 	result.Elapsed = time.Since(startTime)
 
-	// On timeout, increment idle cycles and clear backoff window
-	if result.Reason == "timeout" && awaitSignalAgentBead != "" {
+	// On timeout or feed error, increment idle cycles and clear backoff window
+	if (result.Reason == "timeout" || result.Reason == "feed_error") && awaitSignalAgentBead != "" {
 		newIdleCycles := idleCycles + 1
 		if err := setAgentIdleCycles(awaitSignalAgentBead, beadsDir, newIdleCycles); err != nil {
 			if !awaitSignalQuiet {
@@ -242,6 +261,14 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 				fmt.Printf("%s Timeout after %v (no activity)\n",
 					style.Dim.Render("⏱"), result.Elapsed.Round(time.Millisecond))
 			}
+		case "feed_error":
+			if awaitSignalAgentBead != "" {
+				fmt.Printf("%s Feed unavailable, backoff as timeout (idle cycle: %d)\n",
+					style.Dim.Render("⚠"), result.IdleCycles)
+			} else {
+				fmt.Printf("%s Feed unavailable, treated as timeout\n",
+					style.Dim.Render("⚠"))
+			}
 		}
 	}
 
@@ -284,71 +311,61 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 	return time.ParseDuration(awaitSignalTimeout)
 }
 
-// activityFollowCmd builds the exec.Cmd for subscribing to new beads activity.
-// Uses --since 0s to scope the feed to post-subscription events only,
-// preventing stale replay from causing immediate spurious wakes.
-// Using 0s instead of 1s avoids the race where our own label update
-// (from setAgentBackoffUntil) happens within the lookback window.
-func activityFollowCmd(ctx context.Context, workDir string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow", "--since", "0s")
-	cmd.Dir = workDir
-	return cmd
+// waitForActivitySignal tails ~/gt/.events.jsonl for new activity.
+// Returns immediately when a new event line is appended, or when context is canceled.
+func waitForActivitySignal(ctx context.Context, _ string) (*AwaitSignalResult, error) {
+	return waitForEventsFile(ctx, "")
 }
 
-// waitForActivitySignal starts bd activity --follow --since 0s and waits for any output.
-// The --since 0s flag scopes the feed to post-subscription events only,
-// preventing stale replay from causing immediate spurious wakes.
-// Returns immediately when a line is received, or when context is canceled.
-func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
-	cmd := activityFollowCmd(ctx, workDir)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting bd activity: %w", err)
-	}
-
-	// Channel for results
-	signalCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	// Read lines in goroutine
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		if scanner.Scan() {
-			// Got a line - this is our signal
-			signalCh <- scanner.Text()
-		} else if err := scanner.Err(); err != nil {
-			errCh <- err
+// waitForEventsFile tails the events file for new lines. If eventsPath is empty,
+// it auto-discovers ~/gt/.events.jsonl from the workspace root.
+// This replaces the former bd activity --follow subprocess approach.
+func waitForEventsFile(ctx context.Context, eventsPath string) (*AwaitSignalResult, error) {
+	if eventsPath == "" {
+		townRoot, err := workspace.FindFromCwd()
+		if err != nil || townRoot == "" {
+			return nil, fmt.Errorf("finding town root for events file: %w", err)
 		}
-	}()
+		eventsPath = filepath.Join(townRoot, events.EventsFile)
+	}
 
-	// Wait for signal, error, or timeout
-	select {
-	case signal := <-signalCh:
-		// Got activity signal - kill the process and return
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return &AwaitSignalResult{
-			Reason: "signal",
-			Signal: signal,
-		}, nil
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening events file %s: %w", eventsPath, err)
+	}
+	defer f.Close()
 
-	case err := <-errCh:
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return nil, fmt.Errorf("reading from feed: %w", err)
+	// Seek to end — we only want new events, not historical ones
+	if _, err := f.Seek(0, 2); err != nil {
+		return nil, fmt.Errorf("seeking to end of events file: %w", err)
+	}
 
-	case <-ctx.Done():
-		// Timeout - kill process and return timeout result
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return &AwaitSignalResult{
-			Reason: "timeout",
-		}, nil
+	// Poll for new lines using bufio.Reader (not Scanner, which doesn't
+	// resume after EOF). Reader.ReadString properly retries the underlying
+	// file reader, picking up appended data between polls.
+	reader := bufio.NewReader(f)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return &AwaitSignalResult{
+				Reason: "timeout",
+			}, nil
+		case <-ticker.C:
+			line, err := reader.ReadString('\n')
+			if err == nil && line != "" {
+				return &AwaitSignalResult{
+					Reason: "signal",
+					Signal: strings.TrimRight(line, "\n"),
+				}, nil
+			}
+			// io.EOF means no new data yet — keep polling
+			if err != nil && err != io.EOF {
+				return nil, fmt.Errorf("reading events file: %w", err)
+			}
+		}
 	}
 }
 

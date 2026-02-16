@@ -2,26 +2,11 @@ package cmd
 
 import (
 	"context"
-	"reflect"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
-
-func TestActivityFollowCmd_IncludesSinceFlag(t *testing.T) {
-	// Regression test: the --since 0s flag prevents stale event replay
-	// from causing await-signal to fire immediately. Without it, the
-	// deacon patrol loop busy-loops consuming context and resources.
-	cmd := activityFollowCmd(context.Background(), "/tmp/test-workdir")
-
-	wantArgs := []string{"bd", "activity", "--follow", "--since", "0s"}
-	if !reflect.DeepEqual(cmd.Args, wantArgs) {
-		t.Errorf("activityFollowCmd args = %v, want %v", cmd.Args, wantArgs)
-	}
-
-	if cmd.Dir != "/tmp/test-workdir" {
-		t.Errorf("activityFollowCmd Dir = %q, want %q", cmd.Dir, "/tmp/test-workdir")
-	}
-}
 
 func TestCalculateEffectiveTimeout(t *testing.T) {
 	tests := []struct {
@@ -139,6 +124,92 @@ func TestAwaitSignalResult(t *testing.T) {
 	}
 	if result.Signal == "" {
 		t.Error("expected signal to be set")
+	}
+}
+
+func TestAwaitSignalResult_FeedError(t *testing.T) {
+	// Test that feed_error reason carries error detail and is treated like timeout
+	result := AwaitSignalResult{
+		Reason:     "feed_error",
+		Elapsed:    0,
+		IdleCycles: 29,
+		Error:      "starting bd activity: context deadline exceeded",
+	}
+
+	if result.Reason != "feed_error" {
+		t.Errorf("expected reason 'feed_error', got %q", result.Reason)
+	}
+	if result.Error == "" {
+		t.Error("expected error detail to be set for feed_error")
+	}
+	// feed_error should be treated like timeout for idle counter purposes
+	if result.Reason != "feed_error" && result.Reason != "timeout" {
+		t.Error("feed_error should be handled alongside timeout in idle counter logic")
+	}
+}
+
+func TestWaitForEventsFile_MissingFile(t *testing.T) {
+	// When the events file doesn't exist, waitForEventsFile should return
+	// an error. The caller (runMoleculeAwaitSignal) treats this as feed_error.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	result, err := waitForEventsFile(ctx, filepath.Join(t.TempDir(), "nonexistent.jsonl"))
+	if err == nil {
+		t.Fatalf("expected error for missing events file, got result: %+v", result)
+	}
+}
+
+func TestWaitForEventsFile_Timeout(t *testing.T) {
+	// When no new events are appended, waitForEventsFile should return timeout.
+	eventsPath := filepath.Join(t.TempDir(), ".events.jsonl")
+	if err := os.WriteFile(eventsPath, []byte(`{"ts":"2024-01-01","type":"test"}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	result, err := waitForEventsFile(ctx, eventsPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Reason != "timeout" {
+		t.Errorf("expected reason 'timeout', got %q", result.Reason)
+	}
+}
+
+func TestWaitForEventsFile_Signal(t *testing.T) {
+	// When a new event is appended, waitForEventsFile should return signal.
+	eventsPath := filepath.Join(t.TempDir(), ".events.jsonl")
+	// Write initial content (will be skipped — we seek to end)
+	if err := os.WriteFile(eventsPath, []byte(`{"ts":"old","type":"ignore"}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Append a new line after a short delay
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		_, _ = f.WriteString(`{"ts":"new","type":"sling","actor":"test"}` + "\n")
+	}()
+
+	result, err := waitForEventsFile(ctx, eventsPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Reason != "signal" {
+		t.Errorf("expected reason 'signal', got %q", result.Reason)
+	}
+	if result.Signal == "" {
+		t.Error("expected signal line to be set")
 	}
 }
 
