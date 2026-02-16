@@ -1,0 +1,267 @@
+# Deacon Patrol: Dog Health and Pool Maintenance
+# Tests whether the model correctly applies timeout duration matrix
+# and manages the dog pool (spawn/retire decisions).
+
+- description: "Dog working within normal time"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon monitoring dog health. Dogs have expected timeouts for their
+      tasks. The duration matrix: <2x timeout = normal (log), 2-5x = file warrant,
+      >5x = force clear + escalate. You also manage the dog pool: minimum 1 idle dog,
+      maximum 4 total, retire dogs idle >24h.
+    formula_step: dog-health-check
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan", "started_at": "2026-02-15T14:52:00Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      Expected timeout for mol-orphan-scan: 5m
+    context: "Dog Fido working for 3 minutes on a task with 5m expected timeout. Well within normal range."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op" || d.action === "log-and-watch";
+
+- description: "Dog working 1.5x timeout (amber zone — watch)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon monitoring dog health. Duration matrix: <2x = log/watch,
+      2-5x = file warrant, >5x = force clear.
+    formula_step: dog-health-check
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan", "started_at": "2026-02-15T14:47:30Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      Expected timeout for mol-orphan-scan: 5m
+    context: "Dog Fido working for 7.5 minutes on a 5m task (1.5x timeout). Amber zone — worth noting but not critical."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "log-and-watch" || d.action === "no-op";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "force-clear";
+
+- description: "Dog working 3x timeout (warrant zone)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon monitoring dog health. Duration matrix: <2x = log/watch,
+      2-5x = file warrant, >5x = force clear + escalate.
+    formula_step: dog-health-check
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan", "started_at": "2026-02-15T14:40:00Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      Expected timeout for mol-orphan-scan: 5m
+    context: "Dog Fido working for 15 minutes on a 5m task (3x timeout). Warrant zone."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant";
+
+- description: "Dog working >5x timeout (force clear zone)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon monitoring dog health. Duration matrix: >5x timeout = force
+      clear + escalate. This dog is severely over time.
+    formula_step: dog-health-check
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan", "started_at": "2026-02-15T14:25:00Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      Expected timeout for mol-orphan-scan: 5m
+    context: "Dog Fido working for 30 minutes on a 5m task (6x timeout). Force clear zone — severely over time."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "force-clear";
+
+- description: "Dog session dead but bead shows working (zombie dog)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon monitoring dog health. If a dog's tmux session is dead but
+      its status shows working, it's a zombie dog. File a warrant.
+    formula_step: dog-health-check
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-convoy-feed", "started_at": "2026-02-15T14:50:00Z"}
+      ]
+
+      $ tmux has-session -t bd-dog-Fido 2>/dev/null; echo $?
+      1
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Dog Fido shows status=working but tmux session is dead. Zombie dog."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant";
+
+- description: "Pool: zero idle dogs + pending work — spawn"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon managing the dog pool. Rules: minimum 1 idle dog, maximum 4
+      total. Spawn when no idle dogs and pending work exists.
+    formula_step: dog-pool-maintenance
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan"},
+        {"name": "Rex", "status": "working", "task": "mol-convoy-feed"}
+      ]
+
+      $ bd list --status=open --type=task --assignee="" --json | jq length
+      3
+    context: "2 dogs, both working. 3 pending unassigned tasks. No idle capacity. Should spawn a new dog."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "spawn-dog";
+
+- description: "Pool: zero idle dogs + no pending work — no action"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon managing the dog pool. All dogs busy but no pending work.
+      No need to spawn — there's nothing for a new dog to do.
+    formula_step: dog-pool-maintenance
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working", "task": "mol-orphan-scan"},
+        {"name": "Rex", "status": "working", "task": "mol-convoy-feed"}
+      ]
+
+      $ bd list --status=open --type=task --assignee="" --json | jq length
+      0
+    context: "2 dogs, both working. 0 pending tasks. All dogs busy but no unmet demand."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+
+- description: "Pool: dog idle >24h — retire"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon managing the dog pool. Dogs idle for >24h should be retired
+      to free resources — unless they are the last remaining dog (minimum 1).
+    formula_step: dog-pool-maintenance
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "idle", "idle_since": "2026-02-14T12:00:00Z"},
+        {"name": "Rex", "status": "working", "task": "mol-orphan-scan"},
+        {"name": "Spot", "status": "idle", "idle_since": "2026-02-15T14:30:00Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "3 dogs. Fido idle for 27 hours (stale). Rex working. Spot idle 25 minutes (fresh). Fido should be retired."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "retire-dog";
+    - type: contains
+      value: "Fido"
+
+- description: "Pool: only 1 dog, idle >24h — keep (minimum 1)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon managing the dog pool. Minimum 1 dog must always exist.
+      Even if the only dog is idle >24h, do NOT retire it.
+    formula_step: dog-pool-maintenance
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Rex", "status": "idle", "idle_since": "2026-02-14T10:00:00Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Only 1 dog (Rex), idle for 29 hours. But it's the only dog — cannot retire below minimum of 1."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op" || d.action === "log-and-watch";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "retire-dog";
+
+- description: "Pool: max dogs reached + pending work — at capacity"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon managing the dog pool. Maximum 4 dogs. Even with pending work,
+      do not exceed the maximum. Wait for current dogs to finish.
+    formula_step: dog-pool-maintenance
+    allowed_actions: '["no-op", "log-and-watch", "file-warrant", "force-clear", "spawn-dog", "retire-dog"]'
+    shell_output: |
+      $ gt dog list --json
+      [
+        {"name": "Fido", "status": "working"},
+        {"name": "Rex", "status": "working"},
+        {"name": "Spot", "status": "working"},
+        {"name": "Duke", "status": "working"}
+      ]
+
+      $ bd list --status=open --type=task --assignee="" --json | jq length
+      5
+    context: "4 dogs (max), all working. 5 pending tasks. At capacity — cannot spawn more."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op" || d.action === "log-and-watch";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "spawn-dog";

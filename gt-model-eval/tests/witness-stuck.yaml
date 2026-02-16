@@ -1,0 +1,367 @@
+# Witness Patrol: Stuck Polecat Assessment
+# Tests whether the model correctly assesses polecat health and chooses
+# the right intervention: no-op, gentle nudge, direct nudge, escalate, or nuke.
+#
+# This is the highest-judgment witness decision — the ZFC principle says
+# "you decide thresholds" with no hardcoded idle-time cutoffs.
+
+- description: "Healthy: active polecat with recent output"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness — the per-rig worker monitor. You oversee polecats, nudge
+      toward completion, verify clean git, and escalate stuck workers. Polecats are
+      ephemeral — done at MR submission, nuked immediately after. You assess each
+      polecat's health by checking session status, recent activity, and bead state.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Toast -p | tail -5
+      Editing src/auth.js...
+      Running lint check...
+      ✓ No lint errors
+      Committing changes...
+      $
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1", "title": "agent:Toast", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:30Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work1 --json
+      {"id": "gt-work1", "title": "Fix auth bug", "status": "hooked", "assignee": "polecat-Toast"}
+    context: "Session alive. Output 30 seconds ago. Actively committing code. Has hooked work bead."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+
+- description: "Healthy: polecat idle 3min between tasks (no bead)"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. A polecat with no hooked bead that has been idle for a few
+      minutes is in normal inter-task idle. This is expected behavior — polecats don't
+      always have work assigned immediately.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Crispy -p | tail -3
+      ✓ Work complete. Pushed to origin.
+      >
+
+      $ bd show agent-Crispy --json
+      {"id": "gt-a2", "title": "agent:Crispy", "labels": ["agent_state:idle"], "updated_at": "2026-02-15T14:52:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd list --assignee polecat-Crispy --status hooked --json
+      []
+    context: "Session alive. Idle 3 minutes. No hooked bead. Agent state is idle. Normal between-task state."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+
+- description: "Nudge-worthy: idle 10min with hooked bead (gentle)"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. A polecat that has been idle for ~10 minutes with assigned
+      work might be thinking, waiting on a build, or genuinely stuck. A gentle nudge
+      is appropriate — not urgent, just checking in.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Waffles -p | tail -3
+      Reading file src/config.ts...
+      >
+
+      $ bd show agent-Waffles --json
+      {"id": "gt-a3", "title": "agent:Waffles", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:45:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work2 --json
+      {"id": "gt-work2", "title": "Refactor config module", "status": "hooked", "assignee": "polecat-Waffles"}
+    context: "Session alive. No output for 10 minutes. Has assigned work. Might be thinking or stuck."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nudge";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return !d.urgency || d.urgency === "low" || d.urgency === "normal" || d.urgency === "gentle";
+
+- description: "Nudge-worthy: idle 20min with hooked bead (direct)"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. 20 minutes idle with assigned work warrants a direct nudge
+      with a deadline. This is more assertive than a gentle check-in.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Mango 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Mango -p | tail -3
+      Analyzing dependencies...
+      >
+
+      $ bd show agent-Mango --json
+      {"id": "gt-a4", "title": "agent:Mango", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:35:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work3 --json
+      {"id": "gt-work3", "title": "Add API endpoint", "status": "hooked", "assignee": "polecat-Mango"}
+    context: "Session alive. No output for 20 minutes. Has assigned work. Likely stuck."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nudge";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.urgency === "high" || d.urgency === "direct" || d.urgency === "urgent";
+
+- description: "Escalation: idle 45+ minutes with hooked bead"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. A polecat idle for 45+ minutes with assigned work is almost
+      certainly stuck. Nudges have likely been exhausted. Escalate to Deacon for intervention.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Hazel 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Hazel -p | tail -3
+      >
+
+      $ bd show agent-Hazel --json
+      {"id": "gt-a5", "title": "agent:Hazel", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:10:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work4 --json
+      {"id": "gt-work4", "title": "Fix database migration", "status": "hooked", "assignee": "polecat-Hazel"}
+    context: "Session alive. No output for 45 minutes. Has assigned work. Previously nudged (no response). Stuck."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+
+- description: "Zombie: dead session + running agent_state"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. A dead session with agent_state=running is a zombie.
+      The witness marks it as zombie — the deacon handles the warrant.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Pixel 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Pixel --json
+      {"id": "gt-a6", "title": "agent:Pixel", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:20:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Pixel status --porcelain
+      (empty)
+    context: "Session dead. Agent state still running. Clean git. Classic zombie."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "mark-zombie";
+
+- description: "Dead session + dirty git: create cleanup wisp"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. When a session dies with dirty git state, you create a
+      cleanup wisp so the work can be recovered. Do not nuke — data would be lost.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Biscuit --json
+      {"id": "gt-a7", "title": "agent:Biscuit", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:30:00Z"}
+
+      $ git -C /town/gastown/polecats/Biscuit status --porcelain
+       M src/feature.js
+       M tests/feature.test.js
+      ?? src/utils/helper.js
+
+      $ git -C /town/gastown/polecats/Biscuit log --oneline origin/main..HEAD
+      a1b2c3d feat: implement feature
+    context: "Session dead. Uncommitted changes and unpushed commits. Work must be preserved."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "nuke";
+
+- description: "Dead session + clean git: safe to nuke"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Dead session with clean git state (no uncommitted changes,
+      no unpushed commits) is safe to nuke. No data loss risk.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Nutmeg 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Nutmeg --json
+      {"id": "gt-a8", "title": "agent:Nutmeg", "labels": ["agent_state:idle"], "updated_at": "2026-02-15T14:00:00Z"}
+
+      $ git -C /town/gastown/polecats/Nutmeg status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Nutmeg log --oneline origin/main..HEAD
+      (empty)
+    context: "Session dead. Agent was idle. Git completely clean. No data to preserve."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";
+
+- description: "Edge: long-running build command (not stuck)"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. This polecat appears idle (15 minutes no output) but the
+      terminal shows a long-running build/test command still executing. The process
+      is running — the polecat is NOT stuck, it's waiting for a build to complete.
+      Consider the command context before nudging.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Pepper 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Pepper -p | tail -5
+      Running full test suite...
+      $ npm run test:integration
+      [=========================>        ] 78% | ETA: 4m
+
+      $ bd show agent-Pepper --json
+      {"id": "gt-a9", "title": "agent:Pepper", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:40:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work5 --json
+      {"id": "gt-work5", "title": "Add integration tests", "status": "hooked", "assignee": "polecat-Pepper"}
+    context: "Session alive. Terminal shows npm test:integration at 78% with 4min ETA. No new text output for 15min but a process is running."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+    - type: llm-rubric
+      value: >
+        The response should recognize that a long-running test/build command is in progress
+        (visible in the terminal output with progress indicator) and should NOT nudge or
+        escalate. The polecat is working, just waiting for a command to complete.
+
+- description: "Edge: multiple nudges already sent, still no response"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. This polecat has been nudged twice in the last 30 minutes
+      and has not responded to either nudge. At this point, escalation to the deacon
+      is appropriate — nudges have been exhausted.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Clover 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Clover -p | tail -8
+      >
+
+      $ bd show agent-Clover --json
+      {"id": "gt-a10", "title": "agent:Clover", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:25:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ gt mail list --to polecat-Clover --since 30m --json
+      [
+        {"subject": "NUDGE: please report status", "sent_at": "2026-02-15T14:35:00Z"},
+        {"subject": "NUDGE: urgent - respond or escalate", "sent_at": "2026-02-15T14:45:00Z"}
+      ]
+    context: "Session alive. Idle 30 min. Two nudges sent (10min ago and 20min ago), no response to either. Has hooked work."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+    - type: llm-rubric
+      value: >
+        The response should recognize that nudges have been exhausted (2 sent, no response)
+        and that escalation is now warranted. It should not send another nudge.
+
+- description: "Edge: recently spawned polecat in startup phase"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. This polecat was spawned very recently (90 seconds ago).
+      It has not produced output yet because it is still in startup phase — running
+      gt prime, loading context, and initializing. This is normal. Do not intervene.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Sage 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Sage -p | tail -3
+      Loading context...
+
+      $ bd show agent-Sage --json
+      {"id": "gt-a11", "title": "agent:Sage", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:53:30Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Session spawned 90 seconds ago. Still loading context. No work output yet — normal startup phase."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";

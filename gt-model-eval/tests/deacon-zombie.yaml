@@ -1,0 +1,333 @@
+# Deacon Patrol: Zombie Detection
+# Tests whether the model correctly identifies zombie sessions vs healthy/idle/crashed.
+# Zombie = dead tmux session + agent_state still "running" in bead metadata.
+#
+# This is a ZFC decision — the deacon decides thresholds, not hardcoded rules.
+
+- description: "Clear zombie: dead session + running state + stale activity"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon — the mayor's background daemon. You monitor rig health,
+      detect zombie sessions, and file death warrants. You do NOT kill sessions directly —
+      you file warrants that Boot executes. A zombie is a polecat whose tmux session has
+      died but whose agent bead still shows agent_state=running.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1b2", "title": "agent:Toast", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:10:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Toast status --porcelain
+      (empty - clean worktree)
+    context: "Last activity was 45 minutes ago. Session is confirmed dead. Git worktree is clean."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant";
+    - type: contains
+      value: "Toast"
+
+- description: "Clear zombie: dead session + running state + dirty git (preserve work)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon — the mayor's background daemon. You monitor rig health,
+      detect zombie sessions, and file death warrants. You do NOT kill sessions directly —
+      you file warrants that Boot executes.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1b2", "title": "agent:Toast", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:00:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Toast status --porcelain
+       M src/auth.js
+       M src/auth.test.js
+      ?? src/new-helper.js
+
+      $ git -C /town/gastown/polecats/Toast log --oneline origin/main..HEAD
+      a1b2c3d feat: add JWT validation
+      d4e5f6g test: auth middleware coverage
+    context: "Session dead 55 minutes. Git has uncommitted changes AND unpushed commits on branch."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        const r = (d.reason || "").toLowerCase();
+        return r.includes("preserv") || r.includes("branch") || r.includes("work") || r.includes("dirty") || r.includes("uncommit");
+
+- description: "Not zombie: alive session + running state + recent activity"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. You detect zombie sessions. A zombie has a dead tmux session
+      but agent_state=running. If the session is alive and active, it is NOT a zombie.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      0
+
+      $ bd show agent-Crispy --json
+      {"id": "gt-c3d4", "title": "agent:Crispy", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:53:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ tmux capture-pane -t bd-polecat-Crispy -p | tail -3
+      Running tests... 42 passed, 0 failed
+      ✓ All checks complete
+      $
+    context: "Session alive. Output 2 minutes ago. Actively working."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+
+- description: "Not zombie: dead session + idle agent_state (nuke, not warrant)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. Dead session + idle agent_state is NOT a zombie — it's a
+      cleanly exited idle polecat. These get nuked (cleaned up), not warranted.
+      Warrants are for running agents whose sessions died unexpectedly.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Waffles --json
+      {"id": "gt-w1x2", "title": "agent:Waffles", "status": "open", "labels": ["agent_state:idle"], "updated_at": "2026-02-15T13:00:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Waffles status --porcelain
+      (empty - clean worktree)
+    context: "Session dead. Agent was idle (not running). Git is clean."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant";
+
+- description: "Not zombie: alive session + running + short idle (5min)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. A polecat idle for only 5 minutes with an alive session
+      is NOT stuck or zombie. It may be thinking, waiting for a build, or between tasks.
+      Do not intervene for short idle periods.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Mango 2>/dev/null; echo $?
+      0
+
+      $ bd show agent-Mango --json
+      {"id": "gt-m1n2", "title": "agent:Mango", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:50:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Session alive. Last update 5 minutes ago. No evidence of being stuck."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op" || d.action === "log-and-watch";
+
+- description: "Edge: session just died (2min ago), was recently active"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. This session died very recently and was active just before death.
+      This is likely a crash, not a long-abandoned zombie. A warrant is still appropriate
+      since the session is dead and agent_state is running, but your reason should
+      acknowledge the recency.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Pixel 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Pixel --json
+      {"id": "gt-p1q2", "title": "agent:Pixel", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:53:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Pixel status --porcelain
+       M src/api/routes.js
+    context: "Session died ~2 minutes ago. Was active until death. Has uncommitted work."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant" || d.action === "create-cleanup-wisp";
+    - type: llm-rubric
+      value: >
+        The response should acknowledge that the session died very recently (within minutes)
+        and that the work may need to be preserved. It should not treat this identically to
+        a session that has been dead for hours.
+
+- description: "Edge: alive session + running + hooked bead + idle 30min"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. This polecat has been idle 30 minutes but the session is alive
+      and it has assigned work. This is NOT a zombie (session alive). The deacon should
+      nudge before escalating — give the polecat a chance to respond.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Hazel 2>/dev/null; echo $?
+      0
+
+      $ bd show agent-Hazel --json
+      {"id": "gt-h1i2", "title": "agent:Hazel", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:25:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-xyz1 --json
+      {"id": "gt-xyz1", "title": "Fix auth middleware", "status": "hooked", "assignee": "polecat-Hazel"}
+    context: "Session alive but no output for 30 minutes. Has assigned work (hooked bead). Not a zombie — but possibly stuck."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nudge" || d.action === "log-and-watch";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant" && d.action !== "nuke";
+
+- description: "Edge: mass death — 4 sessions died in 10-second window"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. Multiple polecat sessions died in a very short time window.
+      This pattern suggests a systemic issue (API rate limit, infrastructure failure,
+      Claude outage) rather than individual zombies. Escalate to mayor rather than
+      filing individual warrants.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux list-sessions 2>/dev/null | grep polecat
+      (no output - all sessions gone)
+
+      $ bd list --label agent_state:running --json
+      [
+        {"id": "gt-a1", "title": "agent:Toast", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:50Z"},
+        {"id": "gt-a2", "title": "agent:Crispy", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:51Z"},
+        {"id": "gt-a3", "title": "agent:Waffles", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:52Z"},
+        {"id": "gt-a4", "title": "agent:Mango", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:55Z"}
+      ]
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "All 4 polecat sessions died within a 10-second window. All show agent_state:running. This is a mass death event, not individual zombies."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate-to-mayor";
+    - type: llm-rubric
+      value: >
+        The response should recognize this as a mass death event (multiple sessions dying
+        simultaneously) and escalate to the mayor rather than filing individual warrants.
+        It should suggest a systemic cause (API issue, infrastructure failure, etc.).
+
+- description: "Edge: dead session + done agent_state + dirty git"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. This agent finished its work (agent_state=done) but the
+      session died before cleanup could happen. This is NOT a zombie — the work is
+      complete. Create a cleanup wisp so the witness can recover the dirty git state.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Biscuit --json
+      {"id": "gt-b1c2", "title": "agent:Biscuit", "status": "open", "labels": ["agent_state:done"], "updated_at": "2026-02-15T14:40:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Biscuit status --porcelain
+       M src/feature.js
+      $ git -C /town/gastown/polecats/Biscuit log --oneline origin/main..HEAD
+      f1a2b3c feat: implement new feature
+      c4d5e6f test: add feature tests
+    context: "Agent completed work (done state) but session died before cleanup. Branch has commits and uncommitted changes."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant";
+
+- description: "Edge: alive session + running + Claude prompt visible (awaiting input)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon. This polecat session is alive and the terminal shows a Claude
+      prompt ("> ") meaning the agent is waiting for input — it has finished processing
+      and is idle at the prompt. This is normal behavior, not stuck. The trigger-pending-spawns
+      step handles nudging these.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Nutmeg 2>/dev/null; echo $?
+      0
+
+      $ bd show agent-Nutmeg --json
+      {"id": "gt-n1m2", "title": "agent:Nutmeg", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:30:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ tmux capture-pane -t bd-polecat-Nutmeg -p | tail -5
+      ✓ Task complete. Committed and pushed.
+
+      >
+    context: "Session alive. Terminal shows '> ' prompt — agent finished processing and is awaiting next input. 25 minutes since last bead update but session is responsive."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op" || d.action === "log-and-watch";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant" && d.action !== "nuke";

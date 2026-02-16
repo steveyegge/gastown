@@ -1,0 +1,359 @@
+# Refinery Patrol: Test Failure Triage (The Scotty Test)
+# Tests whether the model correctly diagnoses test failures as branch-caused
+# vs pre-existing. "Would you walk past a warp core leak that existed before
+# your shift?" Pre-existing = file bead + proceed. Branch-caused = reject MR.
+
+- description: "Branch-caused: test passes on main, fails on branch"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery — the merge queue processor. You sequentially rebase, test,
+      and merge branches. When tests fail, you must diagnose: is the failure caused by
+      this branch's changes, or was it pre-existing on main? Branch-caused failures
+      reject the MR. Pre-existing failures get filed as beads but the merge proceeds.
+      This is the "Scotty Test" — pre-existing problems are not this branch's fault.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/add-user-roles (PR #87)
+      ## Modified files: src/auth/roles.js, src/auth/roles.test.js
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -5
+      Tests:  142 passed, 0 failed
+      Time:   12.4s
+      Result: PASS
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -10
+      FAIL src/auth/roles.test.js
+        ● UserRoles › should assign default role
+          Expected: "viewer"
+          Received: "editor"
+
+      Tests:  141 passed, 1 failed
+      Time:   12.8s
+      Result: FAIL
+    context: "Test passes on main, fails on branch. The failing test is in a file modified by the branch."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+    - type: contains-any
+      value: ["branch", "caused", "introduced"]
+
+- description: "Branch-caused: new test file added by branch fails"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. This branch added a new test file and that test fails.
+      Since the test didn't exist before this branch, the failure is definitively
+      branch-caused.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/notifications (PR #92)
+      ## Modified files: src/notify.js, src/notify.test.js (NEW)
+
+      $ git diff --name-status origin/main...HEAD | grep test
+      A       src/notify.test.js
+
+      $ npm test 2>&1 | tail -8
+      FAIL src/notify.test.js
+        ● Notifications › should send email on trigger
+          TypeError: sendEmail is not a function
+
+      Tests:  142 passed, 1 failed
+      Time:   13.1s
+      Result: FAIL
+    context: "Branch added src/notify.test.js (new file). That new test fails. All other tests pass."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+
+- description: "Branch-caused: lint error in branch-modified files"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Lint check failed on files that were modified by this branch.
+      Lint passed on main. This is a branch-caused quality failure.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: fix/cleanup-imports (PR #95)
+      ## Modified files: src/utils/helpers.js, src/api/routes.js
+
+      $ git stash && git checkout origin/main && npx eslint src/ 2>&1 | tail -2
+      ✓ 0 errors, 0 warnings
+
+      $ git checkout - && git stash pop && npx eslint src/ 2>&1 | tail -5
+      src/utils/helpers.js:15:1  error  'lodash' is imported but never used  no-unused-imports
+      src/api/routes.js:42:5     error  Unexpected console.log  no-console
+
+      ✗ 2 errors, 0 warnings
+    context: "Lint passes on main, fails on branch. Errors are in files modified by the branch."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+
+- description: "Pre-existing: same test fails on both main and branch"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. The Scotty Test: if a test fails on main AND on the branch
+      with the same error, it is pre-existing. File a bead to track it but proceed
+      with the merge — this branch did not cause the failure.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/dark-mode (PR #101)
+      ## Modified files: src/ui/theme.js, src/ui/theme.css
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -8
+      FAIL src/payments/stripe.test.js
+        ● StripePayments › should process refund
+          Error: Stripe API key not configured
+
+      Tests:  141 passed, 1 failed
+      Time:   12.6s
+      Result: FAIL
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -8
+      FAIL src/payments/stripe.test.js
+        ● StripePayments › should process refund
+          Error: Stripe API key not configured
+
+      Tests:  141 passed, 1 failed
+      Time:   12.9s
+      Result: FAIL
+    context: "Same test (stripe.test.js) fails with same error on both main and branch. Branch modifies UI theme files — unrelated to payments. Pre-existing failure."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-bead-and-proceed";
+
+- description: "Pre-existing: flaky test (fails then passes on re-run)"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. A test failed on the first run but passed on re-run with
+      no code changes between runs. This is a flaky test, not a branch-caused failure.
+      Proceed with the merge but consider filing a bead for the flaky test.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/cache-layer (PR #104)
+
+      ## First run:
+      $ npm test 2>&1 | tail -5
+      FAIL src/cache/redis.test.js
+        ● RedisCache › should expire keys after TTL
+          Timeout - Async callback was not invoked within 5000ms
+
+      Tests:  141 passed, 1 failed
+      Result: FAIL
+
+      ## Second run (no code changes):
+      $ npm test 2>&1 | tail -5
+      Tests:  142 passed, 0 failed
+      Result: PASS
+    context: "Test failed on first run, passed on second run. No code changes between runs. Flaky test — timing-dependent."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-bead-and-proceed" || d.action === "retry";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "reject-mr";
+
+- description: "Infrastructure: npm install timeout (not branch-caused)"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. The build infrastructure failed (npm install timeout).
+      This is not related to the branch's code changes. Retry or skip — do not
+      reject the MR for infrastructure issues.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: fix/typo-readme (PR #108)
+      ## Modified files: README.md
+
+      $ npm ci 2>&1 | tail -5
+      npm ERR! network timeout at: https://registry.npmjs.org/react
+      npm ERR! network This is a problem related to network connectivity.
+      npm ERR! network Check your internet connection and proxy settings.
+
+      npm ERR! code ETIMEDOUT
+    context: "npm install failed with network timeout. Branch only modifies README.md — clearly not a code issue."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "retry" || d.action === "skip-mr";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "reject-mr";
+
+- description: "Edge: failure in unmodified file but caused by branch dependency change"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. A test fails in a file NOT directly modified by the branch,
+      but the branch changed a shared dependency (user.js) that payment.test.js imports.
+      This requires reasoning about import chains — the failure IS branch-caused even
+      though the failing test file was not modified.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: refactor/user-model (PR #110)
+      ## Modified files: src/models/user.js, src/models/user.test.js
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -3
+      Tests:  142 passed, 0 failed
+      Result: PASS
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -10
+      FAIL src/payments/checkout.test.js
+        ● Checkout › should apply user discount
+          TypeError: user.getDiscount is not a function
+            at Object.<anonymous> (src/payments/checkout.test.js:28:22)
+
+      Tests:  141 passed, 1 failed
+      Result: FAIL
+
+      $ grep -n "require.*user" src/payments/checkout.js
+      3: const { User } = require('../models/user');
+    context: "Branch modified src/models/user.js. Test fails in src/payments/checkout.test.js which imports from user.js. The failure is in an unmodified file but caused by the branch's changes to a shared dependency."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr" || d.action === "investigate";
+    - type: llm-rubric
+      value: >
+        The response should recognize that although checkout.test.js was not modified by
+        the branch, the failure is caused by the branch's changes to user.js (which
+        checkout.js imports). This is an indirect branch-caused failure, not pre-existing.
+
+- description: "Edge: typecheck fails in downstream files after interface change"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. The branch changed a TypeScript interface, causing type
+      errors in multiple downstream files. Even though those files weren't modified
+      by the branch, the type change broke them. This is branch-caused.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: refactor/api-types (PR #112)
+      ## Modified files: src/types/api.ts
+
+      $ git stash && git checkout origin/main && npx tsc --noEmit 2>&1 | tail -2
+      Found 0 errors.
+
+      $ git checkout - && git stash pop && npx tsc --noEmit 2>&1 | tail -10
+      src/handlers/user.ts:15:5 - error TS2322: Type 'string' is not assignable to type 'number'.
+      src/handlers/admin.ts:28:3 - error TS2345: Argument of type 'OldApiResponse' is not assignable to parameter of type 'ApiResponse'.
+      src/middleware/auth.ts:42:10 - error TS2339: Property 'userId' does not exist on type 'ApiRequest'.
+      src/services/billing.ts:8:20 - error TS2307: Cannot find module '../types/api-legacy'.
+      src/utils/validator.ts:55:8 - error TS2322: Type 'ApiResponse' is not assignable to type 'LegacyResponse'.
+
+      Found 5 errors in 5 files.
+    context: "Branch modified src/types/api.ts (interface definition). TypeScript errors appear in 5 other files that import from api.ts. Typecheck passes on main."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+
+- description: "Edge: ambiguous timing — failure started on main 2 days ago, branch is 3 days old"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. A test fails on both main and the branch. Git bisect shows
+      the failure was introduced on main 2 days ago by a different commit. This branch
+      is 3 days old (created before the failure appeared on main). The failure is
+      pre-existing — it was introduced by someone else's commit on main.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/notifications (PR #115)
+      ## Branch created: 2026-02-12 (3 days ago)
+      ## Modified files: src/notify.js, src/notify.test.js
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | grep FAIL
+      FAIL src/auth/session.test.js
+
+      $ git checkout - && git stash pop && npm test 2>&1 | grep FAIL
+      FAIL src/auth/session.test.js
+
+      $ git bisect start HEAD origin/main~20
+      $ git bisect bad  # main HEAD fails
+      $ git bisect good  # 20 commits ago passes
+      ...
+      $ git bisect result
+      abc1234 is the first bad commit
+      Author: other-developer
+      Date:   2026-02-13 (2 days ago)
+      Message: refactor: session handling cleanup
+    context: "Same test fails on both main and branch. git bisect shows the failure was introduced on main 2 days ago by a different developer's commit. This branch was created 3 days ago. The failure is pre-existing."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-bead-and-proceed";
+    - type: llm-rubric
+      value: >
+        The response should recognize that the failure was introduced by a different
+        commit on main (not by this branch) and proceed with the merge while filing
+        a bead to track the pre-existing issue.
+
+- description: "Edge: mixed failures — some branch-caused, some pre-existing"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Multiple tests failed — some also fail on main (pre-existing),
+      some only fail on the branch (branch-caused). When ANY failure is branch-caused,
+      the MR must be rejected. Pre-existing failures don't override branch-caused ones.
+    formula_step: handle-test-failure
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/user-profiles (PR #118)
+      ## Modified files: src/users/profile.js, src/users/profile.test.js
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -8
+      FAIL src/payments/stripe.test.js
+        ● should process refund — Error: API key not configured
+
+      Tests:  141 passed, 1 failed
+      Result: FAIL
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -12
+      FAIL src/payments/stripe.test.js
+        ● should process refund — Error: API key not configured
+      FAIL src/users/profile.test.js
+        ● should update avatar — TypeError: updateAvatar is not a function
+      FAIL src/users/profile.test.js
+        ● should validate email — Expected: true, Received: false
+
+      Tests:  139 passed, 3 failed
+      Result: FAIL
+    context: "3 failures total. stripe.test.js fails on both main and branch (pre-existing). 2 failures in profile.test.js only fail on branch (branch-caused). Branch-caused failures take precedence."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+    - type: llm-rubric
+      value: >
+        The response should identify that while stripe.test.js is pre-existing,
+        the profile.test.js failures are branch-caused and therefore the MR must
+        be rejected. It should NOT proceed just because one failure is pre-existing.
