@@ -9,6 +9,8 @@ import (
 )
 
 // MergeHooks merges a base config with applicable overrides for a target.
+// It does NOT incorporate built-in defaults from DefaultOverrides(); callers
+// that need the full production merge should use ComputeExpected() instead.
 //
 // Merge rules:
 //  1. Start with base hooks

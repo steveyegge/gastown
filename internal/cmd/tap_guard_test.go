@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"os"
 	"testing"
 )
 
@@ -23,7 +22,7 @@ func TestTapGuardTaskDispatch_BlocksWhenMayor(t *testing.T) {
 }
 
 func TestTapGuardTaskDispatch_AllowsWhenNotMayor(t *testing.T) {
-	os.Unsetenv("GT_ROLE")
+	t.Setenv("GT_ROLE", "")
 
 	err := runTapGuardTaskDispatch(nil, nil)
 	if err != nil {
