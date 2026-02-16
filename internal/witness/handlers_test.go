@@ -422,7 +422,7 @@ func TestExtractDoneIntent_Malformed(t *testing.T) {
 
 func TestExtractDoneIntent_AllExitTypes(t *testing.T) {
 	ts := time.Now().Unix()
-	for _, exitType := range []string{"COMPLETED", "ESCALATED", "DEFERRED", "PHASE_COMPLETE"} {
+	for _, exitType := range []string{"COMPLETED", "ESCALATED", "DEFERRED", "NO_OP", "PHASE_COMPLETE"} {
 		label := fmt.Sprintf("done-intent:%s:%d", exitType, ts)
 		intent := extractDoneIntent([]string{label})
 		if intent == nil {

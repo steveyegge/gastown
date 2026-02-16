@@ -3,8 +3,10 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // setSysProcAttr sets platform-specific process attributes.
@@ -16,13 +18,26 @@ func setSysProcAttr(cmd *exec.Cmd) {
 // isProcessAlive checks if a process is still running.
 // On Windows, we try to open the process with minimal access.
 func isProcessAlive(p *os.Process) bool {
-	// On Windows, FindProcess always succeeds, and Signal(0) may not work.
-	// The best we can do is try to signal and see if it fails.
-	// A killed process will return an error.
-	err := p.Signal(os.Signal(nil))
-	// If err is nil or "not supported", process may still be alive
-	// If err mentions "finished" or similar, process is dead
-	return err == nil
+	if p == nil || p.Pid <= 0 {
+		return false
+	}
+
+	cmd := exec.Command("tasklist",
+		"/FI", fmt.Sprintf("PID eq %d", p.Pid),
+		"/FO", "CSV",
+		"/NH",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	line := strings.TrimSpace(string(output))
+	if line == "" {
+		return false
+	}
+
+	return !strings.Contains(strings.ToLower(line), "no tasks are running")
 }
 
 // sendTermSignal sends a termination signal.

@@ -140,7 +140,7 @@ func TestFormatSource(t *testing.T) {
 
 func TestFormatType(t *testing.T) {
 	// Just verify it doesn't panic and returns non-empty strings
-	types := []string{"commit", "bead_created", "bead_closed", "spawn", "done", "handoff", "crash", "kill", "merged", "merge_failed", "unknown"}
+	types := []string{"commit", "bead_created", "bead_closed", "spawn", "done", "no_op", "handoff", "crash", "kill", "merged", "merge_failed", "unknown"}
 	for _, typ := range types {
 		result := formatType(typ)
 		if result == "" {

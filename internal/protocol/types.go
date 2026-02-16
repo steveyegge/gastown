@@ -173,7 +173,7 @@ type PolecatDonePayload struct {
 	// Polecat is the worker name.
 	Polecat string `json:"polecat"`
 
-	// ExitType is the exit status (COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE).
+	// ExitType is the exit status (COMPLETED, ESCALATED, DEFERRED, NO_OP, PHASE_COMPLETE).
 	ExitType string `json:"exit_type"`
 
 	// Issue is the beads issue ID the polecat worked on.

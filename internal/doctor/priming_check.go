@@ -47,7 +47,7 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 	var details []string
 
 	// Check 1: gt binary in PATH
-	if err := exec.Command("which", "gt").Run(); err != nil {
+	if _, err := exec.LookPath("gt"); err != nil {
 		c.issues = append(c.issues, primingIssue{
 			location:    "system",
 			issueType:   "gt_not_in_path",

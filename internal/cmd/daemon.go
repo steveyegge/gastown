@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,7 +109,7 @@ Examples:
 }
 
 var (
-	daemonLogLines int
+	daemonLogLines  int
 	daemonLogFollow bool
 )
 
@@ -159,15 +161,26 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting daemon: %w", err)
 	}
 
-	// Wait a moment for the daemon to initialize and acquire the lock
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify it started
-	running, pid, err = daemon.IsRunning(townRoot)
-	if err != nil {
-		return fmt.Errorf("checking daemon status: %w", err)
+	// Wait for daemon to initialize and write its PID.
+	// On slower machines (or when startup checks are expensive), a fixed
+	// 200ms sleep is not sufficient.
+	deadline := time.Now().Add(10 * time.Second)
+	var lastStatusErr error
+	for time.Now().Before(deadline) {
+		running, pid, err = daemon.IsRunning(townRoot)
+		if err == nil && running {
+			break
+		}
+		if err != nil {
+			lastStatusErr = err
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
+
 	if !running {
+		if lastStatusErr != nil {
+			return fmt.Errorf("daemon failed to start: %w (check logs with 'gt daemon logs')", lastStatusErr)
+		}
 		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
 	}
 
@@ -278,19 +291,113 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no log file found at %s", logFile)
 	}
 
-	if daemonLogFollow {
-		// Use tail -f for following
-		tailCmd := exec.Command("tail", "-f", logFile)
+	// Prefer native tail when available.
+	if _, err := exec.LookPath("tail"); err == nil {
+		if daemonLogFollow {
+			tailCmd := exec.Command("tail", "-f", logFile)
+			tailCmd.Stdout = os.Stdout
+			tailCmd.Stderr = os.Stderr
+			return tailCmd.Run()
+		}
+
+		tailCmd := exec.Command("tail", "-n", fmt.Sprintf("%d", daemonLogLines), logFile)
 		tailCmd.Stdout = os.Stdout
 		tailCmd.Stderr = os.Stderr
 		return tailCmd.Run()
 	}
 
-	// Use tail -n for last N lines
-	tailCmd := exec.Command("tail", "-n", fmt.Sprintf("%d", daemonLogLines), logFile)
-	tailCmd.Stdout = os.Stdout
-	tailCmd.Stderr = os.Stderr
-	return tailCmd.Run()
+	if daemonLogFollow {
+		return followLogFile(logFile, daemonLogLines)
+	}
+	return printLastLogLines(logFile, daemonLogLines)
+}
+
+func printLastLogLines(logFile string, lines int) error {
+	lastLines, err := readLastLines(logFile, lines)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range lastLines {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func readLastLines(logFile string, lines int) ([]string, error) {
+	if lines <= 0 {
+		lines = 50
+	}
+
+	file, err := os.Open(logFile)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buffer := make([]string, 0, lines)
+	next := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(buffer) < lines {
+			buffer = append(buffer, line)
+			continue
+		}
+		buffer[next] = line
+		next = (next + 1) % lines
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Not wrapped: already in order.
+	if len(buffer) < lines || next == 0 {
+		return buffer, nil
+	}
+
+	// Wrapped ring buffer: return oldest -> newest.
+	out := make([]string, 0, len(buffer))
+	out = append(out, buffer[next:]...)
+	out = append(out, buffer[:next]...)
+	return out, nil
+}
+
+func followLogFile(logFile string, lines int) error {
+	if err := printLastLogLines(logFile, lines); err != nil {
+		return err
+	}
+
+	file, err := os.Open(logFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(file)
+	ticker := time.NewTicker(400 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+			fmt.Print(line)
+		}
+	}
+
+	return nil
 }
 
 func runDaemonRun(cmd *cobra.Command, args []string) error {
