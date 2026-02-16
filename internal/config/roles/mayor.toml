@@ -8,7 +8,7 @@ prompt_template = "mayor.md.tmpl"
 
 [session]
 pattern = "hq-mayor"
-work_dir = "{town}"
+work_dir = "{town}/mayor"
 needs_pre_sync = false
 start_command = "exec claude --dangerously-skip-permissions"
 
