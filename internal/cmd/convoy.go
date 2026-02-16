@@ -1852,7 +1852,7 @@ func printConvoyTree(townBeads string, convoys []struct {
 }
 
 // hasLabel checks if a label exists in a list of labels.
-func hasLabel(labels []string, target string) bool {
+func hasLabel(labels []string, target string) bool { //nolint:unparam // target is always "gt:owned" today but the API is intentionally general
 	for _, l := range labels {
 		if l == target {
 			return true
