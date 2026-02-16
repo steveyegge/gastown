@@ -1501,14 +1501,17 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 		return rigBeads, nil
 	}
 
-	// Neither exists — atomically create the canonical mayor path.
-	// MkdirAll uses mkdir(2) which is atomic per POSIX, so concurrent
-	// callers creating the same path won't race.
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	// Neither exists — create rig-root .beads (NOT mayor path).
+	// The mayor/rig/.beads path should only be used when the source repo
+	// has tracked beads (checked out via git clone). Creating it here would
+	// cause InitBeads to misdetect an untracked repo as having tracked beads,
+	// taking the redirect early-return and skipping config.yaml/issues.jsonl
+	// creation (see rig/manager.go InitBeads).
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
 		return "", fmt.Errorf("creating beads dir: %w", err)
 	}
 
-	return mayorBeads, nil
+	return rigBeads, nil
 }
 
 // GetActiveConnectionCount queries the Dolt server to get the number of active connections.

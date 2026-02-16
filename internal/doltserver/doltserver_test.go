@@ -573,19 +573,24 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 		}
 	})
 
-	t.Run("neither exists creates mayor path", func(t *testing.T) {
+	t.Run("neither exists creates rig-root path", func(t *testing.T) {
 		townRoot := t.TempDir()
 		dir, err := FindOrCreateRigBeadsDir(townRoot, "newrig")
 		if err != nil {
 			t.Fatal(err)
 		}
-		expectedMayor := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
-		if dir != expectedMayor {
-			t.Errorf("newrig beads dir = %q, want %q", dir, expectedMayor)
+		expectedRig := filepath.Join(townRoot, "newrig", ".beads")
+		if dir != expectedRig {
+			t.Errorf("newrig beads dir = %q, want %q", dir, expectedRig)
 		}
 		// Verify directory was actually created
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			t.Error("mayor .beads directory was not created")
+			t.Error("rig-root .beads directory was not created")
+		}
+		// Verify mayor path was NOT created (would confuse InitBeads)
+		mayorBeads := filepath.Join(townRoot, "newrig", "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorBeads); err == nil {
+			t.Error("mayor/rig/.beads should NOT be created for untracked repos")
 		}
 	})
 
@@ -605,19 +610,51 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 		}
 		wg.Wait()
 
-		expectedMayor := filepath.Join(townRoot, "racerig", "mayor", "rig", ".beads")
+		expectedRig := filepath.Join(townRoot, "racerig", ".beads")
 		for i := 0; i < goroutines; i++ {
 			if errs[i] != nil {
 				t.Errorf("goroutine %d: unexpected error: %v", i, errs[i])
 			}
-			if results[i] != expectedMayor {
-				t.Errorf("goroutine %d: got %q, want %q", i, results[i], expectedMayor)
+			if results[i] != expectedRig {
+				t.Errorf("goroutine %d: got %q, want %q", i, results[i], expectedRig)
 			}
 		}
 
 		// Verify directory exists
-		if _, err := os.Stat(expectedMayor); os.IsNotExist(err) {
+		if _, err := os.Stat(expectedRig); os.IsNotExist(err) {
 			t.Error("directory was not created after concurrent calls")
+		}
+	})
+
+	t.Run("does not create mayor path for untracked repo", func(t *testing.T) {
+		// Regression test: FindOrCreateRigBeadsDir must not create
+		// mayor/rig/.beads for new rigs. If it does, InitBeads
+		// misdetects the rig as having tracked beads and takes the
+		// redirect path, skipping config.yaml and issues.jsonl creation.
+		townRoot := t.TempDir()
+
+		// Simulate rig directory existing (after git clone) but with
+		// NO mayor/rig/.beads (untracked repo).
+		rigDir := filepath.Join(townRoot, "untracked", "mayor", "rig")
+		if err := os.MkdirAll(rigDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		dir, err := FindOrCreateRigBeadsDir(townRoot, "untracked")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Should return rig-root .beads, NOT mayor/rig/.beads
+		expectedRig := filepath.Join(townRoot, "untracked", ".beads")
+		if dir != expectedRig {
+			t.Errorf("got %q, want %q", dir, expectedRig)
+		}
+
+		// mayor/rig/.beads must NOT exist
+		mayorBeads := filepath.Join(townRoot, "untracked", "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorBeads); err == nil {
+			t.Error("mayor/rig/.beads was created — would break InitBeads for untracked repos")
 		}
 	})
 }
