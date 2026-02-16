@@ -3,6 +3,7 @@ package rig
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -983,6 +984,95 @@ func TestRegisterRig_RejectsReservedNames(t *testing.T) {
 				t.Errorf("RegisterRig(%q) error = %q, want error containing %q", tt.name, err.Error(), tt.wantError)
 			}
 		})
+	}
+}
+
+func TestRegisterRig_DetectsAndPersistsCustomPushURL(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigName := "adoptme"
+	rigPath := filepath.Join(root, rigName)
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig path: %v", err)
+	}
+
+	upstreamURL := filepath.Join(root, "upstream.git")
+	forkURL := filepath.Join(root, "fork.git")
+
+	for _, args := range [][]string{{"git", "init", "--bare", upstreamURL}, {"git", "init", "--bare", forkURL}} {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, string(out))
+		}
+	}
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "remote", "add", "origin", upstreamURL},
+		{"git", "remote", "set-url", "origin", "--push", forkURL},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = rigPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, string(out))
+		}
+	}
+
+	result, err := manager.RegisterRig(RegisterRigOptions{Name: rigName, GitURL: upstreamURL})
+	if err != nil {
+		t.Fatalf("RegisterRig: %v", err)
+	}
+
+	if result.GitURL != upstreamURL {
+		t.Errorf("GitURL = %q, want %q", result.GitURL, upstreamURL)
+	}
+
+	entry, ok := rigsConfig.Rigs[rigName]
+	if !ok {
+		t.Fatalf("rig entry %q missing from config", rigName)
+	}
+	if entry.PushURL != forkURL {
+		t.Errorf("PushURL = %q, want %q", entry.PushURL, forkURL)
+	}
+}
+
+func TestRegisterRig_DetectPushURLEmptyWhenPushEqualsFetch(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigName := "adoptsame"
+	rigPath := filepath.Join(root, rigName)
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig path: %v", err)
+	}
+
+	url := filepath.Join(root, "upstream-same.git")
+	cmd := exec.Command("git", "init", "--bare", url)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init bare repo failed: %v\n%s", err, string(out))
+	}
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "remote", "add", "origin", url},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = rigPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, string(out))
+		}
+	}
+
+	if _, err := manager.RegisterRig(RegisterRigOptions{Name: rigName, GitURL: url}); err != nil {
+		t.Fatalf("RegisterRig: %v", err)
+	}
+
+	entry := rigsConfig.Rigs[rigName]
+	if entry.PushURL != "" {
+		t.Errorf("PushURL = %q, want empty when push URL equals fetch URL", entry.PushURL)
 	}
 }
 

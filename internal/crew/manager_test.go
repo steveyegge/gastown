@@ -726,6 +726,72 @@ func TestBuildResumeArgs(t *testing.T) {
 }
 
 
+func TestManagerAddSyncsCustomPushURLFromRig(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crew-test-push-url-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	rigPath := filepath.Join(tmpDir, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("failed to create rig dir: %v", err)
+	}
+
+	upstreamRepoPath := filepath.Join(tmpDir, "upstream.git")
+	forkRepoPath := filepath.Join(tmpDir, "fork.git")
+	if err := runCmd("git", "init", "--bare", upstreamRepoPath); err != nil {
+		t.Fatalf("failed to create upstream bare repo: %v", err)
+	}
+	if err := runCmd("git", "init", "--bare", forkRepoPath); err != nil {
+		t.Fatalf("failed to create fork bare repo: %v", err)
+	}
+
+	// Create mayor clone with fetch=upstream and push=fork.
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
+		t.Fatalf("failed to create mayor dir: %v", err)
+	}
+	if err := runCmd("git", "clone", upstreamRepoPath, mayorRigPath); err != nil {
+		t.Fatalf("failed to clone mayor rig: %v", err)
+	}
+	if err := runCmd("git", "-C", mayorRigPath, "remote", "set-url", "origin", "--push", forkRepoPath); err != nil {
+		t.Fatalf("failed to set mayor push url: %v", err)
+	}
+
+	r := &rig.Rig{
+		Name:   "test-rig",
+		Path:   rigPath,
+		GitURL: upstreamRepoPath,
+	}
+	mgr := NewManager(r, git.NewGit(rigPath))
+
+	worker, err := mgr.Add("dave", false)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	crewRepo := worker.ClonePath
+	outFetch, err := exec.Command("git", "-C", crewRepo, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to read crew fetch URL: %v (%s)", err, outFetch)
+	}
+	outPush, err := exec.Command("git", "-C", crewRepo, "remote", "get-url", "--push", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to read crew push URL: %v (%s)", err, outPush)
+	}
+
+	fetchURL := strings.TrimSpace(string(outFetch))
+	pushURL := strings.TrimSpace(string(outPush))
+
+	if fetchURL != upstreamRepoPath {
+		t.Errorf("crew fetch URL = %q, want %q", fetchURL, upstreamRepoPath)
+	}
+	if pushURL != forkRepoPath {
+		t.Errorf("crew push URL = %q, want %q", pushURL, forkRepoPath)
+	}
+}
+
 // Helper to run commands
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)

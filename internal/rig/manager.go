@@ -1284,7 +1284,7 @@ func (m *Manager) detectPushURL(rigPath string) string {
 		filepath.Join(rigPath, "refinery", "rig"),
 	}
 	for _, p := range possiblePaths {
-		g := git.NewGitWithDir(p, "")
+		g := git.NewGit(p)
 		fetchURL, fetchErr := g.RemoteURL("origin")
 		if fetchErr != nil {
 			continue
@@ -1309,7 +1309,7 @@ func (m *Manager) detectGitURL(rigPath string) (string, error) {
 		filepath.Join(rigPath, "refinery", "rig"),
 	}
 	for _, p := range possiblePaths {
-		g := git.NewGitWithDir(p, "")
+		g := git.NewGit(p)
 		url, err := g.RemoteURL("origin")
 		if err == nil && url != "" {
 			return strings.TrimSpace(url), nil
