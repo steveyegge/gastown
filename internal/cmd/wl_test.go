@@ -44,3 +44,49 @@ func TestWlCommandGroup(t *testing.T) {
 		t.Errorf("wl command GroupID = %q, want %q", wlCmd.GroupID, GroupWork)
 	}
 }
+
+func TestWlSubcommands(t *testing.T) {
+	expected := []string{"join", "post", "claim", "done", "browse", "sync"}
+	for _, name := range expected {
+		found := false
+		for _, c := range wlCmd.Commands() {
+			if c.Name() == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("subcommand %q not found on wl command", name)
+		}
+	}
+}
+
+func TestWlClaimRequiresArg(t *testing.T) {
+	if err := wlClaimCmd.Args(wlClaimCmd, []string{}); err == nil {
+		t.Error("claim should require exactly 1 argument")
+	}
+	if err := wlClaimCmd.Args(wlClaimCmd, []string{"w-abc123"}); err != nil {
+		t.Errorf("claim should accept 1 argument: %v", err)
+	}
+}
+
+func TestWlDoneRequiresArg(t *testing.T) {
+	if err := wlDoneCmd.Args(wlDoneCmd, []string{}); err == nil {
+		t.Error("done should require exactly 1 argument")
+	}
+	if err := wlDoneCmd.Args(wlDoneCmd, []string{"w-abc123"}); err != nil {
+		t.Errorf("done should accept 1 argument: %v", err)
+	}
+}
+
+func TestWlBrowseNoArgs(t *testing.T) {
+	if err := wlBrowseCmd.Args(wlBrowseCmd, []string{}); err != nil {
+		t.Errorf("browse should accept 0 arguments: %v", err)
+	}
+}
+
+func TestWlSyncNoArgs(t *testing.T) {
+	if err := wlSyncCmd.Args(wlSyncCmd, []string{}); err != nil {
+		t.Errorf("sync should accept 0 arguments: %v", err)
+	}
+}
