@@ -35,24 +35,19 @@ if ! [ -f "$RESULTS_FILE" ]; then
   exit 1
 fi
 
+# --- Extract metadata ---
+
+GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+PROMPTFOO_VER=$(npx promptfoo@latest --version 2>/dev/null || echo "unknown")
+DATE=$(date -u +%Y-%m-%d)
+USER=$(whoami)
+
 # --- Extract data ---
 
-# Get provider labels
-PROVIDERS=$(jq -r '.results.table.head.prompts[].provider' "$RESULTS_FILE" 2>/dev/null \
-  || jq -r '.results.providers[]' "$RESULTS_FILE" 2>/dev/null \
-  || echo "unknown")
-
-# Count results per provider
-TOTAL=$(jq '.results.table.body | length' "$RESULTS_FILE" 2>/dev/null || echo "0")
-
-# Build summary by parsing the results structure
+# Build aggregate summary per provider
 generate_summary() {
   local file="$1"
-
-  # Try to extract pass/fail counts per provider from the results
-  # promptfoo JSON structure: results.results[] has .provider and .success
   jq -r '
-    # Group results by provider
     [.results.results[] | {provider: .provider.label, success: .success, cost: (.cost // 0), latency: (.latencyMs // 0)}]
     | group_by(.provider)
     | map({
@@ -65,51 +60,139 @@ generate_summary() {
       })
     | sort_by(.provider)
     | .[] | "\(.provider)|\(.passed)/\(.total)|\(.passed * 100 / .total | round)%|$\(.avg_cost)|\(.avg_latency)ms"
-  ' "$file" 2>/dev/null || echo "Could not parse results. Check JSON structure."
+  ' "$file" 2>/dev/null || echo "PARSE_ERROR"
+}
+
+# Build per-suite breakdown per provider
+# Groups test descriptions by prefix: "[Class A] Deacon..." -> "class-a-deacon", "Clear zombie..." -> "deacon-zombie" etc.
+generate_suite_breakdown() {
+  local file="$1"
+  jq -r '
+    # Extract suite name from test description or vars.role
+    [.results.results[] | {
+      provider: .provider.label,
+      success: .success,
+      suite: (
+        if (.vars.role // "" | length) > 0 then
+          # Determine suite from description prefix and role
+          if (.description // "" | test("^\\[Class A\\]")) then
+            "class-a-" + .vars.role
+          else
+            .vars.role + "/" + (.vars.formula_step // "unknown")
+          end
+        else
+          "unknown"
+        end
+      )
+    }]
+    | group_by(.suite)
+    | map({
+        suite: .[0].suite,
+        results: (
+          group_by(.provider)
+          | map({
+              provider: .[0].provider,
+              passed: ([.[] | select(.success == true)] | length),
+              total: length
+            })
+          | sort_by(.provider)
+        )
+      })
+    | sort_by(.suite)
+    | .[] | "\(.suite)|\(.results | map("\(.provider):\(.passed)/\(.total)") | join("|"))"
+  ' "$file" 2>/dev/null || echo "PARSE_ERROR"
 }
 
 # --- Generate markdown ---
-
-DATE=$(date -u +%Y-%m-%d)
-USER=$(whoami)
 
 MARKDOWN="$(cat <<HEADER
 ## Model Comparison Results: ${DATE}
 
 **Reporter**: ${USER}
-**Framework**: [gt-model-eval](https://github.com/${REPO})
+**Framework commit**: \`${GIT_SHA}\`
+**Promptfoo version**: \`${PROMPTFOO_VER}\`
 **Related**: [Discussion #1542](https://github.com/${REPO}/discussions/1542) | [Issue #1545](https://github.com/${REPO}/issues/1545)
 
-### Summary
+### Aggregate Summary
 
 | Model | Tests Passed | Pass Rate | Avg Cost/Test | Avg Latency |
 |-------|-------------|-----------|---------------|-------------|
 HEADER
 )"
 
-# Append summary rows
+# Append aggregate summary rows
 SUMMARY=$(generate_summary "$RESULTS_FILE")
-if [ -n "$SUMMARY" ] && [ "$SUMMARY" != "Could not parse results. Check JSON structure." ]; then
+if [ -n "$SUMMARY" ] && [ "$SUMMARY" != "PARSE_ERROR" ]; then
   while IFS='|' read -r provider passed rate cost latency; do
     MARKDOWN="${MARKDOWN}
 | ${provider} | ${passed} | ${rate} | ${cost} | ${latency} |"
   done <<< "$SUMMARY"
 else
   MARKDOWN="${MARKDOWN}
-| (parse results.json manually — structure varies by promptfoo version) | | | | |"
+| (could not parse results — check promptfoo version) | | | | |"
+fi
+
+# Append per-suite breakdown
+MARKDOWN="${MARKDOWN}
+
+### Per-Suite Breakdown
+
+| Suite | $(jq -r '[.results.results[].provider.label] | unique | sort | join(" | ")' "$RESULTS_FILE" 2>/dev/null || echo "Models") |
+|-------|$(jq -r '[.results.results[].provider.label] | unique | sort | map("---") | join("|")' "$RESULTS_FILE" 2>/dev/null || echo "---")|"
+
+SUITE_DATA=$(generate_suite_breakdown "$RESULTS_FILE")
+if [ -n "$SUITE_DATA" ] && [ "$SUITE_DATA" != "PARSE_ERROR" ]; then
+  while IFS='|' read -r suite rest; do
+    # Format each provider's pass/total
+    formatted=""
+    IFS='|' read -ra parts <<< "$rest"
+    for part in "${parts[@]}"; do
+      # part is "Provider:passed/total"
+      score="${part#*:}"
+      formatted="${formatted} | ${score}"
+    done
+    MARKDOWN="${MARKDOWN}
+| ${suite} ${formatted} |"
+  done <<< "$SUITE_DATA"
+else
+  MARKDOWN="${MARKDOWN}
+| (per-suite breakdown unavailable) | |"
+fi
+
+# Append failed test details
+FAILED_TESTS=$(jq -r '
+  [.results.results[] | select(.success == false) | {
+    provider: .provider.label,
+    desc: .description,
+    action: ((.response.output // "") | try (fromjson | .action) catch "PARSE_ERROR")
+  }]
+  | group_by(.desc)
+  | map({
+      desc: .[0].desc,
+      failures: [.[] | .provider] | join(", ")
+    })
+  | .[:20]
+  | .[] | "| \(.desc) | \(.failures) |"
+' "$RESULTS_FILE" 2>/dev/null || echo "")
+
+if [ -n "$FAILED_TESTS" ]; then
+  MARKDOWN="${MARKDOWN}
+
+### Failed Tests (up to 20)
+
+| Test Description | Failed On |
+|-----------------|-----------|
+${FAILED_TESTS}"
 fi
 
 MARKDOWN="${MARKDOWN}
-
-### Per-Role Breakdown
-
-Run \`npx promptfoo@latest view\` locally to see detailed per-test results, or check the attached JSON.
 
 ### How to Reproduce
 
 \`\`\`bash
 git clone https://github.com/${REPO}.git
 cd gt-model-eval
+git checkout ${GIT_SHA}  # exact framework version
 export ANTHROPIC_API_KEY=sk-...
 npx promptfoo@latest eval --repeat 3
 npx promptfoo@latest view
@@ -123,7 +206,7 @@ npx promptfoo@latest eval --output results.json
 \`\`\`
 
 ---
-*Generated by gt-model-eval results pipeline*"
+*Generated by gt-model-eval results pipeline (commit ${GIT_SHA})*"
 
 # --- Output or post ---
 
