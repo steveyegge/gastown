@@ -3,7 +3,6 @@ package cmd
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -105,11 +104,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	// Set CC recipients
 	msg.CC = mailCC
 
-	// When the CLI handles notification itself, suppress the router's built-in
-	// queue-only notification to avoid double-notifying.
-	if !mailNoNotify {
-		msg.SuppressNotify = true
-	}
+	// Always suppress the router's built-in notification — the CLI owns
+	// the notification decision via --no-notify / --notify flags.
+	msg.SuppressNotify = true
 
 	// Handle reply-to: auto-set type to reply and look up thread
 	if mailReplyTo != "" {
@@ -262,16 +259,22 @@ func notifyRecipients(townRoot, from, subject string, addrs []string, router *ma
 		}
 
 		notified := false
+		isOverseer := mail.AddressToIdentity(addr) == "overseer"
+
 		for _, sessionID := range sessionIDs {
 			hasSession, err := t.HasSession(sessionID)
-			if err != nil {
-				if errors.Is(err, tmux.ErrSessionNotFound) || errors.Is(err, tmux.ErrNoServer) {
-					continue
-				}
+			if err != nil || !hasSession {
 				continue
 			}
-			if !hasSession {
-				continue
+
+			// Overseer is a human operator — use a visible banner instead of
+			// NudgeSession, which would type into the human's terminal input.
+			if isOverseer {
+				if err := t.SendNotificationBanner(sessionID, from, subject); err == nil {
+					fmt.Printf("  ↳ Notified overseer %s\n", addr)
+					notified = true
+				}
+				break
 			}
 
 			// Session exists — check if idle
@@ -286,11 +289,14 @@ func notifyRecipients(townRoot, from, subject string, addrs []string, router *ma
 
 			// Busy or nudge failed → enqueue for cooperative delivery
 			if townRoot != "" {
-				_ = nudge.Enqueue(townRoot, sessionID, nudge.QueuedNudge{
+				if err := nudge.Enqueue(townRoot, sessionID, nudge.QueuedNudge{
 					Sender:  from,
 					Message: notification,
-				})
-				fmt.Printf("  ↳ Queued notification for %s\n", addr)
+				}); err != nil {
+					style.PrintWarning("failed to enqueue notification for %s: %v", addr, err)
+				} else {
+					fmt.Printf("  ↳ Queued notification for %s\n", addr)
+				}
 				notified = true
 				break
 			}
