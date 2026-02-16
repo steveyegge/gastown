@@ -1352,7 +1352,8 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 // centralized Dolt server.
 //
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
-// For other rigs, it writes to <townRoot>/<rigName>/mayor/rig/.beads/metadata.json.
+// For other rigs, it writes to mayor/rig/.beads/metadata.json if that path exists,
+// otherwise to <townRoot>/<rigName>/.beads/metadata.json.
 func EnsureMetadata(townRoot, rigName string) error {
 	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
 	// avoiding the TOCTOU race where the directory state changes between
@@ -1453,8 +1454,8 @@ func FindRigBeadsDir(townRoot, rigName string) string {
 		return rigBeads
 	}
 
-	// Neither exists; return mayor path (caller will create it)
-	return mayorBeads
+	// Neither exists; return rig-root path (consistent with FindOrCreateRigBeadsDir)
+	return rigBeads
 }
 
 // FindOrCreateRigBeadsDir atomically resolves and ensures the .beads directory
