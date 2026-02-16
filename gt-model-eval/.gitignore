@@ -1,0 +1,10 @@
+# promptfoo
+output/
+.promptfoo/
+results*.json
+results*.html
+results*.csv
+
+# Node
+node_modules/
+package-lock.json

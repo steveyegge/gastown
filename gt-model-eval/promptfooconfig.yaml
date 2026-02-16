@@ -19,19 +19,19 @@ providers:
     label: "Opus 4.6"
     config:
       temperature: 0.0
-      max_tokens: 1024
+      max_tokens: 512
 
   - id: anthropic:messages:claude-sonnet-4-5-20250929
     label: "Sonnet 4.5"
     config:
       temperature: 0.0
-      max_tokens: 1024
+      max_tokens: 512
 
   - id: anthropic:messages:claude-haiku-4-5-20251001
     label: "Haiku 4.5"
     config:
       temperature: 0.0
-      max_tokens: 1024
+      max_tokens: 512
 
 defaultTest:
   options:

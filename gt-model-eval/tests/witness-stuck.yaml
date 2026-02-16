@@ -107,7 +107,7 @@
     - type: javascript
       value: |
         const d = JSON.parse(output);
-        return !d.urgency || d.urgency === "low" || d.urgency === "normal" || d.urgency === "gentle";
+        return !d.urgency || d.urgency === "low" || d.urgency === "normal";
 
 - description: "Nudge-worthy: idle 20min with hooked bead (direct)"
   vars:
@@ -142,7 +142,7 @@
     - type: javascript
       value: |
         const d = JSON.parse(output);
-        return d.urgency === "high" || d.urgency === "direct" || d.urgency === "urgent";
+        return d.urgency === "high" || d.urgency === "critical" || d.urgency === "urgent";
 
 - description: "Escalation: idle 45+ minutes with hooked bead"
   vars:

@@ -1,0 +1,15 @@
+{
+  "name": "gt-model-eval",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Promptfoo-based model comparison framework for Gas Town patrol agents",
+  "scripts": {
+    "eval": "promptfoo eval",
+    "eval:repeat": "promptfoo eval --repeat 3",
+    "view": "promptfoo view",
+    "export": "promptfoo eval --output results.json --output results.html"
+  },
+  "devDependencies": {
+    "promptfoo": "^0.99.0"
+  }
+}

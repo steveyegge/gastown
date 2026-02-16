@@ -38,6 +38,10 @@
       value: |
         const d = JSON.parse(output);
         return d.action === "reject-mr";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-bead-and-proceed";
     - type: contains-any
       value: ["branch", "caused", "introduced"]
 
@@ -71,6 +75,10 @@
       value: |
         const d = JSON.parse(output);
         return d.action === "reject-mr";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-bead-and-proceed";
 
 - description: "Branch-caused: lint error in branch-modified files"
   vars:
@@ -98,6 +106,10 @@
       value: |
         const d = JSON.parse(output);
         return d.action === "reject-mr";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-bead-and-proceed";
 
 - description: "Pre-existing: same test fails on both main and branch"
   vars:

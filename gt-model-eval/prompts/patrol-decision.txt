@@ -18,7 +18,7 @@ You must respond with a single JSON object. No other text, no markdown, no expla
 
 **Optional fields (include when relevant):**
 - `target`: The specific session, bead, or resource being acted on
-- `urgency`: "low" | "normal" | "high" | "critical"
+- `urgency`: "low" | "normal" | "high" | "critical" | "urgent"
 - `preserve`: Whether to preserve data/branches before destructive action
 
 ## Current Step: {{formula_step}}
