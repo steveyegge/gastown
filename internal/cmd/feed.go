@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -184,22 +184,14 @@ func buildFeedArgs() []string {
 	return args
 }
 
-// runFeedDirect runs bd activity in the current terminal.
-func runFeedDirect(workDir string, bdArgs []string) error {
-	bdPath, err := exec.LookPath("bd")
+// runFeedDirect prints recent events from .events.jsonl to stdout.
+func runFeedDirect(_ string, _ []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("bd not found in PATH: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Prepend argv[0] for exec
-	fullArgs := append([]string{"bd", "activity"}, bdArgs...)
-
-	// Change to the target directory before exec
-	if err := os.Chdir(workDir); err != nil {
-		return fmt.Errorf("changing to directory %s: %w", workDir, err)
-	}
-
-	return syscall.Exec(bdPath, fullArgs, os.Environ())
+	return feed.PrintGtEvents(townRoot, feedLimit)
 }
 
 // runFeedTUI runs the interactive TUI feed.
@@ -212,12 +204,11 @@ func runFeedTUI(workDir string) error {
 
 	var sources []feed.EventSource
 
-	// Create event source from bd activity
+	// Create event source from bd activity (optional - bd may not have activity command)
 	bdSource, err := feed.NewBdActivitySource(workDir)
-	if err != nil {
-		return fmt.Errorf("creating bd activity source: %w", err)
+	if err == nil {
+		sources = append(sources, bdSource)
 	}
-	sources = append(sources, bdSource)
 
 	// Create MQ event source (optional - don't fail if not available)
 	mqSource, err := feed.NewMQEventSourceFromWorkDir(workDir)
@@ -229,6 +220,10 @@ func runFeedTUI(workDir string) error {
 	gtSource, err := feed.NewGtEventsSource(townRoot)
 	if err == nil {
 		sources = append(sources, gtSource)
+	}
+
+	if len(sources) == 0 {
+		return fmt.Errorf("no event sources available (check that .events.jsonl exists in %s)", townRoot)
 	}
 
 	// Combine all sources
@@ -272,10 +267,13 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 	}
 
 	// Build the command to run in the window
-	// Always use follow mode in window (it's meant to be persistent)
-	feedCmd := fmt.Sprintf("cd %s && bd activity --follow", workDir)
+	// Use gt feed --plain instead of bd activity (which may not exist)
+	gtPath, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		gtPath = "gt"
+	}
+	feedWindowCmd := fmt.Sprintf("cd %s && %s feed --plain --follow", workDir, gtPath)
 	if len(bdArgs) > 0 {
-		// Filter out --follow if present (we add it unconditionally)
 		var filteredArgs []string
 		for _, arg := range bdArgs {
 			if arg != "--follow" {
@@ -283,7 +281,7 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 			}
 		}
 		if len(filteredArgs) > 0 {
-			feedCmd = fmt.Sprintf("cd %s && bd activity --follow %s", workDir, strings.Join(filteredArgs, " "))
+			feedWindowCmd = fmt.Sprintf("cd %s && %s feed --plain --follow %s", workDir, gtPath, strings.Join(filteredArgs, " "))
 		}
 	}
 
@@ -300,9 +298,9 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 		return selectWindow(t, windowTarget)
 	}
 
-	// Create new window named 'feed' with the bd activity command
+	// Create new window named 'feed'
 	fmt.Printf("Creating feed window in session %s...\n", sessionName)
-	if err := createWindow(t, sessionName, "feed", workDir, feedCmd); err != nil {
+	if err := createWindow(t, sessionName, "feed", workDir, feedWindowCmd); err != nil {
 		return fmt.Errorf("creating feed window: %w", err)
 	}
 
