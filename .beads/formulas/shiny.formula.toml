@@ -1,4 +1,5 @@
 description = "Engineer in a Box - the canonical right way. Design before you code. Review before you ship. Test before you submit."
+execution = "distributed"
 formula = "shiny"
 type = "workflow"
 version = 1
@@ -6,10 +7,11 @@ version = 1
 [[steps]]
 description = "Think carefully about architecture before writing code. Consider: How does this fit into the existing system? What are the edge cases? What could go wrong? Is there a simpler approach?"
 id = "design"
+output = "design.md"
 title = "Design {{feature}}"
 
 [[steps]]
-description = "Write the code for {{feature}}. Follow the design. Keep it simple. Don't gold-plate."
+description = "Read design.md for the design plan. Write the code for {{feature}}. Follow the design. Keep it simple. Don't gold-plate."
 id = "implement"
 needs = ["design"]
 title = "Implement {{feature}}"

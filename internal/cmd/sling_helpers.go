@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -590,10 +591,91 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		wispRootID = bondResult.RootID
 	}
 
+	// Phase 4: If formula uses distributed execution, annotate the wisp root bead
+	// so isDistributedMolecule() can detect it at runtime. Non-fatal if this fails.
+	if err := annotateDistributedFormula(formulaName, wispRootID, formulaWorkDir, townRoot); err != nil {
+		style.PrintWarning("could not annotate distributed formula: %v", err)
+	}
+
 	return &FormulaOnBeadResult{
 		WispRootID: wispRootID,
 		BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
 	}, nil
+}
+
+// annotateDistributedFormula checks if a formula uses distributed execution and,
+// if so, appends "execution: distributed" to the wisp root bead's description.
+// This metadata is read by isDistributedMolecule() at step-done time.
+func annotateDistributedFormula(formulaName, wispRootID, workDir, townRoot string) error {
+	f, err := findAndParseFormulaFromPaths(formulaName, workDir, townRoot)
+	if err != nil || f == nil {
+		return err
+	}
+	if !f.IsDistributed() {
+		return nil
+	}
+
+	// Append execution mode to wisp root description
+	b := beads.New(workDir)
+	issue, err := b.Show(wispRootID)
+	if err != nil {
+		return fmt.Errorf("reading wisp root %s: %w", wispRootID, err)
+	}
+	desc := strings.TrimRight(issue.Description, "\n") + "\n"
+	desc += "execution: distributed\n"
+	if err := b.Update(wispRootID, beads.UpdateOptions{Description: &desc}); err != nil {
+		return fmt.Errorf("updating wisp root: %w", err)
+	}
+
+	// Annotate step beads with input artifacts from the formula's needs chain.
+	// Step beads are children of the wisp root, numbered .1, .2, etc.
+	children, err := b.List(beads.ListOptions{
+		Parent:   wispRootID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil // Non-fatal: steps still work without input annotations
+	}
+
+	allIDs := f.GetAllIDs()
+	for i, stepID := range allIDs {
+		inputs := f.GetStepInputs(stepID)
+		if len(inputs) == 0 {
+			continue
+		}
+		// Find the child bead corresponding to this step (by sequence number)
+		for _, child := range children {
+			suffix := fmt.Sprintf(".%d", i+1)
+			if strings.HasSuffix(child.ID, suffix) {
+				childDesc := strings.TrimRight(child.Description, "\n") + "\n"
+				childDesc += fmt.Sprintf("step_inputs: %s\n", strings.Join(inputs, ","))
+				_ = b.Update(child.ID, beads.UpdateOptions{Description: &childDesc})
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+// findAndParseFormulaFromPaths searches standard formula locations and parses the file.
+func findAndParseFormulaFromPaths(name, workDir, townRoot string) (*formula.Formula, error) {
+	searchPaths := []string{
+		filepath.Join(workDir, ".beads", "formulas"),
+		filepath.Join(townRoot, ".beads", "formulas"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(home, ".beads", "formulas"))
+	}
+
+	for _, basePath := range searchPaths {
+		path := filepath.Join(basePath, name+".formula.toml")
+		if _, err := os.Stat(path); err == nil {
+			return formula.ParseFile(path)
+		}
+	}
+	return nil, nil // Not found, non-fatal
 }
 
 // CookFormula cooks a formula to ensure its proto exists.

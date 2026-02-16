@@ -78,6 +78,43 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
+	// Handle STEP_COMPLETE: distributed workflow step done, next step needs fresh polecat.
+	// The polecat has pushed its branch and written handoff metadata to the molecule bead.
+	// We read the handoff, send STEP_READY to Mayor for dispatch, and nuke the polecat.
+	if payload.Exit == "STEP_COMPLETE" {
+		// Read handoff metadata from molecule bead (via the base bead's attached_molecule)
+		handoff := readStepHandoff(workDir, payload.IssueID)
+
+		// Send STEP_READY to Mayor so it can sling the next step to a fresh polecat
+		if router != nil && handoff != nil {
+			mailID, err := sendStepReady(router, rigName, payload, handoff)
+			if err != nil {
+				result.Error = fmt.Errorf("sending STEP_READY: %w (non-fatal)", err)
+			} else {
+				result.MailSent = mailID
+			}
+		}
+
+		// Auto-nuke the polecat — branch is pushed, worktree is expendable.
+		// gt done already killed the session; this cleans up the worktree.
+		nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
+
+		result.Handled = true
+		action := fmt.Sprintf("step-complete for %s", payload.PolecatName)
+		if handoff != nil {
+			action += fmt.Sprintf(" (next=%s, branch=%s, STEP_READY sent to mayor)", handoff.NextStepID, handoff.Branch)
+		} else {
+			action += " (no handoff metadata found)"
+		}
+		if nukeResult.Nuked {
+			action += ", polecat nuked"
+		} else if nukeResult.Reason != "" {
+			action += fmt.Sprintf(", nuke: %s", nukeResult.Reason)
+		}
+		result.Action = action
+		return result
+	}
+
 	// Check if this polecat has a pending MR
 	// ESCALATED/DEFERRED exits typically have no MR pending
 	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
@@ -599,6 +636,88 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	}
 
 	return ""
+}
+
+// StepHandoff contains handoff metadata written to the molecule bead by
+// handleDistributedStepDone when a distributed workflow step completes.
+type StepHandoff struct {
+	NextStepID string // Bead ID of the next step to execute
+	Branch     string // Git branch containing the completed step's work
+	MoleculeID string // Bead ID of the molecule (wisp root)
+}
+
+// readStepHandoff reads distributed workflow handoff metadata from a molecule bead.
+// The base bead (issueID) has an attached_molecule pointing to the molecule bead,
+// which contains step_handoff_next and step_handoff_branch fields in its description.
+func readStepHandoff(workDir, issueID string) *StepHandoff {
+	if issueID == "" {
+		return nil
+	}
+
+	// Find the attached molecule via the base bead
+	moleculeID := getAttachedMoleculeID(workDir, issueID)
+	if moleculeID == "" {
+		return nil
+	}
+
+	// Read molecule bead description for handoff fields
+	output, err := util.ExecWithOutput(workDir, "bd", "show", moleculeID, "--json")
+	if err != nil || output == "" {
+		return nil
+	}
+
+	var issues []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return nil
+	}
+
+	handoff := &StepHandoff{MoleculeID: moleculeID}
+	for _, line := range strings.Split(issues[0].Description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "step_handoff_next:") {
+			handoff.NextStepID = strings.TrimSpace(strings.TrimPrefix(line, "step_handoff_next:"))
+		} else if strings.HasPrefix(line, "step_handoff_branch:") {
+			handoff.Branch = strings.TrimSpace(strings.TrimPrefix(line, "step_handoff_branch:"))
+		}
+	}
+
+	if handoff.NextStepID == "" {
+		return nil
+	}
+	return handoff
+}
+
+// sendStepReady sends a STEP_READY notification to the Mayor.
+// This signals that a distributed workflow step is complete and the next step
+// needs a fresh polecat with --base-branch pointing to the previous step's branch.
+func sendStepReady(router *mail.Router, rigName string, payload *PolecatDonePayload, handoff *StepHandoff) (string, error) {
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/witness", rigName),
+		"mayor/",
+		fmt.Sprintf("STEP_READY %s", handoff.NextStepID),
+		fmt.Sprintf(`NextStep: %s
+Molecule: %s
+Branch: %s
+Rig: %s
+Issue: %s
+PreviousPolecat: %s`,
+			handoff.NextStepID,
+			handoff.MoleculeID,
+			handoff.Branch,
+			rigName,
+			payload.IssueID,
+			payload.PolecatName,
+		),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	if err := router.Send(msg); err != nil {
+		return "", err
+	}
+	return msg.ID, nil
 }
 
 // sendMergeReady sends a MERGE_READY notification to the Refinery.

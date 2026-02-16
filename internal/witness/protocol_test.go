@@ -23,6 +23,8 @@ func TestClassifyMessage(t *testing.T) {
 		{"🤝 HANDOFF: Patrol context", ProtoHandoff},
 		{"🤝HANDOFF: No space", ProtoHandoff},
 		{"SWARM_START", ProtoSwarmStart},
+		{"STEP_READY gt-abc.2", ProtoStepReady},
+		{"STEP_READY mol-xyz.3", ProtoStepReady},
 		{"Unknown message", ProtoUnknown},
 		{"", ProtoUnknown},
 	}
@@ -323,6 +325,47 @@ func TestParseSwarmStart_MinimalBody(t *testing.T) {
 	}
 	if len(payload.BeadIDs) != 0 {
 		t.Errorf("BeadIDs = %v, want empty", payload.BeadIDs)
+	}
+}
+
+func TestParseStepReady(t *testing.T) {
+	subject := "STEP_READY gt-abc.3"
+	body := `NextStep: gt-abc.3
+Molecule: mol-abc
+Branch: polecat/nux/gt-abc
+Rig: gastown
+Issue: gt-abc.2
+PreviousPolecat: nux`
+
+	payload, err := ParseStepReady(subject, body)
+	if err != nil {
+		t.Fatalf("ParseStepReady() error = %v", err)
+	}
+
+	if payload.NextStepID != "gt-abc.3" {
+		t.Errorf("NextStepID = %q, want %q", payload.NextStepID, "gt-abc.3")
+	}
+	if payload.MoleculeID != "mol-abc" {
+		t.Errorf("MoleculeID = %q, want %q", payload.MoleculeID, "mol-abc")
+	}
+	if payload.Branch != "polecat/nux/gt-abc" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
+	}
+	if payload.Rig != "gastown" {
+		t.Errorf("Rig = %q, want %q", payload.Rig, "gastown")
+	}
+	if payload.IssueID != "gt-abc.2" {
+		t.Errorf("IssueID = %q, want %q", payload.IssueID, "gt-abc.2")
+	}
+	if payload.PreviousPolecat != "nux" {
+		t.Errorf("PreviousPolecat = %q, want %q", payload.PreviousPolecat, "nux")
+	}
+}
+
+func TestParseStepReady_InvalidSubject(t *testing.T) {
+	_, err := ParseStepReady("Not a step ready", "body")
+	if err == nil {
+		t.Error("ParseStepReady() expected error for invalid subject")
 	}
 }
 

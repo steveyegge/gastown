@@ -42,6 +42,14 @@ Exit statuses:
   COMPLETED      - Work done, MR submitted (default)
   ESCALATED      - Hit blocker, needs human intervention
   DEFERRED       - Work paused, issue still open
+  PHASE_COMPLETE - Phase done, awaiting gate (use --phase-complete)
+  STEP_COMPLETE  - Distributed workflow step done, fresh polecat needed for next step
+
+Phase handoff workflow:
+  When a molecule has gate steps (async waits), use --phase-complete to signal
+  that the current phase is complete but work continues after the gate closes.
+  The Witness will recycle this polecat and dispatch a new one when the gate
+  resolves.
 
 Examples:
   gt done                              # Submit branch, notify COMPLETED, exit session
@@ -61,9 +69,11 @@ var (
 
 // Valid exit types for gt done
 const (
-	ExitCompleted = "COMPLETED"
-	ExitEscalated = "ESCALATED"
-	ExitDeferred  = "DEFERRED"
+	ExitCompleted     = "COMPLETED"
+	ExitEscalated     = "ESCALATED"
+	ExitDeferred      = "DEFERRED"
+	ExitPhaseComplete = "PHASE_COMPLETE"
+	ExitStepComplete  = "STEP_COMPLETE" // Distributed workflow: step done, next step needs fresh polecat
 )
 
 func init() {
@@ -88,8 +98,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Validate exit status
 	exitType := strings.ToUpper(doneStatus)
-	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred && exitType != ExitStepComplete {
+		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, DEFERRED, or STEP_COMPLETE", doneStatus)
 	}
 
 	// Deferred session kill: ensures selfKillSession runs on ANY exit path for polecats.
@@ -783,6 +793,28 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("  Priority: P%d\n", priority)
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+	} else if exitType == ExitStepComplete {
+		// Distributed workflow step complete - push branch so next polecat can base on it
+		// No MR creation - work is incomplete (more steps remain)
+		fmt.Printf("%s Distributed step complete\n", style.Bold.Render("→"))
+		fmt.Printf("  Branch: %s\n", branch)
+		if issueID != "" {
+			fmt.Printf("  Issue: %s\n", issueID)
+		}
+		fmt.Println()
+		fmt.Printf("%s\n", style.Dim.Render("Next step will be dispatched to a fresh polecat."))
+
+		// Push branch to remote so next polecat can base on it
+		if cwdAvailable {
+			if err := pushBranchToOrigin(g, branch, townRoot, rigName); err != nil {
+				// Record error but continue - branch may already be pushed
+				errMsg := fmt.Sprintf("push failed for step handoff: %v", err)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s", errMsg)
+			} else {
+				fmt.Printf("%s Branch pushed to origin (for next step)\n", style.Bold.Render("✓"))
+			}
+		}
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
@@ -950,6 +982,37 @@ afterDoltMerge:
 	}
 	fmt.Printf("  Goodbye!\n")
 	return NewSilentExit(0)
+}
+
+// pushBranchToOrigin pushes the current branch to origin using explicit refspec.
+// Used by both COMPLETED (before MR creation) and STEP_COMPLETE (for next polecat handoff).
+// Falls back to bare repo and mayor/rig clone if primary push fails.
+func pushBranchToOrigin(g *git.Git, branch, townRoot, rigName string) error {
+	refspec := branch + ":" + branch
+	pushErr := g.Push("origin", refspec, false)
+	if pushErr != nil {
+		// Try bare repo fallback
+		rigPath := filepath.Join(townRoot, rigName)
+		bareRepoPath := filepath.Join(rigPath, ".repo.git")
+		if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			pushErr = bareGit.Push("origin", refspec, false)
+			if pushErr == nil {
+				return nil
+			}
+		}
+		// Try mayor/rig as last resort
+		mayorPath := filepath.Join(rigPath, "mayor", "rig")
+		if _, statErr := os.Stat(mayorPath); statErr == nil {
+			mayorGit := git.NewGit(mayorPath)
+			pushErr = mayorGit.Push("origin", refspec, false)
+			if pushErr == nil {
+				return nil
+			}
+		}
+		return pushErr
+	}
+	return nil
 }
 
 // setDoneIntentLabel writes a done-intent:<type>:<unix-ts> label on the agent bead

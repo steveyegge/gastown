@@ -63,6 +63,14 @@ func (f *Formula) Validate() error {
 		return fmt.Errorf("invalid formula type %q (must be convoy, workflow, expansion, or aspect)", f.Type)
 	}
 
+	// Validate execution mode (only meaningful for workflow formulas)
+	if f.Execution != "" && f.Execution != "local" && f.Execution != "distributed" {
+		return fmt.Errorf("invalid execution mode %q (must be \"local\" or \"distributed\")", f.Execution)
+	}
+	if f.Execution == "distributed" && f.Type != TypeWorkflow {
+		return fmt.Errorf("execution = \"distributed\" is only valid for workflow formulas, not %q", f.Type)
+	}
+
 	// Type-specific validation
 	switch f.Type {
 	case TypeConvoy:

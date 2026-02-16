@@ -265,6 +265,24 @@ This is THE command for dispatching work. It:
 
 **There is NO `{{ cmd }} polecat spawn` command.** Use `{{ cmd }} sling`.
 
+**Distributed workflow step dispatch:**
+When you receive a `STEP_READY` mail from a Witness, a distributed workflow step
+has completed and the next step needs a fresh polecat. Run:
+```bash
+{{ cmd }} sling <issue-id> <rig> --base-branch <branch>
+```
+The `--base-branch` ensures the new polecat's worktree starts from the previous
+step's branch, so all committed artifacts (design docs, code) are on disk.
+
+| Field | Description |
+|-------|-------------|
+| `NextStep` | Bead ID of the next step to execute |
+| `Molecule` | Molecule bead ID (for progress tracking) |
+| `Branch` | Git branch to base the new worktree on |
+| `Rig` | Target rig for the new polecat |
+| `Issue` | Base work bead ID (what to sling) |
+| `PreviousPolecat` | Name of the completed polecat |
+
 **Other polecat commands:**
 - `{{ cmd }} polecat list` - List polecats in current rig
 - `{{ cmd }} polecat nuke <rig>/<name> --force` - Kill session + remove worktree

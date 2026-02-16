@@ -88,6 +88,19 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 			fmt.Println()
 		}
 
+		// Surface input artifacts from previous steps (distributed workflows).
+		// Step beads have "step_inputs: file1.md,file2.md" in their description,
+		// written during formula instantiation for distributed workflows.
+		if stepInputs := extractStepInputs(step.Description); len(stepInputs) > 0 {
+			fmt.Println("### Input Artifacts (from previous steps)")
+			fmt.Println()
+			fmt.Println("These files were produced by previous steps and are available in your worktree:")
+			for _, input := range stepInputs {
+				fmt.Printf("  - `%s`\n", input)
+			}
+			fmt.Println()
+		}
+
 		// The propulsion directive
 		fmt.Println(style.Bold.Render("→ EXECUTE THIS STEP NOW."))
 		fmt.Println()
@@ -173,6 +186,29 @@ func outputMoleculeContext(ctx RoleContext) {
 		fmt.Println("4. When all steps done, run `" + cli.Name() + " done`")
 		break // Only show context for first molecule step found
 	}
+}
+
+// extractStepInputs parses "step_inputs: file1.md,file2.md" from a step description.
+// Returns nil if no step_inputs field is found.
+func extractStepInputs(description string) []string {
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "step_inputs:") {
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "step_inputs:"))
+			if raw == "" {
+				return nil
+			}
+			var inputs []string
+			for _, item := range strings.Split(raw, ",") {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					inputs = append(inputs, item)
+				}
+			}
+			return inputs
+		}
+	}
+	return nil
 }
 
 // parseMoleculeMetadata extracts molecule info from a step's description.

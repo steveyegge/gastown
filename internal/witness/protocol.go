@@ -33,6 +33,9 @@ var (
 
 	// SWARM_START - mayor initiating batch work
 	PatternSwarmStart = regexp.MustCompile(`^SWARM_START`)
+
+	// STEP_READY <next-step-id> - witness notifying mayor that a distributed workflow step is ready
+	PatternStepReady = regexp.MustCompile(`^STEP_READY\s+(\S+)`)
 )
 
 // ProtocolType identifies the type of protocol message.
@@ -47,13 +50,14 @@ const (
 	ProtoMergeReady        ProtocolType = "merge_ready"
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
+	ProtoStepReady         ProtocolType = "step_ready"
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
 // PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
-	Exit        string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE
+	Exit        string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE, STEP_COMPLETE
 	IssueID     string
 	MRID        string
 	Branch      string
@@ -125,6 +129,8 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoHandoff
 	case PatternSwarmStart.MatchString(subject):
 		return ProtoSwarmStart
+	case PatternStepReady.MatchString(subject):
+		return ProtoStepReady
 	default:
 		return ProtoUnknown
 	}
@@ -339,6 +345,59 @@ func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
 			}
 		} else if strings.HasPrefix(line, "Total:") {
 			_, _ = fmt.Sscanf(line, "Total: %d", &payload.Total)
+		}
+	}
+
+	return payload, nil
+}
+
+// StepReadyPayload contains parsed data from a STEP_READY message.
+// Sent by Witness to Mayor when a distributed workflow step completes
+// and the next step needs a fresh polecat.
+type StepReadyPayload struct {
+	NextStepID      string
+	MoleculeID      string
+	Branch          string
+	Rig             string
+	IssueID         string
+	PreviousPolecat string
+}
+
+// ParseStepReady extracts payload from a STEP_READY message.
+// Subject format: STEP_READY <next-step-id>
+// Body format:
+//
+//	NextStep: <step-id>
+//	Molecule: <molecule-id>
+//	Branch: <branch>
+//	Rig: <rig>
+//	Issue: <issue-id>
+//	PreviousPolecat: <polecat-name>
+func ParseStepReady(subject, body string) (*StepReadyPayload, error) {
+	matches := PatternStepReady.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid STEP_READY subject: %s", subject)
+	}
+
+	payload := &StepReadyPayload{
+		NextStepID: matches[1],
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "NextStep:"):
+			payload.NextStepID = strings.TrimSpace(strings.TrimPrefix(line, "NextStep:"))
+		case strings.HasPrefix(line, "Molecule:"):
+			payload.MoleculeID = strings.TrimSpace(strings.TrimPrefix(line, "Molecule:"))
+		case strings.HasPrefix(line, "Branch:"):
+			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		case strings.HasPrefix(line, "Rig:"):
+			payload.Rig = strings.TrimSpace(strings.TrimPrefix(line, "Rig:"))
+		case strings.HasPrefix(line, "Issue:"):
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
+		case strings.HasPrefix(line, "PreviousPolecat:"):
+			payload.PreviousPolecat = strings.TrimSpace(strings.TrimPrefix(line, "PreviousPolecat:"))
 		}
 	}
 

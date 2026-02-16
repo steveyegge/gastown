@@ -29,6 +29,7 @@ type Formula struct {
 	Description string      `toml:"description"`
 	Type        FormulaType `toml:"type"`
 	Version     int         `toml:"version"`
+	Execution   string      `toml:"execution"` // "local" (default) or "distributed" - controls step handoff model
 
 	// Convoy-specific
 	Inputs    map[string]Input `toml:"inputs"`
@@ -94,6 +95,7 @@ type Step struct {
 	Description string   `toml:"description"`
 	Needs       []string `toml:"needs"`
 	Parallel    bool     `toml:"parallel"` // If true, this step can run concurrently with other parallel steps that share the same needs
+	Output      string   `toml:"output"`   // Artifact path this step produces (e.g., "design.md")
 }
 
 // Template represents a template step in an expansion formula.
@@ -169,4 +171,29 @@ func (f *Formula) GetAllIDs() []string {
 		}
 	}
 	return ids
+}
+
+// IsDistributed returns true if this is a distributed workflow formula.
+// Distributed workflows hand off each sequential step to a fresh polecat
+// instead of running all steps in the same session.
+func (f *Formula) IsDistributed() bool {
+	return f.Type == TypeWorkflow && f.Execution == "distributed"
+}
+
+// GetStepInputs returns the output artifact paths from steps that the given
+// step depends on (via the needs chain). This tells the next polecat which
+// files from previous steps to expect on disk.
+func (f *Formula) GetStepInputs(stepID string) []string {
+	step := f.GetStep(stepID)
+	if step == nil {
+		return nil
+	}
+	var inputs []string
+	for _, needID := range step.Needs {
+		need := f.GetStep(needID)
+		if need != nil && need.Output != "" {
+			inputs = append(inputs, need.Output)
+		}
+	}
+	return inputs
 }

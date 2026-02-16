@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -153,6 +154,10 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 	// Step 5: Handle next action
 	switch result.Action {
 	case "continue":
+		// Check if this is a distributed molecule - if so, exit and let a fresh polecat handle next step
+		if isDistributedMolecule(b, moleculeID) {
+			return handleDistributedStepDone(cwd, townRoot, b, moleculeID, readySteps[0], moleculeStepDryRun)
+		}
 		return handleStepContinue(cwd, townRoot, readySteps[0], moleculeStepDryRun)
 
 	case "parallel":
@@ -485,6 +490,90 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	// For other roles, just print completion message
 	fmt.Printf("\nMolecule %s is complete. Ready for next assignment.\n", moleculeID)
 	return nil
+}
+
+// isDistributedMolecule checks if a molecule uses distributed execution mode.
+// Reads the molecule bead's description for "execution: distributed" metadata,
+// which is written during formula instantiation (InstantiateFormulaOnBead).
+func isDistributedMolecule(b *beads.Beads, moleculeID string) bool {
+	issue, err := b.Show(moleculeID)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(issue.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "execution:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, line[:len("execution:")]))
+			return value == "distributed"
+		}
+	}
+	return false
+}
+
+// handleDistributedStepDone handles step completion for distributed workflows.
+// Instead of respawning the same pane, it:
+// 1. Gets current git branch name
+// 2. Writes handoff metadata to the molecule bead
+// 3. Calls gt done --status STEP_COMPLETE (pushes branch, notifies witness, exits)
+func handleDistributedStepDone(cwd, townRoot string, b *beads.Beads, moleculeID string, nextStep *beads.Issue, dryRun bool) error {
+	fmt.Printf("\n%s Distributed workflow: handing off to fresh polecat\n", style.Bold.Render("→"))
+	fmt.Printf("  Next step: %s (%s)\n", nextStep.ID, nextStep.Title)
+
+	// Get current git branch
+	g := git.NewGit(cwd)
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		return fmt.Errorf("getting current branch for step handoff: %w", err)
+	}
+
+	if dryRun {
+		fmt.Printf("\n[dry-run] Would write handoff metadata to molecule %s\n", moleculeID)
+		fmt.Printf("[dry-run]   step_handoff_next: %s\n", nextStep.ID)
+		fmt.Printf("[dry-run]   step_handoff_branch: %s\n", branch)
+		fmt.Printf("[dry-run] Would call: gt done --status STEP_COMPLETE\n")
+		return nil
+	}
+
+	// Write handoff metadata to molecule bead description
+	issue, err := b.Show(moleculeID)
+	if err != nil {
+		return fmt.Errorf("reading molecule for handoff: %w", err)
+	}
+
+	// Append handoff fields to description (using existing key: value pattern)
+	desc := issue.Description
+	// Remove any existing handoff fields (idempotent)
+	var cleanLines []string
+	for _, line := range strings.Split(desc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "step_handoff_next:") || strings.HasPrefix(lower, "step_handoff_branch:") {
+			continue
+		}
+		cleanLines = append(cleanLines, line)
+	}
+	desc = strings.Join(cleanLines, "\n")
+	desc = strings.TrimRight(desc, "\n") + "\n"
+	desc += fmt.Sprintf("step_handoff_next: %s\n", nextStep.ID)
+	desc += fmt.Sprintf("step_handoff_branch: %s\n", branch)
+
+	if err := b.Update(moleculeID, beads.UpdateOptions{
+		Description: &desc,
+	}); err != nil {
+		return fmt.Errorf("writing handoff metadata: %w", err)
+	}
+
+	fmt.Printf("%s Handoff metadata written\n", style.Bold.Render("✓"))
+	fmt.Printf("  step_handoff_next: %s\n", nextStep.ID)
+	fmt.Printf("  step_handoff_branch: %s\n", branch)
+
+	// Call gt done --status STEP_COMPLETE
+	// This pushes the branch, notifies the witness, and kills the session
+	fmt.Printf("\n%s Exiting with STEP_COMPLETE...\n", style.Bold.Render("→"))
+	doneCmd := exec.Command("gt", "done", "--status", "STEP_COMPLETE")
+	doneCmd.Stdout = os.Stdout
+	doneCmd.Stderr = os.Stderr
+	return doneCmd.Run()
 }
 
 // getGitRoot is defined in prime.go
