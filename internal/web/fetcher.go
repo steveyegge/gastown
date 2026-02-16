@@ -1658,7 +1658,7 @@ func eventCategory(eventType string) string {
 	switch eventType {
 	case "spawn", "kill", "session_start", "session_end", "session_death", "mass_death", "nudge", "handoff":
 		return "agent"
-	case "sling", "hook", "unhook", "done", "merge_started", "merged", "merge_failed":
+	case "sling", "hook", "unhook", "done", "no_op", "merge_started", "merged", "merge_failed":
 		return "work"
 	case "mail", "escalation_sent", "escalation_acked", "escalation_closed":
 		return "comms"
@@ -1688,6 +1688,7 @@ func eventIcon(eventType string) string {
 		"hook":              "🪝",
 		"unhook":            "🔓",
 		"done":              "✅",
+		"no_op":             "◯",
 		"mail":              "📬",
 		"spawn":             "🦨",
 		"kill":              "💀",
@@ -1726,6 +1727,19 @@ func eventSummary(eventType, actor string, payload map[string]interface{}) strin
 	case "done":
 		bead, _ := payload["bead"].(string)
 		return fmt.Sprintf("%s completed %s", shortActor, bead)
+	case "no_op":
+		bead, _ := payload["bead"].(string)
+		reason, _ := payload["reason"].(string)
+		if reason != "" && len(reason) > 30 {
+			reason = reason[:27] + "..."
+		}
+		if bead != "" && reason != "" {
+			return fmt.Sprintf("%s no-op on %s (%s)", shortActor, bead, reason)
+		}
+		if bead != "" {
+			return fmt.Sprintf("%s no-op on %s", shortActor, bead)
+		}
+		return fmt.Sprintf("%s no-op", shortActor)
 	case "mail":
 		to, _ := payload["to"].(string)
 		subject, _ := payload["subject"].(string)

@@ -367,6 +367,14 @@ func TestCurator_GeneratesSummary(t *testing.T) {
 		},
 		{
 			event: &events.Event{
+				Type:    events.TypeNoOp,
+				Actor:   "mayor",
+				Payload: map[string]interface{}{"bead": "gt-123", "reason": "coherence low"},
+			},
+			expected: "mayor no-op on gt-123: coherence low",
+		},
+		{
+			event: &events.Event{
 				Type:  events.TypeHandoff,
 				Actor: "gastown/witness",
 			},

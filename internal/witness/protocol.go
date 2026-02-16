@@ -53,7 +53,7 @@ const (
 // PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
-	Exit        string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE
+	Exit        string // COMPLETED, ESCALATED, DEFERRED, NO_OP, PHASE_COMPLETE
 	IssueID     string
 	MRID        string
 	Branch      string
@@ -134,7 +134,7 @@ func ClassifyMessage(subject string) ProtocolType {
 // Subject format: POLECAT_DONE <polecat-name>
 // Body format:
 //
-//	Exit: COMPLETED|ESCALATED|DEFERRED|PHASE_COMPLETE
+//	Exit: COMPLETED|ESCALATED|DEFERRED|NO_OP|PHASE_COMPLETE
 //	Issue: <issue-id>
 //	MR: <mr-id>
 //	Gate: <gate-id>

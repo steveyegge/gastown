@@ -450,6 +450,15 @@ func (c *Curator) generateSummary(event *events.Event) string {
 		}
 		return fmt.Sprintf("%s signaled done", event.Actor)
 
+	case events.TypeNoOp:
+		if bead, ok := event.Payload["bead"].(string); ok {
+			if reason, ok := event.Payload["reason"].(string); ok && reason != "" {
+				return fmt.Sprintf("%s no-op on %s: %s", event.Actor, bead, reason)
+			}
+			return fmt.Sprintf("%s no-op on %s", event.Actor, bead)
+		}
+		return fmt.Sprintf("%s signaled no-op", event.Actor)
+
 	case events.TypeHandoff:
 		return fmt.Sprintf("%s handed off to fresh session", event.Actor)
 

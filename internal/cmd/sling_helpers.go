@@ -71,9 +71,11 @@ func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
 
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Assignee string `json:"assignee"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Assignee  string `json:"assignee"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // verifyBeadExists checks that the bead exists using bd show.

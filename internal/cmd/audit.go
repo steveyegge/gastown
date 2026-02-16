@@ -470,6 +470,11 @@ func formatFeedSummary(e events.Event) string {
 			return fmt.Sprintf("Done %s", bead)
 		}
 		return "Done"
+	case events.TypeNoOp:
+		if bead, ok := e.Payload["bead"].(string); ok {
+			return fmt.Sprintf("No-op %s", bead)
+		}
+		return "No-op"
 	case events.TypeMail:
 		if to, ok := e.Payload["to"].(string); ok {
 			return fmt.Sprintf("Sent mail to %s", to)
@@ -553,6 +558,8 @@ func formatType(t string) string {
 		return style.Success.Render("spawn")
 	case "done":
 		return style.Success.Render("done")
+	case "no_op":
+		return style.Dim.Render("no_op")
 	case "handoff":
 		return style.Bold.Render("handoff")
 	case "crash":

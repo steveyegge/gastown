@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1138,34 +1139,34 @@ func IsRunning(townRoot string) (bool, int, error) {
 	}
 
 	pidStr := strings.TrimSpace(string(data))
+	if pidStr == "" {
+		_ = os.Remove(pidFile)
+		return false, 0, nil
+	}
+
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		// Corrupted PID file - return error, not silent false
-		return false, 0, fmt.Errorf("invalid PID in file %q: %w", pidStr, err)
+		// Corrupted PID file - clean up stale file.
+		_ = os.Remove(pidFile)
+		return false, 0, nil
 	}
 
 	// Check if process is alive
 	process, err := os.FindProcess(pid)
 	if err != nil {
+		_ = os.Remove(pidFile)
 		return false, 0, nil
 	}
 
-	// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		// Process not running, clean up stale PID file
-		if err := os.Remove(pidFile); err == nil {
-			// Successfully cleaned up stale file
-			return false, 0, fmt.Errorf("removed stale PID file (process %d not found)", pid)
-		}
+	if !isProcessAlive(process) {
+		// Process not running, clean up stale PID file.
+		_ = os.Remove(pidFile)
 		return false, 0, nil
 	}
 
-	// CRITICAL: Verify it's actually our daemon, not PID reuse
+	// Verify it's actually our daemon, not PID reuse.
 	if !isGasTownDaemon(pid) {
-		// PID reused by different process
-		if err := os.Remove(pidFile); err == nil {
-			return false, 0, fmt.Errorf("removed stale PID file (PID %d is not gt daemon)", pid)
-		}
+		_ = os.Remove(pidFile)
 		return false, 0, nil
 	}
 
@@ -1176,7 +1177,27 @@ func IsRunning(townRoot string) (bool, int, error) {
 // This prevents false positives from PID reuse.
 // Uses ps command for cross-platform compatibility (Linux, macOS).
 func isGasTownDaemon(pid int) bool {
-	// Use ps to get command for the PID (works on Linux and macOS)
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("tasklist",
+			"/FI", fmt.Sprintf("PID eq %d", pid),
+			"/FO", "CSV",
+			"/NH",
+		)
+		output, err := cmd.Output()
+		if err != nil {
+			return false
+		}
+
+		line := strings.ToLower(strings.TrimSpace(string(output)))
+		if line == "" || strings.Contains(line, "no tasks are running") {
+			return false
+		}
+
+		// tasklist output format: "gt.exe","1234","Console","1","12,340 K"
+		return strings.Contains(line, "\"gt.exe\"") || strings.Contains(line, "\"gt\"")
+	}
+
+	// Use ps to get command for the PID (Unix).
 	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
 	output, err := cmd.Output()
 	if err != nil {
@@ -1207,7 +1228,7 @@ func StopDaemon(townRoot string) error {
 	}
 
 	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := sendTermSignal(process); err != nil {
 		return fmt.Errorf("sending SIGTERM: %w", err)
 	}
 
@@ -1215,9 +1236,9 @@ func StopDaemon(townRoot string) error {
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Check if still running
-	if err := process.Signal(syscall.Signal(0)); err == nil {
+	if isProcessAlive(process) {
 		// Still running, force kill
-		_ = process.Signal(syscall.SIGKILL)
+		_ = sendKillSignal(process)
 	}
 
 	// Clean up PID file

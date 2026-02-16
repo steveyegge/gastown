@@ -392,6 +392,7 @@ func TestDoneIntentLabelFormat(t *testing.T) {
 		{"COMPLETED", fmt.Sprintf("done-intent:COMPLETED:%d", now.Unix())},
 		{"ESCALATED", fmt.Sprintf("done-intent:ESCALATED:%d", now.Unix())},
 		{"DEFERRED", fmt.Sprintf("done-intent:DEFERRED:%d", now.Unix())},
+		{"NO_OP", fmt.Sprintf("done-intent:NO_OP:%d", now.Unix())},
 		{"PHASE_COMPLETE", fmt.Sprintf("done-intent:PHASE_COMPLETE:%d", now.Unix())},
 	}
 
@@ -477,6 +478,7 @@ func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
 		{"completed+push-failed", ExitCompleted, true, false},
 		{"escalated+push-ok", ExitEscalated, false, false},
 		{"deferred+push-ok", ExitDeferred, false, false},
+		{"no-op+push-ok", ExitNoOp, false, false},
 		{"escalated+push-failed", ExitEscalated, true, false},
 	}
 
@@ -857,7 +859,7 @@ func TestReadDoneCheckpoints(t *testing.T) {
 			},
 		},
 		{
-			name:   "all checkpoints",
+			name: "all checkpoints",
 			labels: []string{
 				"done-cp:pushed:branch-name:1738972800",
 				"done-cp:mr-created:gt-mr1:1738972801",
@@ -872,7 +874,7 @@ func TestReadDoneCheckpoints(t *testing.T) {
 			},
 		},
 		{
-			name:   "mixed with done-intent and other labels",
+			name: "mixed with done-intent and other labels",
 			labels: []string{
 				"gt:agent",
 				"done-intent:COMPLETED:1738972800",

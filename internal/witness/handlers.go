@@ -33,7 +33,7 @@ type HandlerResult struct {
 }
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
-// For ESCALATED/DEFERRED exits (no pending MR), auto-nukes if clean.
+// For ESCALATED/DEFERRED/NO_OP exits (no pending MR), auto-nukes if clean.
 // For PHASE_COMPLETE exits, recycles the polecat (session ends, worktree kept).
 // For COMPLETED exits with MR and clean state, auto-nukes immediately (ephemeral model).
 // For exits with pending MR but dirty state, creates cleanup wisp for manual intervention.
@@ -79,7 +79,7 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 	}
 
 	// Check if this polecat has a pending MR
-	// ESCALATED/DEFERRED exits typically have no MR pending
+	// ESCALATED/DEFERRED/NO_OP exits typically have no MR pending
 	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
 
 	// Local-only branches model: if there's a pending MR, DON'T nuke.

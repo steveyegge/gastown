@@ -59,10 +59,12 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 	// Track results for summary
 	type slingResult struct {
-		beadID  string
-		polecat string
-		success bool
-		errMsg  string
+		beadID        string
+		polecat       string
+		success       bool
+		neutral       bool
+		neutralReason string
+		errMsg        string
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 	activeCount := 0 // Track active spawns for --max-concurrent throttling
@@ -98,6 +100,22 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if (info.Status == "pinned" || info.Status == "hooked") && !slingForce {
 			results = append(results, slingResult{beadID: beadID, success: false, errMsg: "already " + info.Status})
 			fmt.Printf("  %s Already %s (use --force to re-sling)\n", style.Dim.Render("✗"), info.Status)
+			continue
+		}
+
+		if gateResult, gateErr := evaluateSlingStillnessGate(townRoot, beadID, rigName, info, slingForce, slingArgs); gateErr != nil {
+			fmt.Printf("  %s stillness_gate check failed: %v (continuing)\n", style.Dim.Render("Warning:"), gateErr)
+		} else if gateResult != nil && gateResult.Decision != stillnessDecisionAct {
+			reason := fmt.Sprintf("%s: %s [coherence=%d]", gateResult.Decision, gateResult.Reason, gateResult.Coherence)
+			results = append(results, slingResult{
+				beadID:        beadID,
+				neutral:       true,
+				neutralReason: reason,
+			})
+			fmt.Printf("  %s stillness_gate %s\n", style.Dim.Render("○"), reason)
+			if gateResult.ConvoyClosed != "" {
+				fmt.Printf("  %s Closed convoy %s (resonance decay)\n", style.Dim.Render("○"), gateResult.ConvoyClosed)
+			}
 			continue
 		}
 
@@ -240,22 +258,42 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 	}
 
-	if !slingNoBoot {
-		wakeRigAgents(rigName)
-	}
-
-	// Print summary
+	// Compute summary counts before any downstream side-effects.
+	// Neutral outcomes are intentionally not treated as success.
 	successCount := 0
+	neutralCount := 0
 	for _, r := range results {
 		if r.success {
 			successCount++
 		}
+		if r.neutral {
+			neutralCount++
+		}
+	}
+	failCount := len(beadIDs) - successCount - neutralCount
+
+	// Contagion boundary: only wake rig agents if at least one assignment acted.
+	// Neutral-only batches should not trigger additional motion.
+	if !slingNoBoot {
+		if successCount > 0 {
+			wakeRigAgents(rigName)
+		} else {
+			fmt.Printf("%s No acted dispatches; skipping rig wake\n", style.Dim.Render("○"))
+		}
 	}
 
-	fmt.Printf("\n%s Batch sling complete: %d/%d succeeded\n", style.Bold.Render("📊"), successCount, len(beadIDs))
-	if successCount < len(beadIDs) {
+	fmt.Printf("\n%s Batch sling complete: %d acted, %d neutral, %d failed\n",
+		style.Bold.Render("📊"), successCount, neutralCount, failCount)
+	if neutralCount > 0 {
 		for _, r := range results {
-			if !r.success {
+			if r.neutral {
+				fmt.Printf("  %s %s: %s\n", style.Dim.Render("○"), r.beadID, r.neutralReason)
+			}
+		}
+	}
+	if failCount > 0 {
+		for _, r := range results {
+			if !r.success && !r.neutral {
 				fmt.Printf("  %s %s: %s\n", style.Dim.Render("✗"), r.beadID, r.errMsg)
 			}
 		}

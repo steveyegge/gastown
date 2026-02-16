@@ -42,12 +42,14 @@ Exit statuses:
   COMPLETED      - Work done, MR submitted (default)
   ESCALATED      - Hit blocker, needs human intervention
   DEFERRED       - Work paused, issue still open
+  NO_OP          - Intentionally no action taken (neutral completion)
 
 Examples:
   gt done                              # Submit branch, notify COMPLETED, exit session
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
-  gt done --status DEFERRED            # Pause work, skip MR`,
+  gt done --status DEFERRED            # Pause work, skip MR
+  gt done --status NO_OP               # Record neutral completion, skip MR`,
 	RunE: runDone,
 }
 
@@ -64,12 +66,13 @@ const (
 	ExitCompleted = "COMPLETED"
 	ExitEscalated = "ESCALATED"
 	ExitDeferred  = "DEFERRED"
+	ExitNoOp      = "NO_OP"
 )
 
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
-	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
+	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, DEFERRED, or NO_OP")
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
 
@@ -88,8 +91,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Validate exit status
 	exitType := strings.ToUpper(doneStatus)
-	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred && exitType != ExitNoOp {
+		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, DEFERRED, or NO_OP", doneStatus)
 	}
 
 	// Deferred session kill: ensures selfKillSession runs on ANY exit path for polecats.
@@ -784,7 +787,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
 	} else {
-		// For ESCALATED or DEFERRED, just print status
+		// For ESCALATED, DEFERRED, or NO_OP, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
 		if issueID != "" {
 			fmt.Printf("  Issue: %s\n", issueID)
@@ -902,7 +905,13 @@ afterDoltMerge:
 	if err := LogDone(townRoot, sender, issueID); err != nil {
 		style.PrintWarning("could not log done event: %v", err)
 	}
-	if err := events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch)); err != nil {
+	feedEventType := events.TypeDone
+	if exitType == ExitNoOp {
+		feedEventType = events.TypeNoOp
+	}
+	feedPayload := events.DonePayload(issueID, branch)
+	feedPayload["status"] = exitType
+	if err := events.LogFeed(feedEventType, sender, feedPayload); err != nil {
 		style.PrintWarning("could not log feed event: %v", err)
 	}
 
@@ -1222,7 +1231,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		if _, err := bd.Run("agent", "state", agentBeadID, "stuck"); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to stuck: %v\n", agentBeadID, err)
 		}
-	// ExitCompleted and ExitDeferred don't set state - observable from tmux
+		// ExitCompleted, ExitDeferred, and ExitNoOp don't set state - observable from tmux
 	}
 
 	// ZFC #10: Self-report cleanup status

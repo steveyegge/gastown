@@ -39,6 +39,7 @@ const (
 	TypeUnhook  = "unhook"
 	TypeHandoff = "handoff"
 	TypeDone    = "done"
+	TypeNoOp    = "no_op"
 	TypeMail    = "mail"
 	TypeSpawn   = "spawn"
 	TypeKill    = "kill"

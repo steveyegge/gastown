@@ -303,11 +303,24 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve target agent using shared dispatch logic
+	// Mayor-only stillness gate: decide whether to act before any dispatch side effects.
+	// WAIT and REFUSE are neutral outcomes (no error, no retries).
 	var target string
 	if len(args) > 1 {
 		target = args[1]
 	}
+	if gateResult, gateErr := evaluateSlingStillnessGate(townRoot, beadID, target, info, force, slingArgs); gateErr != nil {
+		fmt.Printf("%s stillness_gate check failed: %v (continuing)\n", style.Dim.Render("Warning:"), gateErr)
+	} else if gateResult != nil && gateResult.Decision != stillnessDecisionAct {
+		fmt.Printf("%s stillness_gate %s: %s [coherence=%d]\n",
+			style.Dim.Render("○"), gateResult.Decision, gateResult.Reason, gateResult.Coherence)
+		if gateResult.ConvoyClosed != "" {
+			fmt.Printf("%s Closed convoy %s (resonance decay)\n", style.Dim.Render("○"), gateResult.ConvoyClosed)
+		}
+		return nil
+	}
+
+	// Resolve target agent using shared dispatch logic
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
 		DryRun:     slingDryRun,
 		Force:      force,
