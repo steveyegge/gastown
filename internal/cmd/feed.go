@@ -184,29 +184,13 @@ func buildFeedArgs() []string {
 	return args
 }
 
-// runFeedDirect runs bd activity in the current terminal, falling back
-// to printing .events.jsonl if bd activity is not available.
-func runFeedDirect(workDir string, _ []string) error {
+// runFeedDirect prints recent events from .events.jsonl to stdout.
+func runFeedDirect(_ string, _ []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Try bd activity first
-	bdPath, bdErr := exec.LookPath("bd")
-	if bdErr == nil {
-		cmd := exec.Command(bdPath, "activity", "--help")
-		if cmd.Run() == nil {
-			// bd activity exists - use it
-			cmd = exec.Command(bdPath, "activity")
-			cmd.Dir = workDir
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			return cmd.Run()
-		}
-	}
-
-	// Fallback: print events from .events.jsonl
 	return feed.PrintGtEvents(townRoot, feedLimit)
 }
 
