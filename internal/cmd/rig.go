@@ -27,6 +27,7 @@ import (
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"golang.org/x/term"
 )
 
 var rigCmd = &cobra.Command{
@@ -202,7 +203,7 @@ Before shutdown, checks all polecats for uncommitted work:
 - Stashes
 - Unpushed commits
 
-Use --force to skip graceful shutdown and kill immediately.
+Use --force to force immediate shutdown (prompts if uncommitted work).
 Use --nuclear to bypass ALL safety checks (will lose work!).
 
 Examples:
@@ -251,7 +252,7 @@ Before shutdown, checks all polecats for uncommitted work:
 - Stashes
 - Unpushed commits
 
-Use --force to skip graceful shutdown and kill immediately.
+Use --force to force immediate shutdown (prompts if uncommitted work).
 Use --nuclear to bypass ALL safety checks (will lose work!).
 
 Examples:
@@ -276,7 +277,7 @@ Before shutdown, checks all polecats for uncommitted work:
 - Stashes
 - Unpushed commits
 
-Use --force to skip graceful shutdown and kill immediately.
+Use --force to force immediate shutdown (prompts if uncommitted work).
 Use --nuclear to bypass ALL safety checks (will lose work!).
 
 Examples:
@@ -344,17 +345,68 @@ func init() {
 	rigResetCmd.Flags().BoolVar(&rigResetDryRun, "dry-run", false, "Show what would be reset without making changes")
 	rigResetCmd.Flags().StringVar(&rigResetRole, "role", "", "Role to reset (default: auto-detect from cwd)")
 
-	rigShutdownCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown")
+	rigShutdownCmd.Flags().BoolVarP(&rigShutdownForce, "force", "f", false, "Force immediate shutdown (prompts if uncommitted work)")
 	rigShutdownCmd.Flags().BoolVar(&rigShutdownNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 
-	rigRebootCmd.Flags().BoolVarP(&rigRebootForce, "force", "f", false, "Force immediate shutdown during reboot")
+	rigRebootCmd.Flags().BoolVarP(&rigRebootForce, "force", "f", false, "Force immediate shutdown during reboot (prompts if uncommitted work)")
 	rigRebootCmd.Flags().BoolVar(&rigRebootNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks during reboot (loses uncommitted work!)")
 
-	rigStopCmd.Flags().BoolVarP(&rigStopForce, "force", "f", false, "Force immediate shutdown")
+	rigStopCmd.Flags().BoolVarP(&rigStopForce, "force", "f", false, "Force immediate shutdown (prompts if uncommitted work)")
 	rigStopCmd.Flags().BoolVar(&rigStopNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
 
-	rigRestartCmd.Flags().BoolVarP(&rigRestartForce, "force", "f", false, "Force immediate shutdown during restart")
+	rigRestartCmd.Flags().BoolVarP(&rigRestartForce, "force", "f", false, "Force immediate shutdown during restart (prompts if uncommitted work)")
 	rigRestartCmd.Flags().BoolVar(&rigRestartNuclear, "nuclear", false, "DANGER: Bypass ALL safety checks (loses uncommitted work!)")
+}
+
+// checkUncommittedWork checks polecats in a rig for uncommitted work.
+// operation is the verb shown in the warning (e.g. "stop", "shutdown", "restart").
+// Returns true if the caller should proceed, false if it should abort.
+// When force is true and stdin is a TTY, prompts the user to confirm.
+// When force is true but stdin is NOT a TTY, blocks (same as no --force).
+// All user-facing messages are printed internally.
+func checkUncommittedWork(r *rig.Rig, rigName, operation string, force bool) (proceed bool) {
+	polecatGit := git.NewGit(r.Path)
+	polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
+	polecats, err := polecatMgr.List()
+	if err != nil || len(polecats) == 0 {
+		return true
+	}
+
+	var problemPolecats []struct {
+		name   string
+		status *git.UncommittedWorkStatus
+	}
+	for _, p := range polecats {
+		pGit := git.NewGit(p.ClonePath)
+		status, err := pGit.CheckUncommittedWork()
+		if err == nil && !status.Clean() {
+			problemPolecats = append(problemPolecats, struct {
+				name   string
+				status *git.UncommittedWorkStatus
+			}{p.Name, status})
+		}
+	}
+	if len(problemPolecats) == 0 {
+		return true
+	}
+
+	// Print warning
+	fmt.Printf("\n%s Cannot %s %s - polecats have uncommitted work:\n",
+		style.Warning.Render("⚠"), operation, rigName)
+	for _, pp := range problemPolecats {
+		fmt.Printf("  %s: %s\n", style.Bold.Render(pp.name), pp.status.String())
+	}
+
+	// If --force and interactive TTY, prompt
+	if force && term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Println()
+		return promptYesNo("Proceed anyway?")
+	}
+
+	// Otherwise block with hint
+	fmt.Printf("\nUse %s to proceed with confirmation, or %s to skip all checks (DANGER: will lose work!)\n",
+		style.Bold.Render("--force"), style.Bold.Render("--nuclear"))
+	return false
 }
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
@@ -1322,36 +1374,8 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check all polecats for uncommitted work (unless nuclear)
-	if !rigShutdownNuclear {
-		polecatGit := git.NewGit(r.Path)
-		polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
-		polecats, err := polecatMgr.List()
-		if err == nil && len(polecats) > 0 {
-			var problemPolecats []struct {
-				name   string
-				status *git.UncommittedWorkStatus
-			}
-
-			for _, p := range polecats {
-				pGit := git.NewGit(p.ClonePath)
-				status, err := pGit.CheckUncommittedWork()
-				if err == nil && !status.Clean() {
-					problemPolecats = append(problemPolecats, struct {
-						name   string
-						status *git.UncommittedWorkStatus
-					}{p.Name, status})
-				}
-			}
-
-			if len(problemPolecats) > 0 {
-				fmt.Printf("\n%s Cannot shutdown - polecats have uncommitted work:\n\n", style.Warning.Render("⚠"))
-				for _, pp := range problemPolecats {
-					fmt.Printf("  %s: %s\n", style.Bold.Render(pp.name), pp.status.String())
-				}
-				fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
-				return fmt.Errorf("refusing to shutdown with uncommitted work")
-			}
-		}
+	if !rigShutdownNuclear && !checkUncommittedWork(r, rigName, "shutdown", rigShutdownForce) {
+		return fmt.Errorf("refusing to shutdown with uncommitted work")
 	}
 
 	fmt.Printf("Shutting down rig %s...\n", style.Bold.Render(rigName))
@@ -1600,36 +1624,9 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check all polecats for uncommitted work (unless nuclear)
-		if !rigStopNuclear {
-			polecatGit := git.NewGit(r.Path)
-			polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
-			polecats, err := polecatMgr.List()
-			if err == nil && len(polecats) > 0 {
-				var problemPolecats []struct {
-					name   string
-					status *git.UncommittedWorkStatus
-				}
-
-				for _, p := range polecats {
-					pGit := git.NewGit(p.ClonePath)
-					status, err := pGit.CheckUncommittedWork()
-					if err == nil && !status.Clean() {
-						problemPolecats = append(problemPolecats, struct {
-							name   string
-							status *git.UncommittedWorkStatus
-						}{p.Name, status})
-					}
-				}
-
-				if len(problemPolecats) > 0 {
-					fmt.Printf("\n%s Cannot stop %s - polecats have uncommitted work:\n", style.Warning.Render("⚠"), rigName)
-					for _, pp := range problemPolecats {
-						fmt.Printf("  %s: %s\n", style.Bold.Render(pp.name), pp.status.String())
-					}
-					failed = append(failed, rigName)
-					continue
-				}
-			}
+		if !rigStopNuclear && !checkUncommittedWork(r, rigName, "stop", rigStopForce) {
+			failed = append(failed, rigName)
+			continue
 		}
 
 		fmt.Printf("Stopping rig %s...\n", style.Bold.Render(rigName))
@@ -1685,11 +1682,9 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		}
 		if len(failed) > 0 {
 			fmt.Printf("%s Failed: %s\n", style.Warning.Render("⚠"), strings.Join(failed, ", "))
-			fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
 			return fmt.Errorf("some rigs failed to stop")
 		}
 	} else if len(failed) > 0 {
-		fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
 		return fmt.Errorf("rig failed to stop")
 	}
 
@@ -1730,36 +1725,9 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Restarting rig %s...\n", style.Bold.Render(rigName))
 
 		// Check all polecats for uncommitted work (unless nuclear)
-		if !rigRestartNuclear {
-			polecatGit := git.NewGit(r.Path)
-			polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
-			polecats, err := polecatMgr.List()
-			if err == nil && len(polecats) > 0 {
-				var problemPolecats []struct {
-					name   string
-					status *git.UncommittedWorkStatus
-				}
-
-				for _, p := range polecats {
-					pGit := git.NewGit(p.ClonePath)
-					status, err := pGit.CheckUncommittedWork()
-					if err == nil && !status.Clean() {
-						problemPolecats = append(problemPolecats, struct {
-							name   string
-							status *git.UncommittedWorkStatus
-						}{p.Name, status})
-					}
-				}
-
-				if len(problemPolecats) > 0 {
-					fmt.Printf("\n%s Cannot restart %s - polecats have uncommitted work:\n", style.Warning.Render("⚠"), rigName)
-					for _, pp := range problemPolecats {
-						fmt.Printf("  %s: %s\n", style.Bold.Render(pp.name), pp.status.String())
-					}
-					failed = append(failed, rigName)
-					continue
-				}
-			}
+		if !rigRestartNuclear && !checkUncommittedWork(r, rigName, "restart", rigRestartForce) {
+			failed = append(failed, rigName)
+			continue
 		}
 
 		var stopErrors []string
@@ -1873,11 +1841,9 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		}
 		if len(failed) > 0 {
 			fmt.Printf("%s Failed: %s\n", style.Warning.Render("⚠"), strings.Join(failed, ", "))
-			fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
 			return fmt.Errorf("some rigs failed to restart")
 		}
 	} else if len(failed) > 0 {
-		fmt.Printf("\nUse %s to force shutdown (DANGER: will lose work!)\n", style.Bold.Render("--nuclear"))
 		return fmt.Errorf("rig failed to restart")
 	}
 
