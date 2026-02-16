@@ -4060,3 +4060,149 @@ func TestMergeQueueConfig_PartialJSON_NilPointers(t *testing.T) {
 		t.Errorf("IntegrationBranchAutoLand should be nil when omitted, got %v", *cfg.IntegrationBranchAutoLand)
 	}
 }
+
+// --- Ephemeral Cost Tier Tests ---
+
+func TestTryResolveFromEphemeralTier(t *testing.T) {
+	t.Run("no env var returns nil", func(t *testing.T) {
+		os.Unsetenv("GT_COST_TIER")
+		rc := tryResolveFromEphemeralTier("witness")
+		if rc != nil {
+			t.Errorf("expected nil when GT_COST_TIER not set, got %+v", rc)
+		}
+	})
+
+	t.Run("invalid tier returns nil", func(t *testing.T) {
+		os.Setenv("GT_COST_TIER", "premium")
+		defer os.Unsetenv("GT_COST_TIER")
+		rc := tryResolveFromEphemeralTier("witness")
+		if rc != nil {
+			t.Errorf("expected nil for invalid tier, got %+v", rc)
+		}
+	})
+
+	t.Run("budget tier witness gets haiku", func(t *testing.T) {
+		os.Setenv("GT_COST_TIER", "budget")
+		defer os.Unsetenv("GT_COST_TIER")
+		rc := tryResolveFromEphemeralTier("witness")
+		if rc == nil {
+			t.Fatal("expected RuntimeConfig for witness in budget tier")
+		}
+		if !isClaudeCommand(rc.Command) {
+			t.Errorf("Command = %q, want claude", rc.Command)
+		}
+		found := false
+		for i, arg := range rc.Args {
+			if arg == "--model" && i+1 < len(rc.Args) && rc.Args[i+1] == "haiku" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Args %v missing --model haiku", rc.Args)
+		}
+	})
+
+	t.Run("economy tier polecat returns nil (uses default)", func(t *testing.T) {
+		os.Setenv("GT_COST_TIER", "economy")
+		defer os.Unsetenv("GT_COST_TIER")
+		rc := tryResolveFromEphemeralTier("polecat")
+		if rc != nil {
+			t.Errorf("expected nil for polecat in economy tier (should use default), got %+v", rc)
+		}
+	})
+
+	t.Run("economy tier mayor gets sonnet", func(t *testing.T) {
+		os.Setenv("GT_COST_TIER", "economy")
+		defer os.Unsetenv("GT_COST_TIER")
+		rc := tryResolveFromEphemeralTier("mayor")
+		if rc == nil {
+			t.Fatal("expected RuntimeConfig for mayor in economy tier")
+		}
+		found := false
+		for i, arg := range rc.Args {
+			if arg == "--model" && i+1 < len(rc.Args) && rc.Args[i+1] == "sonnet" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Args %v missing --model sonnet", rc.Args)
+		}
+	})
+
+	t.Run("standard tier returns nil for all roles", func(t *testing.T) {
+		os.Setenv("GT_COST_TIER", "standard")
+		defer os.Unsetenv("GT_COST_TIER")
+		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"} {
+			rc := tryResolveFromEphemeralTier(role)
+			if rc != nil {
+				t.Errorf("standard tier should return nil for %s, got %+v", role, rc)
+			}
+		}
+	})
+}
+
+func TestResolveRoleAgentConfig_WithEphemeralTier(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal town settings
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	os.Setenv("GT_COST_TIER", "budget")
+	defer os.Unsetenv("GT_COST_TIER")
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness with ephemeral budget tier")
+	}
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("Command = %q, want claude", rc.Command)
+	}
+	found := false
+	for i, arg := range rc.Args {
+		if arg == "--model" && i+1 < len(rc.Args) && rc.Args[i+1] == "haiku" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Args %v missing --model haiku for budget witness", rc.Args)
+	}
+}
+
+func TestResolveRoleAgentConfig_EphemeralOverridesPersistent(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create town settings with economy tier persisted
+	townSettings := NewTownSettings()
+	if err := ApplyCostTier(townSettings, TierEconomy); err != nil {
+		t.Fatalf("ApplyCostTier: %v", err)
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Set ephemeral to budget — should override
+	os.Setenv("GT_COST_TIER", "budget")
+	defer os.Unsetenv("GT_COST_TIER")
+
+	// witness is sonnet in economy, haiku in budget
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	found := false
+	for i, arg := range rc.Args {
+		if arg == "--model" && i+1 < len(rc.Args) && rc.Args[i+1] == "haiku" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ephemeral budget should override persistent economy; witness Args %v missing --model haiku", rc.Args)
+	}
+}

@@ -81,6 +81,11 @@ type TownSettings struct {
 
 	// Convoy configures convoy behavior settings.
 	Convoy *ConvoyConfig `json:"convoy,omitempty"`
+
+	// CostTier tracks which cost tier preset was applied (informational).
+	// Actual model assignments live in RoleAgents and Agents.
+	// Values: "standard", "economy", "budget", or empty for custom configs.
+	CostTier string `json:"cost_tier,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
