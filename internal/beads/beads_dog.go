@@ -25,7 +25,7 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 	args := []string{
 		"create", "--json",
 		"--id=" + beadID,
-		"--type=agent",
+		"--type=task",
 		"--role-type=dog",
 		"--title=" + title,
 		"--description=" + description,
