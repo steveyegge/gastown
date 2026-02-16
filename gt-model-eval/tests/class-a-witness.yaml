@@ -1,0 +1,102 @@
+# Class A Reasoning Tests: Witness
+# Fixed neutral role_context — no answer hints. Tests raw reasoning from evidence.
+
+- description: "[Class A] Witness: active polecat with recent output"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness — the per-rig worker monitor. You oversee polecat health
+      by checking session status, recent terminal activity, git state, and bead
+      assignments. You decide what intervention (if any) each polecat needs based
+      on the evidence in the shell output below.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      0
+
+      $ tmux capture-pane -t bd-polecat-Toast -p | tail -5
+      Editing src/auth.js...
+      Running lint check...
+      ✓ No lint errors
+      Committing changes...
+      $
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1", "title": "agent:Toast", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:54:30Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ bd show gt-work1 --json
+      {"id": "gt-work1", "title": "Fix auth bug", "status": "hooked", "assignee": "polecat-Toast"}
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+
+- description: "[Class A] Witness: dead session + uncommitted changes"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness — the per-rig worker monitor. You oversee polecat health
+      by checking session status, recent terminal activity, git state, and bead
+      assignments. You decide what intervention (if any) each polecat needs based
+      on the evidence in the shell output below.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Biscuit --json
+      {"id": "gt-a7", "title": "agent:Biscuit", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:30:00Z"}
+
+      $ git -C /town/gastown/polecats/Biscuit status --porcelain
+       M src/feature.js
+       M tests/feature.test.js
+      ?? src/utils/helper.js
+
+      $ git -C /town/gastown/polecats/Biscuit log --oneline origin/main..HEAD
+      a1b2c3d feat: implement feature
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "nuke";
+
+- description: "[Class A] Witness: dead session + clean git + idle agent"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness — the per-rig worker monitor. You oversee polecat health
+      by checking session status, recent terminal activity, git state, and bead
+      assignments. You decide what intervention (if any) each polecat needs based
+      on the evidence in the shell output below.
+    formula_step: survey-workers
+    allowed_actions: '["no-op", "nudge", "escalate", "nuke", "mark-zombie", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Nutmeg 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Nutmeg --json
+      {"id": "gt-a8", "title": "agent:Nutmeg", "labels": ["agent_state:idle"], "updated_at": "2026-02-15T14:00:00Z"}
+
+      $ git -C /town/gastown/polecats/Nutmeg status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Nutmeg log --oneline origin/main..HEAD
+      (empty)
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";

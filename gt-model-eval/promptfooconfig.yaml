@@ -35,8 +35,10 @@ providers:
 
 defaultTest:
   options:
-    # Use Sonnet as the grading model for llm-rubric assertions
-    provider: anthropic:messages:claude-sonnet-4-5-20250929
+    # Use Opus as the grading model — grader must be stronger than all test subjects
+    provider: anthropic:messages:claude-opus-4-6
+  # Strip markdown code fences (```json ... ```) that models sometimes add
+  transform: "output.replace(/^```(?:json)?\\s*\\n?/gm, '').replace(/\\n?```\\s*$/gm, '').trim()"
   assert:
     # Every response must be valid JSON
     - type: is-json
@@ -50,6 +52,12 @@ defaultTest:
       value: |
         const parsed = JSON.parse(output);
         return parsed.reason !== undefined && parsed.reason.length > 0;
+    # Action must be one of the allowed actions for this step
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        const allowed = JSON.parse(context.vars.allowed_actions);
+        return allowed.includes(parsed.action);
     # Cost ceiling per test (adjust per tier)
     - type: cost
       threshold: 0.10
@@ -58,6 +66,7 @@ defaultTest:
       threshold: 15000
 
 tests:
+  # Class B: Directive role_context (instruction-following)
   - file://tests/deacon-zombie.yaml
   - file://tests/deacon-plugin-gate.yaml
   - file://tests/deacon-dog-health.yaml
@@ -66,6 +75,11 @@ tests:
   - file://tests/refinery-triage.yaml
   - file://tests/refinery-conflict.yaml
   - file://tests/dog-orphan.yaml
+  # Class A: Neutral role_context (reasoning from evidence)
+  - file://tests/class-a-deacon.yaml
+  - file://tests/class-a-witness.yaml
+  - file://tests/class-a-refinery.yaml
+  - file://tests/class-a-dog.yaml
 
 commandLineOptions:
   maxConcurrency: 3

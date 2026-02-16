@@ -29,6 +29,10 @@ npx promptfoo@latest eval --output results.json --output results.html
 
 ## Test Suites
 
+### Class B — Directive Tests (instruction-following)
+
+Each test provides a role_context that describes the expected behavior. These validate that all models can follow explicit patrol instructions.
+
 | File | Role | Tests | What It Measures |
 |------|------|-------|-----------------|
 | `deacon-zombie.yaml` | Deacon | 10 | Zombie session detection vs healthy/idle/crashed |
@@ -40,9 +44,20 @@ npx promptfoo@latest eval --output results.json --output results.html
 | `refinery-conflict.yaml` | Refinery | 10 | Merge conflict handling and push verification |
 | `dog-orphan.yaml` | Dog | 10 | Orphan triage: RESET/REASSIGN/RECOVER/ESCALATE/BURN |
 
-**Total: 82 test cases** across 4 patrol roles.
+### Class A — Reasoning Tests (evidence-based)
 
-Each test provides simulated shell output and expects a structured JSON decision. Tests are split into "clear" cases (all models should agree) and "edge" cases (where model quality matters).
+Each test provides a **neutral** role_context with NO answer hints. These measure whether the model can derive the correct action from shell output evidence alone — the key signal for downgrade decisions.
+
+| File | Role | Tests | What It Measures |
+|------|------|-------|-----------------|
+| `class-a-deacon.yaml` | Deacon | 3 | Zombie vs idle vs healthy from raw evidence |
+| `class-a-witness.yaml` | Witness | 3 | Active vs dirty-dead vs clean-dead from raw evidence |
+| `class-a-refinery.yaml` | Refinery | 3 | Branch-caused vs pre-existing vs push failure from raw evidence |
+| `class-a-dog.yaml` | Dog | 3 | Reset vs recover vs escalate from raw evidence |
+
+**Total: 94 test cases** (82 Class B + 12 Class A) across 4 patrol roles.
+
+Each test provides simulated shell output and expects a structured JSON decision. Class B tests are split into "clear" cases (all models should agree) and "edge" cases (where model quality matters). Class A results are what directly informs the downgrade decision.
 
 ## How It Works
 
@@ -102,17 +117,22 @@ Good test cases:
 ```
 gt-model-eval/
 ├── promptfooconfig.yaml           # Main config (3 providers, assertions)
+├── package.json                   # Pin promptfoo version
 ├── prompts/
 │   └── patrol-decision.txt        # System prompt template
 ├── tests/
-│   ├── deacon-zombie.yaml         # 10 tests
-│   ├── deacon-plugin-gate.yaml    # 10 tests
-│   ├── deacon-dog-health.yaml     # 10 tests
-│   ├── witness-stuck.yaml         # 12 tests
-│   ├── witness-cleanup.yaml       # 10 tests
-│   ├── refinery-triage.yaml       # 10 tests
-│   ├── refinery-conflict.yaml     # 10 tests
-│   └── dog-orphan.yaml            # 10 tests
+│   ├── deacon-zombie.yaml         # 10 Class B tests
+│   ├── deacon-plugin-gate.yaml    # 10 Class B tests
+│   ├── deacon-dog-health.yaml     # 10 Class B tests
+│   ├── witness-stuck.yaml         # 12 Class B tests
+│   ├── witness-cleanup.yaml       # 10 Class B tests
+│   ├── refinery-triage.yaml       # 10 Class B tests
+│   ├── refinery-conflict.yaml     # 10 Class B tests
+│   ├── dog-orphan.yaml            # 10 Class B tests
+│   ├── class-a-deacon.yaml        #  3 Class A tests
+│   ├── class-a-witness.yaml       #  3 Class A tests
+│   ├── class-a-refinery.yaml      #  3 Class A tests
+│   └── class-a-dog.yaml           #  3 Class A tests
 ├── scripts/
 │   └── results-to-discussion.sh   # Format + post results
 └── README.md
