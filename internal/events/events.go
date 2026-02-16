@@ -56,9 +56,9 @@ const (
 	TypeMassDeath    = "mass_death"    // Multiple sessions died in short window
 
 	// Witness patrol events
-	TypePatrolStarted   = "patrol_started"
-	TypePolecatChecked  = "polecat_checked"
-	TypePolecatNudged   = "polecat_nudged"
+	TypePatrolStarted    = "patrol_started"
+	TypePolecatChecked   = "polecat_checked"
+	TypePolecatNudged    = "polecat_nudged"
 	TypeEscalationSent   = "escalation_sent"
 	TypeEscalationAcked  = "escalation_acked"
 	TypeEscalationClosed = "escalation_closed"
@@ -69,6 +69,12 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Governance control-plane events
+	TypeAnchorHealthGate     = "anchor_health_gate"
+	TypeAnchorHealthWarn     = "anchor_health_warn"
+	TypeAnchorHealthFreeze   = "anchor_health_freeze"
+	TypeAnchorHealthUnfreeze = "anchor_health_unfreeze"
 )
 
 // EventsFile is the name of the raw events log.

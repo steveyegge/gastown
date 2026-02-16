@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -853,19 +852,11 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 		t.Fatalf("write rig redirect: %v", err)
 	}
 
-	// Initialize beads database so agent bead creation works.
-	// Use real bd if available; fall back to a mock for environments (like
-	// Windows CI) where bd is not installed.
-	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
-		if err := bd.Init("gt"); err != nil {
-			t.Fatalf("bd init: %v", err)
-		}
-	} else {
-		installMockBd(t)
-		// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
-		_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
-	}
+	// Use mock bd for deterministic behavior across environments; real bd can
+	// vary by local custom-type configuration and produce long retry backoffs.
+	installMockBd(t)
+	// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
+	_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
 
 	// Initialize git repo in mayor/rig WITHOUT any .beads/PRIME.md
 	cmd := exec.Command("git", "init")
@@ -965,19 +956,11 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		t.Fatalf("write rig redirect: %v", err)
 	}
 
-	// Initialize beads database so agent bead creation works.
-	// Use real bd if available; fall back to a mock for environments (like
-	// Windows CI) where bd is not installed.
-	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
-		if err := bd.Init("gt"); err != nil {
-			t.Fatalf("bd init: %v", err)
-		}
-	} else {
-		installMockBd(t)
-		// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
-		_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
-	}
+	// Use mock bd for deterministic behavior across environments; real bd can
+	// vary by local custom-type configuration and produce long retry backoffs.
+	installMockBd(t)
+	// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
+	_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
 
 	// Initialize a CLEAN git repo with known files only
 	cmd := exec.Command("git", "init")
@@ -1109,19 +1092,11 @@ func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
 		t.Fatalf("write rig redirect: %v", err)
 	}
 
-	// Initialize beads database so agent bead creation works.
-	// Use real bd if available; fall back to a mock for environments (like
-	// Windows CI) where bd is not installed.
-	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
-		if err := bd.Init("gt"); err != nil {
-			t.Fatalf("bd init: %v", err)
-		}
-	} else {
-		installMockBd(t)
-		// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
-		_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
-	}
+	// Use mock bd for deterministic behavior across environments; real bd can
+	// vary by local custom-type configuration and produce long retry backoffs.
+	installMockBd(t)
+	// Write the custom-types sentinel so EnsureCustomTypes is a no-op.
+	_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
 
 	// Initialize a git repo
 	cmd := exec.Command("git", "init")

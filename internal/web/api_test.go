@@ -4,13 +4,36 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func semaphoreSleepCommand(t *testing.T, milliseconds int) (string, []string) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("powershell"); err != nil {
+			t.Skipf("powershell not available for semaphore sleep command: %v", err)
+		}
+		return "powershell", []string{
+			"-NoProfile",
+			"-Command",
+			fmt.Sprintf("Start-Sleep -Milliseconds %d", milliseconds),
+		}
+	}
+
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skipf("sleep command not available for semaphore test: %v", err)
+	}
+	return "sleep", []string{fmt.Sprintf("%.3f", float64(milliseconds)/1000.0)}
+}
 
 func TestValidateCommand(t *testing.T) {
 	tests := []struct {
@@ -762,9 +785,11 @@ func TestOptionsCacheConcurrentAccess(t *testing.T) {
 //
 // Regression test for steveyegge/gastown#1230 item 5.
 func TestRunGtCommandSemaphore(t *testing.T) {
+	sleepCmd, shortSleepArgs := semaphoreSleepCommand(t, 100)
+
 	// Create handler with a 1-slot semaphore — fully serialized execution.
 	h := &APIHandler{
-		gtPath:            "sleep",
+		gtPath:            sleepCmd,
 		workDir:           t.TempDir(),
 		defaultRunTimeout: 5 * time.Second,
 		maxRunTimeout:     10 * time.Second,
@@ -779,7 +804,7 @@ func TestRunGtCommandSemaphore(t *testing.T) {
 	for i := 0; i < numCmds; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = h.runGtCommand(context.Background(), 2*time.Second, []string{"0.1"})
+			_, _ = h.runGtCommand(context.Background(), 2*time.Second, shortSleepArgs)
 		}()
 	}
 	wg.Wait()
@@ -797,8 +822,10 @@ func TestRunGtCommandSemaphore(t *testing.T) {
 //
 // Regression test for steveyegge/gastown#1230 item 5.
 func TestRunGtCommandSemaphoreContextCancel(t *testing.T) {
+	sleepCmd, longSleepArgs := semaphoreSleepCommand(t, 10_000)
+
 	h := &APIHandler{
-		gtPath:            "sleep",
+		gtPath:            sleepCmd,
 		workDir:           t.TempDir(),
 		defaultRunTimeout: 5 * time.Second,
 		maxRunTimeout:     10 * time.Second,
@@ -812,7 +839,7 @@ func TestRunGtCommandSemaphoreContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := h.runGtCommand(ctx, 5*time.Second, []string{"10"})
+	_, err := h.runGtCommand(ctx, 5*time.Second, longSleepArgs)
 	if err == nil {
 		t.Fatal("expected error when semaphore full and context cancelled")
 	}
@@ -830,8 +857,10 @@ func TestRunGtCommandSemaphoreContextCancel(t *testing.T) {
 //
 // Regression test: timeout context must be created before semaphore acquisition.
 func TestRunGtCommandSemaphoreTimeoutBudget(t *testing.T) {
+	sleepCmd, longSleepArgs := semaphoreSleepCommand(t, 10_000)
+
 	h := &APIHandler{
-		gtPath:            "sleep",
+		gtPath:            sleepCmd,
 		workDir:           t.TempDir(),
 		defaultRunTimeout: 5 * time.Second,
 		maxRunTimeout:     10 * time.Second,
@@ -844,7 +873,7 @@ func TestRunGtCommandSemaphoreTimeoutBudget(t *testing.T) {
 	start := time.Now()
 	// Use a background context (no external deadline) but a short timeout.
 	// The timeout should bound the semaphore wait.
-	_, err := h.runGtCommand(context.Background(), 200*time.Millisecond, []string{"10"})
+	_, err := h.runGtCommand(context.Background(), 200*time.Millisecond, longSleepArgs)
 	elapsed := time.Since(start)
 
 	// Drain the slot we manually added.

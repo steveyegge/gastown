@@ -200,7 +200,7 @@ func TestFormatDailyDigest(t *testing.T) {
 	if !strings.Contains(md, "### Summary") {
 		t.Error("missing summary section")
 	}
-	if !strings.Contains(md, "| Heartbeats | 2847 | 0 | 23 |") {
+	if !strings.Contains(md, "| Heartbeats | 2847 | 0 | 0 | 23 |") {
 		t.Error("missing heartbeats row")
 	}
 	if !strings.Contains(md, "### Promotions") {
