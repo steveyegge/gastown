@@ -190,19 +190,44 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	sessionID := m.SessionName(polecat)
 
 	// Check if session already exists.
-	// If an existing session's pane process has died, kill the stale session
-	// and proceed rather than returning ErrSessionRunning (gt-jn40ft).
+	// Handle stale, zombie, and reusable sessions gracefully (gt-m2hnr).
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if running {
+		// Case 1: Session exists but process is dead → kill and proceed
 		if m.isSessionStale(sessionID) {
 			if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing stale session %s: %w", sessionID, err)
 			}
+			fmt.Printf("Cleaned up stale session %s\n", sessionID)
 		} else {
-			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
+			// Case 2: Session is alive → check if worktree exists
+			worktreeExists := m.hasValidWorktree(polecat)
+			if !worktreeExists {
+				// Zombie session: tmux session exists but no worktree
+				// This happens when a previous sling created the session but failed to create the worktree
+				if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+					return fmt.Errorf("killing zombie session %s: %w", sessionID, err)
+				}
+				fmt.Printf("Cleaned up zombie session %s (no worktree)\n", sessionID)
+			} else {
+				// Valid session + worktree both exist → verify session is functional and reuse
+				// This is the desired behavior: avoid unnecessary session recreation
+				// Verify the session has a valid pane
+				_, err := m.tmux.GetPaneID(sessionID)
+				if err != nil {
+					// Session exists but has no valid pane - treat as zombie
+					if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+						return fmt.Errorf("killing broken session %s: %w", sessionID, err)
+					}
+					fmt.Printf("Cleaned up broken session %s (no valid pane)\n", sessionID)
+				} else {
+					fmt.Printf("Reusing existing session %s (session and worktree both exist)\n", sessionID)
+					return nil
+				}
+			}
 		}
 	}
 
@@ -402,6 +427,24 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 // Delegates to isSessionProcessDead to avoid duplicating process-check logic (gt-qgzj1h).
 func (m *SessionManager) isSessionStale(sessionID string) bool {
 	return isSessionProcessDead(m.tmux, sessionID)
+}
+
+// hasValidWorktree checks if a polecat's worktree directory exists and is valid.
+// Returns true if the worktree exists as a directory with a .git file/directory.
+// Used to detect zombie sessions (session exists but worktree was never created or deleted).
+func (m *SessionManager) hasValidWorktree(polecat string) bool {
+	worktreePath := m.clonePath(polecat)
+
+	// Check if worktree directory exists
+	info, err := os.Stat(worktreePath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+
+	// Check for .git (file for worktrees, directory for regular clones)
+	gitPath := filepath.Join(worktreePath, ".git")
+	_, err = os.Stat(gitPath)
+	return err == nil
 }
 
 // Stop terminates a polecat session.
