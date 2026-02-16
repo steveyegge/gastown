@@ -261,7 +261,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return nil, b.wrapError(err, stderr.String(), args, stdout.String())
+		return nil, b.wrapError(err, stderr.String(), args)
 	}
 
 	// Handle bd exit code 0 bug: when issue not found,
@@ -305,7 +305,7 @@ func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unpara
 
 	err := cmd.Run()
 	if err != nil {
-		return nil, b.wrapError(err, stderr.String(), args, stdout.String())
+		return nil, b.wrapError(err, stderr.String(), args)
 	}
 
 	if stdout.Len() == 0 && stderr.Len() > 0 {
@@ -326,12 +326,8 @@ func (b *Beads) Run(args ...string) ([]byte, error) {
 // ZFC: Avoid parsing stderr to make decisions. Transport errors to agents instead.
 // Exception: ErrNotInstalled (exec.ErrNotFound) and ErrNotFound (issue lookup) are
 // acceptable as they enable basic error handling without decision-making.
-func (b *Beads) wrapError(err error, stderr string, args []string, stdout ...string) error {
+func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	stderr = strings.TrimSpace(stderr)
-	stdoutStr := ""
-	if len(stdout) > 0 {
-		stdoutStr = strings.TrimSpace(stdout[0])
-	}
 
 	// Check for bd not installed
 	if execErr, ok := err.(*exec.Error); ok && errors.Is(execErr.Err, exec.ErrNotFound) {
@@ -340,10 +336,8 @@ func (b *Beads) wrapError(err error, stderr string, args []string, stdout ...str
 
 	// ErrNotFound is widely used for issue lookups - acceptable exception
 	// Match various "not found" error patterns from bd
-	// Check both stderr and stdout (Dolt backend returns errors as JSON to stdout)
 	if strings.Contains(stderr, "not found") || strings.Contains(stderr, "Issue not found") ||
-		strings.Contains(stderr, "no issue found") ||
-		strings.Contains(stdoutStr, "not found") || strings.Contains(stdoutStr, "no issue found") {
+		strings.Contains(stderr, "no issue found") {
 		return ErrNotFound
 	}
 

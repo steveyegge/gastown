@@ -1,15 +1,20 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 
@@ -75,6 +80,16 @@ func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
 
 // ServeHTTP routes API requests to the appropriate handler.
 func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers for dashboard
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	switch {
 	case path == "/run" && r.Method == http.MethodPost:
@@ -184,17 +199,49 @@ func (h *APIHandler) handleCommands(w http.ResponseWriter, _ *http.Request) {
 
 // runGtCommand executes a gt command with the given args.
 func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
-	return runCommand(ctx, timeout, h.gtPath, args, h.workDir, h.cmdSem)
-}
+	// Apply timeout first so it bounds both semaphore wait and command execution.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-// runBdCommand executes a bd command with the given args.
-func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
-	return runCommand(ctx, timeout, "bd", args, h.workDir, h.cmdSem)
-}
+	// Acquire semaphore slot to limit concurrent subprocess spawns.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
 
-// runGhCommand executes a gh command with the given args.
-func (h *APIHandler) runGhCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
-	return runCommand(ctx, timeout, "gh", args, h.workDir, h.cmdSem)
+	cmd := exec.CommandContext(ctx, h.gtPath, args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	// Ensure the command doesn't wait for stdin
+	cmd.Stdin = nil
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	// Combine stdout and stderr for output
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
 }
 
 // sendError sends a JSON error response.
@@ -205,6 +252,249 @@ func (h *APIHandler) sendError(w http.ResponseWriter, message string, status int
 		Success: false,
 		Error:   message,
 	})
+}
+
+// MailMessage represents a mail message for the API.
+type MailMessage struct {
+	ID        string `json:"id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Subject   string `json:"subject"`
+	Body      string `json:"body,omitempty"`
+	Timestamp string `json:"timestamp"`
+	Read      bool   `json:"read"`
+	Priority  string `json:"priority,omitempty"`
+}
+
+// MailInboxResponse is the response for /api/mail/inbox.
+type MailInboxResponse struct {
+	Messages    []MailMessage `json:"messages"`
+	UnreadCount int           `json:"unread_count"`
+	Total       int           `json:"total"`
+}
+
+// handleMailInbox returns the user's inbox.
+func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
+	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox", "--json"})
+	if err != nil {
+		// Try without --json flag
+		output, err = h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox"})
+		if err != nil {
+			h.sendError(w, "Failed to fetch inbox: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Parse text output
+		messages := parseMailInboxText(output)
+		unread := 0
+		for _, m := range messages {
+			if !m.Read {
+				unread++
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(MailInboxResponse{
+			Messages:    messages,
+			UnreadCount: unread,
+			Total:       len(messages),
+		})
+		return
+	}
+
+	// Parse JSON output
+	var messages []MailMessage
+	if err := json.Unmarshal([]byte(output), &messages); err != nil {
+		h.sendError(w, "Failed to parse inbox: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	unread := 0
+	for _, m := range messages {
+		if !m.Read {
+			unread++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(MailInboxResponse{
+		Messages:    messages,
+		UnreadCount: unread,
+		Total:       len(messages),
+	})
+}
+
+// handleMailRead reads a specific message by ID.
+func (h *APIHandler) handleMailRead(w http.ResponseWriter, r *http.Request) {
+	msgID := r.URL.Query().Get("id")
+	if msgID == "" {
+		h.sendError(w, "Missing message ID", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(msgID) {
+		h.sendError(w, "Invalid message ID format", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
+	if err != nil {
+		h.sendError(w, "Failed to read message: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the message output
+	msg := parseMailReadOutput(output, msgID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(msg)
+}
+
+// MailSendRequest is the request body for /api/mail/send.
+type MailSendRequest struct {
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+	ReplyTo string `json:"reply_to,omitempty"`
+}
+
+// handleMailSend sends a new message.
+func (h *APIHandler) handleMailSend(w http.ResponseWriter, r *http.Request) {
+	var req MailSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.To == "" || req.Subject == "" {
+		h.sendError(w, "Missing required fields (to, subject)", http.StatusBadRequest)
+		return
+	}
+	if !isValidMailAddress(req.To) {
+		h.sendError(w, "Invalid recipient format", http.StatusBadRequest)
+		return
+	}
+	if req.ReplyTo != "" && !isValidID(req.ReplyTo) {
+		h.sendError(w, "Invalid reply-to ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce length limits (consistent with handleIssueCreate)
+	const maxSubjectLen = 500
+	const maxBodyLen = 100_000
+	if len(req.Subject) > maxSubjectLen {
+		h.sendError(w, fmt.Sprintf("Subject too long (max %d bytes)", maxSubjectLen), http.StatusBadRequest)
+		return
+	}
+	if len(req.Body) > maxBodyLen {
+		h.sendError(w, fmt.Sprintf("Body too long (max %d bytes)", maxBodyLen), http.StatusBadRequest)
+		return
+	}
+	if strings.Contains(req.Subject, "\x00") || strings.Contains(req.Body, "\x00") {
+		h.sendError(w, "Subject and body cannot contain null bytes", http.StatusBadRequest)
+		return
+	}
+
+	// Build mail send command. Flags go first, then -- to end flag parsing,
+	// then the positional recipient (consistent with handleIssueCreate/handleInstall).
+	args := []string{"mail", "send"}
+	args = append(args, "-s", req.Subject)
+	if req.Body != "" {
+		args = append(args, "-m", req.Body)
+	}
+	if req.ReplyTo != "" {
+		args = append(args, "--reply-to", req.ReplyTo)
+	}
+	args = append(args, "--", req.To)
+
+	output, err := h.runGtCommand(r.Context(), 30*time.Second, args)
+	if err != nil {
+		h.sendError(w, "Failed to send message: "+err.Error()+"\n"+output, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Message sent",
+		"output":  output,
+	})
+}
+
+// parseMailInboxText parses text output from "gt mail inbox".
+func parseMailInboxText(output string) []MailMessage {
+	var messages []MailMessage
+	lines := strings.Split(output, "\n")
+
+	// Format: "  1. ● subject" or "  1. subject" (● = unread)
+	// followed by "      id from sender"
+	// followed by "      timestamp"
+	var current *MailMessage
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "📬") || strings.HasPrefix(trimmed, "(no messages)") {
+			continue
+		}
+
+		// Check for numbered message line
+		if len(trimmed) > 2 && trimmed[0] >= '1' && trimmed[0] <= '9' && trimmed[1] == '.' {
+			// Save previous message
+			if current != nil {
+				messages = append(messages, *current)
+			}
+			current = &MailMessage{}
+			// Parse "1. ● subject" or "1. subject"
+			rest := strings.TrimSpace(trimmed[2:])
+			if strings.HasPrefix(rest, "●") {
+				current.Read = false
+				current.Subject = strings.TrimSpace(strings.TrimPrefix(rest, "●"))
+			} else {
+				current.Read = true
+				current.Subject = rest
+			}
+		} else if current != nil && current.ID == "" && strings.Contains(trimmed, " from ") {
+			// Parse "id from sender"
+			parts := strings.SplitN(trimmed, " from ", 2)
+			if len(parts) == 2 {
+				current.ID = strings.TrimSpace(parts[0])
+				current.From = strings.TrimSpace(parts[1])
+			}
+		} else if current != nil && current.Timestamp == "" && (strings.Contains(trimmed, "-") || strings.Contains(trimmed, ":")) {
+			current.Timestamp = trimmed
+		}
+	}
+	// Don't forget the last one
+	if current != nil && current.ID != "" {
+		messages = append(messages, *current)
+	}
+
+	return messages
+}
+
+// parseMailReadOutput parses the output from "gt mail read <id>".
+func parseMailReadOutput(output string, msgID string) MailMessage {
+	msg := MailMessage{ID: msgID}
+	lines := strings.Split(output, "\n")
+
+	inBody := false
+	var bodyLines []string
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "📬 ") || strings.HasPrefix(line, "Subject: ") {
+			msg.Subject = strings.TrimPrefix(strings.TrimPrefix(line, "📬 "), "Subject: ")
+			msg.Subject = strings.TrimSpace(msg.Subject)
+		} else if strings.HasPrefix(line, "From: ") {
+			msg.From = strings.TrimPrefix(line, "From: ")
+		} else if strings.HasPrefix(line, "To: ") {
+			msg.To = strings.TrimPrefix(line, "To: ")
+		} else if strings.HasPrefix(line, "ID: ") {
+			msg.ID = strings.TrimPrefix(line, "ID: ")
+		} else if line == "" && msg.From != "" && !inBody {
+			inBody = true
+		} else if inBody {
+			bodyLines = append(bodyLines, line)
+		}
+	}
+
+	msg.Body = strings.TrimSpace(strings.Join(bodyLines, "\n"))
+	return msg
 }
 
 // OptionItem represents an option with name and status.
@@ -518,6 +808,1013 @@ func parseJSONPaths(jsonStr string) []string {
 	return paths
 }
 
+// IssueShowResponse is the response for /api/issues/show.
+type IssueShowResponse struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	Owner       string   `json:"owner,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Created     string   `json:"created,omitempty"`
+	Updated     string   `json:"updated,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	Blocks      []string `json:"blocks,omitempty"`
+	RawOutput   string   `json:"raw_output"`
+}
+
+// handleIssueShow returns details for a specific issue/bead.
+func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
+	issueID := r.URL.Query().Get("id")
+	if issueID == "" {
+		h.sendError(w, "Missing issue ID", http.StatusBadRequest)
+		return
+	}
+	// Issue IDs may use external:prefix:id format for cross-rig dependencies
+	// (see internal/web/fetcher.go:extractIssueID). Unwrap to the raw bead ID
+	// before validation and before passing to bd show, which doesn't handle
+	// the external: prefix. This also fixes a pre-existing bug where the
+	// wrapped ID was passed to bd show and always failed to resolve.
+	showID := issueID
+	if strings.HasPrefix(issueID, "external:") {
+		parts := strings.SplitN(issueID, ":", 3)
+		if len(parts) == 3 {
+			showID = parts[2]
+		} else {
+			h.sendError(w, "Malformed external issue ID (expected external:prefix:id)", http.StatusBadRequest)
+			return
+		}
+	}
+	if !isValidID(showID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Try structured JSON output first (preferred — no text parsing needed)
+	output, err := h.runBdCommand(r.Context(), 10*time.Second, []string{"show", showID, "--json"})
+	if err == nil {
+		if resp, ok := parseIssueShowJSON(output); ok {
+			// Preserve the original request ID in the response (may be external:prefix:id).
+			// Callers may store/compare the full prefixed form.
+			resp.ID = issueID
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	// Fall back to text parsing
+	output, err = h.runBdCommand(r.Context(), 10*time.Second, []string{"show", showID})
+	if err != nil {
+		h.sendError(w, "Failed to fetch issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Pass issueID (not showID) to preserve the original ID in the API response.
+	// Callers may store/compare the full external:prefix:id form.
+	resp := parseIssueShowOutput(output, issueID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// IssueCreateRequest is the request body for creating an issue.
+type IssueCreateRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Priority    int    `json:"priority,omitempty"` // 1-4, default 2
+}
+
+// IssueCreateResponse is the response from creating an issue.
+type IssueCreateResponse struct {
+	Success bool   `json:"success"`
+	ID      string `json:"id,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleIssueCreate creates a new issue via bd create.
+func (h *APIHandler) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
+	var req IssueCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Title == "" {
+		h.sendError(w, "Title is required", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce length limits to prevent oversized payloads
+	const maxTitleLen = 500
+	const maxDescriptionLen = 100_000 // 100KB
+	if len(req.Title) > maxTitleLen {
+		h.sendError(w, fmt.Sprintf("Title too long (max %d bytes)", maxTitleLen), http.StatusBadRequest)
+		return
+	}
+	if len(req.Description) > maxDescriptionLen {
+		h.sendError(w, fmt.Sprintf("Description too long (max %d bytes)", maxDescriptionLen), http.StatusBadRequest)
+		return
+	}
+
+	// Validate title doesn't contain control characters or newlines
+	if strings.ContainsAny(req.Title, "\n\r\x00") {
+		h.sendError(w, "Title cannot contain newlines or control characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate description if provided
+	if req.Description != "" && strings.Contains(req.Description, "\x00") {
+		h.sendError(w, "Description cannot contain null characters", http.StatusBadRequest)
+		return
+	}
+
+	// Build bd create command. Flags go first, then -- to end flag parsing,
+	// then the positional title (prevents titles like "--help" being parsed as flags).
+	// bd uses cobra/pflag which respects -- natively (verified: bd --help shows cobra format).
+	args := []string{"create"}
+
+	// Add priority if specified (default is P2)
+	if req.Priority >= 1 && req.Priority <= 4 {
+		args = append(args, fmt.Sprintf("--priority=%d", req.Priority))
+	}
+
+	// Add description if provided
+	if req.Description != "" {
+		args = append(args, "--body", req.Description)
+	}
+
+	args = append(args, "--", req.Title)
+
+	// Run bd create
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	output, err := h.runBdCommand(ctx, 12*time.Second, args)
+
+	resp := IssueCreateResponse{}
+	if err != nil {
+		resp.Success = false
+		resp.Error = "Failed to create issue: " + err.Error()
+		if output != "" {
+			resp.Message = output
+		}
+	} else {
+		resp.Success = true
+		resp.Message = output
+
+		// Try to extract issue ID from output (e.g., "Created issue: abc123")
+		if strings.Contains(output, "Created") {
+			parts := strings.Fields(output)
+			for i, p := range parts {
+				if strings.HasSuffix(p, ":") && i+1 < len(parts) {
+					resp.ID = strings.TrimSpace(parts[i+1])
+					break
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// IssueCloseRequest is the request body for closing an issue.
+type IssueCloseRequest struct {
+	ID string `json:"id"`
+}
+
+// handleIssueClose closes an issue via bd close.
+func (h *APIHandler) handleIssueClose(w http.ResponseWriter, r *http.Request) {
+	var req IssueCloseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, []string{"close", req.ID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to close issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue closed",
+		"output":  output,
+	})
+}
+
+// IssueUpdateRequest is the request body for updating an issue.
+type IssueUpdateRequest struct {
+	ID       string `json:"id"`
+	Status   string `json:"status,omitempty"`   // "open", "in_progress"
+	Priority int    `json:"priority,omitempty"` // 1-4
+	Assignee string `json:"assignee,omitempty"`
+}
+
+// handleIssueUpdate updates issue fields via bd update.
+func (h *APIHandler) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
+	var req IssueUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		h.sendError(w, "Issue ID is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidID(req.ID) {
+		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Build bd update args
+	args := []string{"update", req.ID}
+	hasUpdate := false
+
+	if req.Status != "" {
+		// Validate allowed status values
+		switch req.Status {
+		case "open", "in_progress":
+			args = append(args, "--status="+req.Status)
+			hasUpdate = true
+		default:
+			h.sendError(w, "Invalid status (allowed: open, in_progress)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.Priority >= 1 && req.Priority <= 4 {
+		args = append(args, fmt.Sprintf("--priority=%d", req.Priority))
+		hasUpdate = true
+	}
+
+	if req.Assignee != "" {
+		if !isValidID(req.Assignee) {
+			h.sendError(w, "Invalid assignee format", http.StatusBadRequest)
+			return
+		}
+		args = append(args, "--assignee="+req.Assignee)
+		hasUpdate = true
+	}
+
+	if !hasUpdate {
+		h.sendError(w, "No update fields provided", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.runBdCommand(r.Context(), 12*time.Second, args)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to update issue: " + err.Error(),
+			"output":  output,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue updated",
+		"output":  output,
+	})
+}
+
+// runBdCommand executes a bd command with the given args.
+func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Acquire semaphore slot — shared with runGtCommand/runGhCommand.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	cmd.Stdin = nil
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
+}
+
+// parseIssueShowJSON parses the JSON output from "bd show <id> --json".
+// Returns (response, true) on success, or (zero, false) if parsing fails.
+func parseIssueShowJSON(output string) (IssueShowResponse, bool) {
+	var items []struct {
+		ID          string   `json:"id"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Status      string   `json:"status"`
+		Priority    int      `json:"priority"`
+		Type        string   `json:"issue_type"`
+		Owner       string   `json:"owner"`
+		CreatedAt   string   `json:"created_at"`
+		UpdatedAt   string   `json:"updated_at"`
+		DependsOn   []string `json:"depends_on,omitempty"`
+		Blocks      []string `json:"blocks,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil || len(items) == 0 {
+		return IssueShowResponse{}, false
+	}
+	item := items[0]
+
+	priority := ""
+	if item.Priority > 0 {
+		priority = fmt.Sprintf("P%d", item.Priority)
+	}
+
+	return IssueShowResponse{
+		ID:          item.ID,
+		Title:       item.Title,
+		Type:        item.Type,
+		Status:      item.Status,
+		Priority:    priority,
+		Owner:       item.Owner,
+		Description: item.Description,
+		Created:     item.CreatedAt,
+		Updated:     item.UpdatedAt,
+		DependsOn:   item.DependsOn,
+		Blocks:      item.Blocks,
+		RawOutput:   output,
+	}, true
+}
+
+// parseIssueShowOutput parses the text output from "bd show <id>".
+// This is the fallback path when --json is unavailable.
+func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
+	resp := IssueShowResponse{
+		ID:        issueID,
+		RawOutput: output,
+	}
+
+	lines := strings.Split(output, "\n")
+	inDescription := false
+	parsedFirstLine := false
+	var descLines []string
+	var dependsOn []string
+	var blocks []string
+
+	for _, line := range lines {
+		// First non-empty line usually has the format: "○ id · title   [● P2 · OPEN]"
+		if !parsedFirstLine && (strings.HasPrefix(line, "○") || strings.HasPrefix(line, "●")) {
+			parsedFirstLine = true
+			// Parse the first line for title and status
+			// Format: "○ id · title   [● P2 · OPEN]"
+			// Find the bracket first to isolate the status
+			if bracketIdx := strings.Index(line, "["); bracketIdx > 0 {
+				beforeBracket := line[:bracketIdx]
+				statusPart := line[bracketIdx:]
+
+				// Extract priority and status from [● P2 · OPEN]
+				statusPart = strings.Trim(statusPart, "[]●○ ")
+				statusParts := strings.Split(statusPart, "·")
+				if len(statusParts) >= 1 {
+					resp.Priority = strings.TrimSpace(statusParts[0])
+				}
+				if len(statusParts) >= 2 {
+					resp.Status = strings.TrimSpace(statusParts[1])
+				}
+
+				// Now parse the title from before the bracket
+				// Format: "○ id · title"
+				// Use strings.Cut for safe splitting on multi-byte "·" separator
+				if _, afterFirst, ok := strings.Cut(beforeBracket, "·"); ok {
+					if _, afterSecond, ok := strings.Cut(afterFirst, "·"); ok {
+						resp.Title = strings.TrimSpace(afterSecond)
+					} else {
+						// Only one dot - id is embedded in icon part
+						resp.Title = strings.TrimSpace(afterFirst)
+					}
+				}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "Owner:") {
+			// Format: "Owner: mayor · Type: task"
+			ownerLine := strings.TrimPrefix(line, "Owner:")
+			ownerParts := strings.Split(ownerLine, "·")
+			resp.Owner = strings.TrimSpace(ownerParts[0])
+			if len(ownerParts) >= 2 {
+				typePart := strings.TrimSpace(ownerParts[1])
+				resp.Type = strings.TrimSpace(strings.TrimPrefix(typePart, "Type:"))
+			}
+		} else if strings.HasPrefix(line, "Type:") {
+			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
+		} else if strings.HasPrefix(line, "Created:") {
+			// Split always returns >= 1 element; parts[0] is safe unconditionally
+			parts := strings.Split(line, "·")
+			resp.Created = strings.TrimSpace(strings.TrimPrefix(parts[0], "Created:"))
+			if len(parts) >= 2 {
+				resp.Updated = strings.TrimSpace(strings.TrimPrefix(parts[1], "Updated:"))
+			}
+		} else if line == "DESCRIPTION" {
+			inDescription = true
+		} else if line == "DEPENDS ON" || line == "BLOCKS" {
+			inDescription = false
+		} else if inDescription && strings.TrimSpace(line) != "" {
+			descLines = append(descLines, line)
+		} else if strings.HasPrefix(strings.TrimSpace(line), "→") {
+			// Dependency line
+			depLine := strings.TrimSpace(line)
+			depLine = strings.TrimPrefix(depLine, "→")
+			depLine = strings.TrimSpace(depLine)
+			// Extract just the bead ID
+			if colonIdx := strings.Index(depLine, ":"); colonIdx > 0 {
+				parts := strings.Fields(depLine[:colonIdx])
+				if len(parts) >= 2 {
+					dependsOn = append(dependsOn, parts[1])
+				}
+			}
+		} else if strings.HasPrefix(strings.TrimSpace(line), "←") {
+			// Blocks line
+			blockLine := strings.TrimSpace(line)
+			blockLine = strings.TrimPrefix(blockLine, "←")
+			blockLine = strings.TrimSpace(blockLine)
+			// Extract just the bead ID
+			if colonIdx := strings.Index(blockLine, ":"); colonIdx > 0 {
+				parts := strings.Fields(blockLine[:colonIdx])
+				if len(parts) >= 2 {
+					blocks = append(blocks, parts[1])
+				}
+			}
+		}
+	}
+
+	resp.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+	resp.DependsOn = dependsOn
+	resp.Blocks = blocks
+
+	return resp
+}
+
+// PRShowResponse is the response for /api/pr/show.
+type PRShowResponse struct {
+	Number       int      `json:"number"`
+	Title        string   `json:"title"`
+	State        string   `json:"state"`
+	Author       string   `json:"author"`
+	URL          string   `json:"url"`
+	Body         string   `json:"body"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
+	Additions    int      `json:"additions"`
+	Deletions    int      `json:"deletions"`
+	ChangedFiles int      `json:"changed_files"`
+	Mergeable    string   `json:"mergeable"`
+	BaseRef      string   `json:"base_ref"`
+	HeadRef      string   `json:"head_ref"`
+	Labels       []string `json:"labels,omitempty"`
+	Checks       []string `json:"checks,omitempty"`
+	RawOutput    string   `json:"raw_output,omitempty"`
+}
+
+// handlePRShow returns details for a specific PR.
+func (h *APIHandler) handlePRShow(w http.ResponseWriter, r *http.Request) {
+	// Accept either repo/number or full URL
+	repo := r.URL.Query().Get("repo")
+	number := r.URL.Query().Get("number")
+	prURL := r.URL.Query().Get("url")
+
+	if prURL == "" && (repo == "" || number == "") {
+		h.sendError(w, "Missing repo/number or url parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Validate inputs to prevent argument injection.
+	// When url is provided, repo/number are ignored — only validate what's used.
+	if prURL != "" {
+		const maxURLLen = 2000
+		if len(prURL) > maxURLLen {
+			h.sendError(w, fmt.Sprintf("PR URL too long (max %d bytes)", maxURLLen), http.StatusBadRequest)
+			return
+		}
+		if strings.ContainsAny(prURL, "\x00\n\r") {
+			h.sendError(w, "PR URL cannot contain null bytes or newlines", http.StatusBadRequest)
+			return
+		}
+		// Allow any https:// URL, not just github.com — supports GitHub Enterprise.
+		// gh CLI validates against the configured host and rejects non-GitHub API responses,
+		// limiting SSRF risk. Localhost-only deployment further reduces exposure.
+		if !strings.HasPrefix(prURL, "https://") {
+			h.sendError(w, "PR URL must start with https://", http.StatusBadRequest)
+			return
+		}
+	} else {
+		if !isNumeric(number) {
+			h.sendError(w, "Invalid PR number format", http.StatusBadRequest)
+			return
+		}
+		if !isValidRepoRef(repo) {
+			h.sendError(w, "Invalid repo format (expected owner/repo)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	var args []string
+	if prURL != "" {
+		args = []string{"pr", "view", prURL, "--json", "number,title,state,author,url,body,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,baseRefName,headRefName,labels,statusCheckRollup"}
+	} else {
+		args = []string{"pr", "view", number, "--repo", repo, "--json", "number,title,state,author,url,body,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,baseRefName,headRefName,labels,statusCheckRollup"}
+	}
+
+	output, err := h.runGhCommand(r.Context(), 15*time.Second, args)
+	if err != nil {
+		h.sendError(w, "Failed to fetch PR: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the JSON output
+	resp := parsePRShowOutput(output)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// runGhCommand executes a gh command with the given args.
+func (h *APIHandler) runGhCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Acquire semaphore slot — shared with runGtCommand/runBdCommand.
+	select {
+	case h.cmdSem <- struct{}{}:
+		defer func() { <-h.cmdSem }()
+	case <-ctx.Done():
+		return "", fmt.Errorf("command slot unavailable: %w", ctx.Err())
+	}
+
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	cmd.Stdin = nil
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
+}
+
+// parsePRShowOutput parses the JSON output from "gh pr view --json".
+func parsePRShowOutput(jsonStr string) PRShowResponse {
+	resp := PRShowResponse{
+		RawOutput: jsonStr,
+	}
+
+	var data struct {
+		Number       int    `json:"number"`
+		Title        string `json:"title"`
+		State        string `json:"state"`
+		Author       struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		URL          string `json:"url"`
+		Body         string `json:"body"`
+		CreatedAt    string `json:"createdAt"`
+		UpdatedAt    string `json:"updatedAt"`
+		Additions    int    `json:"additions"`
+		Deletions    int    `json:"deletions"`
+		ChangedFiles int    `json:"changedFiles"`
+		Mergeable    string `json:"mergeable"`
+		BaseRefName  string `json:"baseRefName"`
+		HeadRefName  string `json:"headRefName"`
+		Labels       []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		StatusCheckRollup []struct {
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"statusCheckRollup"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return resp
+	}
+
+	resp.Number = data.Number
+	resp.Title = data.Title
+	resp.State = data.State
+	resp.Author = data.Author.Login
+	resp.URL = data.URL
+	resp.Body = data.Body
+	resp.CreatedAt = data.CreatedAt
+	resp.UpdatedAt = data.UpdatedAt
+	resp.Additions = data.Additions
+	resp.Deletions = data.Deletions
+	resp.ChangedFiles = data.ChangedFiles
+	resp.Mergeable = data.Mergeable
+	resp.BaseRef = data.BaseRefName
+	resp.HeadRef = data.HeadRefName
+
+	for _, label := range data.Labels {
+		resp.Labels = append(resp.Labels, label.Name)
+	}
+
+	for _, check := range data.StatusCheckRollup {
+		status := check.Name + ": "
+		if check.Conclusion != "" {
+			status += check.Conclusion
+		} else {
+			status += check.Status
+		}
+		resp.Checks = append(resp.Checks, status)
+	}
+
+	// Clear raw output if parsing succeeded
+	resp.RawOutput = ""
+
+	return resp
+}
+
+// CrewMember represents a crew member's status for the dashboard.
+type CrewMember struct {
+	Name       string `json:"name"`
+	Rig        string `json:"rig"`
+	State      string `json:"state"`       // spinning, finished, ready, questions
+	Hook       string `json:"hook,omitempty"`
+	HookTitle  string `json:"hook_title,omitempty"`
+	Session    string `json:"session"`     // attached, detached, none
+	LastActive string `json:"last_active"`
+}
+
+// CrewResponse is the response for /api/crew.
+type CrewResponse struct {
+	Crew    []CrewMember `json:"crew"`
+	ByRig   map[string][]CrewMember `json:"by_rig"`
+	Total   int          `json:"total"`
+}
+
+// ReadyItem represents a ready work item.
+type ReadyItem struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
+	Source   string `json:"source"` // "town" or rig name
+	Type     string `json:"type"`   // issue, mr, etc.
+}
+
+// ReadyResponse is the response for /api/ready.
+type ReadyResponse struct {
+	Items   []ReadyItem         `json:"items"`
+	BySource map[string][]ReadyItem `json:"by_source"`
+	Summary struct {
+		Total   int `json:"total"`
+		P1Count int `json:"p1_count"`
+		P2Count int `json:"p2_count"`
+		P3Count int `json:"p3_count"`
+	} `json:"summary"`
+}
+
+// handleCrew returns crew status across all rigs with proper state detection.
+func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// Run gt crew list --all --json to get crew across all rigs
+	output, err := h.runGtCommand(ctx, 10*time.Second, []string{"crew", "list", "--all", "--json"})
+	
+	resp := CrewResponse{
+		Crew:  make([]CrewMember, 0),
+		ByRig: make(map[string][]CrewMember),
+	}
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Parse the JSON output
+	var crewData []struct {
+		Name    string `json:"name"`
+		Rig     string `json:"rig"`
+		Branch  string `json:"branch"`
+		Session string `json:"session,omitempty"`
+		Hook    string `json:"hook,omitempty"`
+	}
+	
+	if err := json.Unmarshal([]byte(output), &crewData); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Convert to CrewMember format with state detection
+	for _, c := range crewData {
+		sessionName := session.CrewSessionName(session.PrefixFor(c.Rig), c.Name)
+		state, lastActive, sessionStatus := h.detectCrewState(ctx, sessionName, c.Hook)
+
+		member := CrewMember{
+			Name:       c.Name,
+			Rig:        c.Rig,
+			State:      state,
+			Hook:       c.Hook,
+			Session:    sessionStatus,
+			LastActive: lastActive,
+		}
+		resp.Crew = append(resp.Crew, member)
+		resp.ByRig[c.Rig] = append(resp.ByRig[c.Rig], member)
+	}
+	resp.Total = len(resp.Crew)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// detectCrewState determines crew member state from tmux session.
+// Returns: state (spinning/finished/questions/ready), lastActive string, session status
+func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook string) (string, string, string) {
+	// Check if tmux session exists and get activity
+	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_attached}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		// tmux not running - crew is ready (no session)
+		return "ready", "", "none"
+	}
+
+	// Find our session
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 || parts[0] != sessionName {
+			continue
+		}
+
+		// Found session
+		var activityUnix int64
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil {
+			continue
+		}
+		attached := parts[2] == "1"
+
+		sessionStatus := "detached"
+		if attached {
+			sessionStatus = "attached"
+		}
+
+		// Calculate activity age
+		activityAge := time.Since(time.Unix(activityUnix, 0))
+		lastActive := formatCrewActivityAge(activityAge)
+
+		// Check if Claude is running in the session
+		isClaudeRunning := h.isClaudeRunningInSession(ctx, sessionName)
+
+		// Determine state based on activity and Claude status
+		state := determineCrewState(activityAge, isClaudeRunning, hook)
+
+		// Check for questions if state is potentially finished
+		if state == "finished" || (state == "ready" && hook != "") {
+			if h.hasQuestionInPane(ctx, sessionName) {
+				state = "questions"
+			}
+		}
+
+		return state, lastActive, sessionStatus
+	}
+
+	// Session not found
+	return "ready", "", "none"
+}
+
+// isClaudeRunningInSession checks if Claude/agent is actively running.
+func (h *APIHandler) isClaudeRunningInSession(ctx context.Context, sessionName string) bool {
+	// Target pane 0 explicitly (:0.0) to avoid false positives from
+	// user-created split panes running shells or other commands.
+	cmd := exec.CommandContext(ctx, "tmux", "display-message", "-t", sessionName+":0.0", "-p", "#{pane_current_command}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	output := strings.ToLower(strings.TrimSpace(stdout.String()))
+	if output == "" {
+		return false
+	}
+	// Check for common agent commands
+	return strings.Contains(output, "claude") ||
+	       strings.Contains(output, "node") ||
+	       strings.Contains(output, "codex") ||
+	       strings.Contains(output, "opencode")
+}
+
+// hasQuestionInPane checks the last output for question indicators.
+func (h *APIHandler) hasQuestionInPane(ctx context.Context, sessionName string) bool {
+	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+
+	// Get last few lines
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	lastLines := ""
+	if len(lines) > 10 {
+		lastLines = strings.Join(lines[len(lines)-10:], "\n")
+	} else {
+		lastLines = strings.Join(lines, "\n")
+	}
+	lastLines = strings.ToLower(lastLines)
+
+	// Look for question indicators
+	questionIndicators := []string{
+		"?",
+		"what do you think",
+		"should i",
+		"would you like",
+		"please confirm",
+		"waiting for",
+		"need your input",
+		"your thoughts",
+		"let me know",
+	}
+
+	for _, indicator := range questionIndicators {
+		if strings.Contains(lastLines, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// determineCrewState determines state from activity and Claude status.
+func determineCrewState(activityAge time.Duration, isClaudeRunning bool, hook string) string {
+	if !isClaudeRunning {
+		// Claude not running
+		if hook != "" {
+			return "finished" // Had work, Claude stopped = finished
+		}
+		return "ready" // No work, Claude stopped = ready for work
+	}
+
+	// Claude is running
+	switch {
+	case activityAge < 2*time.Minute:
+		return "spinning" // Active recently
+	case activityAge < 10*time.Minute:
+		return "spinning" // Still probably working
+	default:
+		return "questions" // Running but no activity = likely waiting for input
+	}
+}
+
+// formatCrewActivityAge formats activity age for display.
+func formatCrewActivityAge(age time.Duration) string {
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	}
+}
+
+// handleReady returns ready work items across town.
+func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// Run gt ready --json to get ready work
+	output, err := h.runGtCommand(ctx, 12*time.Second, []string{"ready", "--json"})
+	
+	resp := ReadyResponse{
+		Items:    make([]ReadyItem, 0),
+		BySource: make(map[string][]ReadyItem),
+	}
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Parse the JSON output from gt ready
+	var readyData struct {
+		Sources []struct {
+			Name   string `json:"name"`
+			Issues []struct {
+				ID       string `json:"id"`
+				Title    string `json:"title"`
+				Priority int    `json:"priority"`
+				Type     string `json:"type"`
+			} `json:"issues"`
+		} `json:"sources"`
+		Summary struct {
+			Total   int `json:"total"`
+			P1Count int `json:"p1_count"`
+			P2Count int `json:"p2_count"`
+			P3Count int `json:"p3_count"`
+		} `json:"summary"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &readyData); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Convert to ReadyItem format
+	for _, src := range readyData.Sources {
+		for _, issue := range src.Issues {
+			item := ReadyItem{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Source:   src.Name,
+				Type:     issue.Type,
+			}
+			resp.Items = append(resp.Items, item)
+			resp.BySource[src.Name] = append(resp.BySource[src.Name], item)
+
+			// Count priorities
+			switch issue.Priority {
+			case 1:
+				resp.Summary.P1Count++
+			case 2:
+				resp.Summary.P2Count++
+			case 3:
+				resp.Summary.P3Count++
+			}
+		}
+	}
+	resp.Summary.Total = len(resp.Items)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // parseCommandArgs splits a command string into args, respecting quotes.
 func parseCommandArgs(command string) []string {
 	var args []string
@@ -552,4 +1849,105 @@ func parseCommandArgs(command string) []string {
 	}
 
 	return args
+}
+
+// handleSSE streams Server-Sent Events to the dashboard client.
+// It polls key dashboard state every 2 seconds and sends an event when
+// changes are detected, allowing the client to trigger a re-render.
+// Falls through gracefully if the client disconnects.
+func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ctx := r.Context()
+
+	// Send initial connection event
+	fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
+	flusher.Flush()
+
+	var lastHash string
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Send keepalive comment every 15 seconds to prevent connection timeouts
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-ticker.C:
+			hash := h.computeDashboardHash(ctx)
+			if hash != "" && hash != lastHash {
+				lastHash = hash
+				fmt.Fprintf(w, "event: dashboard-update\ndata: %s\n\n", hash)
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// computeDashboardHash generates a lightweight hash of key dashboard state.
+// It runs quick commands in parallel and hashes their output to detect changes.
+func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	var parts []string
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Check worker/polecat state
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"status", "--json"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "status:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	// Check hooks state
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"hooks", "list"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "hooks:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	// Check mail count
+	go func() {
+		defer wg.Done()
+		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"mail", "inbox"}); err == nil {
+			mu.Lock()
+			parts = append(parts, "mail:"+out)
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	h256 := sha256.Sum256([]byte(strings.Join(parts, "|")))
+	return fmt.Sprintf("%x", h256[:8])
 }

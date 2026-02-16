@@ -285,13 +285,8 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating agent bead: %w", err)
 	}
 	// Fix type separately — UpdateOptions doesn't support type changes
-	// Only update if current type is not already agent (bd update --type has validation bug with custom types)
-	if existing.Type != "agent" {
-		if _, err := target.run("update", id, "--type=agent"); err != nil {
-			// If update fails due to custom type validation, warn but continue
-			// The bead already has gt:agent label which is what matters for Gastown logic
-			fmt.Printf("Warning: could not update agent bead type to 'agent' (already has gt:agent label): %v\n", err)
-		}
+	if _, err := target.run("update", id, "--type=agent"); err != nil {
+		return nil, fmt.Errorf("fixing agent bead type: %w", err)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based

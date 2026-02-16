@@ -89,12 +89,12 @@ linters:
         linters:
           - gosec
         text: 'G117'
-      # G702-G706: Taint analysis false positives in internal tooling
+      # G702/G703/G704/G705: Taint analysis false positives in internal tooling
       # Internal code uses trusted inputs (constructed paths, internal APIs, validated args)
       - path: 'internal/'
         linters:
           - gosec
-        text: 'G702|G703|G704|G705|G706'
+        text: 'G702|G703|G704|G705'
       # errcheck: Ignore unchecked errors in test files for common cleanup patterns
       - path: '_test\.go'
         linters:

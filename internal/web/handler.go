@@ -357,5 +357,5 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
 	mux.Handle("/", convoyHandler)
 
-	return corsMiddleware(mux), nil
+	return mux, nil
 }
