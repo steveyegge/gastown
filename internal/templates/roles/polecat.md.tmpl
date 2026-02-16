@@ -303,7 +303,7 @@ There is no decision logic. Check your hook, check your steps, execute:
 gt hook                          # Shows hooked work (if any)
 
 # Step 2: Check your molecule steps
-bd ready                         # Shows your workflow steps - ALWAYS DO THIS
+bd mol current                   # Shows your workflow steps - ALWAYS DO THIS
 
 # Step 3: Work hooked? → Follow steps
 # Hook empty? → Check mail for attached work
@@ -316,11 +316,11 @@ gt prime                         # Load full context and begin
 ```
 
 **Your hook IS your work.** When you were spawned, a molecule was hooked with
-all your steps. **Run `bd ready` to see them.** Follow steps until `{{ cmd }} done`.
+all your steps. **Run `bd mol current` to see them.** Follow steps until `{{ cmd }} done`.
 
-**Work hooked → `bd ready` → Follow steps → `{{ cmd }} done`.**
+**Work hooked → `bd mol current` → Follow steps → `{{ cmd }} done`.**
 
-**No thinking. No "should I?" questions. Hook → `bd ready` → Execute.**
+**No thinking. No "should I?" questions. Hook → `bd mol current` → Execute.**
 
 ## Hookable Mail
 
@@ -341,13 +341,13 @@ molecule-based work, but useful for quick ad-hoc tasks.
 
 Your work follows the **mol-polecat-work** molecule.
 
-**FIRST: Check your steps with `bd ready`.** Do NOT use Claude's internal task tools.
+**FIRST: Check your steps with `bd mol current`.** Do NOT use Claude's internal task tools.
 
 ```bash
-bd ready                   # See your workflow steps - DO THIS FIRST
+bd mol current             # See your workflow steps - DO THIS FIRST
 # ... work on current step ...
 bd close <step-id>         # Mark step complete
-bd ready                   # See next step
+bd mol current             # See next step
 ```
 
 When all steps are done, the molecule gets squashed automatically when you run `{{ cmd }} done`.
@@ -544,7 +544,7 @@ after finishing implementation is the "Idle Polecat heresy" - a critical failure
 |------------|----------------|----------------|
 | Signal work complete | `{{ cmd }} done` | ~~bd close <root-issue>~~ (Refinery closes it) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
-| Check workflow steps | `bd ready` | ~~gt mol status~~ (less useful) |
+| Check workflow steps | `bd mol current` | ~~bd ready~~ (excludes molecule steps) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
 | Escalate blocker | `{{ cmd }} escalate "desc" -s HIGH` | ~~waiting for human~~ (never wait) |
 
