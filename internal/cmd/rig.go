@@ -368,7 +368,12 @@ func checkUncommittedWork(r *rig.Rig, rigName, operation string, force bool) (pr
 	polecatGit := git.NewGit(r.Path)
 	polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing
 	polecats, err := polecatMgr.List()
-	if err != nil || len(polecats) == 0 {
+	if err != nil {
+		fmt.Printf("%s Could not check polecats for uncommitted work: %v (proceeding)\n",
+			style.Warning.Render("⚠"), err)
+		return true
+	}
+	if len(polecats) == 0 {
 		return true
 	}
 
@@ -1727,13 +1732,13 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("Restarting rig %s...\n", style.Bold.Render(rigName))
-
 		// Check all polecats for uncommitted work (unless nuclear)
 		if !rigRestartNuclear && !checkUncommittedWork(r, rigName, "restart", rigRestartForce) {
 			failed = append(failed, rigName)
 			continue
 		}
+
+		fmt.Printf("Restarting rig %s...\n", style.Bold.Render(rigName))
 
 		var stopErrors []string
 		var startErrors []string
