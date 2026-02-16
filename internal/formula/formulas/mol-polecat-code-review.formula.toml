@@ -9,7 +9,7 @@ opportunities. The output is a set of beads capturing actionable findings.
 
 You are a self-cleaning worker. You:
 1. Receive work via your hook (pinned molecule + review scope)
-2. Work through molecule steps using `bd mol current` / `bd close <step>`
+2. Work through molecule steps using `bd ready` / `bd close <step>`
 3. Complete and self-clean via `gt done` (submit findings + nuke yourself)
 4. You are GONE - your findings are recorded in beads
 
@@ -17,7 +17,7 @@ You are a self-cleaning worker. You:
 sandbox, and exit. There is no idle state. Done means gone.
 
 **Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `bd mol current` to find them - do NOT read this file directly.
+beads created from it. Use `bd ready` to find them - do NOT read this file directly.
 
 **You do NOT:**
 - Fix the issues yourself (file beads, let other polecats fix)
