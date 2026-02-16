@@ -489,17 +489,26 @@ func parseRigAgentAddressFromID(id string) string {
 }
 
 // parseAgentAddressFromDescription extracts agent address from description metadata.
-// Looks for "role_type: X" and "rig: Y" patterns in the description.
+// Looks for "location: X" first (explicit address), then falls back to
+// "role_type: X" and "rig: Y" patterns in the description.
 func parseAgentAddressFromDescription(desc string) string {
-	var roleType, rig string
+	var roleType, rig, location string
 
 	for _, line := range strings.Split(desc, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "role_type:") {
+		if strings.HasPrefix(line, "location:") {
+			location = strings.TrimSpace(strings.TrimPrefix(line, "location:"))
+		} else if strings.HasPrefix(line, "role_type:") {
 			roleType = strings.TrimSpace(strings.TrimPrefix(line, "role_type:"))
 		} else if strings.HasPrefix(line, "rig:") {
 			rig = strings.TrimSpace(strings.TrimPrefix(line, "rig:"))
 		}
+	}
+
+	// Explicit location takes priority (used by dogs and other agents
+	// whose address can't be derived from role_type + rig alone)
+	if location != "" && location != "null" {
+		return location
 	}
 
 	// Handle null values from description
