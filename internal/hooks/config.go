@@ -164,9 +164,33 @@ func Merge(base, override *HooksConfig) *HooksConfig {
 	return applyOverride(result, override)
 }
 
+// DefaultOverrides returns built-in role-specific hook overrides.
+// These are always applied as a baseline layer; on-disk overrides merge on top.
+func DefaultOverrides() map[string]*HooksConfig {
+	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
+	return map[string]*HooksConfig{
+		"mayor": {
+			PreToolUse: []HookEntry{
+				{
+					Matcher: "Task",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: fmt.Sprintf("%s && gt tap guard task-dispatch", pathSetup),
+					}},
+				},
+			},
+		},
+	}
+}
+
 // ComputeExpected computes the expected HooksConfig for a target by loading
 // the base config and applying all applicable overrides in order of specificity.
 // If no base config exists, uses DefaultBase().
+//
+// For each override key, built-in defaults (from DefaultOverrides) are merged
+// first, then on-disk overrides layer on top. On-disk overrides can replace
+// or disable built-in guards by providing a matching PreToolUse entry (e.g.,
+// an empty Hooks list for the "Task" matcher disables the task-dispatch guard).
 func ComputeExpected(target string) (*HooksConfig, error) {
 	base, err := LoadBase()
 	if err != nil {
@@ -177,8 +201,15 @@ func ComputeExpected(target string) (*HooksConfig, error) {
 		}
 	}
 
+	defaults := DefaultOverrides()
 	result := base
 	for _, overrideKey := range GetApplicableOverrides(target) {
+		// Always apply built-in defaults first
+		if def, ok := defaults[overrideKey]; ok {
+			result = Merge(result, def)
+		}
+
+		// Then layer on-disk overrides on top
 		override, err := LoadOverride(overrideKey)
 		if err != nil {
 			if os.IsNotExist(err) {

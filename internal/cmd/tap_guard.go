@@ -18,7 +18,8 @@ is violated. They're called before the tool runs, preventing the
 forbidden operation entirely.
 
 Available guards:
-  pr-workflow   - Block PR creation and feature branches
+  pr-workflow      - Block PR creation and feature branches
+  task-dispatch    - Block Task tool for Mayor (use gt sling instead)
 
 Example hook configuration:
   {
@@ -51,9 +52,33 @@ witness, etc.). Humans running outside Gas Town can still use PRs.`,
 	RunE: runTapGuardPRWorkflow,
 }
 
+var tapGuardTaskDispatchCmd = &cobra.Command{
+	Use:   "task-dispatch",
+	Short: "Block Task tool for Mayor (use gt sling instead)",
+	Long: `Block the Claude Code Task tool when running as Mayor.
+
+The Mayor should dispatch work via gt sling, not by spawning Claude Code
+subagents. Subagents block the Mayor's context until they finish, breaking
+GUPP (the propulsion principle) and preventing parallel polecat execution.
+
+This guard blocks:
+  - Task tool invocations (Claude Code subagent spawning)
+
+Exit codes:
+  0 - Operation allowed (not Mayor)
+  2 - Operation BLOCKED (Mayor context detected)
+
+The guard only blocks when GT_ROLE=mayor. Crew members and polecats
+can still use the Task tool for parallel research.
+
+See: https://github.com/steveyegge/gastown/issues/904`,
+	RunE: runTapGuardTaskDispatch,
+}
+
 func init() {
 	tapCmd.AddCommand(tapGuardCmd)
 	tapGuardCmd.AddCommand(tapGuardPRWorkflowCmd)
+	tapGuardCmd.AddCommand(tapGuardTaskDispatchCmd)
 }
 
 func runTapGuardPRWorkflow(cmd *cobra.Command, args []string) error {
@@ -75,6 +100,28 @@ func runTapGuardPRWorkflow(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "║                                                                  ║")
 	fmt.Fprintln(os.Stderr, "║  Why? PRs add friction that breaks autonomous execution.        ║")
 	fmt.Fprintln(os.Stderr, "║  See: ~/gt/docs/PRIMING.md (GUPP principle)                     ║")
+	fmt.Fprintln(os.Stderr, "╚══════════════════════════════════════════════════════════════════╝")
+	fmt.Fprintln(os.Stderr, "")
+	return NewSilentExit(2) // Exit 2 = BLOCK in Claude Code hooks
+}
+
+func runTapGuardTaskDispatch(cmd *cobra.Command, args []string) error {
+	// Only block when running as Mayor
+	if os.Getenv("GT_ROLE") != "mayor" {
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "╔══════════════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(os.Stderr, "║  TASK TOOL BLOCKED -- Mayor cannot spawn subagents              ║")
+	fmt.Fprintln(os.Stderr, "╠══════════════════════════════════════════════════════════════════╣")
+	fmt.Fprintln(os.Stderr, "║  Subagents block your context and prevent parallel execution.    ║")
+	fmt.Fprintln(os.Stderr, "║                                                                  ║")
+	fmt.Fprintln(os.Stderr, "║  Instead of:  Task tool (spawning a subagent)                   ║")
+	fmt.Fprintln(os.Stderr, "║  Do this:     bd create \"...\" && gt sling <bead-id> <rig>       ║")
+	fmt.Fprintln(os.Stderr, "║                                                                  ║")
+	fmt.Fprintln(os.Stderr, "║  Why? Polecats execute in parallel without blocking the Mayor.  ║")
+	fmt.Fprintln(os.Stderr, "║  See: https://github.com/steveyegge/gastown/issues/904          ║")
 	fmt.Fprintln(os.Stderr, "╚══════════════════════════════════════════════════════════════════╝")
 	fmt.Fprintln(os.Stderr, "")
 	return NewSilentExit(2) // Exit 2 = BLOCK in Claude Code hooks
