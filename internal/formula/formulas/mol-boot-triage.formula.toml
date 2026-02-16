@@ -119,8 +119,7 @@ No action needed. Log observation and exit.
 
 **NUDGE**
 ```bash
-# Use --mode=queue to avoid interrupting in-flight tool calls
-gt nudge --mode=queue deacon "Boot check-in: you have pending work"
+gt nudge deacon "Boot check-in: you have pending work"
 ```
 
 **WAKE**
