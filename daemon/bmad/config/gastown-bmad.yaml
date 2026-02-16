@@ -1,0 +1,110 @@
+# Gastown - BMad Integration Configuration
+# Конфигурация для интеграции BMad Method v6 в Gastown dispatch
+# Версия: 1.0 (Proof of Concept)
+
+version: "1.0"
+integration_name: "gastown-bmad"
+created: "2026-01-23"
+author: "Gastown Contributors"
+
+# === ПУТИ ===
+paths:
+  bmad_root: "~/gt/daemon/factory/simulator/bmad-method"
+  adapters_dir: "~/gt/daemon/bmad/adapters"
+  config_dir: "~/gt/daemon/bmad/config"
+  temp_dir: "/tmp/gastown-bmad"
+  results_dir: "~/gt/daemon/learning/bmad-results"
+
+# === МАППИНГ WORKFLOW ===
+# Соответствие уровней сложности BMad workflows
+workflows:
+  level0:
+    name: "quick-flow-level0"
+    description: "Тривиальные задачи (документация, typo)"
+    estimated_time: "2-5 минут"
+    agents: ["documentation-writer"]
+
+  level1:
+    name: "quick-flow-level1"
+    description: "Простые задачи (bug fix, small feature)"
+    estimated_time: "5-15 минут"
+    agents: ["bug-fixer", "code-reviewer"]
+
+  level2:
+    name: "quick-flow-level2"
+    description: "Средние задачи (new feature, refactoring)"
+    estimated_time: "15-30 минут"
+    agents: ["feature-developer", "test-writer", "code-reviewer"]
+
+  level3:
+    name: "bmad-method-standard"
+    description: "Сложные задачи (module, integration)"
+    estimated_time: "1-3 часа"
+    agents: ["pm", "architect", "developer", "qa", "scrum-master"]
+
+  level4:
+    name: "bmad-method-enterprise"
+    description: "Архитектурные задачи (system design, platform)"
+    estimated_time: "3+ часа"
+    agents: ["pm", "architect", "tech-lead", "developer", "qa", "ux", "scrum-master"]
+
+# === ROUTING RULES ===
+routing:
+  quick_flow_threshold: 2  # Level 0-2 идут в Quick Flow
+  ml_router_threshold: 3   # Level 3+ идут в ML Router (будущее)
+
+  # Исключения (force routing)
+  force_quick_flow:
+    - "docs"
+    - "typo"
+    - "format"
+
+  force_bmad_method:
+    - "architecture"
+    - "platform"
+    - "enterprise"
+
+# === ИНТЕГРАЦИЯ С Gastown ===
+gastown_integration:
+  # Включить BMad роутер в dispatch.sh
+  enabled: true
+
+  # Приоритет: bmad | standard | auto
+  # bmad: всегда пытаться использовать BMad
+  # standard: использовать стандартный Gastown pipeline
+  # auto: автоматический выбор на основе уровня
+  priority: "auto"
+
+  # Fallback при ошибке BMad
+  fallback_to_standard: true
+
+  # Сохранять метрики
+  save_metrics: true
+
+  # Интеграция с results-tracker
+  results_tracker_enabled: true
+
+# === PREFERENCES ===
+preferences:
+  # Язык для BMad агентов
+  language: "ru"  # ru | en
+
+  # Verbose output
+  verbose: false
+
+  # Cleanup временных файлов
+  cleanup_temp_files: true
+
+  # Timeout для workflow (секунды)
+  workflow_timeout: 300
+
+# === EXPERIMENTAL ===
+experimental:
+  # Использовать ML Router для Level 3-4
+  ml_router_enabled: false
+
+  # Использовать параллельное выполнение
+  parallel_execution: false
+
+  # Использовать кэширование результатов
+  result_caching: false
