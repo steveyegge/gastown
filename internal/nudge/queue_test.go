@@ -385,7 +385,8 @@ func TestDrainSweepsOrphanedClaims(t *testing.T) {
 	}
 
 	// Create an orphaned .claimed file with old mod time
-	orphanPath := filepath.Join(dir, "100.json.claimed")
+	// Claim files now use the format: <original>.json.claimed.<suffix>
+	orphanPath := filepath.Join(dir, "100.json.claimed.deadbeef")
 	if err := os.WriteFile(orphanPath, []byte(`{"sender":"ghost"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +397,7 @@ func TestDrainSweepsOrphanedClaims(t *testing.T) {
 	}
 
 	// Create a fresh .claimed file (should NOT be swept)
-	freshClaimPath := filepath.Join(dir, "200.json.claimed")
+	freshClaimPath := filepath.Join(dir, "200.json.claimed.cafebabe")
 	if err := os.WriteFile(freshClaimPath, []byte(`{"sender":"active"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +427,8 @@ func TestDrainSweepsOrphanedClaims(t *testing.T) {
 	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
 		t.Error("orphaned .claimed file should no longer exist (requeued to .json)")
 	}
-	restoredPath := strings.TrimSuffix(orphanPath, ".claimed")
+	// Restored path strips everything from ".claimed" onward
+	restoredPath := filepath.Join(dir, "100.json")
 	if _, err := os.Stat(restoredPath); os.IsNotExist(err) {
 		t.Error("restored .json file should exist after requeue")
 	}

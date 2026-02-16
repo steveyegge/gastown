@@ -150,9 +150,10 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 	// normal processing completes in milliseconds. We rename it back to .json
 	// so it gets picked up on this or a future Drain call, rather than deleting
 	// it (which would permanently drop the nudge).
+	// Claim files have the pattern: <original>.json.claimed.<suffix>
 	now := time.Now()
 	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".claimed") {
+		if !strings.Contains(entry.Name(), ".claimed") {
 			continue
 		}
 		info, err := entry.Info()
@@ -161,8 +162,10 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		}
 		if now.Sub(info.ModTime()) > staleClaimThreshold {
 			orphanPath := filepath.Join(dir, entry.Name())
-			// Strip .claimed suffix to restore the original .json filename
-			restoredPath := strings.TrimSuffix(orphanPath, ".claimed")
+			// Strip everything from ".claimed" onward to restore original .json filename
+			name := entry.Name()
+			claimedIdx := strings.Index(name, ".claimed")
+			restoredPath := filepath.Join(dir, name[:claimedIdx])
 			if err := os.Rename(orphanPath, restoredPath); err != nil {
 				// Rename failed — remove as last resort to prevent infinite accumulation
 				fmt.Fprintf(os.Stderr, "Warning: failed to requeue orphaned claim %s: %v\n", entry.Name(), err)
@@ -187,7 +190,13 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		// Atomically claim the file by renaming it. If another Drain call
 		// is racing us, only one rename will succeed — the loser gets
 		// ENOENT and moves on. This prevents double-delivery.
-		claimPath := path + ".claimed"
+		//
+		// Each drainer uses a unique claim suffix to avoid destination
+		// collisions. On Windows, os.Rename to a shared destination is
+		// not atomic — two goroutines can both "succeed" via
+		// MOVEFILE_REPLACE_EXISTING, causing data loss. Unique suffixes
+		// ensure each rename has a distinct target.
+		claimPath := path + ".claimed." + randomSuffix()
 		if err := os.Rename(path, claimPath); err != nil {
 			// Another Drain got it first, or file was already removed
 			continue
@@ -195,10 +204,12 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 
 		data, err := os.ReadFile(claimPath)
 		if err != nil {
-			// Unreadable — clean up so it doesn't become a ghost entry
-			if rmErr := os.Remove(claimPath); rmErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove unreadable claim %s: %v\n", entry.Name(), rmErr)
+			if os.IsNotExist(err) {
+				// File vanished between rename and read — treat as lost race
+				continue
 			}
+			// Genuinely unreadable — clean up so it doesn't become a ghost entry
+			_ = os.Remove(claimPath)
 			continue
 		}
 
