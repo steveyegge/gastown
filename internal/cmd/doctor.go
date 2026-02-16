@@ -84,6 +84,12 @@ Session hook checks:
   - claude-settings          Check Claude settings.json match templates (fixable)
   - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
 
+Dolt checks:
+  - dolt-binary              Check that dolt is installed and in PATH
+  - dolt-metadata            Check dolt metadata tables exist
+  - dolt-server-reachable    Check dolt sql-server is reachable
+  - dolt-orphaned-databases  Detect orphaned dolt databases
+
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
   - patrol-hooks-wired       Verify daemon triggers patrols
@@ -215,6 +221,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewHooksSyncCheck())
 
 	// Dolt health checks
+	d.Register(doctor.NewDoltBinaryCheck())
 	d.Register(doctor.NewDoltMetadataCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())
 	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
