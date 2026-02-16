@@ -1165,7 +1165,44 @@ func RoleSettingsDir(role, rigPath string) string {
 	}
 }
 
+// tryResolveFromEphemeralTier checks the GT_COST_TIER environment variable
+// and returns the appropriate RuntimeConfig for the given role if an ephemeral
+// cost tier is set. Returns nil if no ephemeral tier is active or if the role
+// is not overridden by the tier.
+func tryResolveFromEphemeralTier(role string) *RuntimeConfig {
+	tierName := os.Getenv("GT_COST_TIER")
+	if tierName == "" || !IsValidTier(tierName) {
+		return nil
+	}
+
+	tier := CostTier(tierName)
+	roleAgents := CostTierRoleAgents(tier)
+	if roleAgents == nil {
+		return nil
+	}
+
+	agentName, ok := roleAgents[role]
+	if !ok || agentName == "" {
+		return nil // Role not overridden by this tier — use default resolution
+	}
+
+	// Look up the agent config from the tier's agent definitions
+	agents := CostTierAgents(tier)
+	if agents != nil {
+		if rc, found := agents[agentName]; found && rc != nil {
+			return fillRuntimeDefaults(rc)
+		}
+	}
+
+	return nil
+}
+
 func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
+	// Check ephemeral cost tier (GT_COST_TIER env var) first
+	if rc := tryResolveFromEphemeralTier(role); rc != nil {
+		return rc
+	}
+
 	// Load rig settings (may be nil for town-level roles like mayor/deacon)
 	var rigSettings *RigSettings
 	if rigPath != "" {
