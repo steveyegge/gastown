@@ -56,6 +56,7 @@ var (
 	nowForStillness               = time.Now
 	estimateTargetLoadFn          = estimateTargetLoad
 	closeConvoyForDissolvedTaskFn = closeConvoyForDissolvedTask
+	logGovernanceAuditFn          = events.LogAudit
 )
 
 func evaluateSlingStillnessGate(townRoot, beadID, target string, info *beadInfo, force bool, args string) (*stillnessGateResult, error) {
@@ -147,6 +148,10 @@ func shouldApplyStillnessGate() bool {
 		case "1", "true", "yes", "on":
 			return true
 		case "0", "false", "no", "off":
+			if isProductionGovernanceEnv() {
+				logStillnessGateDisableBlocked(strings.TrimSpace(raw))
+				break
+			}
 			return false
 		}
 	}
@@ -520,4 +525,21 @@ func logStillnessNoOp(beadID, target string, result *stillnessGateResult) {
 	}
 
 	_ = events.LogFeed(events.TypeNoOp, actor, payload)
+}
+
+func logStillnessGateDisableBlocked(requested string) {
+	actor := detectActor()
+	if actor == "" || actor == "unknown" {
+		actor = "mayor"
+	}
+
+	payload := map[string]interface{}{
+		"schema_version": 1,
+		"phase":          "stillness_disable_blocked",
+		"requested":      strings.TrimSpace(requested),
+		"governance_env": strings.TrimSpace(os.Getenv("GT_GOVERNANCE_ENV")),
+		"reason":         "GT_STILLNESS_GATE disable override ignored in production",
+	}
+
+	_ = logGovernanceAuditFn(events.TypeAnchorHealthGate, actor, payload)
 }

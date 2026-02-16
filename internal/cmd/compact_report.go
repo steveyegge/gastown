@@ -41,26 +41,31 @@ var categoryOrder = []string{"Heartbeats", "Patrols", "Errors", "Untyped"}
 type categoryStats struct {
 	Deleted  int `json:"deleted"`
 	Promoted int `json:"promoted"`
+	Blocked  int `json:"blocked,omitempty"`
 	Active   int `json:"active"`
 }
 
 // compactReport is the full daily digest data.
 type compactReport struct {
-	Date       string                    `json:"date"`
-	Categories map[string]*categoryStats `json:"categories"`
-	Promotions []compactAction           `json:"promotions,omitempty"`
-	Anomalies  []string                  `json:"anomalies,omitempty"`
-	Errors     []string                  `json:"errors,omitempty"`
+	Date                       string                    `json:"date"`
+	Categories                 map[string]*categoryStats `json:"categories"`
+	Promotions                 []compactAction           `json:"promotions,omitempty"`
+	BlockedPromotions          []compactAction           `json:"blocked_promotions,omitempty"`
+	EpistemicIntegrityPreserve int                       `json:"epistemic_integrity_preserve,omitempty"`
+	Anomalies                  []string                  `json:"anomalies,omitempty"`
+	Errors                     []string                  `json:"errors,omitempty"`
 }
 
 // weeklyRollup aggregates daily reports for trend data.
 type weeklyRollup struct {
-	WeekStart  string                    `json:"week_start"`
-	WeekEnd    string                    `json:"week_end"`
-	Days       int                       `json:"days"`
-	Totals     map[string]*categoryStats `json:"totals"`
-	Promotions int                       `json:"total_promotions"`
-	Anomalies  []string                  `json:"anomalies,omitempty"`
+	WeekStart                  string                    `json:"week_start"`
+	WeekEnd                    string                    `json:"week_end"`
+	Days                       int                       `json:"days"`
+	Totals                     map[string]*categoryStats `json:"totals"`
+	Promotions                 int                       `json:"total_promotions"`
+	BlockedPromotions          int                       `json:"total_blocked_promotions,omitempty"`
+	EpistemicIntegrityPreserve int                       `json:"epistemic_integrity_preserve,omitempty"`
+	Anomalies                  []string                  `json:"anomalies,omitempty"`
 }
 
 var compactReportCmd = &cobra.Command{
@@ -197,6 +202,14 @@ func buildReport(dateStr string, result *compactResult, activeWisps []*compactIs
 		report.Promotions = append(report.Promotions, p)
 	}
 
+	// Tally blocked promotions by category
+	for _, b := range result.Blocked {
+		cat := wispTypeToCategory(b.WispType)
+		report.Categories[cat].Blocked++
+		report.BlockedPromotions = append(report.BlockedPromotions, b)
+	}
+	report.EpistemicIntegrityPreserve = len(report.BlockedPromotions)
+
 	// Tally active wisps by category
 	for _, w := range activeWisps {
 		cat := wispTypeToCategory(w.WispType)
@@ -240,6 +253,11 @@ func detectAnomalies(report *compactReport) []string {
 				fmt.Sprintf("%s: high promotion rate (%d/%d) — review wisp classification",
 					cat, stats.Promoted, total))
 		}
+
+		if stats.Blocked > 0 {
+			anomalies = append(anomalies,
+				fmt.Sprintf("%s: %d promotion(s) blocked by anchor freeze", cat, stats.Blocked))
+		}
 	}
 
 	return anomalies
@@ -253,17 +271,17 @@ func formatDailyDigest(report *compactReport) string {
 
 	// Summary table
 	sb.WriteString("### Summary\n")
-	sb.WriteString("| Category | Deleted | Promoted | Active |\n")
-	sb.WriteString("|----------|---------|----------|--------|\n")
+	sb.WriteString("| Category | Deleted | Promoted | Blocked | Active |\n")
+	sb.WriteString("|----------|---------|----------|---------|--------|\n")
 
 	for _, cat := range categoryOrder {
 		stats := report.Categories[cat]
 		// Skip empty categories
-		if stats.Deleted == 0 && stats.Promoted == 0 && stats.Active == 0 {
+		if stats.Deleted == 0 && stats.Promoted == 0 && stats.Blocked == 0 && stats.Active == 0 {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d |\n",
-			cat, stats.Deleted, stats.Promoted, stats.Active))
+		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %d |\n",
+			cat, stats.Deleted, stats.Promoted, stats.Blocked, stats.Active))
 	}
 
 	// Promotions
@@ -274,6 +292,17 @@ func formatDailyDigest(report *compactReport) string {
 				p.ID, compactTruncate(p.Title, 60), p.Reason))
 		}
 	}
+
+	if len(report.BlockedPromotions) > 0 {
+		sb.WriteString("\n### Blocked Promotions\n")
+		for _, p := range report.BlockedPromotions {
+			sb.WriteString(fmt.Sprintf("- %s: %q (reason: %s)\n",
+				p.ID, compactTruncate(p.Title, 60), p.Reason))
+		}
+	}
+
+	sb.WriteString("\n### Integrity\n")
+	sb.WriteString(fmt.Sprintf("- **Epistemic integrity preserved:** %d\n", report.EpistemicIntegrityPreserve))
 
 	// Anomalies
 	if len(report.Anomalies) > 0 {
@@ -374,9 +403,12 @@ func runWeeklyRollup() error {
 			}
 			rollup.Totals[cat].Deleted += stats.Deleted
 			rollup.Totals[cat].Promoted += stats.Promoted
+			rollup.Totals[cat].Blocked += stats.Blocked
 			rollup.Totals[cat].Active = stats.Active // Use latest active count
 		}
 		rollup.Promotions += len(report.Promotions)
+		rollup.BlockedPromotions += len(report.BlockedPromotions)
+		rollup.EpistemicIntegrityPreserve += report.EpistemicIntegrityPreserve
 		rollup.Anomalies = append(rollup.Anomalies, report.Anomalies...)
 	}
 
@@ -473,27 +505,31 @@ func formatWeeklyRollup(rollup *weeklyRollup) string {
 
 	// Totals table
 	sb.WriteString("### Totals\n")
-	sb.WriteString("| Category | Deleted | Promoted | Active (latest) |\n")
-	sb.WriteString("|----------|---------|----------|----------------|\n")
+	sb.WriteString("| Category | Deleted | Promoted | Blocked | Active (latest) |\n")
+	sb.WriteString("|----------|---------|----------|---------|----------------|\n")
 
 	totalDeleted := 0
 	totalPromoted := 0
+	totalBlocked := 0
 
 	for _, cat := range categoryOrder {
 		stats := rollup.Totals[cat]
-		if stats.Deleted == 0 && stats.Promoted == 0 && stats.Active == 0 {
+		if stats.Deleted == 0 && stats.Promoted == 0 && stats.Blocked == 0 && stats.Active == 0 {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d |\n",
-			cat, stats.Deleted, stats.Promoted, stats.Active))
+		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %d |\n",
+			cat, stats.Deleted, stats.Promoted, stats.Blocked, stats.Active))
 		totalDeleted += stats.Deleted
 		totalPromoted += stats.Promoted
+		totalBlocked += stats.Blocked
 	}
 
 	// Rates
 	sb.WriteString(fmt.Sprintf("\n### Rates\n"))
 	sb.WriteString(fmt.Sprintf("- **Total deleted:** %d\n", totalDeleted))
 	sb.WriteString(fmt.Sprintf("- **Total promoted:** %d\n", totalPromoted))
+	sb.WriteString(fmt.Sprintf("- **Total blocked promotions:** %d\n", totalBlocked))
+	sb.WriteString(fmt.Sprintf("- **Epistemic integrity preserved:** %d\n", rollup.EpistemicIntegrityPreserve))
 	if totalDeleted+totalPromoted > 0 {
 		rate := float64(totalPromoted) / float64(totalDeleted+totalPromoted) * 100
 		sb.WriteString(fmt.Sprintf("- **Promotion rate:** %.1f%%\n", rate))

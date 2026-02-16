@@ -10,6 +10,23 @@ import (
 	"testing"
 )
 
+func requireSymlinkCapability(t *testing.T) {
+	t.Helper()
+
+	target := filepath.Join(t.TempDir(), "target")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.WriteFile(target, []byte("ok"), 0644); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink test skipped on Windows without Developer Mode/elevated token: %v", err)
+		}
+		t.Fatalf("symlink capability required: %v", err)
+	}
+	_ = os.Remove(link)
+}
+
 // TestGetEmbeddedFormulas verifies embedded formulas can be read and hashed.
 func TestGetEmbeddedFormulas(t *testing.T) {
 	embedded, err := getEmbeddedFormulas()
@@ -664,6 +681,8 @@ func TestUpdateFormulas_UpdatesUntracked(t *testing.T) {
 // TestProvisionFormulas_StatError tests that ProvisionFormulas returns an error
 // when os.Stat fails with something other than IsNotExist (e.g. permission denied).
 func TestProvisionFormulas_StatError(t *testing.T) {
+	requireSymlinkCapability(t)
+
 	tmpDir := t.TempDir()
 
 	// Get at least one embedded formula name

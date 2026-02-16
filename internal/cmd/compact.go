@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/governance"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/wisp"
 )
@@ -36,6 +37,7 @@ var defaultTTLs = map[string]time.Duration{
 type compactResult struct {
 	Promoted []compactAction `json:"promoted"`
 	Deleted  []compactAction `json:"deleted"`
+	Blocked  []compactAction `json:"blocked,omitempty"`
 	Skipped  int             `json:"skipped"` // wisps still within TTL
 	Errors   []string        `json:"errors,omitempty"`
 }
@@ -243,13 +245,13 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		if w.Status != "closed" {
 			// Non-closed wisps
 			if shouldPromote {
-				promoteWisp(bd, w, "proven value", result)
+				promoteWisp(townRoot, bd, w, "proven value", result)
 			} else if age > ttl {
 				reason := "open past TTL"
 				if w.Status == "in_progress" {
 					reason = "stuck in_progress past TTL"
 				}
-				promoteWisp(bd, w, reason, result)
+				promoteWisp(townRoot, bd, w, reason, result)
 			} else {
 				result.Skipped++
 				if compactVerbose && !compactJSON {
@@ -260,7 +262,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		} else {
 			// Closed wisps
 			if shouldPromote {
-				promoteWisp(bd, w, "proven value", result)
+				promoteWisp(townRoot, bd, w, "proven value", result)
 			} else if age > ttl {
 				deleteWisp(bd, w, "TTL expired", result)
 			} else {
@@ -309,9 +311,31 @@ func listWisps(bd *beads.Beads) ([]*compactIssue, error) {
 	return wisps, nil
 }
 
+var (
+	updateWispPersistentFn = updateWispPersistent
+	addPromotionCommentFn  = addPromotionComment
+)
+
 // promoteWisp makes a wisp permanent by setting --persistent and adding a comment.
-func promoteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compactResult) {
+func promoteWisp(townRoot string, bd *beads.Beads, w *compactIssue, reason string, result *compactResult) {
 	action := compactAction{ID: w.ID, Title: w.Title, Reason: reason, WispType: w.WispType}
+
+	gateResult, gateErr := assertAnchorHealthFn(townRoot, w.ID, "wisp_compaction")
+	if gateErr != nil && (gateResult == nil || gateResult.Status != governance.AnchorGateStatusOK) {
+		blockPromotion(result, action, fmt.Sprintf("anchor health gate error: %v", gateErr))
+		return
+	}
+	if gateResult != nil && gateResult.Status != governance.AnchorGateStatusOK {
+		blockReason := gateResult.Reason
+		if blockReason == "" {
+			blockReason = fmt.Sprintf("anchor gate returned %s", gateResult.Status)
+		}
+		blockPromotion(result, action, blockReason)
+		return
+	}
+	if gateErr != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("anchor health gate %s: %v", w.ID, gateErr))
+	}
 
 	if compactDryRun {
 		result.Promoted = append(result.Promoted, action)
@@ -323,20 +347,40 @@ func promoteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compac
 	}
 
 	// bd update --persistent sets ephemeral=false
-	_, err := bd.Run("update", w.ID, "--persistent")
-	if err != nil {
+	if err := updateWispPersistentFn(bd, w); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("promote %s: %v", w.ID, err))
 		return
 	}
 
 	// Add comment noting the promotion
-	_, _ = bd.Run("comment", w.ID, fmt.Sprintf("Promoted from Level 0: %s", reason))
+	addPromotionCommentFn(bd, w, reason)
 
 	result.Promoted = append(result.Promoted, action)
+	if err := recordPromotionPtrFn(townRoot, w.ID); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("record promotion pointer %s: %v", w.ID, err))
+	}
 
 	if compactVerbose && !compactJSON {
 		fmt.Printf("  %s %s %s (%s)\n",
 			style.Success.Render("promote"), w.ID, compactTruncate(w.Title, 40), reason)
+	}
+}
+
+func updateWispPersistent(bd *beads.Beads, w *compactIssue) error {
+	_, err := bd.Run("update", w.ID, "--persistent")
+	return err
+}
+
+func addPromotionComment(bd *beads.Beads, w *compactIssue, reason string) {
+	_, _ = bd.Run("comment", w.ID, fmt.Sprintf("Promoted from Level 0: %s", reason))
+}
+
+func blockPromotion(result *compactResult, action compactAction, reason string) {
+	action.Reason = reason
+	result.Blocked = append(result.Blocked, action)
+	if compactVerbose && !compactJSON {
+		fmt.Printf("  %s block   %s %s (%s)\n",
+			style.Dim.Render("○"), action.ID, compactTruncate(action.Title, 40), reason)
 	}
 }
 
@@ -371,7 +415,8 @@ func deleteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compact
 func printCompactSummary(result *compactResult) {
 	promoted := len(result.Promoted)
 	deleted := len(result.Deleted)
-	total := promoted + deleted + result.Skipped
+	blocked := len(result.Blocked)
+	total := promoted + deleted + blocked + result.Skipped
 
 	if compactDryRun {
 		fmt.Printf("\n%s Dry run complete: %d wisps scanned\n",
@@ -382,6 +427,7 @@ func printCompactSummary(result *compactResult) {
 
 	fmt.Printf("  Promoted: %d\n", promoted)
 	fmt.Printf("  Deleted:  %d\n", deleted)
+	fmt.Printf("  Blocked:  %d (anchor freeze)\n", blocked)
 	fmt.Printf("  Skipped:  %d (within TTL)\n", result.Skipped)
 
 	if len(result.Errors) > 0 {
@@ -396,6 +442,13 @@ func printCompactSummary(result *compactResult) {
 		fmt.Printf("\nPromotions:\n")
 		for _, p := range result.Promoted {
 			fmt.Printf("  %s: %s (%s)\n", p.ID, compactTruncate(p.Title, 50), p.Reason)
+		}
+	}
+
+	if blocked > 0 && !compactDryRun {
+		fmt.Printf("\nBlocked promotions:\n")
+		for _, b := range result.Blocked {
+			fmt.Printf("  %s: %s (%s)\n", b.ID, compactTruncate(b.Title, 50), b.Reason)
 		}
 	}
 }

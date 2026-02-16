@@ -13,6 +13,23 @@ import (
 	"testing"
 )
 
+func requireSymlinkCapability(t *testing.T) {
+	t.Helper()
+
+	target := filepath.Join(t.TempDir(), "target")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.WriteFile(target, []byte("ok"), 0644); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink test skipped on Windows without Developer Mode/elevated token: %v", err)
+		}
+		t.Fatalf("symlink capability required: %v", err)
+	}
+	_ = os.Remove(link)
+}
+
 // =============================================================================
 // Health metrics tests
 // =============================================================================
@@ -303,6 +320,8 @@ func TestFindLocalDoltDB(t *testing.T) {
 	})
 
 	t.Run("symlink to directory with dolt database", func(t *testing.T) {
+		requireSymlinkCapability(t)
+
 		beadsDir := t.TempDir()
 		doltParent := filepath.Join(beadsDir, "dolt")
 		if err := os.MkdirAll(doltParent, 0755); err != nil {

@@ -210,6 +210,7 @@ exit /b 0
 	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
@@ -397,6 +398,7 @@ exit /b 0
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("TMUX_PANE", "")
@@ -542,6 +544,7 @@ exit /b 0
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("TMUX_PANE", "")
@@ -707,6 +710,7 @@ exit /b 0
 	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
@@ -1111,6 +1115,7 @@ exit /b 0
 	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
@@ -1253,6 +1258,7 @@ exit /b 0
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_CREW", "")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("TMUX_PANE", "")
@@ -1468,6 +1474,7 @@ exit /b 0
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
+	disableStillnessGate(t)
 	t.Setenv("GT_CREW", "")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("TMUX_PANE", "")

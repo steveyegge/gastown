@@ -77,6 +77,8 @@ func setTestHome(t *testing.T, fakeHome string) {
 }
 
 func TestAccountSwitch(t *testing.T) {
+	requireSymlinkCapability(t)
+
 	t.Run("switch between accounts", func(t *testing.T) {
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
