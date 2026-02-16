@@ -231,7 +231,7 @@ You are a Gas Town polecat (persistent identity, ephemeral sessions).
 1. `cd` to your assigned worktree (given in your spawn prompt)
 2. Run `gt prime` for full context
 3. Check your hook: `gt hook`
-4. Follow molecule steps: `bd ready`
+4. Follow molecule steps: `bd mol current`
 
 ## Work Protocol
 - Mark steps in_progress before starting: `bd update <id> --status=in_progress`
