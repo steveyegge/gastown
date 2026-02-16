@@ -11,13 +11,15 @@ import (
 
 // Category constants for grouping checks
 const (
-	CategoryCore          = "Core"
+	CategoryCore           = "Core"
 	CategoryInfrastructure = "Infrastructure"
-	CategoryRig           = "Rig"
-	CategoryPatrol        = "Patrol"
-	CategoryConfig        = "Configuration"
-	CategoryCleanup       = "Cleanup"
-	CategoryHooks         = "Hooks"
+	CategoryRig            = "Rig"
+	CategoryPatrol         = "Patrol"
+	CategoryConfig         = "Configuration"
+	CategoryBeads          = "Beads"
+	CategoryPriming        = "Priming"
+	CategoryCleanup        = "Cleanup"
+	CategoryHooks          = "Hooks"
 )
 
 // CategoryOrder defines the display order for categories
@@ -27,6 +29,8 @@ var CategoryOrder = []string{
 	CategoryRig,
 	CategoryPatrol,
 	CategoryConfig,
+	CategoryBeads,
+	CategoryPriming,
 	CategoryCleanup,
 	CategoryHooks,
 }
@@ -96,6 +100,9 @@ type Check interface {
 
 	// Description returns a human-readable description.
 	Description() string
+
+	// Category returns the check's category for grouping in output.
+	Category() string
 
 	// Run executes the check and returns a result.
 	Run(ctx *CheckContext) *CheckResult

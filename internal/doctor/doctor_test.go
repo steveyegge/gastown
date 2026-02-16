@@ -362,3 +362,146 @@ func TestFixableCheck(t *testing.T) {
 		t.Error("FixableCheck.CanFix() should return true")
 	}
 }
+
+func TestRunStreaming_NonTTY(t *testing.T) {
+	d := NewDoctor()
+	d.Register(newMockCheck("test-check", StatusOK))
+	d.Register(newMockCheck("warn-check", StatusWarning))
+	d.Register(newMockCheck("fail-check", StatusError))
+
+	ctx := &CheckContext{TownRoot: "/test"}
+	var buf bytes.Buffer
+	report := d.RunStreaming(ctx, &buf, 0, false)
+
+	output := buf.String()
+
+	// Verify text prefixes are used instead of icons
+	if !bytes.Contains(buf.Bytes(), []byte("PASS  test-check")) {
+		t.Errorf("Non-TTY output should contain 'PASS  test-check', got:\n%s", output)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("WARN  warn-check")) {
+		t.Errorf("Non-TTY output should contain 'WARN  warn-check', got:\n%s", output)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("FAIL  fail-check")) {
+		t.Errorf("Non-TTY output should contain 'FAIL  fail-check', got:\n%s", output)
+	}
+
+	// Verify no carriage returns
+	if bytes.Contains(buf.Bytes(), []byte("\r")) {
+		t.Error("Non-TTY output should not contain carriage returns")
+	}
+
+	// Verify no icons (✓ ⚠ ✖ ○)
+	for _, icon := range []string{"✓", "⚠", "✖", "○"} {
+		if bytes.Contains(buf.Bytes(), []byte(icon)) {
+			t.Errorf("Non-TTY output should not contain icon %q", icon)
+		}
+	}
+
+	// Verify message is included
+	if !bytes.Contains(buf.Bytes(), []byte("mock result")) {
+		t.Errorf("Non-TTY output should contain check message, got:\n%s", output)
+	}
+
+	// Verify report counts are correct
+	if report.Summary.Total != 3 || report.Summary.OK != 1 || report.Summary.Warnings != 1 || report.Summary.Errors != 1 {
+		t.Errorf("Report summary mismatch: Total=%d OK=%d Warnings=%d Errors=%d",
+			report.Summary.Total, report.Summary.OK, report.Summary.Warnings, report.Summary.Errors)
+	}
+}
+
+func TestRunStreaming_TTY(t *testing.T) {
+	d := NewDoctor()
+	d.Register(newMockCheck("test-check", StatusOK))
+
+	ctx := &CheckContext{TownRoot: "/test"}
+	var buf bytes.Buffer
+	d.RunStreaming(ctx, &buf, 0, true)
+
+	output := buf.String()
+
+	// TTY mode should have carriage returns for line overwrites
+	if !bytes.Contains(buf.Bytes(), []byte("\r")) {
+		t.Errorf("TTY output should contain carriage returns, got:\n%s", output)
+	}
+
+	// TTY mode should NOT have text prefixes
+	if bytes.Contains(buf.Bytes(), []byte("PASS")) {
+		t.Errorf("TTY output should not contain 'PASS' prefix, got:\n%s", output)
+	}
+}
+
+func TestFixStreaming_NonTTY(t *testing.T) {
+	d := NewDoctor()
+
+	okCheck := newMockCheck("ok-check", StatusOK)
+	d.Register(okCheck)
+
+	fixableCheck := newMockCheck("fixable-check", StatusError)
+	fixableCheck.fixable = true
+	d.Register(fixableCheck)
+
+	unfixableCheck := newMockCheck("unfixable-check", StatusWarning)
+	d.Register(unfixableCheck)
+
+	ctx := &CheckContext{TownRoot: "/test"}
+	var buf bytes.Buffer
+	report := d.FixStreaming(ctx, &buf, 0, false)
+
+	output := buf.String()
+
+	// Verify PASS prefix for ok check
+	if !bytes.Contains(buf.Bytes(), []byte("PASS  ok-check")) {
+		t.Errorf("Non-TTY output should contain 'PASS  ok-check', got:\n%s", output)
+	}
+
+	// Verify FIXED prefix for auto-fixed check
+	if !bytes.Contains(buf.Bytes(), []byte("FIXED  fixable-check")) {
+		t.Errorf("Non-TTY output should contain 'FIXED  fixable-check', got:\n%s", output)
+	}
+
+	// Verify WARN prefix for unfixable warning
+	if !bytes.Contains(buf.Bytes(), []byte("WARN  unfixable-check")) {
+		t.Errorf("Non-TTY output should contain 'WARN  unfixable-check', got:\n%s", output)
+	}
+
+	// Verify no carriage returns
+	if bytes.Contains(buf.Bytes(), []byte("\r")) {
+		t.Error("Non-TTY fix output should not contain carriage returns")
+	}
+
+	// Verify no icons (✓ ⚠ ✖ 🔧 ○)
+	for _, icon := range []string{"✓", "⚠", "✖", "🔧", "○"} {
+		if bytes.Contains(buf.Bytes(), []byte(icon)) {
+			t.Errorf("Non-TTY fix output should not contain icon %q", icon)
+		}
+	}
+
+	// Verify report
+	if report.Summary.Fixed != 1 {
+		t.Errorf("Expected 1 fixed check, got %d", report.Summary.Fixed)
+	}
+}
+
+func TestFixStreaming_NonTTY_FixFailed(t *testing.T) {
+	d := NewDoctor()
+
+	failCheck := newMockCheck("broken-check", StatusError)
+	failCheck.fixable = true
+	failCheck.fixError = ErrCannotFix // Simulate fix failure
+	d.Register(failCheck)
+
+	ctx := &CheckContext{TownRoot: "/test"}
+	var buf bytes.Buffer
+	d.FixStreaming(ctx, &buf, 0, false)
+
+	output := buf.String()
+
+	// Fix failed, so should show FAIL prefix (not FIXED)
+	if !bytes.Contains(buf.Bytes(), []byte("FAIL  broken-check")) {
+		t.Errorf("Non-TTY output should show 'FAIL' for failed fix, got:\n%s", output)
+	}
+	if bytes.Contains(buf.Bytes(), []byte("FIXED")) {
+		t.Errorf("Non-TTY output should not show 'FIXED' when fix fails, got:\n%s", output)
+	}
+}

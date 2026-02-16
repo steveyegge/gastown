@@ -26,7 +26,7 @@ func NewStaleAgentBeadsCheck() *StaleAgentBeadsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "stale-agent-beads",
 				CheckDescription: "Detect agent beads for removed workers (crew and polecats)",
-				CheckCategory:    CategoryRig,
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}

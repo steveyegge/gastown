@@ -27,7 +27,7 @@ func NewRoleBeadsCheck() *RoleConfigCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "role-config-valid",
 			CheckDescription: "Verify role configuration is valid",
-			CheckCategory:    CategoryConfig,
+			CheckCategory:    CategoryBeads,
 		},
 	}
 }

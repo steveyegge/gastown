@@ -35,6 +35,7 @@ func NewPrimingCheck() *PrimingCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "priming",
 				CheckDescription: "Verify priming subsystem is correctly configured",
+				CheckCategory:    CategoryPriming,
 			},
 		},
 	}

@@ -26,7 +26,7 @@ func NewWispGCCheck() *WispGCCheck {
 	return &WispGCCheck{
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
-				CheckName:        "wisp-gc",
+				CheckName:        "wisp-garbage-collection",
 				CheckDescription: "Detect and clean orphaned wisps (>1h old)",
 				CheckCategory:    CategoryCleanup,
 			},

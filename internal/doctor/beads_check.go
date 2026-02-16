@@ -26,7 +26,7 @@ func NewBeadsDatabaseCheck() *BeadsDatabaseCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "beads-database",
 				CheckDescription: "Verify beads database is properly initialized",
-				CheckCategory:    CategoryConfig,
+				CheckCategory:    CategoryBeads,
 			},
 		},
 	}
@@ -179,7 +179,7 @@ func NewPrefixConflictCheck() *PrefixConflictCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "prefix-conflict",
 			CheckDescription: "Check for duplicate beads prefixes across rigs",
-			CheckCategory:    CategoryConfig,
+			CheckCategory:    CategoryBeads,
 		},
 	}
 }
@@ -247,7 +247,7 @@ func NewPrefixMismatchCheck() *PrefixMismatchCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "prefix-mismatch",
 				CheckDescription: "Check for prefix mismatches between rigs.json and routes.jsonl",
-				CheckCategory:    CategoryConfig,
+				CheckCategory:    CategoryBeads,
 			},
 		},
 	}
@@ -483,7 +483,7 @@ func NewRoleLabelCheck() *RoleLabelCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "role-bead-labels",
 				CheckDescription: "Check that role beads have gt:role label",
-				CheckCategory:    CategoryConfig,
+				CheckCategory:    CategoryBeads,
 			},
 		},
 		labelAdder: &realLabelAdder{},
@@ -603,7 +603,7 @@ func NewDatabasePrefixCheck() *DatabasePrefixCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "database-prefix",
 				CheckDescription: "Check rig database issue_prefix matches routes.jsonl",
-				CheckCategory:    CategoryConfig,
+				CheckCategory:    CategoryBeads,
 			},
 		},
 	}
