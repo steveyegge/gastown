@@ -20,12 +20,15 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 		"location:" + location,
 	}
 
+	description := formatDogDescription(name, location)
+
 	args := []string{
 		"create", "--json",
 		"--id=" + beadID,
 		"--type=agent",
 		"--role-type=dog",
 		"--title=" + title,
+		"--description=" + description,
 		"--labels=" + strings.Join(labels, ","),
 	}
 
@@ -96,5 +99,18 @@ func (b *Beads) ResetDogAgentBead(name string) error {
 		return fmt.Errorf("resetting bead %s: %w", issue.ID, err)
 	}
 	return nil
+}
+
+// formatDogDescription creates a description for a dog agent bead.
+// Includes role_type, rig, and location metadata so the mail router
+// can resolve the agent address from the description.
+func formatDogDescription(name, location string) string {
+	return strings.Join([]string{
+		fmt.Sprintf("Dog: %s", name),
+		"",
+		"role_type: dog",
+		"rig: town",
+		fmt.Sprintf("location: %s", location),
+	}, "\n")
 }
 

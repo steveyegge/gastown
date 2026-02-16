@@ -831,6 +831,29 @@ func TestAgentBeadToAddress(t *testing.T) {
 			bead: &agentBead{ID: ""},
 			want: "",
 		},
+		{
+			name: "hq-dog with location in description",
+			bead: &agentBead{
+				ID:          "hq-dog-alpha",
+				Description: "Dog: alpha\n\nrole_type: dog\nrig: town\nlocation: deacon/dogs/alpha",
+			},
+			want: "deacon/dogs/alpha",
+		},
+		{
+			name: "hq-dog without description returns empty",
+			bead: &agentBead{
+				ID: "hq-dog-bravo",
+			},
+			want: "",
+		},
+		{
+			name: "hq-dog with location takes priority over role_type+rig",
+			bead: &agentBead{
+				ID:          "hq-dog-charlie",
+				Description: "Dog: charlie\n\nrole_type: dog\nrig: town\nlocation: deacon/dogs/charlie",
+			},
+			want: "deacon/dogs/charlie",
+		},
 	}
 
 	for _, tt := range tests {
@@ -838,6 +861,49 @@ func TestAgentBeadToAddress(t *testing.T) {
 			got := agentBeadToAddress(tt.bead)
 			if got != tt.want {
 				t.Errorf("agentBeadToAddress(%+v) = %q, want %q", tt.bead, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAgentAddressFromDescription(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want string
+	}{
+		{
+			name: "location field returns address directly",
+			desc: "Dog: alpha\n\nrole_type: dog\nrig: town\nlocation: deacon/dogs/alpha",
+			want: "deacon/dogs/alpha",
+		},
+		{
+			name: "location null falls back to role_type+rig",
+			desc: "Some agent\n\nrole_type: witness\nrig: myrig\nlocation: null",
+			want: "myrig/witness",
+		},
+		{
+			name: "no location uses role_type+rig",
+			desc: "Some agent\n\nrole_type: polecat\nrig: gastown",
+			want: "gastown/polecat",
+		},
+		{
+			name: "town-level agent no rig",
+			desc: "Mayor\n\nrole_type: mayor\nrig: null",
+			want: "mayor/",
+		},
+		{
+			name: "empty description",
+			desc: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseAgentAddressFromDescription(tt.desc)
+			if got != tt.want {
+				t.Errorf("parseAgentAddressFromDescription(%q) = %q, want %q", tt.desc, got, tt.want)
 			}
 		})
 	}
