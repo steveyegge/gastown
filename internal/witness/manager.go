@@ -123,6 +123,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// package config) to prevent concurrent rig starts from corrupting the
 	// global agent registry.
 	townRoot := m.townRoot()
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, "")
+
 	runtimeConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
 	witnessSettingsDir := config.RoleSettingsDir("witness", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(witnessSettingsDir, witnessDir, "witness", runtimeConfig); err != nil {
@@ -143,7 +146,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
+	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, claudeConfigDir, roleConfig)
 	if err != nil {
 		return err
 	}
@@ -157,9 +160,10 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "witness",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
+		Role:             "witness",
+		Rig:              m.rig.Name,
+		TownRoot:         townRoot,
+		RuntimeConfigDir: claudeConfigDir,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
@@ -231,7 +235,7 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	return expanded
 }
 
-func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
+func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride, claudeConfigDir string, roleConfig *beads.RoleConfig) (string, error) {
 	if agentOverride != "" {
 		roleConfig = nil
 	}
@@ -243,11 +247,16 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		Sender:    "deacon",
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
-	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
-	if err != nil {
-		return "", fmt.Errorf("building startup command: %w", err)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "witness",
+		Rig:              rigName,
+		TownRoot:         townRoot,
+		RuntimeConfigDir: claudeConfigDir,
+	})
+	if agentOverride != "" {
+		return config.BuildStartupCommandWithAgentOverride(envVars, rigPath, initialPrompt, agentOverride)
 	}
-	return command, nil
+	return config.BuildStartupCommand(envVars, rigPath, initialPrompt), nil
 }
 
 // Stop stops the witness.
