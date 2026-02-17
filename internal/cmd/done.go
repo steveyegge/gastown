@@ -1346,6 +1346,16 @@ func isPolecatActor(actor string) bool {
 	return len(parts) >= 2 && parts[1] == "polecats"
 }
 
+// resolvePolecatSessionName resolves the tmux session name for a polecat,
+// ensuring the prefix registry is initialized for correct prefix resolution.
+// persistentPreRun may have failed to init it (e.g., deleted worktree).
+func resolvePolecatSessionName(townRoot, rigName, polecatName string) string {
+	if townRoot != "" {
+		_ = session.InitRegistry(townRoot)
+	}
+	return session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
+}
+
 // selfKillSession terminates the polecat's own tmux session after logging the event.
 // This completes the self-cleaning model: "done means gone" - both worktree and session.
 //
@@ -1370,7 +1380,7 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 		return fmt.Errorf("cannot determine session: rig=%q, polecat=%q", rigName, polecatName)
 	}
 
-	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
+	sessionName := resolvePolecatSessionName(townRoot, rigName, polecatName)
 	agentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
 
 	// Log to townlog (human-readable audit log)
