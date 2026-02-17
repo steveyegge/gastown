@@ -73,7 +73,7 @@ var (
 //     cleanup never kills an external server.
 //
 // Why port 3307 is fixed: the entire gt/bd stack (doltserver.DefaultPort,
-// gt install, gt dolt start, bd init --backend dolt) assumes port 3307.
+// gt install, gt dolt start, bd init) assumes port 3307.
 // A random port would require threading an override through all layers.
 func requireDoltServer(t *testing.T) {
 	t.Helper()

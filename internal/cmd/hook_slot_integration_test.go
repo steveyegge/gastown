@@ -74,7 +74,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 func initBeadsDB(t *testing.T, dir string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "init", "--backend", "dolt")
+	cmd := exec.Command("bd", "init")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, output)

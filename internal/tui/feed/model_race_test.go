@@ -11,7 +11,7 @@ import (
 // TestAddEventConcurrentWithView verifies that addEvent and View can run
 // concurrently without data races. Run with -race to detect issues.
 func TestAddEventConcurrentWithView(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 	m.mu.Lock()
 	m.width = 80
 	m.height = 40
@@ -51,7 +51,7 @@ func TestAddEventConcurrentWithView(t *testing.T) {
 // TestSetEventChannelConcurrentWithListen verifies that SetEventChannel
 // can be called concurrently with listenForEvents without data races.
 func TestSetEventChannelConcurrentWithListen(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 
 	var wg sync.WaitGroup
 
@@ -80,7 +80,7 @@ func TestSetEventChannelConcurrentWithListen(t *testing.T) {
 // TestSetTownRootConcurrentWithFetch verifies that SetTownRoot can be called
 // concurrently with fetchConvoys without data races.
 func TestSetTownRootConcurrentWithFetch(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 
 	var wg sync.WaitGroup
 
@@ -108,7 +108,7 @@ func TestSetTownRootConcurrentWithFetch(t *testing.T) {
 // TestMultipleWritersConcurrent verifies that multiple goroutines adding
 // events concurrently don't cause data races on the events slice or rigs map.
 func TestMultipleWritersConcurrent(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 	m.mu.Lock()
 	m.width = 80
 	m.height = 40
@@ -154,7 +154,7 @@ func TestMultipleWritersConcurrent(t *testing.T) {
 
 // TestAddEventLocked verifies the locked mutation logic directly.
 func TestAddEventLocked(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 
 	tests := []struct {
 		name        string
@@ -228,7 +228,7 @@ func TestAddEventLocked(t *testing.T) {
 // TestEventsHistoryLimit verifies that the events slice doesn't grow beyond
 // maxEventHistory.
 func TestEventsHistoryLimit(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 
 	// Add more than maxEventHistory events
 	for i := 0; i < maxEventHistory+100; i++ {
@@ -254,7 +254,7 @@ func TestEventsHistoryLimit(t *testing.T) {
 // TestViewConcurrentWithWindowResize verifies that View and WindowSizeMsg
 // updates can run concurrently without data races on width/height.
 func TestViewConcurrentWithWindowResize(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 	m.mu.Lock()
 	m.width = 80
 	m.height = 40
@@ -286,7 +286,7 @@ func TestViewConcurrentWithWindowResize(t *testing.T) {
 // TestViewConcurrentWithKeyHandling verifies that View and handleKey
 // focus/help toggles can run concurrently without data races.
 func TestViewConcurrentWithKeyHandling(t *testing.T) {
-	m := NewModel()
+	m := NewModel(nil)
 	m.mu.Lock()
 	m.width = 80
 	m.height = 40

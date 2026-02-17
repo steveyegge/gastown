@@ -22,6 +22,7 @@ var (
 	crewListAll       bool
 	crewDryRun        bool
 	crewDebug         bool
+	crewReset         bool
 )
 
 var crewCmd = &cobra.Command{
@@ -108,6 +109,11 @@ current pane. Use C-b s to switch to the new session.
 When run from outside tmux, you are attached to the session (unless
 --detached is specified).
 
+Branch Handling:
+  By default, the workspace stays on its current branch (a warning is
+  shown if not on the default branch). Use --reset to switch to the
+  default branch and pull latest changes.
+
 Role Discovery:
   If no name is provided, attempts to detect the crew workspace from the
   current directory. If you're in <rig>/crew/<name>/, it will attach to
@@ -116,6 +122,7 @@ Role Discovery:
 Examples:
   gt crew at dave                 # Attach to dave's session
   gt crew at                      # Auto-detect from cwd
+  gt crew at dave --reset         # Reset to default branch first
   gt crew at dave --detached      # Start session without attaching
   gt crew at dave --no-tmux       # Just print path`,
 	Args: cobra.MaximumNArgs(1),
@@ -351,6 +358,7 @@ func init() {
 	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
 	crewAtCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 	crewAtCmd.Flags().BoolVar(&crewDebug, "debug", false, "Show debug output for troubleshooting")
+	crewAtCmd.Flags().BoolVar(&crewReset, "reset", false, "Reset workspace to default branch (checkout and pull)")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")

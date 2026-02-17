@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/tui/feed"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -24,6 +25,7 @@ var (
 	feedNoFollow bool
 	feedWindow   bool
 	feedPlain    bool
+	feedProblems bool
 )
 
 func init() {
@@ -37,7 +39,8 @@ func init() {
 	feedCmd.Flags().StringVar(&feedType, "type", "", "Filter by event type (create, update, delete, comment)")
 	feedCmd.Flags().StringVar(&feedRig, "rig", "", "Filter events by rig name")
 	feedCmd.Flags().BoolVarP(&feedWindow, "window", "w", false, "Open in dedicated tmux window (creates 'feed' window)")
-	feedCmd.Flags().BoolVar(&feedPlain, "plain", false, "Use plain text output instead of TUI")
+	feedCmd.Flags().BoolVar(&feedPlain, "plain", false, "Use plain text output (bd activity) instead of TUI")
+	feedCmd.Flags().BoolVarP(&feedProblems, "problems", "p", false, "Start in problems view (shows stuck agents)")
 }
 
 var feedCmd = &cobra.Command{
@@ -51,6 +54,13 @@ By default, launches an interactive TUI dashboard with:
   - Convoy panel (middle): Shows in-progress and recently landed convoys
   - Event stream (bottom): Chronological feed you can scroll through
   - Vim-style navigation: j/k to scroll, tab to switch panels, 1/2/3 for panels, q to quit
+
+Problems View (--problems/-p):
+  A problem-first view that surfaces agents needing attention:
+  - Detects stuck agents via structured beads data (hook state, timestamps)
+  - Shows GUPP violations (hooked work + 30m no progress)
+  - Keyboard actions: Enter=attach, n=nudge, h=handoff
+  - Press 'p' to toggle between activity and problems view
 
 The feed combines multiple event sources:
   - GT events: Agent activity like patrol, sling, handoff (from .events.jsonl)
@@ -74,6 +84,13 @@ Event symbols:
   🎯  sling            - Work was slung to worker
   🤝  handoff          - Session handed off
 
+Agent state symbols (problems view):
+  🔥  GUPP violation   - Hooked work + 30m no progress (critical)
+  ⚠   STALLED          - Hooked work + 15m no progress
+  ●   Working          - Actively producing output
+  ○   Idle             - No hooked work
+  💀  Zombie           - Dead/crashed session
+
 MQ (Merge Queue) event symbols:
   ⚙  merge_started   - Refinery began processing an MR
   ✓  merged          - MR successfully merged (green)
@@ -82,10 +99,12 @@ MQ (Merge Queue) event symbols:
 
 Examples:
   gt feed                       # Launch TUI dashboard
-  gt feed --plain               # Plain text output (.events.jsonl)
+  gt feed --problems            # Start in problems view
+  gt feed -p                    # Short flag for problems view
+  gt feed --plain               # Plain text output (bd activity)
   gt feed --window              # Open in dedicated tmux window
   gt feed --since 1h            # Events from last hour
-  gt feed --rig greenplace         # Filter events for specific rig`,
+  gt feed --rig greenplace      # Use gastown rig's beads`,
 	RunE: runFeed,
 }
 
@@ -134,7 +153,7 @@ func runFeed(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("rig '%s' not found or has no .beads directory", feedRig)
 			}
 		}
-		return runFeedTUI(workDir)
+		return runFeedTUI(workDir, feedProblems)
 	}
 
 	// Plain mode: --rig is a pure event filter via PrintOptions.Rig
@@ -212,7 +231,7 @@ func runFeedDirect(townRoot string) error {
 }
 
 // runFeedTUI runs the interactive TUI feed.
-func runFeedTUI(workDir string) error {
+func runFeedTUI(workDir string, problemsView bool) error {
 	// Must be in a Gas Town workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -247,8 +266,16 @@ func runFeedTUI(workDir string) error {
 	multiSource := feed.NewMultiSource(sources...)
 	defer func() { _ = multiSource.Close() }()
 
+	// Create beads instance for agent health detection
+	bd := beads.New(townRoot)
+
 	// Create model and connect event source
-	m := feed.NewModel()
+	var m *feed.Model
+	if problemsView {
+		m = feed.NewModelWithProblemsView(bd)
+	} else {
+		m = feed.NewModel(bd)
+	}
 	m.SetEventChannel(multiSource.Events())
 	m.SetTownRoot(townRoot)
 

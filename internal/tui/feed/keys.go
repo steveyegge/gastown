@@ -24,6 +24,11 @@ type KeyMap struct {
 	Expand  key.Binding
 	Refresh key.Binding
 
+	// Problems view
+	ToggleProblems key.Binding
+	Nudge          key.Binding
+	Handoff        key.Binding
+
 	// Search/Filter
 	Search      key.Binding
 	Filter      key.Binding
@@ -90,8 +95,20 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("o", "toggle expand"),
 		),
 		Refresh: key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "refresh"),
+			key.WithKeys("R"),
+			key.WithHelp("R", "refresh"),
+		),
+		ToggleProblems: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "toggle problems view"),
+		),
+		Nudge: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "nudge agent"),
+		),
+		Handoff: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "handoff agent"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),
@@ -118,7 +135,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns key bindings for the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Tab, k.Search, k.Filter, k.Quit, k.Help}
+	return []key.Binding{k.Up, k.Down, k.Tab, k.ToggleProblems, k.Search, k.Quit, k.Help}
 }
 
 // FullHelp returns key bindings for the full help view.
@@ -126,6 +143,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom},
 		{k.Tab, k.FocusTree, k.FocusConvoy, k.FocusFeed, k.Enter, k.Expand},
+		{k.ToggleProblems, k.Nudge, k.Handoff},
 		{k.Search, k.Filter, k.ClearFilter, k.Refresh},
 		{k.Help, k.Quit},
 	}

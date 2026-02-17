@@ -157,16 +157,15 @@ func execRuntime(prompt, rigPath, configDir string) error {
 }
 
 // ensureDefaultBranch checks if a git directory is on the default branch.
-// If not, warns the user and offers to switch.
-// Returns true if on default branch (or switched to it), false if user declined.
-// The rigPath parameter is used to look up the configured default branch.
-func ensureDefaultBranch(dir, roleName, rigPath string) bool { //nolint:unparam // bool return kept for future callers to check
+// ensureDefaultBranch checks out the configured default branch and pulls latest.
+// Returns an error if the checkout or pull fails.
+func ensureDefaultBranch(dir, roleName, rigPath string) error {
 	g := git.NewGit(dir)
 
 	branch, err := g.CurrentBranch()
 	if err != nil {
 		// Not a git repo or other error, skip check
-		return true
+		return fmt.Errorf("could not determine current branch: %w", err)
 	}
 
 	// Get configured default branch for this rig
@@ -175,33 +174,54 @@ func ensureDefaultBranch(dir, roleName, rigPath string) bool { //nolint:unparam 
 		defaultBranch = rigCfg.DefaultBranch
 	}
 
-	if branch == defaultBranch || branch == "master" {
-		return true
+	if branch == defaultBranch {
+		// Already on default branch — still pull to ensure up-to-date
+		if err := g.Pull("origin", defaultBranch); err != nil {
+			return fmt.Errorf("pull failed on %s: %w", defaultBranch, err)
+		}
+		fmt.Printf("  %s Already on %s, pulled latest\n", style.Success.Render("✓"), defaultBranch)
+		return nil
 	}
 
-	// Warn about wrong branch
-	fmt.Printf("\n%s %s is on branch '%s', not %s\n",
-		style.Warning.Render("⚠"),
-		roleName,
-		branch,
-		defaultBranch)
-	fmt.Printf("  Persistent roles should work on %s to avoid orphaned work.\n", defaultBranch)
-	fmt.Println()
-
-	// Auto-switch to default branch
-	fmt.Printf("  Switching to %s...\n", defaultBranch)
+	// Not on default branch — switch to it
+	fmt.Printf("  %s is on branch '%s', switching to %s...\n", roleName, branch, defaultBranch)
 	if err := g.Checkout(defaultBranch); err != nil {
-		fmt.Printf("  %s Could not switch to %s: %v\n", style.Error.Render("✗"), defaultBranch, err)
-		fmt.Printf("  Please manually run: git checkout %s && git pull\n", defaultBranch)
-		return false
+		return fmt.Errorf("could not switch to %s: %w", defaultBranch, err)
 	}
 
 	// Pull latest
 	if err := g.Pull("origin", defaultBranch); err != nil {
-		fmt.Printf("  %s Pull failed (continuing anyway): %v\n", style.Warning.Render("⚠"), err)
-	} else {
-		fmt.Printf("  %s Switched to %s and pulled latest\n", style.Success.Render("✓"), defaultBranch)
+		return fmt.Errorf("pull failed on %s: %w", defaultBranch, err)
+	}
+	fmt.Printf("  %s Switched to %s and pulled latest\n", style.Success.Render("✓"), defaultBranch)
+
+	return nil
+}
+
+// warnIfNotDefaultBranch prints a warning if the workspace is not on the
+// configured default branch. Used when --reset is not set to alert users
+// before an agent wastes its context window on a branch that can't push.
+func warnIfNotDefaultBranch(dir, roleName, rigPath string) {
+	g := git.NewGit(dir)
+
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		return
 	}
 
-	return true
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	if branch == defaultBranch {
+		return
+	}
+
+	fmt.Printf("\n%s %s is on branch '%s', not '%s'.\n",
+		style.Warning.Render("⚠"),
+		roleName,
+		branch,
+		defaultBranch)
+	fmt.Printf("  Use --reset to switch to %s, or continue at your own risk.\n\n", defaultBranch)
 }

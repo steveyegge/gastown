@@ -79,7 +79,7 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 	}
 
 	// Run bd init
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt")
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = path
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
@@ -120,7 +120,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping test")
 	}
-	// Dolt server required: bd init --backend dolt (auto-detects server on 3307),
+	// Dolt server required: bd init auto-detects server on 3307,
 	// and gt rig add --adopt uses --server mode for re-initialization.
 	requireDoltServer(t)
 
@@ -444,7 +444,7 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 	}
 
 	// Run bd init (creates database but no issues)
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt")
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = path
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)

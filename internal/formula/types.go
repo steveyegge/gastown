@@ -8,6 +8,8 @@
 //   - aspect: Multi-aspect parallel analysis (like convoy but for analysis)
 package formula
 
+import "fmt"
+
 // FormulaType represents the type of formula.
 type FormulaType string
 
@@ -105,10 +107,41 @@ type Template struct {
 }
 
 // Var represents a variable definition for formulas.
+// Supports both shorthand string syntax (wisp_type = "gc_report")
+// and full table syntax ([vars.wisp_type] with description/required/default).
 type Var struct {
 	Description string `toml:"description"`
 	Required    bool   `toml:"required"`
 	Default     string `toml:"default"`
+}
+
+// UnmarshalTOML allows Var to be decoded from either a plain string
+// (treated as the default value) or a full TOML table.
+func (v *Var) UnmarshalTOML(data any) error {
+	switch val := data.(type) {
+	case string:
+		v.Default = val
+		return nil
+	case map[string]any:
+		if d, ok := val["description"]; ok {
+			if s, ok := d.(string); ok {
+				v.Description = s
+			}
+		}
+		if r, ok := val["required"]; ok {
+			if b, ok := r.(bool); ok {
+				v.Required = b
+			}
+		}
+		if d, ok := val["default"]; ok {
+			if s, ok := d.(string); ok {
+				v.Default = s
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("expected string or table for Var, got %T", data)
+	}
 }
 
 // IsValid returns true if the formula type is recognized.
