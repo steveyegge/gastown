@@ -1836,6 +1836,45 @@ func TestInitRig_InvalidCharacters(t *testing.T) {
 
 
 // =============================================================================
+// Catalog race condition tests (isDoltRetryableError coverage)
+// =============================================================================
+
+func TestIsDoltRetryableError_CatalogRace(t *testing.T) {
+	// After CREATE DATABASE, the Dolt server may not immediately make the
+	// database visible in its in-memory catalog. Subsequent USE queries
+	// fail with "Unknown database '<name>'". This must be retryable so that
+	// doltSQLWithRetry and doltSQLScriptWithRetry handle the race gracefully.
+	catalogErrors := []string{
+		"Unknown database 'myrig'",
+		"Unknown database 'wl_commons'",
+		"database not found",
+		"exit status 1 (output: Unknown database 'newrig')",
+	}
+	for _, msg := range catalogErrors {
+		err := fmt.Errorf("%s", msg)
+		if !isDoltRetryableError(err) {
+			t.Errorf("isDoltRetryableError(%q) = false, want true (catalog race)", msg)
+		}
+	}
+}
+
+func TestWaitForCatalog_NoServer(t *testing.T) {
+	// When no Dolt server is running, waitForCatalog should fail after
+	// exhausting retries (not hang). This validates the timeout/retry behavior.
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := waitForCatalog(townRoot, "testdb")
+	if err == nil {
+		t.Fatal("expected error when no server is running")
+	}
+	if !strings.Contains(err.Error(), "not visible after") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// =============================================================================
 // ListDatabases edge cases
 // =============================================================================
 
@@ -2429,6 +2468,8 @@ func TestIsDoltRetryableError_IncludesReadOnly(t *testing.T) {
 		{"serialization failure", true},
 		{"lock wait timeout exceeded", true},
 		{"try restarting transaction", true},
+		{"Unknown database 'myrig'", true},
+		{"database not found", true},
 		{"connection refused", false},
 		{"table not found", false},
 	}
@@ -2521,6 +2562,8 @@ func TestDoltSQLScriptWithRetry_NonRetryableError(t *testing.T) {
 		"serialization failure",
 		"lock wait timeout",
 		"try restarting transaction",
+		"Unknown database 'myrig'",
+		"database not found",
 	}
 	for _, msg := range retryable {
 		if !isDoltRetryableError(fmt.Errorf("%s", msg)) {
