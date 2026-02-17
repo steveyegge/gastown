@@ -102,6 +102,23 @@ jobs:
         run: |
           python3 .github/scripts/junit-report.py junit.xml "Unit Test Failures"
 
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: junit.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          fail_ci_if_error: false
+
       - name: Upload Coverage Data
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
