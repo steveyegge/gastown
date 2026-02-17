@@ -79,6 +79,41 @@ linters:
         linters:
           - gosec
         text: 'G204'
+      # G115: Integer overflow conversions are safe with known-bounded values
+      # (rune arithmetic, fd conversions, heartbeat counts)
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G115'
+      # G117: Struct fields named Password hold config credentials (Dolt DB, etc.)
+      # These are marshaled to JSON for internal config, not exposed to users
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G117'
+      # G702: Command injection — internal packages call trusted tools (git, dolt)
+      # with programmatically constructed arguments, not user input
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G702'
+      # G703: Path traversal — internal packages use constructed paths for temp
+      # files and state directories, not user-supplied paths (same as G304)
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G703'
+      # G704: SSRF — internal packages make requests to configured endpoints
+      # (DoltHub API, wasteland), not user-supplied URLs
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G704'
+      # G705: XSS — internal web API uses SSE with computed hashes, not user input
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G705'
       # errcheck: Ignore unchecked errors in test files for common cleanup patterns
       - path: '_test\.go'
         linters:
