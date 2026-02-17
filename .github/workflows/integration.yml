@@ -53,6 +53,9 @@ jobs:
           dolt config --global --add user.name "CI Bot"
           dolt config --global --add user.email "ci@gastown.test"
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+
       - name: Generate embedded files
         run: go generate ./internal/formula/...
 
@@ -60,5 +63,13 @@ jobs:
         run: go build -v ./cmd/gt
 
       - name: Run integration tests
-        run: go test -v -tags=integration -timeout=8m ./internal/cmd/...
+        run: gotestsum --format testname --junitfile junit.xml -- -v -tags=integration -timeout=8m ./internal/cmd/...
+
+      - name: Test Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 .github/scripts/junit-report.py junit.xml "Integration Test Failures"
 
