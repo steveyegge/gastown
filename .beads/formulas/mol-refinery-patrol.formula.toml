@@ -661,11 +661,11 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-First, if you haven't already, resolve your agent bead ID once for this session:
+Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
 ```bash
-bd list --type=agent --desc-contains="refinery" --json
+bd list --type=agent --status=open --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.description | test("(?m)^\\s*rig: <YOUR_RIG>\\s*$")) | .id'
 ```
-Use the returned bead ID as YOUR_AGENT_BEAD in the commands below.
+This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
 
 Then use await-signal with exponential backoff to wait for MQ activity:
 
@@ -682,7 +682,7 @@ This command:
    - Second timeout: 60s
    - Third timeout: 120s
    - ...capped at 5 minutes max
-4. Tracks `idle:N` label on refinery agent bead for backoff state
+4. Tracks `idle:N` label on your agent bead for backoff state
 
 **On signal received** (activity detected):
 Reset the idle counter and start next patrol cycle:
