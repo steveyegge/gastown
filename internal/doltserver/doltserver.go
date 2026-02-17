@@ -2195,8 +2195,16 @@ func MergePolecatBranch(townRoot, rigDB, branchName string) error {
 	// NOTE: DOLT_BRANCH('-D') is deliberately NOT in the merge scripts.
 	// If the merge fails (conflict), the branch must still exist for Phase 2.
 	// Branch deletion happens separately after successful merge.
+	//
+	// IMPORTANT: The script begins by flushing main's working set. Other agents
+	// (witness, refinery) write to main with BD_DOLT_AUTO_COMMIT=off, leaving
+	// uncommitted changes. DOLT_MERGE requires a clean working set — without
+	// this flush, the merge fails and MR beads get stranded on dead polecat
+	// branches, invisible to the refinery.
 	escaped := strings.ReplaceAll(branchName, "'", "''")
 	script := fmt.Sprintf(`USE %s;
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('--allow-empty', '-m', 'auto-flush main before polecat merge');
 CALL DOLT_CHECKOUT('%s');
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('--allow-empty', '-m', 'polecat %s final state');
