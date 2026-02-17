@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -88,6 +89,48 @@ func TestMalformedSessionNameCheck_Run_NonGasTownSessions(t *testing.T) {
 
 	if result.Status != StatusOK {
 		t.Errorf("expected OK for non-Gas Town sessions, got %v", result.Status)
+	}
+}
+
+// TestMalformedSessionNameCheck_Run_NonGasTownWithRigSubstring verifies that
+// non-Gastown sessions whose names happen to contain a rig name are NOT
+// falsely flagged. The ownership guard requires a known Gastown prefix.
+func TestMalformedSessionNameCheck_Run_NonGasTownWithRigSubstring(t *testing.T) {
+	check := NewMalformedSessionNameCheck()
+	check.registryForTest = testRegistryForNameCheck()
+	check.sessionListerForTest = &mockSessionLister{sessions: []string{
+		"my-niflheim-witness",       // "my" is not a known Gastown prefix
+		"foo-gastown-refinery",      // "foo" is not a known Gastown prefix
+		"test-whatsapp_automation-witness", // "test" is not a known Gastown prefix
+	}}
+
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected OK for non-Gastown sessions with rig substrings, got %v: %s\nDetails: %v",
+			result.Status, result.Message, result.Details)
+	}
+}
+
+// TestMalformedSessionNameCheck_Run_PolecatWithRigSubstring verifies that
+// polecat sessions whose names embed a rig name are NOT falsely flagged.
+// E.g., "gt-fix-gastown-witness" is a polecat named "fix-gastown-witness",
+// not a legacy gastown witness session.
+func TestMalformedSessionNameCheck_Run_PolecatWithRigSubstring(t *testing.T) {
+	check := NewMalformedSessionNameCheck()
+	check.registryForTest = testRegistryForNameCheck()
+	check.sessionListerForTest = &mockSessionLister{sessions: []string{
+		"gt-fix-gastown-witness",   // polecat "fix-gastown-witness", prefix "gt-fix" is not known
+		"nif-debug-niflheim-refinery", // prefix "nif-debug" is not a known prefix
+	}}
+
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected OK for polecat sessions with rig substrings, got %v: %s\nDetails: %v",
+			result.Status, result.Message, result.Details)
 	}
 }
 
@@ -286,14 +329,46 @@ func TestMalformedSessionNameCheck_Fix_TOCTOUGuard(t *testing.T) {
 	}
 }
 
+// TestMalformedSessionNameCheck_Fix_HasSessionError verifies that Fix()
+// surfaces HasSession errors instead of silently ignoring them.
+func TestMalformedSessionNameCheck_Fix_HasSessionError(t *testing.T) {
+	check := NewMalformedSessionNameCheck()
+	check.malformed = []sessionRename{
+		{oldName: "gt-niflheim-witness", newName: "nif-witness", isCrew: false},
+	}
+
+	mt := &mockTmux{
+		sessions:      map[string]bool{},
+		hasSessionErr: fmt.Errorf("tmux socket unavailable"),
+	}
+	check.tmuxForTest = mt
+
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Fatal("Fix() should return error when HasSession fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "tmux socket unavailable") {
+		t.Errorf("Fix() error should contain HasSession error, got: %v", err)
+	}
+
+	if len(mt.renamedFrom) != 0 {
+		t.Errorf("Fix() should not rename when HasSession errors, but renamed: %v", mt.renamedFrom)
+	}
+}
+
 // mockTmux is a tmux.Tmux stub for testing Fix() without real tmux.
 type mockTmux struct {
-	sessions    map[string]bool
-	renamedFrom []string
-	renamedTo   []string
+	sessions       map[string]bool
+	renamedFrom    []string
+	renamedTo      []string
+	hasSessionErr  error // If non-nil, HasSession returns this error
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
+	if m.hasSessionErr != nil {
+		return false, m.hasSessionErr
+	}
 	return m.sessions[name], nil
 }
 

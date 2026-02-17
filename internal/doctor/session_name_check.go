@@ -150,13 +150,21 @@ func (c *MalformedSessionNameCheck) Fix(ctx *CheckContext) error {
 		// TOCTOU guard: a prior check (e.g., zombie-sessions) may have already
 		// killed the source session between Run() and Fix().
 		sourceExists, err := t.HasSession(r.oldName)
-		if err != nil || !sourceExists {
+		if err != nil {
+			lastErr = fmt.Errorf("check source session %s: %w", r.oldName, err)
+			continue
+		}
+		if !sourceExists {
 			continue
 		}
 
 		// Skip if target name is already in use (collision).
 		targetExists, err := t.HasSession(r.newName)
-		if err == nil && targetExists {
+		if err != nil {
+			lastErr = fmt.Errorf("check target session %s: %w", r.newName, err)
+			continue
+		}
+		if targetExists {
 			continue
 		}
 
@@ -187,6 +195,12 @@ func detectLegacySessionNames(sessions []string, reg *session.PrefixRegistry) []
 		return nil
 	}
 
+	// Build set of known Gastown prefixes for ownership gating.
+	knownPrefixes := make(map[string]bool)
+	for _, prefix := range rigs {
+		knownPrefixes[prefix] = true
+	}
+
 	var result []sessionRename
 	seen := make(map[string]bool)
 
@@ -194,7 +208,7 @@ func detectLegacySessionNames(sessions []string, reg *session.PrefixRegistry) []
 		if sess == "" || seen[sess] {
 			continue
 		}
-		r, ok := matchLegacyName(sess, rigs)
+		r, ok := matchLegacyName(sess, rigs, knownPrefixes)
 		if ok {
 			seen[sess] = true
 			result = append(result, r)
@@ -205,15 +219,31 @@ func detectLegacySessionNames(sessions []string, reg *session.PrefixRegistry) []
 
 // matchLegacyName checks whether sess matches the old
 //
-//	{prefix}-{rig_name}-{role_suffix}  or  {prefix}-{rig_name}-crew-{name}
+//	{known_prefix}-{rig_name}-{role_suffix}  or  {known_prefix}-{rig_name}-crew-{name}
 //
 // pattern for any known rig, and returns the canonical rename if so.
-func matchLegacyName(sess string, rigs map[string]string) (sessionRename, bool) {
+// The prefix before the rig name must be a known Gastown prefix to avoid
+// false-positives on non-Gastown sessions (e.g., "my-niflheim-witness")
+// and polecat sessions whose names embed rig names (e.g., "gt-fix-gastown-witness").
+func matchLegacyName(sess string, rigs map[string]string, knownPrefixes map[string]bool) (sessionRename, bool) {
 	for rigName, shortPrefix := range rigs {
 		// Look for "-{rigName}-" anywhere in the session name.
 		needle := "-" + rigName + "-"
 		idx := strings.Index(sess, needle)
 		if idx < 0 {
+			continue
+		}
+
+		// Ownership guard: the part before the rig name must be a known
+		// Gastown prefix. This prevents matching non-Gastown sessions
+		// and polecat sessions whose names happen to contain a rig name.
+		sessionPrefix := sess[:idx]
+		if !knownPrefixes[sessionPrefix] {
+			continue
+		}
+
+		// Skip if the session already uses the correct prefix for this rig.
+		if sessionPrefix == shortPrefix {
 			continue
 		}
 
