@@ -282,7 +282,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			OutputFlag: "--format json",
 		},
 		// Runtime defaults
-		PromptMode:        "none",
+		PromptMode:        "arg",
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
 		HooksDir:          ".opencode/plugins",
