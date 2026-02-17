@@ -814,6 +814,11 @@ notifyWitness:
 	}
 
 afterDoltMerge:
+	// Ensure BD_BRANCH is unset before any post-merge bead operations.
+	// The normal path unsets it above after MergePolecatBranch, but the
+	// checkpoint-resume path (goto afterDoltMerge) bypasses that code.
+	os.Unsetenv("BD_BRANCH")
+
 	// Deferred close for no-commits-ahead path (G15 fix).
 	// The close is deferred to here because BD_BRANCH has now been unset,
 	// so ForceCloseWithReason writes directly to Dolt main. Closing earlier
