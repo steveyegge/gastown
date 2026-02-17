@@ -277,6 +277,15 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		startOpts.Command = cmd
 	}
 	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
+		if err == polecat.ErrSessionReused {
+			// Session reused — skip all startup state mutations.
+			// The agent is already running; get pane and return.
+			pane, paneErr := getSessionPane(s.SessionName)
+			if paneErr != nil {
+				return "", fmt.Errorf("getting pane for reused session %s: %w", s.SessionName, paneErr)
+			}
+			return pane, nil
+		}
 		return "", fmt.Errorf("starting session: %w", err)
 	}
 
