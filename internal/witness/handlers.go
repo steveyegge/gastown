@@ -162,7 +162,7 @@ func isStalePolecatDone(rigName, polecatName string, msg *mail.Message) (bool, s
 		return false, ""
 	}
 
-	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 	createdAt, err := session.SessionCreatedAt(sessionName)
 	if err != nil {
 		// Session not found or tmux not running - can't determine staleness, allow message
@@ -790,11 +790,10 @@ func extractPolecatFromJSON(output string) string {
 // Should only be called after all safety checks pass.
 func NukePolecat(workDir, rigName, polecatName string) error {
 	// CRITICAL: Kill the tmux session FIRST and unconditionally.
-	// The session name follows the pattern gt-<rig>-<polecat>.
-	// We do this explicitly here because gt polecat nuke may fail to kill the
+	// We kill the session explicitly here because gt polecat nuke may fail to kill the
 	// session due to rig loading issues or race conditions with IsRunning checks.
 	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
-	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 	t := tmux.NewTmux()
 
 	// Check if session exists and kill it
@@ -1017,7 +1016,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 		}
 
 		polecatName := entry.Name()
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		result.Checked++
 
 		// Record timestamp BEFORE checking session liveness.
@@ -1315,7 +1314,7 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 		}
 
 		polecatName := entry.Name()
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		result.Checked++
 
 		// Only check live sessions with alive agents (the opposite of zombie detection)
@@ -1518,7 +1517,7 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 		result.Checked++
 
 		// Check if the polecat's tmux session exists
-		sessionName := fmt.Sprintf("gt-%s-%s", assigneeRig, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(assigneeRig), polecatName)
 		sessionAlive, err := t.HasSession(sessionName)
 		if err != nil {
 			result.Errors = append(result.Errors,
@@ -1649,7 +1648,7 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 		result.Checked++
 
 		// Check if polecat still has a tmux session
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		hasSession, sessionErr := t.HasSession(sessionName)
 		if sessionErr != nil {
 			result.Errors = append(result.Errors,
