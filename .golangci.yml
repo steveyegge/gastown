@@ -79,6 +79,36 @@ linters:
         linters:
           - gosec
         text: 'G204'
+      # G115: Integer overflow conversion uintptr->int is safe for syscall.Flock fd args
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G115"
+      # G117: Exported struct fields matching secret patterns are config structs, not secrets
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G117"
+      # G702: Taint-tracked command injection - internal tools use trusted args (see G204)
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G702"
+      # G703: Taint-tracked path traversal - internal paths are constructed, not user input (see G304)
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G703"
+      # G704: Taint-tracked SSRF - internal HTTP calls use controlled URLs
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G704"
+      # G705: Taint-tracked XSS - internal SSE writes use computed hashes, not user input
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: "G705"
       # errcheck: Ignore unchecked errors in test files for common cleanup patterns
       - path: '_test\.go'
         linters:
