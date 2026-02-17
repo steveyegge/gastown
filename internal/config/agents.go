@@ -98,7 +98,7 @@ type AgentPresetInfo struct {
 	// Empty or "none" means no hooks support.
 	HooksProvider string `json:"hooks_provider,omitempty"`
 
-	// HooksDir is the directory for hooks/settings (e.g., ".claude", ".opencode/plugin").
+	// HooksDir is the directory for hooks/settings (e.g., ".claude", ".opencode/plugins").
 	HooksDir string `json:"hooks_dir,omitempty"`
 
 	// HooksSettingsFile is the settings/plugin filename (e.g., "settings.json", "gastown.js").
@@ -275,7 +275,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "",                                   // OpenCode manages sessions internally
 		ResumeFlag:          "",                                   // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true, // Uses .opencode/plugins/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -285,7 +285,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		PromptMode:        "none",
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
-		HooksDir:          ".opencode/plugin",
+		HooksDir:          ".opencode/plugins",
 		HooksSettingsFile: "gastown.js",
 		ReadyDelayMs:      8000,
 		InstructionsFile:  "AGENTS.md",
