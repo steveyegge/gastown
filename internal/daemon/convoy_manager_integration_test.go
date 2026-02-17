@@ -123,7 +123,7 @@ exit 0
 		if strings.Contains(s, "close detected") && strings.Contains(s, "gt-integ1") {
 			foundClose = true
 		}
-		if strings.Contains(s, "auto-closing empty convoy") || strings.Contains(s, "convoy check") {
+		if strings.Contains(s, "auto-closing") || strings.Contains(s, "convoy check") {
 			foundScan = true
 		}
 		if strings.Contains(s, "already called") {
@@ -405,6 +405,128 @@ exit 0
 		if strings.Contains(line, "%!") {
 			t.Errorf("malformed log line (format string error): %q", line)
 		}
+	}
+}
+
+// TestConvoyManager_MultipleTrackingConvoys verifies that when a single issue
+// is tracked by two different convoys, closing the issue triggers convoy checks
+// for BOTH. This exercises the getTrackingConvoys path returning >1 result and
+// the CheckConvoysForIssue loop iterating all tracking convoys.
+func TestConvoyManager_MultipleTrackingConvoys(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows (process groups)")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Two convoys, both tracking the same task.
+	convoyA := &beadsdk.Issue{
+		ID: "hq-cv-multi-a", Title: "Convoy A",
+		Status: beadsdk.StatusOpen, Priority: 2,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	convoyB := &beadsdk.Issue{
+		ID: "hq-cv-multi-b", Title: "Convoy B",
+		Status: beadsdk.StatusOpen, Priority: 2,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	task := &beadsdk.Issue{
+		ID: "gt-multi1", Title: "Shared Task",
+		Status: beadsdk.StatusOpen, Priority: 2,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+
+	for _, issue := range []*beadsdk.Issue{convoyA, convoyB, task} {
+		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", issue.ID, err)
+		}
+	}
+
+	// Both convoys track the same task.
+	for _, convoyID := range []string{convoyA.ID, convoyB.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoyID,
+			DependsOnID: task.ID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s -> %s: %v", convoyID, task.ID, err)
+		}
+	}
+
+	// Close the shared task to generate a close event.
+	if err := store.CloseIssue(ctx, task.ID, "done", "test", ""); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	// Mock gt
+	binDir := t.TempDir()
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	checkLogPath := filepath.Join(binDir, "check.log")
+	gtScript := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1" = "convoy" ] && [ "$2" = "check" ]; then
+  echo "$3" >> "%s"
+  exit 0
+fi
+exit 0
+`, checkLogPath)
+
+	gtPath := filepath.Join(binDir, "gt")
+	if err := os.WriteFile(gtPath, []byte(gtScript), 0755); err != nil {
+		t.Fatalf("write mock gt: %v", err)
+	}
+
+	var mu sync.Mutex
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		mu.Lock()
+		defer mu.Unlock()
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, nil)
+	m.pollAllStores()
+
+	mu.Lock()
+	snapshot := make([]string, len(logged))
+	copy(snapshot, logged)
+	mu.Unlock()
+
+	// Verify: close detected once for the task.
+	assertLogContains(t, snapshot, "close detected", task.ID)
+
+	// Verify: "tracked by 2 convoy(s)".
+	assertLogContains(t, snapshot, "tracked by 2 convoy(s)")
+
+	// Verify: both convoys were checked.
+	assertLogContains(t, snapshot, "checking convoy", convoyA.ID)
+	assertLogContains(t, snapshot, "checking convoy", convoyB.ID)
+
+	// Verify gt convoy check was called for both (via mock log file).
+	data, err := os.ReadFile(checkLogPath)
+	if err != nil {
+		t.Fatalf("gt convoy check was never called: %v", err)
+	}
+	checkLog := string(data)
+	if !strings.Contains(checkLog, convoyA.ID) {
+		t.Errorf("gt convoy check not called for %s; log: %q", convoyA.ID, checkLog)
+	}
+	if !strings.Contains(checkLog, convoyB.ID) {
+		t.Errorf("gt convoy check not called for %s; log: %q", convoyB.ID, checkLog)
 	}
 }
 

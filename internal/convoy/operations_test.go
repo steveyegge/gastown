@@ -32,8 +32,12 @@ func TestExtractIssueID(t *testing.T) {
 	}
 }
 
-func TestFeedNextReadyIssue_SkipsNonOpenIssues(t *testing.T) {
-	// Test the filtering logic: only open issues with no assignee should be considered
+func TestReadyIssueFilterLogic_SkipsNonOpenIssues(t *testing.T) {
+	// Validates the filtering predicate used by feedNextReadyIssue: only
+	// open issues with no assignee should be considered "ready". We test
+	// the predicate inline because feedNextReadyIssue also calls rigForIssue
+	// and dispatchIssue, making isolated unit testing impractical without a
+	// real store. Integration coverage lives in convoy_manager_integration_test.go.
 	tracked := []trackedIssue{
 		{ID: "gt-closed", Status: "closed", Assignee: ""},
 		{ID: "gt-inprog", Status: "in_progress", Assignee: "gastown/polecats/alpha"},
@@ -49,8 +53,10 @@ func TestFeedNextReadyIssue_SkipsNonOpenIssues(t *testing.T) {
 	}
 }
 
-func TestFeedNextReadyIssue_FindsReadyIssue(t *testing.T) {
-	// Test that we correctly identify a ready issue
+func TestReadyIssueFilterLogic_FindsReadyIssue(t *testing.T) {
+	// Validates that the "first open+unassigned" selection picks the correct
+	// issue. See comment on TestReadyIssueFilterLogic_SkipsNonOpenIssues for
+	// why this tests the predicate inline rather than calling feedNextReadyIssue.
 	tracked := []trackedIssue{
 		{ID: "gt-closed", Status: "closed", Assignee: ""},
 		{ID: "gt-inprog", Status: "in_progress", Assignee: "gastown/polecats/alpha"},

@@ -1619,3 +1619,60 @@ exit 0
 		}
 	}
 }
+
+// --- hq store nil guard ---
+
+func TestPollStore_NilHqStore_LogsWarningAndSkips(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+	// Create a rig store with a close event, but no hq store in the map.
+	// The nil hq guard should log a warning and skip convoy lookups.
+	rigStore, rigCleanup := setupTestStore(t)
+	defer rigCleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	issue := &beadsdk.Issue{
+		ID: "gt-nohq1", Title: "No HQ Store", Status: beadsdk.StatusOpen,
+		Priority: 2, IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := rigStore.CreateIssue(ctx, issue, "test"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := rigStore.CloseIssue(ctx, issue.ID, "done", "test", ""); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	// stores map has a rig but no "hq" key
+	stores := map[string]beadsdk.Storage{
+		"gastown": rigStore,
+	}
+
+	m := NewConvoyManager(t.TempDir(), logger, "gt", 10*time.Minute, stores, nil, nil)
+	m.pollAllStores()
+
+	// Should log the nil hq warning
+	foundWarning := false
+	for _, s := range logged {
+		if strings.Contains(s, "hq store unavailable") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Errorf("expected 'hq store unavailable' warning, got: %v", logged)
+	}
+
+	// Should NOT have logged any close detection (skipped before processing events)
+	for _, s := range logged {
+		if strings.Contains(s, "close detected") {
+			t.Errorf("expected no close detection without hq store, got: %s", s)
+		}
+	}
+}
