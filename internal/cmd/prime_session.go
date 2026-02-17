@@ -234,10 +234,26 @@ func detectSessionState(ctx RoleContext) SessionState {
 		}
 	}
 
-	// Check for hooked work (autonomous state)
+	// Check for hooked work (autonomous state).
+	// Primary: read hook_bead from the agent bead's DB column (same strategy as gt hook).
+	// Fallback: query hooked/in_progress beads by assignee.
 	agentID := getAgentIdentity(ctx)
 	if agentID != "" {
 		b := beads.New(ctx.WorkDir)
+
+		// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
+		agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
+		if agentBeadID != "" {
+			agentBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBeadID, ctx.WorkDir)
+			ab := beads.New(agentBeadDir)
+			if agentBead, err := ab.Show(agentBeadID); err == nil && agentBead != nil && agentBead.HookBead != "" {
+				state.State = "autonomous"
+				state.HookedBead = agentBead.HookBead
+				return state
+			}
+		}
+
+		// Fallback: query by assignee
 		hookedBeads, err := b.List(beads.ListOptions{
 			Status:   beads.StatusHooked,
 			Assignee: agentID,
