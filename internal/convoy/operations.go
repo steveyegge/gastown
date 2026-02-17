@@ -1,4 +1,5 @@
-// Package convoy provides shared convoy operations for redundant observers.
+// Package convoy provides convoy tracking operations: finding tracking convoys,
+// checking completion, feeding ready issues, and dispatching via gt sling.
 package convoy
 
 import (
@@ -6,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	beadsdk "github.com/steveyegge/beads"
@@ -14,47 +14,10 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
-// OpenStoreForTown opens the beads database for the given town root.
-// Uses metadata.json to detect Dolt server mode vs embedded mode, so
-// the returned store connects to the same database as bd itself.
-// Returns nil if the database cannot be opened (e.g. no Dolt backend).
-// Caller must call store.Close() when done.
-func OpenStoreForTown(ctx context.Context, townRoot string) (beadsdk.Storage, error) {
-	beadsDir := filepath.Join(townRoot, ".beads")
-	return beadsdk.OpenFromConfig(ctx, beadsDir)
-}
-
-// CheckConvoysForIssueWithAutoStore opens the beads store for the town and calls CheckConvoysForIssue.
-// Use when the caller doesn't have a store (e.g. witness, refinery).
-// If the store fails to open, convoy checks are skipped silently.
-//
-// Resolves the gt binary path via exec.LookPath at call time, falling back to
-// bare "gt" if resolution fails. This avoids PATH issues in witness/refinery
-// sessions that may have different PATH configurations.
-func CheckConvoysForIssueWithAutoStore(townRoot, issueID, observer string, logger func(format string, args ...interface{})) []string {
-	ctx := context.Background()
-	store, err := OpenStoreForTown(ctx, townRoot)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = store.Close() }()
-
-	// Resolve gt binary path at call time; fall back to bare "gt" if LookPath fails.
-	gtPath, err := exec.LookPath("gt")
-	if err != nil {
-		gtPath = "gt"
-	}
-
-	return CheckConvoysForIssue(ctx, store, townRoot, issueID, observer, logger, gtPath)
-}
-
 // CheckConvoysForIssue finds any convoys tracking the given issue and triggers
 // convoy completion checks. If the convoy is not complete, it reactively feeds
 // the next ready issue to keep the convoy progressing without waiting for
 // polling-based patrol cycles.
-//
-// This enables redundant convoy observation from multiple agents (Witness,
-// Refinery, Daemon).
 //
 // The check is idempotent - running it multiple times for the same issue is safe.
 // The underlying `gt convoy check` handles already-closed convoys gracefully.
@@ -64,12 +27,12 @@ func CheckConvoysForIssueWithAutoStore(townRoot, issueID, observer string, logge
 //   - store: beads storage for dependency/issue queries (nil skips convoy checks)
 //   - townRoot: path to the town root directory
 //   - issueID: the issue ID that was just closed
-//   - observer: identifier for logging (e.g., "witness", "refinery")
+//   - caller: identifier for logging (e.g., "Convoy")
 //   - logger: optional logger function (can be nil)
 //   - gtPath: resolved path to the gt binary (e.g. from exec.LookPath or daemon config)
 //
 // Returns the convoy IDs that were checked (may be empty if issue isn't tracked).
-func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, observer string, logger func(format string, args ...interface{}), gtPath string) []string {
+func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, caller string, logger func(format string, args ...interface{}), gtPath string) []string {
 	if logger == nil {
 		logger = func(format string, args ...interface{}) {} // no-op
 	}
@@ -83,26 +46,26 @@ func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, 
 		return nil
 	}
 
-	logger("%s: %s tracked by %d convoy(s): %v", observer, issueID, len(convoyIDs), convoyIDs)
+	logger("%s: %s tracked by %d convoy(s): %v", caller, issueID, len(convoyIDs), convoyIDs)
 
 	// Run convoy check for each tracking convoy
 	// Note: gt convoy check is idempotent and handles already-closed convoys
 	for _, convoyID := range convoyIDs {
 		if isConvoyClosed(ctx, store, convoyID) {
-			logger("%s: convoy %s already closed, skipping", observer, convoyID)
+			logger("%s: convoy %s already closed, skipping", caller, convoyID)
 			continue
 		}
 
-		logger("%s: checking convoy %s", observer, convoyID)
+		logger("%s: checking convoy %s", caller, convoyID)
 		if err := runConvoyCheck(ctx, townRoot, convoyID, gtPath); err != nil {
-			logger("%s: convoy %s check failed: %s", observer, convoyID, util.FirstLine(err.Error()))
+			logger("%s: convoy %s check failed: %s", caller, convoyID, util.FirstLine(err.Error()))
 		}
 
 		// Continuation feed: if convoy is still open after the completion check,
 		// reactively dispatch the next ready issue. This makes convoy feeding
 		// event-driven instead of relying on polling-based patrol cycles.
 		if !isConvoyClosed(ctx, store, convoyID) {
-			feedNextReadyIssue(ctx, store, townRoot, convoyID, observer, logger, gtPath)
+			feedNextReadyIssue(ctx, store, townRoot, convoyID, caller, logger, gtPath)
 		}
 	}
 
@@ -167,17 +130,16 @@ type trackedIssue struct {
 // polling-based patrol cycles.
 //
 // Only one issue is dispatched per call. When that issue completes, the
-// observer fires again and feeds the next one.
+// next close event triggers another feed cycle.
 // gtPath is the resolved path to the gt binary.
-func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, observer string, logger func(format string, args ...interface{}), gtPath string) {
+func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, caller string, logger func(format string, args ...interface{}), gtPath string) {
 	tracked := getConvoyTrackedIssues(ctx, store, convoyID)
 	if len(tracked) == 0 {
 		return
 	}
 
 	// Find the first ready issue (open, no assignee).
-	// Issues are returned by bd dep list in dependency order, so we pick
-	// the first match which is typically the highest priority.
+	// Pick the first match, which is typically the highest priority.
 	for _, issue := range tracked {
 		if issue.Status != "open" || issue.Assignee != "" {
 			continue
@@ -186,18 +148,18 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 		// Determine target rig from issue prefix
 		rig := rigForIssue(townRoot, issue.ID)
 		if rig == "" {
-			logger("%s: convoy %s: cannot determine rig for issue %s, skipping", observer, convoyID, issue.ID)
+			logger("%s: convoy %s: cannot determine rig for issue %s, skipping", caller, convoyID, issue.ID)
 			continue
 		}
 
-		logger("%s: convoy %s: feeding next ready issue %s to %s", observer, convoyID, issue.ID, rig)
+		logger("%s: convoy %s: feeding next ready issue %s to %s", caller, convoyID, issue.ID, rig)
 		if err := dispatchIssue(ctx, townRoot, issue.ID, rig, gtPath); err != nil {
-			logger("%s: convoy %s: dispatch %s failed: %s", observer, convoyID, issue.ID, util.FirstLine(err.Error()))
+			logger("%s: convoy %s: dispatch %s failed: %s", caller, convoyID, issue.ID, util.FirstLine(err.Error()))
 		}
 		return // Feed one at a time
 	}
 
-	logger("%s: convoy %s: no ready issues to feed", observer, convoyID)
+	logger("%s: convoy %s: no ready issues to feed", caller, convoyID)
 }
 
 // getConvoyTrackedIssues returns issues tracked by a convoy with fresh status.

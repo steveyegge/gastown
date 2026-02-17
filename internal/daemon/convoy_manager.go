@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -61,7 +60,6 @@ type ConvoyManager struct {
 	// Parked rigs are skipped during event polling. May be nil (never parked).
 	isRigParked func(string) bool
 
-	// PATCH-006: Resolved binary path to avoid PATH issues in subprocesses.
 	gtPath string
 
 	// started guards against double-call of Start() which would spawn duplicate goroutines.
@@ -189,6 +187,10 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage) {
 
 	// Use hq store for convoy lookups (convoys are hq-* prefixed)
 	hqStore := m.stores["hq"]
+	if hqStore == nil {
+		m.logger("Convoy: hq store unavailable, skipping convoy lookups for %s events", name)
+		return
+	}
 
 	for _, e := range events {
 		// Update high-water mark
@@ -265,7 +267,6 @@ func (m *ConvoyManager) scan() {
 func (m *ConvoyManager) findStranded() ([]strandedConvoyInfo, error) {
 	cmd := exec.CommandContext(m.ctx, m.gtPath, "convoy", "stranded", "--json")
 	cmd.Dir = m.townRoot
-	cmd.Env = os.Environ()
 	util.SetProcessGroup(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -306,7 +307,6 @@ func (m *ConvoyManager) feedFirstReady(c strandedConvoyInfo) {
 
 	cmd := exec.CommandContext(m.ctx, m.gtPath, "sling", issueID, rig, "--no-boot")
 	cmd.Dir = m.townRoot
-	cmd.Env = os.Environ()
 	util.SetProcessGroup(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -322,7 +322,6 @@ func (m *ConvoyManager) closeEmptyConvoy(convoyID string) {
 
 	cmd := exec.CommandContext(m.ctx, m.gtPath, "convoy", "check", convoyID)
 	cmd.Dir = m.townRoot
-	cmd.Env = os.Environ()
 	util.SetProcessGroup(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

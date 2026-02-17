@@ -16,10 +16,10 @@ func TestExtractIssueID(t *testing.T) {
 		{"external:gt:gt-abc", "gt-abc"},
 		{"external:bd:bd-xyz", "bd-xyz"},
 		{"external:hq:hq-cv-123", "hq-cv-123"},
-		{"external:", "external:"},     // malformed, return as-is
-		{"external:x:", ""},            // 3 parts but empty last part
-		{"simple", "simple"},           // no external prefix
-		{"", ""},                       // empty
+		{"external:", "external:"}, // malformed, return as-is
+		{"external:x:", ""},        // 3 parts but empty last part
+		{"simple", "simple"},       // no external prefix
+		{"", ""},                   // empty
 	}
 
 	for _, tt := range tests {
@@ -86,13 +86,5 @@ func TestCheckConvoysForIssue_NilLogger(t *testing.T) {
 	result := CheckConvoysForIssue(context.Background(), nil, "/nonexistent/path", "gt-test", "test", nil, "gt")
 	if result != nil {
 		t.Errorf("expected nil for nil store, got %v", result)
-	}
-}
-
-func TestCheckConvoysForIssueWithAutoStore_NoStore(t *testing.T) {
-	// With non-existent town root, OpenStoreForTown fails, convoy checks skipped.
-	result := CheckConvoysForIssueWithAutoStore("/nonexistent/path", "gt-test", "test", nil)
-	if result != nil {
-		t.Errorf("expected nil when store cannot be opened, got %v", result)
 	}
 }

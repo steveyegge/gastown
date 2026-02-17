@@ -120,7 +120,7 @@ exit 0
 	foundScan := false
 	foundDoubleStart := false
 	for _, s := range logSnapshot {
-		if strings.Contains(s, "detected close") && strings.Contains(s, "gt-integ1") {
+		if strings.Contains(s, "close detected") && strings.Contains(s, "gt-integ1") {
 			foundClose = true
 		}
 		if strings.Contains(s, "auto-closing empty convoy") || strings.Contains(s, "convoy check") {
@@ -149,15 +149,15 @@ exit 0
 
 // TestConvoyManager_LoggingFlow verifies the end-to-end log chain when a close
 // event triggers convoy tracking lookups and feeding decisions. This exercises
-// both ConvoyManager logging ("convoy manager: ...") and Observer logging
-// ("daemon: ...") flowing through the same logger.
+// both ConvoyManager event detection and CheckConvoysForIssue operations
+// flowing through the same logger.
 //
 // Expected log chain for a close event with convoy tracking:
-//  1. "convoy manager: detected close of <issue>"
-//  2. "daemon: issue <issue> is tracked by 1 convoy(s): [<convoy>]"
-//  3. "daemon: running convoy check for <convoy>"
-//  4. "daemon: convoy <convoy>: feeding next ready issue <issue2> to <rig>"
-//     OR "daemon: convoy <convoy>: no ready issues to feed"
+//  1. "Convoy: close detected: <issue>"
+//  2. "Convoy: <issue> tracked by 1 convoy(s): [<convoy>]"
+//  3. "Convoy: checking convoy <convoy>"
+//  4. "Convoy: convoy <convoy>: feeding next ready issue <issue2> to <rig>"
+//     OR "Convoy: convoy <convoy>: no ready issues to feed"
 func TestConvoyManager_LoggingFlow(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on Windows (process groups)")
@@ -285,12 +285,12 @@ exit 0
 
 	// Verify the complete log chain.
 	// 1. ConvoyManager detects the close event
-	assertLogContains(t, snapshot, "detected close", task1.ID)
-	// 2. Observer reports convoy tracking
-	assertLogContains(t, snapshot, "is tracked by", convoy.ID)
-	// 3. Observer runs convoy check
-	assertLogContains(t, snapshot, "running convoy check", convoy.ID)
-	// 4. Observer feeds next ready issue (task2 is open+unassigned)
+	assertLogContains(t, snapshot, "close detected", task1.ID)
+	// 2. CheckConvoysForIssue reports convoy tracking
+	assertLogContains(t, snapshot, "tracked by", convoy.ID)
+	// 3. CheckConvoysForIssue runs convoy check
+	assertLogContains(t, snapshot, "checking convoy", convoy.ID)
+	// 4. CheckConvoysForIssue feeds next ready issue (task2 is open+unassigned)
 	assertLogContains(t, snapshot, "feeding next ready issue", task2.ID)
 
 	// Verify no format string errors (e.g., %!s(MISSING), %!(EXTRA)
@@ -395,9 +395,9 @@ exit 0
 	mu.Unlock()
 
 	// Verify chain ends with "no ready issues"
-	assertLogContains(t, snapshot, "detected close", task.ID)
-	assertLogContains(t, snapshot, "is tracked by", convoy.ID)
-	assertLogContains(t, snapshot, "running convoy check", convoy.ID)
+	assertLogContains(t, snapshot, "close detected", task.ID)
+	assertLogContains(t, snapshot, "tracked by", convoy.ID)
+	assertLogContains(t, snapshot, "checking convoy", convoy.ID)
 	assertLogContains(t, snapshot, "no ready issues to feed", "")
 
 	// Verify no format string errors

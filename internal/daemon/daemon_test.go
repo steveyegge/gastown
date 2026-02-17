@@ -366,28 +366,6 @@ func TestDaemon_StartsManagerAndScanner(t *testing.T) {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	binDir := t.TempDir()
-	// Mock bd: activity emits one line then blocks; Stop() kills via context
-	bdScript := `#!/bin/sh
-echo '{"type":"status","issue_id":"gt-x","new_status":"closed"}'
-sleep 999
-`
-	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write mock bd: %v", err)
-	}
-	// Mock gt: convoy stranded returns empty, convoy check/sling no-op
-	gtScript := `#!/bin/sh
-if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
-  echo '[]'
-  exit 0
-fi
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(binDir, "gt"), []byte(gtScript), 0755); err != nil {
-		t.Fatalf("write mock gt: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
 	manager := NewConvoyManager(townRoot, func(string, ...interface{}) {}, "gt", 1*time.Hour, nil, nil, nil)
 	if err := manager.Start(); err != nil {
 		t.Fatalf("manager Start: %v", err)
@@ -406,22 +384,6 @@ func TestDaemon_StopsManagerAndScanner(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
-
-	binDir := t.TempDir()
-	bdScript := `#!/bin/sh
-sleep 999
-`
-	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write mock bd: %v", err)
-	}
-	gtScript := `#!/bin/sh
-echo '[]'
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(binDir, "gt"), []byte(gtScript), 0755); err != nil {
-		t.Fatalf("write mock gt: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	manager := NewConvoyManager(townRoot, func(string, ...interface{}) {}, "gt", 1*time.Hour, nil, nil, nil)
 	if err := manager.Start(); err != nil {

@@ -197,7 +197,7 @@ func TestEventPoll_SkipsNonCloseEvents(t *testing.T) {
 
 	// Should NOT have logged any close detection
 	for _, s := range logged {
-		if strings.Contains(s, "detected close") {
+		if strings.Contains(s, "close detected") {
 			t.Errorf("expected no close detection for open issue, got: %v", logged)
 		}
 	}
@@ -515,13 +515,14 @@ func TestEventPoll_LazyStoreOpening(t *testing.T) {
 }
 
 func TestConvoyManager_ScanInterval_Configurable(t *testing.T) {
-	m := NewConvoyManager("/tmp", nil, "gt", 0, nil, nil, nil)
+	noop := func(string, ...interface{}) {}
+	m := NewConvoyManager("/tmp", noop, "gt", 0, nil, nil, nil)
 	if m.scanInterval != defaultStrandedScanInterval {
 		t.Errorf("interval 0 should use default %v, got %v", defaultStrandedScanInterval, m.scanInterval)
 	}
 
 	custom := 5 * time.Minute
-	m2 := NewConvoyManager("/tmp", nil, "gt", custom, nil, nil, nil)
+	m2 := NewConvoyManager("/tmp", noop, "gt", custom, nil, nil, nil)
 	if m2.scanInterval != custom {
 		t.Errorf("interval should be %v, got %v", custom, m2.scanInterval)
 	}
@@ -1602,7 +1603,7 @@ exit 0
 	m.pollAllStores()
 
 	for _, s := range logged {
-		if strings.Contains(s, "detected close") {
+		if strings.Contains(s, "close detected") {
 			t.Errorf("expected no close detection for open issue, got: %s", s)
 		}
 	}

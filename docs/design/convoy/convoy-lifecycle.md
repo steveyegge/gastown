@@ -97,11 +97,11 @@ never lands.
 
 ## Design: Active Convoy Convergence
 
-### Principle: Event-Driven, Redundantly Observed
+### Principle: Event-Driven, Centrally Managed
 
 Convoy completion should be:
 1. **Event-driven**: Triggered by issue close, not polling
-2. **Redundantly observed**: Multiple agents can detect and close
+2. **Centrally managed**: Single owner (daemon) avoids scattered side-effect hooks
 3. **Manually overridable**: Humans can force-close
 
 ### Event-Driven Completion
@@ -264,7 +264,7 @@ stories S-01 through S-18, all DONE). Remaining future work:
 |-----------|------|
 | Convoy command | `internal/cmd/convoy.go` |
 | Auto-convoy (sling) | `internal/cmd/sling_convoy.go` |
-| Event-driven observer | `internal/convoy/observer.go` (`CheckConvoysForIssue`, `feedNextReadyIssue`) |
+| Convoy operations | `internal/convoy/operations.go` (`CheckConvoysForIssue`, `feedNextReadyIssue`) |
 | Daemon manager | `internal/daemon/convoy_manager.go` |
 | Formula convoy | `internal/cmd/formula.go` (`executeConvoyFormula`) |
 
