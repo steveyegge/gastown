@@ -36,8 +36,7 @@ across distributed teams of AI agents working on shared codebases.`, cmdName)
 }
 
 // Commands that don't require beads to be installed/checked.
-// NOTE: Gas Town has migrated to Dolt for beads storage. The bd version
-// check is obsolete. Exempt all common commands.
+// These commands should work even when bd is missing or outdated.
 var beadsExemptCommands = map[string]bool{
 	"version":    true,
 	"help":       true,
@@ -126,8 +125,9 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 
 	// Check beads version (non-blocking - warn only)
 	if err := CheckBeadsVersion(); err != nil {
-		// Just warn, don't block - beads issues shouldn't prevent gt from running
-		fmt.Fprintf(os.Stderr, "⚠ beads check: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\n%s beads (bd) version issue:\n", style.Bold.Render("⚠️  WARNING:"))
+		fmt.Fprintf(os.Stderr, "   %v\n", err)
+		fmt.Fprintf(os.Stderr, "   Run %s for details.\n\n", style.Dim.Render("gt doctor"))
 	}
 	return nil
 }
@@ -181,25 +181,6 @@ func warnIfTownRootOffMain() {
 		style.Bold.Render("⚠️  WARNING:"), branch)
 	fmt.Fprintf(os.Stderr, "   This can cause gt commands to fail. Run: %s\n\n",
 		style.Dim.Render("gt doctor --fix"))
-}
-
-// checkBeadsDependency verifies beads meets minimum version requirements.
-// Skips check for exempt commands (version, help, completion).
-// Deprecated: Use persistentPreRun instead, which calls CheckBeadsVersion.
-func checkBeadsDependency(cmd *cobra.Command, _ []string) error {
-	// Get the root command name being run
-	cmdName := cmd.Name()
-
-	// Skip check for exempt commands
-	if beadsExemptCommands[cmdName] {
-		return nil
-	}
-
-	// Check for stale binary (warning only, doesn't block)
-	checkStaleBinaryWarning()
-
-	// Check beads version
-	return CheckBeadsVersion()
 }
 
 // staleBinaryWarned tracks if we've already warned about stale binary in this session.

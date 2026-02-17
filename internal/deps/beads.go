@@ -2,16 +2,18 @@
 package deps
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // MinBeadsVersion is the minimum compatible beads version for this Gas Town release.
 // Update this when Gas Town requires new beads features.
-const MinBeadsVersion = "0.43.0"
+const MinBeadsVersion = "0.52.0"
 
 // BeadsInstallPath is the go install path for beads.
 const BeadsInstallPath = "github.com/steveyegge/beads/cmd/bd@latest"
@@ -36,8 +38,10 @@ func CheckBeads() (BeadsStatus, string) {
 	}
 	_ = path // bd found
 
-	// Get version
-	cmd := exec.Command("bd", "version")
+	// Get version (with timeout to prevent hanging on broken bd installs)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", "version")
 	output, err := cmd.Output()
 	if err != nil {
 		return BeadsUnknown, ""
@@ -109,7 +113,7 @@ func installBeads() error {
 
 // parseBeadsVersion extracts version from "bd version X.Y.Z ..." output.
 func parseBeadsVersion(output string) string {
-	// Match patterns like "bd version 0.43.0" or "bd version 0.43.0 (dev: ...)"
+	// Match patterns like "bd version 0.52.0" or "bd version 0.52.0 (dev: ...)"
 	re := regexp.MustCompile(`bd version (\d+\.\d+\.\d+)`)
 	matches := re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
