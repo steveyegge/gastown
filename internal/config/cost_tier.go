@@ -32,20 +32,35 @@ func IsValidTier(tier string) bool {
 	}
 }
 
+// TierManagedRoles is the set of roles whose model selection is managed by cost tiers.
+// These are the only roles that ApplyCostTier modifies — any other custom RoleAgents
+// entries (e.g., user-defined roles or non-Claude agents for non-tier roles) are preserved.
+var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+
 // CostTierRoleAgents returns the role_agents mapping for a given tier.
-// Standard tier returns an empty map (all roles use default/opus).
-// Returns nil if the tier is invalid.
+// All tiers explicitly map every tier-managed role. Standard tier maps all roles
+// to empty string (meaning "use default/opus"), while other tiers specify
+// Claude model variants. Returns nil if the tier is invalid.
 func CostTierRoleAgents(tier CostTier) map[string]string {
 	switch tier {
 	case TierStandard:
-		return map[string]string{}
+		// Explicit mapping for all managed roles — empty value means "use default (opus)"
+		return map[string]string{
+			"mayor":    "",
+			"deacon":   "",
+			"witness":  "",
+			"refinery": "",
+			"polecat":  "",
+			"crew":     "",
+		}
 	case TierEconomy:
 		return map[string]string{
 			"mayor":    "claude-sonnet",
 			"deacon":   "claude-haiku",
 			"witness":  "claude-sonnet",
 			"refinery": "claude-sonnet",
-			// polecat and crew omitted → use default (opus)
+			"polecat":  "", // use default (opus)
+			"crew":     "", // use default (opus)
 		}
 	case TierBudget:
 		return map[string]string{
@@ -95,7 +110,10 @@ func claudeHaikuPreset() *RuntimeConfig {
 }
 
 // ApplyCostTier writes the tier's agent and role_agents configuration to town settings.
-// For standard tier, it clears role_agents and tier-specific agents.
+// Only tier-managed roles are modified — custom RoleAgents entries for non-tier roles
+// (or intentional non-Claude overrides) are preserved.
+// For standard tier, tier-managed roles are removed from RoleAgents (using defaults)
+// and tier-specific agent presets are cleaned up.
 func ApplyCostTier(settings *TownSettings, tier CostTier) error {
 	roleAgents := CostTierRoleAgents(tier)
 	if roleAgents == nil {
@@ -104,8 +122,21 @@ func ApplyCostTier(settings *TownSettings, tier CostTier) error {
 
 	agents := CostTierAgents(tier)
 
-	// Set role agents
-	settings.RoleAgents = roleAgents
+	// Ensure RoleAgents map exists
+	if settings.RoleAgents == nil {
+		settings.RoleAgents = make(map[string]string)
+	}
+
+	// Only update tier-managed roles, preserving any custom entries
+	for _, role := range TierManagedRoles {
+		agentName := roleAgents[role]
+		if agentName == "" {
+			// Empty means "use default" — remove any tier override for this role
+			delete(settings.RoleAgents, role)
+		} else {
+			settings.RoleAgents[role] = agentName
+		}
+	}
 
 	// Ensure agents map exists
 	if settings.Agents == nil {
@@ -131,12 +162,13 @@ func ApplyCostTier(settings *TownSettings, tier CostTier) error {
 
 // GetCurrentTier infers the current cost tier from the settings' RoleAgents.
 // Returns the tier name if it matches a known tier exactly, or empty string for custom configs.
+// Only tier-managed roles are compared — non-tier custom entries are ignored.
 func GetCurrentTier(settings *TownSettings) string {
 	// Check informational field first for quick path
 	if settings.CostTier != "" && IsValidTier(settings.CostTier) {
 		// Verify it still matches the actual config
 		expected := CostTierRoleAgents(CostTier(settings.CostTier))
-		if roleAgentsMatch(settings.RoleAgents, expected) {
+		if tierRolesMatch(settings.RoleAgents, expected) {
 			return settings.CostTier
 		}
 	}
@@ -145,7 +177,7 @@ func GetCurrentTier(settings *TownSettings) string {
 	for _, tierName := range ValidCostTiers() {
 		tier := CostTier(tierName)
 		expected := CostTierRoleAgents(tier)
-		if roleAgentsMatch(settings.RoleAgents, expected) {
+		if tierRolesMatch(settings.RoleAgents, expected) {
 			return tierName
 		}
 	}
@@ -153,17 +185,14 @@ func GetCurrentTier(settings *TownSettings) string {
 	return "" // Custom configuration
 }
 
-// roleAgentsMatch checks if two role_agents maps are equivalent.
-// nil and empty maps are treated as equal.
-func roleAgentsMatch(a, b map[string]string) bool {
-	if len(a) == 0 && len(b) == 0 {
-		return true
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
+// tierRolesMatch checks if the actual RoleAgents map matches a tier's expected
+// assignments for tier-managed roles only. Non-tier custom entries in actual are ignored.
+// An empty or missing value in actual matches an empty expected value (both mean "use default").
+func tierRolesMatch(actual, expected map[string]string) bool {
+	for _, role := range TierManagedRoles {
+		actualVal := actual[role]   // "" if not present
+		expectedVal := expected[role] // "" means "use default"
+		if actualVal != expectedVal {
 			return false
 		}
 	}

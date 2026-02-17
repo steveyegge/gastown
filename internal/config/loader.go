@@ -1167,42 +1167,73 @@ func RoleSettingsDir(role, rigPath string) string {
 
 // tryResolveFromEphemeralTier checks the GT_COST_TIER environment variable
 // and returns the appropriate RuntimeConfig for the given role if an ephemeral
-// cost tier is set. Returns nil if no ephemeral tier is active or if the role
-// is not overridden by the tier.
-func tryResolveFromEphemeralTier(role string) *RuntimeConfig {
+// cost tier is set.
+//
+// Returns:
+//   - (rc, true)  — tier is active and has spoken for this role. rc may be nil
+//     if the tier says "use default" (empty agent mapping).
+//   - (nil, false) — no ephemeral tier active, or role is not tier-managed.
+//
+// The caller must respect handled=true even when rc is nil: it means the tier
+// explicitly wants the default agent for this role, and persisted RoleAgents
+// should be skipped to prevent stale config from leaking through.
+func tryResolveFromEphemeralTier(role string) (*RuntimeConfig, bool) {
 	tierName := os.Getenv("GT_COST_TIER")
 	if tierName == "" || !IsValidTier(tierName) {
-		return nil
+		return nil, false
 	}
 
 	tier := CostTier(tierName)
 	roleAgents := CostTierRoleAgents(tier)
 	if roleAgents == nil {
-		return nil
+		return nil, false
 	}
 
 	agentName, ok := roleAgents[role]
-	if !ok || agentName == "" {
-		return nil // Role not overridden by this tier — use default resolution
+	if !ok {
+		return nil, false // Role not managed by tiers
+	}
+
+	// Empty agent name means "use default (opus)" — signal handled but no override
+	if agentName == "" {
+		return nil, true
 	}
 
 	// Look up the agent config from the tier's agent definitions
 	agents := CostTierAgents(tier)
 	if agents != nil {
 		if rc, found := agents[agentName]; found && rc != nil {
-			return fillRuntimeDefaults(rc)
+			return fillRuntimeDefaults(rc), true
 		}
 	}
 
-	return nil
+	return nil, false
+}
+
+// hasExplicitNonClaudeOverride checks if a role has an explicit non-Claude agent
+// assignment in rig or town RoleAgents. This is used to prevent ephemeral cost
+// tiers from silently replacing intentional non-Claude agent selections.
+func hasExplicitNonClaudeOverride(role string, townSettings *TownSettings, rigSettings *RigSettings) bool {
+	// Check rig's RoleAgents
+	if rigSettings != nil && rigSettings.RoleAgents != nil {
+		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+				return true
+			}
+		}
+	}
+	// Check town's RoleAgents
+	if townSettings != nil && townSettings.RoleAgents != nil {
+		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
-	// Check ephemeral cost tier (GT_COST_TIER env var) first
-	if rc := tryResolveFromEphemeralTier(role); rc != nil {
-		return rc
-	}
-
 	// Load rig settings (may be nil for town-level roles like mayor/deacon)
 	var rigSettings *RigSettings
 	if rigPath != "" {
@@ -1223,6 +1254,26 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
 	if rigPath != "" {
 		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	// Check ephemeral cost tier (GT_COST_TIER env var)
+	tierRC, tierHandled := tryResolveFromEphemeralTier(role)
+	if tierHandled {
+		if tierRC != nil {
+			// Tier wants a specific Claude model for this role.
+			// But if there's an explicit non-Claude rig/town override, respect it —
+			// cost tiers only manage Claude model selection, not agent platform choice.
+			if hasExplicitNonClaudeOverride(role, townSettings, rigSettings) {
+				// Fall through to normal resolution below
+			} else {
+				return tierRC
+			}
+		} else {
+			// Tier says "use default" for this role — skip persisted RoleAgents
+			// to prevent stale config from leaking through, go straight to
+			// default resolution (rig's Agent → town's DefaultAgent → "claude").
+			return resolveAgentConfigInternal(townRoot, rigPath)
+		}
 	}
 
 	// Check rig's RoleAgents first
