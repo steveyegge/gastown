@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// FirstLine returns the first non-empty line from s, trimmed of whitespace.
+// Used to extract the meaningful error message from subprocess stderr, which
+// often includes multi-line cobra usage text after the actual error.
+func FirstLine(s string) string {
+	for _, line := range strings.SplitN(s, "\n", -1) {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
 // ExecWithOutput runs a command in the specified directory and returns stdout.
 // If the command fails, stderr content is included in the error message.
 func ExecWithOutput(workDir, cmd string, args ...string) (string, error) {

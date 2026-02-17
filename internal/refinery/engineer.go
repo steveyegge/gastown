@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -88,15 +87,15 @@ type MergeQueueConfig struct {
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:    true,
-		OnConflict: "assign_back",
-		RunTests:                         true,
-		TestCommand:                      "",
-		DeleteMergedBranches:             true,
-		RetryFlakyTests:                  1,
-		PollInterval:                     30 * time.Second,
-		MaxConcurrent:                    1,
-		StaleClaimTimeout:               DefaultStaleClaimTimeout,
+		Enabled:              true,
+		OnConflict:           "assign_back",
+		RunTests:             true,
+		TestCommand:          "",
+		DeleteMergedBranches: true,
+		RetryFlakyTests:      1,
+		PollInterval:         30 * time.Second,
+		MaxConcurrent:        1,
+		StaleClaimTimeout:    DefaultStaleClaimTimeout,
 	}
 }
 
@@ -238,15 +237,15 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled    *bool   `json:"enabled"`
-		OnConflict *string `json:"on_conflict"`
-		RunTests                         *bool   `json:"run_tests"`
-		TestCommand                      *string `json:"test_command"`
-		DeleteMergedBranches             *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
-		PollInterval                     *string `json:"poll_interval"`
-		MaxConcurrent                    *int    `json:"max_concurrent"`
-		StaleClaimTimeout                *string `json:"stale_claim_timeout"`
+		Enabled              *bool   `json:"enabled"`
+		OnConflict           *string `json:"on_conflict"`
+		RunTests             *bool   `json:"run_tests"`
+		TestCommand          *string `json:"test_command"`
+		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
+		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
+		PollInterval         *string `json:"poll_interval"`
+		MaxConcurrent        *int    `json:"max_concurrent"`
+		StaleClaimTimeout    *string `json:"stale_claim_timeout"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -708,12 +707,6 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
-
-			// Redundant convoy observer: check if merged issue is tracked by a convoy
-			logger := func(format string, args ...interface{}) {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
-			}
-			convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
 		}
 	}
 

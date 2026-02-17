@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestIsReadyIssue_BlockingAndStatus(t *testing.T) {
 	tests := []struct {
@@ -124,6 +128,46 @@ func TestIssueDetailsIsBlocked(t *testing.T) {
 			got := tc.in.IsBlocked()
 			if got != tc.want {
 				t.Fatalf("IsBlocked() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsSlingableBead(t *testing.T) {
+	// Set up a fake town root with routes.jsonl
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		beadID string
+		want   bool
+	}{
+		{"rig bead is slingable", "gt-wisp-abc", true},
+		{"another rig bead is slingable", "bd-wisp-xyz", true},
+		{"town-level bead not slingable", "hq-wisp-abc", false},
+		{"town-level convoy not slingable", "hq-cv-kl6ns", false},
+		{"unknown prefix not slingable", "zz-wisp-abc", false},
+		{"no prefix assumes slingable", "nohyphen", true},
+		{"empty ID assumes slingable", "", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isSlingableBead(townRoot, tc.beadID)
+			if got != tc.want {
+				t.Fatalf("isSlingableBead(%q) = %v, want %v", tc.beadID, got, tc.want)
 			}
 		})
 	}
