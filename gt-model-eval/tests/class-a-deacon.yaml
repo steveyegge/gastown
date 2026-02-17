@@ -1,0 +1,108 @@
+# Class A Reasoning Tests: Deacon
+# These tests use a FIXED neutral role_context with NO answer hints.
+# They measure whether the model can derive the correct action from evidence alone.
+# Compare against deacon-zombie.yaml / deacon-plugin-gate.yaml (Class B) which
+# provide directive context.
+
+# Shared neutral context — describes the role without hinting at any decision.
+# Promptfoo doesn't support YAML anchors across list items, so this is repeated.
+
+- description: "[Class A] Deacon zombie: dead session + running state + stale"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon — the mayor's background daemon. You patrol rig health by
+      running diagnostic shell commands and interpreting their output. Your responsibilities
+      include monitoring polecat session health, evaluating plugin readiness, and
+      managing the dog worker pool. You make decisions based on the evidence in the
+      shell output below.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1b2", "title": "agent:Toast", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:10:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Toast status --porcelain
+      (empty - clean worktree)
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-warrant";
+
+- description: "[Class A] Deacon zombie: alive session + running + recent activity"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon — the mayor's background daemon. You patrol rig health by
+      running diagnostic shell commands and interpreting their output. Your responsibilities
+      include monitoring polecat session health, evaluating plugin readiness, and
+      managing the dog worker pool. You make decisions based on the evidence in the
+      shell output below.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      0
+
+      $ bd show agent-Crispy --json
+      {"id": "gt-c3d4", "title": "agent:Crispy", "status": "open", "labels": ["agent_state:running"], "updated_at": "2026-02-15T14:53:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ tmux capture-pane -t bd-polecat-Crispy -p | tail -3
+      Running tests... 42 passed, 0 failed
+      ✓ All checks complete
+      $
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "no-op";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant" && d.action !== "nuke";
+
+- description: "[Class A] Deacon zombie: dead session + idle state + clean git"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon — the mayor's background daemon. You patrol rig health by
+      running diagnostic shell commands and interpreting their output. Your responsibilities
+      include monitoring polecat session health, evaluating plugin readiness, and
+      managing the dog worker pool. You make decisions based on the evidence in the
+      shell output below.
+    formula_step: zombie-scan
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Waffles --json
+      {"id": "gt-w1x2", "title": "agent:Waffles", "status": "open", "labels": ["agent_state:idle"], "updated_at": "2026-02-15T13:00:00Z"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ git -C /town/gastown/polecats/Waffles status --porcelain
+      (empty - clean worktree)
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-warrant";

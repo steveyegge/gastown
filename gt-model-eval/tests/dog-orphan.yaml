@@ -1,0 +1,271 @@
+# Dog Formula: Orphan Triage
+# Tests the 5-way classification of orphaned beads/sessions:
+# RESET, REASSIGN, RECOVER, ESCALATE, or BURN.
+
+- description: "RESET: dead assignee, no branch, no commits"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog executing the mol-orphan-scan formula. You triage orphaned work
+      into categories: reset (clear stale state, re-queue), reassign (work exists
+      elsewhere), recover (preserve branch/commits), escalate (too complex), or
+      burn (safe to destroy ephemeral data).
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work1 "Add user roles"
+      $ bd show gt-work1 --json
+      {"id": "gt-work1", "title": "Add user roles", "status": "in_progress", "assignee": "polecat-Toast"}
+
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ git branch -a | grep -i "user.roles\|Toast"
+      (no output)
+
+      $ ls /town/gastown/polecats/Toast 2>/dev/null
+      ls: /town/gastown/polecats/Toast: No such file or directory
+    context: "Bead in_progress, assignee dead, no branch exists, no worktree. No work was started — safe to reset."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reset";
+
+- description: "RESET: hooked bead, assignee dead, clean worktree"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. A hooked bead with dead assignee and clean
+      worktree means the hook was claimed but work never began. Reset to re-queue.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work2 "Fix pagination bug"
+      $ bd show gt-work2 --json
+      {"id": "gt-work2", "title": "Fix pagination bug", "status": "hooked", "assignee": "polecat-Crispy"}
+
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Crispy status --porcelain 2>/dev/null
+      (empty)
+
+      $ git -C /town/gastown/polecats/Crispy log --oneline origin/main..HEAD 2>/dev/null
+      (empty)
+    context: "Hooked bead, dead assignee, clean worktree, no commits. Work was claimed but never started."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reset";
+
+- description: "REASSIGN: branch exists on another rig"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. If the work branch exists on a different rig's
+      remote, reassign to that rig — the work is there, just needs continuation.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work3 "Implement caching layer"
+      $ bd show gt-work3 --json
+      {"id": "gt-work3", "title": "Implement caching layer", "status": "in_progress", "assignee": "polecat-Toast"}
+
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ git branch -r | grep cache
+      laneassist/feat/caching-layer
+
+      $ git log --oneline laneassist/feat/caching-layer | head -3
+      a1b2c3d feat: add Redis cache adapter
+      d4e5f6g test: cache integration tests
+      h7i8j9k refactor: extract cache interface
+    context: "Bead in_progress. Assignee dead on gastown rig. But branch exists on laneassist rig remote with 3 commits."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reassign";
+
+- description: "RECOVER: branch with unpushed commits"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. When a dead polecat has unpushed commits on a
+      local branch, recover the work by preserving the branch.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work4 "Add search feature"
+      $ bd show gt-work4 --json
+      {"id": "gt-work4", "title": "Add search feature", "status": "in_progress", "assignee": "polecat-Waffles"}
+
+      $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Waffles log --oneline origin/main..HEAD
+      a1b2c3d feat: add search endpoint
+      d4e5f6g feat: search UI component
+      h7i8j9k feat: search indexing
+      k0l1m2n test: search integration tests
+      o3p4q5r docs: search API documentation
+
+      $ git -C /town/gastown/polecats/Waffles branch -vv | grep '*'
+      * feat/search a1b2c3d [no remote] feat: add search endpoint
+    context: "5 unpushed commits on local branch with no remote tracking. Significant work to preserve."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "recover";
+
+- description: "RECOVER: branch pushed + PR open"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. Branch is pushed and a PR is open — the work
+      is safe on the remote. Recover by noting the PR for reassignment.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work5 "Refactor auth module"
+      $ bd show gt-work5 --json
+      {"id": "gt-work5", "title": "Refactor auth module", "status": "in_progress", "assignee": "polecat-Mango"}
+
+      $ tmux has-session -t bd-polecat-Mango 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Mango branch -vv | grep '*'
+      * refactor/auth a1b2c3d [origin/refactor/auth] refactor: extract auth service
+
+      $ gh pr list --head refactor/auth --json number,title,state
+      [{"number": 42, "title": "Refactor auth module", "state": "OPEN"}]
+    context: "Branch pushed to origin. PR #42 is open. Work is safe on remote — just needs new assignee."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "recover";
+
+- description: "RECOVER: uncommitted changes in worktree"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. Dead polecat with uncommitted changes. Stash the
+      changes and create a recovery branch to preserve the work.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work6 "Add payment integration"
+      $ bd show gt-work6 --json
+      {"id": "gt-work6", "title": "Add payment integration", "status": "hooked", "assignee": "polecat-Hazel"}
+
+      $ tmux has-session -t bd-polecat-Hazel 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Hazel status --porcelain
+       M src/payments/stripe.js
+       M src/payments/stripe.test.js
+      ?? src/payments/webhook-handler.js
+
+      $ git -C /town/gastown/polecats/Hazel log --oneline origin/main..HEAD
+      (empty)
+    context: "Hooked bead, dead session. 2 modified files + 1 new file. No commits yet — all work is uncommitted."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "recover";
+
+- description: "ESCALATE: merge conflict state"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. A dead session in merge conflict state is too
+      complex for a dog to resolve. Escalate to mayor for human or senior agent review.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: gt-work7 "Database migration"
+      $ bd show gt-work7 --json
+      {"id": "gt-work7", "title": "Database migration", "status": "in_progress", "assignee": "polecat-Pixel"}
+
+      $ tmux has-session -t bd-polecat-Pixel 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Pixel status
+      interactive rebase in progress; onto abc1234
+      You have unmerged paths.
+      Unmerged paths:
+        both modified:   src/db/schema.sql
+        both modified:   src/db/migrations/001.js
+    context: "Dead session mid-rebase with merge conflicts. Too complex for dog — escalate."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+
+- description: "ESCALATE: multiple beads assigned to same dead polecat"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. Multiple beads assigned to the same dead polecat
+      is a complex situation — the work items may be interrelated. Escalate for
+      coordinated recovery.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan: polecat-Biscuit has multiple beads
+      $ bd list --assignee polecat-Biscuit --status in_progress --json
+      [
+        {"id": "gt-w8", "title": "Fix auth middleware", "status": "in_progress"},
+        {"id": "gt-w9", "title": "Add rate limiting", "status": "in_progress"},
+        {"id": "gt-w10", "title": "Update API docs", "status": "hooked"}
+      ]
+
+      $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Biscuit log --oneline origin/main..HEAD
+      a1b2c3d feat: auth middleware refactor
+      d4e5f6g feat: rate limiting middleware
+    context: "3 beads assigned to dead polecat-Biscuit. Commits span multiple work items. Complex triage needed."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+
+- description: "BURN: orphaned wisp, stale, no promoted content"
+  vars:
+    role: dog
+    role_context: >
+      You are a Dog triaging orphans. Orphaned wisps (ephemeral data) older than 1-2
+      hours with no promoted content and dead spawner sessions can be safely burned.
+      Wisps are temporary by design.
+    formula_step: triage-orphans
+    allowed_actions: '["reset", "reassign", "recover", "escalate", "burn"]'
+    shell_output: |
+      ## Orphan wisp: .beads-wisp/patrol-2026-02-15T11-00.jsonl
+      $ ls -la .beads-wisp/patrol-2026-02-15T11-00.jsonl
+      -rw-r--r-- 1 user staff 2048 Feb 15 11:00 .beads-wisp/patrol-2026-02-15T11-00.jsonl
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ head -1 .beads-wisp/patrol-2026-02-15T11-00.jsonl | jq '.labels'
+      ["type:patrol-log"]
+
+      Spawner session: bd-deacon-old (dead since 12:00)
+      Age: 3 hours 55 minutes
+      Promoted content: none
+    context: "Orphaned wisp, 4 hours old, spawner session dead, no promoted/labeled content worth keeping. Safe to burn."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "burn";

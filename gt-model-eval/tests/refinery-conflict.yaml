@@ -1,0 +1,246 @@
+# Refinery Patrol: Merge Conflict and Push Verification
+# Tests rebase outcomes, target branch selection, and the critical
+# post-push verification (PATCH-003: silent push failure detection).
+
+- description: "Clean rebase — proceed to tests"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery — the merge queue processor. After fetching and rebasing a
+      branch, assess the outcome. Clean rebase = proceed to tests. Conflict = abort and
+      skip. Push failures must be verified (PATCH-003).
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/add-search (PR #87)
+
+      $ git fetch --prune origin
+      $ git checkout -b temp-merge origin/feat/add-search
+      Switched to a new branch 'temp-merge'
+
+      $ git rebase origin/main
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Rebase completed cleanly. No conflicts. Ready for test phase."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "proceed-to-tests";
+
+- description: "Rebase conflict in single file"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Rebase failed with a merge conflict. Abort the rebase and
+      skip this MR. Do not attempt to resolve conflicts — that's the polecat's job.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/update-config (PR #91)
+
+      $ git rebase origin/main
+      CONFLICT (content): Merge conflict in src/config.json
+      error: could not apply a1b2c3d... update config defaults
+      hint: Resolve all conflicts manually, then run "git rebase --continue".
+      hint: Or use "git rebase --abort" to undo the rebase.
+
+      $ git diff --name-only --diff-filter=U
+      src/config.json
+    context: "Rebase conflict in src/config.json. 1 conflicting file."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip";
+    - type: contains-any
+      value: ["conflict", "config.json"]
+
+- description: "Rebase conflict in multiple files"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Rebase failed with conflicts in multiple files.
+      Abort and skip.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/major-refactor (PR #93)
+
+      $ git rebase origin/main
+      CONFLICT (content): Merge conflict in src/api/routes.js
+      CONFLICT (content): Merge conflict in src/auth/middleware.js
+      CONFLICT (modify/delete): src/legacy/compat.js deleted in HEAD and modified in a1b2c3d.
+      CONFLICT (content): Merge conflict in package.json
+      error: could not apply a1b2c3d... major refactoring
+
+      $ git diff --name-only --diff-filter=U
+      src/api/routes.js
+      src/auth/middleware.js
+      src/legacy/compat.js
+      package.json
+    context: "Rebase conflict in 4 files including a modify/delete conflict. Complex merge."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip";
+
+- description: "Rebase fails: dirty worktree (not a conflict)"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Rebase failed because the worktree is dirty, not because
+      of a merge conflict. Different error — skip this MR.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/fix-typo (PR #96)
+
+      $ git rebase origin/main
+      error: cannot rebase: You have unstaged changes.
+      error: Please commit or stash them.
+    context: "Rebase failed due to unstaged changes in worktree, not a merge conflict."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip";
+
+- description: "Target branch: MR specifies non-main target"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. This MR targets a release branch, not main. Rebase against
+      the MR's specified target branch.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: fix/release-hotfix (PR #99)
+      ## MR metadata: {"target_branch": "release/v2.1", "source_branch": "fix/release-hotfix"}
+
+      $ git rebase origin/release/v2.1
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "MR targets release/v2.1 (not main). Rebase succeeded against the correct target."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "proceed-to-tests";
+
+- description: "Post-push: SHA matches — send MERGED notification"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. After pushing, you MUST verify the push succeeded by
+      comparing local and remote SHAs. If they match, send the MERGED notification
+      to the witness IMMEDIATELY — before any cleanup. This is critical: without
+      the notification, polecat worktrees accumulate indefinitely.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch merged to main
+
+      $ git push origin main
+      To github.com:org/repo.git
+         abc1234..def5678  main -> main
+
+      $ LOCAL_SHA=$(git rev-parse main)
+      $ git fetch origin main
+      $ REMOTE_SHA=$(git rev-parse origin/main)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: def5678abc1234def5678abc1234def5678abc12
+    context: "Push succeeded. Local SHA matches remote SHA. Send MERGED notification immediately."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "send-merged-notification";
+
+- description: "CRITICAL: silent push failure — SHA mismatch (PATCH-003)"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. PATCH-003 CRITICAL: After pushing, you MUST verify the SHA.
+      If git push reports success (exit 0) but the remote SHA doesn't match the local
+      SHA, this is a SILENT PUSH FAILURE. Abort immediately. Do NOT send MERGED
+      notification. Do NOT proceed with cleanup. This is a critical safety check.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch merged to main
+
+      $ git push origin main
+      Everything up-to-date
+
+      $ LOCAL_SHA=$(git rev-parse main)
+      $ git fetch origin main
+      $ REMOTE_SHA=$(git rev-parse origin/main)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: aaa1111bbb2222ccc3333ddd4444eee5555fff66
+      $ echo "MISMATCH DETECTED"
+      MISMATCH DETECTED
+    context: "CRITICAL: git push said 'Everything up-to-date' but local SHA != remote SHA. Silent push failure. PATCH-003."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "send-merged-notification";
+    - type: llm-rubric
+      value: >
+        The response MUST recognize this as a silent push failure (SHA mismatch).
+        It must NOT send a MERGED notification. It must abort. This is a critical
+        safety check — merging broken state into main corrupts the repository.
+
+- description: "Push rejected: non-fast-forward"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. Push was rejected because someone else pushed to main
+      between our rebase and push. Abort and skip — re-queue for next cycle.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      $ git push origin main
+      To github.com:org/repo.git
+       ! [rejected]        main -> main (non-fast-forward)
+      error: failed to push some refs to 'github.com:org/repo.git'
+      hint: Updates were rejected because the tip of your current branch is behind
+      hint: its remote counterpart.
+    context: "Push rejected — remote main moved ahead during our merge. Need to re-rebase."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip" || d.action === "retry";
+
+- description: "Branch already deleted before merge"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. The branch for this queued MR no longer exists on the remote.
+      It was either force-deleted or already merged through another path. Close the MR bead.
+    formula_step: queue-scan
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Queued MR: feat/old-feature (PR #85)
+
+      $ git fetch --prune origin
+      $ git branch -r | grep feat/old-feature
+      (no output)
+
+      $ gh pr view 85 --json state,mergedAt
+      {"state": "MERGED", "mergedAt": "2026-02-15T12:00:00Z"}
+    context: "Branch feat/old-feature no longer exists on remote. PR was already merged 3 hours ago."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "close-mr-bead";

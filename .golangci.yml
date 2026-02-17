@@ -79,36 +79,41 @@ linters:
         linters:
           - gosec
         text: 'G204'
-      # G115: Integer overflow conversion uintptr->int is safe for syscall.Flock fd args
+      # G115: Integer overflow conversions are safe with known-bounded values
+      # (rune arithmetic, fd conversions, heartbeat counts)
       - path: 'internal/'
         linters:
           - gosec
-        text: "G115"
-      # G117: Exported struct fields matching secret patterns are config structs, not secrets
+        text: 'G115'
+      # G117: Struct fields named Password hold config credentials (Dolt DB, etc.)
+      # These are marshaled to JSON for internal config, not exposed to users
       - path: 'internal/'
         linters:
           - gosec
-        text: "G117"
-      # G702: Taint-tracked command injection - internal tools use trusted args (see G204)
+        text: 'G117'
+      # G702: Command injection — internal packages call trusted tools (git, dolt)
+      # with programmatically constructed arguments, not user input
       - path: 'internal/'
         linters:
           - gosec
-        text: "G702"
-      # G703: Taint-tracked path traversal - internal paths are constructed, not user input (see G304)
+        text: 'G702'
+      # G703: Path traversal — internal packages use constructed paths for temp
+      # files and state directories, not user-supplied paths (same as G304)
       - path: 'internal/'
         linters:
           - gosec
-        text: "G703"
-      # G704: Taint-tracked SSRF - internal HTTP calls use controlled URLs
+        text: 'G703'
+      # G704: SSRF — internal packages make requests to configured endpoints
+      # (DoltHub API, wasteland), not user-supplied URLs
       - path: 'internal/'
         linters:
           - gosec
-        text: "G704"
-      # G705: Taint-tracked XSS - internal SSE writes use computed hashes, not user input
+        text: 'G704'
+      # G705: XSS — internal web API uses SSE with computed hashes, not user input
       - path: 'internal/'
         linters:
           - gosec
-        text: "G705"
+        text: 'G705'
       # errcheck: Ignore unchecked errors in test files for common cleanup patterns
       - path: '_test\.go'
         linters:

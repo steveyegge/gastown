@@ -1,0 +1,294 @@
+# Witness Patrol: Cleanup Triage and Zombie Handling
+# Tests whether the model correctly triages dead polecat sessions based on
+# git state: nuke (clean), create cleanup wisp (dirty), or escalate (complex).
+
+- description: "Clean nuke: dead session + clean git + no bead"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness handling polecat cleanup. When a session dies, assess git state
+      to decide: nuke (clean, no data loss), create-cleanup-wisp (dirty, preserve work),
+      or escalate (complex recovery needed).
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
+      1
+
+      $ bd show agent-Toast --json
+      {"id": "gt-a1", "labels": ["agent_state:idle"]}
+
+      $ git -C /town/gastown/polecats/Toast status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Toast log --oneline origin/main..HEAD
+      (empty)
+
+      $ bd list --assignee polecat-Toast --status hooked --json
+      []
+    context: "Session dead. Agent idle. Git clean. No unpushed commits. No hooked bead. Safe to nuke."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";
+
+- description: "Clean nuke: dead session + work already merged"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died but the associated bead is already closed
+      (work merged). Git is clean. Safe to nuke.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      1
+
+      $ bd show gt-work1 --json
+      {"id": "gt-work1", "title": "Fix auth bug", "status": "closed", "assignee": "polecat-Crispy"}
+
+      $ git -C /town/gastown/polecats/Crispy status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Crispy log --oneline origin/main..HEAD
+      (empty)
+    context: "Session dead. Bead is closed (work merged). Git clean. Safe to nuke."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";
+
+- description: "Dirty: uncommitted changes + open bead"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died with uncommitted changes and an open work bead.
+      Create a cleanup wisp to preserve and recover the work.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Waffles status --porcelain
+       M src/auth.js
+       M src/auth.test.js
+      ?? src/new-helper.js
+
+      $ bd show gt-work2 --json
+      {"id": "gt-work2", "title": "Refactor auth", "status": "in_progress", "assignee": "polecat-Waffles"}
+    context: "Session dead. 3 file changes (2 modified, 1 new). Work bead is in_progress. Work must be preserved."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "nuke";
+
+- description: "Dirty: unpushed commits on branch"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died with unpushed commits. The work is on a local
+      branch that hasn't been pushed to origin. Create cleanup wisp to recover.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Mango 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Mango status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Mango log --oneline origin/main..HEAD
+      a1b2c3d feat: add JWT validation
+      d4e5f6g test: auth middleware coverage
+      h7i8j9k refactor: extract token parser
+
+      $ git -C /town/gastown/polecats/Mango branch -vv | grep '*'
+      * feat/jwt-auth a1b2c3d [no remote] feat: add JWT validation
+    context: "Session dead. Working tree clean but 3 unpushed commits on branch with no remote tracking. Work must be preserved."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+
+- description: "Dirty: stashed changes"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died with stashed changes. Even though working tree
+      looks clean, there are stashes that contain work.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Hazel 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Hazel status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Hazel log --oneline origin/main..HEAD
+      (empty)
+
+      $ git -C /town/gastown/polecats/Hazel stash list
+      stash@{0}: WIP on feat/cache: a1b2c3d work in progress
+    context: "Session dead. Working tree and branch clean, but there's a stash containing work."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+
+- description: "Escalate: merge conflict state"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died mid-rebase with unresolved merge conflicts.
+      This is too complex for auto-cleanup — escalate to deacon for recovery.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Pixel 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Pixel status --porcelain
+      UU src/api/routes.js
+      UU src/config.ts
+      M  src/auth.js
+
+      $ git -C /town/gastown/polecats/Pixel status
+      interactive rebase in progress; onto abc1234
+      You have unmerged paths.
+        (fix conflicts and run "git rebase --continue")
+    context: "Session dead mid-rebase. Unmerged paths (UU = both modified). Rebase in progress. Too complex for auto-cleanup."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+
+- description: "Escalate: detached HEAD with uncommitted changes"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died in detached HEAD state with uncommitted changes.
+      Detached HEAD recovery is complex — escalate.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Biscuit status
+      HEAD detached at abc1234
+      Changes not staged for commit:
+        modified:   src/feature.js
+        modified:   src/feature.test.js
+    context: "Session dead in detached HEAD state with uncommitted changes. Complex recovery needed."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "escalate";
+
+- description: "Dirty: branch pushed + PR open but session dead"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness. Session died but the branch was pushed and a PR exists.
+      The work is not lost — just needs a new assignee. Create cleanup wisp.
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      $ tmux has-session -t bd-polecat-Nutmeg 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Nutmeg status --porcelain
+      (empty)
+
+      $ git -C /town/gastown/polecats/Nutmeg log --oneline origin/main..HEAD
+      a1b2c3d feat: add search
+      d4e5f6g test: search tests
+
+      $ git -C /town/gastown/polecats/Nutmeg branch -vv | grep '*'
+      * feat/search a1b2c3d [origin/feat/search] feat: add search
+
+      $ gh pr list --head feat/search --json number,title,state
+      [{"number": 42, "title": "Add search feature", "state": "OPEN"}]
+    context: "Session dead. Branch pushed to origin. PR #42 open. Work is safe on remote — just needs cleanup and reassignment."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";
+
+- description: "Batch: 3 dead sessions, mixed states"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness processing multiple dead polecats. Assess each independently:
+      nuke clean ones, create cleanup wisps for dirty ones, escalate complex ones.
+      Report the action for the FIRST polecat listed (Toast — clean git).
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      ## Polecat 1: Toast (CLEAN)
+      $ git -C /town/gastown/polecats/Toast status --porcelain
+      (empty)
+      $ git -C /town/gastown/polecats/Toast log --oneline origin/main..HEAD
+      (empty)
+      Agent state: idle. No hooked bead.
+
+      ## Polecat 2: Crispy (DIRTY)
+      $ git -C /town/gastown/polecats/Crispy status --porcelain
+       M src/feature.js
+      $ git -C /town/gastown/polecats/Crispy log --oneline origin/main..HEAD
+      a1b2c3d work in progress
+      Agent state: running. Hooked bead: gt-work3.
+
+      ## Polecat 3: Waffles (CONFLICT)
+      $ git -C /town/gastown/polecats/Waffles status
+      interactive rebase in progress
+      UU src/api.js
+      Agent state: running. Hooked bead: gt-work4.
+    context: "3 dead polecats. Toast=clean (nuke), Crispy=dirty (cleanup wisp), Waffles=conflict (escalate). Report action for Toast."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "nuke";
+
+- description: "Batch: report action for dirty polecat (Crispy)"
+  vars:
+    role: witness
+    role_context: >
+      You are the Witness processing the second of three dead polecats.
+      Report the action for Crispy (dirty git state).
+    formula_step: process-cleanups
+    allowed_actions: '["nuke", "create-cleanup-wisp", "escalate", "no-op"]'
+    shell_output: |
+      ## Polecat: Crispy (DIRTY)
+      $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
+      1
+
+      $ git -C /town/gastown/polecats/Crispy status --porcelain
+       M src/feature.js
+
+      $ git -C /town/gastown/polecats/Crispy log --oneline origin/main..HEAD
+      a1b2c3d work in progress
+
+      $ bd show gt-work3 --json
+      {"id": "gt-work3", "title": "Add caching", "status": "hooked", "assignee": "polecat-Crispy"}
+    context: "Polecat Crispy: dead session, 1 modified file, 1 unpushed commit, hooked work bead. Create cleanup wisp."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "create-cleanup-wisp";

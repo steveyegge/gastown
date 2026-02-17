@@ -1,0 +1,290 @@
+# Deacon Patrol: Plugin Gate Evaluation
+# Tests whether the model correctly evaluates plugin gates (cooldown, cron, manual).
+# This is highly mechanical — pure timestamp math and config parsing.
+# Strong candidate for proving Sonnet/Haiku can handle deacon work.
+
+- description: "Cooldown gate open — elapsed"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. Each plugin has a gate that controls
+      when it runs. Cooldown gates require a minimum time between runs. Check state.json
+      for last_run time and compare against the gate duration.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/github-sheriff/plugin.md | head -10
+      +++
+      name = "github-sheriff"
+      [gate]
+      type = "cooldown"
+      duration = "5m"
+      +++
+
+      $ cat plugins/github-sheriff/state.json
+      {"last_run": "2026-02-15T14:40:00Z", "last_result": "success"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Plugin: github-sheriff. Gate: cooldown 5m. Last run: 15 minutes ago. Gate is open."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "execute-plugin";
+
+- description: "Cooldown gate closed — not elapsed"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. Cooldown gates require a minimum time
+      between runs. If the cooldown has not elapsed, skip the plugin.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/github-sheriff/plugin.md | head -10
+      +++
+      name = "github-sheriff"
+      [gate]
+      type = "cooldown"
+      duration = "5m"
+      +++
+
+      $ cat plugins/github-sheriff/state.json
+      {"last_run": "2026-02-15T14:53:00Z", "last_result": "success"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Plugin: github-sheriff. Gate: cooldown 5m. Last run: 2 minutes ago. Gate is closed (3m remaining)."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "skip";
+
+- description: "Cooldown gate open — first run (no state.json)"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. If no state.json exists, the plugin
+      has never run before. First runs should always execute.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/health-check/plugin.md | head -10
+      +++
+      name = "health-check"
+      [gate]
+      type = "cooldown"
+      duration = "10m"
+      +++
+
+      $ cat plugins/health-check/state.json
+      cat: plugins/health-check/state.json: No such file or directory
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Plugin: health-check. Gate: cooldown 10m. No state.json — never run before."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "execute-plugin";
+
+- description: "Cron gate — schedule matches"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. Cron gates fire based on a cron
+      schedule. If the current time matches the schedule, execute.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/daily-digest/plugin.md | head -10
+      +++
+      name = "daily-digest"
+      [gate]
+      type = "cron"
+      schedule = "*/5 * * * *"
+      +++
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ cat plugins/daily-digest/state.json
+      {"last_run": "2026-02-15T14:45:00Z", "last_result": "success"}
+    context: "Plugin: daily-digest. Gate: cron every 5 minutes. Current time :55 matches */5 schedule. Last run was at :45 (10min ago)."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "execute-plugin";
+
+- description: "Cron gate — schedule does not match"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. Cron gates only fire when the
+      schedule matches. If the current time doesn't match, skip.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/morning-report/plugin.md | head -10
+      +++
+      name = "morning-report"
+      [gate]
+      type = "cron"
+      schedule = "0 9 * * *"
+      +++
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+
+      $ cat plugins/morning-report/state.json
+      {"last_run": "2026-02-15T09:00:00Z", "last_result": "success"}
+    context: "Plugin: morning-report. Gate: cron at 9:00 daily. Current time is 14:55 — not 9am. Skip."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "skip";
+
+- description: "Manual gate — no gate section"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. Plugins with no [gate] section are
+      manual — they require explicit trigger and should not be auto-executed during patrol.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/data-export/plugin.md | head -10
+      +++
+      name = "data-export"
+      description = "Export analytics data to CSV"
+      version = 1
+      +++
+
+      $ cat plugins/data-export/state.json
+      cat: plugins/data-export/state.json: No such file or directory
+    context: "Plugin: data-export. No [gate] section in frontmatter — this is a manual plugin. Should not auto-execute."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "skip";
+    - type: contains-any
+      value: ["manual", "trigger", "explicit", "no gate"]
+
+- description: "Edge: cooldown gate with missing duration field"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. This plugin declares a cooldown gate
+      but is missing the duration field. This is malformed configuration — skip and note
+      the issue.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/broken-plugin/plugin.md | head -10
+      +++
+      name = "broken-plugin"
+      [gate]
+      type = "cooldown"
+      +++
+
+      $ cat plugins/broken-plugin/state.json
+      {"last_run": "2026-02-15T14:00:00Z"}
+    context: "Plugin: broken-plugin. Gate type is cooldown but duration field is missing. Malformed config."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "skip";
+
+- description: "Edge: unknown gate type"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. This plugin has an unrecognized gate
+      type. Skip it — do not attempt to execute unknown gate types.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/webhook-plugin/plugin.md | head -10
+      +++
+      name = "webhook-plugin"
+      [gate]
+      type = "webhook"
+      url = "https://example.com/hook"
+      +++
+    context: "Plugin: webhook-plugin. Gate type 'webhook' is not a recognized gate type (valid: cooldown, cron, manual)."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "skip";
+    - type: contains-any
+      value: ["unknown", "unrecognized", "unsupported", "invalid"]
+
+- description: "Edge: previous run failed, gate is open"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating plugin gates. The previous run of this plugin failed.
+      The gate cooldown has elapsed. Re-execute — retry failed plugins when their gate
+      opens again. (notify_on_failure is handled separately.)
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      $ cat plugins/github-sheriff/plugin.md | head -15
+      +++
+      name = "github-sheriff"
+      [gate]
+      type = "cooldown"
+      duration = "5m"
+      [execution]
+      notify_on_failure = true
+      +++
+
+      $ cat plugins/github-sheriff/state.json
+      {"last_run": "2026-02-15T14:40:00Z", "last_result": "failure", "error": "gh auth status failed"}
+
+      $ date -u +%Y-%m-%dT%H:%M:%SZ
+      2026-02-15T14:55:00Z
+    context: "Plugin: github-sheriff. Last run failed 15 minutes ago. Gate cooldown (5m) has elapsed. Should retry."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "execute-plugin";
+
+- description: "Edge: multiple plugins, mixed gate states"
+  vars:
+    role: deacon
+    role_context: >
+      You are the Deacon evaluating multiple plugins. Assess each plugin's gate
+      independently. Report which plugins should execute and which should skip.
+    formula_step: plugin-run
+    allowed_actions: '["execute-plugin", "skip"]'
+    shell_output: |
+      ## Plugin 1: github-sheriff
+      $ cat plugins/github-sheriff/state.json
+      {"last_run": "2026-02-15T14:40:00Z"}
+      Gate: cooldown 5m. Current time: 14:55. Elapsed: 15m. OPEN.
+
+      ## Plugin 2: health-check
+      $ cat plugins/health-check/state.json
+      {"last_run": "2026-02-15T14:52:00Z"}
+      Gate: cooldown 10m. Current time: 14:55. Elapsed: 3m. CLOSED (7m remaining).
+
+      ## Plugin 3: data-export
+      No [gate] section. Manual plugin.
+    context: "Three plugins: github-sheriff (gate open), health-check (gate closed), data-export (manual). Only github-sheriff should execute."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "execute-plugin";
+    - type: contains
+      value: "github-sheriff"

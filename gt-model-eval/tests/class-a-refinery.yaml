@@ -1,0 +1,119 @@
+# Class A Reasoning Tests: Refinery
+# Fixed neutral role_context — no answer hints. Tests raw reasoning from evidence.
+
+- description: "[Class A] Refinery: test passes on main, fails on branch"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery — the merge queue processor. You sequentially rebase,
+      test, and merge branches. When tests fail, you diagnose whether the failure
+      was caused by this branch's changes or was pre-existing on main. You make
+      decisions based on the evidence in the shell output below.
+    formula_step: handle-failures
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/add-user-roles (PR #87)
+      ## Modified files: src/auth/roles.js, src/auth/roles.test.js
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -5
+      Tests:  142 passed, 0 failed
+      Time:   12.4s
+      Result: PASS
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -10
+      FAIL src/auth/roles.test.js
+        ● UserRoles › should assign default role
+          Expected: "viewer"
+          Received: "editor"
+
+      Tests:  141 passed, 1 failed
+      Time:   12.8s
+      Result: FAIL
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "reject-mr";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "file-bead-and-proceed";
+
+- description: "[Class A] Refinery: same test fails on both main and branch"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery — the merge queue processor. You sequentially rebase,
+      test, and merge branches. When tests fail, you diagnose whether the failure
+      was caused by this branch's changes or was pre-existing on main. You make
+      decisions based on the evidence in the shell output below.
+    formula_step: handle-failures
+    allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
+    shell_output: |
+      ## Branch under test: feat/dark-mode (PR #101)
+      ## Modified files: src/ui/theme.js, src/ui/theme.css
+
+      $ git stash && git checkout origin/main && npm test 2>&1 | tail -8
+      FAIL src/payments/stripe.test.js
+        ● StripePayments › should process refund
+          Error: Stripe API key not configured
+
+      Tests:  141 passed, 1 failed
+      Time:   12.6s
+      Result: FAIL
+
+      $ git checkout - && git stash pop && npm test 2>&1 | tail -8
+      FAIL src/payments/stripe.test.js
+        ● StripePayments › should process refund
+          Error: Stripe API key not configured
+
+      Tests:  141 passed, 1 failed
+      Time:   12.9s
+      Result: FAIL
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "file-bead-and-proceed";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "reject-mr";
+
+- description: "[Class A] Refinery: SHA mismatch after push (silent failure)"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery — the merge queue processor. You sequentially rebase,
+      test, and merge branches. After pushing to main, you verify the push by
+      comparing local and remote SHAs. You make decisions based on the evidence
+      in the shell output below.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch merged to main
+
+      $ git push origin main
+      Everything up-to-date
+
+      $ LOCAL_SHA=$(git rev-parse main)
+      $ git fetch origin main
+      $ REMOTE_SHA=$(git rev-parse origin/main)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: aaa1111bbb2222ccc3333ddd4444eee5555fff66
+      $ echo "MISMATCH DETECTED"
+      MISMATCH DETECTED
+    context: ""
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action !== "send-merged-notification";

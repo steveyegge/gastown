@@ -1,0 +1,85 @@
+# Gas Town Model Comparison Framework
+# Compare Claude Opus, Sonnet, and Haiku on patrol agent decisions.
+#
+# Usage:
+#   npx promptfoo eval              # Run all tests
+#   npx promptfoo eval --repeat 3   # Run 3x for consistency
+#   npx promptfoo view              # Browse results in browser
+#   npx promptfoo eval --output results.json  # Export for sharing
+#
+# Requires: ANTHROPIC_API_KEY environment variable
+
+description: "Gas Town patrol agent model comparison"
+
+prompts:
+  - file://prompts/patrol-decision.txt
+
+providers:
+  - id: anthropic:messages:claude-opus-4-6
+    label: "Opus 4.6"
+    config:
+      temperature: 0.0
+      max_tokens: 512
+
+  - id: anthropic:messages:claude-sonnet-4-5-20250929
+    label: "Sonnet 4.5"
+    config:
+      temperature: 0.0
+      max_tokens: 512
+
+  - id: anthropic:messages:claude-haiku-4-5-20251001
+    label: "Haiku 4.5"
+    config:
+      temperature: 0.0
+      max_tokens: 512
+
+defaultTest:
+  options:
+    # Use Opus as the grading model — grader must be stronger than all test subjects
+    provider: anthropic:messages:claude-opus-4-6
+    # Strip markdown code fences (```json ... ```) that models sometimes add
+    transform: "output.replace(/^```(?:json)?\\s*\\n?/gm, '').replace(/\\n?```\\s*$/gm, '').trim()"
+  assert:
+    # Every response must be valid JSON
+    - type: is-json
+    # Every response must have an action field
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return parsed.action !== undefined && parsed.action.length > 0;
+    # Every response must have a reason field
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return parsed.reason !== undefined && parsed.reason.length > 0;
+    # Action must be one of the allowed actions for this step
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        const allowed = JSON.parse(context.vars.allowed_actions);
+        return allowed.includes(parsed.action);
+    # Cost ceiling per test (adjust per tier)
+    - type: cost
+      threshold: 0.10
+    # Latency ceiling
+    - type: latency
+      threshold: 15000
+
+tests:
+  # Class B: Directive role_context (instruction-following)
+  - file://tests/deacon-zombie.yaml
+  - file://tests/deacon-plugin-gate.yaml
+  - file://tests/deacon-dog-health.yaml
+  - file://tests/witness-stuck.yaml
+  - file://tests/witness-cleanup.yaml
+  - file://tests/refinery-triage.yaml
+  - file://tests/refinery-conflict.yaml
+  - file://tests/dog-orphan.yaml
+  # Class A: Neutral role_context (reasoning from evidence)
+  - file://tests/class-a-deacon.yaml
+  - file://tests/class-a-witness.yaml
+  - file://tests/class-a-refinery.yaml
+  - file://tests/class-a-dog.yaml
+
+commandLineOptions:
+  maxConcurrency: 3
