@@ -37,7 +37,7 @@ func CheckConvoysForIssueWithAutoStore(townRoot, issueID, observer string, logge
 	if err != nil {
 		return nil
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Resolve gt binary path at call time; fall back to bare "gt" if LookPath fails.
 	gtPath, err := exec.LookPath("gt")
