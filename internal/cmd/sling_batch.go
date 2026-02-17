@@ -248,16 +248,9 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			continue
 		} else {
 			fmt.Printf("  %s Session started for %s\n", style.Bold.Render("▶"), spawnInfo.PolecatName)
-			if spawnInfo.Reused {
-				// Reused sessions didn't get StartupNudge — send a nudge now.
-				t := tmux.NewTmux()
-				nudgePrompt := fmt.Sprintf("New work slung to you (bead %s). Run `gt hook` to see your hook.", beadID)
-				if err := t.NudgePane(pane, nudgePrompt); err != nil {
-					fmt.Printf("  %s Could not nudge reused session: %v\n", style.Dim.Render("○"), err)
-				}
-			}
 			// Fresh polecats get StartupNudge from SessionManager.Start(),
 			// so no need to inject a start prompt here.
+			_ = pane
 		}
 
 		activeCount++

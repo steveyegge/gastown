@@ -654,7 +654,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
 	// Skip for self-sling - agent is currently processing the sling command and will see
 	// the hooked work on next turn. Nudging would inject text while agent is busy.
-	if freshlySpawned && !newPolecatInfo.Reused {
+	if freshlySpawned {
 		// Fresh polecat already got StartupNudge from SessionManager.Start()
 	} else if isSelfSling {
 		// Self-sling: agent already knows about the work (just slung it)

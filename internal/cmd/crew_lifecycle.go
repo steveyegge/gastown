@@ -311,11 +311,18 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
 
+	// Validate: --resume with a specific session ID only makes sense for a single
+	// crew member. Resuming N members with the same session ID is always a mistake.
+	if crewResume != "" && crewResume != "last" && len(crewNames) > 1 {
+		return fmt.Errorf("--resume with a specific session ID can only target a single crew member, got %d", len(crewNames))
+	}
+
 	// Build start options (shared across all crew members)
 	opts := crew.StartOptions{
 		Account:         crewAccount,
 		ClaudeConfigDir: claudeConfigDir,
 		AgentOverride:   crewAgentOverride,
+		ResumeSessionID: crewResume,
 	}
 
 	// Start each crew member in parallel

@@ -338,12 +338,6 @@ func getCurrentTmuxSession() (string, error) {
 //
 // For role shortcuts that need context (crew, witness, refinery), it auto-detects from environment.
 func resolveRoleToSession(role string) (string, error) {
-	// Ensure prefix registry is initialized for correct PrefixFor resolution.
-	// persistentPreRun may have failed (broken cwd), but env fallback may work.
-	if townRoot := detectTownRootFromCwd(); townRoot != "" {
-		_ = session.InitRegistry(townRoot)
-	}
-
 	// First, check if it's a path format (contains /)
 	if strings.Contains(role, "/") {
 		return resolvePathToSession(role)
@@ -460,7 +454,6 @@ var claudeEnvVars = []string{
 	// Claude API and config
 	"ANTHROPIC_API_KEY",
 	"CLAUDE_CODE_USE_BEDROCK",
-	"CLAUDE_CONFIG_DIR",
 	// AWS vars for Bedrock
 	"AWS_PROFILE",
 	"AWS_REGION",
@@ -475,10 +468,6 @@ func buildRestartCommand(sessionName string) (string, error) {
 	if townRoot == "" {
 		return "", fmt.Errorf("cannot detect town root - run from within a Gas Town workspace")
 	}
-
-	// Ensure prefix registry is initialized for correct session name parsing.
-	// persistentPreRun may have failed (broken cwd), but we have townRoot via env fallback.
-	_ = session.InitRegistry(townRoot)
 
 	// Determine the working directory for this session type
 	workDir, err := sessionWorkDir(sessionName, townRoot)

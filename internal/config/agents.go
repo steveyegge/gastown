@@ -61,10 +61,15 @@ type AgentPresetInfo struct {
 	// Used for resuming sessions across restarts.
 	SessionIDEnv string `json:"session_id_env,omitempty"`
 
-	// ResumeFlag is the flag/subcommand for resuming sessions.
+	// ResumeFlag is the flag/subcommand for resuming a specific session.
 	// For claude/gemini: "--resume"
 	// For codex: "resume" (subcommand)
 	ResumeFlag string `json:"resume_flag,omitempty"`
+
+	// ContinueFlag is the flag for auto-resuming the most recent session.
+	// For claude: "--continue" (--resume without args opens interactive picker)
+	// If empty, falls back to ResumeFlag without arguments.
+	ContinueFlag string `json:"continue_flag,omitempty"`
 
 	// ResumeStyle indicates how to invoke resume:
 	// "flag" - pass as --resume <id> argument
@@ -159,6 +164,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ProcessNames:        []string{"node", "claude"}, // Claude runs as Node.js
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
+		ContinueFlag:        "--continue",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,
 		SupportsForkSession: true,

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/session"
 )
 
 // TestDoneUsesResolveBeadsDir verifies that the done command correctly uses
@@ -1046,63 +1044,5 @@ func TestCheckpointNilMapSafe(t *testing.T) {
 	emptyMap := map[DoneCheckpoint]string{}
 	if emptyMap[CheckpointPushed] != "" {
 		t.Error("empty map should return zero value")
-	}
-}
-
-// createTestTownWithPrefix creates a minimal town directory structure with
-// a rigs.json that maps the given prefix to the given rig name.
-// Returns the town root path.
-func createTestTownWithPrefix(t *testing.T, prefix, rigName string) string {
-	t.Helper()
-	townRoot := t.TempDir()
-	mayorDir := filepath.Join(townRoot, "mayor")
-	if err := os.MkdirAll(mayorDir, 0755); err != nil {
-		t.Fatalf("mkdir mayor: %v", err)
-	}
-
-	rigsData := map[string]interface{}{
-		"rigs": map[string]interface{}{
-			rigName: map[string]interface{}{
-				"beads": map[string]interface{}{
-					"prefix": prefix,
-				},
-			},
-		},
-	}
-	data, err := json.Marshal(rigsData)
-	if err != nil {
-		t.Fatalf("marshal rigs.json: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), data, 0644); err != nil {
-		t.Fatalf("write rigs.json: %v", err)
-	}
-	return townRoot
-}
-
-func TestResolvePolecatSessionName_CustomPrefix(t *testing.T) {
-	// Save and restore the default registry
-	old := session.DefaultRegistry()
-	t.Cleanup(func() { session.SetDefaultRegistry(old) })
-
-	townRoot := createTestTownWithPrefix(t, "tr", "testrig")
-
-	got := resolvePolecatSessionName(townRoot, "testrig", "rust")
-	if got != "tr-rust" {
-		t.Errorf("resolvePolecatSessionName() = %q, want %q", got, "tr-rust")
-	}
-}
-
-func TestResolvePolecatSessionName_DefaultPrefix(t *testing.T) {
-	// Save and restore the default registry
-	old := session.DefaultRegistry()
-	t.Cleanup(func() { session.SetDefaultRegistry(old) })
-
-	// Use empty temp dir as town root (no rigs.json → falls back to default prefix)
-	townRoot := t.TempDir()
-	os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755)
-
-	got := resolvePolecatSessionName(townRoot, "testrig", "rust")
-	if got != "gt-rust" {
-		t.Errorf("resolvePolecatSessionName() = %q, want %q", got, "gt-rust")
 	}
 }

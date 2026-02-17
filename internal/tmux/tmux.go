@@ -716,16 +716,6 @@ func (s *SessionSet) Names() []string {
 	return names
 }
 
-// GetSessionID returns the stable tmux session ID (e.g. "$42") for a named session.
-// Session IDs survive renames and are safe to use as kill-session targets.
-func (t *Tmux) GetSessionID(name string) (string, error) {
-	out, err := t.run("display-message", "-t", name, "-p", "#{session_id}")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
-}
-
 // ListSessionIDs returns a map of session name to session ID.
 // Session IDs are in the format "$N" where N is a number.
 func (t *Tmux) ListSessionIDs() (map[string]string, error) {

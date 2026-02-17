@@ -53,6 +53,27 @@ type StartOptions struct {
 
 	// AgentOverride specifies an alternate agent alias (e.g., for testing).
 	AgentOverride string
+
+	// ResumeSessionID resumes a previous agent session instead of starting fresh.
+	// "last" means resume the most recent session (--resume with no session ID).
+	// Any other non-empty value is a specific session ID to resume.
+	ResumeSessionID string
+}
+
+// validateSessionID checks that a resume session ID contains only safe characters.
+// Session IDs from Claude, Gemini, etc. are typically UUIDs or hex strings.
+// This rejects shell metacharacters that could cause injection when the ID is
+// interpolated into a shell command string.
+func validateSessionID(id string) error {
+	if id == "" || id == "last" {
+		return nil
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			return fmt.Errorf("invalid session ID %q: contains character %q; session IDs may only contain alphanumeric characters, hyphens, underscores, and dots", id, string(c))
+		}
+	}
+	return nil
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -620,7 +641,11 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
 	topic := opts.Topic
 	if topic == "" {
-		topic = "start"
+		if opts.ResumeSessionID != "" {
+			topic = "resume"
+		} else {
+			topic = "start"
+		}
 	}
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: address,
@@ -646,9 +671,61 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Build startup command (also includes env vars via 'exec env' for
 	// WaitForCommand detection — belt and suspenders with -e flags)
 	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
+	var claudeCmd string
+	if opts.ResumeSessionID != "" {
+		// Validate session ID to prevent shell injection. The ID is interpolated
+		// into a shell command string, so reject anything with metacharacters.
+		if err := validateSessionID(opts.ResumeSessionID); err != nil {
+			return err
+		}
+
+		// Resume mode: build command without prompt, then append resume flag.
+		// No beacon is passed as prompt - the resumed session already has context.
+		// The SessionStart hook still fires and injects Gas Town metadata.
+		claudeCmd, err = config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, "", opts.AgentOverride)
+		if err != nil {
+			return fmt.Errorf("building resume command: %w", err)
+		}
+
+		// Determine agent preset for resume flag.
+		// Try rig-level agent config first, fall back to "claude".
+		agentName := opts.AgentOverride
+		if agentName == "" {
+			if rc := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
+				agentName = rc.Provider
+			} else {
+				agentName = "claude"
+			}
+		}
+		preset := config.GetAgentPresetByName(agentName)
+		if preset == nil || preset.ResumeFlag == "" {
+			return fmt.Errorf("agent %q does not support session resume", agentName)
+		}
+		if preset.ResumeStyle == "subcommand" {
+			return fmt.Errorf("--resume not yet supported for subcommand-style agents (e.g., %s); use the agent's native resume mechanism", agentName)
+		}
+
+		// Append resume flag. Shell-quote the session ID as defense-in-depth
+		// (validateSessionID already rejects metacharacters, but belt and suspenders).
+		if opts.ResumeSessionID == "last" {
+			// Auto-resume most recent session. Some agents (e.g. Claude) use a
+			// separate flag (--continue) because --resume with no args opens an
+			// interactive picker instead of auto-resuming.
+			continueFlag := preset.ContinueFlag
+			if continueFlag == "" {
+				continueFlag = preset.ResumeFlag
+			}
+			claudeCmd += " " + continueFlag
+		} else {
+			// Resume specific session ID
+			claudeCmd += " " + preset.ResumeFlag + " " + config.ShellQuote(opts.ResumeSessionID)
+		}
+	} else {
+		// Normal start: pass beacon as prompt
+		claudeCmd, err = config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command: %w", err)
+		}
 	}
 
 	// For interactive/refresh mode, remove --dangerously-skip-permissions

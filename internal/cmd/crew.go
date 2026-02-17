@@ -23,6 +23,7 @@ var (
 	crewDryRun        bool
 	crewDebug         bool
 	crewReset         bool
+	crewResume        string
 )
 
 var crewCmd = &cobra.Command{
@@ -289,11 +290,18 @@ current directory. If no crew names are specified, starts all crew in the rig.
 
 The crew session starts in the background with Claude running and ready.
 
+Use --resume to resume a previous session instead of starting fresh. This
+passes the agent's resume flag (e.g., Claude's --resume) so the session
+picks up where it left off, with proper Gas Town metadata set so GC doesn't
+kill the session.
+
 Examples:
   gt crew start beads             # Start all crew in beads rig
   gt crew start                   # Start all crew (rig inferred from cwd)
   gt crew start beads grip fang   # Start specific crew in beads rig
-  gt crew start gastown joe       # Start joe in gastown rig`,
+  gt crew start gastown joe       # Start joe in gastown rig
+  gt crew start beads ace --resume          # Resume ace's most recent session
+  gt crew start beads ace --resume abc123   # Resume specific session ID`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// With --all, we can have 0 args (infer rig) or 1+ args (rig specified)
 		if crewAll {
@@ -382,6 +390,8 @@ func init() {
 	crewStartCmd.Flags().BoolVar(&crewAll, "all", false, "Start all crew members in the rig")
 	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")
 	crewStartCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
+	crewStartCmd.Flags().StringVar(&crewResume, "resume", "", "Resume a previous session (optionally specify session ID)")
+	crewStartCmd.Flags().Lookup("resume").NoOptDefVal = "last"
 
 	crewStopCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use (filter when using --all)")
 	crewStopCmd.Flags().BoolVar(&crewAll, "all", false, "Stop all running crew sessions")

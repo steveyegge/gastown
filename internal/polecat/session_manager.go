@@ -33,14 +33,9 @@ const bdCommandTimeout = 30 * time.Second
 
 // Session errors
 var (
-	// Deprecated: ErrSessionRunning is no longer returned by Start().
-	// Use ErrSessionReused for running-session detection. Kept for backward
-	// compatibility with callers outside the polecat package (crew/dog define
-	// their own). Will be removed in a future release.
 	ErrSessionRunning  = errors.New("session already running")
 	ErrSessionNotFound = errors.New("session not found")
 	ErrIssueInvalid    = errors.New("issue not found or tombstoned")
-	ErrSessionReused   = errors.New("session reused")
 )
 
 // SessionManager handles polecat session lifecycle.
@@ -67,12 +62,6 @@ type SessionStartOptions struct {
 
 	// Command overrides the default "claude" command.
 	Command string
-
-	// Agent is the agent binary name (e.g., "claude", "gemini", "codex").
-	// When set, this is used for GT_AGENT instead of deriving from runtimeConfig.
-	// This ensures IsAgentAlive checks for the correct process when opts.Command
-	// overrides the default startup command.
-	Agent string
 
 	// Account specifies the account handle to use (overrides default).
 	Account string
@@ -200,63 +189,27 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	sessionID := m.SessionName(polecat)
 
-	// Determine working directory — must be resolved before session-state checks
-	// so hasValidWorktree and issue hooks use the correct path.
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir = m.clonePath(polecat)
-	}
-
 	// Check if session already exists.
-	// Handle stale, zombie, and reusable sessions gracefully (gt-m2hnr).
+	// If an existing session's pane process has died, kill the stale session
+	// and proceed rather than returning ErrSessionRunning (gt-jn40ft).
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if running {
-		// Case 1: Session exists but process is dead → kill and proceed
 		if m.isSessionStale(sessionID) {
 			if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing stale session %s: %w", sessionID, err)
 			}
-			fmt.Printf("Cleaned up stale session %s\n", sessionID)
-		} else if !HasValidWorktree(workDir) {
-			// Case 2: Zombie — alive session but no worktree
-			if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
-				return fmt.Errorf("killing zombie session %s: %w", sessionID, err)
-			}
-			fmt.Printf("Cleaned up zombie session %s (no worktree)\n", sessionID)
 		} else {
-			// Cases 3 & 4: Worktree exists — check pane and agent liveness
-			_, err := m.tmux.GetPaneID(sessionID)
-			if err != nil {
-				// Case 3: Broken — no valid pane
-				if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
-					return fmt.Errorf("killing broken session %s: %w", sessionID, err)
-				}
-				fmt.Printf("Cleaned up broken session %s (no valid pane)\n", sessionID)
-			} else if !m.isAgentAliveWithMigration(sessionID) {
-				// Case 4b: Pane alive but agent dead — kill and recreate
-				if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
-					return fmt.Errorf("killing dead-agent session %s: %w", sessionID, err)
-				}
-				fmt.Printf("Cleaned up dead-agent session %s (pane alive, agent dead)\n", sessionID)
-			} else {
-				// Case 4: Fully reusable — valid pane, live agent
-				// Apply --issue flag if provided before returning.
-				if opts.Issue != "" {
-					if err := m.validateIssue(opts.Issue, workDir); err != nil {
-						return err
-					}
-					agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-					if err := m.hookIssue(opts.Issue, agentID, workDir); err != nil {
-						fmt.Printf("Warning: could not hook issue %s: %v\n", opts.Issue, err)
-					}
-				}
-				fmt.Printf("Reusing existing session %s (session and worktree both exist)\n", sessionID)
-				return ErrSessionReused
-			}
+			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 		}
+	}
+
+	// Determine working directory
+	workDir := opts.WorkDir
+	if workDir == "" {
+		workDir = m.clonePath(polecat)
 	}
 
 	// Validate issue exists and isn't tombstoned BEFORE creating session.
@@ -359,21 +312,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
 
-	// Set GT_AGENT in tmux session environment so IsAgentAlive can identify
-	// the correct process names for non-Claude agents (gemini, codex, etc.).
-	// Without this, IsAgentAlive falls back to Claude's process names and
-	// may misclassify live non-Claude sessions as dead.
-	// Use opts.Agent if provided (handles command override path), otherwise
-	// derive from runtimeConfig.Command.
-	agentName := opts.Agent
-	if agentName == "" {
-		agentName = filepath.Base(runtimeConfig.Command)
-	}
-	if agentName == "" || agentName == "." {
-		agentName = "claude"
-	}
-	debugSession("SetEnvironment GT_AGENT", m.tmux.SetEnvironment(sessionID, "GT_AGENT", agentName))
-
 	// Set GT_BRANCH and GT_POLECAT_PATH in tmux session environment.
 	// This ensures respawned processes also inherit these for gt done fallback.
 	if polecatGitBranch != "" {
@@ -458,48 +396,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	return nil
 }
 
-// isAgentAliveWithMigration checks agent liveness, handling legacy sessions
-// that predate GT_AGENT propagation. Without this, IsAgentAlive falls back to
-// Claude's process names and misclassifies live non-Claude agents as dead.
-// If GT_AGENT is missing, we derive it from the rig's runtime config and set
-// it opportunistically before the liveness check.
-func (m *SessionManager) isAgentAliveWithMigration(sessionID string) bool {
-	agentName, _ := m.tmux.GetEnvironment(sessionID, "GT_AGENT")
-	if agentName == "" {
-		// Legacy session — derive agent from runtime config and backfill.
-		townRoot := filepath.Dir(m.rig.Path)
-		rc := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
-		derived := filepath.Base(rc.Command)
-		if derived == "" || derived == "." {
-			derived = "claude"
-		}
-		_ = m.tmux.SetEnvironment(sessionID, "GT_AGENT", derived)
-	}
-	return m.tmux.IsAgentAlive(sessionID)
-}
-
 // isSessionStale checks if a tmux session's pane process has died.
 // A stale session exists in tmux but its main process (the agent) is no longer running.
 // This happens when the agent crashes during startup but tmux keeps the dead pane.
 // Delegates to isSessionProcessDead to avoid duplicating process-check logic (gt-qgzj1h).
 func (m *SessionManager) isSessionStale(sessionID string) bool {
 	return isSessionProcessDead(m.tmux, sessionID)
-}
-
-// HasValidWorktree checks if a worktree directory exists and is valid.
-// Returns true if the worktree exists as a directory with a .git file/directory.
-// Used to detect zombie sessions (session exists but worktree was never created or deleted).
-func HasValidWorktree(workDir string) bool {
-	// Check if worktree directory exists
-	info, err := os.Stat(workDir)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-
-	// Check for .git (file for worktrees, directory for regular clones)
-	gitPath := filepath.Join(workDir, ".git")
-	_, err = os.Stat(gitPath)
-	return err == nil
 }
 
 // Stop terminates a polecat session.

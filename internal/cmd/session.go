@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -269,18 +268,12 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
-		if errors.Is(err, polecat.ErrSessionReused) {
-			fmt.Printf("%s Session already running (reused). Attach with: %s\n",
-				style.Bold.Render("✓"),
-				style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
-		} else {
-			return fmt.Errorf("starting session: %w", err)
-		}
-	} else {
-		fmt.Printf("%s Session started. Attach with: %s\n",
-			style.Bold.Render("✓"),
-			style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
+		return fmt.Errorf("starting session: %w", err)
 	}
+
+	fmt.Printf("%s Session started. Attach with: %s\n",
+		style.Bold.Render("✓"),
+		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
 	// Log wake event
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
@@ -541,18 +534,12 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 	opts := polecat.SessionStartOptions{}
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
-		if errors.Is(err, polecat.ErrSessionReused) {
-			fmt.Printf("%s Session still running (reused). Attach with: %s\n",
-				style.Bold.Render("✓"),
-				style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
-		} else {
-			return fmt.Errorf("starting session: %w", err)
-		}
-	} else {
-		fmt.Printf("%s Session restarted. Attach with: %s\n",
-			style.Bold.Render("✓"),
-			style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
+		return fmt.Errorf("starting session: %w", err)
 	}
+
+	fmt.Printf("%s Session restarted. Attach with: %s\n",
+		style.Bold.Render("✓"),
+		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 	return nil
 }
 

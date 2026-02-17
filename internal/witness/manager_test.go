@@ -12,7 +12,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 		StartCommand: "exec run --town {town} --rig {rig} --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", roleConfig)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", roleConfig)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 }
 
 func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", nil)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", nil)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 		StartCommand: "exec run --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", "", roleConfig)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "codex", roleConfig)
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -51,27 +51,5 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 	}
 	if !strings.Contains(got, "GT_ROLE=gastown/witness") {
 		t.Errorf("expected GT_ROLE=gastown/witness in command, got %q", got)
-	}
-}
-
-func TestBuildWitnessStartCommand_IncludesClaudeConfigDir(t *testing.T) {
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "/custom/config", nil)
-	if err != nil {
-		t.Fatalf("buildWitnessStartCommand: %v", err)
-	}
-
-	if !strings.Contains(got, "CLAUDE_CONFIG_DIR=/custom/config") {
-		t.Errorf("expected CLAUDE_CONFIG_DIR=/custom/config in command, got %q", got)
-	}
-}
-
-func TestBuildWitnessStartCommand_OmitsClaudeConfigDirWhenEmpty(t *testing.T) {
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", nil)
-	if err != nil {
-		t.Fatalf("buildWitnessStartCommand: %v", err)
-	}
-
-	if strings.Contains(got, "CLAUDE_CONFIG_DIR") {
-		t.Errorf("expected no CLAUDE_CONFIG_DIR when empty, got %q", got)
 	}
 }
