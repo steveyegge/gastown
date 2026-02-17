@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -214,11 +215,35 @@ func TestDetectTownRootFromCwd_EnvFallback(t *testing.T) {
 	})
 }
 
+// makeTempDir creates a temp dir and registers cleanup with retry logic.
+// On Windows, git subprocesses can briefly hold file locks after exit, causing
+// t.TempDir()'s RemoveAll to fail with "file is being used by another process".
+// Retry for up to 500ms before giving up; log but don't fail on cleanup error.
+func makeTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gastown-handoff-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 10; i++ {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		// Log but don't fail — stale lock is not a test logic failure.
+		if err := os.RemoveAll(dir); err != nil {
+			t.Logf("warning: temp dir cleanup %s: %v", dir, err)
+		}
+	})
+	return dir
+}
+
 // makeTestGitRepo creates a minimal git repo in a temp dir and returns its path.
-// The caller is responsible for cleanup via t.Cleanup or defer os.RemoveAll.
 func makeTestGitRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := makeTempDir(t)
 	for _, args := range [][]string{
 		{"git", "-C", dir, "init"},
 		{"git", "-C", dir, "config", "user.email", "test@test.com"},

@@ -14,6 +14,13 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+# Windows defaults to cp1252; reconfigure stdout/stderr to UTF-8 so emoji
+# (e.g. ⚠) in test output don't crash the report script.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: junit-report.py <junit.xml> [heading]", file=sys.stderr)
