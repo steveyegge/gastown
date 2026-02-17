@@ -1948,6 +1948,25 @@ func GetRigPrefix(townRoot, rigName string) string {
 	return strings.TrimSuffix(prefix, "-")
 }
 
+// AllRigPrefixes returns a sorted list of all rig beads prefixes from rigs.json.
+// Trailing hyphens are stripped (e.g. "gt-" becomes "gt").
+// Returns nil on error (caller should handle the fallback).
+func AllRigPrefixes(townRoot string) []string {
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil
+	}
+	var prefixes []string
+	for _, entry := range rigsConfig.Rigs {
+		if entry.BeadsConfig != nil && entry.BeadsConfig.Prefix != "" {
+			prefixes = append(prefixes, strings.TrimSuffix(entry.BeadsConfig.Prefix, "-"))
+		}
+	}
+	sort.Strings(prefixes)
+	return prefixes
+}
+
 // EscalationConfigPath returns the standard path for escalation config in a town.
 func EscalationConfigPath(townRoot string) string {
 	return filepath.Join(townRoot, "settings", "escalation.json")
