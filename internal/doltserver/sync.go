@@ -1,9 +1,14 @@
 package doltserver
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // SyncOptions controls the behavior of SyncDatabases.
@@ -195,3 +200,57 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 	return results
 }
 
+// PurgeClosedEphemerals runs "bd purge" for a specific rig database to remove
+// closed ephemeral beads (wisps, convoys) before pushing to DoltHub.
+// Returns the number of beads purged and any error encountered.
+// Errors are non-fatal — the caller should log them but continue with sync.
+// Must be called while the Dolt server is still running (bd purge needs SQL access).
+func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
+	// Resolve the beads directory for this rig
+	beadsDir, err := FindOrCreateRigBeadsDir(townRoot, dbName)
+	if err != nil {
+		return 0, fmt.Errorf("resolving beads dir for %s: %w", dbName, err)
+	}
+
+	// Skip databases with uninitialized beads dirs (no metadata.json).
+	// An empty .beads/ directory causes bd to attempt a fresh bootstrap,
+	// which hangs waiting on dolt init or lock acquisition.
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		return 0, nil // not initialized — nothing to purge
+	}
+
+	// Build bd purge command with safety-net timeout.
+	// bd purge v2 uses batched SQL (completes in seconds), but we keep a
+	// generous timeout as a circuit breaker against future regressions.
+	args := []string{"purge", "--json"}
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return 0, fmt.Errorf("bd purge for %s: timed out after 60s", dbName)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("bd purge for %s: %w (%s)", dbName, err, strings.TrimSpace(string(output)))
+	}
+
+	// Parse JSON output to get purged count
+	var result struct {
+		PurgedCount int `json:"purged_count"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		// bd purge succeeded but we couldn't parse output — not fatal
+		return 0, nil
+	}
+
+	return result.PurgedCount, nil
+}
