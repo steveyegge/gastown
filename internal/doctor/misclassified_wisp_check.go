@@ -146,16 +146,38 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 
 		// Check for wisp characteristics
 		if reason := c.shouldBeWisp(issue.ID, issue.Title, issue.Type, issue.Labels); reason != "" {
-			found = append(found, misclassifiedWisp{
-				rigName: rigName,
-				id:      issue.ID,
-				title:   issue.Title,
-				reason:  reason,
-			})
+			// Verify the current DB state (JSONL may be stale if daemon isn't running)
+			if isIssueStillOpen(issue.ID) {
+				found = append(found, misclassifiedWisp{
+					rigName: rigName,
+					id:      issue.ID,
+					title:   issue.Title,
+					reason:  reason,
+				})
+			}
 		}
 	}
 
 	return found
+}
+
+// isIssueStillOpen verifies an issue is still open/non-ephemeral in the live DB.
+// This guards against stale JSONL data when the daemon isn't running and hasn't flushed.
+func isIssueStillOpen(id string) bool {
+	cmd := exec.Command("bd", "show", id, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		return true // Assume open if we can't query
+	}
+	var issues []struct {
+		Status    string `json:"status"`
+		Ephemeral bool   `json:"ephemeral"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
+		return true // Assume open on parse error
+	}
+	issue := issues[0]
+	return issue.Status != "closed" && !issue.Ephemeral
 }
 
 // shouldBeWisp checks if an issue has characteristics indicating it should be a wisp.
@@ -213,10 +235,9 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 			workDir = filepath.Join(ctx.TownRoot, wisp.rigName)
 		}
 
-		// Close the issue with a descriptive reason
-		// Note: bd update does not support --ephemeral flag for existing issues
-		closeReason := fmt.Sprintf("Closed by doctor: %s (should have been ephemeral wisp)", wisp.reason)
-		cmd := exec.Command("bd", "close", wisp.id, "--reason", closeReason)
+		// Mark as ephemeral (wisp) rather than closing - preserves the issue for audit
+		// bd update --ephemeral is supported as of bd 0.52.0+
+		cmd := exec.Command("bd", "update", wisp.id, "--ephemeral")
 		cmd.Dir = workDir
 		if output, err := cmd.CombinedOutput(); err != nil {
 			lastErr = fmt.Errorf("%s/%s: %v (%s)", wisp.rigName, wisp.id, err, string(output))
