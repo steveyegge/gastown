@@ -38,7 +38,7 @@ jobs:
 
       - name: Install beads (bd)
         if: steps.cache-beads.outputs.cache-hit != 'true'
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.50.2
+        run: go install github.com/steveyegge/beads/cmd/bd@v0.52.0
 
       - name: Install Dolt
         run: |
