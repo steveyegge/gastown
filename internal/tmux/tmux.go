@@ -1963,6 +1963,29 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 	return t.SetCycleBindings(session)
 }
 
+// sessionPrefixPattern returns a grep -Eq pattern that matches any registered
+// Gas Town session name.  The pattern is built dynamically from rigs.json
+// (via config.AllRigPrefixes) so that rigs beyond gastown/hq are recognized.
+// "hq" is always included because it lives outside the rig registry
+// (town-level services).
+//
+// Example output: "^(bd|db|fa|gl|gt|hq|la|lc)-"
+func sessionPrefixPattern() string {
+	seen := map[string]bool{"hq": true, "gt": true} // always include HQ + gastown fallback
+	townRoot := os.Getenv("GT_ROOT")
+	if townRoot != "" {
+		for _, p := range config.AllRigPrefixes(townRoot) {
+			seen[p] = true
+		}
+	}
+	sorted := make([]string, 0, len(seen))
+	for p := range seen {
+		sorted = append(sorted, p)
+	}
+	sort.Strings(sorted)
+	return "^(" + strings.Join(sorted, "|") + ")-"
+}
+
 // SetCycleBindings sets up C-b n/p to cycle through related sessions.
 // The gt cycle command automatically detects the session type and cycles
 // within the appropriate group:
@@ -1970,25 +1993,27 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // - Crew sessions: All crew members in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
-// Gas Town sessions (those starting with "gt-" or "hq-"). For non-GT sessions,
-// the default tmux behavior (next-window/previous-window) is preserved.
+// Gas Town sessions (those matching a registered rig prefix or "hq-").
+// For non-GT sessions, the default tmux behavior (next-window/previous-window)
+// is preserved.
 // See: https://github.com/steveyegge/gastown/issues/13
 //
 // IMPORTANT: We pass #{session_name} to the command because run-shell doesn't
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
-	// C-b n → gt cycle next for GT sessions, next-window otherwise
-	// The if-shell checks if session name starts with "gt-" or "hq-"
+	pattern := sessionPrefixPattern()
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", pattern)
+	// C-b n → gt cycle next for Gas Town sessions, next-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", ifShell,
 		"run-shell 'gt cycle next --session #{session_name}'",
 		"next-window"); err != nil {
 		return err
 	}
-	// C-b p → gt cycle prev for GT sessions, previous-window otherwise
+	// C-b p → gt cycle prev for Gas Town sessions, previous-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", ifShell,
 		"run-shell 'gt cycle prev --session #{session_name}'",
 		"previous-window"); err != nil {
 		return err
@@ -2001,12 +2026,13 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // Uses `gt feed --window` which handles both creation and switching.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+// (those matching a registered rig prefix or "hq-"). For non-GT sessions, a
+// help message is shown.
 // See: https://github.com/steveyegge/gastown/issues/13
 func (t *Tmux) SetFeedBinding(session string) error {
-	// C-b a → gt feed --window for GT sessions, help message otherwise
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	_, err := t.run("bind-key", "-T", "prefix", "a",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", ifShell,
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
 	return err
@@ -2016,11 +2042,12 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // This runs `gt agents` which displays a tmux popup with all Gas Town agents.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+// (those matching a registered rig prefix or "hq-"). For non-GT sessions, a
+// help message is shown.
 func (t *Tmux) SetAgentsBinding(session string) error {
-	// C-b g → gt agents for GT sessions, help message otherwise
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 	_, err := t.run("bind-key", "-T", "prefix", "g",
-		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"if-shell", ifShell,
 		"run-shell 'gt agents'",
 		"display-message 'C-b g is for Gas Town sessions only'")
 	return err
