@@ -525,7 +525,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 			fmt.Printf("  %s already running, injecting task...\n", worker)
 		} else {
 			fmt.Printf("  Starting %s...\n", worker)
-			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil {
+			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil && err != polecat.ErrSessionReused {
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}

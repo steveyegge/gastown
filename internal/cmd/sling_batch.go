@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -100,29 +99,6 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			results = append(results, slingResult{beadID: beadID, success: false, errMsg: "already " + info.Status})
 			fmt.Printf("  %s Already %s (use --force to re-sling)\n", style.Dim.Render("✗"), info.Status)
 			continue
-		}
-
-		// Guard: burn existing molecules before applying new formula.
-		// Runs before polecat spawn to avoid wasted spawn/cleanup on rejected beads.
-		if formulaName != "" {
-			existingMolecules := collectExistingMolecules(info)
-			if len(existingMolecules) > 0 {
-				if slingForce {
-					fmt.Printf("  %s Burning %d stale molecule(s): %s\n",
-						style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-					if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
-						fmt.Printf("  %s Skipping %s: burn failed: %v\n",
-							style.Dim.Render("✗"), beadID, err)
-						results = append(results, slingResult{beadID: beadID, success: false, errMsg: fmt.Sprintf("burn failed: %v", err)})
-						continue
-					}
-				} else {
-					fmt.Printf("  %s Skipping %s: has existing molecule(s) (use --force)\n",
-						style.Dim.Render("✗"), beadID)
-					results = append(results, slingResult{beadID: beadID, success: false, errMsg: "has existing molecule(s)"})
-					continue
-				}
-			}
 		}
 
 		// Spawn a fresh polecat

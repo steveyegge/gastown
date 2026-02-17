@@ -71,74 +71,9 @@ func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
 
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
-	Title        string          `json:"title"`
-	Status       string          `json:"status"`
-	Assignee     string          `json:"assignee"`
-	Description  string          `json:"description"`
-	Dependencies []beads.IssueDep `json:"dependencies,omitempty"`
-}
-
-// collectExistingMolecules returns all molecule wisp IDs attached to a bead.
-// Checks both dependency bonds (ground truth from bd mol bond) and the
-// description's attached_molecule field (metadata pointer). Wisp IDs are
-// identified by containing "-wisp-" in their ID.
-// Uses Dependencies (structured []IssueDep from bd show --json) rather than
-// DependsOn (raw ID list, which is unreliable — see molecule_status.go comments).
-func collectExistingMolecules(info *beadInfo) []string {
-	seen := make(map[string]bool)
-	var molecules []string
-
-	// Check dependency bonds (ground truth - bd mol bond creates these)
-	for _, dep := range info.Dependencies {
-		if strings.Contains(dep.ID, "-wisp-") && !seen[dep.ID] {
-			seen[dep.ID] = true
-			molecules = append(molecules, dep.ID)
-		}
-	}
-
-	// Also check description's attached_molecule (may differ from bonds)
-	issue := &beads.Issue{Description: info.Description}
-	fields := beads.ParseAttachmentFields(issue)
-	if fields != nil && fields.AttachedMolecule != "" && !seen[fields.AttachedMolecule] {
-		seen[fields.AttachedMolecule] = true
-		molecules = append(molecules, fields.AttachedMolecule)
-	}
-
-	return molecules
-}
-
-// burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
-// First detaches the molecule from the base bead (clears attached_molecule in description),
-// then force-closes the orphaned wisp beads. Returns an error if detach fails, since
-// proceeding with a stale attached_molecule reference creates harder-to-debug orphans.
-func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
-	if len(molecules) == 0 {
-		return nil
-	}
-	burnDir := beads.ResolveHookDir(townRoot, beadID, "")
-
-	// Step 1: Detach molecule from the base bead using the Go API (with audit logging
-	// and advisory locking). This clears attached_molecule/attached_at from the description.
-	// Without this, storeFieldsInBead preserves the stale reference because it only
-	// overwrites when updates.AttachedMolecule is non-empty.
-	bd := beads.New(burnDir)
-	if _, err := bd.DetachMoleculeWithAudit(beadID, beads.DetachOptions{
-		Operation: "burn",
-		Reason:    "force re-sling: burning stale molecules",
-	}); err != nil {
-		return fmt.Errorf("detaching molecule from %s: %w", beadID, err)
-	}
-
-	// Step 2: Force-close the orphaned wisp beads so they don't linger.
-	// Uses --force to handle wisps with open child steps (matching gt done pattern).
-	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
-		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
-			style.Dim.Render("Warning:"), err)
-		// Close failure is non-fatal — the detach already succeeded, so the bead
-		// is clean. Orphaned wisps will be caught by reactive DetectOrphanedMolecules.
-	}
-
-	return nil
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Assignee string `json:"assignee"`
 }
 
 // verifyBeadExists checks that the bead exists using bd show.

@@ -432,8 +432,8 @@ func filterIdentityBeads(issues []*beads.Issue) []*beads.Issue {
 
 	filtered := make([]*beads.Issue, 0, len(issues))
 	for _, issue := range issues {
-		// Filter by issue_type (agent beads)
-		if beads.IsAgentBead(issue) {
+		// Filter by issue_type
+		if issue.Type == "agent" {
 			continue
 		}
 

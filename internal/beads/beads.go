@@ -84,21 +84,6 @@ func HasLabel(issue *Issue, label string) bool {
 	return false
 }
 
-// IsAgentBead checks if an issue is an agent bead by checking for the gt:agent
-// label (preferred) or the legacy type == "agent" field. This handles the migration
-// from type-based to label-based agent identification (see gt-vja7b).
-func IsAgentBead(issue *Issue) bool {
-	if issue == nil {
-		return false
-	}
-	// Check legacy type field first for backward compatibility
-	if issue.Type == "agent" {
-		return true
-	}
-	// Check for gt:agent label (current standard)
-	return HasLabel(issue, "gt:agent")
-}
-
 // IssueDep represents a dependency or dependent issue with its relation.
 type IssueDep struct {
 	ID             string `json:"id"`

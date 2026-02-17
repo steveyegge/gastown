@@ -380,7 +380,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 
 		// Try to fetch the agent bead
 		agentBead, err := agentB.Show(agentBeadID)
-		if err == nil && beads.IsAgentBead(agentBead) {
+		if err == nil && agentBead != nil && agentBead.Type == "agent" {
 			status.AgentBeadID = agentBeadID
 
 			// Read hook_bead from the agent bead's database field (not description!)

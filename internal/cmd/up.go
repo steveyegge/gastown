@@ -732,7 +732,7 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 
 		// This polecat has work - start it using SessionManager
 		if err := polecatMgr.Start(polecatName, polecat.SessionStartOptions{}); err != nil {
-			if err == polecat.ErrSessionRunning {
+			if err == polecat.ErrSessionRunning || err == polecat.ErrSessionReused {
 				started = append(started, polecatName)
 			} else {
 				errors[polecatName] = err

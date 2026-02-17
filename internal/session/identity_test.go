@@ -148,17 +148,25 @@ func TestParseSessionName(t *testing.T) {
 			wantPrefix: "sky",
 		},
 
-		// Error cases: unknown prefixes should fail (not fall back to splitting on dash)
+		// Unknown prefix (fallback: prefix = first segment, rig = prefix)
 		{
-			name:    "unknown prefix polecat",
-			session: "zz-alpha",
-			wantErr: true,
+			name:       "unknown prefix polecat",
+			session:    "zz-alpha",
+			wantRole:   RolePolecat,
+			wantRig:    "zz",
+			wantName:   "alpha",
+			wantPrefix: "zz",
 		},
 		{
-			name:    "unknown prefix witness",
-			session: "foo-witness",
-			wantErr: true,
+			name:       "unknown prefix witness",
+			session:    "foo-witness",
+			wantRole:   RoleWitness,
+			wantRig:    "foo",
+			wantName:   "",
+			wantPrefix: "foo",
 		},
+
+		// Error cases
 		{
 			name:    "empty string",
 			session: "",

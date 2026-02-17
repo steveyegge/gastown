@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -1187,21 +1186,13 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 						break
 					} else {
 						lastErr = err
-						// If the molecule doesn't exist (already burned/deleted),
-						// treat it as already closed and stop retrying.
-						if errors.Is(err, beads.ErrNotFound) {
-							moleculeClosed = true
-							fmt.Fprintf(os.Stderr, "Warning: attached molecule %s not found (already burned/deleted), treating as closed\n", attachment.AttachedMolecule)
-							break
-						}
 						if attempt < 2 {
 							time.Sleep(time.Duration(100<<attempt) * time.Millisecond) // 100ms, 200ms
 						}
 					}
 				}
 				if !moleculeClosed {
-					// All retries failed with non-"not found" errors - skip closing
-					// hooked bead (it's blocked by the molecule)
+					// All retries failed - skip closing hooked bead (it's blocked by the molecule)
 					fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s after 3 attempts: %v\n", attachment.AttachedMolecule, lastErr)
 					// Don't try to close hookedBeadID - it will fail because it's still blocked
 					// The Witness will clean up orphaned state

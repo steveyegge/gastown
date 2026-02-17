@@ -1404,17 +1404,11 @@ func RemoveDatabase(townRoot, dbName string) error {
 		return fmt.Errorf("database %q not found at %s", dbName, dbPath)
 	}
 
-	// If server is running, DROP the database first and clean up branch control entries.
-	// In Dolt 1.81.x, DROP DATABASE does not automatically remove dolt_branch_control
-	// entries for the dropped database. These stale entries cause the database directory
-	// to be recreated when connections reference the database name (gt-zlv7l).
+	// If server is running, DROP the database first
 	running, _, _ := IsRunning(townRoot)
 	if running {
 		// Try to DROP — ignore errors (database might not be loaded)
 		_ = serverExecSQL(townRoot, fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", dbName))
-		// Explicitly clean up branch control entries to prevent the database from being
-		// recreated on subsequent connections. `database` is a reserved word, so backtick-quote it.
-		_ = serverExecSQL(townRoot, fmt.Sprintf("DELETE FROM dolt_branch_control WHERE `database` = '%s'", dbName))
 	}
 
 	// Remove the directory

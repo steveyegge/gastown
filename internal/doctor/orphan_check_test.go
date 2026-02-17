@@ -105,12 +105,12 @@ func TestIsCrewSession(t *testing.T) {
 		session string
 		want    bool
 	}{
-		{"gt-crew-joe", true},  // gastown crew (prefix: gt)
-		{"bd-crew-max", true},  // beads crew (prefix: bd)
-		{"nif-crew-a", true},   // niflheim crew (prefix: nif)
-		{"gt-witness", false},  // witness, not crew
-		{"gt-refinery", false}, // refinery, not crew
-		{"gt-polecat1", false}, // polecat, not crew
+		{"gt-crew-joe", true},   // gastown crew (prefix: gt)
+		{"bd-crew-max", true},   // beads crew (prefix: bd)
+		{"nif-crew-a", true},    // niflheim crew (prefix: nif)
+		{"gt-witness", false},   // witness, not crew
+		{"gt-refinery", false},  // refinery, not crew
+		{"gt-polecat1", false},  // polecat, not crew
 		{"hq-deacon", false},
 		{"hq-mayor", false},
 		{"other-session", false},
@@ -146,16 +146,16 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 		{"hq-boot", true},
 
 		// Valid rig sessions (using rig prefixes)
-		{"gt-witness", true},  // gastown witness (prefix: gt)
-		{"gt-refinery", true}, // gastown refinery
-		{"gt-polecat1", true}, // gastown polecat
-		{"bd-witness", true},  // beads witness (prefix: bd)
-		{"bd-refinery", true}, // beads refinery
-		{"bd-crew-max", true}, // beads crew
+		{"gt-witness", true},    // gastown witness (prefix: gt)
+		{"gt-refinery", true},   // gastown refinery
+		{"gt-polecat1", true},   // gastown polecat
+		{"bd-witness", true},    // beads witness (prefix: bd)
+		{"bd-refinery", true},   // beads refinery
+		{"bd-crew-max", true},   // beads crew
 
 		// Invalid rig sessions (unknown prefix/rig)
-		{"zz-witness", false},  // unknown prefix
-		{"xx-refinery", false}, // unknown prefix
+		{"zz-witness", false},   // unknown prefix
+		{"xx-refinery", false},  // unknown prefix
 
 		// Non-GT sessions fail format validation
 		{"other-session", false},
@@ -319,9 +319,9 @@ func TestOrphanSessionCheck_FixProtectsCrewSessions(t *testing.T) {
 
 	// Simulate cached orphan sessions including a crew session
 	check.orphanSessions = []string{
-		"gt-crew-max",     // Crew - should be protected
-		"zz-witness",      // Not crew - would be killed
-		"nif-crew-codex1", // Crew - should be protected
+		"gt-crew-max",      // Crew - should be protected
+		"zz-witness",       // Not crew - would be killed
+		"nif-crew-codex1",  // Crew - should be protected
 	}
 
 	// Verify isCrewSession correctly identifies crew sessions
@@ -387,8 +387,8 @@ func TestOrphanSessionCheck_HQSessions(t *testing.T) {
 
 	lister := &mockSessionLister{
 		sessions: []string{
-			"hq-mayor",  // valid: headquarters mayor session
-			"hq-deacon", // valid: headquarters deacon session
+			"hq-mayor",   // valid: headquarters mayor session
+			"hq-deacon",  // valid: headquarters deacon session
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)
@@ -429,24 +429,25 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 
 	lister := &mockSessionLister{
 		sessions: []string{
-			"gt-witness",     // valid: gastown rig exists (prefix "gt")
-			"gt-polecat1",    // valid: gastown rig exists
-			"bd-refinery",    // valid: beads rig exists (prefix "bd")
-			"hq-mayor",       // valid: hq-mayor is recognized
-			"hq-deacon",      // valid: hq-deacon is recognized
-			"zz-witness",     // ignored: unknown prefix, not a gastown session
-			"xx-crew-joe",    // ignored: unknown prefix, not a gastown session
-			"random-session", // ignored: unknown prefix, not a gastown session
+			"gt-witness",          // valid: gastown rig exists (prefix "gt")
+			"gt-polecat1",         // valid: gastown rig exists
+			"bd-refinery",         // valid: beads rig exists (prefix "bd")
+			"hq-mayor",            // valid: hq-mayor is recognized
+			"hq-deacon",           // valid: hq-deacon is recognized
+			"zz-witness",          // orphan: unknown prefix/rig
+			"xx-crew-joe",         // orphan: unknown prefix/rig
+			"random-session",      // parsed as polecat with unknown prefix, orphan
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)
 	result := check.Run(&CheckContext{TownRoot: townRoot})
 
-	if result.Status != StatusOK {
-		t.Fatalf("expected StatusOK, got %v: %s", result.Status, result.Message)
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning, got %v: %s", result.Status, result.Message)
 	}
 
-	if len(check.orphanSessions) != 0 {
-		t.Fatalf("expected 0 orphans (unknown prefixes are ignored), got %d: %v", len(check.orphanSessions), check.orphanSessions)
+	// Expect 3 orphans: zz-witness, xx-crew-joe, random-session (all have unknown rigs)
+	if len(check.orphanSessions) != 3 {
+		t.Fatalf("expected 3 orphans, got %d: %v", len(check.orphanSessions), check.orphanSessions)
 	}
 }

@@ -36,6 +36,7 @@ var (
 	ErrSessionRunning  = errors.New("session already running")
 	ErrSessionNotFound = errors.New("session not found")
 	ErrIssueInvalid    = errors.New("issue not found or tombstoned")
+	ErrSessionReused   = errors.New("session reused")
 )
 
 // SessionManager handles polecat session lifecycle.
@@ -189,27 +190,63 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	sessionID := m.SessionName(polecat)
 
+	// Determine working directory — must be resolved before session-state checks
+	// so hasValidWorktree and issue hooks use the correct path.
+	workDir := opts.WorkDir
+	if workDir == "" {
+		workDir = m.clonePath(polecat)
+	}
+
 	// Check if session already exists.
-	// If an existing session's pane process has died, kill the stale session
-	// and proceed rather than returning ErrSessionRunning (gt-jn40ft).
+	// Handle stale, zombie, and reusable sessions gracefully (gt-m2hnr).
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if running {
+		// Case 1: Session exists but process is dead → kill and proceed
 		if m.isSessionStale(sessionID) {
 			if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing stale session %s: %w", sessionID, err)
 			}
+			fmt.Printf("Cleaned up stale session %s\n", sessionID)
+		} else if !m.hasValidWorktree(workDir) {
+			// Case 2: Zombie — alive session but no worktree
+			if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+				return fmt.Errorf("killing zombie session %s: %w", sessionID, err)
+			}
+			fmt.Printf("Cleaned up zombie session %s (no worktree)\n", sessionID)
 		} else {
-			return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
+			// Cases 3 & 4: Worktree exists — check pane and agent liveness
+			_, err := m.tmux.GetPaneID(sessionID)
+			if err != nil {
+				// Case 3: Broken — no valid pane
+				if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+					return fmt.Errorf("killing broken session %s: %w", sessionID, err)
+				}
+				fmt.Printf("Cleaned up broken session %s (no valid pane)\n", sessionID)
+			} else if !m.tmux.IsAgentAlive(sessionID) {
+				// Case 4b: Pane alive but agent dead — kill and recreate
+				if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+					return fmt.Errorf("killing dead-agent session %s: %w", sessionID, err)
+				}
+				fmt.Printf("Cleaned up dead-agent session %s (pane alive, agent dead)\n", sessionID)
+			} else {
+				// Case 4: Fully reusable — valid pane, live agent
+				// Apply --issue flag if provided before returning.
+				if opts.Issue != "" {
+					if err := m.validateIssue(opts.Issue, workDir); err != nil {
+						return err
+					}
+					agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+					if err := m.hookIssue(opts.Issue, agentID, workDir); err != nil {
+						fmt.Printf("Warning: could not hook issue %s: %v\n", opts.Issue, err)
+					}
+				}
+				fmt.Printf("Reusing existing session %s (session and worktree both exist)\n", sessionID)
+				return ErrSessionReused
+			}
 		}
-	}
-
-	// Determine working directory
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir = m.clonePath(polecat)
 	}
 
 	// Validate issue exists and isn't tombstoned BEFORE creating session.
@@ -402,6 +439,24 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 // Delegates to isSessionProcessDead to avoid duplicating process-check logic (gt-qgzj1h).
 func (m *SessionManager) isSessionStale(sessionID string) bool {
 	return isSessionProcessDead(m.tmux, sessionID)
+}
+
+// hasValidWorktree checks if a worktree directory exists and is valid.
+// Returns true if the worktree exists as a directory with a .git file/directory.
+// Used to detect zombie sessions (session exists but worktree was never created or deleted).
+func (m *SessionManager) hasValidWorktree(workDir string) bool {
+	worktreePath := workDir
+
+	// Check if worktree directory exists
+	info, err := os.Stat(worktreePath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+
+	// Check for .git (file for worktrees, directory for regular clones)
+	gitPath := filepath.Join(worktreePath, ".git")
+	_, err = os.Stat(gitPath)
+	return err == nil
 }
 
 // Stop terminates a polecat session.
