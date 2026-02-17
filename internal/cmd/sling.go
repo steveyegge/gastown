@@ -478,6 +478,24 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Auto-applying %s for polecat work...\n", formulaName)
 	}
 
+	// Guard: ensure only one molecule is attached to a work bead.
+	// Checks both dependency bonds (ground truth) and description metadata.
+	// When re-slinging with --force, burn ALL existing molecules before creating a new one.
+	// Without this, each sling creates a new wisp bonded to the bead, leaving orphaned molecules.
+	if formulaName != "" {
+		existingMolecules := collectExistingMolecules(info)
+		if len(existingMolecules) > 0 {
+			if slingForce {
+				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
+					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
+				burnExistingMolecules(existingMolecules, beadID, townRoot)
+			} else {
+				return fmt.Errorf("bead %s already has %d attached molecule(s): %s\nUse --force to replace, or --hook-raw-bead to skip formula",
+					beadID, len(existingMolecules), strings.Join(existingMolecules, ", "))
+			}
+		}
+	}
+
 	if slingDryRun {
 		if formulaName != "" {
 			fmt.Printf("Would instantiate formula %s:\n", formulaName)

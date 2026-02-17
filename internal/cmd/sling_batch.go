@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -132,6 +133,22 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 				}
 			} else {
 				fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			}
+		}
+
+		// Guard: burn existing molecules before applying new formula
+		existingMolecules := collectExistingMolecules(info)
+		if len(existingMolecules) > 0 {
+			if slingForce {
+				fmt.Printf("  %s Burning %d stale molecule(s): %s\n",
+					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
+				burnExistingMolecules(existingMolecules, beadID, townRoot)
+			} else {
+				fmt.Printf("  %s Skipping %s: has existing molecule(s) (use --force)\n",
+					style.Dim.Render("✗"), beadID)
+				results = append(results, slingResult{beadID: beadID, success: false, errMsg: "has existing molecule(s)"})
+				cleanupSpawnedPolecat(spawnInfo, rigName)
+				continue
 			}
 		}
 

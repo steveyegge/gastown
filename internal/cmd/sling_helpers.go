@@ -71,9 +71,70 @@ func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
 
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Assignee string `json:"assignee"`
+	Title       string   `json:"title"`
+	Status      string   `json:"status"`
+	Assignee    string   `json:"assignee"`
+	Description string   `json:"description"`
+	DependsOn   []string `json:"depends_on"`
+}
+
+// collectExistingMolecules returns all molecule wisp IDs attached to a bead.
+// Checks both dependency bonds (ground truth from bd mol bond) and the
+// description's attached_molecule field (metadata pointer). Wisp IDs are
+// identified by containing "-wisp-" in their ID.
+func collectExistingMolecules(info *beadInfo) []string {
+	seen := make(map[string]bool)
+	var molecules []string
+
+	// Check dependency bonds (ground truth - bd mol bond creates these)
+	for _, depID := range info.DependsOn {
+		if strings.Contains(depID, "-wisp-") && !seen[depID] {
+			seen[depID] = true
+			molecules = append(molecules, depID)
+		}
+	}
+
+	// Also check description's attached_molecule (may differ from bonds)
+	issue := &beads.Issue{Description: info.Description}
+	fields := beads.ParseAttachmentFields(issue)
+	if fields != nil && fields.AttachedMolecule != "" && !seen[fields.AttachedMolecule] {
+		seen[fields.AttachedMolecule] = true
+		molecules = append(molecules, fields.AttachedMolecule)
+	}
+
+	return molecules
+}
+
+// burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
+// First detaches the molecule from the base bead (clears attached_molecule in description),
+// then closes the orphaned wisp beads.
+func burnExistingMolecules(molecules []string, beadID, townRoot string) {
+	if len(molecules) == 0 {
+		return
+	}
+	burnDir := beads.ResolveHookDir(townRoot, beadID, "")
+
+	// Step 1: Detach molecule from the base bead (clears attached_molecule/attached_at
+	// from description). Without this, storeFieldsInBead preserves the stale reference
+	// because it only overwrites when updates.AttachedMolecule is non-empty.
+	detachCmd := exec.Command("bd", "mol", "detach", beadID)
+	detachCmd.Dir = burnDir
+	detachCmd.Stderr = os.Stderr
+	if err := detachCmd.Run(); err != nil {
+		fmt.Printf("  %s Could not detach molecule from %s: %v\n",
+			style.Dim.Render("Warning:"), beadID, err)
+	}
+
+	// Step 2: Close the orphaned wisp beads so they don't linger.
+	for _, molID := range molecules {
+		closeCmd := exec.Command("bd", "close", molID, "--reason", "burned: force re-sling")
+		closeCmd.Dir = burnDir
+		closeCmd.Stderr = os.Stderr
+		if err := closeCmd.Run(); err != nil {
+			fmt.Printf("  %s Could not close molecule %s: %v\n",
+				style.Dim.Render("Warning:"), molID, err)
+		}
+	}
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
