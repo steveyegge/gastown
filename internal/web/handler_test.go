@@ -1074,8 +1074,9 @@ func TestConvoyHandler_TemplateErrorReturns500(t *testing.T) {
 
 	// Create handler with the failing template
 	handler := &ConvoyHandler{
-		fetcher:  &MockConvoyFetcher{Convoys: []ConvoyRow{}},
-		template: tmpl,
+		fetcher:      &MockConvoyFetcher{Convoys: []ConvoyRow{}},
+		template:     tmpl,
+		fetchTimeout: 5 * time.Second,
 	}
 
 	req := httptest.NewRequest("GET", "/", nil)

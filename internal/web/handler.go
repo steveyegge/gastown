@@ -211,6 +211,9 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// All fetches completed
 	case <-ctx.Done():
 		log.Printf("dashboard: fetch timeout after %v", h.fetchTimeout)
+		// Goroutines may still be writing to shared result variables.
+		// Wait for them to finish to avoid a data race on read below.
+		<-done
 	}
 
 	// Compute summary from already-fetched data
