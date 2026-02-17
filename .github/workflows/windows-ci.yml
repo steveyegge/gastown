@@ -10,13 +10,15 @@ jobs:
   test:
     name: Windows Build and Unit Tests
     runs-on: windows-latest
+    env:
+      CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: false
 
       - name: Cache Go modules
