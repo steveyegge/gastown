@@ -1092,8 +1092,11 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, created bool, err
 		// Wait for the new database to appear in the server's in-memory catalog.
 		// CREATE DATABASE returns before the catalog is fully updated, so
 		// subsequent USE/query operations can fail with "Unknown database".
+		// Non-fatal: the database was created, so we log a warning and continue
+		// to EnsureMetadata. The retry wrappers (doltSQLWithRetry) will handle
+		// any residual catalog propagation delays in subsequent operations.
 		if err := waitForCatalog(townRoot, rigName); err != nil {
-			return true, false, fmt.Errorf("database created but not visible in catalog: %w", err)
+			fmt.Fprintf(os.Stderr, "Warning: catalog visibility wait timed out (will retry on use): %v\n", err)
 		}
 	} else {
 		// Server not running: create directory and init manually.
@@ -2089,16 +2092,23 @@ func serverExecSQL(townRoot, query string) error {
 // in-memory catalog. This bridges the race between CREATE DATABASE returning and the
 // catalog being updated — without this, immediate USE/query operations can fail with
 // "Unknown database". Uses exponential backoff: 100ms, 200ms, 400ms, 800ms, 1.6s.
+// Only retries on catalog-race errors ("Unknown database"); returns immediately for
+// other failures (e.g., server crash, binary missing).
 func waitForCatalog(townRoot, dbName string) error {
 	const maxAttempts = 5
 	const baseBackoff = 100 * time.Millisecond
 	const maxBackoff = 2 * time.Second
 
-	query := fmt.Sprintf("USE `%s`", dbName)
+	query := fmt.Sprintf("USE %s", dbName)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := serverExecSQL(townRoot, query); err != nil {
 			lastErr = err
+			// Only retry catalog-race errors; fail fast on other errors
+			// (connection refused, binary missing, etc.)
+			if !strings.Contains(err.Error(), "Unknown database") {
+				return fmt.Errorf("database %q probe failed (non-retryable): %w", dbName, err)
+			}
 			if attempt < maxAttempts {
 				backoff := baseBackoff
 				for i := 1; i < attempt; i++ {
@@ -2180,8 +2190,7 @@ func isDoltRetryableError(err error) bool {
 		strings.Contains(msg, "serialization failure") ||
 		strings.Contains(msg, "lock wait timeout") ||
 		strings.Contains(msg, "try restarting transaction") ||
-		strings.Contains(msg, "Unknown database") ||
-		strings.Contains(msg, "database not found")
+		strings.Contains(msg, "Unknown database")
 }
 
 // validBranchNameRe matches only safe branch name characters: alphanumeric, hyphen,

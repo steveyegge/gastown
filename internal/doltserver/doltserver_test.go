@@ -1847,7 +1847,6 @@ func TestIsDoltRetryableError_CatalogRace(t *testing.T) {
 	catalogErrors := []string{
 		"Unknown database 'myrig'",
 		"Unknown database 'wl_commons'",
-		"database not found",
 		"exit status 1 (output: Unknown database 'newrig')",
 	}
 	for _, msg := range catalogErrors {
@@ -1859,8 +1858,8 @@ func TestIsDoltRetryableError_CatalogRace(t *testing.T) {
 }
 
 func TestWaitForCatalog_NoServer(t *testing.T) {
-	// When no Dolt server is running, waitForCatalog should fail after
-	// exhausting retries (not hang). This validates the timeout/retry behavior.
+	// When no Dolt server is running, waitForCatalog should fail immediately
+	// (not retry) because the error is non-retryable (not a catalog race).
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
 		t.Fatal(err)
@@ -1869,8 +1868,8 @@ func TestWaitForCatalog_NoServer(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no server is running")
 	}
-	if !strings.Contains(err.Error(), "not visible after") {
-		t.Errorf("unexpected error message: %v", err)
+	if !strings.Contains(err.Error(), "non-retryable") {
+		t.Errorf("expected non-retryable error, got: %v", err)
 	}
 }
 
@@ -2469,7 +2468,7 @@ func TestIsDoltRetryableError_IncludesReadOnly(t *testing.T) {
 		{"lock wait timeout exceeded", true},
 		{"try restarting transaction", true},
 		{"Unknown database 'myrig'", true},
-		{"database not found", true},
+		{"database not found", false},
 		{"connection refused", false},
 		{"table not found", false},
 	}
@@ -2563,7 +2562,6 @@ func TestDoltSQLScriptWithRetry_NonRetryableError(t *testing.T) {
 		"lock wait timeout",
 		"try restarting transaction",
 		"Unknown database 'myrig'",
-		"database not found",
 	}
 	for _, msg := range retryable {
 		if !isDoltRetryableError(fmt.Errorf("%s", msg)) {
