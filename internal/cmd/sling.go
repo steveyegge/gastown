@@ -687,16 +687,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 // checkCrossRigGuard validates that a bead's prefix matches the target rig.
 // Polecats work in their rig's worktree and cannot fix code owned by another rig.
 // Returns an error if the bead belongs to a different rig than the target polecat.
-// Skips the check for town-level beads (hq-*) or beads with unknown prefixes.
+// Town-root beads (hq-*) are rejected — tasks must be created in the target rig.
 func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
 	beadPrefix := beads.ExtractPrefix(beadID)
 	if beadPrefix == "" {
 		return nil // Can't determine prefix, skip check
-	}
-
-	beadRig := beads.GetRigNameForPrefix(townRoot, beadPrefix)
-	if beadRig == "" {
-		return nil // Town-level or unknown prefix, skip check
 	}
 
 	// Extract target rig from agent path (e.g., "gastown/polecats/Toast" → "gastown")
@@ -705,10 +700,17 @@ func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
 		return nil
 	}
 
-	if targetRig != beadRig {
+	beadRig := beads.GetRigNameForPrefix(townRoot, beadPrefix)
+
+	if beadRig != targetRig {
+		if beadRig == "" {
+			return fmt.Errorf("bead %s (prefix %q) is not in rig %q — it belongs to town root\n"+
+				"Create the task from the rig directory: cd %s && bd create --title=...\n"+
+				"Use --force to override", beadID, strings.TrimSuffix(beadPrefix, "-"), targetRig, targetRig)
+		}
 		return fmt.Errorf("cross-rig mismatch: bead %s (prefix %q) belongs to rig %q, but target is rig %q\n"+
-			"Polecats work in their rig's worktree and cannot fix code from another rig.\n"+
-			"Use --force to override this check", beadID, strings.TrimSuffix(beadPrefix, "-"), beadRig, targetRig)
+			"Create the task from the target rig: cd %s && bd create --title=...\n"+
+			"Use --force to override", beadID, strings.TrimSuffix(beadPrefix, "-"), beadRig, targetRig, targetRig)
 	}
 
 	return nil

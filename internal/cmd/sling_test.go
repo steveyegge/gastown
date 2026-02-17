@@ -1354,16 +1354,16 @@ func TestCheckCrossRigGuard(t *testing.T) {
 			wantErr:     true,
 		},
 		{
-			name:        "town-level: hq bead to any rig (allowed)",
+			name:        "town-level: hq bead to rig (rejected — belongs to town root)",
 			beadID:      "hq-abc123",
 			targetAgent: "gastown/polecats/Toast",
-			wantErr:     false,
+			wantErr:     true,
 		},
 		{
-			name:        "unknown prefix: allowed (no route to check)",
+			name:        "unknown prefix: rejected (no route maps to target rig)",
 			beadID:      "xx-unknown",
 			targetAgent: "gastown/polecats/Toast",
-			wantErr:     false,
+			wantErr:     true,
 		},
 		{
 			name:        "empty bead prefix: allowed",
@@ -1380,11 +1380,15 @@ func TestCheckCrossRigGuard(t *testing.T) {
 				t.Errorf("checkCrossRigGuard(%q, %q) error = %v, wantErr %v", tc.beadID, tc.targetAgent, err, tc.wantErr)
 			}
 			if err != nil && tc.wantErr {
-				if !strings.Contains(err.Error(), "cross-rig mismatch") {
-					t.Errorf("expected cross-rig mismatch error, got: %v", err)
+				errMsg := err.Error()
+				if !strings.Contains(errMsg, "cross-rig mismatch") && !strings.Contains(errMsg, "town root") {
+					t.Errorf("expected cross-rig or town-root error, got: %v", err)
 				}
-				if !strings.Contains(err.Error(), "--force") {
+				if !strings.Contains(errMsg, "--force") {
 					t.Errorf("error should mention --force override, got: %v", err)
+				}
+				if !strings.Contains(errMsg, "bd create") {
+					t.Errorf("error should mention bd create, got: %v", err)
 				}
 			}
 		})
