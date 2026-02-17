@@ -460,6 +460,7 @@ var claudeEnvVars = []string{
 	// Claude API and config
 	"ANTHROPIC_API_KEY",
 	"CLAUDE_CODE_USE_BEDROCK",
+	"CLAUDE_CONFIG_DIR",
 	// AWS vars for Bedrock
 	"AWS_PROFILE",
 	"AWS_REGION",

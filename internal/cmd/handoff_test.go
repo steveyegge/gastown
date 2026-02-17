@@ -213,6 +213,19 @@ func TestDetectTownRootFromCwd_EnvFallback(t *testing.T) {
 	})
 }
 
+func TestClaudeEnvVarsIncludesConfigDir(t *testing.T) {
+	found := false
+	for _, v := range claudeEnvVars {
+		if v == "CLAUDE_CONFIG_DIR" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("claudeEnvVars must include CLAUDE_CONFIG_DIR for credential propagation during handoff")
+	}
+}
+
 func TestSessionWorkDirWithCustomPrefix(t *testing.T) {
 	// Register "tr" → "testrig" to simulate a custom-prefix rig
 	reg := session.NewPrefixRegistry()
