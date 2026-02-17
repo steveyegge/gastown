@@ -424,20 +424,18 @@ func TestComputeExpectedNoBase(t *testing.T) {
 	tmpDir := t.TempDir()
 	setTestHome(t, tmpDir)
 
-	// Mayor should get DefaultBase + built-in mayor override (task-dispatch guard)
+	// Mayor should get DefaultBase (no built-in overrides)
 	expected, err := ComputeExpected("mayor")
 	if err != nil {
 		t.Fatalf("ComputeExpected failed: %v", err)
 	}
 
 	defaultBase := DefaultBase()
-	mayorDefaults := DefaultOverrides()["mayor"]
-	merged := Merge(defaultBase, mayorDefaults)
-	if !HooksEqual(expected, merged) {
-		t.Error("expected DefaultBase + mayor default override when no configs exist")
+	if !HooksEqual(expected, defaultBase) {
+		t.Error("expected DefaultBase for mayor when no configs exist")
 	}
 
-	// Non-mayor target should still just get DefaultBase
+	// Non-mayor target should also just get DefaultBase
 	crew, err := ComputeExpected("crew")
 	if err != nil {
 		t.Fatalf("ComputeExpected(crew) failed: %v", err)
@@ -468,19 +466,7 @@ func TestComputeExpectedBuiltinPlusOnDisk(t *testing.T) {
 		t.Fatalf("ComputeExpected failed: %v", err)
 	}
 
-	// Should have the built-in Task guard from DefaultOverrides
-	foundTaskGuard := false
-	for _, entry := range expected.PreToolUse {
-		if entry.Matcher == "Task" {
-			foundTaskGuard = true
-			break
-		}
-	}
-	if !foundTaskGuard {
-		t.Error("built-in Task guard should be present even with on-disk mayor override")
-	}
-
-	// Should also have the custom SessionStart from on-disk override
+	// Should have the custom SessionStart from on-disk override
 	if len(expected.SessionStart) == 0 {
 		t.Error("on-disk SessionStart override should be present")
 	} else if expected.SessionStart[0].Hooks[0].Command != "custom-mayor-session" {
@@ -488,72 +474,6 @@ func TestComputeExpectedBuiltinPlusOnDisk(t *testing.T) {
 	}
 }
 
-// TestComputeExpectedOnDiskReplacesBuiltin verifies that an on-disk override
-// with a conflicting "Task" matcher replaces the built-in guard command.
-func TestComputeExpectedOnDiskReplacesBuiltin(t *testing.T) {
-	tmpDir := t.TempDir()
-	setTestHome(t, tmpDir)
-
-	// On-disk override replaces the Task matcher with a custom command
-	customOverride := &HooksConfig{
-		PreToolUse: []HookEntry{
-			{Matcher: "Task", Hooks: []Hook{{Type: "command", Command: "custom-task-guard"}}},
-		},
-	}
-	if err := SaveOverride("mayor", customOverride); err != nil {
-		t.Fatalf("SaveOverride failed: %v", err)
-	}
-
-	expected, err := ComputeExpected("mayor")
-	if err != nil {
-		t.Fatalf("ComputeExpected failed: %v", err)
-	}
-
-	// The on-disk Task entry should replace the built-in one
-	foundCustom := false
-	for _, entry := range expected.PreToolUse {
-		if entry.Matcher == "Task" {
-			if len(entry.Hooks) == 1 && entry.Hooks[0].Command == "custom-task-guard" {
-				foundCustom = true
-			} else {
-				t.Errorf("Task matcher should have custom command, got %v", entry.Hooks)
-			}
-			break
-		}
-	}
-	if !foundCustom {
-		t.Error("on-disk Task override should replace built-in guard")
-	}
-}
-
-// TestComputeExpectedOnDiskDisablesBuiltin verifies that an on-disk override
-// with an empty Hooks list for "Task" disables the built-in guard entirely.
-func TestComputeExpectedOnDiskDisablesBuiltin(t *testing.T) {
-	tmpDir := t.TempDir()
-	setTestHome(t, tmpDir)
-
-	// On-disk override disables the Task guard with empty hooks
-	disableOverride := &HooksConfig{
-		PreToolUse: []HookEntry{
-			{Matcher: "Task", Hooks: []Hook{}},
-		},
-	}
-	if err := SaveOverride("mayor", disableOverride); err != nil {
-		t.Fatalf("SaveOverride failed: %v", err)
-	}
-
-	expected, err := ComputeExpected("mayor")
-	if err != nil {
-		t.Fatalf("ComputeExpected failed: %v", err)
-	}
-
-	// The Task entry should be removed (empty Hooks = explicit disable)
-	for _, entry := range expected.PreToolUse {
-		if entry.Matcher == "Task" {
-			t.Error("Task matcher should be removed when on-disk override has empty Hooks")
-		}
-	}
-}
 
 func TestHooksEqual(t *testing.T) {
 	a := &HooksConfig{
