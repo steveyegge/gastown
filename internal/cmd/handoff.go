@@ -93,6 +93,9 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// --auto mode: save state only, no session cycling.
 	// Used by PreCompact hook to preserve state before compaction.
+	// Note: auto-mode exits here, before the git-status warning check below.
+	// This is intentional — auto-handoffs are triggered by hooks and should not
+	// spam warnings. The --no-git-check flag has no effect in auto mode.
 	if handoffAuto {
 		return runHandoffAuto()
 	}
@@ -141,7 +144,11 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting session name: %w", err)
 	}
 
-	// Warn if workspace has uncommitted or unpushed work (wa-7967c)
+	// Warn if workspace has uncommitted or unpushed work (wa-7967c).
+	// Note: this checks the caller's cwd, not the target session's workdir.
+	// For remote handoff (gt handoff <role>), the warning reflects the caller's
+	// workspace state. Checking the target session's workdir would require tmux
+	// pane introspection and is deferred to a future enhancement.
 	if !handoffNoGitCheck {
 		warnHandoffGitStatus()
 	}

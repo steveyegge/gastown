@@ -223,9 +223,10 @@ func makeTestGitRepo(t *testing.T) string {
 		{"git", "-C", dir, "init"},
 		{"git", "-C", dir, "config", "user.email", "test@test.com"},
 		{"git", "-C", dir, "config", "user.name", "Test"},
-		// Disable background GC to prevent git from holding file handles open
-		// after process exit — causes TempDir cleanup failures on Windows.
+		// Disable background processes that hold file handles open after exit —
+		// causes TempDir cleanup failures on Windows.
 		{"git", "-C", dir, "config", "gc.auto", "0"},
+		{"git", "-C", dir, "config", "core.fsmonitor", "false"},
 		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
 	} {
 		if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
@@ -242,17 +243,29 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 	t.Run("no warning on clean repo", func(t *testing.T) {
 		dir := makeTestGitRepo(t)
 		os.Chdir(dir)
-		// Should not panic or error — clean repo emits nothing
-		warnHandoffGitStatus()
+		t.Cleanup(func() { os.Chdir(origCwd) })
+		output := captureStdout(t, func() {
+			warnHandoffGitStatus()
+		})
+		if output != "" {
+			t.Errorf("expected no output for clean repo, got: %q", output)
+		}
 	})
 
 	t.Run("warns on untracked file", func(t *testing.T) {
 		dir := makeTestGitRepo(t)
 		os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x"), 0644)
 		os.Chdir(dir)
-		// We can't easily capture style.PrintWarning output in unit tests,
-		// so we just verify it doesn't panic and exits cleanly.
-		warnHandoffGitStatus()
+		t.Cleanup(func() { os.Chdir(origCwd) })
+		output := captureStdout(t, func() {
+			warnHandoffGitStatus()
+		})
+		if !strings.Contains(output, "uncommitted work") {
+			t.Errorf("expected warning about uncommitted work, got: %q", output)
+		}
+		if !strings.Contains(output, "untracked") {
+			t.Errorf("expected 'untracked' in output, got: %q", output)
+		}
 	})
 
 	t.Run("warns on modified tracked file", func(t *testing.T) {
@@ -265,7 +278,16 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 		// Now modify it
 		os.WriteFile(fpath, []byte("modified"), 0644)
 		os.Chdir(dir)
-		warnHandoffGitStatus()
+		t.Cleanup(func() { os.Chdir(origCwd) })
+		output := captureStdout(t, func() {
+			warnHandoffGitStatus()
+		})
+		if !strings.Contains(output, "uncommitted work") {
+			t.Errorf("expected warning about uncommitted work, got: %q", output)
+		}
+		if !strings.Contains(output, "modified") {
+			t.Errorf("expected 'modified' in output, got: %q", output)
+		}
 	})
 
 	t.Run("no warning for .beads-only changes", func(t *testing.T) {
@@ -274,12 +296,41 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 		os.MkdirAll(filepath.Join(dir, ".beads"), 0755)
 		os.WriteFile(filepath.Join(dir, ".beads", "somefile.db"), []byte("db"), 0644)
 		os.Chdir(dir)
-		warnHandoffGitStatus()
+		t.Cleanup(func() { os.Chdir(origCwd) })
+		output := captureStdout(t, func() {
+			warnHandoffGitStatus()
+		})
+		if output != "" {
+			t.Errorf("expected no output for .beads-only changes, got: %q", output)
+		}
 	})
 
 	t.Run("no warning outside git repo", func(t *testing.T) {
 		os.Chdir(os.TempDir())
-		// Should return silently — not a git repo
-		warnHandoffGitStatus()
+		output := captureStdout(t, func() {
+			warnHandoffGitStatus()
+		})
+		if output != "" {
+			t.Errorf("expected no output outside git repo, got: %q", output)
+		}
+	})
+
+	t.Run("no-git-check flag suppresses warning", func(t *testing.T) {
+		dir := makeTestGitRepo(t)
+		os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x"), 0644)
+		os.Chdir(dir)
+		t.Cleanup(func() { os.Chdir(origCwd) })
+		// Simulate --no-git-check by setting the flag
+		origFlag := handoffNoGitCheck
+		handoffNoGitCheck = true
+		defer func() { handoffNoGitCheck = origFlag }()
+		output := captureStdout(t, func() {
+			if !handoffNoGitCheck {
+				warnHandoffGitStatus()
+			}
+		})
+		if output != "" {
+			t.Errorf("expected no output with --no-git-check, got: %q", output)
+		}
 	})
 }

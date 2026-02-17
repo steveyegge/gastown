@@ -72,7 +72,7 @@ def main():
     # 3. $GITHUB_STEP_SUMMARY
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
     if summary_path:
-        with open(summary_path, "a") as out:
+        with open(summary_path, "a", encoding="utf-8", errors="replace") as out:
             out.write(f"## {heading}\n\n")
             out.write("| Package | Test | Error |\n")
             out.write("|---------|------|-------|\n")
