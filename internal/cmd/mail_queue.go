@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -153,14 +154,17 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 
 // queueMessage represents a message in a queue.
 type queueMessage struct {
-	ID          string
-	Title       string
-	Description string
-	From        string
-	Created     time.Time
-	Priority    int
-	ClaimedBy   string
-	ClaimedAt   *time.Time
+	ID              string
+	Title           string
+	Description     string
+	From            string
+	Created         time.Time
+	Priority        int
+	ClaimedBy       string
+	ClaimedAt       *time.Time
+	DeliveryState   string
+	DeliveryAckedBy string
+	DeliveryAckedAt *time.Time
 }
 
 // listUnclaimedQueueMessages lists unclaimed messages in a queue.
@@ -232,6 +236,7 @@ func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, err
 				}
 			}
 		}
+		msg.DeliveryState, msg.DeliveryAckedBy, msg.DeliveryAckedAt = mail.ParseDeliveryLabels(issue.Labels)
 
 		// Only include unclaimed messages - check both ClaimedBy and ClaimedAt
 		// to handle orphaned claimed-at labels from interrupted releases
@@ -272,6 +277,30 @@ func claimQueueMessage(beadsDir, messageID, claimant string) error {
 			return fmt.Errorf("%s", errMsg)
 		}
 		return err
+	}
+
+	// Phase-2 delivery ack is append-only and idempotent. If a crash happens
+	// before this completes, delivery remains pending and retries can resume.
+	for _, label := range mail.DeliveryAckLabelSequence(claimant, time.Now().UTC()) {
+		args := []string{"label", "add", messageID, label}
+		cmd := exec.Command("bd", args...)
+		cmd.Env = append(os.Environ(),
+			"BEADS_DIR="+beadsDir,
+			"BD_ACTOR="+claimant,
+		)
+
+		var ackStderr bytes.Buffer
+		cmd.Stderr = &ackStderr
+		if err := cmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(ackStderr.String())
+			if strings.Contains(errMsg, "already has label") {
+				continue
+			}
+			if errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+			return err
+		}
 	}
 
 	return nil
@@ -325,12 +354,15 @@ func runMailRelease(cmd *cobra.Command, args []string) error {
 
 // queueMessageInfo holds details about a queue message.
 type queueMessageInfo struct {
-	ID        string
-	Title     string
-	QueueName string
-	ClaimedBy string
-	ClaimedAt *time.Time
-	Status    string
+	ID              string
+	Title           string
+	QueueName       string
+	ClaimedBy       string
+	ClaimedAt       *time.Time
+	Status          string
+	DeliveryState   string
+	DeliveryAckedBy string
+	DeliveryAckedAt *time.Time
 }
 
 // getQueueMessageInfo retrieves information about a queue message.
@@ -357,10 +389,10 @@ func getQueueMessageInfo(beadsDir, messageID string) (*queueMessageInfo, error) 
 
 	// Parse JSON output - bd show --json returns an array
 	var issues []struct {
-		ID       string   `json:"id"`
-		Title    string   `json:"title"`
-		Labels   []string `json:"labels"`
-		Status   string   `json:"status"`
+		ID     string   `json:"id"`
+		Title  string   `json:"title"`
+		Labels []string `json:"labels"`
+		Status string   `json:"status"`
 	}
 
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
@@ -391,6 +423,7 @@ func getQueueMessageInfo(beadsDir, messageID string) (*queueMessageInfo, error) 
 			}
 		}
 	}
+	info.DeliveryState, info.DeliveryAckedBy, info.DeliveryAckedAt = mail.ParseDeliveryLabels(issue.Labels)
 
 	return info, nil
 }

@@ -904,6 +904,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	var labels []string
 	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
+	labels = append(labels, DeliverySendLabels()...)
 	if msg.ThreadID != "" {
 		labels = append(labels, "thread:"+msg.ThreadID)
 	}
@@ -1032,6 +1033,7 @@ func (r *Router) sendToQueue(msg *Message) error {
 	labels = append(labels, "gt:message")
 	labels = append(labels, "from:"+msg.From)
 	labels = append(labels, "queue:"+queueName)
+	labels = append(labels, DeliverySendLabels()...)
 	if msg.ThreadID != "" {
 		labels = append(labels, "thread:"+msg.ThreadID)
 	}

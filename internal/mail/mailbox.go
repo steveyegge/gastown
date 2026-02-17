@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -204,7 +205,6 @@ func (m *Mailbox) identityVariants() []string {
 
 	return variants
 }
-
 
 func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)
@@ -824,6 +824,63 @@ func (m *Mailbox) Count() (total, unread int, err error) {
 	}
 
 	return total, unread, nil
+}
+
+// AcknowledgeDeliveries marks delivery receipt for unread messages where this
+// mailbox is the primary recipient. This is phase-2 of two-phase delivery
+// tracking (phase-1 is written at send time as delivery:pending).
+func (m *Mailbox) AcknowledgeDeliveries(recipientAddress string, messages []*Message) error {
+	if m.legacy || len(messages) == 0 {
+		return nil
+	}
+
+	recipientIdentity := AddressToIdentity(recipientAddress)
+	var errs []string
+
+	for _, msg := range messages {
+		if msg == nil || msg.ID == "" {
+			continue
+		}
+		// Only acknowledge for the direct recipient (not CC readers).
+		if AddressToIdentity(msg.To) != recipientIdentity {
+			continue
+		}
+		if msg.DeliveryState == DeliveryStateAcked {
+			continue
+		}
+		if err := m.ackDeliveryBeads(msg.ID, recipientIdentity); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", msg.ID, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("acknowledging deliveries failed: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (m *Mailbox) ackDeliveryBeads(id, recipientIdentity string) error {
+	// Ordered writes preserve pending state until final ack marker is written.
+	for _, label := range DeliveryAckLabelSequence(recipientIdentity, timeNow().UTC()) {
+		args := []string{"label", "add", id, label}
+		ctx, cancel := bdWriteCtx()
+		_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
+		cancel()
+		if err == nil {
+			continue
+		}
+		if bdErr, ok := err.(*bdError); ok {
+			if bdErr.ContainsError("not found") {
+				return ErrMessageNotFound
+			}
+			// Idempotent retry behavior: existing labels are success.
+			if bdErr.ContainsError("already has label") {
+				continue
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // Append adds a message to the mailbox (legacy mode only).
