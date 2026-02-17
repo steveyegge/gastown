@@ -223,6 +223,9 @@ func makeTestGitRepo(t *testing.T) string {
 		{"git", "-C", dir, "init"},
 		{"git", "-C", dir, "config", "user.email", "test@test.com"},
 		{"git", "-C", dir, "config", "user.name", "Test"},
+		// Disable background GC to prevent git from holding file handles open
+		// after process exit — causes TempDir cleanup failures on Windows.
+		{"git", "-C", dir, "config", "gc.auto", "0"},
 		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
 	} {
 		if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
