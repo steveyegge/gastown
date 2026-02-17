@@ -88,6 +88,7 @@ jobs:
 
       - name: Test with Coverage
         run: |
+          set -o pipefail
           go test -race -short -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
 
       - name: Upload Coverage Data
