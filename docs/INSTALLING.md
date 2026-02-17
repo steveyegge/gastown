@@ -11,7 +11,7 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 | **Go** | 1.24+ | `go version` | See [golang.org](https://go.dev/doc/install) |
 | **Git** | 2.20+ | `git --version` | See below |
 | **Dolt** | latest | `dolt version` | See [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
-| **Beads** | latest | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
+| **Beads** | >= 0.52.0 | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
 
 ### Optional (for Full Stack Mode)
 

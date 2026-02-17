@@ -41,6 +41,7 @@ Town root protection:
 
 Infrastructure checks:
   - stale-binary             Check if gt binary is up to date with repo
+  - beads-binary             Check that beads (bd) is installed and meets minimum version
   - daemon                   Check if daemon is running (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
 
@@ -137,6 +138,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Register built-in checks
 	d.Register(doctor.NewStaleBinaryCheck())
+	d.Register(doctor.NewBeadsBinaryCheck())
 	// All database queries go through bd CLI
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())

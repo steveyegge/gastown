@@ -7,8 +7,8 @@ func TestParseBeadsVersion(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"bd version 0.43.0 (dev: main@3e1378e122c6)", "0.43.0"},
-		{"bd version 0.43.0", "0.43.0"},
+		{"bd version 0.52.0 (dev: main@3e1378e122c6)", "0.52.0"},
+		{"bd version 0.52.0", "0.52.0"},
 		{"bd version 1.2.3", "1.2.3"},
 		{"bd version 10.20.30 (release)", "10.20.30"},
 		{"some other output", ""},
@@ -28,12 +28,12 @@ func TestCompareVersions(t *testing.T) {
 		a, b     string
 		expected int
 	}{
-		{"0.43.0", "0.43.0", 0},
-		{"0.43.0", "0.42.0", 1},
-		{"0.42.0", "0.43.0", -1},
+		{"0.52.0", "0.52.0", 0},
+		{"0.52.0", "0.51.0", 1},
+		{"0.51.0", "0.52.0", -1},
 		{"1.0.0", "0.99.99", 1},
-		{"0.43.1", "0.43.0", 1},
-		{"0.43.0", "0.43.1", -1},
+		{"0.52.1", "0.52.0", 1},
+		{"0.52.0", "0.52.1", -1},
 	}
 
 	for _, tt := range tests {
