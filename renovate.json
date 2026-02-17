@@ -1,0 +1,53 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":pinDevDependencies"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on Monday"],
+  "timezone": "America/Los_Angeles",
+  "gomod": {
+    "enabled": true,
+    "postUpdateOptions": ["gomodTidy"]
+  },
+  "dockerfile": {
+    "enabled": true
+  },
+  "github-actions": {
+    "enabled": true
+  },
+  "npm": {
+    "enabled": true,
+    "fileMatch": ["npm-package/package.json"]
+  },
+  "packageRules": [
+    {
+      "description": "Automerge patch and minor updates for stable deps",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "description": "Group Go x/ stdlib packages",
+      "matchPackagePrefixes": ["golang.org/x/"],
+      "groupName": "Go x/ packages"
+    },
+    {
+      "description": "Group Charm ecosystem packages",
+      "matchPackagePrefixes": ["github.com/charmbracelet/"],
+      "groupName": "Charm TUI packages"
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Do not automerge major updates",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}
