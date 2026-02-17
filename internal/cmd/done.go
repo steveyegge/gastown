@@ -802,24 +802,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		} else {
 			fmt.Printf("%s Refinery notified\n", style.Bold.Render("✓"))
 		}
-	} else if exitType == ExitPhaseComplete {
-		// Phase complete - register as waiter on gate, then recycle
-		fmt.Printf("%s Phase complete, awaiting gate\n", style.Bold.Render("→"))
-		fmt.Printf("  Gate: %s\n", doneGate)
-		if issueID != "" {
-			fmt.Printf("  Issue: %s\n", issueID)
-		}
-		fmt.Printf("  Branch: %s\n", branch)
-		fmt.Println()
-		fmt.Printf("%s\n", style.Dim.Render("Witness will dispatch new polecat when gate closes."))
-
-		// Register this polecat as a waiter on the gate
-		bd := beads.New(beads.ResolveBeadsDir(cwd))
-		if err := bd.AddGateWaiter(doneGate, sender); err != nil {
-			style.PrintWarning("could not register as gate waiter: %v", err)
-		} else {
-			fmt.Printf("%s Registered as waiter on gate %s\n", style.Bold.Render("✓"), doneGate)
-		}
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
