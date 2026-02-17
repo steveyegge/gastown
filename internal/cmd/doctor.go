@@ -83,6 +83,7 @@ Session hook checks:
   - session-hooks            Check settings.json use session-start.sh
   - claude-settings          Check Claude settings.json match templates (fixable)
   - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
+  - stale-task-dispatch      Detect stale task-dispatch guard in settings.json (fixable)
 
 Dolt checks:
   - dolt-binary              Check that dolt is installed and in PATH
@@ -212,6 +213,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
 
 	// Hooks sync check
+	d.Register(doctor.NewStaleTaskDispatchCheck())
 	d.Register(doctor.NewHooksSyncCheck())
 
 	// Dolt health checks

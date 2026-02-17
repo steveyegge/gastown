@@ -165,7 +165,8 @@ func Merge(base, override *HooksConfig) *HooksConfig {
 }
 
 // DefaultOverrides returns built-in role-specific hook overrides.
-// These are always applied as a baseline layer; on-disk overrides merge on top.
+// Currently empty — the merge mechanism is retained for future use.
+// On-disk overrides (in ~/.gt/hooks-overrides/) layer on top of DefaultBase().
 func DefaultOverrides() map[string]*HooksConfig {
 	return map[string]*HooksConfig{}
 }
@@ -174,9 +175,9 @@ func DefaultOverrides() map[string]*HooksConfig {
 // the base config and applying all applicable overrides in order of specificity.
 // If no base config exists, uses DefaultBase().
 //
-// For each override key, built-in defaults (from DefaultOverrides) are merged
-// first, then on-disk overrides layer on top. On-disk overrides can replace
-// or disable built-in guards by providing a matching PreToolUse entry.
+// For each override key, built-in defaults (from DefaultOverrides, currently empty)
+// are merged first, then on-disk overrides layer on top. On-disk overrides can
+// replace or extend base hooks by providing matching PreToolUse entries.
 func ComputeExpected(target string) (*HooksConfig, error) {
 	base, err := LoadBase()
 	if err != nil {
