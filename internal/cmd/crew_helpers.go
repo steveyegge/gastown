@@ -95,26 +95,29 @@ func detectCrewFromCwd() (*crewDetection, error) {
 	}, nil
 }
 
-// parseCrewSessionName extracts rig and crew name from a tmux session name.
+// parseCrewSessionName extracts rig, crew name, and prefix from a tmux session name.
 // Format: <prefix>-crew-<name>
 // Returns empty strings and false if the format doesn't match.
-func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool) {
+func parseCrewSessionName(sessionName string) (rigName, crewName, prefix string, ok bool) {
 	identity, err := session.ParseSessionName(sessionName)
 	if err != nil {
-		return "", "", false
+		return "", "", "", false
 	}
 	if identity.Role != session.RoleCrew {
-		return "", "", false
+		return "", "", "", false
 	}
 	if identity.Rig == "" || identity.Name == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return identity.Rig, identity.Name, true
+	return identity.Rig, identity.Name, identity.Prefix, true
 }
 
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
-// Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
-func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
+// Uses tmux list-sessions to find sessions matching <prefix>-crew-* pattern.
+// rigPrefix is the rig's beads prefix (e.g., "gt", "bd") — passed directly from
+// the parsed session identity to avoid re-derivation failures when the registry
+// isn't loaded.
+func findRigCrewSessions(rigPrefix string) ([]string, error) { //nolint:unparam // error return kept for future use
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.Output()
 	if err != nil {
@@ -122,7 +125,7 @@ func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam //
 		return nil, nil
 	}
 
-	prefix := session.PrefixFor(rigName) + "-crew-"
+	prefix := rigPrefix + "-crew-"
 	var sessions []string
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {

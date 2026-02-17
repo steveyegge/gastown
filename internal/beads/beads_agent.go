@@ -627,8 +627,8 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 		return nil, nil, err
 	}
 
-	if !HasLabel(issue, "gt:agent") {
-		return nil, nil, fmt.Errorf("issue %s is not an agent bead (missing gt:agent label)", id)
+	if !IsAgentBead(issue) {
+		return nil, nil, fmt.Errorf("issue %s is not an agent bead (type=%s)", id, issue.Type)
 	}
 
 	fields := ParseAgentFields(issue.Description)

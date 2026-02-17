@@ -20,8 +20,8 @@ func TestAddressToIdentity(t *testing.T) {
 		// Rig-level agents: crew/ and polecats/ normalized to canonical form
 		{"gastown/polecats/Toast", "gastown/Toast"},
 		{"gastown/crew/max", "gastown/max"},
-		{"gastown/Toast", "gastown/Toast"},         // Already canonical
-		{"gastown/max", "gastown/max"},             // Already canonical
+		{"gastown/Toast", "gastown/Toast"}, // Already canonical
+		{"gastown/max", "gastown/max"},     // Already canonical
 		{"gastown/refinery", "gastown/refinery"},
 		{"gastown/witness", "gastown/witness"},
 
@@ -53,7 +53,7 @@ func TestIdentityToAddress(t *testing.T) {
 		// Rig-level agents: crew/ and polecats/ normalized
 		{"gastown/polecats/Toast", "gastown/Toast"},
 		{"gastown/crew/max", "gastown/max"},
-		{"gastown/Toast", "gastown/Toast"},  // Already canonical
+		{"gastown/Toast", "gastown/Toast"}, // Already canonical
 		{"gastown/refinery", "gastown/refinery"},
 		{"gastown/witness", "gastown/witness"},
 
@@ -102,7 +102,7 @@ func TestPriorityFromInt(t *testing.T) {
 		{1, PriorityHigh},
 		{2, PriorityNormal},
 		{3, PriorityLow},
-		{4, PriorityLow},  // Out of range maps to low
+		{4, PriorityLow},     // Out of range maps to low
 		{-1, PriorityNormal}, // Negative maps to normal
 	}
 
@@ -758,6 +758,10 @@ func TestParseLabelsIdempotent(t *testing.T) {
 			"queue:work-requests",
 			"channel:alerts",
 			"claimed-by:gastown/nux",
+			"delivery:pending",
+			"delivery-acked-by:gastown/nux",
+			"delivery-acked-at:2026-02-17T12:00:00Z",
+			"delivery:acked",
 		},
 	}
 
@@ -793,6 +797,12 @@ func TestParseLabelsIdempotent(t *testing.T) {
 	if bm.claimedBy != "gastown/nux" {
 		t.Errorf("claimedBy = %q, want 'gastown/nux'", bm.claimedBy)
 	}
+	if bm.deliveryState != DeliveryStateAcked {
+		t.Errorf("deliveryState = %q, want %q", bm.deliveryState, DeliveryStateAcked)
+	}
+	if bm.deliveryAckedBy != "gastown/nux" {
+		t.Errorf("deliveryAckedBy = %q, want %q", bm.deliveryAckedBy, "gastown/nux")
+	}
 }
 
 func TestParseLabelsIdempotentViaPublicMethods(t *testing.T) {
@@ -816,6 +826,27 @@ func TestParseLabelsIdempotentViaPublicMethods(t *testing.T) {
 
 	if len(msg.CC) != 2 {
 		t.Errorf("CC should have 2 entries after multiple method calls, got %d: %v", len(msg.CC), msg.CC)
+	}
+}
+
+func TestToMessage_DeliveryStatePendingOnPartialAck(t *testing.T) {
+	bm := BeadsMessage{
+		ID:       "hq-test",
+		Title:    "Test",
+		Assignee: "gastown/Toast",
+		Labels: []string{
+			"from:mayor/",
+			"delivery:pending",
+			"delivery-acked-by:gastown/Toast",
+		},
+	}
+
+	msg := bm.ToMessage()
+	if msg.DeliveryState != DeliveryStatePending {
+		t.Fatalf("DeliveryState = %q, want %q", msg.DeliveryState, DeliveryStatePending)
+	}
+	if msg.DeliveryAckedBy != "" || msg.DeliveryAckedAt != nil {
+		t.Fatalf("partial ack should not expose ack metadata, got by=%q at=%v", msg.DeliveryAckedBy, msg.DeliveryAckedAt)
 	}
 }
 

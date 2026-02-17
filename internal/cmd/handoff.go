@@ -608,7 +608,7 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 
 	case strings.Contains(sessionName, "-crew-"):
 		// gt-<rig>-crew-<name> -> <townRoot>/<rig>/crew/<name>
-		rig, name, ok := parseCrewSessionName(sessionName)
+		rig, name, _, ok := parseCrewSessionName(sessionName)
 		if !ok {
 			return "", fmt.Errorf("cannot parse crew session name: %s", sessionName)
 		}

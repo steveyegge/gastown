@@ -209,6 +209,13 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 		} else {
 			result.IdleCycles = newIdleCycles
 		}
+		// Update last_activity so watchers know agent is still alive
+		if err := updateAgentHeartbeat(awaitSignalAgentBead, beadsDir); err != nil {
+			if !awaitSignalQuiet {
+				fmt.Printf("%s Failed to update agent heartbeat: %v\n",
+					style.Dim.Render("⚠"), err)
+			}
+		}
 		// Clear the backoff window — timeout completed normally
 		_ = clearAgentBackoffUntil(awaitSignalAgentBead, beadsDir)
 	} else if result.Reason == "signal" && awaitSignalAgentBead != "" {

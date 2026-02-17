@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -526,7 +525,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 			fmt.Printf("  %s already running, injecting task...\n", worker)
 		} else {
 			fmt.Printf("  Starting %s...\n", worker)
-			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil && !errors.Is(err, polecat.ErrSessionReused) {
+			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil {
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
