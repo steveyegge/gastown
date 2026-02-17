@@ -492,10 +492,9 @@ func writeJSON(path string, data interface{}) error {
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
 // Uses Dolt backend in server mode (Gas Town runs a shared Dolt sql-server).
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq --backend dolt --server
-	// IMPORTANT: Must pass --backend dolt to prevent SQLite database creation.
-	// Without this, bd init defaults to SQLite, which causes Classic contamination.
-	cmd := exec.Command("bd", "init", "--prefix", "hq", "--backend", "dolt", "--server")
+	// Run: bd init --prefix hq --server
+	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
+	cmd := exec.Command("bd", "init", "--prefix", "hq", "--server")
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()

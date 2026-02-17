@@ -1016,10 +1016,9 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			return fmt.Errorf("creating .beads directory: %w", err)
 		}
 
-		// Run bd init with the configured prefix and Dolt backend.
-		// IMPORTANT: Must pass --backend dolt --server to prevent SQLite creation.
+		// Run bd init with the configured prefix (Dolt is the only backend since bd v0.51.0).
 		// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
-		cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
+		cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			// bd might not be installed - create minimal config.yaml

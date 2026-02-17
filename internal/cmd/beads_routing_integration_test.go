@@ -119,7 +119,7 @@ func setupRoutingTestTown(t *testing.T) string {
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "init", "--quiet", "--prefix", prefix, "--backend", "dolt")
+	cmd := exec.Command("bd", "init", "--quiet", "--prefix", prefix)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
