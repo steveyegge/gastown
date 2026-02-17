@@ -283,6 +283,20 @@ step's branch, so all committed artifacts (design docs, code) are on disk.
 | `Issue` | Base work bead ID (what to sling) |
 | `PreviousPolecat` | Name of the completed polecat |
 
+**CONVOY_READY: Convoy auto-dispatched:**
+When you receive `CONVOY_READY` mail from a Witness, all initially-ready phase
+beads have been auto-dispatched via `{{ cmd }} sling`. This is informational — no
+action needed unless you want to override dispatch decisions.
+
+| Field | Description |
+|-------|-------------|
+| `Convoy` | Convoy bead ID |
+| `Rig` | Rig where phases were dispatched |
+| `Dispatched` | Bead IDs that were auto-slung |
+
+To check convoy progress: `{{ cmd }} convoy check <convoy-id>`
+To see what's still pending: `bd ready`
+
 **Other polecat commands:**
 - `{{ cmd }} polecat list` - List polecats in current rig
 - `{{ cmd }} polecat nuke <rig>/<name> --force` - Kill session + remove worktree

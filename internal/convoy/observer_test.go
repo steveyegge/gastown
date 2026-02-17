@@ -136,3 +136,32 @@ func TestFeedNextReadyIssue_EmptyTracked(t *testing.T) {
 		t.Errorf("expected no logs for empty tracked issues, got %d", len(logged))
 	}
 }
+
+func TestFeedAllReadyIssues_NilLogger(t *testing.T) {
+	// Nil logger should not panic — gets replaced with no-op internally.
+	result := FeedAllReadyIssues("/nonexistent/path", "convoy-1", "test", nil)
+	if result != nil {
+		t.Errorf("expected nil for non-existent path, got %v", result)
+	}
+}
+
+func TestFeedAllReadyIssues_NoTrackedIssues(t *testing.T) {
+	// With a non-existent town root, no tracked issues should be found.
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, format)
+	}
+
+	result := FeedAllReadyIssues("/nonexistent/path", "convoy-1", "test", logger)
+	if result != nil {
+		t.Errorf("expected nil result, got %v", result)
+	}
+}
+
+func TestGetReadyIssueSet_CommandFailure(t *testing.T) {
+	// When bd is not available, should return nil gracefully.
+	result := getReadyIssueSet("/nonexistent/path")
+	if result != nil {
+		t.Errorf("expected nil on command failure, got %v", result)
+	}
+}

@@ -66,6 +66,86 @@ func CheckConvoysForIssue(townRoot, issueID, observer string, logger func(format
 	return convoyIDs
 }
 
+// FeedAllReadyIssues dispatches ALL ready issues in a convoy simultaneously.
+// Unlike feedNextReadyIssue (which feeds one at a time for ongoing dispatch),
+// this is used after bootstrap completion to kick off all initially-ready phases.
+//
+// The intersection with `bd ready` is critical — it respects dependency blockers,
+// unlike feedNextReadyIssue which only checks status/assignee.
+//
+// Returns the list of bead IDs that were dispatched.
+func FeedAllReadyIssues(townRoot, convoyID, observer string, logger func(format string, args ...interface{})) []string {
+	if logger == nil {
+		logger = func(format string, args ...interface{}) {} // no-op
+	}
+
+	// Get convoy tracked issues
+	tracked := getConvoyTrackedIssues(townRoot, convoyID)
+	if len(tracked) == 0 {
+		logger("%s: convoy %s: no tracked issues", observer, convoyID)
+		return nil
+	}
+
+	// Get truly ready issues via bd ready --json (respects blockers)
+	readySet := getReadyIssueSet(townRoot)
+
+	// Intersect: only dispatch tracked issues that appear in bd ready
+	var dispatched []string
+	for _, issue := range tracked {
+		// Must be open with no assignee (basic readiness)
+		if issue.Status != "open" || issue.Assignee != "" {
+			continue
+		}
+		// Must also pass blocker checks (appear in bd ready)
+		if !readySet[issue.ID] {
+			logger("%s: convoy %s: issue %s is open but blocked, skipping", observer, convoyID, issue.ID)
+			continue
+		}
+
+		rig := rigForIssue(townRoot, issue.ID)
+		if rig == "" {
+			logger("%s: convoy %s: cannot determine rig for issue %s, skipping", observer, convoyID, issue.ID)
+			continue
+		}
+
+		logger("%s: convoy %s: dispatching ready issue %s to %s", observer, convoyID, issue.ID, rig)
+		if err := dispatchIssue(townRoot, issue.ID, rig); err != nil {
+			logger("%s: convoy %s: failed to dispatch %s: %v", observer, convoyID, issue.ID, err)
+			continue
+		}
+		dispatched = append(dispatched, issue.ID)
+	}
+
+	logger("%s: convoy %s: dispatched %d issues", observer, convoyID, len(dispatched))
+	return dispatched
+}
+
+// getReadyIssueSet returns a set of issue IDs that are ready (no blockers).
+// Uses `bd ready --json` which respects dependency blockers.
+func getReadyIssueSet(townRoot string) map[string]bool {
+	cmd := exec.Command("bd", "ready", "--json")
+	cmd.Dir = townRoot
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var issues []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil
+	}
+
+	readySet := make(map[string]bool, len(issues))
+	for _, issue := range issues {
+		readySet[issue.ID] = true
+	}
+	return readySet
+}
+
 // getTrackingConvoys returns convoy IDs that track the given issue.
 // Uses bd dep list to query the dependency graph.
 func getTrackingConvoys(townRoot, issueID string) []string {

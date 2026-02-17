@@ -460,3 +460,104 @@ func TestAssessHelpRequest_BuildIssues(t *testing.T) {
 		t.Error("Should be able to help with build issues")
 	}
 }
+
+func TestParsePolecatDone_WithConvoyID(t *testing.T) {
+	subject := "POLECAT_DONE bootstrap"
+	body := `Exit: COMPLETED
+Issue: gt-abc
+Branch: polecat/bootstrap
+ConvoyID: hq-cv-plan123`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.PolecatName != "bootstrap" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "bootstrap")
+	}
+	if payload.ConvoyID != "hq-cv-plan123" {
+		t.Errorf("ConvoyID = %q, want %q", payload.ConvoyID, "hq-cv-plan123")
+	}
+	if payload.Exit != "COMPLETED" {
+		t.Errorf("Exit = %q, want %q", payload.Exit, "COMPLETED")
+	}
+}
+
+func TestParsePolecatDone_NoConvoyID(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc
+Branch: feature-branch`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.ConvoyID != "" {
+		t.Errorf("ConvoyID = %q, want empty", payload.ConvoyID)
+	}
+}
+
+func TestClassifyMessage_ConvoyReady(t *testing.T) {
+	result := ClassifyMessage("CONVOY_READY hq-cv-plan123")
+	if result != ProtoConvoyReady {
+		t.Errorf("ClassifyMessage(CONVOY_READY ...) = %v, want %v", result, ProtoConvoyReady)
+	}
+}
+
+func TestParseConvoyReady(t *testing.T) {
+	subject := "CONVOY_READY hq-cv-plan123"
+	body := `Convoy: hq-cv-plan123
+Rig: gastown
+Dispatched: gt-phase1, gt-phase2, gt-phase3`
+
+	payload, err := ParseConvoyReady(subject, body)
+	if err != nil {
+		t.Fatalf("ParseConvoyReady() error = %v", err)
+	}
+
+	if payload.ConvoyID != "hq-cv-plan123" {
+		t.Errorf("ConvoyID = %q, want %q", payload.ConvoyID, "hq-cv-plan123")
+	}
+	if payload.Rig != "gastown" {
+		t.Errorf("Rig = %q, want %q", payload.Rig, "gastown")
+	}
+	expectedDispatched := []string{"gt-phase1", "gt-phase2", "gt-phase3"}
+	if len(payload.Dispatched) != len(expectedDispatched) {
+		t.Fatalf("Dispatched has %d items, want %d", len(payload.Dispatched), len(expectedDispatched))
+	}
+	for i, d := range payload.Dispatched {
+		if d != expectedDispatched[i] {
+			t.Errorf("Dispatched[%d] = %q, want %q", i, d, expectedDispatched[i])
+		}
+	}
+	if payload.ReadyAt.IsZero() {
+		t.Error("ReadyAt should not be zero")
+	}
+}
+
+func TestParseConvoyReady_InvalidSubject(t *testing.T) {
+	_, err := ParseConvoyReady("Not a convoy ready", "body")
+	if err == nil {
+		t.Error("ParseConvoyReady() expected error for invalid subject")
+	}
+}
+
+func TestParseConvoyReady_MinimalBody(t *testing.T) {
+	subject := "CONVOY_READY hq-cv-123"
+	body := "Convoy: hq-cv-123"
+
+	payload, err := ParseConvoyReady(subject, body)
+	if err != nil {
+		t.Fatalf("ParseConvoyReady() error = %v", err)
+	}
+
+	if payload.ConvoyID != "hq-cv-123" {
+		t.Errorf("ConvoyID = %q, want %q", payload.ConvoyID, "hq-cv-123")
+	}
+	if len(payload.Dispatched) != 0 {
+		t.Errorf("Dispatched = %v, want empty", payload.Dispatched)
+	}
+}

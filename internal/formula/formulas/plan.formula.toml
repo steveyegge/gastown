@@ -87,13 +87,15 @@ Include every phase bead ID in the convoy creation command.
 
 ### 7. Signal Completion
 
-You're done. The Mayor will take over convoy dispatch — slinging ready
-(unblocked) phase beads to polecats, then slinging newly-unblocked phases
-as earlier ones complete.
+Capture the convoy ID from the `gt convoy create` output, then exit:
 
 ```bash
-gt done
+gt done --cleanup-status clean --convoy <convoy-id>
 ```
+
+The `--cleanup-status clean` acknowledges this task had no code changes.
+The `--convoy` flag passes the convoy ID to the Witness for auto-dispatch
+of all initially-ready (unblocked) phase beads.
 
 ## Edge Cases
 

@@ -36,6 +36,9 @@ var (
 
 	// STEP_READY <next-step-id> - witness notifying mayor that a distributed workflow step is ready
 	PatternStepReady = regexp.MustCompile(`^STEP_READY\s+(\S+)`)
+
+	// CONVOY_READY <convoy-id> - witness notifying mayor that convoy beads were auto-dispatched
+	PatternConvoyReady = regexp.MustCompile(`^CONVOY_READY\s+(\S+)`)
 )
 
 // ProtocolType identifies the type of protocol message.
@@ -51,6 +54,7 @@ const (
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
 	ProtoStepReady         ProtocolType = "step_ready"
+	ProtoConvoyReady       ProtocolType = "convoy_ready"
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
@@ -62,6 +66,7 @@ type PolecatDonePayload struct {
 	MRID        string
 	Branch      string
 	Gate        string // Gate ID when Exit is PHASE_COMPLETE
+	ConvoyID    string // Convoy ID when bootstrap passes --convoy flag
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -131,6 +136,8 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoSwarmStart
 	case PatternStepReady.MatchString(subject):
 		return ProtoStepReady
+	case PatternConvoyReady.MatchString(subject):
+		return ProtoConvoyReady
 	default:
 		return ProtoUnknown
 	}
@@ -168,6 +175,8 @@ func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 			payload.Gate = strings.TrimSpace(strings.TrimPrefix(line, "Gate:"))
 		} else if strings.HasPrefix(line, "Branch:") {
 			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		} else if strings.HasPrefix(line, "ConvoyID:") {
+			payload.ConvoyID = strings.TrimSpace(strings.TrimPrefix(line, "ConvoyID:"))
 		}
 	}
 
@@ -351,6 +360,16 @@ func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
 	return payload, nil
 }
 
+// ConvoyReadyPayload contains parsed data from a CONVOY_READY message.
+// Sent by Witness to Mayor when a plan bootstrap completes and convoy phase
+// beads are auto-dispatched.
+type ConvoyReadyPayload struct {
+	ConvoyID   string
+	Rig        string
+	Dispatched []string // Bead IDs that were auto-dispatched
+	ReadyAt    time.Time
+}
+
 // StepReadyPayload contains parsed data from a STEP_READY message.
 // Sent by Witness to Mayor when a distributed workflow step completes
 // and the next step needs a fresh polecat.
@@ -398,6 +417,47 @@ func ParseStepReady(subject, body string) (*StepReadyPayload, error) {
 			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
 		case strings.HasPrefix(line, "PreviousPolecat:"):
 			payload.PreviousPolecat = strings.TrimSpace(strings.TrimPrefix(line, "PreviousPolecat:"))
+		}
+	}
+
+	return payload, nil
+}
+
+// ParseConvoyReady extracts payload from a CONVOY_READY message.
+// Subject format: CONVOY_READY <convoy-id>
+// Body format:
+//
+//	Convoy: <convoy-id>
+//	Rig: <rig>
+//	Dispatched: <bead-1>, <bead-2>, ...
+func ParseConvoyReady(subject, body string) (*ConvoyReadyPayload, error) {
+	matches := PatternConvoyReady.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid CONVOY_READY subject: %s", subject)
+	}
+
+	payload := &ConvoyReadyPayload{
+		ConvoyID: matches[1],
+		ReadyAt:  time.Now(),
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Convoy:"):
+			payload.ConvoyID = strings.TrimSpace(strings.TrimPrefix(line, "Convoy:"))
+		case strings.HasPrefix(line, "Rig:"):
+			payload.Rig = strings.TrimSpace(strings.TrimPrefix(line, "Rig:"))
+		case strings.HasPrefix(line, "Dispatched:"):
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "Dispatched:"))
+			if raw != "" {
+				for _, b := range strings.Split(raw, ",") {
+					b = strings.TrimSpace(b)
+					if b != "" {
+						payload.Dispatched = append(payload.Dispatched, b)
+					}
+				}
+			}
 		}
 	}
 

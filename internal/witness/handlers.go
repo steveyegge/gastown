@@ -115,6 +115,28 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
+	// Convoy bootstrap completion: if ConvoyID is present and this polecat
+	// had no MR (bootstrap/no-code tasks), trigger convoy feeding to dispatch
+	// all initially-ready phase beads simultaneously.
+	if payload.ConvoyID != "" && payload.MRID == "" {
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			dispatched := convoy.FeedAllReadyIssues(townRoot, payload.ConvoyID, "witness", nil)
+			if len(dispatched) > 0 && router != nil {
+				mailID, err := sendConvoyReady(router, rigName, payload.ConvoyID, dispatched)
+				if err != nil {
+					if result.Error != nil {
+						result.Error = fmt.Errorf("sending CONVOY_READY: %w (also: %v)", err, result.Error)
+					} else {
+						result.Error = fmt.Errorf("sending CONVOY_READY: %w (non-fatal)", err)
+					}
+				} else {
+					result.MailSent = mailID
+				}
+			}
+		}
+	}
+
 	// Check if this polecat has a pending MR
 	// ESCALATED/DEFERRED exits typically have no MR pending
 	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
@@ -713,6 +735,30 @@ PreviousPolecat: %s`,
 	)
 	msg.Priority = mail.PriorityHigh
 	msg.Type = mail.TypeTask
+
+	if err := router.Send(msg); err != nil {
+		return "", err
+	}
+	return msg.ID, nil
+}
+
+// sendConvoyReady sends a CONVOY_READY notification to the Mayor.
+// This signals that a plan bootstrap completed and all initially-ready phase
+// beads have been auto-dispatched via gt sling. Informational — dispatch
+// already happened; Mayor can override if needed.
+func sendConvoyReady(router *mail.Router, rigName, convoyID string, dispatched []string) (string, error) {
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/witness", rigName),
+		"mayor/",
+		fmt.Sprintf("CONVOY_READY %s", convoyID),
+		fmt.Sprintf("Convoy: %s\nRig: %s\nDispatched: %s",
+			convoyID,
+			rigName,
+			strings.Join(dispatched, ", "),
+		),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeNotification
 
 	if err := router.Send(msg); err != nil {
 		return "", err

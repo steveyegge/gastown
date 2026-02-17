@@ -65,6 +65,7 @@ var (
 	doneStatus        string
 	doneCleanupStatus string
 	doneResume        bool
+	doneConvoy        string
 )
 
 // Valid exit types for gt done
@@ -82,6 +83,7 @@ func init() {
 	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
+	doneCmd.Flags().StringVar(&doneConvoy, "convoy", "", "Convoy ID to pass through to Witness for auto-dispatch (used by plan bootstrap)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -888,6 +890,10 @@ afterDoltMerge:
 		if convoyInfo.MergeStrategy != "" {
 			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
 		}
+	} else if doneConvoy != "" {
+		// Bootstrap polecat: not tracked by convoy itself, but passes convoy ID
+		// so Witness can auto-dispatch all ready phase beads after bootstrap exits.
+		bodyLines = append(bodyLines, fmt.Sprintf("ConvoyID: %s", doneConvoy))
 	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
