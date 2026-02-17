@@ -929,6 +929,11 @@ afterDoltMerge:
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
 			} else {
 				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
+				// Restore a valid cwd after worktree deletion. Without this,
+				// subsequent exec.Command calls (tmux, kill) fail with
+				// "ENOENT: posix_spawn '/bin/sh'" because the child process
+				// inherits the deleted cwd.
+				_ = os.Chdir("/")
 			}
 		}
 
