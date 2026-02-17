@@ -354,6 +354,51 @@ version = 1
 	}
 }
 
+func TestParsePluginMD_GitHubSheriff(t *testing.T) {
+	// Verify the actual github-sheriff plugin.md parses correctly.
+	// This catches frontmatter regressions in the shipped plugin.
+	content, err := os.ReadFile(filepath.Join("..", "..", "plugins", "github-sheriff", "plugin.md"))
+	if err != nil {
+		t.Skipf("github-sheriff plugin not found (expected in plugins/): %v", err)
+	}
+
+	plugin, err := parsePluginMD(content, "/test/github-sheriff", LocationRig, "gastown")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+
+	if plugin.Name != "github-sheriff" {
+		t.Errorf("expected name 'github-sheriff', got %q", plugin.Name)
+	}
+	if plugin.Gate == nil {
+		t.Fatal("expected gate to be non-nil")
+	}
+	if plugin.Gate.Type != GateCooldown {
+		t.Errorf("expected gate type 'cooldown', got %q", plugin.Gate.Type)
+	}
+	if plugin.Gate.Duration != "5m" {
+		t.Errorf("expected gate duration '5m', got %q", plugin.Gate.Duration)
+	}
+	if plugin.Tracking == nil {
+		t.Fatal("expected tracking to be non-nil")
+	}
+	if !plugin.Tracking.Digest {
+		t.Error("expected digest to be true")
+	}
+	if plugin.Execution == nil {
+		t.Fatal("expected execution to be non-nil")
+	}
+	if plugin.Execution.Timeout != "2m" {
+		t.Errorf("expected timeout '2m', got %q", plugin.Execution.Timeout)
+	}
+	if !plugin.Execution.NotifyOnFailure {
+		t.Error("expected notify_on_failure to be true")
+	}
+	if plugin.Instructions == "" {
+		t.Error("expected non-empty instructions")
+	}
+}
+
 func TestScanner_RigOverridesTown(t *testing.T) {
 	// Create temp directory structure
 	tmpDir, err := os.MkdirTemp("", "plugin-test")
