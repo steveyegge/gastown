@@ -76,8 +76,11 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(os.Stderr, "gt mail check: could not list unread for %s: %v\n", address, listErr)
 				return nil
 			}
-
 			fmt.Print(formatInjectOutput(messages))
+			// Ack after output so message is delivered before being marked acked.
+			if ackErr := mailbox.AcknowledgeDeliveries(address, messages); ackErr != nil {
+				fmt.Fprintf(os.Stderr, "gt mail check: delivery ack update failed for %s: %v\n", address, ackErr)
+			}
 		}
 
 		// Also drain queued nudges (from --mode=queue or --mode=wait-idle fallback).

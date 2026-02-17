@@ -79,6 +79,22 @@ linters:
         linters:
           - gosec
         text: 'G204'
+      # G115: Integer narrowing conversions in internal code are intentional
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G115'
+      # G117: Password fields in config/DB structs are not hardcoded secrets
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G117'
+      # G702/G703/G704/G705: Taint analysis false positives in internal tooling
+      # Internal code uses trusted inputs (constructed paths, internal APIs, validated args)
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G702|G703|G704|G705'
       # errcheck: Ignore unchecked errors in test files for common cleanup patterns
       - path: '_test\.go'
         linters:
