@@ -62,8 +62,10 @@ func TestIsGitRemoteURL(t *testing.T) {
 func setupRigTestRegistry(t *testing.T) {
 	t.Helper()
 	reg := session.NewPrefixRegistry()
-	reg.Register("tr", "testrig1223")
-	reg.Register("or", "otherrig")
+	// Use zz-prefixed names to avoid collisions with real rig sessions
+	// (e.g. "tr" collides with production rigs that use that prefix).
+	reg.Register("zztr", "testrig1223")
+	reg.Register("zzor", "otherrig")
 	old := session.DefaultRegistry()
 	session.SetDefaultRegistry(reg)
 	t.Cleanup(func() { session.SetDefaultRegistry(old) })
@@ -77,14 +79,14 @@ func TestFindRigSessions(t *testing.T) {
 
 	tm := tmux.NewTmux()
 
-	// Create sessions that match our test rig prefix (tr- for testrig1223)
+	// Create sessions that match our test rig prefix (zztr- for testrig1223)
 	matching := []string{
-		"tr-witness",
-		"tr-refinery",
-		"tr-alpha",
+		"zztr-witness",
+		"zztr-refinery",
+		"zztr-alpha",
 	}
-	// Create a non-matching session (or- for otherrig)
-	nonMatching := "or-witness"
+	// Create a non-matching session (zzor- for otherrig)
+	nonMatching := "zzor-witness"
 
 	for _, name := range append(matching, nonMatching) {
 		_ = tm.KillSession(name) // clean up any leftovers
