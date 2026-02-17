@@ -12,7 +12,7 @@
       this branch's changes, or was it pre-existing on main? Branch-caused failures
       reject the MR. Pre-existing failures get filed as beads but the merge proceeds.
       This is the "Scotty Test" — pre-existing problems are not this branch's fault.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/add-user-roles (PR #87)
@@ -52,7 +52,7 @@
       You are the Refinery. This branch added a new test file and that test fails.
       Since the test didn't exist before this branch, the failure is definitively
       branch-caused.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/notifications (PR #92)
@@ -86,7 +86,7 @@
     role_context: >
       You are the Refinery. Lint check failed on files that were modified by this branch.
       Lint passed on main. This is a branch-caused quality failure.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: fix/cleanup-imports (PR #95)
@@ -118,7 +118,7 @@
       You are the Refinery. The Scotty Test: if a test fails on main AND on the branch
       with the same error, it is pre-existing. File a bead to track it but proceed
       with the merge — this branch did not cause the failure.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/dark-mode (PR #101)
@@ -155,7 +155,7 @@
       You are the Refinery. A test failed on the first run but passed on re-run with
       no code changes between runs. This is a flaky test, not a branch-caused failure.
       Proceed with the merge but consider filing a bead for the flaky test.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/cache-layer (PR #104)
@@ -191,7 +191,7 @@
       You are the Refinery. The build infrastructure failed (npm install timeout).
       This is not related to the branch's code changes. Retry or skip — do not
       reject the MR for infrastructure issues.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: fix/typo-readme (PR #108)
@@ -222,7 +222,7 @@
       but the branch changed a shared dependency (user.js) that payment.test.js imports.
       This requires reasoning about import chains — the failure IS branch-caused even
       though the failing test file was not modified.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: refactor/user-model (PR #110)
@@ -262,7 +262,7 @@
       You are the Refinery. The branch changed a TypeScript interface, causing type
       errors in multiple downstream files. Even though those files weren't modified
       by the branch, the type change broke them. This is branch-caused.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: refactor/api-types (PR #112)
@@ -294,7 +294,7 @@
       the failure was introduced on main 2 days ago by a different commit. This branch
       is 3 days old (created before the failure appeared on main). The failure is
       pre-existing — it was introduced by someone else's commit on main.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/notifications (PR #115)
@@ -335,7 +335,7 @@
       You are the Refinery. Multiple tests failed — some also fail on main (pre-existing),
       some only fail on the branch (branch-caused). When ANY failure is branch-caused,
       the MR must be rejected. Pre-existing failures don't override branch-caused ones.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/user-profiles (PR #118)

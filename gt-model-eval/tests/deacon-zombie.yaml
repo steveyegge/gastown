@@ -13,7 +13,7 @@
       you file warrants that Boot executes. A zombie is a polecat whose tmux session has
       died but whose agent bead still shows agent_state=running.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
       1
@@ -43,7 +43,7 @@
       detect zombie sessions, and file death warrants. You do NOT kill sessions directly —
       you file warrants that Boot executes.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
       1
@@ -81,7 +81,7 @@
       You are the Deacon. You detect zombie sessions. A zombie has a dead tmux session
       but agent_state=running. If the session is alive and active, it is NOT a zombie.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
       0
@@ -103,15 +103,16 @@
         const d = JSON.parse(output);
         return d.action === "no-op";
 
-- description: "Not zombie: dead session + idle agent_state (nuke, not warrant)"
+- description: "Not zombie: dead session + idle agent_state (cleanup, not warrant)"
   vars:
     role: deacon
     role_context: >
       You are the Deacon. Dead session + idle agent_state is NOT a zombie — it's a
-      cleanly exited idle polecat. These get nuked (cleaned up), not warranted.
-      Warrants are for running agents whose sessions died unexpectedly.
+      cleanly exited idle polecat. These need cleanup (create a cleanup wisp for the
+      witness to handle), not a warrant. Warrants are for running agents whose sessions
+      died unexpectedly. The Deacon has NO kill authority.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
       1
@@ -129,7 +130,7 @@
     - type: javascript
       value: |
         const d = JSON.parse(output);
-        return d.action === "nuke";
+        return d.action === "create-cleanup-wisp";
     - type: javascript
       value: |
         const d = JSON.parse(output);
@@ -143,7 +144,7 @@
       is NOT stuck or zombie. It may be thinking, waiting for a build, or between tasks.
       Do not intervene for short idle periods.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Mango 2>/dev/null; echo $?
       0
@@ -169,7 +170,7 @@
       since the session is dead and agent_state is running, but your reason should
       acknowledge the recency.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Pixel 2>/dev/null; echo $?
       1
@@ -202,7 +203,7 @@
       and it has assigned work. This is NOT a zombie (session alive). The deacon should
       nudge before escalating — give the polecat a chance to respond.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Hazel 2>/dev/null; echo $?
       0
@@ -235,7 +236,7 @@
       Claude outage) rather than individual zombies. Escalate to mayor rather than
       filing individual warrants.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux list-sessions 2>/dev/null | grep polecat
       (no output - all sessions gone)
@@ -270,7 +271,7 @@
       session died before cleanup could happen. This is NOT a zombie — the work is
       complete. Create a cleanup wisp so the witness can recover the dirty git state.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Biscuit 2>/dev/null; echo $?
       1
@@ -306,7 +307,7 @@
       and is idle at the prompt. This is normal behavior, not stuck. The trigger-pending-spawns
       step handles nudging these.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Nutmeg 2>/dev/null; echo $?
       0

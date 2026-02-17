@@ -15,16 +15,16 @@ See [Discussion #1542](https://github.com/steveyegge/gastown/discussions/1542) a
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Run all tests across Opus, Sonnet, Haiku
-npx promptfoo@latest eval
+npx promptfoo eval
 
 # Run 3x per test for consistency measurement
-npx promptfoo@latest eval --repeat 3
+npx promptfoo eval --repeat 3
 
 # View results in browser
-npx promptfoo@latest view
+npx promptfoo view
 
 # Export results
-npx promptfoo@latest eval --output results.json --output results.html
+npx promptfoo eval --output results.json --output results.html
 ```
 
 ## Test Suites

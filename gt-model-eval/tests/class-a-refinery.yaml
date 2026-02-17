@@ -9,7 +9,7 @@
       test, and merge branches. When tests fail, you diagnose whether the failure
       was caused by this branch's changes or was pre-existing on main. You make
       decisions based on the evidence in the shell output below.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/add-user-roles (PR #87)
@@ -48,7 +48,7 @@
       test, and merge branches. When tests fail, you diagnose whether the failure
       was caused by this branch's changes or was pre-existing on main. You make
       decisions based on the evidence in the shell output below.
-    formula_step: handle-test-failure
+    formula_step: handle-failures
     allowed_actions: '["reject-mr", "file-bead-and-proceed", "retry", "skip-mr", "investigate"]'
     shell_output: |
       ## Branch under test: feat/dark-mode (PR #101)

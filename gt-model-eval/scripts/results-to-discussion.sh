@@ -41,7 +41,7 @@ fi
 # --- Extract metadata ---
 
 GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-PROMPTFOO_VER=$(npx promptfoo@latest --version 2>/dev/null || echo "unknown")
+PROMPTFOO_VER=$(npx promptfoo --version 2>/dev/null || echo "unknown")
 DATE=$(date -u +%Y-%m-%d)
 USER=$(whoami)
 
@@ -193,17 +193,18 @@ MARKDOWN="${MARKDOWN}
 
 \`\`\`bash
 git clone https://github.com/${REPO}.git
-cd gt-model-eval
+cd \${REPO##*/}/gt-model-eval
 git checkout ${GIT_SHA}  # exact framework version
 export ANTHROPIC_API_KEY=sk-...
-npx promptfoo@latest eval --repeat 3
-npx promptfoo@latest view
+npm ci
+npx promptfoo eval --repeat 3
+npx promptfoo view
 \`\`\`
 
 ### How to Share Your Results
 
 \`\`\`bash
-npx promptfoo@latest eval --output results.json
+npx promptfoo eval --output results.json
 ./scripts/results-to-discussion.sh results.json --post
 \`\`\`
 
@@ -261,8 +262,8 @@ elif [ "$POST" = true ]; then
         }
       }
     }
-  ' -f owner="${REPO%%/*}" -f repo="${REPO##*/}" \
-    --jq ".data.repository.discussionCategories.nodes[] | select(.name == \"${CATEGORY}\") | .id" 2>/dev/null)
+  ' -f owner="${REPO%%/*}" -f repo="${REPO##*/}" 2>/dev/null \
+    | jq -r --arg cat "$CATEGORY" '.data.repository.discussionCategories.nodes[] | select(.name == $cat) | .id')
 
   if [ -z "$CATEGORY_ID" ]; then
     echo "Error: could not find Discussion category '${CATEGORY}'" >&2

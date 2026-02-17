@@ -10,7 +10,9 @@ Each role has hardcoded `allowed_actions` in every test case. If an action is re
 
 | Role | Actions | Test Files |
 |------|---------|------------|
-| Deacon | `file-warrant`, `nuke`, `no-op`, `nudge`, `log-and-watch`, `escalate-to-mayor`, `create-cleanup-wisp` | `deacon-zombie.yaml`, `deacon-plugin-gate.yaml`, `deacon-dog-health.yaml`, `class-a-deacon.yaml` |
+| Deacon (zombie-scan) | `file-warrant`, `no-op`, `nudge`, `log-and-watch`, `escalate-to-mayor`, `create-cleanup-wisp` | `deacon-zombie.yaml`, `class-a-deacon.yaml` |
+| Deacon (plugin-run) | `execute-plugin`, `skip` | `deacon-plugin-gate.yaml` |
+| Deacon (dog-health) | `no-op`, `log-and-watch`, `file-warrant`, `force-clear`, `spawn-dog`, `retire-dog` | `deacon-dog-health.yaml`, `class-a-deacon.yaml` |
 | Witness | `no-op`, `nudge`, `escalate`, `nuke`, `mark-zombie`, `create-cleanup-wisp` | `witness-stuck.yaml`, `witness-cleanup.yaml`, `class-a-witness.yaml` |
 | Refinery | `reject-mr`, `file-bead-and-proceed`, `retry`, `skip-mr`, `investigate` | `refinery-triage.yaml`, `refinery-conflict.yaml`, `class-a-refinery.yaml` |
 | Dog | `reset`, `reassign`, `recover`, `escalate`, `burn` | `dog-orphan.yaml`, `class-a-dog.yaml` |
@@ -83,14 +85,26 @@ When updating tests, maintain this distinction: Class A must never leak the expe
 
 ```bash
 # Quick validation (single run)
-npx promptfoo@latest eval
+npx promptfoo eval
 
 # Full comparison (3x for consistency)
-npx promptfoo@latest eval --repeat 3
+npx promptfoo eval --repeat 3
 
 # View results
-npx promptfoo@latest view
+npx promptfoo view
 ```
+
+## Action Vocabulary vs CLI Verbs
+
+Eval action names are **abstractions** of the actual CLI commands. This is intentional — the eval tests decision quality, not CLI syntax knowledge. When interpreting results, use this mapping:
+
+| Eval Action | Actual CLI Command | Context |
+|-------------|-------------------|---------|
+| `spawn-dog` | `gt dog add` | Deacon dog pool maintenance |
+| `retire-dog` | `gt dog remove` | Deacon dog pool maintenance |
+| `force-clear` | `gt dog clear --force` | Deacon dog health check |
+| `file-warrant` | `bd create --type=warrant ...` | Deacon zombie detection |
+| `create-cleanup-wisp` | `bd create --type=wisp ...` | Deacon/witness cleanup |
 
 ## Future Improvements
 

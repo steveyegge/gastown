@@ -17,7 +17,7 @@
       managing the dog worker pool. You make decisions based on the evidence in the
       shell output below.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Toast 2>/dev/null; echo $?
       1
@@ -47,7 +47,7 @@
       managing the dog worker pool. You make decisions based on the evidence in the
       shell output below.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Crispy 2>/dev/null; echo $?
       0
@@ -83,7 +83,7 @@
       managing the dog worker pool. You make decisions based on the evidence in the
       shell output below.
     formula_step: zombie-scan
-    allowed_actions: '["file-warrant", "nuke", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
+    allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |
       $ tmux has-session -t bd-polecat-Waffles 2>/dev/null; echo $?
       1
@@ -101,7 +101,7 @@
     - type: javascript
       value: |
         const d = JSON.parse(output);
-        return d.action === "nuke";
+        return d.action === "create-cleanup-wisp";
     - type: javascript
       value: |
         const d = JSON.parse(output);
