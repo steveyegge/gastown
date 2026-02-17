@@ -3,13 +3,50 @@ package convoy
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/util"
 )
+
+// OpenStoreForTown opens the beads database for the given town root.
+// Uses metadata.json to detect Dolt server mode vs embedded mode, so
+// the returned store connects to the same database as bd itself.
+// Returns nil if the database cannot be opened (e.g. no Dolt backend).
+// Caller must call store.Close() when done.
+func OpenStoreForTown(ctx context.Context, townRoot string) (beadsdk.Storage, error) {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	return beadsdk.OpenFromConfig(ctx, beadsDir)
+}
+
+// CheckConvoysForIssueWithAutoStore opens the beads store for the town and calls CheckConvoysForIssue.
+// Use when the caller doesn't have a store (e.g. witness, refinery).
+// If the store fails to open, convoy checks are skipped silently.
+//
+// Resolves the gt binary path via exec.LookPath at call time, falling back to
+// bare "gt" if resolution fails. This avoids PATH issues in witness/refinery
+// sessions that may have different PATH configurations.
+func CheckConvoysForIssueWithAutoStore(townRoot, issueID, observer string, logger func(format string, args ...interface{})) []string {
+	ctx := context.Background()
+	store, err := OpenStoreForTown(ctx, townRoot)
+	if err != nil {
+		return nil
+	}
+	defer store.Close()
+
+	// Resolve gt binary path at call time; fall back to bare "gt" if LookPath fails.
+	gtPath, err := exec.LookPath("gt")
+	if err != nil {
+		gtPath = "gt"
+	}
+
+	return CheckConvoysForIssue(ctx, store, townRoot, issueID, observer, logger, gtPath)
+}
 
 // CheckConvoysForIssue finds any convoys tracking the given issue and triggers
 // convoy completion checks. If the convoy is not complete, it reactively feeds
@@ -23,43 +60,49 @@ import (
 // The underlying `gt convoy check` handles already-closed convoys gracefully.
 //
 // Parameters:
+//   - ctx: context for storage operations
+//   - store: beads storage for dependency/issue queries (nil skips convoy checks)
 //   - townRoot: path to the town root directory
 //   - issueID: the issue ID that was just closed
 //   - observer: identifier for logging (e.g., "witness", "refinery")
 //   - logger: optional logger function (can be nil)
+//   - gtPath: resolved path to the gt binary (e.g. from exec.LookPath or daemon config)
 //
 // Returns the convoy IDs that were checked (may be empty if issue isn't tracked).
-func CheckConvoysForIssue(townRoot, issueID, observer string, logger func(format string, args ...interface{})) []string {
+func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, observer string, logger func(format string, args ...interface{}), gtPath string) []string {
 	if logger == nil {
 		logger = func(format string, args ...interface{}) {} // no-op
 	}
+	if store == nil {
+		return nil
+	}
 
 	// Find convoys tracking this issue
-	convoyIDs := getTrackingConvoys(townRoot, issueID)
+	convoyIDs := getTrackingConvoys(ctx, store, issueID)
 	if len(convoyIDs) == 0 {
 		return nil
 	}
 
-	logger("%s: issue %s is tracked by %d convoy(s): %v", observer, issueID, len(convoyIDs), convoyIDs)
+	logger("%s: %s tracked by %d convoy(s): %v", observer, issueID, len(convoyIDs), convoyIDs)
 
 	// Run convoy check for each tracking convoy
 	// Note: gt convoy check is idempotent and handles already-closed convoys
 	for _, convoyID := range convoyIDs {
-		if isConvoyClosed(townRoot, convoyID) {
+		if isConvoyClosed(ctx, store, convoyID) {
 			logger("%s: convoy %s already closed, skipping", observer, convoyID)
 			continue
 		}
 
-		logger("%s: running convoy check for %s", observer, convoyID)
-		if err := runConvoyCheck(townRoot, convoyID); err != nil {
-			logger("%s: convoy check failed: %v", observer, err)
+		logger("%s: checking convoy %s", observer, convoyID)
+		if err := runConvoyCheck(ctx, townRoot, convoyID, gtPath); err != nil {
+			logger("%s: convoy %s check failed: %s", observer, convoyID, util.FirstLine(err.Error()))
 		}
 
 		// Continuation feed: if convoy is still open after the completion check,
 		// reactively dispatch the next ready issue. This makes convoy feeding
 		// event-driven instead of relying on polling-based patrol cycles.
-		if !isConvoyClosed(townRoot, convoyID) {
-			feedNextReadyIssue(townRoot, convoyID, observer, logger)
+		if !isConvoyClosed(ctx, store, convoyID) {
+			feedNextReadyIssue(ctx, store, townRoot, convoyID, observer, logger, gtPath)
 		}
 	}
 
@@ -67,58 +110,39 @@ func CheckConvoysForIssue(townRoot, issueID, observer string, logger func(format
 }
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
-// Uses bd dep list to query the dependency graph.
-func getTrackingConvoys(townRoot, issueID string) []string {
-	// Query for convoys that track this issue (direction=up finds dependents)
-	cmd := exec.Command("bd", "dep", "list", issueID, "--direction=up", "-t", "tracks", "--json")
-	cmd.Dir = townRoot
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+// Uses SDK GetDependentsWithMetadata filtered by type "tracks".
+func getTrackingConvoys(ctx context.Context, store beadsdk.Storage, issueID string) []string {
+	dependents, err := store.GetDependentsWithMetadata(ctx, issueID)
+	if err != nil {
 		return nil
 	}
 
-	var results []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
-		return nil
-	}
-
-	convoyIDs := make([]string, 0, len(results))
-	for _, r := range results {
-		convoyIDs = append(convoyIDs, r.ID)
+	convoyIDs := make([]string, 0)
+	for _, d := range dependents {
+		if string(d.DependencyType) == "tracks" {
+			convoyIDs = append(convoyIDs, d.ID)
+		}
 	}
 	return convoyIDs
 }
 
 // isConvoyClosed checks if a convoy is already closed.
-func isConvoyClosed(townRoot, convoyID string) bool {
-	cmd := exec.Command("bd", "show", convoyID, "--json")
-	cmd.Dir = townRoot
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+func isConvoyClosed(ctx context.Context, store beadsdk.Storage, convoyID string) bool {
+	issue, err := store.GetIssue(ctx, convoyID)
+	if err != nil || issue == nil {
 		return false
 	}
-
-	var results []struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil || len(results) == 0 {
-		return false
-	}
-
-	return results[0].Status == "closed"
+	return string(issue.Status) == "closed"
 }
 
 // runConvoyCheck runs `gt convoy check <convoy-id>` to check a specific convoy.
 // This is idempotent and handles already-closed convoys gracefully.
-func runConvoyCheck(townRoot, convoyID string) error {
-	cmd := exec.Command("gt", "convoy", "check", convoyID)
+// The context parameter enables cancellation on daemon shutdown.
+// gtPath is the resolved path to the gt binary.
+func runConvoyCheck(ctx context.Context, townRoot, convoyID, gtPath string) error {
+	cmd := exec.CommandContext(ctx, gtPath, "convoy", "check", convoyID)
 	cmd.Dir = townRoot
+	util.SetProcessGroup(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -144,8 +168,9 @@ type trackedIssue struct {
 //
 // Only one issue is dispatched per call. When that issue completes, the
 // observer fires again and feeds the next one.
-func feedNextReadyIssue(townRoot, convoyID, observer string, logger func(format string, args ...interface{})) {
-	tracked := getConvoyTrackedIssues(townRoot, convoyID)
+// gtPath is the resolved path to the gt binary.
+func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, observer string, logger func(format string, args ...interface{}), gtPath string) {
+	tracked := getConvoyTrackedIssues(ctx, store, convoyID)
 	if len(tracked) == 0 {
 		return
 	}
@@ -166,8 +191,8 @@ func feedNextReadyIssue(townRoot, convoyID, observer string, logger func(format 
 		}
 
 		logger("%s: convoy %s: feeding next ready issue %s to %s", observer, convoyID, issue.ID, rig)
-		if err := dispatchIssue(townRoot, issue.ID, rig); err != nil {
-			logger("%s: convoy %s: failed to dispatch %s: %v", observer, convoyID, issue.ID, err)
+		if err := dispatchIssue(ctx, townRoot, issue.ID, rig, gtPath); err != nil {
+			logger("%s: convoy %s: dispatch %s failed: %s", observer, convoyID, issue.ID, util.FirstLine(err.Error()))
 		}
 		return // Feed one at a time
 	}
@@ -176,98 +201,62 @@ func feedNextReadyIssue(townRoot, convoyID, observer string, logger func(format 
 }
 
 // getConvoyTrackedIssues returns issues tracked by a convoy with fresh status.
-// Uses bd dep list for the tracking relations, then bd show for current status.
-func getConvoyTrackedIssues(townRoot, convoyID string) []trackedIssue {
-	// Get tracked issue IDs from dependency graph
-	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
-	depCmd.Dir = townRoot
-	var stdout bytes.Buffer
-	depCmd.Stdout = &stdout
-
-	if err := depCmd.Run(); err != nil {
+// Uses SDK GetDependenciesWithMetadata filtered by tracks, then GetIssuesByIDs for current status.
+func getConvoyTrackedIssues(ctx context.Context, store beadsdk.Storage, convoyID string) []trackedIssue {
+	deps, err := store.GetDependenciesWithMetadata(ctx, convoyID)
+	if err != nil || len(deps) == 0 {
 		return nil
 	}
 
-	var deps []struct {
-		ID       string `json:"id"`
-		Status   string `json:"status"`
-		Assignee string `json:"assignee"`
-		Priority int    `json:"priority"`
+	// Filter by tracks type and collect IDs
+	var ids []string
+	type depMeta struct {
+		status   string
+		assignee string
+		priority int
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
-		return nil
-	}
-
-	if len(deps) == 0 {
-		return nil
-	}
-
-	// Unwrap external:prefix:id format
-	for i := range deps {
-		deps[i].ID = extractIssueID(deps[i].ID)
-	}
-
-	// Refresh status via bd show for cross-rig accuracy.
-	// bd dep list returns stale status from the HQ dependency record.
-	ids := make([]string, len(deps))
-	for i, d := range deps {
-		ids[i] = d.ID
-	}
-
-	freshStatus := batchShowIssues(townRoot, ids)
-
-	result := make([]trackedIssue, len(deps))
-	for i, d := range deps {
-		t := trackedIssue{
-			ID:       d.ID,
-			Status:   d.Status,
-			Assignee: d.Assignee,
-			Priority: d.Priority,
+	metaByID := make(map[string]depMeta)
+	for _, d := range deps {
+		if string(d.DependencyType) == "tracks" {
+			id := extractIssueID(d.ID)
+			ids = append(ids, id)
+			metaByID[id] = depMeta{
+				status:   string(d.Status),
+				assignee: d.Assignee,
+				priority: d.Priority,
+			}
 		}
-		if fresh, ok := freshStatus[d.ID]; ok {
-			t.Status = fresh.Status
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Refresh status via GetIssuesByIDs for cross-rig accuracy
+	freshIssues, err := store.GetIssuesByIDs(ctx, ids)
+	if err != nil {
+		freshIssues = nil
+	}
+
+	freshMap := make(map[string]*beadsdk.Issue)
+	for _, iss := range freshIssues {
+		if iss != nil {
+			freshMap[iss.ID] = iss
+		}
+	}
+
+	result := make([]trackedIssue, 0, len(ids))
+	for _, id := range ids {
+		t := trackedIssue{ID: id}
+		if fresh := freshMap[id]; fresh != nil {
+			t.Status = string(fresh.Status)
 			t.Assignee = fresh.Assignee
+			t.Priority = fresh.Priority
+		} else if meta, ok := metaByID[id]; ok {
+			t.Status = meta.status
+			t.Assignee = meta.assignee
+			t.Priority = meta.priority
 		}
-		result[i] = t
-	}
-
-	return result
-}
-
-// batchShowIssues fetches fresh status for multiple issues via bd show.
-func batchShowIssues(townRoot string, issueIDs []string) map[string]trackedIssue {
-	result := make(map[string]trackedIssue)
-	if len(issueIDs) == 0 {
-		return result
-	}
-
-	args := append([]string{"show"}, issueIDs...)
-	args = append(args, "--json")
-
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = townRoot
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return result
-	}
-
-	var issues []struct {
-		ID       string `json:"id"`
-		Status   string `json:"status"`
-		Assignee string `json:"assignee"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
-		return result
-	}
-
-	for _, issue := range issues {
-		result[issue.ID] = trackedIssue{
-			ID:       issue.ID,
-			Status:   issue.Status,
-			Assignee: issue.Assignee,
-		}
+		result = append(result, t)
 	}
 
 	return result
@@ -295,9 +284,12 @@ func rigForIssue(townRoot, issueID string) string {
 }
 
 // dispatchIssue dispatches an issue to a rig via gt sling.
-func dispatchIssue(townRoot, issueID, rig string) error {
-	cmd := exec.Command("gt", "sling", issueID, rig, "--no-boot")
+// The context parameter enables cancellation on daemon shutdown.
+// gtPath is the resolved path to the gt binary.
+func dispatchIssue(ctx context.Context, townRoot, issueID, rig, gtPath string) error {
+	cmd := exec.CommandContext(ctx, gtPath, "sling", issueID, rig, "--no-boot")
 	cmd.Dir = townRoot
+	util.SetProcessGroup(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 

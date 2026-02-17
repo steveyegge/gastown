@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -350,5 +351,92 @@ func TestIsShutdownInProgress_ActiveLock(t *testing.T) {
 	// File should still exist (we're still holding the lock)
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Errorf("lock file should still exist: %v", err)
+	}
+}
+
+// TestDaemon_StartsManagerAndScanner verifies that the convoy manager (event-driven + stranded scan)
+// starts and stops correctly when used as the daemon does.
+func TestDaemon_StartsManagerAndScanner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	binDir := t.TempDir()
+	// Mock bd: activity emits one line then blocks; Stop() kills via context
+	bdScript := `#!/bin/sh
+echo '{"type":"status","issue_id":"gt-x","new_status":"closed"}'
+sleep 999
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+	// Mock gt: convoy stranded returns empty, convoy check/sling no-op
+	gtScript := `#!/bin/sh
+if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
+  echo '[]'
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "gt"), []byte(gtScript), 0755); err != nil {
+		t.Fatalf("write mock gt: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	manager := NewConvoyManager(townRoot, func(string, ...interface{}) {}, "gt", 1*time.Hour, nil, nil, nil)
+	if err := manager.Start(); err != nil {
+		t.Fatalf("manager Start: %v", err)
+	}
+	manager.Stop()
+}
+
+// TestDaemon_StopsManagerAndScanner verifies that stopping the convoy manager
+// completes without blocking (e.g. context cancellation works).
+func TestDaemon_StopsManagerAndScanner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	binDir := t.TempDir()
+	bdScript := `#!/bin/sh
+sleep 999
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+	gtScript := `#!/bin/sh
+echo '[]'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "gt"), []byte(gtScript), 0755); err != nil {
+		t.Fatalf("write mock gt: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	manager := NewConvoyManager(townRoot, func(string, ...interface{}) {}, "gt", 1*time.Hour, nil, nil, nil)
+	if err := manager.Start(); err != nil {
+		t.Fatalf("manager Start: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		manager.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() did not complete within 5s")
 	}
 }

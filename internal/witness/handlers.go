@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/nudge"
@@ -309,17 +308,6 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		result.Error = fmt.Errorf("polecat %s commit is NOT on main - MERGED signal may be stale, DO NOT NUKE", payload.PolecatName)
 		result.Action = fmt.Sprintf("BLOCKED: %s commit not verified on main, merge may have failed", payload.PolecatName)
 		return result
-	}
-
-	// Redundant convoy observer: check if completed issue is tracked by a convoy.
-	// Run this after verifyCommitOnMain succeeds, regardless of cleanup status.
-	// The work is confirmed merged at this point, so convoys tracking this issue
-	// can potentially close even if polecat cleanup is blocked.
-	if onMain && payload.IssueID != "" {
-		townRoot, _ := workspace.Find(workDir)
-		if townRoot != "" {
-			convoy.CheckConvoysForIssue(townRoot, payload.IssueID, "witness", nil)
-		}
 	}
 
 	// ZFC #10: Check cleanup_status before allowing nuke
@@ -1070,10 +1058,6 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 					zombie.Error = err
 					zombie.Action = fmt.Sprintf("kill-stuck-session-failed: %v", err)
 				}
-				// Notify convoys if hooked bead was closed (gt-nsteq7)
-				if stuckHookBead != "" && getBeadStatus(workDir, stuckHookBead) == "closed" {
-					convoy.CheckConvoysForIssue(townRoot, stuckHookBead, "witness-zombie", nil)
-				}
 				// Reset abandoned bead for re-dispatch (gt-c3lgp)
 				zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, stuckHookBead, polecatName, router)
 				result.Zombies = append(result.Zombies, zombie)
@@ -1097,10 +1081,6 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 					zombie.Error = err
 					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
 				}
-				// Notify convoys if hooked bead was closed (gt-nsteq7)
-				if deadAgentHookBead != "" && getBeadStatus(workDir, deadAgentHookBead) == "closed" {
-					convoy.CheckConvoysForIssue(townRoot, deadAgentHookBead, "witness-zombie", nil)
-				}
 				// Reset abandoned bead for re-dispatch (gt-c3lgp)
 				zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, deadAgentHookBead, polecatName, router)
 				result.Zombies = append(result.Zombies, zombie)
@@ -1120,8 +1100,6 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 						zombie.Error = err
 						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
 					}
-					// Notify convoys about the closed bead (gt-nsteq7)
-					convoy.CheckConvoysForIssue(townRoot, hookBead, "witness-zombie", nil)
 					result.Zombies = append(result.Zombies, zombie)
 				}
 			}
@@ -1149,10 +1127,6 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
 				zombie.Error = err
 				zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
-			}
-			// Notify convoys if hooked bead was closed (gt-nsteq7)
-			if diHookBead != "" && getBeadStatus(workDir, diHookBead) == "closed" {
-				convoy.CheckConvoysForIssue(townRoot, diHookBead, "witness-zombie", nil)
 			}
 			// Reset abandoned bead for re-dispatch (gt-c3lgp)
 			zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, diHookBead, polecatName, router)
@@ -1262,11 +1236,6 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 
 		// Notify convoys if hooked bead was closed (gt-nsteq7).
 		// This covers all standard zombie paths: clean, empty status, and dirty.
-		// The bead may have been closed even if the polecat never ran gt done.
-		if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
-			convoy.CheckConvoysForIssue(townRoot, hookBead, "witness-zombie", nil)
-		}
-
 		// Reset abandoned bead for re-dispatch (gt-c3lgp)
 		zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, hookBead, polecatName, router)
 
@@ -1835,7 +1804,6 @@ func closeDescendantsViaCLI(workDir, parentID string) (int, error) {
 	}
 	return totalClosed, nil
 }
-
 
 // DoneIntent represents a parsed done-intent label from an agent bead.
 type DoneIntent struct {

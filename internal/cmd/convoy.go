@@ -332,7 +332,6 @@ func init() {
 	convoyCreateCmd.Flags().BoolVar(&convoyOwned, "owned", false, "Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
 	convoyCreateCmd.Flags().StringVar(&convoyMerge, "merge", "", "Merge strategy: direct (push to main), mr (merge queue, default), local (keep on branch)")
 
-
 	// Status flags
 	convoyStatusCmd.Flags().BoolVar(&convoyStatusJSON, "json", false, "Output as JSON")
 
@@ -1260,10 +1259,16 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 			continue
 		}
 
-		// Find ready issues (open, not blocked, no live assignee)
+		// Find ready issues (open, not blocked, no live assignee, slingable).
+		// Town-level beads (hq- prefix with path=".") are excluded because
+		// they can't be dispatched via gt sling -- they're handled by the deacon.
+		townRoot := filepath.Dir(townBeads)
 		var readyIssues []string
 		for _, t := range tracked {
 			if isReadyIssue(t) {
+				if !isSlingableBead(townRoot, t.ID) {
+					continue
+				}
 				readyIssues = append(readyIssues, t.ID)
 			}
 		}
@@ -1327,6 +1332,17 @@ func isReadyIssue(t trackedIssueInfo) bool {
 	}
 
 	return false // Session exists = worker is active
+}
+
+// isSlingableBead reports whether a bead can be dispatched via gt sling.
+// Town-level beads (hq- prefix with path=".") and beads with unknown
+// prefixes are not slingable — they're handled by the deacon/mayor.
+func isSlingableBead(townRoot, beadID string) bool {
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix == "" {
+		return true // No prefix info, assume slingable
+	}
+	return beads.GetRigNameForPrefix(townRoot, prefix) != ""
 }
 
 // checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
