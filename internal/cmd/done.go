@@ -1383,15 +1383,33 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
 
-	// Kill our own tmux session with proper process cleanup
-	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
-	// We use KillSessionWithProcessesExcluding to ensure no orphaned processes are left behind,
-	// while excluding our own PID to avoid killing ourselves before cleanup completes.
-	// The tmux kill-session at the end will terminate us along with the session.
 	t := tmux.NewTmux()
+
+	// Resolve stable tmux session ID (e.g. "$195") BEFORE killing processes.
+	// Resolve stable tmux session ID (e.g. "$195") BEFORE killing processes.
+	// When the pane process dies, tmux may respawn default-shell and rename the
+	// session to a numeric ID, making the original name stale.
+	sessionTarget := sessionName
+	if sid, err := t.GetSessionID(sessionName); err == nil && sid != "" {
+		sessionTarget = sid
+	}
+
+	// Kill process tree (excluding our PID so we survive to finish cleanup).
 	myPID := strconv.Itoa(os.Getpid())
 	if err := t.KillSessionWithProcessesExcluding(sessionName, []string{myPID}); err != nil {
-		return fmt.Errorf("killing session %s: %w", sessionName, err)
+		// KillSessionWithProcessesExcluding may fail to kill-session by name
+		// (session renamed after pane process death). Try by stable ID.
+		if killErr := t.KillSession(sessionTarget); killErr != nil {
+			return fmt.Errorf("killing session %s (id %s): %w", sessionName, sessionTarget, err)
+		}
+		return nil
+	}
+
+	// Belt-and-suspenders: if the session was renamed during process kill,
+	// the kill-session inside KillSessionWithProcessesExcluding missed it.
+	// Try again with the stable ID.
+	if sessionTarget != sessionName {
+		_ = t.KillSession(sessionTarget)
 	}
 
 	return nil
