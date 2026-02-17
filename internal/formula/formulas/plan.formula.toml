@@ -1,0 +1,119 @@
+description = "Execute a plan document with one bead per phase, Mayor-orchestrated. A bootstrap polecat reads the plan, creates phase beads with dependency blockers, and wraps them in a convoy for parallel/sequential dispatch."
+formula = "plan"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "bootstrap"
+title = "Bootstrap: {{feature}}"
+description = """
+You are bootstrapping plan execution. Your job is to read the plan document,
+create one bead per phase, set up dependency blockers matching the plan's
+Execution Strategy, and wrap everything in a convoy for Mayor dispatch.
+
+## Instructions
+
+### 1. Read the Plan Document
+
+Read the plan document at: **{{plan_path}}**
+
+This file is committed to the repo and exists in your worktree.
+
+### 2. Extract Phases
+
+Look for `## Phase N:` headings (or similar phase/step headings). For each phase, note:
+- Phase number and title
+- What work it describes
+- Its priority (earlier phases = higher priority, use 2 for first phases, 3 for later)
+
+### 3. Extract the Execution Strategy
+
+Find the Execution Strategy section (or Dependencies section). Identify:
+- Which phases can run in parallel (no dependencies between them)
+- Which phases are sequential (depend on earlier phases completing)
+- The full dependency graph (Phase X depends on Phase Y)
+
+If no explicit execution strategy exists, infer from context:
+- Phases with no cross-references → parallel
+- Phases that reference outputs of earlier phases → sequential
+- When in doubt, make it sequential (safer)
+
+### 4. Create Phase Beads
+
+For each phase, create a bead. Keep descriptions compact — reference the plan
+document instead of embedding full phase content (the plan file is on disk and
+phase agents will read it directly):
+
+```bash
+bd create --title "Phase N: <Title>" --priority <pri> --json
+```
+
+Then update the description to reference the plan:
+
+```bash
+bd update <id> --description "Execute Phase N: <Title>
+
+Plan document: {{plan_path}}
+Read the '## Phase N' section for full requirements, changes, and acceptance criteria.
+Run the verification commands listed in that section when done."
+```
+
+### 5. Set Up Dependency Blockers
+
+Based on the execution strategy, add dependency blockers between phase beads.
+Remember: `bd dep add <dependent> <blocker>` means "dependent NEEDS blocker to finish first."
+
+```bash
+bd dep add <dependent-phase-bead> <blocker-phase-bead>
+```
+
+Examples:
+- Phase 3 depends on Phase 1: `bd dep add <phase-3-id> <phase-1-id>`
+- Phase 3 depends on Phase 1 AND Phase 2: add both deps separately
+- Phases 1 and 2 have no deps on each other → don't add any (they run in parallel)
+
+**Common mistake**: Temporal language inverts dependencies. Think "X NEEDS Y",
+not "X comes before Y". Verify with `bd blocked`.
+
+### 6. Create Convoy
+
+Create a convoy tracking ALL phase beads:
+
+```bash
+gt convoy create "{{feature}}" <phase-1-id> <phase-2-id> <phase-3-id> ...
+```
+
+Include every phase bead ID in the convoy creation command.
+
+### 7. Signal Completion
+
+You're done. The Mayor will take over convoy dispatch — slinging ready
+(unblocked) phase beads to polecats, then slinging newly-unblocked phases
+as earlier ones complete.
+
+```bash
+gt done
+```
+
+## Edge Cases
+
+- **Single-phase plan**: Create one bead, no deps, convoy with one bead. Works fine.
+- **All-parallel plan**: Create all beads with no deps. Mayor slings them all at once.
+- **All-sequential plan**: Chain deps linearly (2 needs 1, 3 needs 2, etc.).
+- **Diamond deps** (A→C, B→C, A→D, B→D): Add each dep edge separately.
+
+## Important
+
+- Do NOT write any code. Your only job is creating the execution structure.
+- Do NOT embed full phase content in bead descriptions. Reference the plan path.
+- The plan file is already committed and available in every polecat's worktree.
+- Use `--json` flag with `bd create` to capture the bead ID from output.
+"""
+
+[vars]
+[vars.plan_path]
+description = "Repo-relative path to the plan document (must be committed)"
+required = true
+[vars.feature]
+description = "Feature name for the convoy and bead titles"
+required = true

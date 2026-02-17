@@ -288,6 +288,35 @@ step's branch, so all committed artifacts (design docs, code) are on disk.
 - `{{ cmd }} polecat nuke <rig>/<name> --force` - Kill session + remove worktree
 - `{{ cmd }} polecat status <rig>/<name>` - Show polecat status
 
+### Plan Convoy Dispatch
+
+When a `plan` formula bootstrap completes, it creates a convoy of phase beads
+with dependency blockers matching the plan's execution strategy. The plan
+document is committed to the repo, so every polecat's worktree has it on disk.
+
+**Dispatch protocol:**
+1. The bootstrap polecat creates phase beads + convoy, then exits
+2. Check `bd ready` for the convoy's tracked beads (unblocked phases)
+3. Sling ALL ready beads simultaneously — these are parallel phases:
+   ```bash
+   {{ cmd }} sling <phase-bead-1> <rig>
+   {{ cmd }} sling <phase-bead-2> <rig>    # simultaneous dispatch
+   ```
+4. As polecats complete and close beads, re-check `bd ready`
+5. Sling newly-unblocked beads (their blockers were cleared by completed phases)
+6. When all convoy beads are closed: `{{ cmd }} convoy check <convoy-id>`
+
+**Branch strategy:**
+- Each phase polecat gets its own branch (polecat default)
+- Phase MRs are merged to main by the Refinery
+- Convergence phases (ones that depend on multiple parallel phases) branch from
+  main, which already has predecessor changes merged by the Refinery
+
+**Triggering plan execution:**
+```bash
+{{ cmd }} sling plan <rig> --var plan_path=<path-to-plan.md> --var feature="<Feature Name>"
+```
+
 ### Delegation
 Prefer delegating to Refineries, not directly to polecats:
 - `{{ cmd }} send <rig>/refinery -s "Subject" -m "Message"`
