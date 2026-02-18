@@ -433,6 +433,11 @@ func TestInstallDoctorClean(t *testing.T) {
 		assertDirExists(t, filepath.Join(rigPath, ".repo.git"), "testrig/.repo.git/")
 	})
 
+	// 5b. Verify rig beads: no orphaned Dolt database, metadata shares HQ
+	t.Run("verify-rig-beads", func(t *testing.T) {
+		assertRigBeadsNoOrphan(t, hqPath, "testrig", "tr")
+	})
+
 	// 6. Add a crew member
 	t.Run("crew-add", func(t *testing.T) {
 		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
@@ -466,6 +471,10 @@ func TestInstallDoctorClean(t *testing.T) {
 			if strings.Contains(outStr, signal) {
 				t.Fatalf("doctor crashed with %s", signal)
 			}
+		}
+		// Regression: initBeads orphan bug should not create beads_<prefix> in .dolt-data/
+		if strings.Contains(outStr, "⚠  dolt-orphaned-databases") {
+			t.Errorf("doctor reports orphaned databases after rig-add (initBeads regression):\n%s", outStr)
 		}
 	})
 }
@@ -532,6 +541,11 @@ func TestInstallWithDaemon(t *testing.T) {
 			"https://github.com/octocat/Hello-World.git", "--prefix", "tr")
 	})
 
+	// 5b. Verify rig beads: no orphaned Dolt database, metadata shares HQ
+	t.Run("verify-rig-beads", func(t *testing.T) {
+		assertRigBeadsNoOrphan(t, hqPath, "testrig", "tr")
+	})
+
 	// 6. Add crew member
 	t.Run("crew-add", func(t *testing.T) {
 		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
@@ -559,6 +573,10 @@ func TestInstallWithDaemon(t *testing.T) {
 			if strings.Contains(outStr, signal) {
 				t.Fatalf("doctor crashed with %s", signal)
 			}
+		}
+		// Regression: initBeads orphan bug should not create beads_<prefix> in .dolt-data/
+		if strings.Contains(outStr, "⚠  dolt-orphaned-databases") {
+			t.Errorf("doctor reports orphaned databases after rig-add (initBeads regression):\n%s", outStr)
 		}
 	})
 }
@@ -602,5 +620,59 @@ func runGTCmd(t *testing.T, binary, dir string, env []string, args ...string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt %v failed: %v\n%s", args, err, out)
+	}
+}
+
+// assertRigBeadsNoOrphan verifies that gt rig add for a non-tracked rig correctly
+// sets up the beads directory without creating a standalone Dolt database.
+//
+// Non-tracked rigs (no .beads/ in the source repo) share the HQ Dolt database.
+// Previously, initBeads ran bd init which created beads_<prefix> in .dolt-data/,
+// then EnsureMetadataWithDB immediately overwrote metadata.json to point at HQ,
+// leaving beads_<prefix> as an orphan. This helper asserts the regression is absent.
+func assertRigBeadsNoOrphan(t *testing.T, hqPath, rigName, prefix string) {
+	t.Helper()
+	beadsDir := filepath.Join(hqPath, rigName, ".beads")
+
+	// config.yaml must exist with the configured prefix
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	assertFileExists(t, configPath, rigName+"/.beads/config.yaml")
+	configContent, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read %s/.beads/config.yaml: %v", rigName, err)
+	}
+	if !strings.Contains(string(configContent), prefix) {
+		t.Errorf("%s/.beads/config.yaml should contain prefix %q, got:\n%s", rigName, prefix, configContent)
+	}
+
+	// metadata.json must point at the HQ database, not a per-rig standalone database.
+	// Non-tracked rigs share HQ so that beads dispatched from HQ are visible to bd ready/list.
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	assertFileExists(t, metadataPath, rigName+"/.beads/metadata.json")
+	metadataBytes, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("read %s/.beads/metadata.json: %v", rigName, err)
+	}
+	var metadata struct {
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		t.Fatalf("parse %s/.beads/metadata.json: %v\nContent: %s", rigName, err, metadataBytes)
+	}
+	if metadata.DoltDatabase != "hq" {
+		t.Errorf("%s/.beads/metadata.json dolt_database = %q, want %q (non-tracked rigs share HQ)", rigName, metadata.DoltDatabase, "hq")
+	}
+
+	// No standalone beads_<prefix> database should exist in .dolt-data/.
+	// Only the HQ database ("hq") is expected there for a fresh install + rig-add.
+	doltDataDir := filepath.Join(hqPath, ".dolt-data")
+	entries, err := os.ReadDir(doltDataDir)
+	if err != nil {
+		t.Fatalf("read .dolt-data/: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "beads_") {
+			t.Errorf(".dolt-data/%s is an orphaned database: initBeads should not create standalone Dolt databases for non-tracked rigs", e.Name())
+		}
 	}
 }

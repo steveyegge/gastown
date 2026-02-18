@@ -729,66 +729,29 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		return nil
 	}
 
-	// No tracked beads - create local database
+	// No tracked beads - this rig will share the HQ Dolt database.
+	// AddRig calls EnsureMetadataWithDB with "hq" when no redirect file exists (see below).
+	//
+	// Do NOT call bd init here. bd init creates a standalone Dolt database
+	// (named beads_<prefix> by bd's internal convention) that is immediately
+	// abandoned when EnsureMetadataWithDB overwrites metadata.json to point at
+	// the HQ database. That abandoned database becomes an orphan in .dolt-data/
+	// and triggers false positives in the dolt-orphaned-databases and database-prefix
+	// doctor checks.
+	//
+	// Write minimal config so gastown's Go code (e.g. detectBeadsPrefixFromConfig)
+	// can read the prefix. Once metadata.json is in server mode, bd reads prefix
+	// from the Dolt database, not config.yaml—so this is gastown-internal only.
+	// EnsureMetadataWithDB in AddRig will write metadata.json pointing at HQ.
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
 
-	// Build environment with explicit BEADS_DIR to prevent bd from
-	// finding a parent directory's .beads/ database
-	env := os.Environ()
-	filteredEnv := make([]string, 0, len(env)+1)
-	for _, e := range env {
-		if !strings.HasPrefix(e, "BEADS_DIR=") {
-			filteredEnv = append(filteredEnv, e)
-		}
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\n", prefix, prefix)
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		return err
 	}
-	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
-
-	// Run bd init if available (default to Dolt server backend).
-	// --server tells bd to set dolt_mode=server in metadata.json so bd
-	// connects to the centralized Dolt sql-server instead of embedded mode.
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--backend", "dolt", "--server")
-	cmd.Dir = rigPath
-	cmd.Env = filteredEnv
-	_, bdInitErr := cmd.CombinedOutput()
-	if bdInitErr != nil {
-		// bd might not be installed or failed, create minimal structure
-		// Note: beads currently expects YAML format for config
-		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\n", prefix, prefix)
-		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
-			return writeErr
-		}
-	} else {
-		// bd init succeeded - configure the Dolt database
-
-		// Configure custom types for Gas Town (agent, role, rig, convoy).
-		// These were extracted from beads core in v0.46.0 and now require explicit config.
-		configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-		configCmd.Dir = rigPath
-		configCmd.Env = filteredEnv
-		// Ignore errors - older beads versions don't need this
-		_, _ = configCmd.CombinedOutput()
-
-		// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
-		// Without this, bd create and gt sling fail with "issue_prefix config is missing".
-		prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-		prefixSetCmd.Dir = rigPath
-		prefixSetCmd.Env = filteredEnv
-		if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
-			return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
-		}
-	}
-
-	// Ensure database has repository fingerprint (GH #25).
-	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
-	// Without fingerprint, the bd daemon fails to start silently.
-	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id")
-	migrateCmd.Dir = rigPath
-	migrateCmd.Env = filteredEnv
-	// Ignore errors - fingerprint is optional for functionality
-	_, _ = migrateCmd.CombinedOutput()
 
 	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
 	// Without issues.jsonl, bd's auto-export might write issues to other .jsonl files.
