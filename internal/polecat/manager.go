@@ -1141,8 +1141,8 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}
 
 	// Reset agent bead AFTER old worktree is confirmed removed.
-	// NOTE: We use ResetAgentBeadForReuse instead of CloseAndClearAgentBead to avoid
-	// the close/reopen cycle that fails on Dolt backend (gt-14b8o).
+	// NOTE: We use ResetAgentBeadForReuse to avoid the close/reopen cycle
+	// that fails on Dolt backend (gt-14b8o).
 	agentID := m.agentBeadID(name)
 	if err := m.beads.ResetAgentBeadForReuse(agentID, "polecat repair"); err != nil {
 		if !errors.Is(err, beads.ErrNotFound) {
