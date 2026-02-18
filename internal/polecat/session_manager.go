@@ -392,6 +392,18 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
 	}
 
+	// Validate GT_AGENT is set. Without GT_AGENT, IsAgentAlive falls back to
+	// ["node", "claude"] process detection and witness patrol will auto-nuke
+	// polecats running non-Claude agents (e.g., opencode). Fail fast.
+	gtAgent, _ := m.tmux.GetEnvironment(sessionID, "GT_AGENT")
+	if gtAgent == "" {
+		_ = m.tmux.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("GT_AGENT not set in session %s (command=%q); "+
+			"witness patrol will misidentify this polecat as a zombie and auto-nuke it. "+
+			"Ensure RuntimeConfig.ResolvedAgent is set during agent config resolution",
+			sessionID, runtimeConfig.Command)
+	}
+
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, m.tmux)
 
