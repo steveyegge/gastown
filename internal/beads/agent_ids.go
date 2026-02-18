@@ -343,32 +343,6 @@ func AgentBeadID(rig, role, name string) string {
 	return AgentBeadIDWithPrefix("gt", rig, role, name)
 }
 
-// MayorBeadID returns the Mayor agent bead ID.
-//
-// Deprecated: Use MayorBeadIDTown() for town-level beads (hq- prefix).
-// This function returns "gt-mayor" which is for rig-level storage.
-// Town-level agents like Mayor should use the hq- prefix.
-func MayorBeadID() string {
-	return "gt-mayor"
-}
-
-// DeaconBeadID returns the Deacon agent bead ID.
-//
-// Deprecated: Use DeaconBeadIDTown() for town-level beads (hq- prefix).
-// This function returns "gt-deacon" which is for rig-level storage.
-// Town-level agents like Deacon should use the hq- prefix.
-func DeaconBeadID() string {
-	return "gt-deacon"
-}
-
-// DogBeadID returns a Dog agent bead ID.
-// Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
-// Deprecated: Use DogBeadIDTown() for town-level beads with hq- prefix.
-// Dogs are town-level agents and should use hq-dog-<name>, not gt-dog-<name>.
-func DogBeadID(name string) string {
-	return "gt-dog-" + name
-}
-
 // WitnessBeadIDWithPrefix returns the Witness agent bead ID for a rig using the specified prefix.
 func WitnessBeadIDWithPrefix(prefix, rig string) string {
 	return AgentBeadIDWithPrefix(prefix, rig, "witness", "")
