@@ -768,6 +768,20 @@ func (g *Git) RefExists(ref string) (bool, error) {
 	return true, nil
 }
 
+// IsEmpty returns true if the repository has no refs (an empty/unborn repo).
+// This is the case for newly-created repos with no commits.
+func (g *Git) IsEmpty() (bool, error) {
+	out, err := g.run("show-ref")
+	if err != nil {
+		// git show-ref exits 1 when there are no refs — that means empty
+		if strings.Contains(err.Error(), "exit status 1") {
+			return true, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
 // RemoteBranchExists checks if a branch exists on the remote.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)

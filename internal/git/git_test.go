@@ -535,6 +535,37 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	}
 }
 
+func TestIsEmpty_EmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	g := NewGit(dir)
+	empty, err := g.IsEmpty()
+	if err != nil {
+		t.Fatalf("IsEmpty: %v", err)
+	}
+	if !empty {
+		t.Error("expected newly-initialized repo to be empty")
+	}
+}
+
+func TestIsEmpty_RepoWithCommit(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	empty, err := g.IsEmpty()
+	if err != nil {
+		t.Fatalf("IsEmpty: %v", err)
+	}
+	if empty {
+		t.Error("expected repo with commits to not be empty")
+	}
+}
+
 func TestRefExists_ValidRef(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)

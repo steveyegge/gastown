@@ -357,6 +357,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	fmt.Printf("   ✓ Created shared bare repo\n")
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
+	// Detect empty repos (no commits) early with a clear diagnostic.
+	// An empty repo has no refs, so RemoteDefaultBranch/DefaultBranch would
+	// return "main" as a fallback, but checkout would fail with an opaque error.
+	if empty, err := bareGit.IsEmpty(); err != nil {
+		return nil, fmt.Errorf("checking if repository is empty: %w", err)
+	} else if empty {
+		return nil, fmt.Errorf("repository %s is empty (no commits). Push at least one commit before adding it as a rig", opts.GitURL)
+	}
+
 	// Determine default branch: use provided value or auto-detect from remote
 	var defaultBranch string
 	if opts.DefaultBranch != "" {
