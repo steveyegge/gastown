@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -66,7 +67,7 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.MayorTheme()
-	_, err = session.StartSession(t, session.SessionConfig{
+	result, err := session.StartSession(t, session.SessionConfig{
 		SessionID: sessionID,
 		WorkDir:   mayorDir,
 		Role:      "mayor",
@@ -87,6 +88,12 @@ func (m *Manager) Start(agentOverride string) error {
 	if err != nil {
 		return err
 	}
+
+	// Send gt prime via tmux for non-hook agents (e.g., codex).
+	// Hook-based agents (claude, opencode) get context via their hook system,
+	// so RunStartupFallback is a no-op for them.
+	runtime.SleepForReadyDelay(result.RuntimeConfig)
+	_ = runtime.RunStartupFallback(t, sessionID, "mayor", result.RuntimeConfig)
 
 	time.Sleep(session.ShutdownDelay())
 
