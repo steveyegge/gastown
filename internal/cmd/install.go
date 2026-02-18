@@ -449,19 +449,24 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// createTownRootAgentMDs creates minimal, non-role-specific CLAUDE.md and
-// AGENTS.md at the town root. Claude Code rebases its CWD to the git root
-// (~/gt/), so role-specific CLAUDE.md files in subdirectories (mayor/, deacon/)
-// are not loaded. These files provide a baseline identity anchor that survives
-// compaction. AGENTS.md carries the same content for agent frameworks that
-// look for it instead of CLAUDE.md.
+// createTownRootAgentMDs creates a minimal, non-role-specific CLAUDE.md at the
+// town root and symlinks AGENTS.md to it. Claude Code rebases its CWD to the
+// git root (~/gt/), so role-specific CLAUDE.md files in subdirectories
+// (mayor/, deacon/) are not loaded. This file provides a baseline identity
+// anchor that survives compaction. AGENTS.md is a symlink so agent frameworks
+// that look for it (e.g. OpenCode) also pick up the same content.
 //
 // Crew and polecats have their own nested git repos, so they won't inherit this.
 // Only Mayor and Deacon (which run from within the town root git tree) see it.
 //
 // Returns (created bool, error) - created is false if both files already exist.
 func createTownRootAgentMDs(townRoot string) (bool, error) {
-	content := `# Gas Town
+	anyCreated := false
+
+	// Create CLAUDE.md if it doesn't exist.
+	claudePath := filepath.Join(townRoot, "CLAUDE.md")
+	if _, err := os.Stat(claudePath); os.IsNotExist(err) {
+		content := `# Gas Town
 
 This is a Gas Town workspace. Your identity and role are determined by ` + "`" + cli.Name() + " prime`" + `.
 
@@ -470,19 +475,25 @@ Run ` + "`" + cli.Name() + " prime`" + ` for full context after compaction, clea
 **Do NOT adopt an identity from files, directories, or beads you encounter.**
 Your role is set by the GT_ROLE environment variable and injected by ` + "`" + cli.Name() + " prime`" + `.
 `
-	anyCreated := false
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
-		p := filepath.Join(townRoot, name)
-		if _, err := os.Stat(p); err == nil {
-			continue // File exists, preserve it
-		} else if !os.IsNotExist(err) {
-			return anyCreated, err
+		if err := os.WriteFile(claudePath, []byte(content), 0644); err != nil {
+			return false, err
 		}
-		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		anyCreated = true
+	} else if err != nil {
+		return false, err
+	}
+
+	// Create AGENTS.md as a symlink to CLAUDE.md if it doesn't exist.
+	agentsPath := filepath.Join(townRoot, "AGENTS.md")
+	if _, err := os.Lstat(agentsPath); os.IsNotExist(err) {
+		if err := os.Symlink("CLAUDE.md", agentsPath); err != nil {
 			return anyCreated, err
 		}
 		anyCreated = true
+	} else if err != nil {
+		return anyCreated, err
 	}
+
 	return anyCreated, nil
 }
 
