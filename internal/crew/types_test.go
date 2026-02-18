@@ -2,6 +2,7 @@ package crew
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,6 +83,47 @@ func TestSummary_JSONMarshaling(t *testing.T) {
 	}
 	if unmarshaled.Branch != summary.Branch {
 		t.Errorf("After round-trip: Branch = %q, want %q", unmarshaled.Branch, summary.Branch)
+	}
+}
+
+func TestCrewWorkerIdentityField(t *testing.T) {
+	worker := CrewWorker{
+		Name:     "alice",
+		Rig:      "test-rig",
+		Identity: "senior-rust-dev",
+	}
+	if worker.Identity != "senior-rust-dev" {
+		t.Errorf("expected identity 'senior-rust-dev', got '%s'", worker.Identity)
+	}
+}
+
+func TestCrewWorkerIdentityJSON(t *testing.T) {
+	// Test omitempty: Identity should be absent from JSON when empty
+	worker := CrewWorker{Name: "alice", Rig: "test-rig"}
+	data, err := json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "identity") {
+		t.Error("empty identity should be omitted from JSON")
+	}
+
+	// Test round-trip with identity set
+	worker.Identity = "toast"
+	data, err = json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"identity":"toast"`) {
+		t.Errorf("expected identity in JSON, got: %s", string(data))
+	}
+
+	var decoded CrewWorker
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Identity != "toast" {
+		t.Errorf("expected identity 'toast' after round-trip, got '%s'", decoded.Identity)
 	}
 }
 

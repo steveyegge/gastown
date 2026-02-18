@@ -22,6 +22,11 @@ type CrewWorker struct {
 
 	// UpdatedAt is when the crew worker was last updated.
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Identity is an optional override for the identity file name.
+	// When set, prime loads <identity>.md instead of <name>.md.
+	// Set via `gt crew identity apply`.
+	Identity string `json:"identity,omitempty"`
 }
 
 // Summary provides a concise view of crew worker status.
