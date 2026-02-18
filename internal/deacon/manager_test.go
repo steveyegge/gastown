@@ -45,7 +45,7 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 }
 
 func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
+func (m *mockTmux) SetEnvironment(_, _, _ string) error    { return nil }
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }
@@ -54,12 +54,14 @@ func (m *mockTmux) WaitForCommand(_ string, _ []string, _ time.Duration) error {
 	return m.waitErr
 }
 
-func (m *mockTmux) SetAutoRespawnHook(_ string) error              { return nil }
-func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error  { return nil }
-func (m *mockTmux) SendKeysRaw(_, _ string) error                  { return m.sendKeysErr }
+func (m *mockTmux) SetAutoRespawnHook(_ string) error             { return nil }
+func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error { return nil }
+func (m *mockTmux) SendKeysRaw(_, _ string) error                 { return m.sendKeysErr }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
+
+func (m *mockTmux) NudgeSession(_, _ string) error { return nil }
 
 func newTestManager(townRoot string, mock *mockTmux) *Manager {
 	return &Manager{
@@ -307,11 +309,11 @@ func TestStop_KillFails(t *testing.T) {
 
 func TestIsRunning(t *testing.T) {
 	tests := []struct {
-		name     string
-		running  bool
-		err      error
-		wantRun  bool
-		wantErr  bool
+		name    string
+		running bool
+		err     error
+		wantRun bool
+		wantErr bool
 	}{
 		{
 			name:    "running",
