@@ -879,6 +879,69 @@ exit 0
 	}
 }
 
+func TestFeedFirstReady_ParkedRig_Skips(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+
+	binDir := t.TempDir()
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	routes := `{"prefix":"sh-","path":"shippercrm/.beads"}` + "\n"
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	slingLogPath := filepath.Join(binDir, "sling.log")
+	gtScript := `#!/bin/sh
+if [ "$1" = "sling" ]; then
+  echo "$@" >> "` + slingLogPath + `"
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "gt"), []byte(gtScript), 0755); err != nil {
+		t.Fatalf("write mock gt: %v", err)
+	}
+
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	// isRigParked returns true for "shippercrm"
+	parked := func(rig string) bool { return rig == "shippercrm" }
+	m := NewConvoyManager(townRoot, logger, filepath.Join(binDir, "gt"), 10*time.Minute, nil, nil, parked)
+
+	c := strandedConvoyInfo{
+		ID:          "hq-cv-park1",
+		Title:       "Parked Rig Convoy",
+		ReadyCount:  1,
+		ReadyIssues: []string{"sh-issue1"},
+	}
+	m.feedFirstReady(c)
+
+	// Sling should NOT have been called
+	if _, err := os.Stat(slingLogPath); err == nil {
+		data, _ := os.ReadFile(slingLogPath)
+		t.Errorf("sling was called for parked rig: %s", data)
+	}
+
+	// Should log the parked skip
+	skipLogged := false
+	for _, s := range logged {
+		if strings.Contains(s, "parked") && strings.Contains(s, "shippercrm") {
+			skipLogged = true
+			break
+		}
+	}
+	if !skipLogged {
+		t.Errorf("expected parked rig skip log, got: %v", logged)
+	}
+}
+
 func TestFeedFirstReady_EmptyReadyIssues_NoOp(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on Windows")

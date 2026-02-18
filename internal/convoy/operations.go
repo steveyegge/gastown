@@ -32,9 +32,12 @@ import (
 //   - gtPath: resolved path to the gt binary (e.g. from exec.LookPath or daemon config)
 //
 // Returns the convoy IDs that were checked (may be empty if issue isn't tracked).
-func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, caller string, logger func(format string, args ...interface{}), gtPath string) []string {
+func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, caller string, logger func(format string, args ...interface{}), gtPath string, isRigParked func(string) bool) []string {
 	if logger == nil {
 		logger = func(format string, args ...interface{}) {} // no-op
+	}
+	if isRigParked == nil {
+		isRigParked = func(string) bool { return false }
 	}
 	if store == nil {
 		return nil
@@ -65,7 +68,7 @@ func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, 
 		// reactively dispatch the next ready issue. This makes convoy feeding
 		// event-driven instead of relying on polling-based patrol cycles.
 		if !isConvoyClosed(ctx, store, convoyID) {
-			feedNextReadyIssue(ctx, store, townRoot, convoyID, caller, logger, gtPath)
+			feedNextReadyIssue(ctx, store, townRoot, convoyID, caller, logger, gtPath, isRigParked)
 		}
 	}
 
@@ -132,7 +135,7 @@ type trackedIssue struct {
 // Only one issue is dispatched per call. When that issue completes, the
 // next close event triggers another feed cycle.
 // gtPath is the resolved path to the gt binary.
-func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, caller string, logger func(format string, args ...interface{}), gtPath string) {
+func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, caller string, logger func(format string, args ...interface{}), gtPath string, isRigParked func(string) bool) {
 	tracked := getConvoyTrackedIssues(ctx, store, convoyID)
 	if len(tracked) == 0 {
 		return
@@ -149,6 +152,11 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 		rig := rigForIssue(townRoot, issue.ID)
 		if rig == "" {
 			logger("%s: convoy %s: cannot determine rig for issue %s, skipping", caller, convoyID, issue.ID)
+			continue
+		}
+
+		if isRigParked(rig) {
+			logger("%s: convoy %s: rig %s is parked, skipping %s", caller, convoyID, rig, issue.ID)
 			continue
 		}
 

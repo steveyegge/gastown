@@ -80,7 +80,7 @@ func TestReadyIssueFilterLogic_FindsReadyIssue(t *testing.T) {
 
 func TestCheckConvoysForIssue_NilStore(t *testing.T) {
 	// Nil store returns nil immediately (no convoy checks).
-	result := CheckConvoysForIssue(context.Background(), nil, "/nonexistent/path", "gt-test", "test", nil, "gt")
+	result := CheckConvoysForIssue(context.Background(), nil, "/nonexistent/path", "gt-test", "test", nil, "gt", nil)
 	if result != nil {
 		t.Errorf("expected nil for nil store, got %v", result)
 	}
@@ -89,7 +89,7 @@ func TestCheckConvoysForIssue_NilStore(t *testing.T) {
 func TestCheckConvoysForIssue_NilLogger(t *testing.T) {
 	// Nil logger should not panic — gets replaced with no-op internally.
 	// With nil store, returns nil.
-	result := CheckConvoysForIssue(context.Background(), nil, "/nonexistent/path", "gt-test", "test", nil, "gt")
+	result := CheckConvoysForIssue(context.Background(), nil, "/nonexistent/path", "gt-test", "test", nil, "gt", nil)
 	if result != nil {
 		t.Errorf("expected nil for nil store, got %v", result)
 	}

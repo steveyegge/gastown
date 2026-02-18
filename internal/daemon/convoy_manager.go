@@ -214,7 +214,7 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage) {
 		}
 
 		m.logger("Convoy: close detected: %s", issueID)
-		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath)
+		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)
 	}
 
 	m.lastEventIDs.Store(name, highWater)
@@ -300,6 +300,11 @@ func (m *ConvoyManager) feedFirstReady(c strandedConvoyInfo) {
 	rig := beads.GetRigNameForPrefix(m.townRoot, prefix)
 	if rig == "" {
 		m.logger("Convoy %s: no rig for %s (prefix %s), skipping", c.ID, issueID, prefix)
+		return
+	}
+
+	if m.isRigParked(rig) {
+		m.logger("Convoy %s: rig %s is parked, skipping %s", c.ID, rig, issueID)
 		return
 	}
 

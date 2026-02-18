@@ -530,6 +530,127 @@ exit 0
 	}
 }
 
+// TestConvoyManager_ParkedRig_SkipsFeedOnEventPoll verifies that the event poll
+// path (CheckConvoysForIssue → feedNextReadyIssue) skips dispatching issues to
+// parked rigs. The convoy is detected and checked, but the ready issue is not
+// slung because the target rig is parked.
+func TestConvoyManager_ParkedRig_SkipsFeedOnEventPoll(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows (process groups)")
+	}
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Convoy tracks two issues: task1 (will close) and task2 (stays open, ready to feed).
+	convoy := &beadsdk.Issue{
+		ID: "hq-cv-parked", Title: "Parked Rig Convoy",
+		Status: beadsdk.StatusOpen, Priority: 2,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	task1 := &beadsdk.Issue{
+		ID: "gt-parked1", Title: "Task 1 (close me)",
+		Status: beadsdk.StatusOpen, Priority: 2,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	task2 := &beadsdk.Issue{
+		ID: "gt-parked2", Title: "Task 2 (ready but rig parked)",
+		Status: beadsdk.StatusOpen, Priority: 3,
+		IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+
+	for _, issue := range []*beadsdk.Issue{convoy, task1, task2} {
+		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", issue.ID, err)
+		}
+	}
+	for _, taskID := range []string{task1.ID, task2.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID: convoy.ID, DependsOnID: taskID,
+			Type: beadsdk.DependencyType("tracks"), CreatedAt: now, CreatedBy: "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", taskID, err)
+		}
+	}
+	if err := store.CloseIssue(ctx, task1.ID, "done", "test", ""); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	// Mock gt with routes for "gt-" prefix → rig "gt"
+	binDir := t.TempDir()
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	routes := `{"prefix":"gt-","path":"gt/.beads"}` + "\n"
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	slingLogPath := filepath.Join(binDir, "sling.log")
+	gtScript := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1" = "convoy" ] && [ "$2" = "check" ]; then
+  exit 0
+fi
+if [ "$1" = "sling" ]; then
+  echo "$@" >> "%s"
+  exit 0
+fi
+exit 0
+`, slingLogPath)
+	gtPath := filepath.Join(binDir, "gt")
+	if err := os.WriteFile(gtPath, []byte(gtScript), 0755); err != nil {
+		t.Fatalf("write mock gt: %v", err)
+	}
+
+	var mu sync.Mutex
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		mu.Lock()
+		defer mu.Unlock()
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	// isRigParked returns true for "gt" rig
+	parked := func(rig string) bool { return rig == "gt" }
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, parked)
+	m.pollAllStores()
+
+	mu.Lock()
+	snapshot := make([]string, len(logged))
+	copy(snapshot, logged)
+	mu.Unlock()
+
+	// Close event should be detected and convoy checked.
+	assertLogContains(t, snapshot, "close detected", task1.ID)
+	assertLogContains(t, snapshot, "tracked by", convoy.ID)
+	assertLogContains(t, snapshot, "checking convoy", convoy.ID)
+
+	// Feed should be skipped because rig is parked.
+	assertLogContains(t, snapshot, "parked", "gt-parked2")
+
+	// Sling should NOT have been called.
+	if _, err := os.Stat(slingLogPath); err == nil {
+		data, _ := os.ReadFile(slingLogPath)
+		t.Errorf("sling was called for parked rig: %s", data)
+	}
+
+	// Should NOT contain "feeding next ready issue" log.
+	for _, s := range snapshot {
+		if strings.Contains(s, "feeding next ready issue") {
+			t.Errorf("expected no feeding for parked rig, got: %s", s)
+		}
+	}
+}
+
 // assertLogContains checks that at least one log line contains all specified substrings.
 func assertLogContains(t *testing.T, logs []string, substrings ...string) {
 	t.Helper()
