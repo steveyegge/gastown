@@ -615,17 +615,24 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Build the startup beacon for predecessor discovery via /resume
 	// Pass it as Claude's initial prompt - processed when Claude is ready
+	// Configure beacon based on agent's hook/prompt capabilities.
 	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
 	topic := opts.Topic
 	if topic == "" {
 		topic = "start"
 	}
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     topic,
+		Recipient:               address,
+		Sender:                  "human",
+		Topic:                   topic,
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
 	})
 
 	// Compute environment variables BEFORE creating the session.
@@ -674,6 +681,32 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, t)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	// For crew, we run this in background since we don't wait for startup.
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge || fallbackInfo.SendStartupNudge {
+		go func() {
+			// Wait for runtime to be fully ready at the prompt
+			runtime.SleepForReadyDelay(runtimeConfig)
+
+			if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+				// Hooks + no prompt: Single combined nudge
+				combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+				_ = t.NudgeSession(sessionID, combined)
+			} else {
+				if fallbackInfo.SendBeaconNudge {
+					_ = t.NudgeSession(sessionID, beacon)
+				}
+				if fallbackInfo.StartupNudgeDelayMs > 0 {
+					time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+				}
+				if fallbackInfo.SendStartupNudge {
+					_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
+				}
+			}
+		}()
+	}
 
 	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds
