@@ -1089,9 +1089,12 @@ func TestPiRuntimeConfigFromPreset(t *testing.T) {
 	}
 }
 
-// TestAllHookSupportingAgentsHaveHookFields enforces the invariant that every
-// built-in preset with SupportsHooks=true has the three hook fields populated.
-// Without all three, fillRuntimeDefaults() silently skips hooks auto-fill.
+// TestAllHookSupportingAgentsHaveHookFields ensures that every built-in preset
+// with SupportsHooks=true also declares the three fields required by the hooks
+// install path: HooksProvider, HooksDir, and HooksSettingsFile.
+//
+// If this test fails, add the missing fields to the offending preset in
+// builtinPresets (agents.go) before setting SupportsHooks=true.
 func TestAllHookSupportingAgentsHaveHookFields(t *testing.T) {
 	t.Parallel()
 	for name, preset := range builtinPresets {
