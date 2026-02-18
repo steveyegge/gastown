@@ -897,7 +897,7 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 	if store, err := beadsdk.OpenFromConfig(d.ctx, hqBeadsDir); err == nil {
 		stores["hq"] = store
 	} else {
-		d.logger.Printf("Convoy: hq beads store unavailable: %v", err)
+		d.logger.Printf("Convoy: hq beads store unavailable: %s", util.FirstLine(err.Error()))
 	}
 
 	// Per-rig stores
@@ -908,7 +908,7 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 		}
 		store, err := beadsdk.OpenFromConfig(d.ctx, beadsDir)
 		if err != nil {
-			d.logger.Printf("Convoy: %s beads store unavailable: %v", rigName, err)
+			d.logger.Printf("Convoy: %s beads store unavailable: %s", rigName, util.FirstLine(err.Error()))
 			continue
 		}
 		stores[rigName] = store

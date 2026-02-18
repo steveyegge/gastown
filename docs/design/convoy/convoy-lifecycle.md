@@ -148,6 +148,25 @@ is idempotent — closing an already-closed convoy is a no-op.
 > (spec S-05) after S-17 found they were silently broken (wrong root path) with
 > no visible impact, confirming single-observer coverage is sufficient.
 
+### Issue-to-Rig Resolution
+
+Convoys are rig-agnostic. A convoy like `hq-cv-6vjz2` lives in the hq store and
+tracks issue IDs like `sh-pb6sa` — but it doesn't store which rig that issue
+belongs to. The rig association is resolved at dispatch time via two lookups:
+
+1. **Extract prefix**: `sh-pb6sa` → `sh-` (string parsing)
+2. **Resolve rig**: look up `sh-` in `~/gt/.beads/routes.jsonl` → finds
+   `{"prefix":"sh-","path":"shippercrm/.beads"}` → rig name is `shippercrm`
+
+This happens in `feedFirstReady` (stranded scan path) and `feedNextReadyIssue`
+(event poll path) just before calling `gt sling`. Issues with prefixes that
+don't appear in `routes.jsonl` (or that map to `path="."` like `hq-*`) are
+skipped — see `isSlingableBead()`.
+
+> **Known gap**: Neither path checks whether the resolved rig is parked before
+> attempting to sling. A convoy tracking issues in a parked rig will
+> repeatedly attempt and fail to dispatch work every scan cycle.
+
 ### Manual Close Command
 
 `gt convoy close` is implemented, including `--force` for abandoned convoys.
