@@ -124,6 +124,8 @@ var (
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
+	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
+	slingQueue         bool   // --queue: defer dispatch via work queue instead of immediate sling
 )
 
 func init() {
@@ -148,6 +150,8 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
+	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
+	slingCmd.Flags().BoolVar(&slingQueue, "queue", false, "Defer dispatch via work queue instead of immediate sling")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -240,8 +244,30 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if len(args) > 2 {
 		lastArg := args[len(args)-1]
 		if rigName, isRig := IsRigName(lastArg); isRig {
+			if slingQueue {
+				return runBatchEnqueue(args[:len(args)-1], rigName)
+			}
 			return runBatchSling(args[:len(args)-1], rigName, townBeadsDir)
 		}
+	}
+
+	// Queue routing for single bead: gt sling gt-abc gastown --queue
+	if slingQueue && len(args) == 2 {
+		rigName, isRig := IsRigName(args[1])
+		if !isRig {
+			return fmt.Errorf("--queue requires a rig target (got %q)", args[1])
+		}
+		beadID := args[0]
+		return enqueueBead(beadID, rigName, EnqueueOptions{
+			Args:       slingArgs,
+			Vars:       slingVars,
+			Merge:      slingMerge,
+			BaseBranch: slingBaseBranch,
+			NoConvoy:   slingNoConvoy,
+			Owned:      slingOwned,
+			DryRun:     slingDryRun,
+			Force:      slingForce,
+		})
 	}
 
 	// Determine mode based on flags and argument types

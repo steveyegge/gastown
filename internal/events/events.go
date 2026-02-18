@@ -68,6 +68,10 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Work queue events
+	TypeQueueEnqueue  = "queue_enqueue"  // Bead queued for deferred dispatch
+	TypeQueueDispatch = "queue_dispatch" // Bead dispatched from queue
 )
 
 // EventsFile is the name of the raw events log.
@@ -335,4 +339,21 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 		p["cwd"] = cwd
 	}
 	return p
+}
+
+// QueueEnqueuePayload creates a payload for queue enqueue events.
+func QueueEnqueuePayload(beadID, rig string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead": beadID,
+		"rig":  rig,
+	}
+}
+
+// QueueDispatchPayload creates a payload for queue dispatch events.
+func QueueDispatchPayload(beadID, rig, polecat string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead":    beadID,
+		"rig":     rig,
+		"polecat": polecat,
+	}
 }
