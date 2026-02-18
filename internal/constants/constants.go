@@ -43,6 +43,14 @@ const (
 	// NudgeRetryInterval is the base interval between send-keys retry attempts
 	// when a transient tmux error is encountered during nudge delivery.
 	NudgeRetryInterval = 500 * time.Millisecond
+
+	// BdCommandTimeout is the default timeout for bd (beads CLI) command
+	// execution. Used across polecat session management and plugin recording.
+	BdCommandTimeout = 30 * time.Second
+
+	// BdSubprocessTimeout is the timeout for bd subprocess calls in TUI panels.
+	// Prevents the TUI from freezing if these commands hang.
+	BdSubprocessTimeout = 5 * time.Second
 )
 
 // Directory names within a Gas Town workspace.

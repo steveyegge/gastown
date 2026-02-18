@@ -10,18 +10,16 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
-
-// subprocessTimeout is the timeout for bd subprocess calls.
-const subprocessTimeout = 5 * time.Second
 
 // IssueItem represents a tracked issue within a convoy.
 type IssueItem struct {
@@ -89,7 +87,7 @@ func (m *Model) fetchConvoys() tea.Msg {
 
 // loadConvoys loads convoy data from the beads directory.
 func loadConvoys(townBeads string) ([]ConvoyItem, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdSubprocessTimeout)
 	defer cancel()
 
 	// Get list of open convoys
@@ -148,7 +146,7 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 		return nil, 0, 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdSubprocessTimeout)
 	defer cancel()
 
 	// Query tracked issues using bd dep list (returns full issue details)

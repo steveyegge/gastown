@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 )
-
-const bdCommandTimeout = 30 * time.Second
 
 // RunResult represents the outcome of a plugin execution.
 type RunResult string
@@ -80,7 +79,7 @@ func (r *Recorder) RecordRun(record PluginRunRecord) (string, error) {
 		args = append(args, "--description="+record.Body)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot
@@ -148,7 +147,7 @@ func (r *Recorder) queryRuns(pluginName string, limit int, since string) ([]*Plu
 		args = append(args, "--created-after="+sinceArg)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), bdCommandTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot

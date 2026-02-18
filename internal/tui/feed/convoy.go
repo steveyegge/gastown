@@ -13,14 +13,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
-
-// convoySubprocessTimeout is the timeout for bd subprocess calls in the convoy panel.
-// Prevents TUI freezing if these commands hang.
-const convoySubprocessTimeout = 5 * time.Second
 
 // Convoy represents a convoy's status for the dashboard
 type Convoy struct {
@@ -90,7 +88,7 @@ func FetchConvoys(townRoot string) (*ConvoyState, error) {
 func listConvoys(beadsDir, status string) ([]convoyListItem, error) {
 	listArgs := []string{"list", "--label=gt:convoy", "--status=" + status, "--json"}
 
-	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdSubprocessTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bd", listArgs...) //nolint:gosec // G204: args are constructed internally
@@ -174,7 +172,7 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdSubprocessTimeout)
 	defer cancel()
 
 	// Query tracked issues using bd dep list (returns full issue details)
