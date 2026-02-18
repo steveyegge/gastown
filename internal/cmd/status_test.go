@@ -417,6 +417,95 @@ func TestIsAgentCmdline(t *testing.T) {
 	}
 }
 
+func TestCountRunningAgents(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status TownStatus
+		want   int
+	}{
+		{
+			name:   "empty status",
+			status: TownStatus{},
+			want:   0,
+		},
+		{
+			name: "global agents only",
+			status: TownStatus{
+				Agents: []AgentRuntime{
+					{Name: "mayor", Running: true},
+					{Name: "deacon", Running: false},
+				},
+			},
+			want: 1,
+		},
+		{
+			name: "rig agents only",
+			status: TownStatus{
+				Rigs: []RigStatus{
+					{
+						Agents: []AgentRuntime{
+							{Name: "polecat-1", Running: true},
+							{Name: "witness", Running: true},
+						},
+					},
+				},
+			},
+			want: 2,
+		},
+		{
+			name: "mixed global and rig agents",
+			status: TownStatus{
+				Agents: []AgentRuntime{
+					{Name: "mayor", Running: true},
+				},
+				Rigs: []RigStatus{
+					{
+						Agents: []AgentRuntime{
+							{Name: "polecat-1", Running: true},
+							{Name: "witness", Running: false},
+						},
+					},
+					{
+						Agents: []AgentRuntime{
+							{Name: "polecat-2", Running: true},
+						},
+					},
+				},
+			},
+			want: 3,
+		},
+		{
+			name: "all not running",
+			status: TownStatus{
+				Agents: []AgentRuntime{
+					{Name: "mayor", Running: false},
+				},
+				Rigs: []RigStatus{
+					{
+						Agents: []AgentRuntime{
+							{Name: "polecat-1", Running: false},
+						},
+					},
+				},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countRunningAgents(tt.status)
+			if got != tt.want {
+				t.Errorf(
+					"countRunningAgents() = %d, want %d",
+					got, tt.want,
+				)
+			}
+		})
+	}
+}
+
 func TestExtractBaseName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
