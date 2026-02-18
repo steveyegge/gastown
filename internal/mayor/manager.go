@@ -71,22 +71,24 @@ func (m *Manager) Start(agentOverride string) error {
 	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, "")
 	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
 
-	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	// Configure beacon based on agent's hook/prompt capabilities.
+	beaconConfig := session.BeaconConfig{
+		Recipient:               "mayor",
+		Sender:                  "human",
+		Topic:                   "cold-start",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+
+	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.MayorTheme()
 	result, err := session.StartSession(t, session.SessionConfig{
-		SessionID: sessionID,
-		WorkDir:   mayorDir,
-		Role:      "mayor",
-		TownRoot:  m.townRoot,
-		AgentName: "Mayor",
-		Beacon: session.BeaconConfig{
-			Recipient:               "mayor",
-			Sender:                  "human",
-			Topic:                   "cold-start",
-			IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
-			ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
-		},
+		SessionID:     sessionID,
+		WorkDir:       mayorDir,
+		Role:          "mayor",
+		TownRoot:      m.townRoot,
+		AgentName:     "Mayor",
+		Beacon:        beaconConfig,
 		AgentOverride: agentOverride,
 		Theme:         &theme,
 		WaitForAgent:  true,
@@ -107,37 +109,9 @@ func (m *Manager) Start(agentOverride string) error {
 	time.Sleep(session.ShutdownDelay())
 
 	// Handle fallback nudges for non-prompt agents (e.g., Codex, OpenCode).
-	// See StartupFallbackInfo in runtime package for the fallback matrix.
-	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		beacon := session.FormatStartupBeacon(session.BeaconConfig{
-			Recipient: "mayor",
-			Sender:    "human",
-			Topic:     "cold-start",
-		})
-		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		_ = t.NudgeSession(sessionID, combined)
-	} else {
-		if fallbackInfo.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			beacon := session.FormatStartupBeacon(session.BeaconConfig{
-				Recipient: "mayor",
-				Sender:    "human",
-				Topic:     "cold-start",
-			})
-			_ = t.NudgeSession(sessionID, beacon)
-		}
-
-		if fallbackInfo.StartupNudgeDelayMs > 0 {
-			// Wait for agent to run gt prime before sending work instructions
-			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
-		}
-
-		if fallbackInfo.SendStartupNudge {
-			// Send work instructions via nudge
-			_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
-		}
-	}
+	// Reuse the same beaconConfig to ensure flags are consistent.
+	beacon := session.FormatStartupBeacon(beaconConfig)
+	runtime.SendFallbackNudges(t, sessionID, beacon, fallbackInfo)
 
 	return nil
 }

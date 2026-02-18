@@ -59,6 +59,9 @@ export const GasTown = async ({ $, directory }) => {
       const context = await primePromise;
       if (context) {
         output.system.push(context);
+      } else {
+        // Reset so next transform retries instead of pushing empty forever.
+        primePromise = null;
       }
     },
     "experimental.session.compacting": async ({ sessionID }, output) => {

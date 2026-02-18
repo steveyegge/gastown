@@ -152,39 +152,20 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		return err
 	}
 
-	// Wait for runtime to be fully ready at the prompt (not just started)
-	runtime.SleepForReadyDelay(runtimeConfig)
-
-	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	// See StartupFallbackInfo in runtime package for the fallback matrix.
-	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		_ = m.tmux.NudgeSession(sessionID, combined)
-	} else {
-		if fallbackInfo.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			_ = m.tmux.NudgeSession(sessionID, beacon)
-		}
-
-		if fallbackInfo.StartupNudgeDelayMs > 0 {
-			// Wait for agent to run gt prime before sending work instructions
-			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
-		}
-
-		if fallbackInfo.SendStartupNudge {
-			// Send work instructions via nudge
-			_ = m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent())
-		}
-	}
-
-	// Update persistent state to working
+	// Update persistent state to working before sleep/nudge so deacon
+	// won't reassign the dog during the ready delay window.
 	if m.mgr != nil {
 		if err := m.mgr.SetState(dogName, StateWorking); err != nil {
 			// Log but don't fail - session is running, state sync is best-effort
 			fmt.Fprintf(os.Stderr, "warning: failed to set dog %s state to working: %v\n", dogName, err)
 		}
 	}
+
+	// Wait for runtime to be fully ready at the prompt (not just started)
+	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	runtime.SendFallbackNudges(m.tmux, sessionID, beacon, fallbackInfo)
 
 	return nil
 }

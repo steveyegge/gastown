@@ -175,27 +175,7 @@ func (m *Manager) Start(agentOverride string) error {
 	runtime.SleepForReadyDelay(runtimeConfig)
 
 	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	// See StartupFallbackInfo in runtime package for the fallback matrix.
-	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		_ = t.NudgeSession(sessionID, combined)
-	} else {
-		if fallbackInfo.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			_ = t.NudgeSession(sessionID, beacon)
-		}
-
-		if fallbackInfo.StartupNudgeDelayMs > 0 {
-			// Wait for agent to run gt prime before sending work instructions
-			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
-		}
-
-		if fallbackInfo.SendStartupNudge {
-			// Send work instructions via nudge
-			_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
-		}
-	}
+	runtime.SendFallbackNudges(t, sessionID, beacon, fallbackInfo)
 
 	return nil
 }

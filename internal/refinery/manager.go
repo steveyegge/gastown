@@ -201,31 +201,12 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
 
-	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	// See StartupFallbackInfo in runtime package for the fallback matrix.
-	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		_ = t.NudgeSession(sessionID, combined)
-	} else {
-		if fallbackInfo.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			_ = t.NudgeSession(sessionID, beacon)
-		}
-
-		if fallbackInfo.StartupNudgeDelayMs > 0 {
-			// Wait for agent to run gt prime before sending work instructions
-			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
-		}
-
-		if fallbackInfo.SendStartupNudge {
-			// Send work instructions via nudge
-			_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
-		}
-	}
-
-	// Legacy fallback for other startup paths (non-fatal)
+	// Send gt prime via tmux for non-hook agents BEFORE work instructions.
+	// This ensures prime completes before work nudge is sent.
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	runtime.SendFallbackNudges(t, sessionID, beacon, fallbackInfo)
 
 	return nil
 }
