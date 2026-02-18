@@ -239,7 +239,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Build startup command with beacon for predecessor discovery.
 	// Configure beacon based on agent's hook/prompt capabilities.
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	address := session.BeaconRecipient("polecat", polecat, m.rig.Name)
 	beaconConfig := session.BeaconConfig{
 		Recipient:               address,
 		Sender:                  "witness",

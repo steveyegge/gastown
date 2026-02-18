@@ -695,7 +695,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	} else {
 		// Normal start: build beacon for predecessor discovery via /resume.
 		// Only used in fresh-start mode — resumed sessions already have context.
-		address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
+		address := session.BeaconRecipient("crew", name, m.rig.Name)
 		topic := opts.Topic
 		if topic == "" {
 			topic = "start"

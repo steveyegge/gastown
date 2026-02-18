@@ -526,7 +526,7 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 	// The SessionStart hook handles context injection (gt prime --hook)
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: identity.Address(),
+		Recipient: identity.BeaconAddress(),
 		Sender:    "self",
 		Topic:     "handoff",
 	})

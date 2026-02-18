@@ -136,7 +136,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
+		Recipient: session.BeaconRecipient("refinery", "", m.rig.Name),
 		Sender:    "deacon",
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")

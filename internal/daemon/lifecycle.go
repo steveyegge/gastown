@@ -468,14 +468,9 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 	// Use role-based agent resolution for per-role model selection
 	runtimeConfig := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
 
-	// Build recipient for beacon
-	recipient := identityToBDActor(parsed.RigName + "/" + parsed.RoleType)
-	if parsed.AgentName != "" {
-		recipient = identityToBDActor(parsed.RigName + "/" + parsed.RoleType + "/" + parsed.AgentName)
-	}
-	if parsed.RoleType == "deacon" || parsed.RoleType == "mayor" {
-		recipient = parsed.RoleType
-	}
+	// Build recipient for beacon using non-path format to prevent LLMs
+	// from misinterpreting the recipient as a filesystem path.
+	recipient := session.BeaconRecipient(parsed.RoleType, parsed.AgentName, parsed.RigName)
 	prompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: recipient,
 		Sender:    "daemon",
