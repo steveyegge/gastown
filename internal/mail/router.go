@@ -1561,13 +1561,3 @@ func AddressToSessionIDs(address string) []string {
 	}
 }
 
-// addressToSessionID converts a mail address to a tmux session ID.
-// Returns empty string if address format is not recognized.
-// Deprecated: Use AddressToSessionIDs for proper crew/polecat handling.
-func addressToSessionID(address string) string {
-	ids := AddressToSessionIDs(address)
-	if len(ids) == 0 {
-		return ""
-	}
-	return ids[0]
-}

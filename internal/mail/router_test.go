@@ -146,42 +146,6 @@ func TestAddressToSessionIDs(t *testing.T) {
 	}
 }
 
-func TestAddressToSessionID(t *testing.T) {
-	// Set up prefix registry for test
-	reg := session.NewPrefixRegistry()
-	reg.Register("gt", "gastown")
-	reg.Register("bd", "beads")
-	old := session.DefaultRegistry()
-	session.SetDefaultRegistry(reg)
-	defer session.SetDefaultRegistry(old)
-
-	// Deprecated wrapper - returns first candidate from AddressToSessionIDs
-	tests := []struct {
-		address string
-		want    string
-	}{
-		{"overseer", "hq-overseer"},
-		{"mayor", "hq-mayor"},
-		{"mayor/", "hq-mayor"},
-		{"deacon", "hq-deacon"},
-		{"gastown/refinery", "gt-refinery"},
-		{"gastown/Toast", "gt-crew-Toast"}, // First candidate is crew
-		{"beads/witness", "bd-witness"},
-		{"gastown/", ""},   // Empty target
-		{"gastown", ""},    // No slash
-		{"", ""},           // Empty address
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.address, func(t *testing.T) {
-			got := addressToSessionID(tt.address)
-			if got != tt.want {
-				t.Errorf("addressToSessionID(%q) = %q, want %q", tt.address, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsSelfMail(t *testing.T) {
 	tests := []struct {
 		from string
