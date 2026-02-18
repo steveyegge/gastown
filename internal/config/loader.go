@@ -1205,7 +1205,9 @@ func tryResolveFromEphemeralTier(role string) (*RuntimeConfig, bool) {
 	agents := CostTierAgents(tier)
 	if agents != nil {
 		if rc, found := agents[agentName]; found && rc != nil {
-			return fillRuntimeDefaults(rc), true
+			filled := fillRuntimeDefaults(rc)
+			filled.ResolvedAgent = agentName
+			return filled, true
 		}
 	}
 
