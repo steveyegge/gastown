@@ -1298,12 +1298,6 @@ func hasDescendantWithNames(pid string, names []string, depth int) bool {
 	return false
 }
 
-// hasChildWithNames checks if a process has a child matching any of the given names.
-// Deprecated: Use hasDescendantWithNames for more robust detection.
-func hasChildWithNames(pid string, names []string) bool {
-	return hasDescendantWithNames(pid, names, 0)
-}
-
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
 // matches or is under the target directory. Returns session names that match.
 // If processNames is provided, only returns sessions that match those processes.

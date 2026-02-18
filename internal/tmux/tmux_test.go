@@ -553,31 +553,31 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 	}
 }
 
-func TestHasChildWithNames(t *testing.T) {
-	// Test the hasChildWithNames helper function directly
+func TestHasDescendantWithNames(t *testing.T) {
+	// Test the hasDescendantWithNames helper function directly
 
 	// Test with a definitely nonexistent PID
-	got := hasChildWithNames("999999999", []string{"node", "claude"})
+	got := hasDescendantWithNames("999999999", []string{"node", "claude"}, 0)
 	if got {
-		t.Error("hasChildWithNames should return false for nonexistent PID")
+		t.Error("hasDescendantWithNames should return false for nonexistent PID")
 	}
 
 	// Test with empty names slice - should always return false
-	got = hasChildWithNames("1", []string{})
+	got = hasDescendantWithNames("1", []string{}, 0)
 	if got {
-		t.Error("hasChildWithNames should return false for empty names slice")
+		t.Error("hasDescendantWithNames should return false for empty names slice")
 	}
 
 	// Test with nil names slice - should always return false
-	got = hasChildWithNames("1", nil)
+	got = hasDescendantWithNames("1", nil, 0)
 	if got {
-		t.Error("hasChildWithNames should return false for nil names slice")
+		t.Error("hasDescendantWithNames should return false for nil names slice")
 	}
 
 	// Test with PID 1 (init/launchd) - should have children but not specific agent processes
-	got = hasChildWithNames("1", []string{"node", "claude"})
+	got = hasDescendantWithNames("1", []string{"node", "claude"}, 0)
 	if got {
-		t.Logf("hasChildWithNames(\"1\", [node,claude]) = true - init has matching child?")
+		t.Logf("hasDescendantWithNames(\"1\", [node,claude]) = true - init has matching child?")
 	}
 }
 
