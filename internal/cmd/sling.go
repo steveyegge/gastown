@@ -153,9 +153,16 @@ func init() {
 }
 
 func runSling(cmd *cobra.Command, args []string) error {
-	// Polecats cannot sling - check early before writing anything
-	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+	// Polecats cannot sling - check early before writing anything.
+	// Check GT_ROLE first: coordinators (mayor, witness, etc.) may have a stale
+	// GT_POLECAT in their environment from spawning polecats. Only block if the
+	// role is actually "polecat" (or if GT_ROLE is unset and GT_POLECAT is set).
+	if role := os.Getenv("GT_ROLE"); role == "polecat" {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+	} else if role == "" {
+		if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+			return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+		}
 	}
 
 	// Validate --merge flag if provided
