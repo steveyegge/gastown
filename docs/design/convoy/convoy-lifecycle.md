@@ -108,20 +108,14 @@ Convoy completion should be:
 
 When an issue closes, check if it's tracked by a convoy:
 
-```
-Issue closes
-    ↓
-Is issue tracked by convoy? ──(no)──► done
-    │
-   (yes)
-    ↓
-Run gt convoy check <convoy-id>
-    ↓
-All tracked issues closed? ──(no)──► done
-    │
-   (yes)
-    ↓
-Close convoy, send notifications
+```mermaid
+flowchart TD
+    close["Issue closes"] --> tracked{"Tracked by convoy?"}
+    tracked -->|No| done1(["Done"])
+    tracked -->|Yes| check["Run gt convoy check"]
+    check --> all{"All tracked<br/>issues closed?"}
+    all -->|No| done2(["Done"])
+    all -->|Yes| notify["Close convoy +<br/>send notifications"]
 ```
 
 **Implementation**: The daemon's `ConvoyManager` event poll detects close events
@@ -163,9 +157,8 @@ This happens in `feedFirstReady` (stranded scan path) and `feedNextReadyIssue`
 don't appear in `routes.jsonl` (or that map to `path="."` like `hq-*`) are
 skipped — see `isSlingableBead()`.
 
-> **Known gap**: Neither path checks whether the resolved rig is parked before
-> attempting to sling. A convoy tracking issues in a parked rig will
-> repeatedly attempt and fail to dispatch work every scan cycle.
+Both paths check `isRigParked` after resolving the rig name. Issues targeting
+parked rigs are logged and skipped rather than dispatched.
 
 ### Manual Close Command
 
