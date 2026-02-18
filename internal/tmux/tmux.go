@@ -2185,27 +2185,3 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 	return nil
 }
 
-// SetGlobalDeaconRespawnHook sets up a global hook that respawns hq-deacon panes.
-// DEPRECATED: Global pane-died hooks don't fire reliably in tmux 3.2a.
-// Use SetAutoRespawnHook with per-session hooks instead (called by deacon manager).
-//
-// Keeping this function for reference in case tmux behavior changes in future versions.
-func (t *Tmux) SetGlobalDeaconRespawnHook() error {
-	// Hook command that only respawns hq-deacon sessions
-	// Uses #{session_name} to check if this is the deacon session
-	// #{pane_id} identifies the exact pane that died
-	// IMPORTANT: We must re-enable remain-on-exit after respawn-pane resets it!
-	//
-	// NOTE: Testing showed global pane-died hooks don't fire in tmux 3.2a,
-	// even though per-session hooks work correctly. The per-session approach
-	// in SetAutoRespawnHook is the reliable solution.
-	hookCmd := `run-shell "if [ '#{session_name}' = 'hq-deacon' ]; then sleep 3 && tmux respawn-pane -k -t #{pane_id} && tmux set-option -t #{session_name} remain-on-exit on; fi"`
-
-	// Set as a global hook so it applies to all sessions
-	_, err := t.run("set-hook", "-g", "pane-died", hookCmd)
-	if err != nil {
-		return fmt.Errorf("setting global pane-died hook: %w", err)
-	}
-
-	return nil
-}
