@@ -792,6 +792,33 @@ func (m *Manager) Stop(name string) error {
 	return nil
 }
 
+// SetIdentity sets the identity override for a crew worker.
+func (m *Manager) SetIdentity(name, identity string) error {
+	if err := validateCrewName(name); err != nil {
+		return err
+	}
+	fl, err := m.lockCrew(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	worker, err := m.getLocked(name)
+	if err != nil {
+		return err
+	}
+
+	worker.Identity = identity
+	worker.UpdatedAt = time.Now()
+	return m.saveState(worker)
+}
+
+// ClearIdentity removes the identity override, reverting to
+// name-based lookup.
+func (m *Manager) ClearIdentity(name string) error {
+	return m.SetIdentity(name, "")
+}
+
 // IsRunning checks if a crew member's session is active.
 func (m *Manager) IsRunning(name string) (bool, error) {
 	t := tmux.NewTmux()

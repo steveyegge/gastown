@@ -725,6 +725,60 @@ func TestBuildResumeArgs(t *testing.T) {
 	}
 }
 
+func TestManagerSetIdentity(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "crew-identity-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	rigPath := filepath.Join(tmpDir, "test-rig")
+	bareRepoPath := filepath.Join(tmpDir, "bare-repo.git")
+	if err := runCmd("git", "init", "--bare", bareRepoPath); err != nil {
+		t.Fatalf("failed to create bare repo: %v", err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: rigPath, GitURL: bareRepoPath}
+	g := git.NewGit(rigPath)
+	mgr := NewManager(r, g)
+
+	// Create crew member
+	if _, err := mgr.Add("dave", false); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Set identity
+	if err := mgr.SetIdentity("dave", "senior_rust_dev"); err != nil {
+		t.Fatalf("SetIdentity failed: %v", err)
+	}
+
+	// Verify
+	worker, err := mgr.Get("dave")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if worker.Identity != "senior_rust_dev" {
+		t.Errorf(
+			"expected identity 'senior_rust_dev', got '%s'",
+			worker.Identity,
+		)
+	}
+
+	// Clear identity
+	if err := mgr.ClearIdentity("dave"); err != nil {
+		t.Fatalf("ClearIdentity failed: %v", err)
+	}
+
+	worker, err = mgr.Get("dave")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if worker.Identity != "" {
+		t.Errorf(
+			"expected empty identity, got '%s'", worker.Identity,
+		)
+	}
+}
 
 // Helper to run commands
 func runCmd(name string, args ...string) error {
