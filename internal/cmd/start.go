@@ -200,7 +200,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Clean up orphaned tmux sessions before starting new agents.
 	// This prevents session name conflicts and resource accumulation from
 	// zombie sessions (tmux alive but Claude dead).
-	if cleaned, err := t.CleanupOrphanedSessions(); err != nil {
+	if cleaned, err := t.CleanupOrphanedSessions(session.IsKnownSession); err != nil {
 		fmt.Printf("  %s Could not clean orphaned sessions: %v\n", style.Dim.Render("○"), err)
 	} else if cleaned > 0 {
 		fmt.Printf("  %s Cleaned up %d orphaned session(s)\n", style.Bold.Render("✓"), cleaned)

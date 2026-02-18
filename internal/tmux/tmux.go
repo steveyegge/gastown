@@ -2088,18 +2088,21 @@ func CurrentSessionName() string {
 // A zombie session is one where tmux is alive but the Claude process has died.
 // This runs at `gt start` time to prevent session name conflicts and resource accumulation.
 //
+// The isGTSession predicate identifies Gas Town sessions (e.g. session.IsKnownSession).
+// It is passed as a parameter to avoid a circular import from tmux → session.
+//
 // Returns:
 //   - cleaned: number of zombie sessions that were killed
 //   - err: error if session listing failed (individual kill errors are logged but not returned)
-func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
+func (t *Tmux) CleanupOrphanedSessions(isGTSession func(string) bool) (cleaned int, err error) {
 	sessions, err := t.ListSessions()
 	if err != nil {
 		return 0, fmt.Errorf("listing sessions: %w", err)
 	}
 
 	for _, sess := range sessions {
-		// Only process Gas Town sessions (gt-* for rigs, hq-* for town-level)
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		// Only process Gas Town sessions
+		if !isGTSession(sess) {
 			continue
 		}
 

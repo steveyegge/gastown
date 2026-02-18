@@ -920,12 +920,18 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
+	// Local predicate matching gt-/hq- prefixes (sufficient for test fixtures;
+	// avoids circular import of session package).
+	isTestGTSession := func(s string) bool {
+		return strings.HasPrefix(s, "gt-") || strings.HasPrefix(s, "hq-")
+	}
+
 	tm := NewTmux()
 
 	// Additional safety check: Skip if production GT sessions exist.
 	sessions, _ := tm.ListSessions()
 	for _, sess := range sessions {
-		if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) &&
+		if isTestGTSession(sess) &&
 			sess != "gt-test-cleanup-rig" && sess != "hq-test-cleanup" {
 			t.Skip("Skipping: production GT sessions exist (would be killed by CleanupOrphanedSessions)")
 		}
@@ -970,7 +976,7 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 	}
 
 	// Run cleanup
-	cleaned, err := tm.CleanupOrphanedSessions()
+	cleaned, err := tm.CleanupOrphanedSessions(isTestGTSession)
 	if err != nil {
 		t.Fatalf("CleanupOrphanedSessions: %v", err)
 	}
@@ -1012,18 +1018,23 @@ func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
+	// Local predicate matching gt-/hq- prefixes (avoids circular import).
+	isTestGTSession := func(s string) bool {
+		return strings.HasPrefix(s, "gt-") || strings.HasPrefix(s, "hq-")
+	}
+
 	tm := NewTmux()
 
 	// Additional safety check: Skip if production GT sessions exist.
 	sessions, _ := tm.ListSessions()
 	for _, sess := range sessions {
-		if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
+		if isTestGTSession(sess) {
 			t.Skip("Skipping: GT sessions exist (CleanupOrphanedSessions would kill them)")
 		}
 	}
 
 	// Running cleanup with no orphaned GT sessions should return 0, no error
-	cleaned, err := tm.CleanupOrphanedSessions()
+	cleaned, err := tm.CleanupOrphanedSessions(isTestGTSession)
 	if err != nil {
 		t.Fatalf("CleanupOrphanedSessions: %v", err)
 	}

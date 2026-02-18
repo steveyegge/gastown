@@ -1334,8 +1334,8 @@ func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
 		parts := strings.SplitN(line, ":", 2)
 		name := parts[0]
 
-		// Only include gt-* sessions
-		if !strings.HasPrefix(name, "gt-") {
+		// Only include Gas Town sessions
+		if !session.IsKnownSession(name) {
 			continue
 		}
 

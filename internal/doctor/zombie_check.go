@@ -2,9 +2,9 @@ package doctor
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -60,8 +60,8 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check Gas Town sessions (gt-* and hq-*)
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		// Only check Gas Town sessions
+		if !session.IsKnownSession(sess) {
 			continue
 		}
 
