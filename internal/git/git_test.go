@@ -1512,3 +1512,45 @@ func TestStashCount_NoFalsePositiveFromCommitMessage(t *testing.T) {
 		t.Errorf("StashCount on 'fix' branch = %d, want 0 (stash belongs to 'develop', commit msg has 'on fix:')", count)
 	}
 }
+
+func TestClearPushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	fetchURL := "https://github.com/upstream/repo.git"
+	pushURL := "https://github.com/fork/repo.git"
+
+	cmd := exec.Command("git", "remote", "add", "origin", fetchURL)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// Set a custom push URL
+	if err := g.ConfigurePushURL("origin", pushURL); err != nil {
+		t.Fatalf("ConfigurePushURL: %v", err)
+	}
+	got, _ := g.GetPushURL("origin")
+	if got != pushURL {
+		t.Fatalf("push URL after set = %q, want %q", got, pushURL)
+	}
+
+	// Clear the custom push URL
+	if err := g.ClearPushURL("origin"); err != nil {
+		t.Fatalf("ClearPushURL: %v", err)
+	}
+
+	// After clearing, GetPushURL should return the fetch URL
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL after clear: %v", err)
+	}
+	if got != fetchURL {
+		t.Errorf("push URL after clear = %q, want %q (fetch URL)", got, fetchURL)
+	}
+
+	// Clearing again should be a no-op (not an error)
+	if err := g.ClearPushURL("origin"); err != nil {
+		t.Errorf("ClearPushURL (idempotent) should not error, got: %v", err)
+	}
+}
