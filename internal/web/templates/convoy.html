@@ -867,7 +867,7 @@
                                     <td class="issue-status">
                                         {{if .Assignee}}<span class="badge badge-blue" title="{{.Assignee}}">{{.Assignee}}</span>{{else}}<span class="badge badge-green">Ready</span>{{end}}
                                     </td>
-                                    <td>{{.Age}}</td>
+                                    <td class="issue-age">{{.Age}}</td>
                                     <td><button class="sling-btn" data-bead-id="{{.ID}}" title="Sling to rig">Sling</button></td>
                                 </tr>
                                 {{end}}
@@ -950,7 +950,7 @@
                                 <td><span class="hook-id">{{.ID}}</span></td>
                                 <td class="hook-title">{{.Title}}</td>
                                 <td class="hook-agent">{{.Agent}}</td>
-                                <td>
+                                <td class="hook-age">
                                     {{if .IsStale}}
                                     <span class="badge badge-yellow">{{.Age}}</span>
                                     {{else}}

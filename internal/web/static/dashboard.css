@@ -998,6 +998,10 @@
             font-size: 0.8rem;
         }
 
+        .hook-age {
+            white-space: nowrap;
+        }
+
         tr.hook-stale {
             background: rgba(255, 180, 84, 0.08);
         }
@@ -1207,6 +1211,10 @@
         .issue-status.closed {
             background: rgba(166, 218, 149, 0.2);
             color: var(--green);
+        }
+
+        .issue-age {
+            white-space: nowrap;
         }
 
         #issue-detail h3 {
@@ -1632,7 +1640,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: 56px;
+            width: 64px;
             flex-shrink: 0;
             position: relative;
         }
@@ -1640,10 +1648,10 @@
         .tl-time {
             font-size: 0.65rem;
             color: var(--text-muted);
-            white-space: nowrap;
-            line-height: 1;
+            text-align: center;
+            line-height: 1.2;
             margin-bottom: 4px;
-            margin-top: 8px;
+            margin-top: 4px;
         }
 
         .tl-node {

@@ -1622,7 +1622,7 @@ func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook stri
 
 		// Calculate activity age
 		activityAge := time.Since(time.Unix(activityUnix, 0))
-		lastActive := formatCrewActivityAge(activityAge)
+		lastActive := formatTimestamp(time.Unix(activityUnix, 0))
 
 		// Check if Claude is running in the session
 		isClaudeRunning := h.isClaudeRunningInSession(ctx, sessionName)
@@ -1724,20 +1724,6 @@ func determineCrewState(activityAge time.Duration, isClaudeRunning bool, hook st
 		return "spinning" // Still probably working
 	default:
 		return "questions" // Running but no activity = likely waiting for input
-	}
-}
-
-// formatCrewActivityAge formats activity age for display.
-func formatCrewActivityAge(age time.Duration) string {
-	switch {
-	case age < time.Minute:
-		return "just now"
-	case age < time.Hour:
-		return fmt.Sprintf("%dm ago", int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(age.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
 	}
 }
 
