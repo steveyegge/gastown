@@ -755,6 +755,61 @@ func TestOptionsCacheConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestParseConvoyListJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want []string
+	}{
+		{
+			name: "valid JSON with convoys",
+			json: `[{"id":"hq-cv-abc","title":"Deploy widgets"},{"id":"hq-cv-def","title":"Fix bugs"}]`,
+			want: []string{"hq-cv-abc", "hq-cv-def"},
+		},
+		{
+			name: "empty array",
+			json: `[]`,
+			want: []string{},
+		},
+		{
+			name: "invalid JSON",
+			json: `{not valid`,
+			want: nil,
+		},
+		{
+			name: "empty string",
+			json: ``,
+			want: nil,
+		},
+		{
+			name: "skips empty IDs",
+			json: `[{"id":"hq-cv-abc"},{"id":""},{"id":"hq-cv-def"}]`,
+			want: []string{"hq-cv-abc", "hq-cv-def"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConvoyListJSON(tt.json)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("parseConvoyListJSON(%q) = %v, want nil", tt.json, got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("parseConvoyListJSON(%q) = %v, want %v", tt.json, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("parseConvoyListJSON(%q)[%d] = %q, want %q", tt.json, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestRunGtCommandSemaphore verifies that runGtCommand limits concurrent
 // command execution via a semaphore. With a 1-slot semaphore and 3 commands
 // each sleeping 0.1s, total time must be >= 0.25s (serialized), proving the

@@ -573,9 +573,9 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list", "--json"}); err == nil {
 			mu.Lock()
-			resp.Convoys = parseConvoyListOutput(output)
+			resp.Convoys = parseConvoyListJSON(output)
 			mu.Unlock()
 		} else {
 			log.Printf("warning: handleOptions: convoy list: %v", err)
@@ -668,22 +668,21 @@ func parseRigListOutput(output string) []string {
 	return rigs
 }
 
-// parseConvoyListOutput extracts convoy IDs from text output.
-func parseConvoyListOutput(output string) []string {
-	var convoys []string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		// Look for lines that start with convoy ID pattern
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && !strings.HasPrefix(trimmed, "Convoy") && !strings.HasPrefix(trimmed, "No ") {
-			// Try to extract the first word as convoy ID
-			parts := strings.Fields(trimmed)
-			if len(parts) > 0 {
-				convoys = append(convoys, parts[0])
-			}
+// parseConvoyListJSON extracts convoy IDs from JSON output of "gt convoy list --json".
+func parseConvoyListJSON(jsonStr string) []string {
+	var convoys []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &convoys); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(convoys))
+	for _, c := range convoys {
+		if c.ID != "" {
+			ids = append(ids, c.ID)
 		}
 	}
-	return convoys
+	return ids
 }
 
 // parseHooksListOutput extracts bead names from hooks list output.
