@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -119,6 +120,22 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 // runMoleculeSquash squashes the current molecule into a digest.
 func runMoleculeSquash(cmd *cobra.Command, args []string) error {
+	// Apply jitter before acquiring any Dolt locks.
+	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
+	// cycle end, causing exclusive-lock contention. A random pre-sleep
+	// desynchronizes them without changing semantics.
+	if moleculeJitter != "" {
+		jitterMax, err := time.ParseDuration(moleculeJitter)
+		if err != nil {
+			return fmt.Errorf("invalid --jitter duration %q: %w", moleculeJitter, err)
+		}
+		if jitterMax > 0 {
+			//nolint:gosec // weak RNG is fine for jitter
+			sleep := time.Duration(rand.Int63n(int64(jitterMax)))
+			time.Sleep(sleep)
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
