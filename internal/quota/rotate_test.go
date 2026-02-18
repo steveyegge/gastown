@@ -283,3 +283,266 @@ func TestPlanRotation_MultipleLimitedSessions(t *testing.T) {
 		t.Fatalf("expected at least 1 assignment, got %d", len(plan.Assignments))
 	}
 }
+
+// --- Config dir grouping tests ---
+
+func TestPlanRotation_ConfigDirGrouping_SameDir(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Two sessions on the same config dir (alpha) should produce one config dir swap.
+	tmux := &mockTmux{
+		sessions: []string{"hq-mayor", "gt-crew-bear"},
+		paneContent: map[string]string{
+			"hq-mayor":     "You've hit your limit · resets 7pm",
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"hq-mayor":     {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One config dir swap entry (alpha's dir -> beta)
+	if len(plan.ConfigDirSwaps) != 1 {
+		t.Fatalf("expected 1 config dir swap, got %d: %v", len(plan.ConfigDirSwaps), plan.ConfigDirSwaps)
+	}
+
+	alphaDir := "/home/user/.claude-accounts/alpha"
+	newAccount, ok := plan.ConfigDirSwaps[alphaDir]
+	if !ok {
+		t.Fatalf("expected config dir swap for %s", alphaDir)
+	}
+	if newAccount != "beta" {
+		t.Errorf("expected config dir swap to 'beta', got %q", newAccount)
+	}
+
+	// Both sessions should get the same assignment (beta)
+	if len(plan.Assignments) != 2 {
+		t.Fatalf("expected 2 session assignments, got %d", len(plan.Assignments))
+	}
+	for session, assigned := range plan.Assignments {
+		if assigned != "beta" {
+			t.Errorf("session %s: expected assignment 'beta', got %q", session, assigned)
+		}
+	}
+}
+
+func TestPlanRotation_ConfigDirGrouping_DifferentDirs(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Two sessions on different config dirs should produce separate swap entries.
+	tmux := &mockTmux{
+		sessions: []string{"hq-mayor", "gt-crew-bear"},
+		paneContent: map[string]string{
+			"hq-mayor":     "You've hit your limit · resets 7pm",
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"hq-mayor":     {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+			"delta": {ConfigDir: "/home/user/.claude-accounts/delta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+			"gamma": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"delta": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T04:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two different config dirs = two swap entries
+	if len(plan.ConfigDirSwaps) != 2 {
+		t.Fatalf("expected 2 config dir swaps, got %d: %v", len(plan.ConfigDirSwaps), plan.ConfigDirSwaps)
+	}
+
+	// Each session should have an assignment
+	if len(plan.Assignments) != 2 {
+		t.Fatalf("expected 2 session assignments, got %d", len(plan.Assignments))
+	}
+
+	// The two assignments should be different accounts (not alpha or beta, since those are limited)
+	assigned := make(map[string]bool)
+	for _, acct := range plan.Assignments {
+		assigned[acct] = true
+	}
+	if len(assigned) != 2 {
+		t.Errorf("expected 2 distinct assigned accounts, got %d: %v", len(assigned), plan.Assignments)
+	}
+}
+
+// --- State persistence tests ---
+
+func TestPlanRotation_MarksLimitedAccountsInState(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm (America/Los_Angeles)",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable},
+			"beta":  {Status: config.QuotaStatusAvailable},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// PlanRotation should detect alpha as limited
+	if len(plan.LimitedSessions) != 1 {
+		t.Fatalf("expected 1 limited session, got %d", len(plan.LimitedSessions))
+	}
+	if plan.LimitedSessions[0].AccountHandle != "alpha" {
+		t.Errorf("expected limited account alpha, got %q", plan.LimitedSessions[0].AccountHandle)
+	}
+
+	// Reload state — PlanRotation updates in-memory state but the caller
+	// is responsible for persisting. Verify the limited sessions output
+	// contains enough info for the caller to persist.
+	if plan.LimitedSessions[0].ResetsAt == "" {
+		t.Errorf("expected non-empty ResetsAt for rate-limited session")
+	}
+}
+
+func TestPlanRotation_DryRunReturnsValidPlan(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	// PlanRotation returns a complete plan suitable for JSON serialization
+	// (used by --dry-run --json). Verify all fields are populated.
+	plan, err := PlanRotation(scanner, mgr, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if plan.LimitedSessions == nil {
+		t.Error("plan.LimitedSessions should not be nil")
+	}
+	if plan.AvailableAccounts == nil {
+		t.Error("plan.AvailableAccounts should not be nil")
+	}
+	if plan.Assignments == nil {
+		t.Error("plan.Assignments should not be nil")
+	}
+	if plan.ConfigDirSwaps == nil {
+		t.Error("plan.ConfigDirSwaps should not be nil")
+	}
+}

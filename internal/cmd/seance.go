@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -392,12 +393,7 @@ func findSessionLocation(townRoot, sessionID string) *sessionLocation {
 			continue
 		}
 
-		// Expand ~ in path
-		configDir := acct.ConfigDir
-		if strings.HasPrefix(configDir, "~/") {
-			home, _ := os.UserHomeDir()
-			configDir = filepath.Join(home, configDir[2:])
-		}
+		configDir := util.ExpandHome(acct.ConfigDir)
 
 		// Search all sessions-index.json files in this account
 		projectsDir := filepath.Join(configDir, "projects")

@@ -291,9 +291,11 @@ func MayorQuotaPath(townRoot string) string {
 // DefaultRateLimitPatterns are the default patterns that indicate a session
 // is rate-limited. These are matched against tmux pane content.
 // Note: patterns are compiled with (?i) for case-insensitive matching.
+// Patterns are intentionally specific to actual Claude rate-limit messages
+// to avoid false positives from agent discussion or code comments.
 var DefaultRateLimitPatterns = []string{
-	`You've hit your limit`,
-	`resets \d+[:\d]*(am|pm)\b`,               // "resets 7pm", "resets 3:00 AM" — anchored to digit
-	`Stop and wait for limit to reset`,        // /rate-limit-options TUI prompt option 1
-	`Add funds to continue with extra usage`,  // /rate-limit-options TUI prompt option 2
+	`You've hit your .*limit`,                        // Claude's primary rate-limit message
+	`limit\s*·\s*resets \d+[:\d]*(am|pm)\b`,         // "limit · resets 7pm" — requires limit context before resets
+	`Stop and wait for limit to reset`,               // /rate-limit-options TUI prompt option 1
+	`Add funds to continue with extra usage`,         // /rate-limit-options TUI prompt option 2
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // RotateResult holds the result of rotating a single session.
@@ -13,6 +14,7 @@ type RotateResult struct {
 	NewAccount     string `json:"new_account,omitempty"`    // new account handle
 	Rotated        bool   `json:"rotated"`                  // whether rotation occurred
 	ResumedSession string `json:"resumed_session,omitempty"` // session ID that was resumed (empty if fresh start)
+	KeychainSwap   bool   `json:"keychain_swap,omitempty"`   // whether keychain was swapped
 	Error          string `json:"error,omitempty"`          // error message if rotation failed
 }
 
@@ -26,6 +28,11 @@ type RotatePlan struct {
 
 	// Assignments maps session -> new account handle.
 	Assignments map[string]string
+
+	// ConfigDirSwaps maps config_dir -> new account handle.
+	// One keychain swap per config dir, not per session.
+	// All sessions sharing a config dir get the same assignment.
+	ConfigDirSwaps map[string]string
 }
 
 // PlanRotation scans for limited sessions and plans account assignments.
@@ -67,29 +74,70 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// Get available accounts
 	available := mgr.AvailableAccounts(state)
 
-	// Plan assignments: assign available accounts to limited sessions (LRU order)
-	assignments := make(map[string]string)
-	availIdx := 0
+	// Collect unique config dirs from limited sessions.
+	// Multiple sessions can share the same config dir (via the same account).
+	// We only need one keychain swap per config dir.
+	type configDirInfo struct {
+		configDir     string // resolved config dir path
+		accountHandle string // the limited account using this config dir
+	}
+	uniqueConfigDirs := make(map[string]*configDirInfo) // configDir -> info
 	for _, r := range limitedSessions {
-		if availIdx >= len(available) {
-			break // No more available accounts
+		if r.AccountHandle == "" {
+			continue
 		}
-		// Don't assign the same account the session already has
+		acct, ok := acctCfg.Accounts[r.AccountHandle]
+		if !ok {
+			continue
+		}
+		configDir := util.ExpandHome(acct.ConfigDir)
+		if _, exists := uniqueConfigDirs[configDir]; !exists {
+			uniqueConfigDirs[configDir] = &configDirInfo{
+				configDir:     configDir,
+				accountHandle: r.AccountHandle,
+			}
+		}
+	}
+
+	// Assign available accounts to unique config dirs (round-robin, skip same-account).
+	configDirSwaps := make(map[string]string) // configDir -> new account handle
+	availIdx := 0
+	for configDir, info := range uniqueConfigDirs {
+		if availIdx >= len(available) {
+			break
+		}
 		candidate := available[availIdx]
-		if candidate == r.AccountHandle {
+		if candidate == info.accountHandle {
 			availIdx++
 			if availIdx >= len(available) {
 				break
 			}
 			candidate = available[availIdx]
 		}
-		assignments[r.Session] = candidate
+		configDirSwaps[configDir] = candidate
 		availIdx++
+	}
+
+	// Expand config dir assignments to session-level assignments.
+	assignments := make(map[string]string)
+	for _, r := range limitedSessions {
+		if r.AccountHandle == "" {
+			continue
+		}
+		acct, ok := acctCfg.Accounts[r.AccountHandle]
+		if !ok {
+			continue
+		}
+		configDir := util.ExpandHome(acct.ConfigDir)
+		if newAccount, ok := configDirSwaps[configDir]; ok {
+			assignments[r.Session] = newAccount
+		}
 	}
 
 	return &RotatePlan{
 		LimitedSessions:   limitedSessions,
 		AvailableAccounts: available,
 		Assignments:       assignments,
+		ConfigDirSwaps:    configDirSwaps,
 	}, nil
 }
