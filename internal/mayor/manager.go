@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -64,18 +66,26 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, "")
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
+	// Configure beacon based on agent's hook/prompt capabilities.
 	theme := tmux.MayorTheme()
-	_, err = session.StartSession(t, session.SessionConfig{
+	result, err := session.StartSession(t, session.SessionConfig{
 		SessionID: sessionID,
 		WorkDir:   mayorDir,
 		Role:      "mayor",
 		TownRoot:  m.townRoot,
 		AgentName: "Mayor",
 		Beacon: session.BeaconConfig{
-			Recipient: "mayor",
-			Sender:    "human",
-			Topic:     "cold-start",
+			Recipient:               "mayor",
+			Sender:                  "human",
+			Topic:                   "cold-start",
+			IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+			ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
 		},
 		AgentOverride: agentOverride,
 		Theme:         &theme,
@@ -88,7 +98,46 @@ func (m *Manager) Start(agentOverride string) error {
 		return err
 	}
 
+	// Send gt prime via tmux for non-hook agents (e.g., codex).
+	// Hook-based agents (claude, opencode) get context via their hook system,
+	// so RunStartupFallback is a no-op for them.
+	runtime.SleepForReadyDelay(result.RuntimeConfig)
+	_ = runtime.RunStartupFallback(t, sessionID, "mayor", result.RuntimeConfig)
+
 	time.Sleep(session.ShutdownDelay())
+
+	// Handle fallback nudges for non-prompt agents (e.g., Codex, OpenCode).
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
+			Recipient: "mayor",
+			Sender:    "human",
+			Topic:     "cold-start",
+		})
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		_ = t.NudgeSession(sessionID, combined)
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
+				Recipient: "mayor",
+				Sender:    "human",
+				Topic:     "cold-start",
+			})
+			_ = t.NudgeSession(sessionID, beacon)
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			_ = t.NudgeSession(sessionID, runtime.StartupNudgeContent())
+		}
+	}
 
 	return nil
 }

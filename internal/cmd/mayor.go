@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mayor"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -215,6 +216,12 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
 			}
+
+			// Send gt prime via tmux for non-hook agents (e.g., codex).
+			// Hook-based agents handle this via their hook system.
+			runtimeCfg := config.ResolveRoleAgentConfig("mayor", townRoot, "")
+			runtime.SleepForReadyDelay(runtimeCfg)
+			_ = runtime.RunStartupFallback(t, sessionID, "mayor", runtimeCfg)
 
 			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))
 		}

@@ -2,14 +2,16 @@
 package dog
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -95,12 +97,31 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 	}
 
-	// Build instructions for the dog
+	// Ensure runtime settings exist for dogs
+	runtimeConfig := config.ResolveRoleAgentConfig("dog", m.townRoot, kennelDir)
+	if err := runtime.EnsureSettingsForRole(kennelDir, kennelDir, "dog", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
+	// Build startup prompt - dogs check mail for work
+	// Configure beacon based on agent's hook/prompt capabilities.
+	address := fmt.Sprintf("deacon/dogs/%s", dogName)
 	workInfo := ""
 	if opts.WorkDesc != "" {
 		workInfo = fmt.Sprintf(" Work assigned: %s.", opts.WorkDesc)
 	}
 	instructions := fmt.Sprintf("I am Dog %s.%s Check mail for work: `"+cli.Name()+" mail inbox`. Execute assigned formula/bead. When done, send DOG_DONE mail to deacon/ and return to idle.", dogName, workInfo)
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+		Recipient:               address,
+		Sender:                  "deacon",
+		Topic:                   "assigned",
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	})
 
 	// Use unified session lifecycle.
 	theme := tmux.DogTheme()
@@ -111,9 +132,11 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		TownRoot:  m.townRoot,
 		AgentName: dogName,
 		Beacon: session.BeaconConfig{
-			Recipient: fmt.Sprintf("deacon/dogs/%s", dogName),
-			Sender:    "deacon",
-			Topic:     "assigned",
+			Recipient:               address,
+			Sender:                  "deacon",
+			Topic:                   "assigned",
+			IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+			ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
 		},
 		Instructions:   instructions,
 		AgentOverride:  opts.AgentOverride,
@@ -127,6 +150,32 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// Wait for runtime to be fully ready at the prompt (not just started)
+	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		_ = m.tmux.NudgeSession(sessionID, combined)
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			_ = m.tmux.NudgeSession(sessionID, beacon)
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			_ = m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent())
+		}
 	}
 
 	// Update persistent state to working
