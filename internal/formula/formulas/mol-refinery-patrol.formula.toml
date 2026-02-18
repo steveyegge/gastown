@@ -120,7 +120,12 @@ default = "true"
 id = "inbox-check"
 title = "Check refinery mail"
 description = """
-Check mail for MERGE_READY submissions, escalations, and messages.
+First, clean up any stale patrol wisps from abnormal exits in previous cycles:
+```bash
+bd mol wisp gc --age 1h
+```
+
+Then check mail for MERGE_READY submissions, escalations, and messages.
 
 ```bash
 gt mail inbox
