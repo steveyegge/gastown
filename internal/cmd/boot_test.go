@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +247,9 @@ func readTestWarrant(t *testing.T, dir string, target string) Warrant {
 // This covers the normal case during degraded triage: sessions have been killed
 // by other means, or the warrant fires in the same cycle that restarts everything.
 func TestExecuteWarrants_MarksPendingAsExecuted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping warrant execution test on Windows (no tmux)")
+	}
 	// Register prefixes so targetToSessionName can resolve "gastown" → "gt"
 	setupWarrantTestRegistry(t)
 
