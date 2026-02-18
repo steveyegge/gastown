@@ -114,7 +114,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 `)
 	} else {
-		fmt.Println("\n  WELCOME TO GASTOWN\n")
+		fmt.Print("\n  WELCOME TO GASTOWN\n\n")
 	}
 	fmt.Printf("  launching dashboard at %s  •  api: %s/api/  •  ctrl+c to stop\n", url, url)
 
