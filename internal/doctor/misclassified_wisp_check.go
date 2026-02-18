@@ -66,10 +66,12 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var details []string
+	var totalProbeErrors int
 
 	for _, rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
-		found := c.findMisclassifiedWisps(rigPath, rigName)
+		found, probeErrors := c.findMisclassifiedWisps(rigPath, rigName)
+		totalProbeErrors += probeErrors
 		if len(found) > 0 {
 			c.misclassified = append(c.misclassified, found...)
 			c.misclassifiedRigs[rigName] = len(found)
@@ -78,11 +80,16 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Also check town-level beads
-	townFound := c.findMisclassifiedWisps(ctx.TownRoot, "town")
+	townFound, townProbeErrors := c.findMisclassifiedWisps(ctx.TownRoot, "town")
+	totalProbeErrors += townProbeErrors
 	if len(townFound) > 0 {
 		c.misclassified = append(c.misclassified, townFound...)
 		c.misclassifiedRigs["town"] = len(townFound)
 		details = append(details, fmt.Sprintf("town: %d misclassified wisp(s)", len(townFound)))
+	}
+
+	if totalProbeErrors > 0 {
+		details = append(details, fmt.Sprintf("%d DB probe(s) failed — some candidates may have been skipped", totalProbeErrors))
 	}
 
 	total := len(c.misclassified)
@@ -96,6 +103,15 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	if totalProbeErrors > 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "No misclassified wisps found (some DB probes failed)",
+			Details: details,
+		}
+	}
+
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusOK,
@@ -104,16 +120,18 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 }
 
 // findMisclassifiedWisps finds issues that should be wisps but aren't in a single location.
-func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName string) []misclassifiedWisp {
+// Returns the found misclassified wisps and the number of DB probe errors encountered.
+func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName string) ([]misclassifiedWisp, int) {
 	beadsDir := beads.ResolveBeadsDir(path)
 	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
 	file, err := os.Open(issuesPath)
 	if err != nil {
-		return nil // No issues file
+		return nil, 0 // No issues file
 	}
 	defer file.Close()
 
 	var found []misclassifiedWisp
+	var probeErrors int
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -147,7 +165,12 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 		// Check for wisp characteristics
 		if reason := c.shouldBeWisp(issue.ID, issue.Title, issue.Type, issue.Labels); reason != "" {
 			// Verify the current DB state (JSONL may be stale if daemon isn't running)
-			if isIssueStillOpen(issue.ID) {
+			open, err := isIssueStillOpen(path, issue.ID)
+			if err != nil {
+				probeErrors++
+				continue
+			}
+			if open {
 				found = append(found, misclassifiedWisp{
 					rigName: rigName,
 					id:      issue.ID,
@@ -158,26 +181,36 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 		}
 	}
 
-	return found
+	return found, probeErrors
 }
 
 // isIssueStillOpen verifies an issue is still open/non-ephemeral in the live DB.
 // This guards against stale JSONL data when the daemon isn't running and hasn't flushed.
-func isIssueStillOpen(id string) bool {
-	cmd := exec.Command("bd", "show", id, "--json")
+// Uses --allow-stale to survive DB/JSONL drift (consistent with all other bd invocations).
+// Returns an error if the probe fails, so callers can track and surface failures.
+func isIssueStillOpen(workDir, id string) (bool, error) {
+	cmd := exec.Command("bd", "--allow-stale", "show", id, "--json")
+	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {
-		return true // Assume open if we can't query
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		return false, fmt.Errorf("bd show %s: %v (%s)", id, err, stderr)
 	}
 	var issues []struct {
 		Status    string `json:"status"`
 		Ephemeral bool   `json:"ephemeral"`
 	}
-	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
-		return true // Assume open on parse error
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return false, fmt.Errorf("bd show %s: parse error: %v", id, err)
+	}
+	if len(issues) == 0 {
+		return false, fmt.Errorf("bd show %s: empty result", id)
 	}
 	issue := issues[0]
-	return issue.Status != "closed" && !issue.Ephemeral
+	return issue.Status != "closed" && !issue.Ephemeral, nil
 }
 
 // shouldBeWisp checks if an issue has characteristics indicating it should be a wisp.
@@ -216,9 +249,8 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 	return ""
 }
 
-// Fix closes misclassified issues that should have been wisps.
-// Since bd does not support retroactively marking issues as ephemeral,
-// we close them with a descriptive close reason noting they were operational.
+// Fix marks misclassified issues as ephemeral wisps via bd update --ephemeral.
+// This preserves the issue for audit rather than permanently closing it.
 func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 	if len(c.misclassified) == 0 {
 		return nil
