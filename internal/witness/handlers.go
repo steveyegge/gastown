@@ -21,6 +21,15 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// initRegistryFromWorkDir initializes the session prefix registry from a work
+// directory. This ensures session.PrefixFor(rigName) returns the correct rig
+// prefix (e.g., "tr" for testrig) instead of the default "gt".
+func initRegistryFromWorkDir(workDir string) {
+	if townRoot, err := workspace.Find(workDir); err == nil && townRoot != "" {
+		_ = session.InitRegistry(townRoot)
+	}
+}
+
 // HandlerResult tracks the result of handling a protocol message.
 type HandlerResult struct {
 	MessageID    string
@@ -60,7 +69,7 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	if stale, reason := isStalePolecatDone(rigName, payload.PolecatName, msg); stale {
+	if stale, reason := isStalePolecatDone(workDir, rigName, payload.PolecatName, msg); stale {
 		result.Handled = true
 		result.Action = fmt.Sprintf("ignored stale POLECAT_DONE for %s (%s)", payload.PolecatName, reason)
 		return result
@@ -157,12 +166,13 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 	return result
 }
 
-func isStalePolecatDone(rigName, polecatName string, msg *mail.Message) (bool, string) {
+func isStalePolecatDone(workDir, rigName, polecatName string, msg *mail.Message) (bool, string) {
 	if msg == nil {
 		return false, ""
 	}
 
-	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	initRegistryFromWorkDir(workDir)
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 	createdAt, err := session.SessionCreatedAt(sessionName)
 	if err != nil {
 		// Session not found or tmux not running - can't determine staleness, allow message
@@ -633,7 +643,8 @@ Verified: clean git state`,
 // Uses the nudge queue for cooperative delivery so we don't interrupt in-flight
 // tool calls. The refinery will pick this up at its next turn boundary.
 func nudgeRefinery(townRoot, rigName string) error {
-	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+	_ = session.InitRegistry(townRoot)
+	sessionName := session.RefinerySessionName(session.PrefixFor(rigName))
 
 	// Check if refinery is running
 	t := tmux.NewTmux()
@@ -790,11 +801,11 @@ func extractPolecatFromJSON(output string) string {
 // Should only be called after all safety checks pass.
 func NukePolecat(workDir, rigName, polecatName string) error {
 	// CRITICAL: Kill the tmux session FIRST and unconditionally.
-	// The session name follows the pattern gt-<rig>-<polecat>.
 	// We do this explicitly here because gt polecat nuke may fail to kill the
 	// session due to rig loading issues or race conditions with IsRunning checks.
 	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
-	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	initRegistryFromWorkDir(workDir)
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 	t := tmux.NewTmux()
 
 	// Check if session exists and kill it
@@ -996,11 +1007,12 @@ type DetectZombiePolecatsResult struct {
 func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZombiePolecatsResult {
 	result := &DetectZombiePolecatsResult{}
 
-	// Find town root for beads prefix resolution
+	// Find town root for beads prefix resolution and session naming
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
+	_ = session.InitRegistry(townRoot)
 
 	// List all polecat directories
 	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
@@ -1017,7 +1029,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 		}
 
 		polecatName := entry.Name()
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		result.Checked++
 
 		// Record timestamp BEFORE checking session liveness.
@@ -1294,11 +1306,12 @@ type DetectStalledPolecatsResult struct {
 func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult {
 	result := &DetectStalledPolecatsResult{}
 
-	// Find town root for path resolution
+	// Find town root for path resolution and session naming
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
+	_ = session.InitRegistry(townRoot)
 
 	// List all polecat directories
 	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
@@ -1315,7 +1328,7 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 		}
 
 		polecatName := entry.Name()
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		result.Checked++
 
 		// Only check live sessions with alive agents (the opposite of zombie detection)
@@ -1469,6 +1482,7 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
+	_ = session.InitRegistry(townRoot)
 
 	// Scan both in_progress and hooked beads — resetAbandonedBead handles both
 	// states, and orphaned beads can be stuck in either.
@@ -1518,7 +1532,7 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 		result.Checked++
 
 		// Check if the polecat's tmux session exists
-		sessionName := fmt.Sprintf("gt-%s-%s", assigneeRig, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(assigneeRig), polecatName)
 		sessionAlive, err := t.HasSession(sessionName)
 		if err != nil {
 			result.Errors = append(result.Errors,
@@ -1601,11 +1615,12 @@ type DetectOrphanedMoleculesResult struct {
 func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *DetectOrphanedMoleculesResult {
 	result := &DetectOrphanedMoleculesResult{}
 
-	// Find town root for path resolution
+	// Find town root for path resolution and session naming
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
+	_ = session.InitRegistry(townRoot)
 
 	// Step 1: List beads that could have attached molecules.
 	// Slung beads start as status=hooked; polecats may change them to in_progress.
@@ -1649,7 +1664,7 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 		result.Checked++
 
 		// Check if polecat still has a tmux session
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 		hasSession, sessionErr := t.HasSession(sessionName)
 		if sessionErr != nil {
 			result.Errors = append(result.Errors,

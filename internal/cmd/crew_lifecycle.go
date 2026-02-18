@@ -311,11 +311,39 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
 
+	// Validate: --resume with a specific session ID only makes sense for a single
+	// crew member. Resuming N members with the same session ID is always a mistake.
+	if crewResume != "" && crewResume != "last" && len(crewNames) > 1 {
+		return fmt.Errorf("--resume with a specific session ID can only target a single crew member, got %d", len(crewNames))
+	}
+
+	// Guard against pflag NoOptDefVal parsing ambiguity: `--resume ace` (space-separated)
+	// treats "ace" as the session ID, not a crew name. If the value matches a known crew
+	// member, it's almost certainly a misparse. Use --resume=<id> for explicit session IDs.
+	if crewResume != "" && crewResume != "last" {
+		workers, listErr := crewMgr.List()
+		if listErr == nil {
+			for _, w := range workers {
+				if w.Name == crewResume {
+					return fmt.Errorf("%q looks like a crew member name, not a session ID; use --resume=%s if you meant a session ID, or use --resume (no value) to auto-resume the most recent session", crewResume, crewResume)
+				}
+			}
+		}
+	}
+
+	// Warn when --resume last targets multiple crew members, since agents that
+	// have never had a session may fail or behave unexpectedly.
+	if crewResume == "last" && len(crewNames) > 1 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --resume will auto-resume the most recent session for all %d crew members\n", len(crewNames))
+	}
+
 	// Build start options (shared across all crew members)
 	opts := crew.StartOptions{
 		Account:         crewAccount,
 		ClaudeConfigDir: claudeConfigDir,
 		AgentOverride:   crewAgentOverride,
+		ResumeSessionID: crewResume,
+		KillExisting:    crewResume != "", // Resume needs to kill existing session first
 	}
 
 	// Start each crew member in parallel

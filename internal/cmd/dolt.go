@@ -175,18 +175,22 @@ var doltSyncCmd = &cobra.Command{
 
 This command automates the tedious process of pushing each database individually:
   1. Stops the Dolt server (required for CLI push)
-  2. Iterates databases in .dolt-data/
-  3. For each database with a configured remote, runs dolt push
-  4. Reports success/failure per database
-  5. Restarts the Dolt server
+  2. Optionally purges closed ephemeral beads (--gc)
+  3. Iterates databases in .dolt-data/
+  4. For each database with a configured remote, runs dolt push
+  5. Reports success/failure per database
+  6. Restarts the Dolt server
 
 Use --db to sync a single database, --dry-run to preview, or --force for force-push.
+Use --gc to purge closed ephemeral beads (wisps, convoys) before pushing.
 
 Examples:
   gt dolt sync                # Push all databases with remotes
   gt dolt sync --dry-run      # Preview what would be pushed
   gt dolt sync --db gastown   # Push only the gastown database
-  gt dolt sync --force        # Force-push all databases`,
+  gt dolt sync --force        # Force-push all databases
+  gt dolt sync --gc           # Purge closed ephemeral beads, then push
+  gt dolt sync --gc --dry-run # Preview purge + push without changes`,
 	RunE: runDoltSync,
 }
 
@@ -238,6 +242,7 @@ var (
 	doltSyncDry      bool
 	doltSyncForce    bool
 	doltSyncDB       string
+	doltSyncGC       bool
 )
 
 func init() {
@@ -269,6 +274,7 @@ func init() {
 	doltSyncCmd.Flags().BoolVar(&doltSyncDry, "dry-run", false, "Preview what would be pushed without pushing")
 	doltSyncCmd.Flags().BoolVar(&doltSyncForce, "force", false, "Force-push to remotes")
 	doltSyncCmd.Flags().StringVar(&doltSyncDB, "db", "", "Sync a single database instead of all")
+	doltSyncCmd.Flags().BoolVar(&doltSyncGC, "gc", false, "Purge closed ephemeral beads before push (requires bd purge)")
 
 	rootCmd.AddCommand(doltCmd)
 }
@@ -1125,12 +1131,52 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 	// Check server state
 	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
 
+	// GC phase: purge closed ephemeral beads BEFORE stopping the server.
+	// bd purge needs SQL access via the running Dolt server.
+	purgeResults := make(map[string]struct {
+		purged int
+		err    error
+	})
+	if doltSyncGC {
+		if !wasRunning {
+			fmt.Fprintf(os.Stderr, "Warning: --gc requires a running Dolt server, skipping purge\n")
+		} else {
+			databases, listErr := doltserver.ListDatabases(townRoot)
+			if listErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: --gc: could not list databases: %v\n", listErr)
+			} else {
+				for _, db := range databases {
+					if doltSyncDB != "" && db != doltSyncDB {
+						continue
+					}
+					purged, purgeErr := doltserver.PurgeClosedEphemerals(townRoot, db, doltSyncDry)
+					purgeResults[db] = struct {
+						purged int
+						err    error
+					}{purged, purgeErr}
+				}
+			}
+		}
+	}
+
 	if wasRunning {
 		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
 		if err := doltserver.Stop(townRoot); err != nil {
-			return fmt.Errorf("stopping Dolt server: %w", err)
+			// If --gc ran, the server may have exited during the purge window (TOCTOU).
+			// Re-check actual state rather than matching error strings — Stop() can fail
+			// with various race-related errors (not running, process gone, etc.).
+			if doltSyncGC {
+				if stillRunning, _, _ := doltserver.IsRunning(townRoot); !stillRunning {
+					fmt.Printf("%s Dolt server already stopped (exited during GC)\n", style.Bold.Render("~"))
+				} else {
+					return fmt.Errorf("stopping Dolt server: %w", err)
+				}
+			} else {
+				return fmt.Errorf("stopping Dolt server: %w", err)
+			}
+		} else {
+			fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
 		}
-		fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
 
 		// Guarantee restart even if push fails
 		defer func() {
@@ -1161,9 +1207,24 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nSyncing %d database(s)...\n", len(results))
 
-	var pushed, skipped, failed int
+	var pushed, skipped, failed, totalPurged int
 	for _, r := range results {
 		fmt.Println()
+		// Show purge results if --gc was used
+		if doltSyncGC {
+			if pr, ok := purgeResults[r.Database]; ok {
+				if pr.err != nil {
+					fmt.Printf("  %s %s gc: %v\n", style.Bold.Render("!"), r.Database, pr.err)
+				} else if pr.purged > 0 {
+					verb := "purged"
+					if doltSyncDry {
+						verb = "would purge"
+					}
+					fmt.Printf("  %s %s gc: %s %d closed ephemeral bead(s)\n", style.Bold.Render("✓"), r.Database, verb, pr.purged)
+					totalPurged += pr.purged
+				}
+			}
+		}
 		switch {
 		case r.Pushed:
 			fmt.Printf("  %s %s → origin main\n", style.Bold.Render("✓"), r.Database)
@@ -1184,6 +1245,13 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 	}
 
 	summary := fmt.Sprintf("Summary: %d pushed, %d skipped, %d failed", pushed, skipped, failed)
+	if doltSyncGC && totalPurged > 0 {
+		if doltSyncDry {
+			summary += fmt.Sprintf(", %d would be purged", totalPurged)
+		} else {
+			summary += fmt.Sprintf(", %d purged", totalPurged)
+		}
+	}
 	fmt.Printf("\n%s\n", summary)
 
 	if failed > 0 {

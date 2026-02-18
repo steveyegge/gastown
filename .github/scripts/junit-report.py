@@ -15,6 +15,11 @@ import sys
 import xml.etree.ElementTree as ET
 
 def main():
+    # Windows terminals default to cp1252 which can't encode characters like ⚠.
+    # Force UTF-8 output so test failure details with emoji/symbols render correctly.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     if len(sys.argv) < 2:
         print("Usage: junit-report.py <junit.xml> [heading]", file=sys.stderr)
         sys.exit(1)
@@ -67,7 +72,7 @@ def main():
     # 3. $GITHUB_STEP_SUMMARY
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
     if summary_path:
-        with open(summary_path, "a") as out:
+        with open(summary_path, "a", encoding="utf-8", errors="replace") as out:
             out.write(f"## {heading}\n\n")
             out.write("| Package | Test | Error |\n")
             out.write("|---------|------|-------|\n")

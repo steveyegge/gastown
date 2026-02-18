@@ -56,6 +56,18 @@ func (r *PrefixRegistry) PrefixForRig(rigName string) string {
 	return DefaultPrefix
 }
 
+// AllRigs returns a copy of the rig-name → prefix mapping for all registered rigs.
+// Callers can iterate it to find known rig names embedded in session strings.
+func (r *PrefixRegistry) AllRigs() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]string, len(r.rigToPrefix))
+	for rig, prefix := range r.rigToPrefix {
+		out[rig] = prefix
+	}
+	return out
+}
+
 // Prefixes returns all registered prefixes, sorted longest-first for matching.
 func (r *PrefixRegistry) Prefixes() []string {
 	r.mu.RLock()

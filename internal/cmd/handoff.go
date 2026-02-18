@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -53,14 +54,15 @@ The SessionStart hook runs 'gt prime' to restore context.`,
 }
 
 var (
-	handoffWatch   bool
-	handoffDryRun  bool
-	handoffSubject string
-	handoffMessage string
-	handoffCollect bool
-	handoffStdin   bool
-	handoffAuto    bool
-	handoffReason  string
+	handoffWatch      bool
+	handoffDryRun     bool
+	handoffSubject    string
+	handoffMessage    string
+	handoffCollect    bool
+	handoffStdin      bool
+	handoffAuto       bool
+	handoffReason     string
+	handoffNoGitCheck bool
 )
 
 func init() {
@@ -72,6 +74,7 @@ func init() {
 	handoffCmd.Flags().BoolVar(&handoffStdin, "stdin", false, "Read message body from stdin (avoids shell quoting issues)")
 	handoffCmd.Flags().BoolVar(&handoffAuto, "auto", false, "Save state only, no session cycling (for PreCompact hooks)")
 	handoffCmd.Flags().StringVar(&handoffReason, "reason", "", "Reason for handoff (e.g., 'compaction', 'idle')")
+	handoffCmd.Flags().BoolVar(&handoffNoGitCheck, "no-git-check", false, "Skip git workspace cleanliness check")
 	rootCmd.AddCommand(handoffCmd)
 }
 
@@ -90,6 +93,9 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// --auto mode: save state only, no session cycling.
 	// Used by PreCompact hook to preserve state before compaction.
+	// Note: auto-mode exits here, before the git-status warning check below.
+	// This is intentional — auto-handoffs are triggered by hooks and should not
+	// spam warnings. The --no-git-check flag has no effect in auto mode.
 	if handoffAuto {
 		return runHandoffAuto()
 	}
@@ -136,6 +142,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	currentSession, err := getCurrentTmuxSession()
 	if err != nil {
 		return fmt.Errorf("getting session name: %w", err)
+	}
+
+	// Warn if workspace has uncommitted or unpushed work (wa-7967c).
+	// Note: this checks the caller's cwd, not the target session's workdir.
+	// For remote handoff (gt handoff <role>), the warning reflects the caller's
+	// workspace state. Checking the target session's workdir would require tmux
+	// pane introspection and is deferred to a future enhancement.
+	if !handoffNoGitCheck {
+		warnHandoffGitStatus()
 	}
 
 	// Determine target session and check for bead hook
@@ -849,6 +864,35 @@ func sendHandoffMail(subject, message string) (string, error) {
 	}
 
 	return beadID, nil
+}
+
+// warnHandoffGitStatus checks the current workspace for uncommitted or unpushed
+// work and prints a warning if found. Non-blocking — handoff continues regardless.
+// Skips .beads/ changes since those are managed by Dolt and not a concern.
+func warnHandoffGitStatus() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	g := git.NewGit(cwd)
+	if !g.IsRepo() {
+		return
+	}
+	status, err := g.CheckUncommittedWork()
+	if err != nil || status.CleanExcludingBeads() {
+		return
+	}
+	style.PrintWarning("workspace has uncommitted work: %s", status.String())
+	if len(status.ModifiedFiles) > 0 {
+		style.PrintWarning("  modified: %s", strings.Join(status.ModifiedFiles, ", "))
+	}
+	if len(status.UntrackedFiles) > 0 {
+		style.PrintWarning("  untracked: %s", strings.Join(status.UntrackedFiles, ", "))
+	}
+	if status.UnpushedCommits > 0 {
+		style.PrintWarning("  %d unpushed commit(s) — run 'git push' before handoff", status.UnpushedCommits)
+	}
+	fmt.Println("  (use --no-git-check to suppress this warning)")
 }
 
 // looksLikeBeadID checks if a string looks like a bead ID.

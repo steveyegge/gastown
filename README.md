@@ -376,22 +376,24 @@ Gas Town includes built-in formulas for common workflows. See `.beads/formulas/`
 
 ## Dashboard
 
-Gas Town includes a web dashboard for monitoring:
+Gas Town includes a web dashboard for monitoring your workspace. The dashboard
+must be run from inside a Gas Town workspace (HQ) directory.
 
 ```bash
-# Start dashboard
-gt dashboard --port 8080
+# Start dashboard (default port 8080)
+gt dashboard
 
-# Open in browser
-open http://localhost:8080
+# Start on a custom port
+gt dashboard --port 3000
+
+# Start and automatically open in browser
+gt dashboard --open
 ```
 
-Features:
-
-- Real-time agent status
-- Convoy progress tracking
-- Hook state visualization
-- Configuration management
+The dashboard gives you a single-page overview of everything happening in your
+workspace: agents, convoys, hooks, queues, issues, and escalations. It
+auto-refreshes via htmx and includes a command palette for running gt commands
+directly from the browser.
 
 ## Advanced Concepts
 

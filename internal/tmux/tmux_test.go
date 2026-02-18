@@ -1949,3 +1949,43 @@ func TestNewSessionSet_Nil(t *testing.T) {
 		t.Error("Nil-input SessionSet.Has() = true, want false")
 	}
 }
+
+func TestSessionPrefixPattern_AlwaysIncludesGTAndHQ(t *testing.T) {
+	// Even without GT_ROOT, the pattern should include gt and hq as safe defaults.
+	orig := os.Getenv("GT_ROOT")
+	t.Setenv("GT_ROOT", "")
+	defer func() { os.Setenv("GT_ROOT", orig) }()
+
+	pattern := sessionPrefixPattern()
+	if !strings.Contains(pattern, "gt") {
+		t.Errorf("pattern %q missing 'gt'", pattern)
+	}
+	if !strings.Contains(pattern, "hq") {
+		t.Errorf("pattern %q missing 'hq'", pattern)
+	}
+	// Must be a valid grep -Eq anchored alternation
+	if !strings.HasPrefix(pattern, "^(") || !strings.HasSuffix(pattern, ")-") {
+		t.Errorf("pattern %q has unexpected format", pattern)
+	}
+}
+
+func TestSessionPrefixPattern_WithTownRoot(t *testing.T) {
+	// Point at the real town root if available; otherwise skip.
+	townRoot := os.Getenv("GT_ROOT")
+	if townRoot == "" {
+		t.Skip("GT_ROOT not set; skipping live rigs.json test")
+	}
+	pattern := sessionPrefixPattern()
+	// With a real rigs.json, pattern must include at least gt, hq, and
+	// whatever other rigs are registered.
+	if !strings.Contains(pattern, "gt") {
+		t.Errorf("pattern %q missing 'gt'", pattern)
+	}
+	if !strings.Contains(pattern, "hq") {
+		t.Errorf("pattern %q missing 'hq'", pattern)
+	}
+	// Verify it's a sorted alternation.
+	if !strings.HasPrefix(pattern, "^(") || !strings.HasSuffix(pattern, ")-") {
+		t.Errorf("pattern %q has unexpected format", pattern)
+	}
+}

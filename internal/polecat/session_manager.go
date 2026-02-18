@@ -286,6 +286,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		"GT_POLECAT":      polecat,
 		"GT_ROLE":         fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
 		"GT_POLECAT_PATH": workDir,
+		"GT_TOWN_ROOT":    townRoot,
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
@@ -318,6 +319,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		debugSession("SetEnvironment GT_BRANCH", m.tmux.SetEnvironment(sessionID, "GT_BRANCH", polecatGitBranch))
 	}
 	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
+	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
 
 	// Branch-per-polecat: set BD_BRANCH in tmux session environment
 	// This ensures respawned processes also inherit the branch setting.

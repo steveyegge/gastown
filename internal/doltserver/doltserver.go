@@ -1089,6 +1089,15 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, created bool, err
 		if err := serverExecSQL(townRoot, fmt.Sprintf("CREATE DATABASE `%s`", rigName)); err != nil {
 			return true, false, fmt.Errorf("creating database on running server: %w", err)
 		}
+		// Wait for the new database to appear in the server's in-memory catalog.
+		// CREATE DATABASE returns before the catalog is fully updated, so
+		// subsequent USE/query operations can fail with "Unknown database".
+		// Non-fatal: the database was created, so we log a warning and continue
+		// to EnsureMetadata. The retry wrappers (doltSQLWithRetry) will handle
+		// any residual catalog propagation delays in subsequent operations.
+		if err := waitForCatalog(townRoot, rigName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: catalog visibility wait timed out (will retry on use): %v\n", err)
+		}
 	} else {
 		// Server not running: create directory and init manually.
 		// The database will be picked up when the server starts.
@@ -2079,6 +2088,45 @@ func serverExecSQL(townRoot, query string) error {
 	return nil
 }
 
+// waitForCatalog polls the Dolt server until the named database is visible in the
+// in-memory catalog. This bridges the race between CREATE DATABASE returning and the
+// catalog being updated — without this, immediate USE/query operations can fail with
+// "Unknown database". Uses exponential backoff: 100ms, 200ms, 400ms, 800ms, 1.6s.
+// Only retries on catalog-race errors ("Unknown database"); returns immediately for
+// other failures (e.g., server crash, binary missing).
+func waitForCatalog(townRoot, dbName string) error {
+	const maxAttempts = 5
+	const baseBackoff = 100 * time.Millisecond
+	const maxBackoff = 2 * time.Second
+
+	query := fmt.Sprintf("USE %s", dbName)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := serverExecSQL(townRoot, query); err != nil {
+			lastErr = err
+			// Only retry catalog-race errors; fail fast on other errors
+			// (connection refused, binary missing, etc.)
+			if !strings.Contains(err.Error(), "Unknown database") {
+				return fmt.Errorf("database %q probe failed (non-retryable): %w", dbName, err)
+			}
+			if attempt < maxAttempts {
+				backoff := baseBackoff
+				for i := 1; i < attempt; i++ {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+						break
+					}
+				}
+				time.Sleep(backoff)
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("database %q not visible after %d attempts: %w", dbName, maxAttempts, lastErr)
+}
+
 // doltSQL executes a SQL statement against a specific rig database on the Dolt server.
 // Uses the dolt CLI from the data directory (auto-detects running server).
 // The USE prefix selects the database since --use-db is not available on all dolt versions.
@@ -2129,7 +2177,8 @@ func doltSQLWithRetry(townRoot, rigDB, query string) error {
 }
 
 // isDoltRetryableError returns true if the error is a transient Dolt failure worth retrying.
-// Covers manifest lock contention, read-only mode, optimistic lock failures, and timeouts.
+// Covers manifest lock contention, read-only mode, optimistic lock failures, timeouts,
+// and catalog propagation delays after CREATE DATABASE.
 func isDoltRetryableError(err error) bool {
 	if err == nil {
 		return false
@@ -2140,7 +2189,8 @@ func isDoltRetryableError(err error) bool {
 		strings.Contains(msg, "optimistic lock") ||
 		strings.Contains(msg, "serialization failure") ||
 		strings.Contains(msg, "lock wait timeout") ||
-		strings.Contains(msg, "try restarting transaction")
+		strings.Contains(msg, "try restarting transaction") ||
+		strings.Contains(msg, "Unknown database")
 }
 
 // validBranchNameRe matches only safe branch name characters: alphanumeric, hyphen,
