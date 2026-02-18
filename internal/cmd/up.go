@@ -22,7 +22,9 @@ import (
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -77,18 +79,19 @@ func buildUpSummary(services []ServiceStatus) UpSummary {
 	}
 }
 
-func emitUpJSON(w io.Writer, allOK bool, services []ServiceStatus) error {
+func emitUpJSON(w io.Writer, services []ServiceStatus) error {
+	summary := buildUpSummary(services)
 	output := UpOutput{
-		Success:  allOK,
+		Success:  summary.Failed == 0,
 		Services: services,
-		Summary:  buildUpSummary(services),
+		Summary:  summary,
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(output); err != nil {
 		return err
 	}
-	if !allOK {
+	if summary.Failed > 0 {
 		return NewSilentExit(1)
 	}
 	return nil
@@ -132,7 +135,7 @@ var (
 )
 
 func init() {
-	upCmd.Flags().BoolVarP(&upQuiet, "quiet", "q", false, "Only show errors")
+	upCmd.Flags().BoolVarP(&upQuiet, "quiet", "q", false, "Only show errors (ignored with --json)")
 	upCmd.Flags().BoolVar(&upRestore, "restore", false, "Also restore crew (from settings) and polecats (from hooks)")
 	upCmd.Flags().BoolVar(&upJSON, "json", false, "Output as JSON")
 	rootCmd.AddCommand(upCmd)
@@ -236,15 +239,16 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	startupWg.Wait()
 
-	// Print Dolt/daemon/deacon/mayor results
+	// Ensure beads metadata points to the Dolt server
+	if !doltSkipped && doltOK {
+		_, _ = doltserver.EnsureAllMetadata(townRoot)
+	}
+
+	// Collect Dolt status (if configured)
 	if !doltSkipped {
-		printStatus("Dolt", doltOK, doltDetail)
+		services = append(services, ServiceStatus{Name: "Dolt", Type: "dolt", OK: doltOK, Detail: doltDetail})
 		if !doltOK {
 			allOK = false
-		}
-		// Ensure beads metadata points to the Dolt server
-		if doltOK {
-			_, _ = doltserver.EnsureAllMetadata(townRoot)
 		}
 	}
 
@@ -257,11 +261,11 @@ func runUp(cmd *cobra.Command, args []string) error {
 	} else {
 		services = append(services, ServiceStatus{Name: "Daemon", Type: "daemon", OK: true, Detail: "running (PID unknown)"})
 	}
-	services = append(services, ServiceStatus{Name: deaconResult.name, Type: "deacon", OK: deaconResult.ok, Detail: deaconResult.detail})
+	services = append(services, ServiceStatus{Name: deaconResult.name, Type: constants.RoleDeacon, OK: deaconResult.ok, Detail: deaconResult.detail})
 	if !deaconResult.ok {
 		allOK = false
 	}
-	services = append(services, ServiceStatus{Name: mayorResult.name, Type: "mayor", OK: mayorResult.ok, Detail: mayorResult.detail})
+	services = append(services, ServiceStatus{Name: mayorResult.name, Type: constants.RoleMayor, OK: mayorResult.ok, Detail: mayorResult.detail})
 	if !mayorResult.ok {
 		allOK = false
 	}
@@ -272,7 +276,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Collect results in order: all witnesses first, then all refineries
 	for _, rigName := range rigs {
 		if result, ok := witnessResults[rigName]; ok {
-			services = append(services, ServiceStatus{Name: result.name, Type: "witness", Rig: rigName, OK: result.ok, Detail: result.detail})
+			services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleWitness, Rig: rigName, OK: result.ok, Detail: result.detail})
 			if !result.ok {
 				allOK = false
 			}
@@ -280,7 +284,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	for _, rigName := range rigs {
 		if result, ok := refineryResults[rigName]; ok {
-			services = append(services, ServiceStatus{Name: result.name, Type: "refinery", Rig: rigName, OK: result.ok, Detail: result.detail})
+			services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleRefinery, Rig: rigName, OK: result.ok, Detail: result.detail})
 			if !result.ok {
 				allOK = false
 			}
@@ -294,16 +298,16 @@ func runUp(cmd *cobra.Command, args []string) error {
 			for _, name := range crewStarted {
 				services = append(services, ServiceStatus{
 					Name:   fmt.Sprintf("Crew (%s/%s)", rigName, name),
-					Type:   "crew",
+					Type:   constants.RoleCrew,
 					Rig:    rigName,
 					OK:     true,
-					Detail: fmt.Sprintf("gt-%s-crew-%s", rigName, name),
+					Detail: session.CrewSessionName(session.PrefixFor(rigName), name),
 				})
 			}
 			for name, err := range crewErrors {
 				services = append(services, ServiceStatus{
 					Name:   fmt.Sprintf("Crew (%s/%s)", rigName, name),
-					Type:   "crew",
+					Type:   constants.RoleCrew,
 					Rig:    rigName,
 					OK:     false,
 					Detail: err.Error(),
@@ -318,16 +322,16 @@ func runUp(cmd *cobra.Command, args []string) error {
 			for _, name := range polecatsStarted {
 				services = append(services, ServiceStatus{
 					Name:   fmt.Sprintf("Polecat (%s/%s)", rigName, name),
-					Type:   "polecat",
+					Type:   constants.RolePolecat,
 					Rig:    rigName,
 					OK:     true,
-					Detail: fmt.Sprintf("gt-%s-polecat-%s", rigName, name),
+					Detail: session.PolecatSessionName(session.PrefixFor(rigName), name),
 				})
 			}
 			for name, err := range polecatErrors {
 				services = append(services, ServiceStatus{
 					Name:   fmt.Sprintf("Polecat (%s/%s)", rigName, name),
-					Type:   "polecat",
+					Type:   constants.RolePolecat,
 					Rig:    rigName,
 					OK:     false,
 					Detail: err.Error(),
@@ -349,7 +353,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Output JSON or text
 	if upJSON {
-		return emitUpJSON(os.Stdout, allOK, services)
+		return emitUpJSON(os.Stdout, services)
 	}
 
 	// Text output
