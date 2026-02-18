@@ -84,7 +84,6 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 ```json
 {
   "theme": "desert",
-  "max_workers": 5,
   "merge_queue": {
     "enabled": true,
     "run_tests": true,
