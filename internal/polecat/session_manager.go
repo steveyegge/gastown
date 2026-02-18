@@ -331,6 +331,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// This ensures respawned processes also inherit the setting.
 	debugSession("SetEnvironment BD_DOLT_AUTO_COMMIT", m.tmux.SetEnvironment(sessionID, "BD_DOLT_AUTO_COMMIT", "off"))
 
+	// Set GT_AGENT in tmux session environment so IsAgentAlive can detect
+	// the running process. BuildStartupCommand sets it via exec env (process env),
+	// but IsAgentAlive reads from tmux show-environment (session env).
+	if runtimeConfig.ResolvedAgent != "" {
+		debugSession("SetEnvironment GT_AGENT", m.tmux.SetEnvironment(sessionID, "GT_AGENT", runtimeConfig.ResolvedAgent))
+	}
+
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
 		agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
