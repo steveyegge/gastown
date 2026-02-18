@@ -17,6 +17,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
 	assertEnv(t, env, "NODE_OPTIONS", "")                  // cleared to prevent debugger inheritance
+	assertEnv(t, env, "CLAUDECODE", "")                    // cleared to prevent nested session detection
 	assertNotSet(t, env, "GT_RIG")
 }
 
@@ -52,6 +53,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BD_DOLT_AUTO_COMMIT", "off") // gt-5cc2p: prevent manifest contention
 	assertEnv(t, env, "NODE_OPTIONS", "")            // cleared to prevent debugger inheritance
+	assertEnv(t, env, "CLAUDECODE", "")              // cleared to prevent nested session detection
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -505,6 +507,71 @@ func TestSanitizeAgentEnv(t *testing.T) {
 	}
 }
 
+func TestSanitizeAgentEnv_ClearsClaudeCode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		resolvedEnv map[string]string
+		callerEnv   map[string]string
+		wantKey     bool   // expect CLAUDECODE to be present in resolvedEnv
+		wantValue   string // expected value if present
+	}{
+		{
+			name:        "neither map has CLAUDECODE — sets empty",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat"},
+			callerEnv:   map[string]string{"GT_ROLE": "polecat"},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "caller provides CLAUDECODE — preserved",
+			resolvedEnv: map[string]string{"CLAUDECODE": "1"},
+			callerEnv:   map[string]string{"CLAUDECODE": "1"},
+			wantKey:     true,
+			wantValue:   "1",
+		},
+		{
+			name:        "inherited CLAUDECODE not in callerEnv — cleared",
+			resolvedEnv: map[string]string{"CLAUDECODE": "1"},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "empty maps — sets empty",
+			resolvedEnv: map[string]string{},
+			callerEnv:   map[string]string{},
+			wantKey:     true,
+			wantValue:   "",
+		},
+		{
+			name:        "same map without CLAUDECODE — sets empty (lifecycle.go pattern)",
+			resolvedEnv: map[string]string{"GT_ROLE": "polecat", "GT_RIG": "myrig"},
+			callerEnv:   nil, // will be set to same map below
+			wantKey:     true,
+			wantValue:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callerEnv := tt.callerEnv
+			if callerEnv == nil {
+				callerEnv = tt.resolvedEnv
+			}
+			SanitizeAgentEnv(tt.resolvedEnv, callerEnv)
+			val, ok := tt.resolvedEnv["CLAUDECODE"]
+			if ok != tt.wantKey {
+				t.Errorf("CLAUDECODE present=%v, want %v", ok, tt.wantKey)
+			}
+			if ok && val != tt.wantValue {
+				t.Errorf("CLAUDECODE=%q, want %q", val, tt.wantValue)
+			}
+		})
+	}
+}
+
 func TestAgentEnv_IncludesNodeOptionsClearing(t *testing.T) {
 	t.Parallel()
 	// Verify AgentEnv always includes NODE_OPTIONS="" regardless of role.
@@ -531,6 +598,37 @@ func TestAgentEnv_IncludesNodeOptionsClearing(t *testing.T) {
 				TownRoot:  "/town",
 			})
 			assertEnv(t, env, "NODE_OPTIONS", "")
+		})
+	}
+}
+
+func TestAgentEnv_IncludesClaudeCodeClearing(t *testing.T) {
+	t.Parallel()
+	// Verify AgentEnv always includes CLAUDECODE="" regardless of role.
+	// This prevents nested session detection when gt sling is invoked
+	// from within a Claude Code session (issue #1666).
+	roles := []struct {
+		role      string
+		rig       string
+		agentName string
+	}{
+		{"mayor", "", ""},
+		{"deacon", "", ""},
+		{"boot", "", ""},
+		{"witness", "myrig", ""},
+		{"refinery", "myrig", ""},
+		{"polecat", "myrig", "Toast"},
+		{"crew", "myrig", "emma"},
+	}
+	for _, r := range roles {
+		t.Run(r.role, func(t *testing.T) {
+			env := AgentEnv(AgentEnvConfig{
+				Role:      r.role,
+				Rig:       r.rig,
+				AgentName: r.agentName,
+				TownRoot:  "/town",
+			})
+			assertEnv(t, env, "CLAUDECODE", "")
 		})
 	}
 }

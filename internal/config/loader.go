@@ -1790,6 +1790,16 @@ func SanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
 			resolvedEnv["NODE_OPTIONS"] = ""
 		}
 	}
+
+	// CLAUDECODE is set by Claude Code v2.x on startup and triggers nested session
+	// detection. When gt sling is invoked from within a Claude Code session, tmux
+	// inherits this variable into its global environment, causing new polecat sessions
+	// to fail with "Nested sessions share runtime resources and will crash all active
+	// sessions." Clear it unless the caller explicitly provides it.
+	// See: https://github.com/steveyegge/gastown/issues/1666
+	if _, ok := callerEnv["CLAUDECODE"]; !ok {
+		resolvedEnv["CLAUDECODE"] = ""
+	}
 }
 
 // PrependEnv prepends export statements to a command string.

@@ -124,6 +124,13 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// this empty value with intentional settings like --max-old-space-size.
 	env["NODE_OPTIONS"] = ""
 
+	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.
+	// When gt sling is invoked from within a Claude Code session, CLAUDECODE=1
+	// leaks through tmux's global environment into new polecat sessions, causing
+	// Claude Code to refuse to start with a "nested sessions" error.
+	// See: https://github.com/steveyegge/gastown/issues/1666
+	env["CLAUDECODE"] = ""
+
 	return env
 }
 
