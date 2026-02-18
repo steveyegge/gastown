@@ -3967,8 +3967,13 @@ func TestBuildStartupCommand_RoleAgentsSetGTAgent(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
-	// Configure opencode as the polecat agent via role_agents
+	// Configure opencode as the polecat agent via role_agents.
+	// Define it as a custom agent so the test doesn't depend on the
+	// opencode binary being in PATH (ValidateAgentConfig calls exec.LookPath).
 	townSettings := NewTownSettings()
+	townSettings.Agents["opencode"] = &RuntimeConfig{
+		Command: "opencode",
+	}
 	townSettings.RoleAgents = map[string]string{
 		"polecat": "opencode",
 	}
