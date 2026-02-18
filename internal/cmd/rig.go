@@ -514,6 +514,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Local repo: %s\n", rigAddLocalRepo)
 	}
 
+	// Validate push URL if provided
+	rigAddPushURL = strings.TrimSpace(rigAddPushURL)
+	if rigAddPushURL != "" && !isGitRemoteURL(rigAddPushURL) {
+		return fmt.Errorf("invalid push URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddPushURL)
+	}
+
 	startTime := time.Now()
 
 	// Add the rig
@@ -837,10 +843,17 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
 	}
 
+	// Validate --push-url if provided
+	rigAddPushURL = strings.TrimSpace(rigAddPushURL)
+	if rigAddPushURL != "" && !isGitRemoteURL(rigAddPushURL) {
+		return fmt.Errorf("invalid push URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddPushURL)
+	}
+
 	// Register the existing rig
 	result, err := mgr.RegisterRig(rig.RegisterRigOptions{
 		Name:        name,
 		GitURL:      rigAddAdoptURL,
+		PushURL:     rigAddPushURL,
 		BeadsPrefix: rigAddPrefix,
 		Force:       rigAddAdoptForce,
 	})
