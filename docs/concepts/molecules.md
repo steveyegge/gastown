@@ -115,7 +115,7 @@ Next ready in molecule:
 ✓ Closed gt-abc.6: Exit decision
 
 Molecule gt-abc complete! All steps closed.
-Consider: bd mol squash gt-abc --summary '...'
+Consider: gt mol squash --summary '...'
 ```
 
 ## Molecule Commands

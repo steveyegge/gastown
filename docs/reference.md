@@ -282,7 +282,7 @@ gt mol step done <step>      # Complete a molecule step
 
 ```
 1. Complete work steps
-2. bd mol squash (create digest)
+2. gt mol squash (create digest)
 3. Submit to merge queue
 4. gt handoff (request shutdown)
 5. Wait for Witness to kill session
@@ -689,7 +689,7 @@ Deacon, Witness, and Refinery run continuous patrol loops using wisps:
 ```
 1. bd mol wisp mol-<role>-patrol
 2. Execute steps (check workers, process queue, run plugins)
-3. bd mol squash (or burn if routine)
+3. gt mol squash --jitter 10s (or burn if routine)
 4. Loop
 ```
 

@@ -352,7 +352,7 @@ Then squash and decide:
 
 ```bash
 # Squash the wisp to a digest
-bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
+gt mol squash --jitter 10s --summary="Patrol: merged 3 branches, no issues"
 
 # Assess session health: RSS, session age, context, work done
 RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
@@ -408,7 +408,7 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 - `{{ cmd }} hook` - Check for hooked patrol
 - `bd mol wisp <mol>` - Create patrol wisp
 - `bd update <wisp-id> --status=hooked --assignee=...` - Hook the wisp
-- `bd mol squash <id> --summary="..."` - Squash completed patrol
+- `gt mol squash --jitter 10s --summary="..."` - Squash completed patrol
 
 ### Git Operations
 - `git fetch origin` - Fetch all remote branches

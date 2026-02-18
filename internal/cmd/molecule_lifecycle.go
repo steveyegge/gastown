@@ -120,19 +120,18 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 
 // runMoleculeSquash squashes the current molecule into a digest.
 func runMoleculeSquash(cmd *cobra.Command, args []string) error {
-	// Apply jitter before acquiring any Dolt locks.
-	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
-	// cycle end, causing exclusive-lock contention. A random pre-sleep
-	// desynchronizes them without changing semantics.
+	// Parse jitter early so invalid flags fail fast, but defer the sleep
+	// until after workspace/attachment validation so no-op invocations
+	// (wrong directory, no attached molecule) don't wait unnecessarily.
+	var jitterMax time.Duration
 	if moleculeJitter != "" {
-		jitterMax, err := time.ParseDuration(moleculeJitter)
+		var err error
+		jitterMax, err = time.ParseDuration(moleculeJitter)
 		if err != nil {
 			return fmt.Errorf("invalid --jitter duration %q: %w", moleculeJitter, err)
 		}
-		if jitterMax > 0 {
-			//nolint:gosec // weak RNG is fine for jitter
-			sleep := time.Duration(rand.Int63n(int64(jitterMax)))
-			time.Sleep(sleep)
+		if jitterMax < 0 {
+			return fmt.Errorf("--jitter must be non-negative, got %v", jitterMax)
 		}
 	}
 
@@ -203,6 +202,21 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
+	// Apply jitter before acquiring any Dolt locks.
+	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
+	// cycle end, causing exclusive-lock contention. A random pre-sleep
+	// desynchronizes them without changing semantics.
+	if jitterMax > 0 {
+		//nolint:gosec // weak RNG is fine for jitter
+		sleep := time.Duration(rand.Int63n(int64(jitterMax)))
+		fmt.Fprintf(os.Stderr, "jitter: sleeping %v before squash\n", sleep)
+		select {
+		case <-cmd.Context().Done():
+			return cmd.Context().Err()
+		case <-time.After(sleep):
+		}
+	}
+
 	// Recursively close all descendant step issues before squashing
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
 	childrenClosed := closeDescendants(b, moleculeID)
@@ -218,6 +232,10 @@ molecule: %s
 agent: %s
 squashed_at: %s
 `, moleculeID, target, time.Now().UTC().Format(time.RFC3339))
+
+	if moleculeSummary != "" {
+		digestDesc += fmt.Sprintf("\n## Summary\n%s\n", moleculeSummary)
+	}
 
 	if progress != nil {
 		digestDesc += fmt.Sprintf(`
