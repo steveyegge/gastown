@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/gofrs/flock"
+
+	"github.com/steveyegge/gastown/internal/style"
 )
 
 // lockAgentBead acquires an exclusive file lock for a specific agent bead ID.
@@ -203,7 +205,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 		if err := target.SetHookBead(id, fields.HookBead); err != nil {
 			// Non-fatal: warn but continue - description text has the backup
-			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+			style.PrintWarning("could not set hook slot: %v", err)
 		}
 	}
 
@@ -299,7 +301,7 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	if fields != nil && fields.HookBead != "" {
 		if err := target.SetHookBead(id, fields.HookBead); err != nil {
 			// Non-fatal: warn but continue - description text has the backup
-			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+			style.PrintWarning("could not set hook slot: %v", err)
 		}
 	}
 

@@ -46,6 +46,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -1920,7 +1921,7 @@ func RecoverReadOnly(townRoot string) error {
 	// Stop the server
 	if err := Stop(townRoot); err != nil {
 		// Server might already be stopped or unreachable
-		fmt.Printf("Warning: stop returned error (proceeding with restart): %v\n", err)
+		style.PrintWarning("stop returned error (proceeding with restart): %v", err)
 	}
 
 	// Brief pause for cleanup
@@ -2392,12 +2393,12 @@ func doltSQLScriptWithRetry(townRoot, script string) error {
 // Best-effort: logs warning if branch doesn't exist or deletion fails.
 func DeletePolecatBranch(townRoot, rigDB, branchName string) {
 	if err := validateBranchName(branchName); err != nil {
-		fmt.Printf("Warning: invalid Dolt branch name %q: %v\n", branchName, err)
+		style.PrintWarning("invalid Dolt branch name %q: %v", branchName, err)
 		return
 	}
 	query := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", branchName)
 	if err := doltSQL(townRoot, rigDB, query); err != nil {
 		// Non-fatal: branch may not exist (already merged/deleted)
-		fmt.Printf("Warning: could not delete Dolt branch %s: %v\n", branchName, err)
+		style.PrintWarning("could not delete Dolt branch %s: %v", branchName, err)
 	}
 }

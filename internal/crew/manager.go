@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -204,7 +205,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// Clone the rig repo
 	if m.rig.LocalRepo != "" {
 		if err := m.git.CloneWithReference(m.rig.GitURL, crewPath, m.rig.LocalRepo); err != nil {
-			fmt.Printf("Warning: could not clone with local repo reference: %v\n", err)
+			style.PrintWarning("could not clone with local repo reference: %v", err)
 			if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
 				return nil, fmt.Errorf("cloning rig: %w", err)
 			}
@@ -218,7 +219,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// Sync remotes from mayor/rig so crew clone matches the rig's remote config.
 	// This prevents origin pointing to upstream instead of the fork.
 	if err := m.syncRemotesFromRig(crewPath); err != nil {
-		fmt.Printf("Warning: could not sync remotes from rig: %v\n", err)
+		style.PrintWarning("could not sync remotes from rig: %v", err)
 	}
 
 	crewGit := git.NewGit(crewPath)
@@ -247,7 +248,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// Set up shared beads: crew uses rig's shared beads via redirect file
 	if err := m.setupSharedBeads(crewPath); err != nil {
 		// Non-fatal - crew can still work, warn but don't fail
-		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+		style.PrintWarning("could not set up shared beads: %v", err)
 	}
 
 	// Provision PRIME.md with Gas Town context for this worker.
@@ -255,20 +256,20 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// always have GUPP and essential Gas Town context.
 	if err := beads.ProvisionPrimeMDForWorktree(crewPath); err != nil {
 		// Non-fatal - crew can still work via hook, warn but don't fail
-		fmt.Printf("Warning: could not provision PRIME.md: %v\n", err)
+		style.PrintWarning("could not provision PRIME.md: %v", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to crew root.
 	// This allows services to have .env and other config files at their root.
 	if err := rig.CopyOverlay(m.rig.Path, crewPath); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
+		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+		style.PrintWarning("could not update .gitignore: %v", err)
 	}
 
 	// Install runtime settings in the shared crew parent directory.
@@ -278,7 +279,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(crewSettingsDir, crewPath, "crew", addRuntimeConfig); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
+		style.PrintWarning("could not install runtime settings: %v", err)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
@@ -341,12 +342,12 @@ func (m *Manager) syncRemotesFromRig(crewPath string) error {
 		if existErr != nil {
 			// Remote doesn't exist — add it
 			if _, addErr := crewGit.AddRemote(remote, url); addErr != nil {
-				fmt.Printf("Warning: could not add remote %s: %v\n", remote, addErr)
+				style.PrintWarning("could not add remote %s: %v", remote, addErr)
 			}
 		} else if existingURL != url {
 			// Remote exists but URL differs — update it
 			if _, setErr := crewGit.SetRemoteURL(remote, url); setErr != nil {
-				fmt.Printf("Warning: could not update remote %s: %v\n", remote, setErr)
+				style.PrintWarning("could not update remote %s: %v", remote, setErr)
 			}
 		}
 	}

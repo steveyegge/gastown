@@ -284,7 +284,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	spawnTownRoot := filepath.Dir(r.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", spawnTownRoot, r.Path)
 	if err := t.WaitForRuntimeReady(s.SessionName, runtimeConfig, 30*time.Second); err != nil {
-		fmt.Printf("Warning: runtime may not be fully ready: %v\n", err)
+		style.PrintWarning("runtime may not be fully ready: %v", err)
 	}
 
 	// Update agent state with retry logic (gt-94llt7: fail-safe Dolt writes).
@@ -296,13 +296,13 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	polecatGit := git.NewGit(r.Path)
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
 	if err := polecatMgr.SetAgentStateWithRetry(s.PolecatName, "working"); err != nil {
-		fmt.Printf("Warning: could not update agent state after retries: %v\n", err)
+		style.PrintWarning("could not update agent state after retries: %v", err)
 	}
 
 	// Update issue status from hooked to in_progress.
 	// Also warn-only for the same reason: session is already running.
 	if err := polecatMgr.SetState(s.PolecatName, polecat.StateWorking); err != nil {
-		fmt.Printf("Warning: could not update issue status to in_progress: %v\n", err)
+		style.PrintWarning("could not update issue status to in_progress: %v", err)
 	}
 
 	// Get pane — if this fails, the session may have died during startup.

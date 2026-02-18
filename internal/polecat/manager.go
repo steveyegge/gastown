@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -221,7 +222,7 @@ func (m *Manager) CheckDoltHealth() error {
 		lastErr = err
 		if attempt < doltMaxRetries {
 			backoff := doltBackoff(attempt)
-			fmt.Printf("Warning: Dolt health check attempt %d failed, retrying in %v...\n", attempt, backoff)
+			style.PrintWarning("Dolt health check attempt %d failed, retrying in %v...", attempt, backoff)
 			time.Sleep(backoff)
 		}
 	}
@@ -287,7 +288,7 @@ func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFi
 		lastErr = err
 		// If beads directory doesn't exist, this is a test/setup env — warn only
 		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
-			fmt.Printf("Warning: could not create agent bead (beads not configured): %v\n", err)
+			style.PrintWarning("could not create agent bead (beads not configured): %v", err)
 			return nil
 		}
 		// Fail fast on config/init errors — retrying won't help (gt-2ra)
@@ -296,7 +297,7 @@ func (m *Manager) createAgentBeadWithRetry(agentID string, fields *beads.AgentFi
 		}
 		if attempt < doltMaxRetries {
 			backoff := doltBackoff(attempt)
-			fmt.Printf("Warning: agent bead creation attempt %d failed, retrying in %v: %v\n", attempt, backoff, err)
+			style.PrintWarning("agent bead creation attempt %d failed, retrying in %v: %v", attempt, backoff, err)
 			time.Sleep(backoff)
 		}
 	}
@@ -323,7 +324,7 @@ func (m *Manager) SetAgentStateWithRetry(name string, state string) error {
 		}
 		if attempt < doltMaxRetries {
 			backoff := doltBackoff(attempt)
-			fmt.Printf("Warning: SetAgentState attempt %d failed, retrying in %v: %v\n", attempt, backoff, err)
+			style.PrintWarning("SetAgentState attempt %d failed, retrying in %v: %v", attempt, backoff, err)
 			time.Sleep(backoff)
 		}
 	}
@@ -635,7 +636,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// Fetch latest from origin to ensure worktree starts from up-to-date code
 	if err := repoGit.Fetch("origin"); err != nil {
 		// Non-fatal - proceed with potentially stale code
-		fmt.Printf("Warning: could not fetch origin: %v\n", err)
+		style.PrintWarning("could not fetch origin: %v", err)
 	}
 
 	// Determine the start point for the new worktree
@@ -682,7 +683,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	if err := m.setupSharedBeads(clonePath); err != nil {
 		// Non-fatal - polecat can still work with local beads
 		// Log warning but don't fail the spawn
-		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+		style.PrintWarning("could not set up shared beads: %v", err)
 	}
 
 	// Provision PRIME.md with Gas Town context for this worker.
@@ -690,19 +691,19 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// always have GUPP and essential Gas Town context.
 	if err := beads.ProvisionPrimeMDForWorktree(clonePath); err != nil {
 		// Non-fatal - polecat can still work via hook, warn but don't fail
-		fmt.Printf("Warning: could not provision PRIME.md: %v\n", err)
+		style.PrintWarning("could not provision PRIME.md: %v", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	// This allows services to have .env and other config files at their root.
 	if err := rig.CopyOverlay(m.rig.Path, clonePath); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
+		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
-		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+		style.PrintWarning("could not update .gitignore: %v", err)
 	}
 
 	// Install runtime settings in the shared polecats parent directory.
@@ -712,14 +713,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, clonePath, "polecat", runtimeConfig); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
+		style.PrintWarning("could not install runtime settings: %v", err)
 	}
 
 	// Run setup hooks from .runtime/setup-hooks/.
 	// These hooks can inject local git config, copy secrets, or perform other setup tasks.
 	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not run setup hooks: %v\n", err)
+		style.PrintWarning("could not run setup hooks: %v", err)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
@@ -843,7 +844,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 	if err := m.beads.ResetAgentBeadForReuse(agentID, "polecat removed"); err != nil {
 		// Only log if not "not found" - it's ok if it doesn't exist
 		if !errors.Is(err, beads.ErrNotFound) {
-			fmt.Printf("Warning: could not reset agent bead %s: %v\n", agentID, err)
+			style.PrintWarning("could not reset agent bead %s: %v", agentID, err)
 		}
 	}
 
@@ -920,7 +921,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 	// The above removal attempts may fail silently on permissions, symlinks, or busy files
 	if err := verifyRemovalComplete(polecatDir, clonePath); err != nil {
 		// Log warning but don't fail - the polecat is effectively "removed" from Gas Town's perspective
-		fmt.Printf("Warning: incomplete removal for %s: %v\n", name, err)
+		style.PrintWarning("incomplete removal for %s: %v", name, err)
 	}
 
 	// Release name back to pool if it's a pooled name (non-fatal: state file update)
@@ -1146,7 +1147,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	agentID := m.agentBeadID(name)
 	if err := m.beads.ResetAgentBeadForReuse(agentID, "polecat repair"); err != nil {
 		if !errors.Is(err, beads.ErrNotFound) {
-			fmt.Printf("Warning: could not reset old agent bead %s: %v\n", agentID, err)
+			style.PrintWarning("could not reset old agent bead %s: %v", agentID, err)
 		}
 	}
 
@@ -1164,17 +1165,17 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 
 	// Set up shared beads
 	if err := m.setupSharedBeads(newClonePath); err != nil {
-		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+		style.PrintWarning("could not set up shared beads: %v", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
-		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
+		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(newClonePath); err != nil {
-		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+		style.PrintWarning("could not update .gitignore: %v", err)
 	}
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
@@ -1654,7 +1655,7 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 		// Delete orphaned branch
 		if err := repoGit.DeleteBranch(branch, true); err != nil {
 			// Log but continue - non-fatal
-			fmt.Printf("Warning: could not delete branch %s: %v\n", branch, err)
+			style.PrintWarning("could not delete branch %s: %v", branch, err)
 			continue
 		}
 		deleted++

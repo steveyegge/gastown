@@ -310,7 +310,7 @@ func runChannelCreate(cmd *cobra.Command, args []string) error {
 	if channelRetainCount > 0 || channelRetainHours > 0 {
 		if err := b.UpdateChannelRetention(name, channelRetainCount, channelRetainHours); err != nil {
 			// Non-fatal: channel created but retention not set
-			fmt.Printf("Warning: could not set retention: %v\n", err)
+			style.PrintWarning("could not set retention: %v", err)
 		}
 	}
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/style"
 )
 
 // Delegation represents a work delegation relationship between work units.
@@ -77,7 +79,7 @@ func (b *Beads) AddDelegation(d *Delegation) error {
 	// Also add a dependency so child blocks parent (work must complete before parent can close)
 	if err := b.AddDependency(d.Parent, d.Child); err != nil {
 		// Log but don't fail - the delegation is still recorded
-		fmt.Printf("Warning: could not add blocking dependency for delegation: %v\n", err)
+		style.PrintWarning("could not add blocking dependency for delegation: %v", err)
 	}
 
 	return nil
@@ -94,7 +96,7 @@ func (b *Beads) RemoveDelegation(parent, child string) error {
 	// Also remove the blocking dependency
 	if err := b.RemoveDependency(parent, child); err != nil {
 		// Log but don't fail
-		fmt.Printf("Warning: could not remove blocking dependency: %v\n", err)
+		style.PrintWarning("could not remove blocking dependency: %v", err)
 	}
 
 	return nil

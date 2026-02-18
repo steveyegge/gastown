@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -235,14 +236,14 @@ func (m *Manager) Remove(name string) error {
 		repoGit, err := m.findRepoBase(rigPath)
 		if err != nil {
 			// Log but continue with other rigs
-			fmt.Printf("Warning: could not find repo base for %s: %v\n", rigName, err)
+			style.PrintWarning("could not find repo base for %s: %v", rigName, err)
 			continue
 		}
 
 		// Try to remove worktree properly
 		if err := repoGit.WorktreeRemove(worktreePath, true); err != nil {
 			// Log but continue - will remove directory below
-			fmt.Printf("Warning: could not remove worktree %s: %v\n", worktreePath, err)
+			style.PrintWarning("could not remove worktree %s: %v", worktreePath, err)
 		}
 
 		// Prune stale entries
@@ -560,7 +561,7 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 
 		deleted, err := m.cleanupStaleBranchesForRig(repoGit, rigName)
 		if err != nil {
-			fmt.Printf("Warning: cleanup failed for rig %s: %v\n", rigName, err)
+			style.PrintWarning("cleanup failed for rig %s: %v", rigName, err)
 			continue
 		}
 		totalDeleted += deleted
@@ -608,7 +609,7 @@ func (m *Manager) cleanupStaleBranchesForRig(repoGit *git.Git, rigName string) (
 			continue
 		}
 		if err := repoGit.DeleteBranch(branch, true); err != nil {
-			fmt.Printf("Warning: could not delete branch %s: %v\n", branch, err)
+			style.PrintWarning("could not delete branch %s: %v", branch, err)
 			continue
 		}
 		deleted++

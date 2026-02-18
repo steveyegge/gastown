@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/style"
 )
 
 // CopyOverlay copies files from <rigPath>/.runtime/overlay/ to the destination path.
@@ -48,7 +50,7 @@ func CopyOverlay(rigPath, destPath string) error {
 
 		if err := copyFilePreserveMode(srcPath, dstPath); err != nil {
 			// Log warning but continue - don't fail spawn for overlay issues
-			fmt.Printf("Warning: could not copy overlay file %s: %v\n", entry.Name(), err)
+			style.PrintWarning("could not copy overlay file %s: %v", entry.Name(), err)
 			continue
 		}
 	}

@@ -353,7 +353,7 @@ func runDogRemove(cmd *cobra.Command, args []string) error {
 	for _, name := range names {
 		d, err := mgr.Get(name)
 		if err != nil {
-			fmt.Printf("Warning: dog %s not found, skipping\n", name)
+			style.PrintWarning("dog %s not found, skipping", name)
 			continue
 		}
 
@@ -491,7 +491,7 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 		for _, d := range dogs {
 			if d.State == dog.StateIdle {
 				if err := mgr.SetState(d.Name, dog.StateIdle); err != nil {
-					fmt.Printf("Warning: failed to wake %s: %v\n", d.Name, err)
+					style.PrintWarning("failed to wake %s: %v", d.Name, err)
 					continue
 				}
 				woken++
