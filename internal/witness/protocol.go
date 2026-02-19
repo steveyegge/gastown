@@ -67,6 +67,7 @@ type PolecatDonePayload struct {
 	Branch      string
 	Gate        string // Gate ID when Exit is PHASE_COMPLETE
 	ConvoyID    string // Convoy ID when bootstrap passes --convoy flag
+	PushFailed  bool   // True when git push failed (STEP_COMPLETE: blocks next step dispatch)
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -177,6 +178,9 @@ func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
 		} else if strings.HasPrefix(line, "ConvoyID:") {
 			payload.ConvoyID = strings.TrimSpace(strings.TrimPrefix(line, "ConvoyID:"))
+		} else if strings.HasPrefix(line, "PushFailed:") {
+			val := strings.TrimSpace(strings.TrimPrefix(line, "PushFailed:"))
+			payload.PushFailed = val == "true"
 		}
 	}
 

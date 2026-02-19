@@ -545,6 +545,46 @@ func TestParseConvoyReady_InvalidSubject(t *testing.T) {
 	}
 }
 
+func TestParsePolecatDone_WithPushFailed(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: STEP_COMPLETE
+Issue: gt-abc
+Branch: polecat/nux/gt-abc
+PushFailed: true
+Errors: push failed for step handoff: remote rejected`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.Exit != "STEP_COMPLETE" {
+		t.Errorf("Exit = %q, want %q", payload.Exit, "STEP_COMPLETE")
+	}
+	if !payload.PushFailed {
+		t.Error("PushFailed = false, want true")
+	}
+}
+
+func TestParsePolecatDone_NoPushFailed(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: STEP_COMPLETE
+Issue: gt-abc
+Branch: polecat/nux/gt-abc`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.PushFailed {
+		t.Error("PushFailed = true, want false (not present in body)")
+	}
+}
+
 func TestParseConvoyReady_MinimalBody(t *testing.T) {
 	subject := "CONVOY_READY hq-cv-123"
 	body := "Convoy: hq-cv-123"

@@ -161,6 +161,13 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 		return handleStepContinue(cwd, townRoot, readySteps[0], moleculeStepDryRun)
 
 	case "parallel":
+		// Defense-in-depth: distributed workflows must not fan out.
+		// Formula validation rejects this at parse time, but guard here too
+		// in case a distributed molecule reaches this path via a race or bug.
+		if isDistributedMolecule(b, moleculeID) {
+			return fmt.Errorf("distributed workflow %s has fan-out (%d parallel steps ready); "+
+				"distributed execution requires strictly linear steps", moleculeID, len(readySteps))
+		}
 		return handleParallelSteps(cwd, townRoot, workDir, readySteps, moleculeStepDryRun)
 
 	case "done":

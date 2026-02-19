@@ -806,14 +806,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("Next step will be dispatched to a fresh polecat."))
 
-		// Push branch to remote so next polecat can base on it
+		// Push branch to remote so next polecat can base on it.
+		// If push fails, set pushFailed so Witness skips STEP_READY dispatch —
+		// dispatching to a non-existent remote branch would strand the next polecat.
 		if cwdAvailable {
 			if err := pushBranchToOrigin(g, branch, townRoot, rigName); err != nil {
-				// Record error but continue - branch may already be pushed
+				pushFailed = true
 				errMsg := fmt.Sprintf("push failed for step handoff: %v", err)
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s", errMsg)
 			} else {
+				doneCleanupStatus = "clean"
 				fmt.Printf("%s Branch pushed to origin (for next step)\n", style.Bold.Render("✓"))
 			}
 		}
@@ -895,6 +898,9 @@ afterDoltMerge:
 		// so Witness can auto-dispatch all ready phase beads after bootstrap exits.
 		bodyLines = append(bodyLines, fmt.Sprintf("ConvoyID: %s", doneConvoy))
 	}
+	if pushFailed {
+		bodyLines = append(bodyLines, "PushFailed: true")
+	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
 	}
@@ -954,11 +960,11 @@ afterDoltMerge:
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
 		selfCleanAttempted = true
 
-		// Step 1: Nuke the worktree (only for COMPLETED with successful push)
+		// Step 1: Nuke the worktree (only for COMPLETED/STEP_COMPLETE with successful push)
 		// If push failed, preserve the worktree so Witness/Refinery can still
 		// access the branch for recovery. selfNukePolecat also checks
 		// branch-on-remote, so this is defense-in-depth.
-		if exitType == ExitCompleted && !pushFailed {
+		if (exitType == ExitCompleted || exitType == ExitStepComplete) && !pushFailed {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)

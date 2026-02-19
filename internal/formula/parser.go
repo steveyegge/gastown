@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -155,6 +156,15 @@ func (f *Formula) validateWorkflow() error {
 		return err
 	}
 
+	// Distributed workflows must be strictly linear (no fan-out).
+	// Fan-out requires parallel execution which contradicts the distributed
+	// model of one-step-per-polecat sequential handoff.
+	if f.Execution == "distributed" {
+		if err := f.checkDistributedNoFanOut(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -219,6 +229,29 @@ func (f *Formula) checkCycles() error {
 		deps[step.ID] = step.Needs
 	}
 	return checkDependencyCycles(deps)
+}
+
+// checkDistributedNoFanOut verifies that a distributed workflow has no fan-out
+// (parallel steps). Two steps that share the same needs-signature would become
+// ready simultaneously, requiring parallel dispatch which distributed mode
+// doesn't support.
+func (f *Formula) checkDistributedNoFanOut() error {
+	// Build canonical needs-signature for each step: sorted needs joined by comma.
+	// Steps with identical signatures become ready at the same time (fan-out).
+	seen := make(map[string]string) // signature -> first step ID with that signature
+	for _, step := range f.Steps {
+		needs := make([]string, len(step.Needs))
+		copy(needs, step.Needs)
+		sort.Strings(needs)
+		sig := strings.Join(needs, ",")
+
+		if existing, ok := seen[sig]; ok {
+			return fmt.Errorf("distributed workflow has fan-out: steps %q and %q share the same dependencies (%s); fan-out is not supported for distributed execution",
+				existing, step.ID, sig)
+		}
+		seen[sig] = step.ID
+	}
+	return nil
 }
 
 // checkExpansionCycles detects circular dependencies in expansion templates.

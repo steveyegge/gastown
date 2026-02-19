@@ -82,6 +82,15 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 	// The polecat has pushed its branch and written handoff metadata to the molecule bead.
 	// We read the handoff, send STEP_READY to Mayor for dispatch, and nuke the polecat.
 	if payload.Exit == "STEP_COMPLETE" {
+		// If push failed, the branch doesn't exist on remote — do NOT send STEP_READY
+		// (the next polecat would be dispatched to a non-existent branch) and do NOT
+		// auto-nuke (the worktree still has the only copy of the work).
+		if payload.PushFailed {
+			result.Handled = true
+			result.Action = fmt.Sprintf("step-complete for %s but push failed — skipping STEP_READY dispatch and auto-nuke (branch not on remote)", payload.PolecatName)
+			return result
+		}
+
 		// Read handoff metadata from molecule bead (via the base bead's attached_molecule)
 		handoff := readStepHandoff(workDir, payload.IssueID)
 

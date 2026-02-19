@@ -466,7 +466,7 @@ func TestClearDoneIntentLabel(t *testing.T) {
 // own branch-on-remote check).
 func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
 	// This tests the boolean guard logic inline in runDone:
-	// if exitType == ExitCompleted && !pushFailed { ... nuke ... }
+	// if (exitType == ExitCompleted || exitType == ExitStepComplete) && !pushFailed { ... nuke ... }
 	tests := []struct {
 		name       string
 		exitType   string
@@ -475,6 +475,8 @@ func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
 	}{
 		{"completed+push-ok", ExitCompleted, false, true},
 		{"completed+push-failed", ExitCompleted, true, false},
+		{"step_complete+push-ok", ExitStepComplete, false, true},
+		{"step_complete+push-failed", ExitStepComplete, true, false},
 		{"escalated+push-ok", ExitEscalated, false, false},
 		{"deferred+push-ok", ExitDeferred, false, false},
 		{"escalated+push-failed", ExitEscalated, true, false},
@@ -483,7 +485,7 @@ func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Replicate the guard condition from runDone
-			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed
+			shouldNuke := (tt.exitType == ExitCompleted || tt.exitType == ExitStepComplete) && !tt.pushFailed
 			if shouldNuke != tt.wantNuke {
 				t.Errorf("shouldNuke = %v, want %v", shouldNuke, tt.wantNuke)
 			}

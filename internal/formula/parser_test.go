@@ -1,6 +1,7 @@
 package formula
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -351,5 +352,119 @@ title = "Leg 3"
 	ready = f.ReadySteps(map[string]bool{"leg1": true})
 	if len(ready) != 2 {
 		t.Errorf("ReadySteps({leg1}) = %v, want 2 legs", ready)
+	}
+}
+
+func TestDistributed_LinearChainValid(t *testing.T) {
+	data := []byte(`
+formula = "dist-linear"
+type = "workflow"
+execution = "distributed"
+version = 1
+
+[[steps]]
+id = "step1"
+title = "Step 1"
+
+[[steps]]
+id = "step2"
+title = "Step 2"
+needs = ["step1"]
+
+[[steps]]
+id = "step3"
+title = "Step 3"
+needs = ["step2"]
+`)
+
+	f, err := Parse(data)
+	if err != nil {
+		t.Fatalf("linear distributed chain should be valid, got: %v", err)
+	}
+	if f.Execution != "distributed" {
+		t.Errorf("Execution = %q, want %q", f.Execution, "distributed")
+	}
+}
+
+func TestDistributed_FanOutSameNeedsInvalid(t *testing.T) {
+	data := []byte(`
+formula = "dist-fanout"
+type = "workflow"
+execution = "distributed"
+version = 1
+
+[[steps]]
+id = "step1"
+title = "Step 1"
+
+[[steps]]
+id = "step2a"
+title = "Step 2a"
+needs = ["step1"]
+
+[[steps]]
+id = "step2b"
+title = "Step 2b"
+needs = ["step1"]
+`)
+
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("distributed workflow with fan-out (same needs) should be rejected")
+	}
+	if !strings.Contains(err.Error(), "fan-out") {
+		t.Errorf("error should mention fan-out, got: %v", err)
+	}
+}
+
+func TestDistributed_MultipleRootsInvalid(t *testing.T) {
+	data := []byte(`
+formula = "dist-roots"
+type = "workflow"
+execution = "distributed"
+version = 1
+
+[[steps]]
+id = "step1"
+title = "Step 1"
+
+[[steps]]
+id = "step2"
+title = "Step 2"
+`)
+
+	_, err := Parse(data)
+	if err == nil {
+		t.Fatal("distributed workflow with multiple roots (no needs) should be rejected")
+	}
+	if !strings.Contains(err.Error(), "fan-out") {
+		t.Errorf("error should mention fan-out, got: %v", err)
+	}
+}
+
+func TestLocal_FanOutValid(t *testing.T) {
+	data := []byte(`
+formula = "local-fanout"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "step1"
+title = "Step 1"
+
+[[steps]]
+id = "step2a"
+title = "Step 2a"
+needs = ["step1"]
+
+[[steps]]
+id = "step2b"
+title = "Step 2b"
+needs = ["step1"]
+`)
+
+	_, err := Parse(data)
+	if err != nil {
+		t.Fatalf("local workflow with fan-out should be valid, got: %v", err)
 	}
 }
