@@ -354,6 +354,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// validate early to avoid spawning a polecat that will be immediately orphaned
 	// if the check fails. The auto-apply path (formulaName set after resolveTarget)
 	// handles its own check with rollback protection below.
+	//
+	// Trade-off: with --force, this burns molecules before resolveTarget(). If
+	// target resolution then fails, molecule state is irreversibly destroyed.
+	// This is accepted --force semantics — the alternative (defer burn until after
+	// spawn) re-introduces the orphaned polecat problem this PR fixes, since a
+	// post-spawn burn failure would leave both a spawned polecat AND stale molecules.
 	preflightFormulaName := formulaName
 	if formulaName != "" {
 		if err := ensureNoExistingMolecules(info, beadID, townRoot, force, slingDryRun); err != nil {
@@ -508,6 +514,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if err := ensureNoExistingMolecules(info, beadID, townRoot, force, slingDryRun); err != nil {
 			if newPolecatInfo != nil {
 				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+				if force && originalStatus == "pinned" {
+					restorePinnedBead(townRoot, beadID, originalAssignee)
+				}
 			}
 			return err
 		}
@@ -590,6 +599,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
 		if newPolecatInfo != nil {
 			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+			if force && originalStatus == "pinned" {
+				restorePinnedBead(townRoot, beadID, originalAssignee)
+			}
 		}
 		return err
 	}

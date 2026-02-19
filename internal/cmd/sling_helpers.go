@@ -126,7 +126,10 @@ func ensureNoExistingMolecules(info *beadInfo, beadID, townRoot string, force, d
 	}
 	fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
 		style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-	return burnExistingMolecules(existingMolecules, beadID, townRoot)
+	if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
+		return fmt.Errorf("burning stale molecules: %w", err)
+	}
+	return nil
 }
 
 // burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
