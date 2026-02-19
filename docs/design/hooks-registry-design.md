@@ -171,19 +171,63 @@ for Go-based hooks. The registry supports both.
 
 ## Recommended Execution Order
 
-1. **Bootstrap base/overrides** - `gt hooks init` to establish the base+override
-   system from current reality. Verify with `gt hooks diff` showing no changes.
+### Phase 1: Bootstrap ✅ (2026-02-18 Complete)
+- ✅ **Bootstrap base/overrides** - Ran `gt hooks init` to extract base config from 14 settings files
+- ✅ **Sync verification** - `gt hooks sync` confirmed all 14 targets unchanged (consistent)
+- **Pending:** Add missing hooks to registry.toml
 
-2. **Add missing hooks to registry** - Update `registry.toml` with the 4 missing
-   hooks (bd-init-guard, mol-patrol-guard, tmux-clear, cwd-validation).
+### Phase 2: Add Missing Hooks (Next)
+Update `registry.toml` with these 4 missing hooks from Gap 2:
 
-3. **Implement `gt tap` guards** - Move inline script hooks to Go commands:
-   `gt tap guard dangerous-command`, `gt tap guard bd-init`, `gt tap guard mol-patrol`.
+```toml
+[[hooks]]
+name = "bd-init-guard"
+event = "PreToolUse"
+matcher = "Bash(bd init*)"
+command = "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard bd-init"
+roles = ["crew", "witness", "refinery"]
+scope = "committed"
+enabled = true
 
-4. **Add convenience commands** - `gt tap disable/enable` as thin wrappers around
-   the override mechanism.
+[[hooks]]
+name = "mol-patrol-guard"
+event = "PreToolUse"
+matcher = "Bash(*bd mol pour*patrol* OR *bd mol pour*witness* OR *bd mol pour*deacon*)"
+command = "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard mol-patrol"
+roles = ["witness", "refinery", "crew"]
+scope = "committed"
+enabled = true
 
-5. **Integration** - Ensure `gt rig add` and `gt doctor` use the hooks system.
+[[hooks]]
+name = "tmux-clear-history"
+event = "SessionStart"
+matcher = ""
+command = "history -c"
+roles = ["crew"]
+scope = "local"
+enabled = false
+
+[[hooks]]
+name = "cwd-validation"
+event = "SessionStart"
+matcher = ""
+command = "test -d .beads || exit 0"
+roles = ["crew", "witness", "refinery"]
+scope = "committed"
+enabled = true
+```
+
+### Phase 3: Implement `gt tap` Guards
+Move inline script hooks to Go commands:
+- `gt tap guard dangerous-command` - blocks rm -rf, force push
+- `gt tap guard bd-init` - blocks bd init inside .beads/
+- `gt tap guard mol-patrol` - blocks persistent patrol molecules
+
+### Phase 4: Add Convenience Commands
+`gt tap disable/enable` as thin wrappers around the override mechanism.
+
+### Phase 5: Integration
+Ensure `gt rig add` and `gt doctor` use the hooks system.
 
 ## Decision: Registry as Source of Truth vs Catalog
 
