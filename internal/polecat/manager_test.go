@@ -1390,3 +1390,154 @@ func TestCleanupOrphanBranches(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyRemovalComplete_AlreadyGone(t *testing.T) {
+	// When both directories don't exist, verifyRemovalComplete should return nil.
+	tmpDir := t.TempDir()
+	polecatDir := filepath.Join(tmpDir, "polecats", "rex")
+	clonePath := filepath.Join(polecatDir, "myrig")
+
+	// Neither directory exists - should be a no-op success.
+	err := verifyRemovalComplete(polecatDir, clonePath)
+	if err != nil {
+		t.Errorf("expected nil when dirs already gone, got: %v", err)
+	}
+}
+
+func TestVerifyRemovalComplete_RemovesLeftoverDirs(t *testing.T) {
+	// When directories still exist after initial removal, verifyRemovalComplete
+	// should attempt aggressive removal and succeed.
+	tmpDir := t.TempDir()
+	polecatDir := filepath.Join(tmpDir, "polecats", "rex")
+	clonePath := filepath.Join(polecatDir, "myrig")
+
+	// Create both directories with a file inside.
+	if err := os.MkdirAll(clonePath, 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(clonePath, "file.txt"), []byte("data"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// verifyRemovalComplete should remove the leftover dirs.
+	err := verifyRemovalComplete(polecatDir, clonePath)
+	if err != nil {
+		t.Errorf("expected removal to succeed, got: %v", err)
+	}
+
+	// Verify they're actually gone.
+	if _, statErr := os.Lstat(clonePath); statErr == nil {
+		t.Error("clonePath still exists after verifyRemovalComplete")
+	}
+	if _, statErr := os.Lstat(polecatDir); statErr == nil {
+		t.Error("polecatDir still exists after verifyRemovalComplete")
+	}
+}
+
+func TestVerifyRemovalComplete_SamePathNotDoubleChecked(t *testing.T) {
+	// When polecatDir == clonePath (old structure), should only check once.
+	tmpDir := t.TempDir()
+	sharedPath := filepath.Join(tmpDir, "polecats", "rex")
+
+	if err := os.MkdirAll(sharedPath, 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := verifyRemovalComplete(sharedPath, sharedPath)
+	if err != nil {
+		t.Errorf("expected removal to succeed for same-path case, got: %v", err)
+	}
+
+	if _, statErr := os.Lstat(sharedPath); statErr == nil {
+		t.Error("shared path still exists after verifyRemovalComplete")
+	}
+}
+
+func TestVerifyRemovalComplete_SymlinkIsRemovedNotFollowed(t *testing.T) {
+	// verifyRemovalComplete uses Lstat so it checks the symlink entry itself,
+	// not the target. If a symlink pointing outside the worktree is left behind,
+	// it should still be cleaned up.
+	tmpDir := t.TempDir()
+	polecatDir := filepath.Join(tmpDir, "polecats", "rex")
+	clonePath := filepath.Join(polecatDir, "myrig")
+
+	// Create polecatDir as a directory, clonePath as a symlink to an external dir.
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatalf("setup polecatDir: %v", err)
+	}
+	externalTarget := t.TempDir() // a real dir outside the worktree
+	if err := os.Symlink(externalTarget, clonePath); err != nil {
+		t.Fatalf("setup symlink: %v", err)
+	}
+
+	err := verifyRemovalComplete(polecatDir, clonePath)
+	if err != nil {
+		t.Errorf("expected symlink cleanup to succeed, got: %v", err)
+	}
+
+	// The symlink entry should be gone.
+	if _, statErr := os.Lstat(clonePath); statErr == nil {
+		t.Error("symlink still exists after verifyRemovalComplete")
+	}
+	// The symlink target (external dir) must NOT have been deleted.
+	if _, statErr := os.Stat(externalTarget); statErr != nil {
+		t.Errorf("external target was unexpectedly deleted: %v", statErr)
+	}
+}
+
+func TestForceRemoveDir_NormalDir(t *testing.T) {
+	// A normal directory with files should be removed successfully.
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target")
+	if err := os.MkdirAll(filepath.Join(target, "sub"), 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "sub", "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := forceRemoveDir(target); err != nil {
+		t.Errorf("forceRemoveDir failed: %v", err)
+	}
+	if _, statErr := os.Lstat(target); statErr == nil {
+		t.Error("directory still exists after forceRemoveDir")
+	}
+}
+
+func TestForceRemoveDir_ReadOnlyFiles(t *testing.T) {
+	// Files with read-only permissions should still be removed via the chmod retry path.
+	if os.Getuid() == 0 {
+		t.Skip("root user bypasses permission checks")
+	}
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	readOnlyFile := filepath.Join(target, "readonly.txt")
+	if err := os.WriteFile(readOnlyFile, []byte("data"), 0444); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// Make the directory itself read-only to require chmod for removal.
+	if err := os.Chmod(target, 0555); err != nil {
+		t.Fatalf("setup chmod: %v", err)
+	}
+
+	if err := forceRemoveDir(target); err != nil {
+		t.Errorf("forceRemoveDir failed on read-only dir: %v", err)
+	}
+	if _, statErr := os.Lstat(target); statErr == nil {
+		t.Error("read-only directory still exists after forceRemoveDir")
+	}
+}
+
+func TestForceRemoveDir_NonExistentDir(t *testing.T) {
+	// Removing a non-existent directory should succeed (os.RemoveAll is a no-op).
+	tmpDir := t.TempDir()
+	missing := filepath.Join(tmpDir, "does-not-exist")
+
+	if err := forceRemoveDir(missing); err != nil {
+		t.Errorf("forceRemoveDir on missing dir should succeed, got: %v", err)
+	}
+}
