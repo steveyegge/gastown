@@ -177,7 +177,7 @@ func TestEnsurePersonaBeadExists_FindsExistingBead(t *testing.T) {
 
 	content := "# Rust Expert\n\nYou are Rust.\n"
 	hash := beads.PersonaBeadID("test", "rig", "rust-expert") // just a unique string for hash
-	id, _, err := beads.EnsurePersonaBead(b, "test", "rig", "rust-expert", content, hash)
+	id, _, err := beads.EnsurePersonaBead(b, "test", "rig", "rust-expert", content, hash, false)
 	if err != nil {
 		t.Fatalf("EnsurePersonaBead: %v", err)
 	}

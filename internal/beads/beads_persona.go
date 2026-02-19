@@ -25,8 +25,9 @@ func PersonaBeadID(prefix, rig, name string) string {
 
 // EnsurePersonaBead creates or updates a persona bead from file content.
 // Creates with a deterministic ID if missing; updates description+content if
-// hash has changed. Returns (beadID, updated bool, error).
-func EnsurePersonaBead(b *Beads, prefix, rig, name, content, hash string) (string, bool, error) {
+// hash has changed or force is true. The real content hash is always stored.
+// Returns (beadID, updated bool, error).
+func EnsurePersonaBead(b *Beads, prefix, rig, name, content, hash string, force bool) (string, bool, error) {
 	id := PersonaBeadID(prefix, rig, name)
 
 	source := "rig"
@@ -34,11 +35,17 @@ func EnsurePersonaBead(b *Beads, prefix, rig, name, content, hash string) (strin
 		source = "town"
 	}
 
+	// Always store the real content hash in the bead description so subsequent
+	// regular syncs are idempotent.
 	desc := formatPersonaDescription(name, hash, source, content)
 
 	existing, err := b.Show(id)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return "", false, fmt.Errorf("checking persona bead %s: %w", id, err)
+	if err != nil {
+		// bd show exits with code 1 when a bead ID is not found, rather than
+		// returning a 0-exit empty JSON array that would produce ErrNotFound.
+		// Treat any Show error as "not found" — CreateWithID will surface any
+		// genuine database failures.
+		existing = nil
 	}
 
 	if existing == nil {
@@ -54,13 +61,13 @@ func EnsurePersonaBead(b *Beads, prefix, rig, name, content, hash string) (strin
 		return id, true, nil
 	}
 
-	// Check if hash has changed
+	// Check if hash has changed (skip when force=true)
 	existingHash := parsePersonaHash(existing.Description)
-	if existingHash == hash {
+	if !force && existingHash == hash {
 		return id, false, nil
 	}
 
-	// Hash changed — update
+	// Hash changed (or force) — update
 	if updateErr := b.Update(id, UpdateOptions{Description: &desc}); updateErr != nil {
 		return "", false, fmt.Errorf("updating persona bead %s: %w", id, updateErr)
 	}

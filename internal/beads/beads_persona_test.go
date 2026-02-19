@@ -99,7 +99,7 @@ func TestEnsurePersonaBead_Creates(t *testing.T) {
 	content := "# Rust Expert\n\nYou are a Rust expert.\n"
 	hash := "deadbeef"
 
-	id, updated, err := EnsurePersonaBead(b, "test", "myrig", "rust-expert", content, hash)
+	id, updated, err := EnsurePersonaBead(b, "test", "myrig", "rust-expert", content, hash, false)
 	if err != nil {
 		t.Fatalf("EnsurePersonaBead: %v", err)
 	}
@@ -131,12 +131,12 @@ func TestEnsurePersonaBead_SkipsOnSameHash(t *testing.T) {
 	hash := "samehash"
 
 	// First create
-	if _, _, err := EnsurePersonaBead(b, "test", "rig", "alice", content, hash); err != nil {
+	if _, _, err := EnsurePersonaBead(b, "test", "rig", "alice", content, hash, false); err != nil {
 		t.Fatalf("first EnsurePersonaBead: %v", err)
 	}
 
 	// Second call with same hash — should skip
-	_, updated, err := EnsurePersonaBead(b, "test", "rig", "alice", content, hash)
+	_, updated, err := EnsurePersonaBead(b, "test", "rig", "alice", content, hash, false)
 	if err != nil {
 		t.Fatalf("second EnsurePersonaBead: %v", err)
 	}
@@ -153,13 +153,13 @@ func TestEnsurePersonaBead_UpdatesOnHashChange(t *testing.T) {
 	}
 
 	// Create with initial content
-	if _, _, err := EnsurePersonaBead(b, "test", "rig", "alice", "old content", "oldhash"); err != nil {
+	if _, _, err := EnsurePersonaBead(b, "test", "rig", "alice", "old content", "oldhash", false); err != nil {
 		t.Fatalf("initial EnsurePersonaBead: %v", err)
 	}
 
 	// Update with new content
 	newContent := "# Alice v2\n\nUpdated content.\n"
-	id, updated, err := EnsurePersonaBead(b, "test", "rig", "alice", newContent, "newhash")
+	id, updated, err := EnsurePersonaBead(b, "test", "rig", "alice", newContent, "newhash", false)
 	if err != nil {
 		t.Fatalf("update EnsurePersonaBead: %v", err)
 	}

@@ -30,11 +30,7 @@ func SyncPersonasFromFiles(
 			return nil, fmt.Errorf("reading rig persona %s: %w", name, readErr)
 		}
 		hash := ContentHash(content)
-		effectiveHash := hash
-		if forceUpdate {
-			effectiveHash = "" // empty hash always triggers update
-		}
-		_, changed, syncErr := beads.EnsurePersonaBead(b, prefix, rig, name, content, effectiveHash)
+		_, changed, syncErr := beads.EnsurePersonaBead(b, prefix, rig, name, content, hash, forceUpdate)
 		if syncErr != nil {
 			return nil, fmt.Errorf("syncing rig persona %s: %w", name, syncErr)
 		}
@@ -62,12 +58,8 @@ func SyncPersonasFromFiles(
 			return nil, fmt.Errorf("reading town persona %s: %w", name, readErr)
 		}
 		hash := ContentHash(content)
-		effectiveHash := hash
-		if forceUpdate {
-			effectiveHash = "" // empty hash always triggers update
-		}
 		// Town-level: rig="" in PersonaBeadID
-		_, changed, syncErr := beads.EnsurePersonaBead(b, prefix, "", name, content, effectiveHash)
+		_, changed, syncErr := beads.EnsurePersonaBead(b, prefix, "", name, content, hash, forceUpdate)
 		if syncErr != nil {
 			return nil, fmt.Errorf("syncing town persona %s: %w", name, syncErr)
 		}
@@ -112,7 +104,7 @@ func EnsurePersonaBeadExists(
 	// 3. Try rig-level .personas/<name>.md
 	if content, _, err := ResolvePersonaFile(townRoot, rigPath, name); err == nil && content != "" {
 		hash := ContentHash(content)
-		id, _, syncErr := beads.EnsurePersonaBead(b, prefix, rig, name, content, hash)
+		id, _, syncErr := beads.EnsurePersonaBead(b, prefix, rig, name, content, hash, false)
 		if syncErr != nil {
 			return "", fmt.Errorf("bootstrapping persona %q from rig file: %w", name, syncErr)
 		}
@@ -123,7 +115,7 @@ func EnsurePersonaBeadExists(
 	townFile := filepath.Join(townRoot, ".personas", name+".md")
 	if townContent, err := readFileIfExists(townFile); err == nil && townContent != "" {
 		hash := ContentHash(townContent)
-		id, _, syncErr := beads.EnsurePersonaBead(b, prefix, "", name, townContent, hash)
+		id, _, syncErr := beads.EnsurePersonaBead(b, prefix, "", name, townContent, hash, false)
 		if syncErr != nil {
 			return "", fmt.Errorf("bootstrapping persona %q from town file: %w", name, syncErr)
 		}
