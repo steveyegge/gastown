@@ -936,8 +936,11 @@ func resolveAgentConfigInternal(townRoot, rigPath string) *RuntimeConfig {
 
 	// Backwards compatibility: if Runtime is set directly, use it
 	if rigSettings != nil && rigSettings.Runtime != nil {
-		rc := rigSettings.Runtime
-		return fillRuntimeDefaults(rc)
+		rc := fillRuntimeDefaults(rigSettings.Runtime)
+		if rc.ResolvedAgent == "" {
+			rc.ResolvedAgent = inferAgentName(rc)
+		}
+		return rc
 	}
 
 	// Load town settings for agent lookup
@@ -988,8 +991,11 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 
 	// Backwards compatibility: if Runtime is set directly, use it (but still report agentOverride if present)
 	if rigSettings != nil && rigSettings.Runtime != nil && agentOverride == "" {
-		rc := rigSettings.Runtime
-		return fillRuntimeDefaults(rc), "", nil
+		rc := fillRuntimeDefaults(rigSettings.Runtime)
+		if rc.ResolvedAgent == "" {
+			rc.ResolvedAgent = inferAgentName(rc)
+		}
+		return rc, "", nil
 	}
 
 	// Load town settings for agent lookup
@@ -1439,6 +1445,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Command:       rc.Command,
 		InitialPrompt: rc.InitialPrompt,
 		PromptMode:    rc.PromptMode,
+		ResolvedAgent: rc.ResolvedAgent,
 	}
 
 	// Deep copy Args slice to avoid sharing backing array
@@ -1543,6 +1550,19 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	}
 
 	return result
+}
+
+// inferAgentName determines the agent name from a legacy RuntimeConfig.
+// It mirrors the preset resolution logic in fillRuntimeDefaults:
+// use Provider if set, otherwise Command, falling back to "claude".
+func inferAgentName(rc *RuntimeConfig) string {
+	if rc.Provider != "" {
+		return rc.Provider
+	}
+	if rc.Command != "" {
+		return rc.Command
+	}
+	return "claude"
 }
 
 // GetRuntimeCommand is a convenience function that returns the full command string

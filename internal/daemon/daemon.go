@@ -1502,6 +1502,15 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
 	}
 
+	// Set GT_AGENT in tmux session env so tools querying tmux environment
+	// (e.g., witness patrol) can detect non-Claude agents.
+	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
+	// isn't visible to tmux show-environment.
+	rc := config.ResolveAgentConfig(d.config.TownRoot, rigPath)
+	if rc.ResolvedAgent != "" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
+	}
+
 	// Apply theme
 	theme := tmux.AssignTheme(rigName)
 	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")

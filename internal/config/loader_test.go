@@ -2326,6 +2326,7 @@ func TestFillRuntimeDefaults(t *testing.T) {
 			Env:           map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
 			InitialPrompt: "test prompt",
 			PromptMode:    "none",
+			ResolvedAgent: "opencode",
 			Session: &RuntimeSessionConfig{
 				SessionIDEnv: "OPENCODE_SESSION_ID",
 			},
@@ -2371,6 +2372,9 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 		if result.Instructions == nil || result.Instructions.File != input.Instructions.File {
 			t.Errorf("Instructions: got %+v, want %+v", result.Instructions, input.Instructions)
+		}
+		if result.ResolvedAgent != input.ResolvedAgent {
+			t.Errorf("ResolvedAgent: got %q, want %q", result.ResolvedAgent, input.ResolvedAgent)
 		}
 	})
 
