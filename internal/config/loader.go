@@ -1165,6 +1165,62 @@ func RoleSettingsDir(role, rigPath string) string {
 	}
 }
 
+// resolvePolecatSettingsPath returns the first existing settings file in the fallback chain:
+//  1. polecats/<name>/<hooksDir>/<settingsFile>  (polecat-specific)
+//  2. polecats/<hooksDir>/<settingsFile>          (rig polecats shared)
+//  3. <rigPath>/<hooksDir>/<settingsFile>          (rig root)
+//
+// Returns the default install path (polecats/<hooksDir>/<settingsFile>) if none found.
+func resolvePolecatSettingsPath(polecatName, rigPath, hooksDir, settingsFile string) string {
+	var candidates []string
+	if polecatName != "" {
+		candidates = append(candidates, filepath.Join(rigPath, "polecats", polecatName, hooksDir, settingsFile))
+	}
+	candidates = append(candidates,
+		filepath.Join(rigPath, "polecats", hooksDir, settingsFile),
+		filepath.Join(rigPath, hooksDir, settingsFile),
+	)
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Default: shared polecats install location
+	return filepath.Join(rigPath, "polecats", hooksDir, settingsFile)
+}
+
+// ResolvePolecatRuntimeConfig resolves the runtime config for a specific polecat,
+// implementing the settings.json fallback chain for polecat-specific settings.
+//
+// Fallback order for settings.json:
+//  1. polecats/<name>/.claude/settings.json  (polecat-specific)
+//  2. polecats/.claude/settings.json          (rig polecats shared)
+//  3. rig/.claude/settings.json               (rig root)
+//  4. polecats/.claude/settings.json          (default install location)
+//
+// For non-Claude agents, falls back to withRoleSettingsFlag behavior.
+func ResolvePolecatRuntimeConfig(polecatName, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+	rc := resolveRoleAgentConfigCore("polecat", townRoot, rigPath)
+	if !isClaudeAgent(rc) || rigPath == "" {
+		return withRoleSettingsFlag(rc, "polecat", rigPath)
+	}
+	hooksDir := ".claude"
+	settingsFile := "settings.json"
+	if rc.Hooks != nil {
+		if rc.Hooks.Dir != "" {
+			hooksDir = rc.Hooks.Dir
+		}
+		if rc.Hooks.SettingsFile != "" {
+			settingsFile = rc.Hooks.SettingsFile
+		}
+	}
+	settingsPath := resolvePolecatSettingsPath(polecatName, rigPath, hooksDir, settingsFile)
+	rc.Args = append(rc.Args, "--settings", settingsPath)
+	return rc
+}
+
 // tryResolveFromEphemeralTier checks the GT_COST_TIER environment variable
 // and returns the appropriate RuntimeConfig for the given role if an ephemeral
 // cost tier is set.
@@ -1683,7 +1739,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rigPath != "" {
 		// Derive town root from rig path
 		townRoot = filepath.Dir(rigPath)
-		if role != "" {
+		if role == "polecat" {
+			// Use polecat-specific resolution with settings.json fallback chain
+			rc = ResolvePolecatRuntimeConfig(envVars["GT_POLECAT"], townRoot, rigPath)
+		} else if role != "" {
 			// Use role-based agent resolution for per-role model selection
 			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
 		} else {
@@ -1820,6 +1879,9 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			if err != nil {
 				return "", err
 			}
+		} else if role == "polecat" {
+			// No override, use polecat-specific resolution with settings.json fallback chain
+			rc = ResolvePolecatRuntimeConfig(envVars["GT_POLECAT"], townRoot, rigPath)
 		} else if role != "" {
 			// No override, use role-based agent resolution
 			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)

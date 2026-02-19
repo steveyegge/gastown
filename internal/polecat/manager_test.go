@@ -1183,6 +1183,14 @@ func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
 	if _, err := os.Stat(worktreeSettingsPath); err == nil {
 		t.Errorf("settings.json should NOT exist inside worktree at %s (settings are now in shared polecats dir)", worktreeSettingsPath)
 	}
+
+	// Verify polecat-specific .claude/ directory is created (polecats/<name>/.claude/)
+	// This directory enables per-polecat settings.json overrides in the fallback chain.
+	polecatDir := filepath.Dir(polecat.ClonePath)
+	polecatClaudeDir := filepath.Join(polecatDir, ".claude")
+	if _, err := os.Stat(polecatClaudeDir); os.IsNotExist(err) {
+		t.Errorf(".claude/ dir should exist at %s for per-polecat settings overrides", polecatClaudeDir)
+	}
 }
 
 // TestOverflowNameSessionFormat verifies that overflow names don't create double-prefix.

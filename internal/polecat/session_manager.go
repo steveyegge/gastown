@@ -220,11 +220,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Use ResolveRoleAgentConfig instead of deprecated LoadRuntimeConfig to properly
-	// resolve role_agents from town settings. This ensures EnsureSettingsForRole
-	// creates the correct settings/plugin for the configured agent (e.g., opencode).
+	// Use ResolvePolecatRuntimeConfig to properly resolve role_agents from town settings
+	// and apply the settings.json fallback chain for polecat-specific settings.
 	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	runtimeConfig := config.ResolvePolecatRuntimeConfig(polecat, townRoot, m.rig.Path)
 
 	// Ensure runtime settings exist in the shared polecats parent directory.
 	// Settings are passed to Claude Code via --settings flag.

@@ -4385,3 +4385,124 @@ func TestResolveRoleAgentConfig_EphemeralRespectsNonClaudeOverride(t *testing.T)
 		t.Errorf("expected gemini for witness (non-Claude rig override), got Command=%q", rc.Command)
 	}
 }
+
+func TestResolvePolecatSettingsPath_FallbackChain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	hooksDir := ".claude"
+	settingsFile := "settings.json"
+
+	// No settings files exist yet — should return default (polecats level)
+	got := resolvePolecatSettingsPath("mycat", dir, hooksDir, settingsFile)
+	want := filepath.Join(dir, "polecats", hooksDir, settingsFile)
+	if got != want {
+		t.Errorf("no files: got %q, want %q", got, want)
+	}
+
+	// Create rig-root settings — chain should stop there
+	rigRootSettings := filepath.Join(dir, hooksDir, settingsFile)
+	if err := os.MkdirAll(filepath.Dir(rigRootSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rigRootSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got = resolvePolecatSettingsPath("mycat", dir, hooksDir, settingsFile)
+	if got != rigRootSettings {
+		t.Errorf("rig-root only: got %q, want %q", got, rigRootSettings)
+	}
+
+	// Create shared polecats settings — takes priority over rig root
+	polecatsSettings := filepath.Join(dir, "polecats", hooksDir, settingsFile)
+	if err := os.MkdirAll(filepath.Dir(polecatsSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(polecatsSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got = resolvePolecatSettingsPath("mycat", dir, hooksDir, settingsFile)
+	if got != polecatsSettings {
+		t.Errorf("polecats shared: got %q, want %q", got, polecatsSettings)
+	}
+
+	// Create polecat-specific settings — highest priority
+	specificSettings := filepath.Join(dir, "polecats", "mycat", hooksDir, settingsFile)
+	if err := os.MkdirAll(filepath.Dir(specificSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specificSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got = resolvePolecatSettingsPath("mycat", dir, hooksDir, settingsFile)
+	if got != specificSettings {
+		t.Errorf("polecat-specific: got %q, want %q", got, specificSettings)
+	}
+}
+
+func TestResolvePolecatRuntimeConfig_SettingsFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rigPath := filepath.Join(dir, "testrig")
+	townRoot := dir
+
+	// No settings files — should use default polecats location
+	rc := ResolvePolecatRuntimeConfig("nux", townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("expected non-nil RuntimeConfig")
+	}
+	cmd := rc.BuildCommand()
+	wantSettings := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if !strings.Contains(cmd, wantSettings) {
+		t.Errorf("BuildCommand() = %q, should contain %q", cmd, wantSettings)
+	}
+
+	// Create shared polecats settings — should use that
+	polecatsSettings := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(polecatsSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(polecatsSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc = ResolvePolecatRuntimeConfig("nux", townRoot, rigPath)
+	cmd = rc.BuildCommand()
+	if !strings.Contains(cmd, polecatsSettings) {
+		t.Errorf("with polecats settings: BuildCommand() = %q, should contain %q", cmd, polecatsSettings)
+	}
+
+	// Create polecat-specific settings — should take priority
+	specificSettings := filepath.Join(rigPath, "polecats", "nux", ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(specificSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specificSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc = ResolvePolecatRuntimeConfig("nux", townRoot, rigPath)
+	cmd = rc.BuildCommand()
+	if !strings.Contains(cmd, specificSettings) {
+		t.Errorf("polecat-specific: BuildCommand() = %q, should contain %q", cmd, specificSettings)
+	}
+}
+
+func TestBuildPolecatStartupCommand_SettingsFallbackChain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	rigPath := filepath.Join(dir, "testrig")
+
+	// Create polecat-specific settings
+	specificSettings := filepath.Join(rigPath, "polecats", "nux", ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(specificSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specificSettings, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// BuildPolecatStartupCommand uses GT_POLECAT from AgentEnv — verify fallback chain applied
+	cmd := BuildPolecatStartupCommand("testrig", "nux", rigPath, "test prompt")
+	if !strings.Contains(cmd, specificSettings) {
+		t.Errorf("BuildPolecatStartupCommand() = %q, should contain polecat-specific settings %q", cmd, specificSettings)
+	}
+}

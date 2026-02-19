@@ -618,6 +618,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating polecat dir: %w", err)
 	}
 
+	// Create polecat-specific .claude/ directory so users can drop a
+	// settings.json there for per-polecat overrides (part of fallback chain).
+	polecatClaudeDir := filepath.Join(polecatDir, ".claude")
+	if err := os.MkdirAll(polecatClaudeDir, 0755); err != nil {
+		// Non-fatal: the directory is a convenience placeholder only
+		style.PrintWarning("could not create polecat .claude dir: %v", err)
+	}
+
 	// cleanupOnError removes polecatDir if worktree creation fails.
 	// This ensures exists() returns false for incomplete polecats, preventing
 	// a partial state where polecatDir exists but the worktree doesn't.
@@ -707,9 +715,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	}
 
 	// Install runtime settings in the shared polecats parent directory.
-	// Settings are passed to Claude Code via --settings flag.
+	// Settings are passed to Claude Code via --settings flag using the fallback chain:
+	// polecats/<name>/.claude/settings.json → polecats/.claude/settings.json → rig/.claude/settings.json → defaults
 	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	runtimeConfig := config.ResolvePolecatRuntimeConfig(name, townRoot, m.rig.Path)
 	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, clonePath, "polecat", runtimeConfig); err != nil {
 		// Non-fatal - log warning but continue
