@@ -578,8 +578,10 @@ func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpt
 	}
 
 	// Add --continue flag to resume the most recent session.
+	// Note: runtimeCmd starts with the command name (e.g., "claude --settings ..."),
+	// not "exec claude" — the "exec" prefix is added later in the Sprintf.
 	if opts.ContinueSession {
-		runtimeCmd = strings.Replace(runtimeCmd, "exec claude ", "exec claude --continue ", 1)
+		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
 	}
 
 	// Build environment exports - role vars first, then Claude vars
