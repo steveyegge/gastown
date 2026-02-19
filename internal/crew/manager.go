@@ -804,6 +804,11 @@ func (m *Manager) SetPersona(name, persona string) error {
 	if err := validateCrewName(name); err != nil {
 		return err
 	}
+	if persona != "" {
+		if err := validatePersonaName(persona); err != nil {
+			return err
+		}
+	}
 	fl, err := m.lockCrew(name)
 	if err != nil {
 		return err
