@@ -31,6 +31,9 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 		"--description=" + description,
 		"--labels=" + strings.Join(labels, ","),
 	}
+	if NeedsForceForID(beadID) {
+		args = append(args, "--force")
+	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
 	// Uses getActor() to respect isolated mode (tests)
