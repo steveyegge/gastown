@@ -24,7 +24,7 @@ RUN apk add --no-cache \
     lsof
 
 # Install beads daemon (bd)
-RUN go install github.com/steveyegge/beads/cmd/bd@v0.50.2
+RUN go install github.com/steveyegge/beads/cmd/bd@v0.54.0
 
 # Install Dolt (required for beads database server)
 RUN git clone --depth 1 https://github.com/dolthub/dolt /tmp/dolt && \

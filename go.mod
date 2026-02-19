@@ -13,7 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	github.com/steveyegge/beads v0.53.1-0.20260219051847-8a7f92fd5d96
+	github.com/steveyegge/beads v0.54.0
 	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.40.0
 	golang.org/x/text v0.34.0

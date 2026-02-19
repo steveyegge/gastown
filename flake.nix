@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     beads = {
-      url = "github:steveyegge/beads/v0.47.1";
+      url = "github:steveyegge/beads/v0.54.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
