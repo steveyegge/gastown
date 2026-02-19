@@ -41,6 +41,7 @@ type AgentFields struct {
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	PersonaBead       string // Bead ID of assigned persona (empty = none)
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
 }
@@ -97,6 +98,10 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	if fields.PersonaBead != "" {
+		lines = append(lines, fmt.Sprintf("persona_bead: %s", fields.PersonaBead))
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -138,6 +143,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "persona_bead":
+			fields.PersonaBead = value
 		}
 	}
 
@@ -452,6 +459,7 @@ type AgentFieldUpdates struct {
 	CleanupStatus     *string
 	ActiveMR          *string
 	NotificationLevel *string
+	PersonaBead       *string
 }
 
 // UpdateAgentDescriptionFields atomically updates one or more agent description
@@ -491,6 +499,9 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 	}
 	if updates.NotificationLevel != nil {
 		fields.NotificationLevel = *updates.NotificationLevel
+	}
+	if updates.PersonaBead != nil {
+		fields.PersonaBead = *updates.PersonaBead
 	}
 
 	description := FormatAgentDescription(issue.Title, fields)

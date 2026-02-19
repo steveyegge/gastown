@@ -177,7 +177,7 @@ func runPrimeCompactResume(ctx RoleContext, cwd string) error {
 	fmt.Printf("\n> **Recovery**: Context %s complete. You are **%s** (%s).\n",
 		primeHookSource, actor, ctx.Role)
 
-	outputIdentityBrief(ctx)
+	outputPersonaBrief(ctx)
 
 	// Session metadata for seance
 	outputSessionMetadata(ctx)
@@ -311,7 +311,7 @@ func outputRoleContext(ctx RoleContext) error {
 		return err
 	}
 
-	outputIdentityContext(ctx)
+	outputPersonaContext(ctx)
 
 	outputContextFile(ctx)
 	outputHandoffContent(ctx)

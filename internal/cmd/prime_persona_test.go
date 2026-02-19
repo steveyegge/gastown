@@ -9,19 +9,19 @@ import (
 	"testing"
 )
 
-func TestOutputIdentityContext_CrewWithIdentity(t *testing.T) {
+func TestOutputPersonaContext_CrewWithPersona(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "test-rig")
 
-	// Create identity file
-	idDir := filepath.Join(rigPath, "identities")
-	if err := os.MkdirAll(idDir, 0755); err != nil {
+	// Create persona file
+	personaDir := filepath.Join(rigPath, ".personas")
+	if err := os.MkdirAll(personaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	idContent := "# Alice\n\nYou are Alice, a frontend expert.\n"
+	personaContent := "# Alice\n\nYou are Alice, a frontend expert.\n"
 	if err := os.WriteFile(
-		filepath.Join(idDir, "alice.md"),
-		[]byte(idContent), 0644,
+		filepath.Join(personaDir, "alice.md"),
+		[]byte(personaContent), 0644,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestOutputIdentityContext_CrewWithIdentity(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	outputIdentityContext(ctx)
+	outputPersonaContext(ctx)
 
 	w.Close()
 	os.Stdout = old
@@ -53,15 +53,15 @@ func TestOutputIdentityContext_CrewWithIdentity(t *testing.T) {
 	io.Copy(&buf, r)
 	output := buf.String()
 
-	if !strings.Contains(output, "## Identity") {
-		t.Error("expected '## Identity' heading in output")
+	if !strings.Contains(output, "## Persona") {
+		t.Error("expected '## Persona' heading in output")
 	}
 	if !strings.Contains(output, "You are Alice, a frontend expert.") {
-		t.Errorf("expected identity content in output, got: %s", output)
+		t.Errorf("expected persona content in output, got: %s", output)
 	}
 }
 
-func TestOutputIdentityContext_NonCrewSkipped(t *testing.T) {
+func TestOutputPersonaContext_NonCrewSkipped(t *testing.T) {
 	ctx := RoleContext{
 		Role:     RolePolecat,
 		Rig:      "test-rig",
@@ -73,7 +73,7 @@ func TestOutputIdentityContext_NonCrewSkipped(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	outputIdentityContext(ctx)
+	outputPersonaContext(ctx)
 
 	w.Close()
 	os.Stdout = old
@@ -89,7 +89,7 @@ func TestOutputIdentityContext_NonCrewSkipped(t *testing.T) {
 	}
 }
 
-func TestOutputIdentityContext_NoIdentityFile(t *testing.T) {
+func TestOutputPersonaContext_NoPersonaFile(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "test-rig")
 	crewDir := filepath.Join(rigPath, "crew", "bob")
@@ -109,7 +109,7 @@ func TestOutputIdentityContext_NoIdentityFile(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	outputIdentityContext(ctx)
+	outputPersonaContext(ctx)
 
 	w.Close()
 	os.Stdout = old
@@ -119,35 +119,35 @@ func TestOutputIdentityContext_NoIdentityFile(t *testing.T) {
 
 	if buf.Len() > 0 {
 		t.Errorf(
-			"expected no output when no identity file, got: %s",
+			"expected no output when no persona file, got: %s",
 			buf.String(),
 		)
 	}
 }
 
-func TestOutputIdentityContext_ExplicitAssignment(t *testing.T) {
+func TestOutputPersonaContext_ExplicitAssignment(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "test-rig")
 
-	// Create identity file with different name
-	idDir := filepath.Join(rigPath, "identities")
-	if err := os.MkdirAll(idDir, 0755); err != nil {
+	// Create persona file with different name
+	personaDir := filepath.Join(rigPath, ".personas")
+	if err := os.MkdirAll(personaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	idContent := "# Rust Expert\n\nYou love Rust.\n"
+	personaContent := "# Rust Expert\n\nYou love Rust.\n"
 	if err := os.WriteFile(
-		filepath.Join(idDir, "rust-expert.md"),
-		[]byte(idContent), 0644,
+		filepath.Join(personaDir, "rust-expert.md"),
+		[]byte(personaContent), 0644,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create crew state with explicit identity
+	// Create crew state with explicit persona assignment
 	crewDir := filepath.Join(rigPath, "crew", "alice")
 	if err := os.MkdirAll(crewDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	stateJSON := `{"name":"alice","rig":"test-rig","identity":"rust-expert"}`
+	stateJSON := `{"name":"alice","rig":"test-rig","persona":"rust-expert"}`
 	if err := os.WriteFile(
 		filepath.Join(crewDir, "state.json"),
 		[]byte(stateJSON), 0644,
@@ -167,7 +167,7 @@ func TestOutputIdentityContext_ExplicitAssignment(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	outputIdentityContext(ctx)
+	outputPersonaContext(ctx)
 
 	w.Close()
 	os.Stdout = old
@@ -177,11 +177,11 @@ func TestOutputIdentityContext_ExplicitAssignment(t *testing.T) {
 	output := buf.String()
 
 	if !strings.Contains(output, "You love Rust.") {
-		t.Errorf("expected explicit identity content, got: %s", output)
+		t.Errorf("expected explicit persona content, got: %s", output)
 	}
 }
 
-func TestExtractIdentityBrief(t *testing.T) {
+func TestExtractPersonaBrief(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
@@ -202,13 +202,46 @@ func TestExtractIdentityBrief(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractIdentityBrief(tt.content)
+			got := extractPersonaBrief(tt.content)
 			if got != tt.want {
 				t.Errorf(
-					"extractIdentityBrief() = %q, want %q",
+					"extractPersonaBrief() = %q, want %q",
 					got, tt.want,
 				)
 			}
 		})
+	}
+}
+
+func TestResolvePersonaName_StablePath(t *testing.T) {
+	townRoot := t.TempDir()
+	rig := "test-rig"
+	polecat := "alice"
+
+	// Place state.json at the correct location (TownRoot/Rig/crew/Polecat)
+	crewDir := filepath.Join(townRoot, rig, "crew", polecat)
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stateJSON := `{"name":"alice","rig":"test-rig","persona":"rust-expert"}`
+	if err := os.WriteFile(
+		filepath.Join(crewDir, "state.json"),
+		[]byte(stateJSON), 0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		Role:     RoleCrew,
+		Rig:      rig,
+		Polecat:  polecat,
+		TownRoot: townRoot,
+		// WorkDir intentionally set to a subdirectory to prove path stability
+		WorkDir: filepath.Join(crewDir, "subdir"),
+	}
+
+	got := resolvePersonaName(ctx)
+	if got != "rust-expert" {
+		t.Errorf("resolvePersonaName() = %q, want %q", got, "rust-expert")
 	}
 }

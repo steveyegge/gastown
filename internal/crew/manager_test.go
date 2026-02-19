@@ -725,7 +725,7 @@ func TestBuildResumeArgs(t *testing.T) {
 	}
 }
 
-func TestManagerSetIdentity(t *testing.T) {
+func TestManagerSetPersona(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "crew-identity-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -747,9 +747,9 @@ func TestManagerSetIdentity(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// Set identity
-	if err := mgr.SetIdentity("dave", "senior_rust_dev"); err != nil {
-		t.Fatalf("SetIdentity failed: %v", err)
+	// Set persona
+	if err := mgr.SetPersona("dave", "senior_rust_dev"); err != nil {
+		t.Fatalf("SetPersona failed: %v", err)
 	}
 
 	// Verify
@@ -757,25 +757,25 @@ func TestManagerSetIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if worker.Identity != "senior_rust_dev" {
+	if worker.Persona != "senior_rust_dev" {
 		t.Errorf(
-			"expected identity 'senior_rust_dev', got '%s'",
-			worker.Identity,
+			"expected persona 'senior_rust_dev', got '%s'",
+			worker.Persona,
 		)
 	}
 
-	// Clear identity
-	if err := mgr.ClearIdentity("dave"); err != nil {
-		t.Fatalf("ClearIdentity failed: %v", err)
+	// Clear persona
+	if err := mgr.ClearPersona("dave"); err != nil {
+		t.Fatalf("ClearPersona failed: %v", err)
 	}
 
 	worker, err = mgr.Get("dave")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if worker.Identity != "" {
+	if worker.Persona != "" {
 		t.Errorf(
-			"expected empty identity, got '%s'", worker.Identity,
+			"expected empty persona, got '%s'", worker.Persona,
 		)
 	}
 }

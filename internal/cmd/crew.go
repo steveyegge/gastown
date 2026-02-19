@@ -355,6 +355,7 @@ func init() {
 	// Add flags
 	crewAddCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to create crew workspace in")
 	crewAddCmd.Flags().BoolVar(&crewBranch, "branch", false, "Create a feature branch (crew/<name>)")
+	crewAddCmd.Flags().StringVar(&crewAddPersona, "persona", "", "Assign a persona to the crew member")
 
 	crewListCmd.Flags().StringVar(&crewRig, "rig", "", "Filter by rig name")
 	crewListCmd.Flags().BoolVar(&crewListAll, "all", false, "List crew workspaces in all rigs")

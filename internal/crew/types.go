@@ -23,9 +23,13 @@ type CrewWorker struct {
 	// UpdatedAt is when the crew worker was last updated.
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Identity is an optional override for the identity file name.
-	// When set, prime loads <identity>.md instead of <name>.md.
-	// Set via `gt crew identity apply`.
+	// Persona is an optional override for the persona name.
+	// When set, prime loads the named persona instead of using crew name.
+	// Set via `gt crew persona set`.
+	Persona string `json:"persona,omitempty"`
+
+	// Identity is kept for JSON migration only (original field name).
+	// Do not use — read via Persona after loadState migrates it.
 	Identity string `json:"identity,omitempty"`
 }
 

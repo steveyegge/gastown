@@ -14,6 +14,8 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+var crewAddPersona string
+
 func runCrewAdd(cmd *cobra.Command, args []string) error {
 	// Deduplicate args to handle cases like "gt crew add foo --branch foo"
 	// where "foo" appears twice because --branch is a boolean flag.
@@ -125,6 +127,30 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("could not create agent bead for %s: %v", name, err)
 			} else {
 				fmt.Printf("  Agent bead: %s\n", crewID)
+			}
+		}
+
+		// Assign persona if --persona flag provided
+		if crewAddPersona != "" {
+			if err := crew.ValidatePersonaName(crewAddPersona); err != nil {
+				style.PrintWarning("invalid persona name %q: %v", crewAddPersona, err)
+			} else {
+				personaBeadID, personaErr := crew.EnsurePersonaBeadExists(
+					townRoot, r.Path, prefix, rigName, crewAddPersona, bd,
+				)
+				if personaErr != nil {
+					style.PrintWarning("could not assign persona %q: %v", crewAddPersona, personaErr)
+				} else {
+					if setErr := crewMgr.SetPersona(name, crewAddPersona); setErr != nil {
+						style.PrintWarning("could not persist persona for %s: %v", name, setErr)
+					} else if updateErr := bd.UpdateAgentDescriptionFields(crewID, beads.AgentFieldUpdates{
+						PersonaBead: &personaBeadID,
+					}); updateErr != nil {
+						style.PrintWarning("could not set persona_bead on agent bead %s: %v", crewID, updateErr)
+					} else {
+						fmt.Printf("  Persona: %s\n", crewAddPersona)
+					}
+				}
 			}
 		}
 

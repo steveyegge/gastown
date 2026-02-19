@@ -479,6 +479,13 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		crew.Rig = m.rig.Name
 	}
 
+	// Migration: rename identity → persona for state.json files written by the
+	// original PR branch before this rename.
+	if crew.Identity != "" && crew.Persona == "" {
+		crew.Persona = crew.Identity
+		crew.Identity = ""
+	}
+
 	return &crew, nil
 }
 
@@ -792,8 +799,8 @@ func (m *Manager) Stop(name string) error {
 	return nil
 }
 
-// SetIdentity sets the identity override for a crew worker.
-func (m *Manager) SetIdentity(name, identity string) error {
+// SetPersona sets the persona override for a crew worker.
+func (m *Manager) SetPersona(name, persona string) error {
 	if err := validateCrewName(name); err != nil {
 		return err
 	}
@@ -808,15 +815,14 @@ func (m *Manager) SetIdentity(name, identity string) error {
 		return err
 	}
 
-	worker.Identity = identity
+	worker.Persona = persona
 	worker.UpdatedAt = time.Now()
 	return m.saveState(worker)
 }
 
-// ClearIdentity removes the identity override, reverting to
-// name-based lookup.
-func (m *Manager) ClearIdentity(name string) error {
-	return m.SetIdentity(name, "")
+// ClearPersona removes the persona override.
+func (m *Manager) ClearPersona(name string) error {
+	return m.SetPersona(name, "")
 }
 
 // IsRunning checks if a crew member's session is active.
