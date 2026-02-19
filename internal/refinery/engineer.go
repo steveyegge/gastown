@@ -1439,7 +1439,7 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 //  3. Cleans up stale polecat branches from completed work
 //
 // All operations are best-effort: failures are logged but don't affect merge success.
-func (e *Engineer) postMergeConvoyCheck(mr *MRInfo) {
+func (e *Engineer) postMergeConvoyCheck(_ *MRInfo) {
 	// Find town root from rig path (rig is at ~/gt/<rigname>, town is ~/gt)
 	townRoot := filepath.Dir(e.rig.Path)
 	townBeads := filepath.Join(townRoot, ".beads")
