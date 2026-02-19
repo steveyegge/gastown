@@ -26,25 +26,36 @@ jobs:
           key: gomod-windows-${{ hashFiles('go.sum') }}
           restore-keys: gomod-windows-
 
-      - name: Configure Git
-        run: |
-          git config --global user.name "CI Bot"
-          git config --global user.email "ci@gastown.test"
-
       - name: Add to PATH
         run: |
           echo "$(go env GOPATH)/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install ICU4C (MSYS2)
+        uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda # v2.30.0
+        with:
+          path-type: inherit
+          msystem: UCRT64
+          pacboy: icu:p toolchain:p pkg-config:p
+
+      - name: Configure Git
+        shell: msys2 {0}
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@gastown.test"
 
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
 
       - name: Generate embedded files
+        shell: msys2 {0}
         run: go generate ./internal/formula/...
 
       - name: Build
+        shell: msys2 {0}
         run: go build -v ./cmd/gt
 
       - name: Unit Tests
+        shell: msys2 {0}
         run: gotestsum --format testname --junitfile junit.xml -- -short ./...
 
       - name: Test Report
