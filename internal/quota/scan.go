@@ -59,9 +59,15 @@ func NewScanner(tmux TmuxClient, patterns []string, accounts *config.AccountsCon
 }
 
 // scanLines is the number of pane lines to capture for rate-limit detection.
-// The rate-limit prompt appears at the bottom of the pane, so 30 lines
-// gives plenty of margin.
+// We capture a generous window but only check the bottom checkLines for
+// rate-limit patterns — if the limit was resolved, subsequent output pushes
+// the message above the check window, avoiding false positives.
 const scanLines = 30
+
+// checkLines is the number of bottom lines to actually check for rate-limit
+// patterns. When Claude Code hits a rate limit, the prompt sits at the bottom.
+// Once resolved (e.g., /login, waiting), new output pushes it up.
+const checkLines = 10
 
 // ScanAll scans all Gas Town tmux sessions for rate-limit indicators.
 // Returns results only for sessions where a rate-limit was detected or
@@ -99,8 +105,15 @@ func (s *Scanner) scanSession(session string) ScanResult {
 		return result
 	}
 
-	// Check each line against patterns
-	for _, line := range strings.Split(content, "\n") {
+	// Only check the bottom checkLines for rate-limit patterns.
+	// If the rate limit was resolved (e.g., /login), subsequent output
+	// pushes the message above this window, avoiding false positives.
+	allLines := strings.Split(content, "\n")
+	start := len(allLines) - checkLines
+	if start < 0 {
+		start = 0
+	}
+	for _, line := range allLines[start:] {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
