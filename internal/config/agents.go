@@ -574,6 +574,44 @@ func GetProcessNames(agentName string) []string {
 	return info.ProcessNames
 }
 
+// ResolveProcessNames determines the correct process names for liveness detection
+// given an agent name and the actual command binary. This handles custom agents
+// that shadow built-in preset names (e.g., a custom "codex" agent that runs
+// "opencode" instead of the built-in "codex" binary).
+//
+// Resolution order:
+//  1. If agentName matches a built-in preset AND the preset's Command matches
+//     the actual command → use the preset's ProcessNames (no mismatch).
+//  2. Otherwise, find a built-in preset whose Command matches the actual command
+//     and use its ProcessNames (custom agent using a known launcher).
+//  3. Fallback: [command] (fully custom binary).
+func ResolveProcessNames(agentName, command string) []string {
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	// Check if agentName matches a built-in/registered preset with matching command
+	if info, ok := globalRegistry.Agents[agentName]; ok && len(info.ProcessNames) > 0 {
+		if info.Command == command || command == "" {
+			return info.ProcessNames
+		}
+	}
+
+	// Agent name doesn't match or command differs — look up by command
+	if command != "" {
+		for _, info := range globalRegistry.Agents {
+			if info.Command == command && len(info.ProcessNames) > 0 {
+				return info.ProcessNames
+			}
+		}
+		// Unknown command — use the binary name itself
+		return []string{command}
+	}
+
+	// No command provided, agent not in registry — Claude defaults
+	return []string{"node", "claude"}
+}
+
 // MergeWithPreset applies preset defaults to a RuntimeConfig.
 // User-specified values take precedence over preset defaults.
 // Returns a new RuntimeConfig without modifying the original.

@@ -1125,8 +1125,7 @@ func (t *Tmux) FindAgentPane(session string) (string, error) {
 	}
 
 	// Get agent process names from session environment
-	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
-	processNames := config.GetProcessNames(agentName)
+	processNames := t.resolveSessionProcessNames(session)
 
 	// Check each pane for agent process
 	for _, line := range lines {
@@ -1611,13 +1610,24 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 }
 
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
-// It reads GT_AGENT from the session environment to determine which process names to check.
-// Falls back to Claude's process names if GT_AGENT is not set (legacy sessions).
+// It reads GT_PROCESS_NAMES from the session environment for accurate process detection,
+// falling back to GT_AGENT-based lookup for legacy sessions.
 // This is the preferred method for zombie detection across all agent types.
 func (t *Tmux) IsAgentAlive(session string) bool {
+	return t.IsRuntimeRunning(session, t.resolveSessionProcessNames(session))
+}
+
+// resolveSessionProcessNames returns the process names to check for a session.
+// Prefers GT_PROCESS_NAMES (set at startup, handles custom agents that shadow
+// built-in presets). Falls back to GT_AGENT-based lookup for legacy sessions.
+func (t *Tmux) resolveSessionProcessNames(session string) []string {
+	// Prefer explicit process names set at startup (handles custom agents correctly)
+	if names, err := t.GetEnvironment(session, "GT_PROCESS_NAMES"); err == nil && names != "" {
+		return strings.Split(names, ",")
+	}
+	// Fallback: resolve from agent name (built-in presets only)
 	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
-	processNames := config.GetProcessNames(agentName) // Returns Claude defaults if empty
-	return t.IsRuntimeRunning(session, processNames)
+	return config.GetProcessNames(agentName) // Returns Claude defaults if empty
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.

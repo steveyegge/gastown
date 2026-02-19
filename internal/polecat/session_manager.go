@@ -338,6 +338,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		debugSession("SetEnvironment GT_AGENT", m.tmux.SetEnvironment(sessionID, "GT_AGENT", runtimeConfig.ResolvedAgent))
 	}
 
+	// Set GT_PROCESS_NAMES for accurate liveness detection. Custom agents may
+	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
+	// so we resolve process names from both agent name and actual command.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	debugSession("SetEnvironment GT_PROCESS_NAMES", m.tmux.SetEnvironment(sessionID, "GT_PROCESS_NAMES", strings.Join(processNames, ",")))
+
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
 		agentID := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
