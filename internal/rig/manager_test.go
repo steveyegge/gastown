@@ -947,6 +947,23 @@ func TestDetectBeadsPrefixFromConfig_FallbackIssuesJSONL(t *testing.T) {
 {"id":"gt-xyz99","title":"regular"}`,
 			want: "gt",
 		},
+		{
+			// Regression: GH #591 - 3-char polecat names (nux, ace, max) were
+			// misdetected as prefix "gt-gastown-polecat" before the fix.
+			name: "3-char polecat name does not corrupt prefix detection",
+			issuesJSON: `{"id":"gt-gastown-polecat-nux","title":"agent"}
+{"id":"gt-gastown-polecat-ace","title":"agent"}
+{"id":"gt-gastown-polecat-max","title":"agent"}
+{"id":"gt-abc12","title":"regular"}`,
+			want: "gt",
+		},
+		{
+			// When ONLY 3-char polecat agent beads exist, prefix cannot be detected.
+			name: "only 3-char polecat agent beads returns empty prefix",
+			issuesJSON: `{"id":"gt-gastown-polecat-nux","title":"agent"}
+{"id":"gt-gastown-polecat-ace","title":"agent"}`,
+			want: "",
+		},
 	}
 
 	for _, tt := range tests {

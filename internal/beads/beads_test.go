@@ -1138,6 +1138,11 @@ func TestParseAgentBeadID(t *testing.T) {
 		{"gt-gastown-crew-joe", "gastown", "crew", "joe", true},
 		{"gt-gastown-crew-max", "gastown", "crew", "max", true},
 		{"gt-gastown-polecat-capable", "gastown", "polecat", "capable", true},
+		// 3-char polecat names from mad-max pool (regression: GH #591)
+		{"gt-gastown-polecat-nux", "gastown", "polecat", "nux", true},
+		{"gt-gastown-polecat-ace", "gastown", "polecat", "ace", true},
+		{"gt-gastown-polecat-max", "gastown", "polecat", "max", true},
+		{"gt-gastown-polecat-dag", "gastown", "polecat", "dag", true},
 		// Names with hyphens
 		{"gt-gastown-polecat-my-agent", "gastown", "polecat", "my-agent", true},
 		// Worker name collides with role keyword
@@ -1194,6 +1199,10 @@ func TestIsAgentSessionBead(t *testing.T) {
 		{"gt-gastown-refinery", true},
 		{"gt-gastown-crew-joe", true},
 		{"gt-gastown-polecat-capable", true},
+		// 3-char polecat names from mad-max pool (regression: GH #591)
+		{"gt-gastown-polecat-nux", true},
+		{"gt-gastown-polecat-ace", true},
+		{"gt-gastown-polecat-max", true},
 		// Agent session beads with bd- prefix (should return true)
 		{"bd-mayor", true},
 		{"bd-deacon", true},
