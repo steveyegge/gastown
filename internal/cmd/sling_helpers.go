@@ -107,6 +107,28 @@ func collectExistingMolecules(info *beadInfo) []string {
 	return molecules
 }
 
+// ensureNoExistingMolecules checks whether a bead already has attached molecules
+// and either burns them (with --force) or returns an error. Returns nil when no
+// molecules exist or they were successfully burned. Dry-run mode only prints.
+func ensureNoExistingMolecules(info *beadInfo, beadID, townRoot string, force, dryRun bool) error {
+	existingMolecules := collectExistingMolecules(info)
+	if len(existingMolecules) == 0 {
+		return nil
+	}
+	if dryRun {
+		fmt.Printf("  Would burn %d stale molecule(s): %s\n",
+			len(existingMolecules), strings.Join(existingMolecules, ", "))
+		return nil
+	}
+	if !force {
+		return fmt.Errorf("bead %s already has %d attached molecule(s): %s\nUse --force to replace, or --hook-raw-bead to skip formula",
+			beadID, len(existingMolecules), strings.Join(existingMolecules, ", "))
+	}
+	fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
+		style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
+	return burnExistingMolecules(existingMolecules, beadID, townRoot)
+}
+
 // burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
 // First detaches the molecule from the base bead (clears attached_molecule in description),
 // then force-closes the orphaned wisp beads. Returns an error if detach fails, since

@@ -349,6 +349,18 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Preflight: check existing molecules BEFORE spawning polecat.
+	// When formulaName is already known (explicit formula via --on flag), we can
+	// validate early to avoid spawning a polecat that will be immediately orphaned
+	// if the check fails. The auto-apply path (formulaName set after resolveTarget)
+	// handles its own check with rollback protection below.
+	preflightFormulaName := formulaName
+	if formulaName != "" {
+		if err := ensureNoExistingMolecules(info, beadID, townRoot, force, slingDryRun); err != nil {
+			return err
+		}
+	}
+
 	// Resolve target agent using shared dispatch logic.
 	// Note: args[1] == args[len(args)-1] here because batch mode (len(args) > 2
 	// with rig last arg) exits at line 234. The only remaining case is len(args) <= 2.
@@ -488,26 +500,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Guard: ensure only one molecule is attached to a work bead.
-	// Checks both dependency bonds (ground truth) and description metadata.
-	// When re-slinging with --force, burn ALL existing molecules before creating a new one.
-	// Without this, each sling creates a new wisp bonded to the bead, leaving orphaned molecules.
-	// NOTE: Uses local `force` (not `slingForce`) to respect auto-force paths (dead agent detection).
-	if formulaName != "" {
-		existingMolecules := collectExistingMolecules(info)
-		if len(existingMolecules) > 0 {
-			if slingDryRun {
-				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
-					len(existingMolecules), strings.Join(existingMolecules, ", "))
-			} else if force {
-				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
-					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-				if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
-					return fmt.Errorf("burning stale molecules: %w", err)
-				}
-			} else {
-				return fmt.Errorf("bead %s already has %d attached molecule(s): %s\nUse --force to replace, or --hook-raw-bead to skip formula",
-					beadID, len(existingMolecules), strings.Join(existingMolecules, ", "))
+	// Explicit formulas (--on flag) are checked in the preflight block above,
+	// before any polecat is spawned. This check handles the auto-apply path
+	// (formulaName was empty at preflight but set to mol-polecat-work after
+	// resolveTarget). Failures here include rollback since polecat is already spawned.
+	if formulaName != "" && preflightFormulaName == "" {
+		if err := ensureNoExistingMolecules(info, beadID, townRoot, force, slingDryRun); err != nil {
+			if newPolecatInfo != nil {
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
 			}
+			return err
 		}
 	}
 
@@ -586,6 +588,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// See: https://github.com/steveyegge/gastown/issues/148
 	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
+		if newPolecatInfo != nil {
+			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+		}
 		return err
 	}
 
