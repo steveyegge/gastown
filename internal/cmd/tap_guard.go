@@ -19,7 +19,10 @@ is violated. They're called before the tool runs, preventing the
 forbidden operation entirely.
 
 Available guards:
-  pr-workflow      - Block PR creation and feature branches
+  pr-workflow        - Block PR creation and feature branches
+  bd-init            - Block bd init in wrong directories
+  mol-patrol         - Block mol patrol from agent contexts
+  dangerous-command  - Block destructive shell commands
 
 Example hook configuration:
   {
