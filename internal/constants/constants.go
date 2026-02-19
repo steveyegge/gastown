@@ -298,4 +298,6 @@ var DefaultRateLimitPatterns = []string{
 	`limit\s*·\s*resets \d+[:\d]*(am|pm)\b`,         // "limit · resets 7pm" — requires limit context before resets
 	`Stop and wait for limit to reset`,               // /rate-limit-options TUI prompt option 1
 	`Add funds to continue with extra usage`,         // /rate-limit-options TUI prompt option 2
+	`OAuth token revoked`,                            // Token invalidated after keychain swap
+	`OAuth token has expired`,                        // Token expired — needs fresh auth
 }
