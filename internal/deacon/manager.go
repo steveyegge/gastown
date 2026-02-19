@@ -103,7 +103,7 @@ func (m *Manager) Start(agentOverride string) error {
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.")
+	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create patrol molecule via 'bd mol wisp mol-deacon-patrol --json', hook it with 'bd update <id> --status=hooked --assignee=deacon', then execute.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
