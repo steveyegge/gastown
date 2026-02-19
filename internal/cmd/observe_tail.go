@@ -59,7 +59,7 @@ func runObserveTail(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating source %q: %w", name, err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fmt.Fprintf(os.Stderr, "Tailing %s (%s)... press Ctrl-C to stop\n", name, srcCfg.Path)
 

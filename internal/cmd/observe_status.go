@@ -60,7 +60,7 @@ func runObserveStatus(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, status, modTime, src.Path)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
