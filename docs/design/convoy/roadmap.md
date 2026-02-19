@@ -35,7 +35,7 @@ bd create --type=task "Fix auth timeout"       → sh-task-1
 bd create --type=task "Add validation"         → sh-task-2
 bd create --type=task "Integration tests"      → sh-task-3
 bd dep add sh-task-2 sh-task-1 --type=blocks
-gt sling sh-task-1 sh-task-2 sh-task-3 shippercrm
+gt sling sh-task-1 sh-task-2 sh-task-3 gastown
 ```
 
 What happens today:
@@ -58,7 +58,7 @@ What people expect:
 → creates: root epic, sub-epics, leaf tasks
 → adds: parent-child deps (organizational hierarchy)
 → adds: blocks deps (execution ordering between tasks)
-gt sling <task1> <task2> <task3> shippercrm
+gt sling <task1> <task2> <task3> gastown
 ```
 
 Same outcome as Workflow A: 3 separate auto-convoys, blocks deps ignored.
@@ -69,7 +69,7 @@ dispatch or completion tracking.
 
 ```
 gt convoy create "Auth overhaul" sh-task-1 sh-task-2 sh-task-3
-gt sling sh-task-1 shippercrm
+gt sling sh-task-1 gastown
 → witness feeds sh-task-2 when sh-task-1 closes (serial)
 → witness feeds sh-task-3 when sh-task-2 closes (serial)
 → convoy auto-closes when all 3 are done

@@ -67,6 +67,76 @@ Manual overrides (`close --force`, `land`) bypass the check entirely.
 
 ---
 
+## Auto-convoy creation: what `gt sling` actually does
+
+`gt sling` auto-creates a convoy for every bead it dispatches, unless
+`--no-convoy` is passed. The behavior differs significantly between
+single-bead and multi-bead (batch) sling.
+
+### Single-bead sling
+
+```
+gt sling sh-task-1 gastown
+```
+
+1. Checks if `sh-task-1` is already tracked by an open convoy.
+2. If not tracked: creates one auto-convoy `"Work: <issue-title>"` tracking
+   that single bead.
+3. Spawns one polecat, hooks the bead, starts working.
+
+Result: 1 bead, 1 convoy, 1 polecat.
+
+### Batch sling (3+ args, last arg is a rig)
+
+```
+gt sling sh-task-1 sh-task-2 sh-task-3 gastown
+```
+
+**Each bead gets its own separate auto-convoy.** The batch loop
+(`sling_batch.go:71-241`) iterates each bead ID and runs the same
+auto-convoy logic per bead. There is no grouping.
+
+Result: 3 beads, **3 convoys**, 3 polecats — all dispatched in parallel
+with 2-second delays between spawns.
+
+There is no upper limit on the number of beads. `gt sling <10 beads> <rig>`
+spawns 10 polecats with 10 individual convoys. The only throttle is
+`--max-concurrent` (default 0 = unlimited).
+
+### Why this matters
+
+- **No dependency ordering.** All beads dispatch simultaneously. Even if
+  `sh-task-2` has a `blocks` dep on `sh-task-1`, both get slung at the same
+  time. The Phase 1 feeder's `isIssueBlocked` check only applies to
+  daemon-driven convoy feeding (after a close event), not to the initial
+  batch sling dispatch.
+- **No convoy-level tracking.** Each convoy tracks exactly 1 bead. There is
+  no single convoy that shows "3/3 tasks complete" for the batch. `gt convoy
+  list` shows 3 independent convoys.
+- **No sequential feeding.** Unlike a manual `gt convoy create "name" <beads>`
+  followed by a single sling, batch sling does not use the convoy's
+  `feedNextReadyIssue` path. All tasks start at once.
+
+### How to get grouped convoy behavior
+
+Create the convoy first, then sling individually (or let the daemon feed):
+
+```
+gt convoy create "Auth overhaul" sh-task-1 sh-task-2 sh-task-3
+gt sling sh-task-1 gastown
+# daemon auto-feeds sh-task-2 when sh-task-1 closes
+# daemon auto-feeds sh-task-3 when sh-task-2 closes
+# convoy auto-closes when all 3 are done
+```
+
+Or batch sling with `--no-convoy` if convoy tracking is not needed:
+
+```
+gt sling sh-task-1 sh-task-2 sh-task-3 gastown --no-convoy
+```
+
+---
+
 ## Problem Statement
 
 Convoys are passive trackers. They group work but don't drive it. The completion
@@ -150,7 +220,7 @@ belongs to. The rig association is resolved at dispatch time via two lookups:
 
 1. **Extract prefix**: `sh-pb6sa` → `sh-` (string parsing)
 2. **Resolve rig**: look up `sh-` in `~/gt/.beads/routes.jsonl` → finds
-   `{"prefix":"sh-","path":"shippercrm/.beads"}` → rig name is `shippercrm`
+   `{"prefix":"sh-","path":"gastown/.beads"}` → rig name is `gastown`
 
 This happens in `feedFirstReady` (stranded scan path) and `feedNextReadyIssue`
 (event poll path) just before calling `gt sling`. Issues with prefixes that
