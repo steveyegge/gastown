@@ -123,6 +123,15 @@ func SwapOAuthAccount(targetConfigDir, sourceConfigDir string) (json.RawMessage,
 	targetPath := filepath.Join(expandTilde(targetConfigDir), ".claude.json")
 	sourcePath := filepath.Join(expandTilde(sourceConfigDir), ".claude.json")
 
+	// Skip if either file doesn't exist — the keychain token is what
+	// authenticates; oauthAccount is only cached identity metadata.
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		return nil, nil
+	}
+
 	// Read source's oauthAccount
 	sourceData, err := os.ReadFile(sourcePath)
 	if err != nil {
