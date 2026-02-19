@@ -999,32 +999,16 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			}
 		}
 
-		// Fall back to issues.jsonl for non-dolt backends or if dolt detection failed
+		// Fall back to issues.jsonl for non-dolt backends or if dolt detection failed.
 		if !prefixDetected {
 			jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-			if f, readErr := os.Open(jsonlPath); readErr == nil {
-				scanner := bufio.NewScanner(f)
-				if scanner.Scan() {
-					var issue struct {
-						ID string `json:"id"`
-					}
-					if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
-						// Extract prefix: everything before the last "-" segment
-						if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
-							detected := issue.ID[:lastDash]
-							if detected != "" && rigAddPrefix != "" {
-								if strings.TrimSuffix(rigAddPrefix, "-") != detected {
-									f.Close()
-									return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
-								}
-							}
-							if detected != "" && result.BeadsPrefix == "" {
-								result.BeadsPrefix = detected
-							}
-						}
-					}
+			if detected := extractPrefixFromIssuesJSONL(jsonlPath); detected != "" {
+				if rigAddPrefix != "" && strings.TrimSuffix(rigAddPrefix, "-") != detected {
+					return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
 				}
-				f.Close()
+				if result.BeadsPrefix == "" {
+					result.BeadsPrefix = detected
+				}
 			}
 		}
 
@@ -1284,6 +1268,51 @@ func assigneeToSessionName(assignee string) (sessionName string, isPersistent bo
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// isStandardBeadHashStr checks if a string looks like a standard 5-char bead hash.
+// Regular bead IDs use a 5-character base32-encoded hash (e.g., "mawit", "z0ixd").
+// This distinguishes regular issues from agent beads (suffix like "nux", "witness")
+// and merge requests (10-char suffix).
+func isStandardBeadHashStr(s string) bool {
+	if len(s) != 5 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// extractPrefixFromIssuesJSONL reads issues.jsonl and returns the beads prefix
+// inferred from the first standard bead ID found (one with a 5-char alphanumeric
+// hash suffix). Agent bead IDs (e.g., gt-gastown-polecat-nux) are skipped because
+// their suffix is not a hash and would yield a wrong multi-segment prefix.
+// Returns "" if no suitable ID is found.
+func extractPrefixFromIssuesJSONL(jsonlPath string) string {
+	f, err := os.Open(jsonlPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var issue struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
+			if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
+				hash := issue.ID[lastDash+1:]
+				if isStandardBeadHashStr(hash) {
+					return issue.ID[:lastDash]
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func runRigBoot(cmd *cobra.Command, args []string) error {
