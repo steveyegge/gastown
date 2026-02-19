@@ -507,6 +507,46 @@ func (c *Curator) generateSummary(event *events.Event) string {
 		}
 		return "Multiple sessions died simultaneously"
 
+	case events.TypeObserveLog:
+		line, _ := event.Payload["line"].(string)
+		sourceID, _ := event.Payload["source_id"].(string)
+		if line != "" && sourceID != "" {
+			return fmt.Sprintf("[%s] %s", sourceID, line)
+		}
+		if line != "" {
+			return line
+		}
+		return fmt.Sprintf("%s: observe log", event.Actor)
+
+	case events.TypeObserveTest:
+		testName, _ := event.Payload["test_name"].(string)
+		status, _ := event.Payload["status"].(string)
+		if testName != "" && status != "" {
+			return fmt.Sprintf("Test %s: %s", testName, status)
+		}
+		return fmt.Sprintf("%s: observe test", event.Actor)
+
+	case events.TypeObserveSourceUp:
+		sourceID, _ := event.Payload["source_id"].(string)
+		if sourceID != "" {
+			return fmt.Sprintf("Observability source %s connected", sourceID)
+		}
+		return "Observability source connected"
+
+	case events.TypeObserveSourceDown:
+		sourceID, _ := event.Payload["source_id"].(string)
+		if sourceID != "" {
+			return fmt.Sprintf("Observability source %s disconnected", sourceID)
+		}
+		return "Observability source disconnected"
+
+	case events.TypeObserveMetric, events.TypeObserveTrace, events.TypeObserveAlert:
+		sourceID, _ := event.Payload["source_id"].(string)
+		if sourceID != "" {
+			return fmt.Sprintf("%s from %s", event.Type, sourceID)
+		}
+		return fmt.Sprintf("%s: %s", event.Actor, event.Type)
+
 	default:
 		return fmt.Sprintf("%s: %s", event.Actor, event.Type)
 	}

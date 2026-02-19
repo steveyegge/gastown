@@ -372,6 +372,79 @@ func TestCurator_GeneratesSummary(t *testing.T) {
 			},
 			expected: "gastown/witness handed off to fresh session",
 		},
+		// Observe event summaries
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveLog,
+				Actor:   "observe/app-logs",
+				Payload: map[string]interface{}{"line": "connection reset", "source_id": "app-logs"},
+			},
+			expected: "[app-logs] connection reset",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveLog,
+				Actor:   "observe/app-logs",
+				Payload: map[string]interface{}{"line": "something happened"},
+			},
+			expected: "something happened",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveLog,
+				Actor:   "observe/app-logs",
+				Payload: nil,
+			},
+			expected: "observe/app-logs: observe log",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveTest,
+				Actor:   "observe/test-out",
+				Payload: map[string]interface{}{"test_name": "TestFoo", "status": "pass"},
+			},
+			expected: "Test TestFoo: pass",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveTest,
+				Actor:   "observe/test-out",
+				Payload: nil,
+			},
+			expected: "observe/test-out: observe test",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveSourceUp,
+				Actor:   "observe/app-logs",
+				Payload: map[string]interface{}{"source_id": "app-logs"},
+			},
+			expected: "Observability source app-logs connected",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveSourceDown,
+				Actor:   "observe/app-logs",
+				Payload: map[string]interface{}{"source_id": "app-logs"},
+			},
+			expected: "Observability source app-logs disconnected",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveMetric,
+				Actor:   "observe/metrics",
+				Payload: map[string]interface{}{"source_id": "metrics"},
+			},
+			expected: "observe_metric from metrics",
+		},
+		{
+			event: &events.Event{
+				Type:    events.TypeObserveSourceUp,
+				Actor:   "observe/test",
+				Payload: nil,
+			},
+			expected: "Observability source connected",
+		},
 	}
 
 	for _, tc := range tests {

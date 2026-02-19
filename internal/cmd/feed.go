@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/observe"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/tui/feed"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -256,6 +258,20 @@ func runFeedTUI(workDir string, problemsView bool) error {
 	gtSource, err := feed.NewGtEventsSource(townRoot)
 	if err == nil {
 		sources = append(sources, gtSource)
+	}
+
+	// Create observability sources from town settings (optional).
+	if ts, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil {
+		if ts.Observability != nil {
+			for name, srcCfg := range ts.Observability.Sources {
+				obsSrc, err := observe.NewSource(name, srcCfg)
+				if err == nil {
+					sources = append(sources, obsSrc)
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: observe source %q: %v\n", name, err)
+				}
+			}
+		}
 	}
 
 	if len(sources) == 0 {

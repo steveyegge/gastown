@@ -527,6 +527,49 @@ func buildEventMessage(eventType string, payload map[string]interface{}) string 
 		}
 		return "merge failed"
 
+	case "observe_log":
+		line := getPayloadString(payload, "line")
+		sourceID := getPayloadString(payload, "source_id")
+		if line != "" && sourceID != "" {
+			return fmt.Sprintf("[%s] %s", sourceID, line)
+		}
+		if line != "" {
+			return line
+		}
+		return "observe log"
+
+	case "observe_test":
+		testName := getPayloadString(payload, "test_name")
+		status := getPayloadString(payload, "status")
+		if testName != "" && status != "" {
+			return fmt.Sprintf("test %s: %s", testName, status)
+		}
+		return "observe test"
+
+	case "observe_metric", "observe_trace", "observe_alert":
+		if msg := getPayloadString(payload, "message"); msg != "" {
+			return msg
+		}
+		sourceID := getPayloadString(payload, "source_id")
+		if sourceID != "" {
+			return fmt.Sprintf("%s from %s", eventType, sourceID)
+		}
+		return eventType
+
+	case "observe_source_up":
+		sourceID := getPayloadString(payload, "source_id")
+		if sourceID != "" {
+			return fmt.Sprintf("source %s connected", sourceID)
+		}
+		return "source connected"
+
+	case "observe_source_down":
+		sourceID := getPayloadString(payload, "source_id")
+		if sourceID != "" {
+			return fmt.Sprintf("source %s disconnected", sourceID)
+		}
+		return "source disconnected"
+
 	default:
 		if msg := getPayloadString(payload, "message"); msg != "" {
 			return msg

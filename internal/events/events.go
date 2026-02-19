@@ -68,6 +68,15 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Observability events (from runtime signal sources)
+	TypeObserveLog        = "observe_log"
+	TypeObserveMetric     = "observe_metric"
+	TypeObserveTrace      = "observe_trace"
+	TypeObserveTest       = "observe_test"
+	TypeObserveAlert      = "observe_alert"
+	TypeObserveSourceUp   = "observe_source_up"
+	TypeObserveSourceDown = "observe_source_down"
 )
 
 // EventsFile is the name of the raw events log.
@@ -331,4 +340,41 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 		p["cwd"] = cwd
 	}
 	return p
+}
+
+// ObserveLogPayload creates a payload for observe_log events.
+func ObserveLogPayload(sourceID, serviceID, severity, line string) map[string]interface{} {
+	p := map[string]interface{}{
+		"source_id": sourceID,
+		"line":      line,
+	}
+	if serviceID != "" {
+		p["service_id"] = serviceID
+	}
+	if severity != "" {
+		p["severity"] = severity
+	}
+	return p
+}
+
+// ObserveTestPayload creates a payload for observe_test events.
+func ObserveTestPayload(sourceID, testName, status, output string) map[string]interface{} {
+	p := map[string]interface{}{
+		"source_id": sourceID,
+		"test_name": testName,
+		"status":    status,
+	}
+	if output != "" {
+		p["output"] = output
+	}
+	return p
+}
+
+// ObserveSourcePayload creates a payload for observe_source_up/down events.
+func ObserveSourcePayload(sourceID, sourceKind, path string) map[string]interface{} {
+	return map[string]interface{}{
+		"source_id":   sourceID,
+		"source_kind": sourceKind,
+		"path":        path,
+	}
 }

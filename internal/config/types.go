@@ -86,6 +86,10 @@ type TownSettings struct {
 	// Actual model assignments live in RoleAgents and Agents.
 	// Values: "standard", "economy", "budget", or empty for custom configs.
 	CostTier string `json:"cost_tier,omitempty"`
+
+	// Observability configures runtime signal sources (logs, metrics, traces)
+	// and test orchestration. Opt-in; nil means observability is disabled.
+	Observability *ObservabilityConfig `json:"observability,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -180,6 +184,84 @@ type ConvoyConfig struct {
 	// NotifyOnComplete controls whether convoy completion pushes a notification
 	// into the active Mayor session (in addition to mail). Opt-in; default false.
 	NotifyOnComplete bool `json:"notify_on_complete,omitempty"`
+}
+
+// ObservabilityConfig is the top-level observability configuration.
+type ObservabilityConfig struct {
+	// Sources maps source names to their configurations.
+	// Each source represents a file or stream to tail for runtime signals.
+	Sources map[string]*ObservabilitySourceConfig `json:"sources,omitempty"`
+
+	// TestOrchestration configures the dev-only test runner/controller split.
+	// Schema only in this release; wiring deferred to a follow-up PR.
+	TestOrchestration *TestOrchestrationConfig `json:"test_orchestration,omitempty"`
+}
+
+// ObservabilitySourceConfig configures a single observability source.
+type ObservabilitySourceConfig struct {
+	// Scope limits where this source is active: "dev", "ci", or "all".
+	// Default: "dev".
+	Scope string `json:"scope,omitempty"`
+
+	// ServiceID identifies the service that produces this source.
+	ServiceID string `json:"service_id,omitempty"`
+
+	// EnvID identifies the environment (e.g., "local", "staging").
+	EnvID string `json:"env_id,omitempty"`
+
+	// SourceKind is the type of data: "log", "metric", "trace", "test_output".
+	SourceKind string `json:"source_kind,omitempty"`
+
+	// Path is the file path to tail.
+	Path string `json:"path"`
+
+	// RedactionPolicy controls PII redaction: "none", "standard", "strict".
+	// Default: "standard".
+	RedactionPolicy string `json:"redaction_policy,omitempty"`
+
+	// RoutingRules control how events from this source are routed.
+	RoutingRules *ObservabilityRoutingRules `json:"routing_rules,omitempty"`
+}
+
+// ObservabilityRoutingRules control event routing for a source.
+type ObservabilityRoutingRules struct {
+	// Visibility controls event visibility: "audit", "feed", or "both".
+	// Default: "feed".
+	Visibility string `json:"visibility,omitempty"`
+
+	// EventTypes restricts which event types this source can emit.
+	// Empty means all types are allowed.
+	EventTypes []string `json:"event_types,omitempty"`
+
+	// SeverityThreshold is the minimum severity to emit: "debug", "info", "warn", "error".
+	// Default: "info".
+	SeverityThreshold string `json:"severity_threshold,omitempty"`
+}
+
+// TestOrchestrationConfig configures the test runner/controller split.
+// Schema only — agent wiring is deferred to a follow-up PR.
+type TestOrchestrationConfig struct {
+	// Enabled controls whether test orchestration is active.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// RunnerAgent is the agent alias that runs tests.
+	RunnerAgent string `json:"runner_agent,omitempty"`
+
+	// ControllerAgent is the agent alias that interprets results.
+	ControllerAgent string `json:"controller_agent,omitempty"`
+}
+
+// DefaultObservabilitySourceConfig returns an ObservabilitySourceConfig with sensible defaults.
+func DefaultObservabilitySourceConfig() *ObservabilitySourceConfig {
+	return &ObservabilitySourceConfig{
+		Scope:           "dev",
+		SourceKind:      "log",
+		RedactionPolicy: "standard",
+		RoutingRules: &ObservabilityRoutingRules{
+			Visibility:        "feed",
+			SeverityThreshold: "info",
+		},
+	}
 }
 
 // ParseDurationOrDefault parses a Go duration string, returning fallback on error or empty input.
