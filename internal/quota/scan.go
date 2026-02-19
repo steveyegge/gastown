@@ -2,6 +2,7 @@ package quota
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -98,8 +99,14 @@ func (s *Scanner) scanSession(session string) ScanResult {
 
 	// Always capture CLAUDE_CONFIG_DIR for rotation planning, even if
 	// the account handle can't be resolved (unknown account sessions).
+	// Falls back to ~/.claude (Claude Code's default) when the env var isn't set.
 	if configDir, err := s.tmux.GetEnvironment(session, "CLAUDE_CONFIG_DIR"); err == nil {
 		result.ConfigDir = strings.TrimSpace(configDir)
+	} else {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			result.ConfigDir = home + "/.claude"
+		}
 	}
 
 	// Derive account from CLAUDE_CONFIG_DIR
