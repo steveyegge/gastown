@@ -9,7 +9,7 @@
 #   docker build -f Dockerfile.e2e -t gastown-test .
 #   docker run --rm gastown-test
 
-FROM golang:1.25-alpine
+FROM golang:1.26-alpine
 
 # Install dependencies including CGO build requirements for beads daemon
 # procps and lsof are required by gt dolt start for process verification
