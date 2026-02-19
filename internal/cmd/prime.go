@@ -540,7 +540,7 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 // The agent sees this and runs the slash command, activating the Ralph plugin's
 // stop hook loop. Each iteration gets a fresh context window while preserving
 // artifacts on disk via git.
-func outputRalphLoopDirective(ctx RoleContext, attachment *beads.AttachmentFields) {
+func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields) {
 	fmt.Printf("%s\n\n", style.Bold.Render("## 🐱 RALPH LOOP MODE (RALPHCAT)"))
 	fmt.Println("This work uses Ralph Wiggum loop mode for multi-step execution.")
 	fmt.Println("Each step runs in a fresh context window to avoid context exhaustion.")
