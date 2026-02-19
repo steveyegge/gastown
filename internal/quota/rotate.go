@@ -36,8 +36,10 @@ type RotatePlan struct {
 }
 
 // PlanRotation scans for limited sessions and plans account assignments.
+// When fromAccount is non-empty, it targets all sessions using that account
+// regardless of rate-limit status (preemptive rotation).
 // Returns a plan that can be reviewed before execution.
-func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig) (*RotatePlan, error) {
+func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig, fromAccount string) (*RotatePlan, error) {
 	// Scan for rate-limited sessions
 	results, err := scanner.ScanAll()
 	if err != nil {
@@ -51,11 +53,23 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	}
 	mgr.EnsureAccountsTracked(state, acctCfg.Accounts)
 
-	// Find limited sessions
+	// Auto-clear accounts whose reset time has passed so they
+	// become available for rotation.
+	mgr.ClearExpired(state)
+
+	// Find target sessions: either rate-limited (default) or by account (preemptive).
 	var limitedSessions []ScanResult
 	for _, r := range results {
-		if r.RateLimited {
-			limitedSessions = append(limitedSessions, r)
+		if fromAccount != "" {
+			// Preemptive: target all sessions using the specified account
+			if r.AccountHandle == fromAccount {
+				limitedSessions = append(limitedSessions, r)
+			}
+		} else {
+			// Reactive: target rate-limited sessions only
+			if r.RateLimited {
+				limitedSessions = append(limitedSessions, r)
+			}
 		}
 	}
 

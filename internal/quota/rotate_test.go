@@ -32,7 +32,7 @@ func TestPlanRotation_NoLimitedSessions(t *testing.T) {
 	townRoot := setupTestTown(t)
 	mgr := NewManager(townRoot)
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestPlanRotation_AssignsAvailableAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestPlanRotation_NoAvailableAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestPlanRotation_SkipsSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestPlanRotation_MultipleLimitedSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestPlanRotation_ConfigDirGrouping_SameDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestPlanRotation_ConfigDirGrouping_DifferentDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestPlanRotation_MarksLimitedAccountsInState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestPlanRotation_DryRunReturnsValidPlan(t *testing.T) {
 
 	// PlanRotation returns a complete plan suitable for JSON serialization
 	// (used by --dry-run --json). Verify all fields are populated.
-	plan, err := PlanRotation(scanner, mgr, accounts)
+	plan, err := PlanRotation(scanner, mgr, accounts, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,5 +548,116 @@ func TestPlanRotation_DryRunReturnsValidPlan(t *testing.T) {
 	}
 	if plan.ConfigDirSwaps == nil {
 		t.Error("plan.ConfigDirSwaps should not be nil")
+	}
+}
+
+// --- Preemptive rotation tests ---
+
+func TestPlanRotation_PreemptiveFromAccount(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Two sessions: one on alpha (not rate-limited), one on beta.
+	// --from alpha should target the alpha session regardless of rate-limit status.
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "working normally...",
+			"gt-crew-wolf": "also working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+			"gamma": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should target the alpha session even though it's not rate-limited
+	if len(plan.LimitedSessions) != 1 {
+		t.Fatalf("expected 1 targeted session, got %d", len(plan.LimitedSessions))
+	}
+	if plan.LimitedSessions[0].Session != "gt-crew-bear" {
+		t.Errorf("expected session gt-crew-bear, got %s", plan.LimitedSessions[0].Session)
+	}
+
+	// Should assign a different account (gamma is LRU)
+	if len(plan.Assignments) != 1 {
+		t.Fatalf("expected 1 assignment, got %d", len(plan.Assignments))
+	}
+	newAccount := plan.Assignments["gt-crew-bear"]
+	if newAccount != "gamma" {
+		t.Errorf("expected assignment to 'gamma' (LRU), got %q", newAccount)
+	}
+}
+
+func TestPlanRotation_PreemptiveFromAccount_NoSessions(t *testing.T) {
+	setupTestRegistry(t)
+
+	// No sessions use the "gamma" account — --from gamma should find nothing.
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "working normally...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+
+	plan, err := PlanRotation(scanner, mgr, accounts, "gamma")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(plan.LimitedSessions) != 0 {
+		t.Errorf("expected 0 targeted sessions, got %d", len(plan.LimitedSessions))
+	}
+	if len(plan.Assignments) != 0 {
+		t.Errorf("expected 0 assignments, got %d", len(plan.Assignments))
 	}
 }

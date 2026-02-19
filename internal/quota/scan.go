@@ -118,10 +118,23 @@ func (s *Scanner) scanSession(session string) ScanResult {
 	return result
 }
 
-// resolveAccountHandle maps a session's CLAUDE_CONFIG_DIR back to an account handle.
+// resolveAccountHandle maps a session's active account back to a handle.
+// Checks GT_QUOTA_ACCOUNT first (set by keychain swap rotation), then
+// falls back to matching CLAUDE_CONFIG_DIR against registered accounts.
 func (s *Scanner) resolveAccountHandle(session string) string {
 	if s.accounts == nil {
 		return ""
+	}
+
+	// After keychain swap, the config dir still maps to the old account.
+	// GT_QUOTA_ACCOUNT records which account's token is actually active.
+	if override, err := s.tmux.GetEnvironment(session, "GT_QUOTA_ACCOUNT"); err == nil {
+		override = strings.TrimSpace(override)
+		if override != "" {
+			if _, ok := s.accounts.Accounts[override]; ok {
+				return override
+			}
+		}
 	}
 
 	configDir, err := s.tmux.GetEnvironment(session, "CLAUDE_CONFIG_DIR")

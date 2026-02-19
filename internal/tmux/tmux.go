@@ -1950,6 +1950,35 @@ func (t *Tmux) IsAtPrompt(session string, rc *config.RuntimeConfig) bool {
 	return false
 }
 
+// IsIdle checks whether a session is currently at the idle input prompt (❯)
+// with no active work in progress.
+// Returns true if idle, false if the agent is busy or the check fails.
+// This is a point-in-time snapshot, not a poll.
+//
+// Detection strategy: check the Claude Code status bar (bottom line of the
+// pane starting with ⏵⏵). When the agent is actively working, the status
+// bar contains "esc to interrupt". When idle, it does not.
+func (t *Tmux) IsIdle(session string) bool {
+	lines, err := t.CapturePaneLines(session, 5)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// The status bar starts with ⏵⏵ (double play symbols).
+		// When the agent is busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
+		// When the agent is idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
+		if strings.Contains(trimmed, "⏵⏵") || strings.Contains(trimmed, "\u23F5\u23F5") {
+			if strings.Contains(trimmed, "esc to interrupt") {
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	format := "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}|#{session_activity}|#{session_last_attached}"
