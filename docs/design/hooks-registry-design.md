@@ -11,6 +11,10 @@ Most of the infrastructure requested in gt-gow8b was implemented by the gt-ja40n
 epic (closed 2026-02-06). This design documents what exists, identifies remaining
 gaps, and proposes targeted work to close them.
 
+**Note (2026-02-18 validation):** Investigation confirms all listed infrastructure exists
+and functions correctly. Drift problem verified: 98 hooks deployed in settings.json files
+but only 7 in registry. Bootstrap step (gt hooks init) is ready to run.
+
 ## Current State (Implemented)
 
 ### What Exists
