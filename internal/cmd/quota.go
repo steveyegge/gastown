@@ -629,11 +629,15 @@ func executeKeychainRotation(
 		NewAccount: newAccount,
 	}
 
-	// Read the session's current CLAUDE_CONFIG_DIR
+	// Read the session's current CLAUDE_CONFIG_DIR, falling back to ~/.claude
 	currentConfigDir, err := t.GetEnvironment(session, "CLAUDE_CONFIG_DIR")
-	if err != nil {
-		result.Error = fmt.Sprintf("reading CLAUDE_CONFIG_DIR: %v", err)
-		return result
+	if err != nil || strings.TrimSpace(currentConfigDir) == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			result.Error = fmt.Sprintf("reading CLAUDE_CONFIG_DIR: %v", err)
+			return result
+		}
+		currentConfigDir = home + "/.claude"
 	}
 
 	// Resolve old account handle
