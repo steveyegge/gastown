@@ -1,0 +1,108 @@
+# Codecov configuration for Gas Town (gt) CLI
+# https://docs.codecov.com/docs/codecovyml-reference
+#
+# Strategy: single upload, no flags. Domain-level views via components.
+
+codecov:
+  branch: main
+  max_report_age: off
+  notify:
+    after_n_builds: 1
+    wait_for_ci: true
+
+# Coverage status configuration
+coverage:
+  status:
+    project:
+      # Overall project coverage
+      default:
+        target: auto
+        threshold: 5%
+
+    # Patch coverage (for new code in PRs)
+    patch:
+      default:
+        target: 60%
+        threshold: 10%
+
+# Component management for domain-based coverage views
+# Components are purely configuration-driven — no upload-time setup needed
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 5%
+        informational: true
+
+  individual_components:
+    - component_id: cli-commands
+      name: CLI Commands
+      paths:
+        - cmd/**
+        - internal/cmd/**
+        - internal/cli/**
+
+    - component_id: mail-system
+      name: Mail & Communication
+      paths:
+        - internal/mail/**
+        - internal/nudge/**
+
+    - component_id: rig-management
+      name: Rig Management
+      paths:
+        - internal/rig/**
+        - internal/crew/**
+        - internal/polecat/**
+        - internal/witness/**
+        - internal/refinery/**
+
+    - component_id: git-operations
+      name: Git & Merge Queue
+      paths:
+        - internal/git/**
+        - internal/mq/**
+
+    - component_id: beads-integration
+      name: Beads & Issue Tracking
+      paths:
+        - internal/beads/**
+        - internal/formula/**
+
+# Files and paths to ignore from coverage
+ignore:
+  # Test files
+  - "**/*_test.go"
+  - "**/testdata/**"
+  - "**/test_helpers*.go"
+
+  # Generated files
+  - "internal/formula/formulas/**"
+  - "**/*.generated.go"
+
+  # Build artifacts and dependencies
+  - "**/vendor/**"
+
+  # Documentation
+  - "**/*.md"
+  - "docs/**"
+
+  # Scripts and tooling
+  - "scripts/**"
+
+  # npm package (separate project)
+  - "npm-package/**"
+
+  # E2E and container test infrastructure
+  - "Dockerfile*"
+
+# Comment configuration for PR comments
+comment:
+  layout: "condensed_header,diff,components,tree"
+  behavior: default
+  require_changes: false
+
+# GitHub Checks configuration
+github_checks:
+  annotations: true

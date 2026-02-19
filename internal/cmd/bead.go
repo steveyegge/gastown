@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -139,6 +140,11 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Moving %s to %s...\n", style.Bold.Render("→"), sourceID, targetPrefix)
 	fmt.Printf("  Title: %s\n", source.Title)
 	fmt.Printf("  Type: %s\n", source.Type)
+
+	// Guard against flag-like titles propagating during move (gt-e0kx5)
+	if beads.IsFlagLikeTitle(source.Title) {
+		return fmt.Errorf("refusing to move bead: title %q looks like a CLI flag", source.Title)
+	}
 
 	if beadMoveDryRun {
 		fmt.Printf("\nDry run - would:\n")

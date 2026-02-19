@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -164,15 +165,14 @@ type SessionCost struct {
 
 // CostEntry is a ledger entry for historical cost tracking.
 type CostEntry struct {
-	SessionID   string                     `json:"session_id"`
-	Role        string                     `json:"role"`
-	Rig         string                     `json:"rig,omitempty"`
-	Worker      string                     `json:"worker,omitempty"`
-	CostUSD     float64                    `json:"cost_usd"`
-	ModelTokens map[string]*ModelTokenUsage `json:"model_tokens,omitempty"`
-	StartedAt   time.Time                  `json:"started_at"`
-	EndedAt     time.Time                  `json:"ended_at"`
-	WorkItem    string                     `json:"work_item,omitempty"`
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Rig       string    `json:"rig,omitempty"`
+	Worker    string    `json:"worker,omitempty"`
+	CostUSD   float64   `json:"cost_usd"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	WorkItem  string    `json:"work_item,omitempty"`
 }
 
 // CostsOutput is the JSON output structure.
@@ -184,6 +184,9 @@ type CostsOutput struct {
 	Period   string             `json:"period,omitempty"`
 }
 
+// costRegex matches cost patterns like "$1.23" or "$12.34"
+var costRegex = regexp.MustCompile(`\$(\d+\.\d{2})`)
+
 // TranscriptMessage represents a message from a Claude Code transcript file.
 type TranscriptMessage struct {
 	Type      string                 `json:"type"`
@@ -194,9 +197,8 @@ type TranscriptMessage struct {
 
 // TranscriptMessageBody contains the message content and usage info.
 type TranscriptMessageBody struct {
-	ID    string           `json:"id"`
-	Model string           `json:"model"`
-	Role  string           `json:"role"`
+	Model string          `json:"model"`
+	Role  string          `json:"role"`
 	Usage *TranscriptUsage `json:"usage,omitempty"`
 }
 
@@ -208,62 +210,30 @@ type TranscriptUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 }
 
-// ModelTokenUsage stores per-model token counts for the cost log.
-type ModelTokenUsage struct {
-	InputTokens              int `json:"input"`
-	OutputTokens             int `json:"output"`
-	CacheReadInputTokens     int `json:"cache_read"`
-	CacheCreationInputTokens int `json:"cache_create"`
-}
-
-// TokenUsage aggregates token usage across a session, keyed by model.
+// TokenUsage aggregates token usage across a session.
 type TokenUsage struct {
-	// ByModel maps model ID to aggregated token counts.
-	ByModel map[string]*ModelTokenUsage
-	// ParseErrors collects non-fatal parsing issues (capped at maxParseErrors).
-	ParseErrors []string
+	Model                    string
+	InputTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	OutputTokens             int
 }
 
-// maxParseErrors caps the parse_errors array to keep log entries small.
-const maxParseErrors = 10
-
-// modelPricingEntry holds per-million-token pricing for a model.
-type modelPricingEntry struct {
+// Model pricing per million tokens (as of Jan 2025).
+// See: https://www.anthropic.com/pricing
+var modelPricing = map[string]struct {
 	InputPerMillion       float64
 	OutputPerMillion      float64
 	CacheReadPerMillion   float64 // 90% discount on input price
 	CacheCreatePerMillion float64 // 25% premium on input price
-}
-
-// Model pricing per million tokens (updated 2026-02-18).
-// See: https://www.anthropic.com/pricing
-// Update pricingVersion const when changing this table.
-//
-// Claude Code transcripts use short model IDs (e.g., "claude-opus-4-6")
-// without date suffixes. Include both forms for each model.
-var modelPricing = map[string]modelPricingEntry{
-	// Claude Opus 4.6
-	"claude-opus-4-6":          {15.0, 75.0, 1.5, 18.75},
-	"claude-opus-4-6-20260120": {15.0, 75.0, 1.5, 18.75},
+}{
 	// Claude Opus 4.5
-	"claude-opus-4-5":          {15.0, 75.0, 1.5, 18.75},
 	"claude-opus-4-5-20251101": {15.0, 75.0, 1.5, 18.75},
-	// Claude Sonnet 4.6
-	"claude-sonnet-4-6":          {3.0, 15.0, 0.3, 3.75},
-	"claude-sonnet-4-6-20260217": {3.0, 15.0, 0.3, 3.75},
-	// Claude Sonnet 4.5
-	"claude-sonnet-4-5":          {3.0, 15.0, 0.3, 3.75},
-	"claude-sonnet-4-5-20250929": {3.0, 15.0, 0.3, 3.75},
 	// Claude Sonnet 4
-	"claude-sonnet-4":          {3.0, 15.0, 0.3, 3.75},
 	"claude-sonnet-4-20250514": {3.0, 15.0, 0.3, 3.75},
-	// Claude Haiku 4.5
-	"claude-haiku-4-5":          {1.0, 5.0, 0.1, 1.25},
-	"claude-haiku-4-5-20251001": {1.0, 5.0, 0.1, 1.25},
 	// Claude Haiku 3.5
-	"claude-3-5-haiku":          {1.0, 5.0, 0.1, 1.25},
 	"claude-3-5-haiku-20241022": {1.0, 5.0, 0.1, 1.25},
-	// Fallback for unknown models (use Sonnet pricing as conservative default)
+	// Fallback for unknown models (use Sonnet pricing)
 	"default": {3.0, 15.0, 0.3, 3.75},
 }
 
@@ -439,8 +409,6 @@ type SessionEvent struct {
 }
 
 // SessionPayload represents the JSON payload of a session event.
-// Note: legacy session.ended bead events do not include model_tokens.
-// Per-model token data is only available via CostLogEntry (log file path).
 type SessionPayload struct {
 	CostUSD   float64 `json:"cost_usd"`
 	SessionID string  `json:"session_id"`
@@ -596,12 +564,6 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 
 // queryDigestBeads queries costs.digest events from the past N days and extracts session entries.
 func queryDigestBeads(days int) ([]CostEntry, error) {
-	// Scope to the town root so bd queries the correct database.
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return nil, nil // Not in a Gas Town workspace
-	}
-
 	// Get list of event IDs
 	listArgs := []string{
 		"list",
@@ -612,7 +574,6 @@ func queryDigestBeads(days int) ([]CostEntry, error) {
 	}
 
 	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townRoot
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		return nil, nil
@@ -634,7 +595,6 @@ func queryDigestBeads(days int) ([]CostEntry, error) {
 	}
 
 	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townRoot
 	showOutput, err := showCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("showing events: %w", err)
@@ -718,6 +678,27 @@ func parseSessionName(sess string) (role, rig, worker string) {
 	}
 }
 
+// extractCost finds the most recent cost value in pane content.
+// DEPRECATED: Claude Code no longer displays cost in a scrapable format.
+// This is kept for backwards compatibility but always returns 0.0.
+// Use extractCostFromTranscript instead.
+func extractCost(content string) float64 {
+	matches := costRegex.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return 0.0
+	}
+
+	// Get the last (most recent) match
+	lastMatch := matches[len(matches)-1]
+	if len(lastMatch) < 2 {
+		return 0.0
+	}
+
+	var cost float64
+	_, _ = fmt.Sscanf(lastMatch[1], "%f", &cost)
+	return cost
+}
+
 // getClaudeProjectDir returns the Claude Code project directory for a working directory.
 // Claude Code stores transcripts in ~/.claude/projects/<path-with-dashes-instead-of-slashes>/
 func getClaudeProjectDir(workDir string) (string, error) {
@@ -766,19 +747,7 @@ func findLatestTranscript(projectDir string) (string, error) {
 	return latestPath, nil
 }
 
-// perMessageUsage tracks the last-seen usage for a single API message.
-type perMessageUsage struct {
-	model                    string
-	inputTokens              int
-	cacheCreationInputTokens int
-	cacheReadInputTokens     int
-	outputTokens             int
-}
-
-// parseTranscriptUsage reads a transcript file and extracts deduplicated token usage.
-// Claude Code transcripts contain multiple streaming partial entries per API message
-// (same message.id). Naive summation overcounts by 2-4x. This function deduplicates
-// by message.id, keeping only the last entry per message, then sums across messages.
+// parseTranscriptUsage reads a transcript file and sums token usage from assistant messages.
 func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
 	file, err := os.Open(transcriptPath)
 	if err != nil {
@@ -786,25 +755,13 @@ func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
 	}
 	defer file.Close()
 
-	usage := &TokenUsage{
-		ByModel: make(map[string]*ModelTokenUsage),
-	}
-
-	// Deduplicate: track last-seen usage per message.id.
-	// Capped at 100K entries to bound memory on pathological transcripts.
-	seen := make(map[string]*perMessageUsage)
-	const maxMessages = 100_000
-	// Counter for anonymous messages (no message.id) to use as synthetic keys.
-	anonCounter := 0
-
+	usage := &TokenUsage{}
 	scanner := bufio.NewScanner(file)
-	// 50MB buffer: transcript lines can be very large (tool results with full file contents).
-	// The previous 1MB limit caused silent failures on ~90% of real sessions.
-	scanner.Buffer(make([]byte, 0, 256*1024), 50*1024*1024)
+	// Increase buffer for potentially large JSON lines
+	buf := make([]byte, 0, 256*1024)
+	scanner.Buffer(buf, 1024*1024)
 
-	lineNum := 0
 	for scanner.Scan() {
-		lineNum++
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
@@ -820,80 +777,24 @@ func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
 			continue
 		}
 
-		msgID := msg.Message.ID
-		if msgID == "" {
-			// No message ID—can't deduplicate. Treat as unique so tokens aren't lost.
-			anonCounter++
-			msgID = fmt.Sprintf("__anon_%d", anonCounter)
+		// Capture the model (use first one found, they should all be the same)
+		if usage.Model == "" && msg.Message.Model != "" {
+			usage.Model = msg.Message.Model
 		}
 
-		// Cap seen map to prevent unbounded memory on adversarial transcripts.
-		// Allow updates to existing IDs (preserves "last partial wins" dedup
-		// contract) but reject new IDs once at capacity.
-		if _, exists := seen[msgID]; !exists && len(seen) >= maxMessages {
-			addParseError(usage, "exceeded 100K unique messages, skipping new IDs")
-			continue
-		}
-
-		model := msg.Message.Model
+		// Sum token usage
 		u := msg.Message.Usage
-
-		// Overwrite: last entry per message.id wins (final streaming partial
-		// has the most accurate token counts).
-		seen[msgID] = &perMessageUsage{
-			model:                    model,
-			inputTokens:              u.InputTokens,
-			cacheCreationInputTokens: u.CacheCreationInputTokens,
-			cacheReadInputTokens:     u.CacheReadInputTokens,
-			outputTokens:             u.OutputTokens,
-		}
+		usage.InputTokens += u.InputTokens
+		usage.CacheCreationInputTokens += u.CacheCreationInputTokens
+		usage.CacheReadInputTokens += u.CacheReadInputTokens
+		usage.OutputTokens += u.OutputTokens
 	}
 
 	if err := scanner.Err(); err != nil {
-		// Scanner error (e.g., line too long even with 50MB buffer).
-		// Return partial data with a diagnostic rather than nil — partial cost
-		// is strictly better than $0.00 for the caller.
-		addParseError(usage, fmt.Sprintf("scanner error at line %d: %v", lineNum, err))
-	}
-
-	// Aggregate deduplicated usage by model
-	for _, mu := range seen {
-		model := mu.model
-		if model == "" {
-			model = "unknown"
-		}
-		entry, ok := usage.ByModel[model]
-		if !ok {
-			entry = &ModelTokenUsage{}
-			usage.ByModel[model] = entry
-		}
-		entry.InputTokens += mu.inputTokens
-		entry.OutputTokens += mu.outputTokens
-		entry.CacheReadInputTokens += mu.cacheReadInputTokens
-		entry.CacheCreationInputTokens += mu.cacheCreationInputTokens
-	}
-
-	// Flag unknown models (pricing will fall back to default)
-	for model := range usage.ByModel {
-		if model == "unknown" {
-			addParseError(usage, "some messages missing model field")
-			continue
-		}
-		if _, ok := modelPricing[model]; !ok {
-			addParseError(usage, fmt.Sprintf("unknown model %q: using default pricing", model))
-		}
+		return nil, err
 	}
 
 	return usage, nil
-}
-
-// addParseError appends an error to usage.ParseErrors, respecting the cap.
-func addParseError(usage *TokenUsage, msg string) {
-	if len(usage.ParseErrors) < maxParseErrors {
-		usage.ParseErrors = append(usage.ParseErrors, msg)
-	} else if len(usage.ParseErrors) == maxParseErrors {
-		usage.ParseErrors = append(usage.ParseErrors, "... additional errors truncated")
-	}
 }
 
 // calculateCost converts token usage to USD cost based on model pricing.
@@ -902,20 +803,19 @@ func calculateCost(usage *TokenUsage) float64 {
 		return 0.0
 	}
 
-	var total float64
-	for model, tokens := range usage.ByModel {
-		pricing, ok := modelPricing[model]
-		if !ok {
-			pricing = modelPricing["default"]
-		}
-
-		total += float64(tokens.InputTokens) / 1_000_000 * pricing.InputPerMillion
-		total += float64(tokens.CacheReadInputTokens) / 1_000_000 * pricing.CacheReadPerMillion
-		total += float64(tokens.CacheCreationInputTokens) / 1_000_000 * pricing.CacheCreatePerMillion
-		total += float64(tokens.OutputTokens) / 1_000_000 * pricing.OutputPerMillion
+	// Look up pricing for the model
+	pricing, ok := modelPricing[usage.Model]
+	if !ok {
+		pricing = modelPricing["default"]
 	}
 
-	return total
+	// Calculate cost (prices are per million tokens)
+	inputCost := float64(usage.InputTokens) / 1_000_000 * pricing.InputPerMillion
+	cacheReadCost := float64(usage.CacheReadInputTokens) / 1_000_000 * pricing.CacheReadPerMillion
+	cacheCreateCost := float64(usage.CacheCreationInputTokens) / 1_000_000 * pricing.CacheCreatePerMillion
+	outputCost := float64(usage.OutputTokens) / 1_000_000 * pricing.OutputPerMillion
+
+	return inputCost + cacheReadCost + cacheCreateCost + outputCost
 }
 
 // extractCostFromWorkDir extracts cost from Claude Code transcript for a working directory.
@@ -934,12 +834,6 @@ func extractCostFromWorkDir(workDir string) (float64, error) {
 	usage, err := parseTranscriptUsage(transcriptPath)
 	if err != nil {
 		return 0, fmt.Errorf("parsing transcript: %w", err)
-	}
-
-	if costsVerbose && len(usage.ParseErrors) > 0 {
-		for _, e := range usage.ParseErrors {
-			fmt.Fprintf(os.Stderr, "[costs] warning: %s\n", e)
-		}
 	}
 
 	return calculateCost(usage), nil
@@ -1041,16 +935,13 @@ func outputLedgerHuman(output CostsOutput, entries []CostEntry) error {
 
 // CostLogEntry represents a single entry in the costs.jsonl log file.
 type CostLogEntry struct {
-	SessionID      string                     `json:"session_id"`
-	Role           string                     `json:"role"`
-	Rig            string                     `json:"rig,omitempty"`
-	Worker         string                     `json:"worker,omitempty"`
-	CostUSD        float64                    `json:"cost_usd"`
-	ModelTokens    map[string]*ModelTokenUsage `json:"model_tokens,omitempty"`
-	PricingVersion string                     `json:"pricing_version,omitempty"`
-	ParseErrors    []string                   `json:"parse_errors,omitempty"`
-	EndedAt        time.Time                  `json:"ended_at"`
-	WorkItem       string                     `json:"work_item,omitempty"`
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Rig       string    `json:"rig,omitempty"`
+	Worker    string    `json:"worker,omitempty"`
+	CostUSD   float64   `json:"cost_usd"`
+	EndedAt   time.Time `json:"ended_at"`
+	WorkItem  string    `json:"work_item,omitempty"`
 }
 
 // getCostsLogPath returns the path to the costs log file (~/.gt/costs.jsonl).
@@ -1062,136 +953,65 @@ func getCostsLogPath() string {
 	return filepath.Join(home, ".gt", "costs.jsonl")
 }
 
-// pricingVersion is the date the pricing table was last updated.
-// Used to detect stale pricing in cost log entries.
-const pricingVersion = "2026-02-18"
-
 // runCostsRecord captures the final cost from a session and appends it to a local log file.
 // This is called by the Claude Code Stop hook. It's designed to never fail due to
 // database availability - it's a simple file append operation.
-//
-// The Stop hook passes JSON on stdin with session_id and transcript_path.
-// We prefer stdin data over flags/env vars since it comes directly from Claude Code.
-// Reuses readStdinJSON() from prime_session.go (same hookInput struct).
 func runCostsRecord(cmd *cobra.Command, args []string) error {
-	var parseErrors []string
-
-	// Read Stop hook input from stdin (Claude Code passes JSON).
-	// Uses the same readStdinJSON()/hookInput from prime_session.go—
-	// no duplicate struct, reads one line with bufio (won't block on empty pipe).
-	stdinInput := readStdinJSON()
-
-	// Resolve transcript path: stdin > workdir-based lookup
-	var transcriptPath string
-	if stdinInput != nil && stdinInput.TranscriptPath != "" {
-		transcriptPath = stdinInput.TranscriptPath
-	} else if stdinInput != nil {
-		parseErrors = append(parseErrors, "stdin JSON present but no transcript_path field")
+	// Get session from flag or try to detect from environment
+	session := recordSession
+	if session == "" {
+		session = os.Getenv("GT_SESSION")
 	}
-
-	// Resolve session name: flag > env > derived > tmux detection
-	sessionName := recordSession
-	if sessionName == "" {
-		sessionName = os.Getenv("GT_SESSION")
+	if session == "" {
+		// Derive session name from GT_* environment variables
+		session = deriveSessionName()
 	}
-	if sessionName == "" {
-		sessionName = deriveSessionName()
+	if session == "" {
+		// Try to detect current tmux session (works when running inside tmux)
+		session = detectCurrentTmuxSession()
 	}
-	if sessionName == "" {
-		sessionName = detectCurrentTmuxSession()
-	}
-	if sessionName == "" && stdinInput != nil && stdinInput.SessionID != "" {
-		// Fall back to the session_id from Stop hook stdin. This may not be a
-		// GT tmux-style name, so we'll resolve role as "unknown" below.
-		sessionName = stdinInput.SessionID
-	}
-	if sessionName == "" {
+	if session == "" {
 		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
 	}
 
-	// Parse transcript for token usage
-	var cost float64
-	var modelTokens map[string]*ModelTokenUsage
-
-	if transcriptPath != "" {
-		usage, err := parseTranscriptUsage(transcriptPath)
+	// Get working directory from environment or tmux session
+	workDir := os.Getenv("GT_CWD")
+	if workDir == "" {
+		// Try to get from tmux session
+		var err error
+		workDir, err = getTmuxSessionWorkDir(session)
 		if err != nil {
-			parseErrors = append(parseErrors, fmt.Sprintf("transcript parse failed: %v", err))
-			transcriptPath = "" // clear so workdir fallback runs
-		} else {
-			parseErrors = append(parseErrors, usage.ParseErrors...)
-			cost = calculateCost(usage)
-			if len(usage.ByModel) > 0 {
-				modelTokens = usage.ByModel
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
 			}
 		}
 	}
 
-	// Workdir-based fallback: runs when stdin had no path OR stdin path was invalid/stale
-	if transcriptPath == "" {
-		workDir := os.Getenv("GT_CWD")
-		if workDir == "" {
-			wd, err := getTmuxSessionWorkDir(sessionName)
-			if err != nil {
-				parseErrors = append(parseErrors,
-					fmt.Sprintf("workdir fallback: tmux workdir failed: %v", err))
-			} else {
-				workDir = wd
+	// Extract cost from Claude transcript
+	var cost float64
+	if workDir != "" {
+		var err error
+		cost, err = extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost from transcript: %v\n", err)
 			}
-		}
-
-		if workDir != "" {
-			projectDir, err := getClaudeProjectDir(workDir)
-			if err != nil {
-				parseErrors = append(parseErrors, fmt.Sprintf("workdir fallback: project dir resolution failed: %v", err))
-			} else {
-				tp, err := findLatestTranscript(projectDir)
-				if err != nil {
-					parseErrors = append(parseErrors, fmt.Sprintf("workdir fallback: transcript not found: %v", err))
-				} else {
-					usage, err := parseTranscriptUsage(tp)
-					if err != nil {
-						parseErrors = append(parseErrors, fmt.Sprintf("workdir fallback: transcript parse failed: %v", err))
-					} else {
-						parseErrors = append(parseErrors, usage.ParseErrors...)
-						cost = calculateCost(usage)
-						if len(usage.ByModel) > 0 {
-							modelTokens = usage.ByModel
-						}
-						transcriptPath = tp
-					}
-				}
-			}
+			cost = 0.0
 		}
 	}
 
-	if transcriptPath == "" {
-		parseErrors = append(parseErrors, "no transcript path available")
-	}
+	// Parse session name
+	role, rig, worker := parseSessionName(session)
 
-	// Parse session name for role/rig/worker
-	role, rig, worker := parseSessionName(sessionName)
-
-	// Build log entry with raw tokens and error metadata.
-	// Cap parse errors to keep entry under PIPE_BUF for atomic O_APPEND.
-	if len(parseErrors) > maxParseErrors+1 {
-		parseErrors = append(parseErrors[:maxParseErrors],
-			fmt.Sprintf("... and %d more errors", len(parseErrors)-maxParseErrors))
-	}
-
+	// Build log entry
 	entry := CostLogEntry{
-		SessionID:      sessionName,
-		Role:           role,
-		Rig:            rig,
-		Worker:         worker,
-		CostUSD:        cost,
-		ModelTokens:    modelTokens,
-		PricingVersion: pricingVersion,
-		EndedAt:        time.Now(),
-		WorkItem:       recordWorkItem,
-	}
-	if len(parseErrors) > 0 {
-		entry.ParseErrors = parseErrors
+		SessionID: session,
+		Role:      role,
+		Rig:       rig,
+		Worker:    worker,
+		CostUSD:   cost,
+		EndedAt:   time.Now(),
+		WorkItem:  recordWorkItem,
 	}
 
 	// Marshal to JSON
@@ -1210,32 +1030,26 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open file for append (create if doesn't exist).
-	// O_APPEND ensures each write goes to the end of the file. Concurrent appenders
-	// are serialized by the OS at the syscall level on most POSIX systems for small
-	// writes, though this is not strictly guaranteed for regular files. Entries are
-	// kept small (parse_errors capped at 10) to minimize interleaving risk in practice.
+	// O_APPEND writes are atomic on POSIX for writes < PIPE_BUF (~4KB).
+	// A JSON log entry is ~200 bytes, so concurrent appends are safe.
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("opening costs log: %w", err)
 	}
 	defer f.Close()
 
+	// Write entry with newline
 	if _, err := f.Write(append(entryJSON, '\n')); err != nil {
 		return fmt.Errorf("writing to costs log: %w", err)
 	}
 
-	// Output confirmation
+	// Output confirmation (silent if cost is zero and no work item)
 	if cost > 0 || recordWorkItem != "" {
-		fmt.Printf("%s Recorded $%.2f for %s", style.Success.Render("✓"), cost, sessionName)
+		fmt.Printf("%s Recorded $%.2f for %s", style.Success.Render("✓"), cost, session)
 		if recordWorkItem != "" {
 			fmt.Printf(" (work: %s)", recordWorkItem)
 		}
 		fmt.Println()
-	}
-	if costsVerbose && len(parseErrors) > 0 {
-		for _, e := range parseErrors {
-			fmt.Fprintf(os.Stderr, "[costs] warning: %s\n", e)
-		}
 	}
 
 	return nil
@@ -1350,12 +1164,6 @@ func runCostsDigest(cmd *cobra.Command, args []string) error {
 
 	dateStr := targetDate.Format("2006-01-02")
 
-	// Resolve town root for consistent bd command scoping (write + read symmetry).
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
 	// Query session cost entries for target date
 	costEntries, err := querySessionCostEntries(targetDate)
 	if err != nil {
@@ -1401,8 +1209,8 @@ func runCostsDigest(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create permanent digest bead (scoped to town root for read/write symmetry)
-	digestID, err := createCostDigestBead(digest, townRoot)
+	// Create permanent digest bead
+	digestID, err := createCostDigestBead(digest)
 	if err != nil {
 		return fmt.Errorf("creating digest bead: %w", err)
 	}
@@ -1460,14 +1268,13 @@ func querySessionCostEntries(targetDate time.Time) ([]CostEntry, error) {
 		}
 
 		entries = append(entries, CostEntry{
-			SessionID:   logEntry.SessionID,
-			Role:        logEntry.Role,
-			Rig:         logEntry.Rig,
-			Worker:      logEntry.Worker,
-			CostUSD:     logEntry.CostUSD,
-			ModelTokens: logEntry.ModelTokens,
-			EndedAt:     logEntry.EndedAt,
-			WorkItem:    logEntry.WorkItem,
+			SessionID: logEntry.SessionID,
+			Role:      logEntry.Role,
+			Rig:       logEntry.Rig,
+			Worker:    logEntry.Worker,
+			CostUSD:   logEntry.CostUSD,
+			EndedAt:   logEntry.EndedAt,
+			WorkItem:  logEntry.WorkItem,
 		})
 	}
 
@@ -1475,9 +1282,7 @@ func querySessionCostEntries(targetDate time.Time) ([]CostEntry, error) {
 }
 
 // createCostDigestBead creates a permanent bead for the daily cost digest.
-// townRoot scopes bd commands to the town-level database for read/write symmetry
-// with queryDigestBeads (which also scopes to townRoot).
-func createCostDigestBead(digest CostDigest, townRoot string) (string, error) {
+func createCostDigestBead(digest CostDigest) (string, error) {
 	// Build description with aggregate data
 	var desc strings.Builder
 	desc.WriteString(fmt.Sprintf("Daily cost aggregate for %s.\n\n", digest.Date))
@@ -1537,7 +1342,6 @@ func createCostDigestBead(digest CostDigest, townRoot string) (string, error) {
 	}
 
 	bdCmd := exec.Command("bd", bdArgs...)
-	bdCmd.Dir = townRoot
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("creating digest bead: %w\nOutput: %s", err, string(output))
@@ -1547,7 +1351,6 @@ func createCostDigestBead(digest CostDigest, townRoot string) (string, error) {
 
 	// Auto-close the digest (it's an audit record, not work)
 	closeCmd := exec.Command("bd", "close", digestID, "--reason=daily cost digest")
-	closeCmd.Dir = townRoot
 	_ = closeCmd.Run() // Best effort
 
 	return digestID, nil

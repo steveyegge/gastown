@@ -1,0 +1,357 @@
+package daemon
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	beadsdk "github.com/steveyegge/beads"
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
+	"github.com/steveyegge/gastown/internal/util"
+)
+
+const (
+	defaultStrandedScanInterval = 30 * time.Second
+	eventPollInterval           = 5 * time.Second
+)
+
+// strandedConvoyInfo matches the JSON output of `gt convoy stranded --json`.
+type strandedConvoyInfo struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	ReadyCount  int      `json:"ready_count"`
+	ReadyIssues []string `json:"ready_issues"`
+}
+
+// ConvoyManager monitors beads events for issue closes and periodically scans for stranded convoys.
+// It handles both event-driven completion checks (via convoy.CheckConvoysForIssue) and periodic
+// stranded convoy feeding/cleanup.
+//
+// Event polling watches ALL beads stores (town-level hq + per-rig) so that close events from
+// any rig are detected. Convoys live in the hq store, so convoy lookups always use hqStore.
+// Parked rigs are skipped during event polling.
+type ConvoyManager struct {
+	townRoot     string
+	scanInterval time.Duration
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	logger       func(format string, args ...interface{})
+
+	// stores maps store names to beads stores for event polling.
+	// Key "hq" is the town-level store (used for convoy lookups).
+	// Other keys are rig names (e.g., "gastown", "beads", "shippercrm").
+	// Populated lazily via openStores if nil at startup (e.g., Dolt not ready).
+	stores map[string]beadsdk.Storage
+
+	// openStores is called lazily to open beads stores when stores is nil.
+	// This handles the case where Dolt isn't ready at daemon startup.
+	// Once stores are successfully opened, this is not called again.
+	// May be nil to disable lazy opening (stores must be provided upfront).
+	openStores func() map[string]beadsdk.Storage
+
+	// isRigParked reports whether a rig is currently parked/docked.
+	// Parked rigs are skipped during event polling. May be nil (never parked).
+	isRigParked func(string) bool
+
+	gtPath string
+
+	// started guards against double-call of Start() which would spawn duplicate goroutines.
+	started atomic.Bool
+
+	// lastEventIDs tracks per-store high-water marks for event polling.
+	// Key matches stores map keys ("hq", "gastown", etc.).
+	lastEventIDs sync.Map // map[string]int64
+
+	// seeded is true once the first poll cycle has run (warm-up).
+	// The first cycle advances high-water marks without processing events,
+	// preventing a burst of historical event replay on daemon restart.
+	seeded bool
+}
+
+// NewConvoyManager creates a new convoy manager.
+// scanInterval controls the periodic stranded scan; 0 uses default (30s).
+// stores maps store names ("hq", rig names) to beads stores for event polling.
+// nil stores disables event-driven convoy checks (stranded scan still runs),
+// unless openStores is provided for lazy initialization.
+// openStores is called lazily if stores is nil (e.g., Dolt not ready at startup).
+// isRigParked reports whether a rig should be skipped during polling (nil = never parked).
+// gtPath is the resolved path to the gt binary for subprocess calls.
+func NewConvoyManager(townRoot string, logger func(format string, args ...interface{}), gtPath string, scanInterval time.Duration, stores map[string]beadsdk.Storage, openStores func() map[string]beadsdk.Storage, isRigParked func(string) bool) *ConvoyManager {
+	if scanInterval <= 0 {
+		scanInterval = defaultStrandedScanInterval
+	}
+	if isRigParked == nil {
+		isRigParked = func(string) bool { return false }
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &ConvoyManager{
+		townRoot:     townRoot,
+		scanInterval: scanInterval,
+		ctx:          ctx,
+		cancel:       cancel,
+		logger:       logger,
+		stores:       stores,
+		openStores:   openStores,
+		isRigParked:  isRigParked,
+		gtPath:       gtPath,
+	}
+}
+
+// Start begins the convoy manager goroutines (event poll + stranded scan).
+// It is safe to call multiple times; subsequent calls are no-ops.
+func (m *ConvoyManager) Start() error {
+	if !m.started.CompareAndSwap(false, true) {
+		m.logger("Convoy: Start() already called, ignoring duplicate")
+		return nil
+	}
+	m.wg.Add(2)
+	go m.runEventPoll()
+	go m.runStrandedScan()
+	return nil
+}
+
+// Stop gracefully stops the convoy manager and closes any beads stores it owns.
+func (m *ConvoyManager) Stop() {
+	m.cancel()
+	m.wg.Wait()
+
+	// Close stores (whether eagerly passed or lazily opened)
+	for name, store := range m.stores {
+		if store != nil {
+			if err := store.Close(); err != nil {
+				m.logger("Convoy: error closing beads store (%s): %v", name, err)
+			} else {
+				m.logger("Convoy: closed beads store (%s)", name)
+			}
+		}
+	}
+	m.stores = nil
+}
+
+// runEventPoll polls GetAllEventsSince every 5s and processes close events.
+// If stores aren't available at startup (e.g., Dolt not ready), retries
+// lazily via the openStores callback until stores become available.
+func (m *ConvoyManager) runEventPoll() {
+	defer m.wg.Done()
+
+	if len(m.stores) == 0 && m.openStores == nil {
+		m.logger("Convoy: no beads stores and no opener, event polling disabled")
+		return
+	}
+
+	ticker := time.NewTicker(eventPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			// Lazy store initialization: retry if stores not yet available
+			if len(m.stores) == 0 {
+				if m.openStores != nil {
+					m.stores = m.openStores()
+				}
+				if len(m.stores) == 0 {
+					continue // still not ready, try next tick
+				}
+			}
+			m.pollAllStores()
+		}
+	}
+}
+
+// pollAllStores polls events from all non-parked stores.
+// The first call is a warm-up: it advances high-water marks without
+// processing events, preventing a burst of historical replay on restart.
+func (m *ConvoyManager) pollAllStores() {
+	for name, store := range m.stores {
+		if name != "hq" && m.isRigParked(name) {
+			continue
+		}
+		m.pollStore(name, store)
+	}
+	if !m.seeded {
+		m.seeded = true
+	}
+}
+
+// pollStore fetches new events from a single store and processes close events.
+// Convoy lookups always use the hq store since convoys are hq-* prefixed.
+func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage) {
+	// Load per-store high-water mark
+	var highWater int64
+	if v, ok := m.lastEventIDs.Load(name); ok {
+		highWater = v.(int64)
+	}
+
+	events, err := store.GetAllEventsSince(m.ctx, highWater)
+	if err != nil {
+		m.logger("Convoy: event poll error (%s): %v", name, err)
+		return
+	}
+
+	// Advance high-water mark from all events
+	for _, e := range events {
+		if e.ID > highWater {
+			highWater = e.ID
+		}
+	}
+	m.lastEventIDs.Store(name, highWater)
+
+	// First poll cycle is warm-up only: advance marks, skip processing.
+	// This prevents replaying the entire event history on daemon restart.
+	if !m.seeded {
+		return
+	}
+
+	// Use hq store for convoy lookups (convoys are hq-* prefixed)
+	hqStore := m.stores["hq"]
+	if hqStore == nil {
+		m.logger("Convoy: hq store unavailable, skipping convoy lookups for %s events", name)
+		return
+	}
+
+	for _, e := range events {
+		// Only interested in status changes to closed (EventStatusChanged with new_value=closed)
+		// or explicit close events (EventClosed)
+		isClose := e.EventType == beadsdk.EventClosed
+		if !isClose && e.EventType == beadsdk.EventStatusChanged {
+			isClose = e.NewValue != nil && *e.NewValue == "closed"
+		}
+		if !isClose {
+			continue
+		}
+
+		issueID := e.IssueID
+		if issueID == "" {
+			continue
+		}
+
+		m.logger("Convoy: close detected: %s", issueID)
+		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)
+	}
+}
+
+// runStrandedScan is the periodic stranded convoy scan loop.
+func (m *ConvoyManager) runStrandedScan() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.scanInterval)
+	defer ticker.Stop()
+
+	// Run once immediately, then on interval
+	m.scan()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.scan()
+		}
+	}
+}
+
+// scan runs one stranded scan cycle: find stranded convoys, feed or close each.
+func (m *ConvoyManager) scan() {
+	stranded, err := m.findStranded()
+	if err != nil {
+		m.logger("Convoy: stranded scan failed: %s", util.FirstLine(err.Error()))
+		return
+	}
+
+	for _, c := range stranded {
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		if c.ReadyCount > 0 {
+			m.feedFirstReady(c)
+		} else {
+			m.closeEmptyConvoy(c.ID)
+		}
+	}
+}
+
+// findStranded runs `gt convoy stranded --json` and parses the output.
+func (m *ConvoyManager) findStranded() ([]strandedConvoyInfo, error) {
+	cmd := exec.CommandContext(m.ctx, m.gtPath, "convoy", "stranded", "--json")
+	cmd.Dir = m.townRoot
+	util.SetProcessGroup(cmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%s", util.FirstLine(stderr.String()))
+	}
+
+	var stranded []strandedConvoyInfo
+	if err := json.Unmarshal(stdout.Bytes(), &stranded); err != nil {
+		return nil, fmt.Errorf("parsing stranded JSON: %w", err)
+	}
+
+	return stranded, nil
+}
+
+// feedFirstReady dispatches the first ready issue to its rig via gt sling.
+func (m *ConvoyManager) feedFirstReady(c strandedConvoyInfo) {
+	if len(c.ReadyIssues) == 0 {
+		return
+	}
+	issueID := c.ReadyIssues[0]
+
+	prefix := beads.ExtractPrefix(issueID)
+	if prefix == "" {
+		m.logger("Convoy %s: no prefix for %s, skipping", c.ID, issueID)
+		return
+	}
+
+	rig := beads.GetRigNameForPrefix(m.townRoot, prefix)
+	if rig == "" {
+		m.logger("Convoy %s: no rig for %s (prefix %s), skipping", c.ID, issueID, prefix)
+		return
+	}
+
+	if m.isRigParked(rig) {
+		m.logger("Convoy %s: rig %s is parked, skipping %s", c.ID, rig, issueID)
+		return
+	}
+
+	m.logger("Convoy %s: feeding %s to %s", c.ID, issueID, rig)
+
+	cmd := exec.CommandContext(m.ctx, m.gtPath, "sling", issueID, rig, "--no-boot")
+	cmd.Dir = m.townRoot
+	util.SetProcessGroup(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		m.logger("Convoy %s: sling %s failed: %s", c.ID, issueID, util.FirstLine(stderr.String()))
+	}
+}
+
+// closeEmptyConvoy runs gt convoy check to auto-close an empty convoy.
+func (m *ConvoyManager) closeEmptyConvoy(convoyID string) {
+	m.logger("Convoy %s: auto-closing (empty)", convoyID)
+
+	cmd := exec.CommandContext(m.ctx, m.gtPath, "convoy", "check", convoyID)
+	cmd.Dir = m.townRoot
+	util.SetProcessGroup(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		m.logger("Convoy %s: check failed: %s", convoyID, util.FirstLine(stderr.String()))
+	}
+}

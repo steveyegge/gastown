@@ -41,6 +41,7 @@ type AgentFields struct {
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	Mode              string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
 }
@@ -97,6 +98,10 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	if fields.Mode != "" {
+		lines = append(lines, fmt.Sprintf("mode: %s", fields.Mode))
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -138,6 +143,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "mode":
+			fields.Mode = value
 		}
 	}
 
@@ -154,6 +161,11 @@ func ParseAgentFields(description string) *AgentFields {
 // where the bead may be routed to a different database than the one this wrapper
 // is connected to.
 func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
+	// Guard against flag-like titles (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(title) {
+		return nil, fmt.Errorf("refusing to create agent bead: %w (got %q)", ErrFlagTitle, title)
+	}
+
 	// Resolve where this bead will actually be written (handles multi-repo routing)
 	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
 
@@ -452,6 +464,7 @@ type AgentFieldUpdates struct {
 	CleanupStatus     *string
 	ActiveMR          *string
 	NotificationLevel *string
+	Mode              *string
 }
 
 // UpdateAgentDescriptionFields atomically updates one or more agent description
@@ -491,6 +504,9 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 	}
 	if updates.NotificationLevel != nil {
 		fields.NotificationLevel = *updates.NotificationLevel
+	}
+	if updates.Mode != nil {
+		fields.Mode = *updates.Mode
 	}
 
 	description := FormatAgentDescription(issue.Title, fields)

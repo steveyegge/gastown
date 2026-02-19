@@ -98,6 +98,11 @@ func ParseRigFields(description string) *RigFields {
 // The ID is constructed internally from fields.Prefix and name.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateRigBead(name string, fields *RigFields) (*Issue, error) {
+	// Guard against flag-like rig names (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(name) {
+		return nil, fmt.Errorf("refusing to create rig bead: %w (got %q)", ErrFlagTitle, name)
+	}
+
 	if fields != nil && fields.State != "" && !ValidRigState(fields.State) {
 		return nil, fmt.Errorf("invalid rig state %q: must be one of active, archived, maintenance", fields.State)
 	}

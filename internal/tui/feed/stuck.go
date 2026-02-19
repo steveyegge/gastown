@@ -231,15 +231,24 @@ func (d *StuckDetector) analyzeAgent(id string, issue *beads.Issue) *ProblemAgen
 
 	hasHook := issue.HookBead != ""
 
+	// Determine thresholds — ralphcats get a longer leash since Ralph loops
+	// involve multiple fresh-context iterations that can take much longer.
+	stalledThreshold := StalledThresholdMinutes // 15
+	guppThreshold := GUPPViolationMinutes       // 30
+	if hasHook && isRalphMode(issue) {
+		stalledThreshold = 120 // 2 hours
+		guppThreshold = 240    // 4 hours
+	}
+
 	// 2. GUPP violation (most critical)
-	if IsGUPPViolation(hasHook, agent.IdleMinutes) {
+	if hasHook && agent.IdleMinutes >= guppThreshold {
 		agent.State = StateGUPPViolation
 		agent.ActionHint = "GUPP violation: hooked work + " + strconv.Itoa(agent.IdleMinutes) + "m no progress"
 		return agent
 	}
 
 	// 3. Stalled (hooked work but no recent progress)
-	if hasHook && agent.IdleMinutes >= StalledThresholdMinutes {
+	if hasHook && agent.IdleMinutes >= stalledThreshold {
 		agent.State = StateStalled
 		agent.ActionHint = "No progress for " + strconv.Itoa(agent.IdleMinutes) + "m"
 		return agent
@@ -258,6 +267,16 @@ func (d *StuckDetector) analyzeAgent(id string, issue *beads.Issue) *ProblemAgen
 // IsGUPPViolation checks if an agent is in GUPP violation.
 func IsGUPPViolation(hasHookedWork bool, minutesSinceProgress int) bool {
 	return hasHookedWork && minutesSinceProgress >= GUPPViolationMinutes
+}
+
+// isRalphMode checks if an agent bead is in Ralph Wiggum loop mode.
+// Reads the mode field from the agent bead's description.
+func isRalphMode(issue *beads.Issue) bool {
+	if issue == nil || issue.Description == "" {
+		return false
+	}
+	fields := beads.ParseAgentFields(issue.Description)
+	return fields != nil && fields.Mode == "ralph"
 }
 
 // deriveSessionName maps bead ID components to a tmux session name.

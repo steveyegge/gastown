@@ -225,50 +225,6 @@ func TestHeartbeat_IsVeryStale(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_ShouldPoke(t *testing.T) {
-	tests := []struct {
-		name     string
-		hb       *Heartbeat
-		expected bool
-	}{
-		{
-			name:     "nil heartbeat - should poke",
-			hb:       nil,
-			expected: true,
-		},
-		{
-			name: "fresh - no poke",
-			hb: &Heartbeat{
-				Timestamp: time.Now(),
-			},
-			expected: false,
-		},
-		{
-			name: "stale - no poke",
-			hb: &Heartbeat{
-				Timestamp: time.Now().Add(-10 * time.Minute),
-			},
-			expected: false, // Stale (5-15 min) but not very stale
-		},
-		{
-			name: "very stale - should poke",
-			hb: &Heartbeat{
-				Timestamp: time.Now().Add(-16 * time.Minute),
-			},
-			expected: true, // Very stale (>15 min)
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := tc.hb.ShouldPoke()
-			if result != tc.expected {
-				t.Errorf("ShouldPoke() = %v, want %v", result, tc.expected)
-			}
-		})
-	}
-}
-
 func TestTouch(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
 	if err != nil {

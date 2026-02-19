@@ -10,20 +10,6 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
-// State represents an agent's running state.
-type State string
-
-const (
-	// StateStopped means the agent is not running.
-	StateStopped State = "stopped"
-
-	// StateRunning means the agent is actively operating.
-	StateRunning State = "running"
-
-	// StatePaused means the agent is paused (not operating but not stopped).
-	StatePaused State = "paused"
-)
-
 // StateManager handles loading and saving agent state to disk.
 // It uses generics to work with any state type.
 type StateManager[T any] struct {

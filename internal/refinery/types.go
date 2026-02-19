@@ -58,6 +58,71 @@ const (
 	MRClosed MRStatus = "closed"
 )
 
+// Extended MR statuses for the v2 state machine.
+// These are stored in the MR bead's checkpoint/claim fields, not in the
+// beads status field (which remains open/in_progress/closed for compatibility).
+type MRPhase string
+
+const (
+	// MRPhaseReady means the MR is queued and available for claiming.
+	MRPhaseReady MRPhase = "ready"
+
+	// MRPhaseClaimed means a refinery instance has claimed the MR for processing.
+	MRPhaseClaimed MRPhase = "claimed"
+
+	// MRPhasePreparing means quality gates are running (rebase, setup, tests).
+	MRPhasePreparing MRPhase = "preparing"
+
+	// MRPhasePrepared means quality gates completed (may have failed — needs diagnosis).
+	MRPhasePrepared MRPhase = "prepared"
+
+	// MRPhaseMerging means the merge is in progress (ff-merge + push).
+	MRPhaseMerging MRPhase = "merging"
+
+	// MRPhaseMerged means the MR was successfully merged to target.
+	MRPhaseMerged MRPhase = "merged"
+
+	// MRPhaseRejected means the MR was rejected after diagnosis.
+	MRPhaseRejected MRPhase = "rejected"
+
+	// MRPhaseFailed means a transient error occurred (eligible for retry).
+	MRPhaseFailed MRPhase = "failed"
+)
+
+// ValidPhaseTransitions defines the allowed state transitions for MR phases.
+var ValidPhaseTransitions = map[MRPhase][]MRPhase{
+	MRPhaseReady:     {MRPhaseClaimed},
+	MRPhaseClaimed:   {MRPhasePreparing, MRPhaseReady},
+	MRPhasePreparing: {MRPhasePrepared, MRPhaseFailed},
+	MRPhasePrepared:  {MRPhaseMerging, MRPhaseRejected, MRPhaseReady},
+	MRPhaseMerging:   {MRPhaseMerged, MRPhaseFailed},
+	MRPhaseFailed:    {MRPhaseReady},
+	// Terminal states: MRPhaseMerged, MRPhaseRejected (no transitions out)
+}
+
+// ValidatePhaseTransition checks if a phase transition is allowed.
+func ValidatePhaseTransition(from, to MRPhase) error {
+	if from == to {
+		return nil
+	}
+	allowed, ok := ValidPhaseTransitions[from]
+	if !ok {
+		return fmt.Errorf("%w: %s is a terminal state", ErrInvalidTransition, from)
+	}
+	for _, target := range allowed {
+		if target == to {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s → %s is not allowed", ErrInvalidTransition, from, to)
+}
+
+// DefaultClaimTTLMinutes is the default TTL for MR claims.
+const DefaultClaimTTLMinutes = 30
+
+// MaxRetryCount is the maximum number of retries before escalation to Mayor.
+const MaxRetryCount = 5
+
 // CloseReason indicates why a merge request was closed.
 type CloseReason string
 

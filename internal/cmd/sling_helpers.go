@@ -216,6 +216,7 @@ type beadFieldUpdates struct {
 	Args             string // Natural language instructions
 	AttachedMolecule string // Wisp root ID
 	NoMerge          bool   // Skip merge queue on completion
+	Mode             string // Execution mode: "" (normal) or "ralph"
 }
 
 // storeFieldsInBead performs a single read-modify-write to update all attachment fields
@@ -269,6 +270,9 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	}
 	if updates.NoMerge {
 		fields.NoMerge = true
+	}
+	if updates.Mode != "" {
+		fields.Mode = updates.Mode
 	}
 
 	// Write back once
@@ -861,4 +865,30 @@ func shouldAcceptPermissionWarning(agentName string) bool {
 		return false
 	}
 	return preset.EmitsPermissionWarning
+}
+
+// updateAgentMode updates the mode field on the agent bead.
+// This is needed so the stuck detector can read the mode from agent fields
+// and apply appropriate thresholds (ralphcats get longer leash).
+func updateAgentMode(agentID, mode, workDir, townBeadsDir string) {
+	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return
+	}
+	if workDir == "" {
+		workDir = townRoot
+	}
+
+	agentBeadID := agentIDToBeadID(agentID, townRoot)
+	if agentBeadID == "" {
+		return
+	}
+
+	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
+	bd := beads.New(agentWorkDir)
+	if err := bd.UpdateAgentDescriptionFields(agentBeadID, beads.AgentFieldUpdates{Mode: &mode}); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s mode: %v\n", agentBeadID, err)
+	}
 }

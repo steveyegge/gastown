@@ -610,6 +610,131 @@ func TestCheckAll_SessionError(t *testing.T) {
 	}
 }
 
+// TestCheckAll_RalphcatNotStalled tests that a ralphcat with 45min idle is NOT stalled
+// (would be stalled for a normal polecat at the 15min threshold)
+func TestCheckAll_RalphcatNotStalled(t *testing.T) {
+	mock := newMockHealthSource()
+	mock.agents["gt-gastown-polecat-Ralph"] = &beads.Issue{
+		ID:       "gt-gastown-polecat-Ralph",
+		HookBead: "gt-abc12",
+		// 45 minutes idle — stalled for normal polecat, but fine for ralphcat
+		UpdatedAt: time.Now().Add(-45 * time.Minute).Format(time.RFC3339),
+		// Description contains mode: ralph (agent fields)
+		Description: "Polecat Ralph\n\nrole_type: polecat\nrig: gastown\nagent_state: working\nhook_bead: gt-abc12\ncleanup_status: null\nactive_mr: null\nnotification_level: null\nmode: ralph",
+	}
+	mock.sessions["gt-Ralph"] = true // session alive
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	// At 45 min, normal polecat would be GUPP (>=30min). Ralphcat threshold is 240min.
+	// At 45 min idle, ralphcat should be Working (< 120min stalled threshold).
+	if agents[0].State != StateWorking {
+		t.Errorf("expected StateWorking for ralphcat at 45min idle, got %s", agents[0].State)
+	}
+}
+
+// TestCheckAll_RalphcatStalled tests that a ralphcat IS stalled after 2+ hours
+func TestCheckAll_RalphcatStalled(t *testing.T) {
+	mock := newMockHealthSource()
+	mock.agents["gt-gastown-polecat-Ralph2"] = &beads.Issue{
+		ID:          "gt-gastown-polecat-Ralph2",
+		HookBead:    "gt-def34",
+		UpdatedAt:   time.Now().Add(-150 * time.Minute).Format(time.RFC3339), // 2.5 hours
+		Description: "Polecat Ralph2\n\nrole_type: polecat\nrig: gastown\nagent_state: working\nhook_bead: gt-def34\ncleanup_status: null\nactive_mr: null\nnotification_level: null\nmode: ralph",
+	}
+	mock.sessions["gt-Ralph2"] = true
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	// 150 min > 120 min stalled threshold for ralphcat
+	if agents[0].State != StateStalled {
+		t.Errorf("expected StateStalled for ralphcat at 150min idle, got %s", agents[0].State)
+	}
+}
+
+// TestCheckAll_RalphcatGUPP tests that a ralphcat with 5h idle IS in GUPP violation
+func TestCheckAll_RalphcatGUPP(t *testing.T) {
+	mock := newMockHealthSource()
+	mock.agents["gt-gastown-polecat-Ralph3"] = &beads.Issue{
+		ID:          "gt-gastown-polecat-Ralph3",
+		HookBead:    "gt-ghi56",
+		UpdatedAt:   time.Now().Add(-300 * time.Minute).Format(time.RFC3339), // 5 hours
+		Description: "Polecat Ralph3\n\nrole_type: polecat\nrig: gastown\nagent_state: working\nhook_bead: gt-ghi56\ncleanup_status: null\nactive_mr: null\nnotification_level: null\nmode: ralph",
+	}
+	mock.sessions["gt-Ralph3"] = true
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	// 300 min > 240 min GUPP threshold for ralphcat
+	if agents[0].State != StateGUPPViolation {
+		t.Errorf("expected StateGUPPViolation for ralphcat at 300min idle, got %s", agents[0].State)
+	}
+}
+
+// TestIsRalphMode tests the ralph mode detection from agent bead description
+func TestIsRalphMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		issue    *beads.Issue
+		expected bool
+	}{
+		{
+			name:     "nil issue",
+			issue:    nil,
+			expected: false,
+		},
+		{
+			name:     "empty description",
+			issue:    &beads.Issue{Description: ""},
+			expected: false,
+		},
+		{
+			name:     "no mode field",
+			issue:    &beads.Issue{Description: "role_type: polecat\nrig: gastown"},
+			expected: false,
+		},
+		{
+			name:     "mode ralph",
+			issue:    &beads.Issue{Description: "role_type: polecat\nmode: ralph"},
+			expected: true,
+		},
+		{
+			name:     "mode other",
+			issue:    &beads.Issue{Description: "role_type: polecat\nmode: other"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRalphMode(tt.issue); got != tt.expected {
+				t.Errorf("isRalphMode() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestNudgeTarget tests the nudge target format for all agent types
 func TestNudgeTarget(t *testing.T) {
 	tests := []struct {

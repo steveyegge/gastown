@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
@@ -48,7 +49,8 @@ type Daemon struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	curator       *feed.Curator
-	convoyWatcher *ConvoyWatcher
+	convoyManager *ConvoyManager
+	beadsStores   map[string]beadsdk.Storage
 	doltServer    *DoltServerManager
 	krcPruner     *KRCPruner
 
@@ -224,12 +226,23 @@ func (d *Daemon) Run() error {
 		d.logger.Println("Feed curator started")
 	}
 
-	// Start convoy watcher for event-driven convoy completion
-	d.convoyWatcher = NewConvoyWatcher(d.config.TownRoot, d.logger.Printf, d.gtPath, d.bdPath)
-	if err := d.convoyWatcher.Start(); err != nil {
-		d.logger.Printf("Warning: failed to start convoy watcher: %v", err)
+	// Start convoy manager (event-driven + periodic stranded scan)
+	// Try opening beads stores eagerly; if Dolt isn't ready yet,
+	// pass the opener as a callback for lazy retry on each poll tick.
+	d.beadsStores = d.openBeadsStores()
+	isRigParked := func(rigName string) bool {
+		ok, _ := d.isRigOperational(rigName)
+		return !ok
+	}
+	var storeOpener func() map[string]beadsdk.Storage
+	if len(d.beadsStores) == 0 {
+		storeOpener = d.openBeadsStores
+	}
+	d.convoyManager = NewConvoyManager(d.config.TownRoot, d.logger.Printf, d.gtPath, 0, d.beadsStores, storeOpener, isRigParked)
+	if err := d.convoyManager.Start(); err != nil {
+		d.logger.Printf("Warning: failed to start convoy manager: %v", err)
 	} else {
-		d.logger.Println("Convoy watcher started")
+		d.logger.Println("Convoy manager started")
 	}
 
 	// Start KRC pruner for automatic ephemeral data cleanup
@@ -681,7 +694,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	age := hb.Age()
 
 	// If heartbeat is fresh, nothing to do
-	if !hb.ShouldPoke() {
+	if !hb.IsVeryStale() {
 		return
 	}
 
@@ -873,6 +886,47 @@ func (d *Daemon) killRefinerySessions() {
 	}
 }
 
+// openBeadsStores opens beads stores for the town (hq) and all known rigs.
+// Returns a map keyed by "hq" for town-level and rig names for per-rig stores.
+// Stores that fail to open are logged and skipped.
+func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
+	stores := make(map[string]beadsdk.Storage)
+
+	// Town-level store (hq)
+	hqBeadsDir := filepath.Join(d.config.TownRoot, ".beads")
+	if store, err := beadsdk.OpenFromConfig(d.ctx, hqBeadsDir); err == nil {
+		stores["hq"] = store
+	} else {
+		d.logger.Printf("Convoy: hq beads store unavailable: %s", util.FirstLine(err.Error()))
+	}
+
+	// Per-rig stores
+	for _, rigName := range d.getKnownRigs() {
+		beadsDir := doltserver.FindRigBeadsDir(d.config.TownRoot, rigName)
+		if beadsDir == "" {
+			continue
+		}
+		store, err := beadsdk.OpenFromConfig(d.ctx, beadsDir)
+		if err != nil {
+			d.logger.Printf("Convoy: %s beads store unavailable: %s", rigName, util.FirstLine(err.Error()))
+			continue
+		}
+		stores[rigName] = store
+	}
+
+	if len(stores) == 0 {
+		d.logger.Printf("Convoy: no beads stores available, event polling disabled")
+		return nil
+	}
+
+	names := make([]string, 0, len(stores))
+	for name := range stores {
+		names = append(names, name)
+	}
+	d.logger.Printf("Convoy: opened %d beads store(s): %v", len(stores), names)
+	return stores
+}
+
 // getKnownRigs returns list of registered rig names.
 func (d *Daemon) getKnownRigs() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
@@ -1027,11 +1081,12 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 		d.logger.Println("Feed curator stopped")
 	}
 
-	// Stop convoy watcher
-	if d.convoyWatcher != nil {
-		d.convoyWatcher.Stop()
-		d.logger.Println("Convoy watcher stopped")
+	// Stop convoy manager (also closes beads stores)
+	if d.convoyManager != nil {
+		d.convoyManager.Stop()
+		d.logger.Println("Convoy manager stopped")
 	}
+	d.beadsStores = nil
 
 	// Stop KRC pruner
 	if d.krcPruner != nil {

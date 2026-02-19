@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -88,15 +87,15 @@ type MergeQueueConfig struct {
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:    true,
-		OnConflict: "assign_back",
-		RunTests:                         true,
-		TestCommand:                      "",
-		DeleteMergedBranches:             true,
-		RetryFlakyTests:                  1,
-		PollInterval:                     30 * time.Second,
-		MaxConcurrent:                    1,
-		StaleClaimTimeout:               DefaultStaleClaimTimeout,
+		Enabled:              true,
+		OnConflict:           "assign_back",
+		RunTests:             true,
+		TestCommand:          "",
+		DeleteMergedBranches: true,
+		RetryFlakyTests:      1,
+		PollInterval:         30 * time.Second,
+		MaxConcurrent:        1,
+		StaleClaimTimeout:    DefaultStaleClaimTimeout,
 	}
 }
 
@@ -238,15 +237,15 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled    *bool   `json:"enabled"`
-		OnConflict *string `json:"on_conflict"`
-		RunTests                         *bool   `json:"run_tests"`
-		TestCommand                      *string `json:"test_command"`
-		DeleteMergedBranches             *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests                  *int    `json:"retry_flaky_tests"`
-		PollInterval                     *string `json:"poll_interval"`
-		MaxConcurrent                    *int    `json:"max_concurrent"`
-		StaleClaimTimeout                *string `json:"stale_claim_timeout"`
+		Enabled              *bool   `json:"enabled"`
+		OnConflict           *string `json:"on_conflict"`
+		RunTests             *bool   `json:"run_tests"`
+		TestCommand          *string `json:"test_command"`
+		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
+		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
+		PollInterval         *string `json:"poll_interval"`
+		MaxConcurrent        *int    `json:"max_concurrent"`
+		StaleClaimTimeout    *string `json:"stale_claim_timeout"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -708,12 +707,6 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
-
-			// Redundant convoy observer: check if merged issue is tracked by a convoy
-			logger := func(format string, args ...interface{}) {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
-			}
-			convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
 		}
 	}
 
@@ -724,12 +717,17 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 2. Delete source branch if configured (local only)
+	// 2. Delete source branch if configured (local and remote)
 	if e.config.DeleteMergedBranches && mr.Branch != "" {
 		if err := e.git.DeleteBranch(mr.Branch, true); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete branch %s: %v\n", mr.Branch, err)
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mr.Branch, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mr.Branch)
+		}
+		if err := e.git.DeleteRemoteBranch("origin", mr.Branch); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s: %v\n", mr.Branch, err)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: %s\n", mr.Branch)
 		}
 	}
 
@@ -989,13 +987,21 @@ func (e *Engineer) firstOpenBlocker(issue *beads.Issue) string {
 
 // ListReadyMRs returns MRs that are ready for processing:
 // - Not claimed by another worker (checked via assignee field)
-// - Not blocked by an open task (handled by bd ready)
+// - Not blocked by an open task (checked via firstOpenBlocker)
 // Sorted by priority (highest first).
 //
-// This queries beads for merge-request wisps.
+// Uses bd list instead of bd ready because MRs are ephemeral beads and
+// bd ready filters out ephemeral issues (see gt-t5t6y). This matches the
+// pattern used by ListBlockedMRs and ListAllOpenMRs.
 func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
-	// Query beads for ready merge-request issues
-	issues, err := e.beads.ReadyWithType("merge-request")
+	// Query beads for all open merge-request issues.
+	// Cannot use ReadyWithType here because bd ready excludes ephemeral beads,
+	// and MRs are ephemeral by design. Use List + manual blocker check instead.
+	issues, err := e.beads.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1, // No priority filter
+	})
 	if err != nil {
 		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
 	}
@@ -1005,6 +1011,11 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 	for _, issue := range issues {
 		// Skip closed MRs (workaround for bd list not respecting --status filter)
 		if issue.Status != "open" {
+			continue
+		}
+
+		// Skip blocked MRs (replaces bd ready's blocker filtering)
+		if blockedBy := e.firstOpenBlocker(issue); blockedBy != "" {
 			continue
 		}
 

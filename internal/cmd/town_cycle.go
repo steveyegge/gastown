@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
-	"sort"
 
 	"github.com/spf13/cobra"
 )
@@ -76,96 +74,43 @@ town-level session (Mayor or Deacon).`,
 // direction: 1 for next, -1 for previous
 // sessionOverride: if non-empty, use this instead of detecting current session
 func cycleTownSession(direction int, sessionOverride string) error {
-	var currentSession string
-	var err error
-
-	if sessionOverride != "" {
-		currentSession = sessionOverride
-	} else {
-		currentSession, err = getCurrentTmuxSession()
-		if err != nil {
-			return fmt.Errorf("not in a tmux session: %w", err)
-		}
-		if currentSession == "" {
-			return fmt.Errorf("not in a tmux session")
-		}
+	currentSession, err := resolveCurrentSession(sessionOverride)
+	if err != nil {
+		return fmt.Errorf("not in a tmux session: %w", err)
+	}
+	if currentSession == "" {
+		return fmt.Errorf("not in a tmux session")
 	}
 
-	// Check if current session is a town-level session
 	if !isTownLevelSession(currentSession) {
-		// Not a town session - no cycling, just stay put
 		return nil
 	}
 
-	// Find running town sessions
 	sessions, err := findRunningTownSessions()
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
 	}
 
-	if len(sessions) == 0 {
-		return fmt.Errorf("no town sessions found")
-	}
-
-	// Sort for consistent ordering
-	sort.Strings(sessions)
-
-	// Find current position
-	currentIdx := -1
-	for i, s := range sessions {
-		if s == currentSession {
-			currentIdx = i
-			break
-		}
-	}
-
-	if currentIdx == -1 {
-		// Current session not in list (shouldn't happen)
-		return fmt.Errorf("current session not found in town session list")
-	}
-
-	// Calculate target index (with wrapping)
-	targetIdx := (currentIdx + direction + len(sessions)) % len(sessions)
-
-	if targetIdx == currentIdx {
-		// Only one session, nothing to switch to
-		return nil
-	}
-
-	targetSession := sessions[targetIdx]
-
-	// Switch to target session
-	cmd := exec.Command("tmux", "-u", "switch-client", "-t", targetSession)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("switching to %s: %w", targetSession, err)
-	}
-
-	return nil
+	return cycleInGroup(direction, currentSession, sessions)
 }
 
 // findRunningTownSessions returns a list of currently running town-level sessions.
 func findRunningTownSessions() ([]string, error) {
-	// Get all tmux sessions
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	allSessions, err := listTmuxSessions()
 	if err != nil {
 		return nil, fmt.Errorf("listing tmux sessions: %w", err)
 	}
 
-	// Get town-level session names
 	townLevelSessions := getTownLevelSessions()
 	if townLevelSessions == nil {
 		return nil, fmt.Errorf("cannot determine town-level sessions")
 	}
 
 	var running []string
-	for _, line := range splitLines(string(out)) {
-		if line == "" {
-			continue
-		}
-		// Check if this is a town-level session
+	for _, s := range allSessions {
 		for _, townSession := range townLevelSessions {
-			if line == townSession {
-				running = append(running, line)
+			if s == townSession {
+				running = append(running, s)
 				break
 			}
 		}

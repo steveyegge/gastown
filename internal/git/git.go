@@ -652,6 +652,32 @@ func (g *Git) DeleteRemoteBranch(remote, branch string) error {
 	return err
 }
 
+// ListRemoteRefs returns remote ref names matching a prefix using ls-remote.
+// The prefix filters refs (e.g., "refs/heads/polecat/" for all polecat branches).
+// Returns full ref names like "refs/heads/polecat/furiosa-abc123".
+func (g *Git) ListRemoteRefs(remote, prefix string) ([]string, error) {
+	out, err := g.run("ls-remote", "--refs", remote, prefix+"*")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var refs []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// ls-remote output format: <sha>\t<refname>
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			refs = append(refs, parts[1])
+		}
+	}
+	return refs, nil
+}
+
 // Rebase rebases the current branch onto the given ref.
 func (g *Git) Rebase(onto string) error {
 	_, err := g.run("rebase", onto)

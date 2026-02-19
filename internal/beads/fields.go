@@ -23,6 +23,7 @@ type AttachmentFields struct {
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
 	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
+	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -70,6 +71,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "no_merge", "no-merge", "nomerge":
 			fields.NoMerge = strings.ToLower(value) == "true"
 			hasFields = true
+		case "mode":
+			fields.Mode = value
+			hasFields = true
 		}
 	}
 
@@ -103,6 +107,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.NoMerge {
 		lines = append(lines, "no_merge: true")
 	}
+	if fields.Mode != "" {
+		lines = append(lines, "mode: "+fields.Mode)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -128,6 +135,7 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"no_merge":          true,
 		"no-merge":          true,
 		"nomerge":           true,
+		"mode":              true,
 	}
 
 	// Collect non-attachment lines from existing description
@@ -432,87 +440,6 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 	return formatted + "\n\n" + strings.Join(otherLines, "\n")
 }
 
-// SynthesisFields holds structured fields for synthesis beads.
-// These fields track the synthesis step in a convoy workflow.
-type SynthesisFields struct {
-	ConvoyID   string `json:"convoy_id"`   // Parent convoy ID
-	ReviewID   string `json:"review_id"`   // Review ID for output paths
-	OutputPath string `json:"output_path"` // Path to synthesis output file
-	Formula    string `json:"formula"`     // Formula name (if from formula)
-}
-
-// ParseSynthesisFields extracts synthesis fields from an issue's description.
-// Fields are expected as "key: value" lines. Returns nil if no fields found.
-func ParseSynthesisFields(issue *Issue) *SynthesisFields {
-	if issue == nil || issue.Description == "" {
-		return nil
-	}
-
-	fields := &SynthesisFields{}
-	hasFields := false
-
-	for _, line := range strings.Split(issue.Description, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		if value == "" {
-			continue
-		}
-
-		switch strings.ToLower(key) {
-		case "convoy", "convoy_id", "convoy-id":
-			fields.ConvoyID = value
-			hasFields = true
-		case "review_id", "review-id", "reviewid":
-			fields.ReviewID = value
-			hasFields = true
-		case "output_path", "output-path", "outputpath":
-			fields.OutputPath = value
-			hasFields = true
-		case "formula":
-			fields.Formula = value
-			hasFields = true
-		}
-	}
-
-	if !hasFields {
-		return nil
-	}
-	return fields
-}
-
-// FormatSynthesisFields formats SynthesisFields as a string for issue description.
-func FormatSynthesisFields(fields *SynthesisFields) string {
-	if fields == nil {
-		return ""
-	}
-
-	var lines []string
-	if fields.ConvoyID != "" {
-		lines = append(lines, "convoy: "+fields.ConvoyID)
-	}
-	if fields.ReviewID != "" {
-		lines = append(lines, "review_id: "+fields.ReviewID)
-	}
-	if fields.OutputPath != "" {
-		lines = append(lines, "output_path: "+fields.OutputPath)
-	}
-	if fields.Formula != "" {
-		lines = append(lines, "formula: "+fields.Formula)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
 // RoleConfig holds structured lifecycle configuration for role beads.
 // These fields are stored as "key: value" lines in the role bead description.
 // This enables agents to self-register their lifecycle configuration,
@@ -618,7 +545,7 @@ func ParseRoleConfig(description string) *RoleConfig {
 			config.PingTimeout = value
 			hasFields = true
 		case "consecutive_failures", "consecutive-failures", "consecutivefailures":
-			if n, err := parseIntValue(value); err == nil {
+			if n, err := parseIntField(value); err == nil {
 				config.ConsecutiveFailures = n
 				hasFields = true
 			}
@@ -657,13 +584,6 @@ func ParseWispTTLKey(key string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// parseIntValue parses an integer from a string value.
-func parseIntValue(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
 }
 
 // FormatRoleConfig formats RoleConfig as a string suitable for a role bead description.

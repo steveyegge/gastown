@@ -124,6 +124,7 @@ var (
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
+	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 )
 
 func init() {
@@ -148,6 +149,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
+	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -292,6 +294,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("checking bead status: %w", err)
 	}
+
+	// Guard against slinging beads with flag-like titles (gt-e0kx5).
+	// These are garbage beads created by flag-parsing bugs. Slinging them
+	// causes dispatch loops where polecats bounce the work.
+	if beads.IsFlagLikeTitle(info.Title) {
+		return fmt.Errorf("refusing to sling bead %s: title %q looks like a CLI flag (garbage bead from flag-parsing bug)", beadID, info.Title)
+	}
+
 	originalStatus := info.Status
 	originalAssignee := info.Assignee
 	force := slingForce // local copy to avoid mutating package-level flag
@@ -623,11 +633,18 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Store all attachment fields in a single read-modify-write cycle.
 	// This eliminates the race condition where sequential independent updates
 	// (dispatcher, args, no_merge, attached_molecule) could overwrite each other.
+	// Determine mode
+	var slingMode string
+	if slingRalph {
+		slingMode = "ralph"
+	}
+
 	fieldUpdates := beadFieldUpdates{
 		Dispatcher:       actor,
 		Args:             slingArgs,
 		AttachedMolecule: attachedMoleculeID,
 		NoMerge:          slingNoMerge,
+		Mode:             slingMode,
 	}
 	if err := storeFieldsInBead(beadID, fieldUpdates); err != nil {
 		// Warn but don't fail - polecat will still complete work
@@ -639,6 +656,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if slingNoMerge {
 			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
 		}
+		if slingMode == "ralph" {
+			fmt.Printf("%s Ralph loop mode enabled (ralphcat)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Store mode on agent bead (stuck detector reads from agent fields)
+	if slingMode != "" {
+		updateAgentMode(targetAgent, slingMode, hookWorkDir, townBeadsDir)
 	}
 
 	// Start delayed dog session now that hook is set
@@ -676,13 +701,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		targetPane = pane
 	}
 
-	// Try to inject the "start now" prompt (graceful if no tmux)
-	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge.
+	// Try to inject the "start now" prompt with specific work details (graceful if no tmux).
+	// Fresh polecats need this too — SessionManager.Start() only sends a generic
+	// StartupNudge ("check your hook"), not the specific work prompt with bead ID/title.
 	// Skip for self-sling - agent is currently processing the sling command and will see
 	// the hooked work on next turn. Nudging would inject text while agent is busy.
-	if freshlySpawned {
-		// Fresh polecat already got StartupNudge from SessionManager.Start()
-	} else if isSelfSling {
+	if isSelfSling {
 		// Self-sling: agent already knows about the work (just slung it)
 		fmt.Printf("%s Self-sling: work hooked, will process on next turn\n", style.Dim.Render("○"))
 	} else if targetPane == "" {
