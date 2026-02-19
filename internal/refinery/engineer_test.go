@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -444,6 +445,9 @@ func TestRunGates_Sequential_AllPass(t *testing.T) {
 }
 
 func TestRunGates_Sequential_StopsOnFirstFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("gate commands run via sh -c; touch with Windows paths breaks under MSYS2 shell")
+	}
 	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
 	e := NewEngineer(r)
 	e.workDir = t.TempDir()

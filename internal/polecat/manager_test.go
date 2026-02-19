@@ -1458,7 +1458,31 @@ func TestAddWithOptions_RollbackCleansWorktree(t *testing.T) {
 
 	// Install a mock bd that FAILS on create (simulates agent bead creation failure)
 	binDir := t.TempDir()
-	script := `#!/bin/sh
+	if runtime.GOOS == "windows" {
+		psPath := filepath.Join(binDir, "bd.ps1")
+		psScript := `$cmd = ''
+foreach ($arg in $args) {
+  if ($arg -like '--*') { continue }
+  $cmd = $arg
+  break
+}
+switch ($cmd) {
+  'create' {
+    Write-Error 'error: database not initialized'
+    exit 1
+  }
+  default { exit 0 }
+}
+`
+		cmdScript := "@echo off\r\npwsh -NoProfile -NoLogo -File \"" + psPath + "\" %*\r\n"
+		if err := os.WriteFile(psPath, []byte(psScript), 0644); err != nil {
+			t.Fatalf("write mock bd.ps1: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "bd.cmd"), []byte(cmdScript), 0644); err != nil {
+			t.Fatalf("write mock bd.cmd: %v", err)
+		}
+	} else {
+		script := `#!/bin/sh
 cmd=""
 for arg in "$@"; do
   case "$arg" in
@@ -1476,8 +1500,9 @@ case "$cmd" in
     ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0755); err != nil {
-		t.Fatalf("write mock bd: %v", err)
+		if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0755); err != nil {
+			t.Fatalf("write mock bd: %v", err)
+		}
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
