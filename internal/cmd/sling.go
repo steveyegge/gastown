@@ -483,6 +483,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// (fix for gt-7b6wf: convoy merge=direct not propagated).
 	var slingConvoyID string
 	var slingConvoyMergeStrategy string
+	var slingConvoyOwned bool
 	if !slingNoConvoy && formulaName == "" {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
@@ -500,6 +501,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				} else {
 					slingConvoyID = convoyID
 					slingConvoyMergeStrategy = slingMerge
+					slingConvoyOwned = slingOwned
 					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
 					fmt.Printf("  Tracking: %s\n", beadID)
 					if slingOwned {
@@ -512,9 +514,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			slingConvoyID = existingConvoy
-			// Look up merge strategy from existing convoy
+			// Look up merge strategy and ownership from existing convoy
 			if convoyInfo := getConvoyInfoForIssue(beadID); convoyInfo != nil {
 				slingConvoyMergeStrategy = convoyInfo.MergeStrategy
+				slingConvoyOwned = convoyInfo.Owned
 			}
 			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
 		}
@@ -660,6 +663,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		Mode:             slingMode,
 		ConvoyID:         slingConvoyID,
 		MergeStrategy:    slingConvoyMergeStrategy,
+		ConvoyOwned:      slingConvoyOwned,
 	}
 	if err := storeFieldsInBead(beadID, fieldUpdates); err != nil {
 		// Warn but don't fail - polecat will still complete work

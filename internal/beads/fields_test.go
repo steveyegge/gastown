@@ -186,6 +186,7 @@ func TestFormatAttachmentFieldsConvoy(t *testing.T) {
 		AttachedMolecule: "gt-wisp-abc",
 		ConvoyID:         "hq-cv-xyz",
 		MergeStrategy:    "direct",
+		ConvoyOwned:      true,
 	}
 	got := FormatAttachmentFields(fields)
 	if !strings.Contains(got, "convoy_id: hq-cv-xyz") {
@@ -193,6 +194,9 @@ func TestFormatAttachmentFieldsConvoy(t *testing.T) {
 	}
 	if !strings.Contains(got, "merge_strategy: direct") {
 		t.Errorf("FormatAttachmentFields missing merge_strategy, got:\n%s", got)
+	}
+	if !strings.Contains(got, "convoy_owned: true") {
+		t.Errorf("FormatAttachmentFields missing convoy_owned, got:\n%s", got)
 	}
 }
 
@@ -202,6 +206,7 @@ func TestConvoyFieldsRoundTrip(t *testing.T) {
 		DispatchedBy:     "mayor/",
 		ConvoyID:         "hq-cv-xyz",
 		MergeStrategy:    "direct",
+		ConvoyOwned:      true,
 	}
 	formatted := FormatAttachmentFields(original)
 	parsed := ParseAttachmentFields(&Issue{Description: formatted})
@@ -217,16 +222,31 @@ func TestConvoyFieldsRoundTrip(t *testing.T) {
 	if parsed.AttachedMolecule != original.AttachedMolecule {
 		t.Errorf("AttachedMolecule: got %q, want %q", parsed.AttachedMolecule, original.AttachedMolecule)
 	}
+	if parsed.ConvoyOwned != original.ConvoyOwned {
+		t.Errorf("ConvoyOwned: got %v, want %v", parsed.ConvoyOwned, original.ConvoyOwned)
+	}
+}
+
+func TestConvoyOwnedFalseNotFormatted(t *testing.T) {
+	fields := &AttachmentFields{
+		ConvoyID:    "hq-cv-xyz",
+		ConvoyOwned: false,
+	}
+	got := FormatAttachmentFields(fields)
+	if strings.Contains(got, "convoy_owned") {
+		t.Errorf("FormatAttachmentFields should not include convoy_owned when false, got:\n%s", got)
+	}
 }
 
 func TestSetAttachmentFieldsPreservesConvoy(t *testing.T) {
 	issue := &Issue{
-		Description: "convoy_id: hq-cv-old\nmerge_strategy: direct\nattached_molecule: gt-wisp-old\nSome other content",
+		Description: "convoy_id: hq-cv-old\nmerge_strategy: direct\nconvoy_owned: true\nattached_molecule: gt-wisp-old\nSome other content",
 	}
 	fields := &AttachmentFields{
 		AttachedMolecule: "gt-wisp-new",
 		ConvoyID:         "hq-cv-new",
 		MergeStrategy:    "local",
+		ConvoyOwned:      true,
 	}
 	newDesc := SetAttachmentFields(issue, fields)
 	if !strings.Contains(newDesc, "convoy_id: hq-cv-new") {
@@ -234,6 +254,9 @@ func TestSetAttachmentFieldsPreservesConvoy(t *testing.T) {
 	}
 	if !strings.Contains(newDesc, "merge_strategy: local") {
 		t.Errorf("SetAttachmentFields lost merge_strategy field, got:\n%s", newDesc)
+	}
+	if !strings.Contains(newDesc, "convoy_owned: true") {
+		t.Errorf("SetAttachmentFields lost convoy_owned field, got:\n%s", newDesc)
 	}
 	if !strings.Contains(newDesc, "Some other content") {
 		t.Errorf("SetAttachmentFields lost non-attachment content, got:\n%s", newDesc)

@@ -26,6 +26,7 @@ type AttachmentFields struct {
 	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	ConvoyID         string // Convoy bead ID tracking this issue (e.g., "hq-cv-abc")
 	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local", or "" (default = mr)
+	ConvoyOwned      bool   // If true, convoy has gt:owned label (caller-managed lifecycle)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -82,6 +83,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "merge_strategy", "merge-strategy", "mergestrategy":
 			fields.MergeStrategy = value
 			hasFields = true
+		case "convoy_owned", "convoy-owned", "convoyowned":
+			fields.ConvoyOwned = strings.ToLower(value) == "true"
+			hasFields = true
 		}
 	}
 
@@ -124,6 +128,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.MergeStrategy != "" {
 		lines = append(lines, "merge_strategy: "+fields.MergeStrategy)
 	}
+	if fields.ConvoyOwned {
+		lines = append(lines, "convoy_owned: true")
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -157,6 +164,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"merge_strategy":    true,
 		"merge-strategy":    true,
 		"mergestrategy":     true,
+		"convoy_owned":      true,
+		"convoy-owned":      true,
+		"convoyowned":       true,
 	}
 
 	// Collect non-attachment lines from existing description

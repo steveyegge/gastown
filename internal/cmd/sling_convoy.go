@@ -221,6 +221,7 @@ func getConvoyInfoFromIssue(issueID, cwd string) *ConvoyInfo {
 	return &ConvoyInfo{
 		ID:            attachment.ConvoyID,
 		MergeStrategy: attachment.MergeStrategy,
+		Owned:         attachment.ConvoyOwned,
 	}
 }
 
