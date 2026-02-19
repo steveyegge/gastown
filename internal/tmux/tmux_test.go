@@ -333,6 +333,13 @@ func TestIsAgentRunning(t *testing.T) {
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
 
+	// Wait for the shell to be fully initialized before querying pane command.
+	// Without this, GetPaneCommand can return a transient value during shell
+	// startup (e.g., login or profile-sourced commands), causing flaky matches.
+	if err := tm.WaitForShellReady(sessionName, 2*time.Second); err != nil {
+		t.Fatalf("WaitForShellReady: %v", err)
+	}
+
 	// Get the current pane command (should be bash/zsh/etc)
 	cmd, err := tm.GetPaneCommand(sessionName)
 	if err != nil {
