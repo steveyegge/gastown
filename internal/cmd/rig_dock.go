@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 )
 
@@ -84,7 +85,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get rig
-	_, r, err := getRig(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
@@ -182,6 +183,14 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("setting docked label: %w", err)
 	}
 
+	// Also set in wisp layer for immediate local effect (belt-and-suspenders).
+	// The daemon checks wisp first, so this ensures dock works even when
+	// beads/Dolt is locked by another process.
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+	if err := wispCfg.Set(RigStatusKey, "docked"); err != nil {
+		fmt.Printf("  %s Warning: wisp layer write failed: %v\n", style.Warning.Render("!"), err)
+	}
+
 	// Output
 	fmt.Printf("%s Rig %s docked (global)\n", style.Success.Render("✓"), rigName)
 	fmt.Printf("  Label added: %s\n", RigDockedLabel)
@@ -208,7 +217,7 @@ func runRigUndock(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get rig and town root
-	_, r, err := getRig(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
@@ -249,6 +258,12 @@ func runRigUndock(cmd *cobra.Command, args []string) error {
 		RemoveLabels: []string{RigDockedLabel},
 	}); err != nil {
 		return fmt.Errorf("removing docked label: %w", err)
+	}
+
+	// Also clear wisp layer (belt-and-suspenders with bead label removal)
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+	if err := wispCfg.Unset(RigStatusKey); err != nil {
+		fmt.Printf("  %s Warning: wisp layer clear failed: %v\n", style.Warning.Render("!"), err)
 	}
 
 	fmt.Printf("%s Rig %s undocked\n", style.Success.Render("✓"), rigName)

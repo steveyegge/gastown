@@ -2061,7 +2061,7 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	var lastHash string
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	// Send keepalive comment every 15 seconds to prevent connection timeouts
@@ -2087,48 +2087,32 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeDashboardHash generates a lightweight hash of key dashboard state.
-// It runs quick commands in parallel and hashes their output to detect changes.
+// Uses file mtimes and a single tmux call instead of spawning gt/bd subprocesses,
+// avoiding the CPU death spiral caused by cascading bd/Dolt server instances.
 func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	var mu sync.Mutex
 	var parts []string
 
-	var wg sync.WaitGroup
-	wg.Add(3)
-
-	// Check worker/polecat state
-	go func() {
-		defer wg.Done()
-		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"status", "--json"}); err == nil {
-			mu.Lock()
-			parts = append(parts, "status:"+out)
-			mu.Unlock()
+	// Check events file mtime (captures activity changes)
+	if h.workDir != "" {
+		eventsPath := h.workDir + "/.events.jsonl"
+		if info, err := os.Stat(eventsPath); err == nil {
+			parts = append(parts, fmt.Sprintf("events:%d", info.ModTime().UnixNano()))
 		}
-	}()
 
-	// Check hooks state
-	go func() {
-		defer wg.Done()
-		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"hooks", "list"}); err == nil {
-			mu.Lock()
-			parts = append(parts, "hooks:"+out)
-			mu.Unlock()
+		// Check .beads/ directory mtime (captures beads/issue changes)
+		beadsPath := h.workDir + "/.beads"
+		if info, err := os.Stat(beadsPath); err == nil {
+			parts = append(parts, fmt.Sprintf("beads:%d", info.ModTime().UnixNano()))
 		}
-	}()
+	}
 
-	// Check mail count
-	go func() {
-		defer wg.Done()
-		if out, err := h.runGtCommand(ctx, 3*time.Second, []string{"mail", "inbox"}); err == nil {
-			mu.Lock()
-			parts = append(parts, "mail:"+out)
-			mu.Unlock()
-		}
-	}()
-
-	wg.Wait()
+	// Check tmux sessions (captures agent start/stop without spawning gt/bd).
+	// Single fast tmux call instead of 3 parallel gt commands.
+	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	cmd.Stdin = nil
+	if out, err := cmd.Output(); err == nil {
+		parts = append(parts, "tmux:"+string(out))
+	}
 
 	if len(parts) == 0 {
 		return ""
