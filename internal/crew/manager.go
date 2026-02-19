@@ -656,24 +656,27 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
-	// Create session with command and env vars via -e flags.
-	// The -e flags set session-level env BEFORE the shell starts, ensuring the
-	// initial shell inherits the correct GT_ROLE (not the parent's).
-	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
-	// See: https://github.com/steveyegge/gastown/issues/1289 (env inheritance fix)
-	if err := t.NewSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
+	// Create session using unified StartSession (benefits from tmuxinator).
+	// Env vars are passed as ExtraEnv and also prepended to command via PrependEnv
+	// for defense-in-depth env inheritance (replaces NewSessionWithCommandAndEnv -e flags).
 	theme := tmux.AssignTheme(m.rig.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, name, "crew")
-
-	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
-	_ = t.SetCrewCycleBindings(sessionID)
-
-	// Track PID for defense-in-depth orphan cleanup (non-fatal)
-	_ = session.TrackSessionPID(townRoot, sessionID, t)
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID:        sessionID,
+		WorkDir:          worker.ClonePath,
+		Role:             "crew",
+		TownRoot:         townRoot,
+		RigPath:          m.rig.Path,
+		RigName:          m.rig.Name,
+		AgentName:        name,
+		Command:          claudeCmd,
+		Theme:            &theme,
+		ExtraEnv:         envVars,
+		RuntimeConfigDir: opts.ClaudeConfigDir,
+		TrackPID:         true,
+	})
+	if err != nil {
+		return fmt.Errorf("starting crew session: %w", err)
+	}
 
 	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds

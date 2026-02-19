@@ -293,43 +293,43 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	command = config.PrependEnv(command, envVarsToInject)
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
-		return fmt.Errorf("creating session: %w", err)
+	// Build polecat-specific extra env vars for tmux session environment.
+	// These ensure respawned processes inherit correct env for gt done fallback.
+	extraEnv := map[string]string{
+		"GT_POLECAT_PATH":    workDir,
+		"GT_TOWN_ROOT":       townRoot,
+		"BD_DOLT_AUTO_COMMIT": "off",
 	}
-
-	// Set environment (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	// Note: townRoot already defined above for ResolveRoleAgentConfig
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "polecat",
-		Rig:              m.rig.Name,
-		AgentName:        polecat,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.RuntimeConfigDir,
-	})
-	for k, v := range envVars {
-		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
-	}
-
-	// Set GT_BRANCH and GT_POLECAT_PATH in tmux session environment.
-	// This ensures respawned processes also inherit these for gt done fallback.
 	if polecatGitBranch != "" {
-		debugSession("SetEnvironment GT_BRANCH", m.tmux.SetEnvironment(sessionID, "GT_BRANCH", polecatGitBranch))
+		extraEnv["GT_BRANCH"] = polecatGitBranch
 	}
-	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
-	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
-
-	// Branch-per-polecat: set BD_BRANCH in tmux session environment
-	// This ensures respawned processes also inherit the branch setting.
 	if opts.DoltBranch != "" {
-		debugSession("SetEnvironment BD_BRANCH", m.tmux.SetEnvironment(sessionID, "BD_BRANCH", opts.DoltBranch))
+		extraEnv["BD_BRANCH"] = opts.DoltBranch
 	}
 
-	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
-	// This ensures respawned processes also inherit the setting.
-	debugSession("SetEnvironment BD_DOLT_AUTO_COMMIT", m.tmux.SetEnvironment(sessionID, "BD_DOLT_AUTO_COMMIT", "off"))
+	// Create session using unified StartSession (benefits from tmuxinator).
+	theme := tmux.AssignTheme(m.rig.Name)
+	startResult, err := session.StartSession(m.tmux, session.SessionConfig{
+		SessionID:        sessionID,
+		WorkDir:          workDir,
+		Role:             "polecat",
+		TownRoot:         townRoot,
+		RigPath:          m.rig.Path,
+		RigName:          m.rig.Name,
+		AgentName:        polecat,
+		Command:          command,
+		Theme:            &theme,
+		ExtraEnv:         extraEnv,
+		RuntimeConfigDir: opts.RuntimeConfigDir,
+		WaitForAgent:     true,
+		AcceptBypass:     true,
+		ReadyDelay:       true,
+		TrackPID:         true,
+		VerifySurvived:   true,
+	})
+	if err != nil {
+		return fmt.Errorf("starting polecat session: %w", err)
+	}
 
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
@@ -339,22 +339,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Apply theme (non-fatal)
-	theme := tmux.AssignTheme(m.rig.Name)
-	debugSession("ConfigureGasTownSession", m.tmux.ConfigureGasTownSession(sessionID, theme, m.rig.Name, polecat, "polecat"))
-
 	// Set pane-died hook for crash detection (non-fatal)
 	agentID := fmt.Sprintf("%s/%s", m.rig.Name, polecat)
 	debugSession("SetPaneDiedHook", m.tmux.SetPaneDiedHook(sessionID, agentID))
-
-	// Wait for Claude to start (non-fatal)
-	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
-
-	// Accept bypass permissions warning dialog if it appears
-	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
-
-	// Wait for runtime to be fully ready at the prompt (not just started)
-	runtime.SleepForReadyDelay(runtimeConfig)
 
 	// Handle fallback nudges for non-hook agents.
 	// See StartupFallbackInfo in runtime package for the fallback matrix.
@@ -380,20 +367,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 
 	// Legacy fallback for other startup paths (non-fatal)
-	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
-
-	// Verify session survived startup - if the command crashed, the session may have died.
-	// Without this check, Start() would return success even if the pane died during initialization.
-	running, err = m.tmux.HasSession(sessionID)
-	if err != nil {
-		return fmt.Errorf("verifying session: %w", err)
-	}
-	if !running {
-		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
-	}
-
-	// Track PID for defense-in-depth orphan cleanup (non-fatal)
-	_ = session.TrackSessionPID(townRoot, sessionID, m.tmux)
+	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", startResult.RuntimeConfig)
 
 	return nil
 }

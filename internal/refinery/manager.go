@@ -153,7 +153,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	// Create session using unified StartSession (benefits from tmuxinator).
 	theme := tmux.AssignTheme(m.rig.Name)
-	_, err = session.StartSession(t, session.SessionConfig{
+	_, err := session.StartSession(t, session.SessionConfig{
 		SessionID:    sessionID,
 		WorkDir:      refineryRigDir,
 		Role:         "refinery",
