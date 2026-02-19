@@ -64,7 +64,9 @@ Examples:
 
 Subcommands:
   gt costs record       # Record session cost to local log file (Stop hook)
-  gt costs digest       # Aggregate log entries into daily digest bead (Deacon patrol)`,
+  gt costs digest       # Aggregate log entries into daily digest bead (Deacon patrol)
+  gt costs stats        # Show aggregate statistics from the cost dataset
+  gt costs preflight    # Estimate cost and success rate before launching an agent`,
 	RunE: runCosts,
 }
 
@@ -217,6 +219,7 @@ type TokenUsage struct {
 	CacheCreationInputTokens int
 	CacheReadInputTokens     int
 	OutputTokens             int
+	TurnCount                int // Number of assistant messages (API round-trips)
 }
 
 // Model pricing per million tokens (as of Jan 2025).
@@ -788,6 +791,7 @@ func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
 		usage.CacheCreationInputTokens += u.CacheCreationInputTokens
 		usage.CacheReadInputTokens += u.CacheReadInputTokens
 		usage.OutputTokens += u.OutputTokens
+		usage.TurnCount++
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -816,6 +820,56 @@ func calculateCost(usage *TokenUsage) float64 {
 	outputCost := float64(usage.OutputTokens) / 1_000_000 * pricing.OutputPerMillion
 
 	return inputCost + cacheReadCost + cacheCreateCost + outputCost
+}
+
+// extractTranscriptTiming derives session start time and wall clock duration
+// from the first and last lines of a Claude Code transcript file.
+func extractTranscriptTiming(transcriptPath string) (startedAt time.Time, wallTimeSecs float64) {
+	file, err := os.Open(transcriptPath)
+	if err != nil {
+		return time.Time{}, 0
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 256*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	// We need just the timestamp from first and last entries.
+	// Claude Code transcript lines have a "timestamp" field.
+	type tsLine struct {
+		Timestamp string `json:"timestamp"`
+	}
+
+	var firstTS, lastTS time.Time
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var ts tsLine
+		if err := json.Unmarshal(line, &ts); err != nil || ts.Timestamp == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, ts.Timestamp)
+		if err != nil {
+			// Try without nano
+			parsed, err = time.Parse(time.RFC3339, ts.Timestamp)
+			if err != nil {
+				continue
+			}
+		}
+		if firstTS.IsZero() {
+			firstTS = parsed
+		}
+		lastTS = parsed
+	}
+
+	if firstTS.IsZero() || lastTS.IsZero() {
+		return time.Time{}, 0
+	}
+	return firstTS, lastTS.Sub(firstTS).Seconds()
 }
 
 // extractCostFromWorkDir extracts cost from Claude Code transcript for a working directory.
@@ -934,6 +988,8 @@ func outputLedgerHuman(output CostsOutput, entries []CostEntry) error {
 }
 
 // CostLogEntry represents a single entry in the costs.jsonl log file.
+// Fields added for the cost-learning-loop (GH #1143) are optional (omitempty)
+// for backward compatibility with existing log entries.
 type CostLogEntry struct {
 	SessionID string    `json:"session_id"`
 	Role      string    `json:"role"`
@@ -942,6 +998,26 @@ type CostLogEntry struct {
 	CostUSD   float64   `json:"cost_usd"`
 	EndedAt   time.Time `json:"ended_at"`
 	WorkItem  string    `json:"work_item,omitempty"`
+
+	// Outcome fields (GH #1143): populated from outcome file written by gt done.
+	ExitStatus  string `json:"exit_status,omitempty"`  // COMPLETED, ESCALATED, DEFERRED, or empty (session ended without gt done)
+	FormulaName string `json:"formula_name,omitempty"` // Formula that spawned this agent, if any
+
+	// Token usage fields (GH #1143): populated from Claude Code transcript.
+	Model             string `json:"model,omitempty"`
+	InputTokens       int    `json:"input_tokens,omitempty"`
+	OutputTokens      int    `json:"output_tokens,omitempty"`
+	CacheReadTokens   int    `json:"cache_read_tokens,omitempty"`
+	CacheCreateTokens int    `json:"cache_create_tokens,omitempty"`
+
+	// Timing fields (GH #1143): derived from transcript timestamps.
+	StartedAt    time.Time `json:"started_at,omitempty"`
+	WallTimeSecs float64   `json:"wall_time_secs,omitempty"`
+
+	// TurnCount is the number of assistant messages (API round-trips) in the session.
+	// This is a proxy for "retries/attempts" — sessions with high turn counts
+	// relative to their outcome may indicate thrash/loop behavior.
+	TurnCount int `json:"turn_count,omitempty"`
 }
 
 // getCostsLogPath returns the path to the costs log file (~/.gt/costs.jsonl).
@@ -951,6 +1027,71 @@ func getCostsLogPath() string {
 		return "/tmp/gt-costs.jsonl" // Fallback
 	}
 	return filepath.Join(home, ".gt", "costs.jsonl")
+}
+
+// OutcomeFile is the data written by gt done for the Stop hook to read.
+// This bridges the gap between gt done (which knows exit status) and
+// gt costs record (which records session cost at session end).
+type OutcomeFile struct {
+	ExitStatus  string    `json:"exit_status"`
+	FormulaName string    `json:"formula_name,omitempty"`
+	IssueID     string    `json:"issue_id,omitempty"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+}
+
+// getOutcomesDirOverride is a test hook. When non-empty, overrides the
+// default outcomes directory for test isolation.
+var getOutcomesDirOverride string
+
+// getOutcomesDir returns the path to the outcomes directory (~/.gt/outcomes/).
+func getOutcomesDir() string {
+	if getOutcomesDirOverride != "" {
+		return getOutcomesDirOverride
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/tmp/gt-outcomes"
+	}
+	return filepath.Join(home, ".gt", "outcomes")
+}
+
+// WriteOutcomeFile writes outcome data for a session so gt costs record can read it.
+// Called by gt done before session kill.
+func WriteOutcomeFile(sessionName string, outcome OutcomeFile) error {
+	dir := getOutcomesDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating outcomes dir: %w", err)
+	}
+
+	data, err := json.Marshal(outcome)
+	if err != nil {
+		return fmt.Errorf("marshaling outcome: %w", err)
+	}
+
+	path := filepath.Join(dir, sessionName+".json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing outcome file: %w", err)
+	}
+	return nil
+}
+
+// readOutcomeFile reads and deletes the outcome file for a session.
+// Returns nil if no outcome file exists (session ended without gt done).
+func readOutcomeFile(sessionName string) *OutcomeFile {
+	path := filepath.Join(getOutcomesDir(), sessionName+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil // No outcome file — session ended without gt done
+	}
+
+	var outcome OutcomeFile
+	if err := json.Unmarshal(data, &outcome); err != nil {
+		return nil
+	}
+
+	// Clean up — outcome consumed
+	_ = os.Remove(path)
+	return &outcome
 }
 
 // runCostsRecord captures the final cost from a session and appends it to a local log file.
@@ -987,23 +1128,40 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Extract cost from Claude transcript
+	// Extract cost and token usage from Claude transcript
 	var cost float64
+	var usage *TokenUsage
+	var wallTimeSecs float64
+	var startedAt time.Time
 	if workDir != "" {
-		var err error
-		cost, err = extractCostFromWorkDir(workDir)
-		if err != nil {
-			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] could not extract cost from transcript: %v\n", err)
+		projectDir, err := getClaudeProjectDir(workDir)
+		if err == nil {
+			transcriptPath, err := findLatestTranscript(projectDir)
+			if err == nil {
+				usage, err = parseTranscriptUsage(transcriptPath)
+				if err != nil && costsVerbose {
+					fmt.Fprintf(os.Stderr, "[costs] could not parse transcript: %v\n", err)
+				}
+				if usage != nil {
+					cost = calculateCost(usage)
+				}
+				// Extract wall time from transcript file timestamps
+				startedAt, wallTimeSecs = extractTranscriptTiming(transcriptPath)
+			} else if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not find transcript: %v\n", err)
 			}
-			cost = 0.0
+		} else if costsVerbose {
+			fmt.Fprintf(os.Stderr, "[costs] could not get project dir: %v\n", err)
 		}
 	}
 
 	// Parse session name
 	role, rig, worker := parseSessionName(session)
 
-	// Build log entry
+	// Read outcome file (written by gt done before session kill)
+	outcome := readOutcomeFile(session)
+
+	// Build log entry with enriched data (GH #1143)
 	entry := CostLogEntry{
 		SessionID: session,
 		Role:      role,
@@ -1012,6 +1170,38 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		CostUSD:   cost,
 		EndedAt:   time.Now(),
 		WorkItem:  recordWorkItem,
+	}
+
+	// Populate token usage from transcript
+	if usage != nil {
+		entry.Model = usage.Model
+		entry.InputTokens = usage.InputTokens
+		entry.OutputTokens = usage.OutputTokens
+		entry.CacheReadTokens = usage.CacheReadInputTokens
+		entry.CacheCreateTokens = usage.CacheCreationInputTokens
+		entry.TurnCount = usage.TurnCount
+	}
+
+	// Populate timing
+	if !startedAt.IsZero() {
+		entry.StartedAt = startedAt
+		entry.WallTimeSecs = wallTimeSecs
+	}
+
+	// Merge outcome data from gt done
+	if outcome != nil {
+		entry.ExitStatus = outcome.ExitStatus
+		entry.FormulaName = outcome.FormulaName
+		if outcome.IssueID != "" && entry.WorkItem == "" {
+			entry.WorkItem = outcome.IssueID
+		}
+		// Prefer gt done's started_at if available (more accurate)
+		if !outcome.StartedAt.IsZero() {
+			entry.StartedAt = outcome.StartedAt
+			if !entry.EndedAt.IsZero() {
+				entry.WallTimeSecs = entry.EndedAt.Sub(outcome.StartedAt).Seconds()
+			}
+		}
 	}
 
 	// Marshal to JSON

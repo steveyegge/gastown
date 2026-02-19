@@ -912,6 +912,25 @@ afterDoltMerge:
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
+	// Write outcome file for the cost-learning-loop (GH #1143).
+	// The Stop hook (gt costs record) reads this to enrich the cost log entry
+	// with exit_status and formula_name. Must be written BEFORE session kill,
+	// because the Stop hook fires when the session dies.
+	outcomeSession := detectCurrentTmuxSession()
+	if outcomeSession == "" {
+		outcomeSession = deriveSessionName()
+	}
+	if outcomeSession != "" {
+		outcome := OutcomeFile{
+			ExitStatus: exitType,
+			IssueID:    issueID,
+		}
+		if err := WriteOutcomeFile(outcomeSession, outcome); err != nil {
+			// Non-fatal: cost entry will just lack outcome data
+			style.PrintWarning("could not write outcome file: %v", err)
+		}
+	}
+
 	// Self-cleaning: Nuke our own sandbox and session (if we're a polecat)
 	// This is the self-cleaning model - polecats clean up after themselves
 	// "done means gone" - both worktree and session are terminated
