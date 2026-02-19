@@ -22,3 +22,4 @@ func SwapKeychainCredential(_, _ string) (*KeychainCredential, error)           
 func RestoreKeychainToken(_ *KeychainCredential) error                             { return errNotDarwin }
 func SwapOAuthAccount(_, _ string) (json.RawMessage, error)                        { return nil, errNotDarwin }
 func RestoreOAuthAccount(_ string, _ json.RawMessage) error                        { return errNotDarwin }
+func ValidateKeychainToken(_ string) error                                         { return nil }

@@ -4,12 +4,15 @@ package quota
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -195,6 +198,83 @@ func RestoreOAuthAccount(targetConfigDir string, backup json.RawMessage) error {
 		return fmt.Errorf("marshaling target .claude.json: %w", err)
 	}
 	return os.WriteFile(targetPath, out, 0600)
+}
+
+// ValidateKeychainToken checks if the OAuth token for a config dir is still usable.
+// It attempts local validation first (JSON credential expiry, JWT expiry), then
+// falls back to a lightweight API call. Returns nil if the token appears valid
+// or if the token can't be read (the actual swap will fail clearly in that case).
+func ValidateKeychainToken(configDir string) error {
+	svc := KeychainServiceName(configDir)
+	raw, err := ReadKeychainToken(svc)
+	if err != nil {
+		// Can't read the token — don't block planning. The swap itself will
+		// fail with a clear error if the keychain entry doesn't exist.
+		return nil
+	}
+	if raw == "" {
+		return nil
+	}
+
+	// Strategy 1: Parse as JSON credential with expires_at field.
+	// Claude Code may store the full OAuth response including expiry.
+	var cred struct {
+		ExpiresAt int64 `json:"expires_at"`
+	}
+	if json.Unmarshal([]byte(raw), &cred) == nil && cred.ExpiresAt > 0 {
+		if time.Now().Unix() >= cred.ExpiresAt {
+			return fmt.Errorf("token expired at %s", time.Unix(cred.ExpiresAt, 0).Format(time.RFC3339))
+		}
+		return nil
+	}
+
+	// Strategy 2: Parse as JWT — decode payload, check exp claim.
+	parts := strings.Split(raw, ".")
+	if len(parts) == 3 {
+		payload, decErr := base64.RawURLEncoding.DecodeString(parts[1])
+		if decErr == nil {
+			var claims struct {
+				Exp int64 `json:"exp"`
+			}
+			if json.Unmarshal(payload, &claims) == nil && claims.Exp > 0 {
+				if time.Now().Unix() >= claims.Exp {
+					return fmt.Errorf("JWT expired at %s", time.Unix(claims.Exp, 0).Format(time.RFC3339))
+				}
+				return nil
+			}
+		}
+	}
+
+	// Strategy 3: HTTP validation — send a minimal malformed request to the
+	// Anthropic API. Auth is checked before request body: 401 = bad token,
+	// any other status (400, 422, etc.) = token accepted by auth layer.
+	// Network errors are treated as "can't determine" → assume valid.
+	return validateTokenHTTP(raw)
+}
+
+// validateTokenHTTP sends a minimal request to the Anthropic API to check if a
+// token is accepted by the auth layer. Returns error only for HTTP 401.
+func validateTokenHTTP(token string) error {
+	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages",
+		strings.NewReader("{}"))
+	if err != nil {
+		return nil // Can't create request → assume valid
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil // Network error → assume valid
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("token rejected by API (HTTP 401)")
+	}
+	return nil
 }
 
 // expandTilde expands a leading ~/ to the user's home directory.

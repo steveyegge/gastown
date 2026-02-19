@@ -33,6 +33,10 @@ type RotatePlan struct {
 	// One keychain swap per config dir, not per session.
 	// All sessions sharing a config dir get the same assignment.
 	ConfigDirSwaps map[string]string
+
+	// SkippedAccounts maps handle -> reason for accounts that were
+	// available by quota status but had invalid/expired tokens.
+	SkippedAccounts map[string]string `json:"skipped_accounts,omitempty"`
 }
 
 // PlanRotation scans for limited sessions and plans account assignments.
@@ -87,6 +91,25 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 
 	// Get available accounts
 	available := mgr.AvailableAccounts(state)
+
+	// Validate tokens for available accounts — skip accounts with expired or
+	// revoked tokens. This prevents swapping a bad token into the target's
+	// keychain entry, which would leave the session non-functional.
+	skipped := make(map[string]string)
+	var validAvailable []string
+	for _, handle := range available {
+		acct, ok := acctCfg.Accounts[handle]
+		if !ok {
+			continue
+		}
+		configDir := util.ExpandHome(acct.ConfigDir)
+		if err := ValidateKeychainToken(configDir); err != nil {
+			skipped[handle] = err.Error()
+			continue
+		}
+		validAvailable = append(validAvailable, handle)
+	}
+	available = validAvailable
 
 	// Collect unique config dirs from limited sessions.
 	// Multiple sessions can share the same config dir (via the same account).
@@ -162,5 +185,6 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		AvailableAccounts: available,
 		Assignments:       assignments,
 		ConfigDirSwaps:    configDirSwaps,
+		SkippedAccounts:   skipped,
 	}, nil
 }

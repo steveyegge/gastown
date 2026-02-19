@@ -495,6 +495,14 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 			fmt.Printf(" %s %d session(s) cannot be rotated (not enough available accounts)\n",
 				style.WarningPrefix, unassignable)
 		}
+		if len(plan.SkippedAccounts) > 0 {
+			fmt.Println()
+			for handle, reason := range plan.SkippedAccounts {
+				acct := acctCfg.Accounts[handle]
+				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, reason)
+				fmt.Printf("   Run: claude /login  (in CLAUDE_CONFIG_DIR=%s)\n", acct.ConfigDir)
+			}
+		}
 	}
 
 	if rotateDryRun {
