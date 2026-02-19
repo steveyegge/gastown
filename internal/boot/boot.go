@@ -4,6 +4,7 @@
 package boot
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,9 +13,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -179,45 +178,21 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Get fallback info to determine beacon content based on agent capabilities.
-	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
-	runtimeConfig := config.ResolveRoleAgentConfig("boot", b.townRoot, b.bootDir)
-	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
-
-	// Configure beacon based on agent's hook/prompt capabilities.
-	beaconConfig := session.BeaconConfig{
-		Recipient:               "boot",
-		Sender:                  "daemon",
-		Topic:                   "triage",
-		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
-		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
-	}
-
 	// Use unified session lifecycle for config → settings → command → create → env.
-	result, err := session.StartSession(b.tmux, session.SessionConfig{
-		SessionID:     session.BootSessionName(),
-		WorkDir:       b.bootDir,
-		Role:          "boot",
-		TownRoot:      b.townRoot,
-		Beacon:        beaconConfig,
+	_, err := session.StartSession(b.tmux, session.SessionConfig{
+		SessionID: session.BootSessionName(),
+		WorkDir:   b.bootDir,
+		Role:      "boot",
+		TownRoot:  b.townRoot,
+		Beacon: session.BeaconConfig{
+			Recipient: "boot",
+			Sender:    "daemon",
+			Topic:     "triage",
+		},
 		Instructions:  "Run `" + cli.Name() + " boot triage` now.",
 		AgentOverride: agentOverride,
 	})
-	if err != nil {
-		return err
-	}
-
-	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	// Boot is ephemeral so we run this in background.
-	if fallbackInfo.SendBeaconNudge || fallbackInfo.SendStartupNudge {
-		beacon := session.FormatStartupBeacon(beaconConfig)
-		go func() {
-			runtime.SleepForReadyDelay(result.RuntimeConfig)
-			runtime.SendFallbackNudges(b.tmux, session.BootSessionName(), beacon, fallbackInfo)
-		}()
-	}
-
-	return nil
+	return err
 }
 
 // spawnDegraded spawns Boot in degraded mode (no tmux).

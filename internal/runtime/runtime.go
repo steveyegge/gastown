@@ -231,36 +231,3 @@ func StartupNudgeContent() string {
 func BeaconPrimeInstruction() string {
 	return "\n\nRun `" + cli.Name() + " prime` to initialize your context."
 }
-
-// Nudger is the minimal interface for sending nudge messages to a tmux session.
-// Both *tmux.Tmux and deacon's tmuxOps interface satisfy this.
-type Nudger interface {
-	NudgeSession(session, message string) error
-}
-
-// SendFallbackNudges sends beacon and/or work instruction nudges based on
-// the agent's fallback requirements. This centralizes the nudge dispatch
-// logic that was previously duplicated across all role managers.
-func SendFallbackNudges(t Nudger, sessionID, beacon string, info *StartupFallbackInfo) {
-	if info == nil {
-		return
-	}
-	if info.SendBeaconNudge && info.SendStartupNudge && info.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		combined := beacon + "\n\n" + StartupNudgeContent()
-		_ = t.NudgeSession(sessionID, combined)
-	} else {
-		if info.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			_ = t.NudgeSession(sessionID, beacon)
-		}
-		if info.StartupNudgeDelayMs > 0 {
-			// Wait for agent to run gt prime before sending work instructions
-			time.Sleep(time.Duration(info.StartupNudgeDelayMs) * time.Millisecond)
-		}
-		if info.SendStartupNudge {
-			// Send work instructions via nudge
-			_ = t.NudgeSession(sessionID, StartupNudgeContent())
-		}
-	}
-}

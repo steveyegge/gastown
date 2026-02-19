@@ -62,6 +62,12 @@ func NewTmux() *Tmux {
 	return &Tmux{}
 }
 
+// IsTmuxinatorAvailable checks if tmuxinator is installed and accessible on PATH.
+func (t *Tmux) IsTmuxinatorAvailable() bool {
+	_, err := exec.LookPath("tmuxinator")
+	return err == nil
+}
+
 // run executes a tmux command and returns stdout.
 // All commands include -u flag for UTF-8 support regardless of locale settings.
 // See: https://github.com/steveyegge/gastown/issues/1219

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -66,29 +64,19 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Get fallback info to determine beacon content based on agent capabilities.
-	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
-	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, "")
-	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
-
-	// Configure beacon based on agent's hook/prompt capabilities.
-	beaconConfig := session.BeaconConfig{
-		Recipient:               "mayor",
-		Sender:                  "human",
-		Topic:                   "cold-start",
-		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
-		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
-	}
-
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.MayorTheme()
-	result, err := session.StartSession(t, session.SessionConfig{
-		SessionID:     sessionID,
-		WorkDir:       mayorDir,
-		Role:          "mayor",
-		TownRoot:      m.townRoot,
-		AgentName:     "Mayor",
-		Beacon:        beaconConfig,
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID: sessionID,
+		WorkDir:   mayorDir,
+		Role:      "mayor",
+		TownRoot:  m.townRoot,
+		AgentName: "Mayor",
+		Beacon: session.BeaconConfig{
+			Recipient: "mayor",
+			Sender:    "human",
+			Topic:     "cold-start",
+		},
 		AgentOverride: agentOverride,
 		Theme:         &theme,
 		WaitForAgent:  true,
@@ -100,18 +88,7 @@ func (m *Manager) Start(agentOverride string) error {
 		return err
 	}
 
-	// Send gt prime via tmux for non-hook agents (e.g., codex).
-	// Hook-based agents (claude, opencode) get context via their hook system,
-	// so RunStartupFallback is a no-op for them.
-	runtime.SleepForReadyDelay(result.RuntimeConfig)
-	_ = runtime.RunStartupFallback(t, sessionID, "mayor", result.RuntimeConfig)
-
 	time.Sleep(session.ShutdownDelay())
-
-	// Handle fallback nudges for non-prompt agents (e.g., Codex, OpenCode).
-	// Reuse the same beaconConfig to ensure flags are consistent.
-	beacon := session.FormatStartupBeacon(beaconConfig)
-	runtime.SendFallbackNudges(t, sessionID, beacon, fallbackInfo)
 
 	return nil
 }

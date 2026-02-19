@@ -3,7 +3,6 @@ package witness
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -139,77 +138,49 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return err
 	}
 
-	// Get fallback info to determine beacon content based on agent capabilities.
-	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
-	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
-
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	startResult, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig, fallbackInfo)
+	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
 	if err != nil {
 		return err
 	}
-	command := startResult.command
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "witness",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-	// Apply role config env vars if present (non-fatal).
+	// Build extra env vars from role config + CLI overrides.
+	extraEnv := make(map[string]string)
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
-		_ = t.SetEnvironment(sessionID, key, value)
+		extraEnv[key] = value
 	}
-	// Apply CLI env overrides (highest priority, non-fatal).
 	for _, override := range envOverrides {
 		if key, value, ok := strings.Cut(override, "="); ok {
-			_ = t.SetEnvironment(sessionID, key, value)
+			extraEnv[key] = value
 		}
 	}
 
-	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
+	// Create session using unified StartSession (benefits from tmuxinator).
 	theme := tmux.AssignTheme(m.rig.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
-
-	// Wait for Claude to start - fatal if Claude fails to launch
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Kill the zombie session before returning error
-		_ = t.KillSessionWithProcesses(sessionID)
-		return fmt.Errorf("waiting for witness to start: %w", err)
-	}
-
-	// Accept bypass permissions warning dialog if it appears.
-	if err := t.AcceptBypassPermissionsWarning(sessionID); err != nil {
-		log.Printf("warning: accepting bypass permissions for %s: %v", sessionID, err)
-	}
-
-	// Track PID for defense-in-depth orphan cleanup (non-fatal)
-	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
-		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID:    sessionID,
+		WorkDir:      witnessDir,
+		Role:         "witness",
+		TownRoot:     townRoot,
+		RigPath:      m.rig.Path,
+		RigName:      m.rig.Name,
+		AgentName:    "witness",
+		Command:      command,
+		Theme:        &theme,
+		ExtraEnv:     extraEnv,
+		WaitForAgent: true,
+		WaitFatal:    true,
+		AcceptBypass: true,
+		TrackPID:     true,
+	})
+	if err != nil {
+		return err
 	}
 
 	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Wait for runtime to be fully ready at the prompt (not just started)
-	runtime.SleepForReadyDelay(runtimeConfig)
-
-	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	if startResult.beacon != "" {
-		runtime.SendFallbackNudges(t, sessionID, startResult.beacon, fallbackInfo)
-	}
 
 	return nil
 }
@@ -244,39 +215,23 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	return expanded
 }
 
-// witnessStartResult contains the startup command and beacon for fallback handling.
-type witnessStartResult struct {
-	command string
-	beacon  string
-}
-
-func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig, fallbackInfo *runtime.StartupFallbackInfo) (*witnessStartResult, error) {
+func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
 	if agentOverride != "" {
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return &witnessStartResult{
-			command: beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"),
-			beacon:  "", // Custom command, no beacon to nudge
-		}, nil
+		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
-
-	// Configure beacon based on agent's hook/prompt capabilities.
-	beaconConfig := session.BeaconConfig{
-		Recipient:               fmt.Sprintf("%s/witness", rigName),
-		Sender:                  "deacon",
-		Topic:                   "patrol",
-		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
-		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
-	}
-	beacon := session.FormatStartupBeacon(beaconConfig)
-	initialPrompt := beacon + "\n\nI am Witness for " + rigName + ". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it."
-
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/witness", rigName),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Run `gt prime --hook` and begin patrol.")
 	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
-		return nil, fmt.Errorf("building startup command: %w", err)
+		return "", fmt.Errorf("building startup command: %w", err)
 	}
-	return &witnessStartResult{command: command, beacon: beacon}, nil
+	return command, nil
 }
 
 // Stop stops the witness.

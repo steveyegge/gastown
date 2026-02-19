@@ -3,12 +3,15 @@ package session
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/tmuxinator"
 )
 
 // SessionConfig describes how to create and start a tmux session.
@@ -174,37 +177,19 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		command = config.PrependEnv(command, cfg.ExtraEnv)
 	}
 
-	// 4. Create tmux session with command.
-	if err := t.NewSessionWithCommand(cfg.SessionID, cfg.WorkDir, command); err != nil {
-		return nil, fmt.Errorf("creating session: %w", err)
+	// 4. Create tmux session — prefer tmuxinator for declarative setup,
+	// fall back to raw tmux if tmuxinator is not available.
+	if tmuxinator.IsAvailable() {
+		if err := startWithTmuxinator(cfg, command); err != nil {
+			return nil, fmt.Errorf("creating session via tmuxinator: %w", err)
+		}
+	} else {
+		if err := startWithRawTmux(t, cfg, command); err != nil {
+			return nil, err
+		}
 	}
 
-	// 5. Set remain-on-exit immediately if requested (before anything else can fail).
-	if cfg.RemainOnExit {
-		_ = t.SetRemainOnExit(cfg.SessionID, true)
-	}
-
-	// 6. Set environment variables.
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             cfg.Role,
-		Rig:              cfg.RigName,
-		AgentName:        cfg.AgentName,
-		TownRoot:         cfg.TownRoot,
-		RuntimeConfigDir: cfg.RuntimeConfigDir,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(cfg.SessionID, k, v)
-	}
-	for k, v := range cfg.ExtraEnv {
-		_ = t.SetEnvironment(cfg.SessionID, k, v)
-	}
-
-	// 7. Apply theme.
-	if cfg.Theme != nil {
-		_ = t.ConfigureGasTownSession(cfg.SessionID, *cfg.Theme, cfg.RigName, cfg.AgentName, cfg.Role)
-	}
-
-	// 8. Wait for agent to start.
+	// 5. Wait for agent to start.
 	if cfg.WaitForAgent {
 		if err := t.WaitForCommand(cfg.SessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 			if cfg.WaitFatal {
@@ -214,24 +199,17 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		}
 	}
 
-	// 9. Auto-respawn hook.
-	if cfg.AutoRespawn {
-		if err := t.SetAutoRespawnHook(cfg.SessionID); err != nil {
-			fmt.Printf("warning: failed to set auto-respawn hook for %s: %v\n", cfg.Role, err)
-		}
-	}
-
-	// 10. Accept bypass permissions warning.
+	// 6. Accept bypass permissions warning.
 	if cfg.AcceptBypass {
 		_ = t.AcceptBypassPermissionsWarning(cfg.SessionID)
 	}
 
-	// 11. Ready delay.
+	// 7. Ready delay.
 	if cfg.ReadyDelay {
 		runtime.SleepForReadyDelay(runtimeConfig)
 	}
 
-	// 12. Verify session survived startup.
+	// 8. Verify session survived startup.
 	if cfg.VerifySurvived {
 		running, err := t.HasSession(cfg.SessionID)
 		if err != nil {
@@ -244,7 +222,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		}
 	}
 
-	// 13. Track PID for defense-in-depth orphan cleanup.
+	// 9. Track PID for defense-in-depth orphan cleanup.
 	if cfg.TrackPID && cfg.TownRoot != "" {
 		_ = TrackSessionPID(cfg.TownRoot, cfg.SessionID, t)
 	}
@@ -332,4 +310,90 @@ func ReadyDelay(rc *config.RuntimeConfig) {
 // Some roles use this instead of the runtime's ready delay.
 func ShutdownDelay() time.Duration {
 	return constants.ShutdownNotifyDelay
+}
+
+// startWithTmuxinator creates a session using tmuxinator's declarative YAML config.
+// The YAML handles: session creation, env vars, theme, bindings, mouse, remain-on-exit,
+// auto-respawn hooks, and the agent startup command — all in one atomic step.
+func startWithTmuxinator(cfg SessionConfig, command string) error {
+	tmuxCfg, err := tmuxinator.FromSessionConfig(tmuxinator.SessionConfig{
+		SessionID:        cfg.SessionID,
+		WorkDir:          cfg.WorkDir,
+		Role:             cfg.Role,
+		TownRoot:         cfg.TownRoot,
+		RigPath:          cfg.RigPath,
+		RigName:          cfg.RigName,
+		AgentName:        cfg.AgentName,
+		Command:          command,
+		Theme:            cfg.Theme,
+		ExtraEnv:         cfg.ExtraEnv,
+		RemainOnExit:     cfg.RemainOnExit,
+		AutoRespawn:      cfg.AutoRespawn,
+		RuntimeConfigDir: cfg.RuntimeConfigDir,
+	})
+	if err != nil {
+		return fmt.Errorf("generating tmuxinator config: %w", err)
+	}
+
+	// Write config to a temp file in the town's tmp directory
+	tmpDir := filepath.Join(cfg.TownRoot, ".tmp")
+	if cfg.TownRoot == "" {
+		tmpDir = os.TempDir()
+	}
+	_ = os.MkdirAll(tmpDir, 0755)
+	configPath := filepath.Join(tmpDir, fmt.Sprintf("tmuxinator-%s.yml", cfg.SessionID))
+
+	if err := tmuxCfg.WriteToFile(configPath); err != nil {
+		return fmt.Errorf("writing tmuxinator config: %w", err)
+	}
+	// Clean up config file after tmuxinator reads it
+	defer os.Remove(configPath)
+
+	if err := tmuxinator.Start(configPath); err != nil {
+		return fmt.Errorf("tmuxinator start: %w", err)
+	}
+	return nil
+}
+
+// startWithRawTmux creates a session using direct tmux API calls.
+// This is the fallback path when tmuxinator is not installed.
+func startWithRawTmux(t *tmux.Tmux, cfg SessionConfig, command string) error {
+	// Create tmux session with command.
+	if err := t.NewSessionWithCommand(cfg.SessionID, cfg.WorkDir, command); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set remain-on-exit immediately if requested (before anything else can fail).
+	if cfg.RemainOnExit {
+		_ = t.SetRemainOnExit(cfg.SessionID, true)
+	}
+
+	// Set environment variables.
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             cfg.Role,
+		Rig:              cfg.RigName,
+		AgentName:        cfg.AgentName,
+		TownRoot:         cfg.TownRoot,
+		RuntimeConfigDir: cfg.RuntimeConfigDir,
+	})
+	for k, v := range envVars {
+		_ = t.SetEnvironment(cfg.SessionID, k, v)
+	}
+	for k, v := range cfg.ExtraEnv {
+		_ = t.SetEnvironment(cfg.SessionID, k, v)
+	}
+
+	// Apply theme.
+	if cfg.Theme != nil {
+		_ = t.ConfigureGasTownSession(cfg.SessionID, *cfg.Theme, cfg.RigName, cfg.AgentName, cfg.Role)
+	}
+
+	// Auto-respawn hook (in raw tmux path only — tmuxinator handles this via on_project_start).
+	if cfg.AutoRespawn {
+		if err := t.SetAutoRespawnHook(cfg.SessionID); err != nil {
+			fmt.Printf("warning: failed to set auto-respawn hook for %s: %v\n", cfg.Role, err)
+		}
+	}
+
+	return nil
 }

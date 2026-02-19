@@ -134,20 +134,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		fmt.Printf("Warning: could not update refinery .gitignore: %v\n", err)
 	}
 
-	// Get fallback info to determine beacon content based on agent capabilities.
-	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
-	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
-
-	// Configure beacon based on agent's hook/prompt capabilities.
-	beaconConfig := session.BeaconConfig{
-		Recipient:               fmt.Sprintf("%s/refinery", m.rig.Name),
-		Sender:                  "deacon",
-		Topic:                   "patrol",
-		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
-		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
-	}
-	beacon := session.FormatStartupBeacon(beaconConfig)
-	initialPrompt := beacon + "\n\nCheck your hook and begin patrol."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Run `gt prime --hook` and begin patrol.")
 
 	var command string
 	if agentOverride != "" {
@@ -160,53 +151,35 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "refinery",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-	})
-
-	// Add refinery-specific flag
-	envVars["GT_REFINERY"] = "1"
-
-	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
-	// Apply theme (non-fatal: theming failure doesn't affect operation)
+	// Create session using unified StartSession (benefits from tmuxinator).
 	theme := tmux.AssignTheme(m.rig.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
+	_, err = session.StartSession(t, session.SessionConfig{
+		SessionID:    sessionID,
+		WorkDir:      refineryRigDir,
+		Role:         "refinery",
+		TownRoot:     townRoot,
+		RigPath:      m.rig.Path,
+		RigName:      m.rig.Name,
+		AgentName:    "refinery",
+		Command:      command,
+		Theme:        &theme,
+		ExtraEnv:     map[string]string{"GT_REFINERY": "1"},
+		AcceptBypass: true,
+	})
+	if err != nil {
+		return err
+	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	// Must be before WaitForRuntimeReady to avoid race where dialog blocks prompt detection.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
-
-	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
-	// WaitForRuntimeReady waits for the runtime to be ready
+	// Refinery uses WaitForRuntimeReady instead of generic WaitForCommand
+	// to handle runtime-specific prompt detection.
 	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
-		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
-
-	// Send gt prime via tmux for non-hook agents BEFORE work instructions.
-	// This ensures prime completes before work nudge is sent.
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
-
-	// Handle fallback nudges for non-prompt agents (e.g., OpenCode).
-	runtime.SendFallbackNudges(t, sessionID, beacon, fallbackInfo)
 
 	return nil
 }
