@@ -425,18 +425,18 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Count unassigned sessions by reason, before idle filtering changes the assignment count.
-	// Two reasons a session may not be assigned:
-	//   1. Account unknown — scanner couldn't resolve the session's account handle
+	// Three reasons a session may not be assigned:
+	//   1. No config dir — session has no CLAUDE_CONFIG_DIR and no known account
 	//   2. No available accounts — all accounts are limited or consumed
-	unknownAccount := 0
+	noConfigDir := 0
 	for _, r := range plan.LimitedSessions {
 		if _, assigned := plan.Assignments[r.Session]; !assigned {
-			if r.AccountHandle == "" {
-				unknownAccount++
+			if r.AccountHandle == "" && r.ConfigDir == "" {
+				noConfigDir++
 			}
 		}
 	}
-	unassignable := len(plan.LimitedSessions) - len(plan.Assignments) - unknownAccount
+	unassignable := len(plan.LimitedSessions) - len(plan.Assignments) - noConfigDir
 
 	// Filter to idle sessions only when --idle is set.
 	// This avoids interrupting agents that are actively working.
@@ -487,9 +487,9 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 				style.Success.Render(newAccount),
 			)
 		}
-		if unknownAccount > 0 {
-			fmt.Printf("\n %s %d session(s) skipped (account unknown)\n",
-				style.WarningPrefix, unknownAccount)
+		if noConfigDir > 0 {
+			fmt.Printf("\n %s %d session(s) skipped (no CLAUDE_CONFIG_DIR)\n",
+				style.WarningPrefix, noConfigDir)
 		}
 		if unassignable > 0 {
 			fmt.Printf(" %s %d session(s) cannot be rotated (not enough available accounts)\n",

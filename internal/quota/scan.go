@@ -15,6 +15,7 @@ import (
 type ScanResult struct {
 	Session       string `json:"session"`                  // tmux session name
 	AccountHandle string `json:"account_handle,omitempty"` // resolved account handle
+	ConfigDir     string `json:"config_dir,omitempty"`     // CLAUDE_CONFIG_DIR (even if account unknown)
 	RateLimited   bool   `json:"rate_limited"`             // whether rate-limit was detected
 	MatchedLine   string `json:"matched_line,omitempty"`   // the line that matched
 	ResetsAt      string `json:"resets_at,omitempty"`      // parsed reset time if available
@@ -94,6 +95,12 @@ func (s *Scanner) ScanAll() ([]ScanResult, error) {
 // scanSession examines a single tmux session for rate-limit indicators.
 func (s *Scanner) scanSession(session string) ScanResult {
 	result := ScanResult{Session: session}
+
+	// Always capture CLAUDE_CONFIG_DIR for rotation planning, even if
+	// the account handle can't be resolved (unknown account sessions).
+	if configDir, err := s.tmux.GetEnvironment(session, "CLAUDE_CONFIG_DIR"); err == nil {
+		result.ConfigDir = strings.TrimSpace(configDir)
+	}
 
 	// Derive account from CLAUDE_CONFIG_DIR
 	result.AccountHandle = s.resolveAccountHandle(session)

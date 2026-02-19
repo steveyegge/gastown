@@ -91,20 +91,26 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// Collect unique config dirs from limited sessions.
 	// Multiple sessions can share the same config dir (via the same account).
 	// We only need one keychain swap per config dir.
+	// Sessions with unknown accounts are included if they have a CLAUDE_CONFIG_DIR.
 	type configDirInfo struct {
 		configDir     string // resolved config dir path
-		accountHandle string // the limited account using this config dir
+		accountHandle string // the limited account using this config dir (may be empty)
 	}
 	uniqueConfigDirs := make(map[string]*configDirInfo) // configDir -> info
 	for _, r := range limitedSessions {
-		if r.AccountHandle == "" {
-			continue
+		var configDir string
+		if r.AccountHandle != "" {
+			acct, ok := acctCfg.Accounts[r.AccountHandle]
+			if !ok {
+				continue
+			}
+			configDir = util.ExpandHome(acct.ConfigDir)
+		} else if r.ConfigDir != "" {
+			// Unknown account but we have the config dir from tmux
+			configDir = r.ConfigDir
+		} else {
+			continue // No account and no config dir — can't rotate
 		}
-		acct, ok := acctCfg.Accounts[r.AccountHandle]
-		if !ok {
-			continue
-		}
-		configDir := util.ExpandHome(acct.ConfigDir)
 		if _, exists := uniqueConfigDirs[configDir]; !exists {
 			uniqueConfigDirs[configDir] = &configDirInfo{
 				configDir:     configDir,
@@ -135,14 +141,18 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// Expand config dir assignments to session-level assignments.
 	assignments := make(map[string]string)
 	for _, r := range limitedSessions {
-		if r.AccountHandle == "" {
+		var configDir string
+		if r.AccountHandle != "" {
+			acct, ok := acctCfg.Accounts[r.AccountHandle]
+			if !ok {
+				continue
+			}
+			configDir = util.ExpandHome(acct.ConfigDir)
+		} else if r.ConfigDir != "" {
+			configDir = r.ConfigDir
+		} else {
 			continue
 		}
-		acct, ok := acctCfg.Accounts[r.AccountHandle]
-		if !ok {
-			continue
-		}
-		configDir := util.ExpandHome(acct.ConfigDir)
 		if newAccount, ok := configDirSwaps[configDir]; ok {
 			assignments[r.Session] = newAccount
 		}
