@@ -1104,6 +1104,14 @@ func (g *Git) StashCount() (int, error) {
 	branch, branchErr := g.CurrentBranch()
 	filterByBranch := branchErr == nil && branch != "" && branch != "HEAD"
 
+	// Stash reflog lines have the format:
+	//   stash@{N}: WIP on <branch>: <hash> <message>
+	//   stash@{N}: On <branch>: <message>
+	// We anchor the match to ": WIP on <branch>:" or ": On <branch>:" to avoid
+	// false positives from commit messages that happen to contain "on <branch>:".
+	wipPrefix := ": WIP on " + branch + ":"
+	onPrefix := ": On " + branch + ":"
+
 	lines := strings.Split(out, "\n")
 	count := 0
 	for _, line := range lines {
@@ -1111,9 +1119,7 @@ func (g *Git) StashCount() (int, error) {
 			continue
 		}
 		if filterByBranch {
-			// Stash reflog messages use "WIP on <branch>:" or "On <branch>:" format.
-			// Only count stashes that were created on the current branch.
-			if !strings.Contains(line, "on "+branch+":") && !strings.Contains(line, "On "+branch+":") {
+			if !strings.Contains(line, wipPrefix) && !strings.Contains(line, onPrefix) {
 				continue
 			}
 		}

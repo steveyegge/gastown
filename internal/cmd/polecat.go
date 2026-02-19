@@ -883,24 +883,13 @@ func getGitState(worktreePath string) (*GitState, error) {
 		}
 	}
 
-	// Check for stashes (git stash list)
-	stashCmd := exec.Command("git", "stash", "list")
-	stashCmd.Dir = worktreePath
-	output, err = stashCmd.Output()
-	if err != nil {
-		// Ignore stash errors
-		output = nil
-	}
-	if len(output) > 0 {
-		lines := splitLines(string(output))
-		count := 0
-		for _, line := range lines {
-			if line != "" {
-				count++
-			}
-		}
-		state.StashCount = count
-		if count > 0 {
+	// Check for stashes using Git.StashCount() which filters by current branch.
+	// Without branch filtering, worktrees see repo-wide stashes and produce
+	// false "NEEDS_RECOVERY" verdicts for worktrees with zero stashes of their own.
+	worktreeGit := git.NewGit(worktreePath)
+	if stashCount, stashErr := worktreeGit.StashCount(); stashErr == nil {
+		state.StashCount = stashCount
+		if stashCount > 0 {
 			state.Clean = false
 		}
 	}
