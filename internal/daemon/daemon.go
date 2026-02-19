@@ -1506,7 +1506,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// (e.g., witness patrol) can detect non-Claude agents.
 	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
 	// isn't visible to tmux show-environment.
-	rc := config.ResolveAgentConfig(d.config.TownRoot, rigPath)
+	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
 	if rc.ResolvedAgent != "" {
 		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
 	}

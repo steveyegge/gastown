@@ -1044,7 +1044,9 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 	}
 
 	// Normal lookup path (no override)
-	return lookupAgentConfig(agentName, townSettings, rigSettings), agentName, nil
+	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
+	rc.ResolvedAgent = agentName
+	return rc, agentName, nil
 }
 
 // ValidateAgentConfig checks if an agent configuration is valid and the binary exists.
