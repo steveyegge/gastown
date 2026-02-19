@@ -424,9 +424,19 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Count sessions that genuinely couldn't be assigned (no available accounts)
-	// before idle filtering changes the assignment count.
-	unassignable := len(plan.LimitedSessions) - len(plan.Assignments)
+	// Count unassigned sessions by reason, before idle filtering changes the assignment count.
+	// Two reasons a session may not be assigned:
+	//   1. Account unknown — scanner couldn't resolve the session's account handle
+	//   2. No available accounts — all accounts are limited or consumed
+	unknownAccount := 0
+	for _, r := range plan.LimitedSessions {
+		if _, assigned := plan.Assignments[r.Session]; !assigned {
+			if r.AccountHandle == "" {
+				unknownAccount++
+			}
+		}
+	}
+	unassignable := len(plan.LimitedSessions) - len(plan.Assignments) - unknownAccount
 
 	// Filter to idle sessions only when --idle is set.
 	// This avoids interrupting agents that are actively working.
@@ -477,8 +487,12 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 				style.Success.Render(newAccount),
 			)
 		}
+		if unknownAccount > 0 {
+			fmt.Printf("\n %s %d session(s) skipped (account unknown)\n",
+				style.WarningPrefix, unknownAccount)
+		}
 		if unassignable > 0 {
-			fmt.Printf("\n %s %d sessions cannot be rotated (not enough available accounts)\n",
+			fmt.Printf(" %s %d session(s) cannot be rotated (not enough available accounts)\n",
 				style.WarningPrefix, unassignable)
 		}
 	}
@@ -638,7 +652,7 @@ func executeKeychainRotation(
 	}
 	sourceConfigDir := util.ExpandHome(newAcct.ConfigDir)
 
-	// Swap keychain credential (deduplicated per config dir)
+	// Swap keychain credential AND oauthAccount identity (deduplicated per config dir)
 	if _, alreadySwapped := swappedConfigDirs[currentConfigDir]; !alreadySwapped {
 		backup, err := quota.SwapKeychainCredential(currentConfigDir, sourceConfigDir)
 		if err != nil {
@@ -646,6 +660,13 @@ func executeKeychainRotation(
 			return result
 		}
 		swappedConfigDirs[currentConfigDir] = backup
+
+		// Also swap the oauthAccount in .claude.json so Claude Code identifies
+		// as the new account (correct accountUuid/organizationUuid for rate limits).
+		if _, err := quota.SwapOAuthAccount(currentConfigDir, sourceConfigDir); err != nil {
+			style.PrintWarning("could not swap oauthAccount for %s: %v", session, err)
+		}
+
 		result.KeychainSwap = true
 	}
 

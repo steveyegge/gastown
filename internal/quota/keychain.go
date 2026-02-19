@@ -4,9 +4,11 @@ package quota
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -111,6 +113,79 @@ func RestoreKeychainToken(backup *KeychainCredential) error {
 		return nil
 	}
 	return WriteKeychainToken(backup.ServiceName, "claude-code", backup.Token)
+}
+
+// SwapOAuthAccount copies the oauthAccount field from the source config dir's
+// .claude.json into the target's. This ensures Claude Code identifies as the
+// new account (correct accountUuid/organizationUuid) after a keychain swap.
+// Returns the target's original oauthAccount value for rollback.
+func SwapOAuthAccount(targetConfigDir, sourceConfigDir string) (json.RawMessage, error) {
+	targetPath := filepath.Join(expandTilde(targetConfigDir), ".claude.json")
+	sourcePath := filepath.Join(expandTilde(sourceConfigDir), ".claude.json")
+
+	// Read source's oauthAccount
+	sourceData, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("reading source .claude.json: %w", err)
+	}
+	var sourceDoc map[string]json.RawMessage
+	if err := json.Unmarshal(sourceData, &sourceDoc); err != nil {
+		return nil, fmt.Errorf("parsing source .claude.json: %w", err)
+	}
+	sourceOAuth, ok := sourceDoc["oauthAccount"]
+	if !ok {
+		return nil, fmt.Errorf("source .claude.json has no oauthAccount")
+	}
+
+	// Read target's .claude.json (preserve all other fields)
+	targetData, err := os.ReadFile(targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading target .claude.json: %w", err)
+	}
+	var targetDoc map[string]json.RawMessage
+	if err := json.Unmarshal(targetData, &targetDoc); err != nil {
+		return nil, fmt.Errorf("parsing target .claude.json: %w", err)
+	}
+
+	// Back up target's oauthAccount
+	backup := targetDoc["oauthAccount"]
+
+	// Swap
+	targetDoc["oauthAccount"] = sourceOAuth
+
+	// Write back
+	out, err := json.MarshalIndent(targetDoc, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling target .claude.json: %w", err)
+	}
+	if err := os.WriteFile(targetPath, out, 0600); err != nil {
+		return nil, fmt.Errorf("writing target .claude.json: %w", err)
+	}
+
+	return backup, nil
+}
+
+// RestoreOAuthAccount writes the backup oauthAccount back to the target .claude.json.
+func RestoreOAuthAccount(targetConfigDir string, backup json.RawMessage) error {
+	if backup == nil {
+		return nil
+	}
+	targetPath := filepath.Join(expandTilde(targetConfigDir), ".claude.json")
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		return fmt.Errorf("reading target .claude.json: %w", err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing target .claude.json: %w", err)
+	}
+	doc["oauthAccount"] = backup
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling target .claude.json: %w", err)
+	}
+	return os.WriteFile(targetPath, out, 0600)
 }
 
 // expandTilde expands a leading ~/ to the user's home directory.
