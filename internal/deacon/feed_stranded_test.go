@@ -9,7 +9,7 @@ import (
 
 func TestFeedStrandedStateFile(t *testing.T) {
 	got := FeedStrandedStateFile("/tmp/town")
-	want := "/tmp/town/deacon/feed-stranded-state.json"
+	want := filepath.Join("/tmp/town", "deacon", "feed-stranded-state.json")
 	if got != want {
 		t.Errorf("FeedStrandedStateFile = %q, want %q", got, want)
 	}
