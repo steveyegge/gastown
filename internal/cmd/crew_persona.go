@@ -257,11 +257,11 @@ func showAllPersonas(
 	}
 
 	// Show crew assignments
-	printCrewPersonaAssignments(mgr, prefix, rigName)
+	printCrewPersonaAssignments(mgr)
 	return nil
 }
 
-func printCrewPersonaAssignments(mgr *crew.Manager, prefix, rigName string) {
+func printCrewPersonaAssignments(mgr *crew.Manager) {
 	workers, err := mgr.List()
 	if err != nil || len(workers) == 0 {
 		return
