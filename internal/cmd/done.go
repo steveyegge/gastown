@@ -426,24 +426,41 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// would ever close the issue.
 			if issueID != "" {
 				bd := beads.New(beads.ResolveBeadsDir(cwd))
-				closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
-				// G15 fix: Force-close bypasses molecule dependency checks.
-				// The polecat is about to be nuked — open wisps should not block closure.
-				// Retry with backoff handles transient dolt lock contention (A2).
-				var closeErr error
-				for attempt := 1; attempt <= 3; attempt++ {
-					closeErr = bd.ForceCloseWithReason(closeReason, issueID)
-					if closeErr == nil {
-						fmt.Printf("%s Issue %s closed (no MR needed)\n", style.Bold.Render("✓"), issueID)
-						break
-					}
-					if attempt < 3 {
-						style.PrintWarning("close attempt %d/3 failed: %v (retrying in %ds)", attempt, closeErr, attempt*2)
-						time.Sleep(time.Duration(attempt*2) * time.Second)
+
+				// Acceptance criteria gate: check for unchecked criteria before closing.
+				// If criteria exist and are unchecked, warn and skip close — the bead stays
+				// open for witness/mayor to handle. This prevents polecats from closing
+				// beads without verifying their work meets acceptance criteria.
+				skipClose := false
+				if issue, err := bd.Show(issueID); err == nil {
+					if unchecked := beads.HasUncheckedCriteria(issue); unchecked > 0 {
+						style.PrintWarning("issue %s has %d unchecked acceptance criteria — skipping close", issueID, unchecked)
+						fmt.Printf("  The bead will remain open for witness/mayor review.\n")
+						fmt.Printf("  To close manually: bd update %s --acceptance '<checked criteria>' && bd close %s\n", issueID, issueID)
+						skipClose = true
 					}
 				}
-				if closeErr != nil {
-					style.PrintWarning("could not close issue %s after 3 attempts: %v (issue may be left HOOKED)", issueID, closeErr)
+
+				if !skipClose {
+					closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
+					// G15 fix: Force-close bypasses molecule dependency checks.
+					// The polecat is about to be nuked — open wisps should not block closure.
+					// Retry with backoff handles transient dolt lock contention (A2).
+					var closeErr error
+					for attempt := 1; attempt <= 3; attempt++ {
+						closeErr = bd.ForceCloseWithReason(closeReason, issueID)
+						if closeErr == nil {
+							fmt.Printf("%s Issue %s closed (no MR needed)\n", style.Bold.Render("✓"), issueID)
+							break
+						}
+						if attempt < 3 {
+							style.PrintWarning("close attempt %d/3 failed: %v (retrying in %ds)", attempt, closeErr, attempt*2)
+							time.Sleep(time.Duration(attempt*2) * time.Second)
+						}
+					}
+					if closeErr != nil {
+						style.PrintWarning("could not close issue %s after 3 attempts: %v (issue may be left HOOKED)", issueID, closeErr)
+					}
 				}
 			}
 
@@ -1214,7 +1231,11 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 				}
 			}
 
-			if err := bd.Close(hookedBeadID); err != nil {
+			// Acceptance criteria gate: skip close if criteria are unchecked.
+			if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
+				style.PrintWarning("hooked bead %s has %d unchecked acceptance criteria — skipping close", hookedBeadID, unchecked)
+				fmt.Fprintf(os.Stderr, "  The bead will remain open for witness/mayor review.\n")
+			} else if err := bd.Close(hookedBeadID); err != nil {
 				// Non-fatal: warn but continue
 				fmt.Fprintf(os.Stderr, "Warning: couldn't close hooked bead %s: %v\n", hookedBeadID, err)
 			}

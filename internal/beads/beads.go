@@ -59,6 +59,9 @@ type Issue struct {
 	Labels      []string `json:"labels,omitempty"`
 	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
 
+	// Content fields (parsed from bd show --json)
+	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
+
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
@@ -82,6 +85,22 @@ func HasLabel(issue *Issue, label string) bool {
 		}
 	}
 	return false
+}
+
+// HasUncheckedCriteria checks if an issue has acceptance criteria with unchecked items.
+// Returns the count of unchecked items (0 means all checked or no criteria).
+func HasUncheckedCriteria(issue *Issue) int {
+	if issue == nil || issue.AcceptanceCriteria == "" {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(issue.AcceptanceCriteria, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- [ ] ") {
+			count++
+		}
+	}
+	return count
 }
 
 // IsAgentBead checks if an issue is an agent bead by checking for the gt:agent
