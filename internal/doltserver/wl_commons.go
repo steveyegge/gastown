@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +62,13 @@ type WantedItem struct {
 	Status          string
 	EffortLevel     string
 	SandboxRequired bool
+}
+
+// isNothingToCommit returns true if the error indicates DOLT_COMMIT found no
+// changes to commit. This happens when a conditional UPDATE matched 0 rows,
+// leaving the working set unchanged.
+func isNothingToCommit(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
 }
 
 // EscapeSQL escapes backslashes and single quotes for SQL string literals.
@@ -282,114 +288,63 @@ CALL DOLT_COMMIT('-m', 'wl post: %s');
 }
 
 // ClaimWanted updates a wanted item's status to claimed.
-// Returns an error if the item does not exist or is not open (0 rows affected).
+// Returns an error if the item does not exist or is not open.
+//
+// Uses a single-script approach: UPDATE + DOLT_ADD + DOLT_COMMIT in one
+// invocation. If the UPDATE matches 0 rows (item not open), the working set
+// is unchanged and DOLT_COMMIT fails with "nothing to commit" — which we
+// map to a precondition error. This avoids splitting into separate sessions
+// and eliminates the need for DOLT_RESET on failure.
 func ClaimWanted(townRoot, wantedID, rigHandle string) error {
-	// Split into two sessions to detect TOCTOU races:
-	// 1. UPDATE + ROW_COUNT via doltSQLQuery (needs CSV output to read rc).
-	// 2. DOLT_ADD + DOLT_COMMIT via doltSQLScriptWithRetry (needs script mode).
-	// Dolt's working set persists across sessions, so the UPDATE is visible
-	// to the COMMIT. The outer retry loop covers transient errors in either step.
-
-	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW() WHERE id='%s' AND status='open'; SELECT ROW_COUNT() AS rc;`,
-		WLCommonsDB, EscapeSQL(rigHandle), EscapeSQL(wantedID))
-
-	commitScript := fmt.Sprintf(`USE %s;
+	script := fmt.Sprintf(`USE %s;
+UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW()
+  WHERE id='%s' AND status='open';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
-`, WLCommonsDB, EscapeSQL(wantedID))
+`, WLCommonsDB, EscapeSQL(rigHandle), EscapeSQL(wantedID), EscapeSQL(wantedID))
 
-	const maxRetries = 3
-	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		output, err := doltSQLQuery(townRoot, updateQuery)
-		if err != nil {
-			lastErr = fmt.Errorf("claim update failed: %w", err)
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-			}
-			continue
-		}
-
-		rows := parseSimpleCSV(output)
-		if len(rows) == 0 || rows[0]["rc"] == "0" {
-			// Not a transient error — the item genuinely isn't open
-			return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
-		}
-
-		if err := doltSQLScriptWithRetry(townRoot, commitScript); err != nil {
-			// Rollback dirty working set to avoid stuck state where the
-			// UPDATE applied but COMMIT failed, leaving status='claimed'
-			// in the uncommitted working set.
-			resetScript := fmt.Sprintf("USE %s;\nCALL DOLT_RESET('--hard');\n", WLCommonsDB)
-			if resetErr := doltSQLScriptWithRetry(townRoot, resetScript); resetErr != nil {
-				log.Printf("warning: DOLT_RESET after claim commit failure also failed: %v", resetErr)
-			}
-			lastErr = fmt.Errorf("claim commit failed (working set reset): %w", err)
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-			}
-			continue
-		}
+	err := doltSQLScriptWithRetry(townRoot, script)
+	if err == nil {
 		return nil
 	}
-	return lastErr
+	if isNothingToCommit(err) {
+		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+	}
+	return fmt.Errorf("claim failed: %w", err)
 }
 
 // SubmitCompletion inserts a completion record and updates the wanted status.
 // The item must have status='claimed' AND claimed_by=rigHandle to prevent
-// completing an item claimed by another rig. Uses the same two-step retry
-// approach as ClaimWanted.
+// completing an item claimed by another rig.
+//
+// Uses a single-script approach like ClaimWanted. The INSERT uses INSERT IGNORE
+// with a SELECT conditional on status='in_review' (which only holds if the
+// UPDATE succeeded). INSERT IGNORE makes the script idempotent on retry since
+// completions.id is a PRIMARY KEY.
 func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
-	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW() WHERE id='%s' AND status='claimed' AND claimed_by='%s'; SELECT ROW_COUNT() AS rc;`,
-		WLCommonsDB, EscapeSQL(evidence), EscapeSQL(wantedID), EscapeSQL(rigHandle))
-
-	commitScript := fmt.Sprintf(`USE %s;
-
-INSERT INTO completions (id, wanted_id, completed_by, evidence, completed_at)
-VALUES ('%s', '%s', '%s', '%s', NOW());
-
+	script := fmt.Sprintf(`USE %s;
+UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
+  WHERE id='%s' AND status='claimed' AND claimed_by='%s';
+INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
+  SELECT '%s', '%s', '%s', '%s', NOW()
+  FROM wanted WHERE id='%s' AND status='in_review';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');
 `,
 		WLCommonsDB,
-		EscapeSQL(completionID),
+		EscapeSQL(evidence), EscapeSQL(wantedID), EscapeSQL(rigHandle),
+		EscapeSQL(completionID), EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(evidence),
 		EscapeSQL(wantedID),
-		EscapeSQL(rigHandle),
-		EscapeSQL(evidence),
 		EscapeSQL(wantedID))
 
-	const maxRetries = 3
-	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		output, err := doltSQLQuery(townRoot, updateQuery)
-		if err != nil {
-			lastErr = fmt.Errorf("completion update failed: %w", err)
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-			}
-			continue
-		}
-
-		rows := parseSimpleCSV(output)
-		if len(rows) == 0 || rows[0]["rc"] == "0" {
-			// Not a transient error — the item isn't claimed by this rig
-			return fmt.Errorf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)
-		}
-
-		if err := doltSQLScriptWithRetry(townRoot, commitScript); err != nil {
-			resetScript := fmt.Sprintf("USE %s;\nCALL DOLT_RESET('--hard');\n", WLCommonsDB)
-			if resetErr := doltSQLScriptWithRetry(townRoot, resetScript); resetErr != nil {
-				log.Printf("warning: DOLT_RESET after completion commit failure also failed: %v", resetErr)
-			}
-			lastErr = fmt.Errorf("completion commit failed (working set reset): %w", err)
-			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-			}
-			continue
-		}
+	err := doltSQLScriptWithRetry(townRoot, script)
+	if err == nil {
 		return nil
 	}
-	return lastErr
+	if isNothingToCommit(err) {
+		return fmt.Errorf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)
+	}
+	return fmt.Errorf("completion failed: %w", err)
 }
 
 // QueryWanted fetches a wanted item by ID. Returns nil if not found.
