@@ -154,9 +154,10 @@ type SyncStatus struct {
 
 // Beads wraps bd CLI operations for a working directory.
 type Beads struct {
-	workDir  string
-	beadsDir string // Optional BEADS_DIR override for cross-database access
-	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+	workDir      string
+	beadsDir     string // Optional BEADS_DIR override for cross-database access
+	isolated     bool   // If true, suppress inherited beads env vars (for test isolation)
+	forceDirectDB bool  // If true, use --db flag to bypass bd's rig routing (like isolated but keeps env)
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -180,6 +181,16 @@ func NewIsolated(workDir string) *Beads {
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
+}
+
+// NewDirectDB creates a Beads wrapper that passes --db to every bd command,
+// bypassing bd's rig routing (which can redirect writes to a dolt rig database).
+// Use this when creating beads within a rig whose .beads directory is already
+// resolved to the correct SQLite database — for example, persona bead operations
+// run from under the town root where routes.jsonl exists and would otherwise
+// cause bd to route to a dolt sub-database.
+func NewDirectDB(workDir string) *Beads {
+	return &Beads{workDir: workDir, forceDirectDB: true}
 }
 
 // getActor returns the BD_ACTOR value for this context.
@@ -233,9 +244,10 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		beadsDir = ResolveBeadsDir(b.workDir)
 	}
 
-	// In isolated mode, use --db flag to force specific database path
-	// This bypasses bd's routing logic that can redirect to .beads-planning
-	// Skip --db for init command since it creates the database
+	// In isolated mode (tests), use --db to pin bd to the test SQLite file since
+	// no daemon is running. Skip for init since it creates the database.
+	// Note: forceDirectDB does NOT add --db — the daemon manages the real database
+	// and is reached via BEADS_DIR/bd.sock. Only cwd needs to be neutral.
 	isInit := len(args) > 0 && args[0] == "init"
 	if b.isolated && !isInit {
 		beadsDB := filepath.Join(beadsDir, "beads.db")
@@ -243,7 +255,14 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	}
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = b.workDir
+	// When forceDirectDB is set, use a neutral cwd outside the town tree so bd's
+	// upward directory walk cannot find routes.jsonl and trigger dolt routing.
+	// BEADS_DIR env var already tells bd exactly which database to use.
+	if b.forceDirectDB {
+		cmd.Dir = os.TempDir()
+	} else {
+		cmd.Dir = b.workDir
+	}
 
 	// Build environment: filter beads env vars when in isolated mode (tests)
 	// to prevent routing to production databases.

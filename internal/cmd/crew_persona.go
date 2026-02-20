@@ -74,7 +74,7 @@ func runCrewPersonaSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	bd := beads.New(beads.ResolveBeadsDir(r.Path))
+	bd := beads.NewDirectDB(beads.ResolveBeadsDir(r.Path))
 	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 	crewID := beads.CrewBeadIDWithPrefix(prefix, r.Name, crewName)
 
@@ -130,7 +130,7 @@ func runCrewPersonaShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	bd := beads.New(beads.ResolveBeadsDir(r.Path))
+	bd := beads.NewDirectDB(beads.ResolveBeadsDir(r.Path))
 	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	if len(args) == 0 {
@@ -193,7 +193,7 @@ func runCrewPersonaSync(cmd *cobra.Command, args []string) error {
 	}
 	_ = mgr
 
-	bd := beads.New(beads.ResolveBeadsDir(r.Path))
+	bd := beads.NewDirectDB(beads.ResolveBeadsDir(r.Path))
 	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	updated, err := crew.SyncPersonasFromFiles(townRoot, r.Path, prefix, r.Name, bd, crewPersonaSyncForce)
