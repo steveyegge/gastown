@@ -18,8 +18,8 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -29,7 +29,6 @@ func debugSession(context string, err error) {
 		fmt.Fprintf(os.Stderr, "[session-debug] %s: %v\n", context, err)
 	}
 }
-
 
 // Session errors
 var (

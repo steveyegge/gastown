@@ -4,6 +4,7 @@ package session
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -194,6 +195,22 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		RuntimeConfigDir: cfg.RuntimeConfigDir,
 		Agent:            cfg.AgentOverride,
 	})
+	// GT_AGENT must be the command name (not custom agent name) so
+	// GetProcessNames() can resolve it to the correct process names.
+	// For custom agents like "occ_sonnet" with command "opencode",
+	// we set GT_AGENT=opencode so IsAgentAlive detects the process.
+	gtAgent := runtimeConfig.Command
+	if gtAgent == "" {
+		gtAgent = "claude"
+	}
+	envVars["GT_AGENT"] = gtAgent
+
+	// Set GT_PROCESS_NAMES for accurate liveness detection. Custom agents may
+	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
+	// so we resolve process names from both agent name and actual command.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	envVars["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
+
 	for _, k := range mapKeysSorted(envVars) {
 		_ = t.SetEnvironment(cfg.SessionID, k, envVars[k])
 	}

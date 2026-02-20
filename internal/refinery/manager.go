@@ -17,8 +17,8 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -156,15 +156,13 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
 
-	// Determine the effective agent: explicit --agent flag takes priority,
-	// then role_agents from settings, then default resolution.
-	// We must resolve this so GT_AGENT is set in the tmux environment,
-	// which allows handoff/respawn to preserve the correct agent.
-	effectiveAgent := agentOverride
+	// GT_AGENT must be the command name (not custom agent name) so
+	// GetProcessNames() can resolve it to the correct process names.
+	// For custom agents like "occ_sonnet" with command "opencode",
+	// we set GT_AGENT=opencode so IsAgentAlive detects the process.
+	effectiveAgent := runtimeConfig.Command
 	if effectiveAgent == "" {
-		if name, isRoleSpecific := config.ResolveRoleAgentName("refinery", townRoot, m.rig.Path); isRoleSpecific {
-			effectiveAgent = name
-		}
+		effectiveAgent = "claude"
 	}
 
 	var command string
@@ -201,6 +199,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	if effectiveAgent != "" {
 		envVars["GT_AGENT"] = effectiveAgent
 	}
+
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	envVars["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
 	for k, v := range envVars {

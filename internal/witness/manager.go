@@ -11,9 +11,9 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -154,6 +154,15 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return err
 	}
 
+	// GT_AGENT must be the command name (not custom agent name) so
+	// GetProcessNames() can resolve it to the correct process names.
+	// For custom agents like "occ_sonnet" with command "opencode",
+	// we set GT_AGENT=opencode so IsAgentAlive detects the process.
+	effectiveAgent := runtimeConfig.Command
+	if effectiveAgent == "" {
+		effectiveAgent = "claude"
+	}
+
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
@@ -177,6 +186,18 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		TownRoot: townRoot,
 		Agent:    agentOverride,
 	})
+
+	// Preserve effective agent in tmux env so IsAgentAlive detects the correct process.
+	// Without this, IsAgentAlive falls back to Claude process names and fails to
+	// detect custom agents (e.g., opencode), causing false zombie detection.
+	if effectiveAgent != "" {
+		envVars["GT_AGENT"] = effectiveAgent
+	}
+
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	envVars["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
+
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}

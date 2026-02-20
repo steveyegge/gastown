@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -99,6 +100,15 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// GT_AGENT must be the command name (not custom agent name) so
+	// GetProcessNames() can resolve it to the correct process names.
+	// For custom agents like "occ_sonnet" with command "opencode",
+	// we set GT_AGENT=opencode so IsAgentAlive detects the process.
+	effectiveAgent := runtimeConfig.Command
+	if effectiveAgent == "" {
+		effectiveAgent = "claude"
+	}
+
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
@@ -127,6 +137,16 @@ func (m *Manager) Start(agentOverride string) error {
 		TownRoot: m.townRoot,
 		Agent:    agentOverride,
 	})
+
+	// Set GT_AGENT so IsAgentAlive detects custom agents correctly.
+	if effectiveAgent != "" {
+		envVars["GT_AGENT"] = effectiveAgent
+	}
+
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	envVars["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
+
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
