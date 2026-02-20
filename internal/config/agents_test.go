@@ -258,6 +258,82 @@ func TestGetProcessNamesRespectsRegistryOverride(t *testing.T) {
 	}
 }
 
+func TestResolveProcessNames(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tests := []struct {
+		name      string
+		agentName string
+		command   string
+		want      []string
+	}{
+		{
+			name:      "built-in preset with matching command",
+			agentName: "claude",
+			command:   "claude",
+			want:      []string{"node", "claude"},
+		},
+		{
+			name:      "built-in preset with matching command (opencode)",
+			agentName: "opencode",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "custom agent shadowing built-in with different command",
+			agentName: "codex",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "custom agent shadowing built-in with same command",
+			agentName: "codex",
+			command:   "codex",
+			want:      []string{"codex"},
+		},
+		{
+			name:      "unknown agent with known command",
+			agentName: "my-custom-agent",
+			command:   "claude",
+			want:      []string{"node", "claude"},
+		},
+		{
+			name:      "unknown agent with unknown command",
+			agentName: "my-custom-agent",
+			command:   "my-binary",
+			want:      []string{"my-binary"},
+		},
+		{
+			name:      "empty agent name with command",
+			agentName: "",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "empty agent and command",
+			agentName: "",
+			command:   "",
+			want:      []string{"node", "claude"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveProcessNames(tt.agentName, tt.command)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ResolveProcessNames(%q, %q) = %v, want %v", tt.agentName, tt.command, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ResolveProcessNames(%q, %q)[%d] = %q, want %q", tt.agentName, tt.command, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAgentPresetApprovalFlags(t *testing.T) {
 	t.Parallel()
 	// Verify permissive-approval flags are set correctly for each E2E tested agent.
