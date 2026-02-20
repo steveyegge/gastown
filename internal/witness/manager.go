@@ -161,7 +161,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		Role:     "witness",
 		Rig:      m.rig.Name,
 		TownRoot: townRoot,
-		Agent:    agentOverride,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

@@ -164,7 +164,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Role:     "refinery",
 		Rig:      m.rig.Name,
 		TownRoot: townRoot,
-		Agent:    agentOverride,
 	})
 
 	// Add refinery-specific flag
