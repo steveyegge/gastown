@@ -2178,7 +2178,8 @@ func TestSlingRejectsDeferredBead(t *testing.T) {
 
 			// Create bd stub that returns the test bead info
 			bdScript := "#!/bin/sh\necho '" + tt.bdOutput + "'\n"
-			writeBDStub(t, binDir, bdScript, "")
+			bdScriptWindows := "@echo off\r\necho " + tt.bdOutput + "\r\n"
+			writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv(EnvGTRole, "crew")
