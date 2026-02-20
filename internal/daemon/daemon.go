@@ -1591,6 +1591,10 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
 	}
 
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
+	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
+
 	// Apply theme
 	theme := tmux.AssignTheme(rigName)
 	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")
