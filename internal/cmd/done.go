@@ -449,6 +449,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// would ever close the issue.
 			if issueID != "" {
 				bd := beads.New(beads.ResolveBeadsDir(cwd))
+
+				// Guard: verify this polecat still owns this bead before force-closing (gt-frf61).
+				// A respawned polecat may retain stale branch state from a prior assignment,
+				// causing gt done to close a bead that's been reassigned to another polecat.
+				// Check both the agent's hook (authoritative) and the bead's assignee (backup).
+				if stale, reason := isStalePolecatDone(bd, agentBeadID, issueID, polecatName); stale {
+					style.PrintWarning("skipping force-close of %s: %s", issueID, reason)
+					goto notifyWitness
+				}
+
 				closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
 				// G15 fix: Force-close bypasses molecule dependency checks.
 				// The polecat is about to be nuked — open wisps should not block closure.
@@ -1406,6 +1416,41 @@ func parseCleanupStatus(s string) polecat.CleanupStatus {
 	default:
 		return polecat.CleanupUnknown
 	}
+}
+
+// isStalePolecatDone checks whether the current gt done invocation is from a
+// stale polecat that no longer owns the target bead. This prevents a respawned
+// polecat (with stale branch state from a prior assignment) from force-closing
+// a bead that has been reassigned to another polecat.
+//
+// Two independent checks, either of which catches the stale state:
+//  1. Hook mismatch: agent's hook_bead points to a different issue than the branch
+//  2. Assignee mismatch: bead is assigned to a different polecat
+//
+// Returns (true, reason) if stale, (false, "") if the polecat legitimately owns the bead.
+func isStalePolecatDone(bd *beads.Beads, agentBeadID, issueID, polecatName string) (bool, string) {
+	// Check 1: Agent hook mismatch (most reliable).
+	// The agent's hook_bead is the authoritative source of current work.
+	// If it points to a different issue, this gt done is from stale branch state.
+	if agentBeadID != "" {
+		if agentBead, err := bd.Show(agentBeadID); err == nil {
+			if agentBead.HookBead != "" && agentBead.HookBead != issueID {
+				return true, fmt.Sprintf("agent hook is %s but branch references %s (stale branch state)", agentBead.HookBead, issueID)
+			}
+		}
+	}
+
+	// Check 2: Assignee mismatch (backup for when hook is cleared).
+	// If the bead is assigned to a different polecat, we shouldn't close it.
+	if polecatName != "" && issueID != "" {
+		if issue, err := bd.Show(issueID); err == nil {
+			if issue.Assignee != "" && !strings.Contains(issue.Assignee, polecatName) {
+				return true, fmt.Sprintf("%s is assigned to %s, not %s", issueID, issue.Assignee, polecatName)
+			}
+		}
+	}
+
+	return false, ""
 }
 
 // selfNukePolecat deletes this polecat's worktree (self-cleaning model).

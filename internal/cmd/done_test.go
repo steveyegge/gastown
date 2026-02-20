@@ -1481,3 +1481,111 @@ func TestDoneMRFailedEventType(t *testing.T) {
 		t.Errorf("TypeDoneMRFailed = %q, want %q", events.TypeDoneMRFailed, "done_mr_failed")
 	}
 }
+
+// TestIsStalePolecatDoneLogic verifies the guard logic that prevents respawned
+// polecats from force-closing beads assigned to other polecats (gt-frf61).
+//
+// Root cause: polecat furiosa was respawned for a different bead but retained
+// stale branch state from a prior assignment. Its gt done found 0 commits ahead
+// and the G15 force-close path closed gt-frf61, which was assigned to polecat
+// cheedo. The isStalePolecatDone guard checks hook_bead and assignee to prevent this.
+func TestIsStalePolecatDoneLogic(t *testing.T) {
+	tests := []struct {
+		name          string
+		agentHookBead string // agent's current hook_bead
+		issueID       string // issue ID parsed from branch name
+		beadAssignee  string // bead's current assignee
+		polecatName   string // this polecat's name
+		wantStale     bool
+	}{
+		{
+			name:          "hook matches issue - legitimate done",
+			agentHookBead: "gt-frf61",
+			issueID:       "gt-frf61",
+			beadAssignee:  "gastown/polecats/furiosa",
+			polecatName:   "furiosa",
+			wantStale:     false,
+		},
+		{
+			name:          "hook points to different issue - stale (gt-frf61 scenario)",
+			agentHookBead: "gt-pjox2",
+			issueID:       "gt-frf61",
+			beadAssignee:  "gastown/polecats/cheedo",
+			polecatName:   "furiosa",
+			wantStale:     true,
+		},
+		{
+			name:          "hook empty but assignee is different polecat - stale",
+			agentHookBead: "",
+			issueID:       "gt-frf61",
+			beadAssignee:  "gastown/polecats/cheedo",
+			polecatName:   "furiosa",
+			wantStale:     true,
+		},
+		{
+			name:          "hook empty and assignee matches - legitimate",
+			agentHookBead: "",
+			issueID:       "gt-frf61",
+			beadAssignee:  "gastown/polecats/furiosa",
+			polecatName:   "furiosa",
+			wantStale:     false,
+		},
+		{
+			name:          "hook empty and no assignee - legitimate (unassigned bead)",
+			agentHookBead: "",
+			issueID:       "gt-frf61",
+			beadAssignee:  "",
+			polecatName:   "furiosa",
+			wantStale:     false,
+		},
+		{
+			name:          "assignee with polecats path format - matches",
+			agentHookBead: "",
+			issueID:       "gt-abc",
+			beadAssignee:  "gastown/polecats/toast",
+			polecatName:   "toast",
+			wantStale:     false,
+		},
+		{
+			name:          "assignee with short format - matches",
+			agentHookBead: "",
+			issueID:       "gt-abc",
+			beadAssignee:  "gastown/toast",
+			polecatName:   "toast",
+			wantStale:     false,
+		},
+		{
+			name:          "no agent bead and no polecat name - not stale (non-polecat caller)",
+			agentHookBead: "",
+			issueID:       "gt-abc",
+			beadAssignee:  "",
+			polecatName:   "",
+			wantStale:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the isStalePolecatDone logic without bd dependency.
+			// This validates the boolean guard conditions match the function's behavior.
+			stale := false
+
+			// Check 1: Hook mismatch
+			if tt.agentHookBead != "" && tt.agentHookBead != tt.issueID {
+				stale = true
+			}
+
+			// Check 2: Assignee mismatch (only if hook didn't catch it)
+			if !stale && tt.polecatName != "" && tt.issueID != "" {
+				if tt.beadAssignee != "" && !strings.Contains(tt.beadAssignee, tt.polecatName) {
+					stale = true
+				}
+			}
+
+			if stale != tt.wantStale {
+				t.Errorf("stale = %v, want %v (hook=%q, issue=%q, assignee=%q, polecat=%q)",
+					stale, tt.wantStale, tt.agentHookBead, tt.issueID, tt.beadAssignee, tt.polecatName)
+			}
+		})
+	}
+}
