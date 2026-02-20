@@ -193,6 +193,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		TownRoot:         cfg.TownRoot,
 		RuntimeConfigDir: cfg.RuntimeConfigDir,
 		Agent:            cfg.AgentOverride,
+		ResolvedAgent:    runtimeConfig.ResolvedAgent,
 	})
 	for _, k := range mapKeysSorted(envVars) {
 		_ = t.SetEnvironment(cfg.SessionID, k, envVars[k])

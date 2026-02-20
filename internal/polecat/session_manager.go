@@ -314,20 +314,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		Agent:            opts.Agent,
+		ResolvedAgent:    runtimeConfig.ResolvedAgent,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
-	}
-
-	// Fallback: set GT_AGENT from resolved config when no explicit --agent override.
-	// AgentEnv only emits GT_AGENT when opts.Agent is non-empty (explicit override).
-	// Without this fallback, the default path (no --agent flag) leaves GT_AGENT
-	// unset in the tmux session table, causing the validation below to fail and
-	// kill the session. BuildStartupCommand sets GT_AGENT in process env via
-	// exec env, but tmux show-environment reads the session table, not process env.
-	// This mirrors the daemon's compensating logic (daemon.go ~line 1593-1595).
-	if _, hasGTAgent := envVars["GT_AGENT"]; !hasGTAgent && runtimeConfig.ResolvedAgent != "" {
-		debugSession("SetEnvironment GT_AGENT (resolved)", m.tmux.SetEnvironment(sessionID, "GT_AGENT", runtimeConfig.ResolvedAgent))
 	}
 
 	// Set GT_BRANCH and GT_POLECAT_PATH in tmux session environment.

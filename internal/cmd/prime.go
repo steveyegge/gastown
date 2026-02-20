@@ -412,6 +412,13 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 		return nil
 	}
 
+	// Unset BD_BRANCH so we read from the main rig branch where work is assigned,
+	// not the polecat's isolated branch. Polecats have BD_BRANCH set for write isolation,
+	// but they need to read hooked work from the main branch.
+	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
+		os.Unsetenv("BD_BRANCH")
+	}
+
 	b := beads.New(ctx.WorkDir)
 
 	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)

@@ -172,10 +172,11 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "witness",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-		Agent:    agentOverride,
+		Role:          "witness",
+		Rig:           m.rig.Name,
+		TownRoot:      townRoot,
+		Agent:         agentOverride,
+		ResolvedAgent: runtimeConfig.ResolvedAgent,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

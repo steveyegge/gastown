@@ -155,6 +155,11 @@ func runMoleculeProgress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
+	// Unset BD_BRANCH to read from main rig branch for hooked work visibility
+	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
+		os.Unsetenv("BD_BRANCH")
+	}
+
 	b := beads.New(workDir)
 
 	// Get the root issue
@@ -356,6 +361,14 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	// Unset BD_BRANCH so we read from the main rig branch where work is assigned,
+	// not the polecat's isolated branch. Polecats have BD_BRANCH set for write isolation,
+	// but they need to read hooked work from the main branch.
+	// See: https://github.com/steveyegge/gastown/issues/gt-nnnnnn
+	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
+		os.Unsetenv("BD_BRANCH")
 	}
 
 	b := beads.New(workDir)

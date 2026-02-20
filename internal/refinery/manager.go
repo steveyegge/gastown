@@ -176,10 +176,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "refinery",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-		Agent:    agentOverride,
+		Role:          "refinery",
+		Rig:           m.rig.Name,
+		TownRoot:      townRoot,
+		Agent:         agentOverride,
+		ResolvedAgent: runtimeConfig.ResolvedAgent,
 	})
 
 	// Add refinery-specific flag

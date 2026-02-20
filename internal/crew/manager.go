@@ -695,6 +695,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		Agent:            opts.AgentOverride,
+		ResolvedAgent:    runtimeConfig.ResolvedAgent,
 	})
 
 	// Build startup command (also includes env vars via 'exec env' for

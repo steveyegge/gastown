@@ -38,6 +38,13 @@ type AgentEnvConfig struct {
 	// Without this, GetEnvironment returns empty (tmux show-environment reads the
 	// session table, not the process env set via exec env in the startup command).
 	Agent string
+
+	// ResolvedAgent is the agent name resolved from rig/town config during
+	// ResolveRoleAgentConfig. Used as fallback for GT_AGENT when Agent
+	// (explicit --agent override) is empty. This ensures all roles have
+	// GT_AGENT in the tmux session table for IsAgentAlive detection.
+	// Pass RuntimeConfig.ResolvedAgent here.
+	ResolvedAgent string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -121,11 +128,14 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
 
-	// Set GT_AGENT when an agent override is in use.
-	// This makes the override visible via tmux show-environment so that
-	// IsAgentAlive and waitForPolecatReady use the correct process names.
+	// Set GT_AGENT for tmux session table visibility. IsAgentAlive and
+	// waitForPolecatReady read GT_AGENT via GetEnvironment (session table),
+	// not process env. Explicit --agent override takes precedence;
+	// otherwise fall back to the resolved agent from rig/town config.
 	if cfg.Agent != "" {
 		env["GT_AGENT"] = cfg.Agent
+	} else if cfg.ResolvedAgent != "" {
+		env["GT_AGENT"] = cfg.ResolvedAgent
 	}
 
 	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
