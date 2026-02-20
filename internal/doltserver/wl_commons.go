@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,8 +65,11 @@ type WantedItem struct {
 	SandboxRequired bool
 }
 
-// EscapeSQL escapes single quotes in SQL string literals.
+// EscapeSQL escapes backslashes and single quotes for SQL string literals.
+// Dolt (MySQL-compatible) treats \ as an escape character, so a trailing
+// backslash in user input would escape the closing quote and break the query.
 func EscapeSQL(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, "'", "''")
 }
 
@@ -317,8 +321,14 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 			// UPDATE applied but COMMIT failed, leaving status='claimed'
 			// in the uncommitted working set.
 			resetScript := fmt.Sprintf("USE %s;\nCALL DOLT_RESET('--hard');\n", WLCommonsDB)
-			_ = doltSQLScriptWithRetry(townRoot, resetScript)
-			return fmt.Errorf("claim commit failed (working set reset): %w", err)
+			if resetErr := doltSQLScriptWithRetry(townRoot, resetScript); resetErr != nil {
+				log.Printf("warning: DOLT_RESET after claim commit failure also failed: %v", resetErr)
+			}
+			lastErr = fmt.Errorf("claim commit failed (working set reset): %w", err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			}
+			continue
 		}
 		return nil
 	}
@@ -326,14 +336,29 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 }
 
 // SubmitCompletion inserts a completion record and updates the wanted status.
+// The item must have status='claimed' to prevent completing an unclaimed item.
+// Uses a two-step approach similar to ClaimWanted: UPDATE with ROW_COUNT check,
+// then INSERT + COMMIT in a separate script.
 func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
-	script := fmt.Sprintf(`USE %s;
+	// Step 1: Verify item is claimed and update status (needs CSV output for ROW_COUNT)
+	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW() WHERE id='%s' AND status='claimed'; SELECT ROW_COUNT() AS rc;`,
+		WLCommonsDB, EscapeSQL(evidence), EscapeSQL(wantedID))
+
+	output, err := doltSQLQuery(townRoot, updateQuery)
+	if err != nil {
+		return fmt.Errorf("completion update failed: %w", err)
+	}
+
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 || rows[0]["rc"] == "0" {
+		return fmt.Errorf("wanted item %q is not claimed or does not exist", wantedID)
+	}
+
+	// Step 2: Insert completion record and commit
+	commitScript := fmt.Sprintf(`USE %s;
 
 INSERT INTO completions (id, wanted_id, completed_by, evidence, completed_at)
 VALUES ('%s', '%s', '%s', '%s', NOW());
-
-UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
-WHERE id='%s';
 
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');
@@ -343,11 +368,17 @@ CALL DOLT_COMMIT('-m', 'wl done: %s');
 		EscapeSQL(wantedID),
 		EscapeSQL(rigHandle),
 		EscapeSQL(evidence),
-		EscapeSQL(evidence),
-		EscapeSQL(wantedID),
 		EscapeSQL(wantedID))
 
-	return doltSQLScriptWithRetry(townRoot, script)
+	if err := doltSQLScriptWithRetry(townRoot, commitScript); err != nil {
+		// Rollback dirty working set on commit failure
+		resetScript := fmt.Sprintf("USE %s;\nCALL DOLT_RESET('--hard');\n", WLCommonsDB)
+		if resetErr := doltSQLScriptWithRetry(townRoot, resetScript); resetErr != nil {
+			log.Printf("warning: DOLT_RESET after completion commit failure also failed: %v", resetErr)
+		}
+		return fmt.Errorf("completion commit failed (working set reset): %w", err)
+	}
+	return nil
 }
 
 // QueryWanted fetches a wanted item by ID. Returns nil if not found.

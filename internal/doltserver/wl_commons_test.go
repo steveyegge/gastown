@@ -90,6 +90,50 @@ func TestParseSimpleCSV_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestEscapeSQL_SingleQuotes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hello", "hello"},
+		{"it's", "it''s"},
+		{"", ""},
+		{"'; DROP TABLE wanted;--", "''; DROP TABLE wanted;--"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := EscapeSQL(tt.input)
+			if got != tt.want {
+				t.Errorf("EscapeSQL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapeSQL_Backslashes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`path\to\file`, `path\\to\\file`},
+		{`trailing\`, `trailing\\`},
+		{`it\'s`, `it\\''s`},
+		{`no special`, `no special`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := EscapeSQL(tt.input)
+			if got != tt.want {
+				t.Errorf("EscapeSQL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGenerateWantedID_Format(t *testing.T) {
 	t.Parallel()
 	id := GenerateWantedID("Test Title")

@@ -96,14 +96,6 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Check if already joined
-	if existing, err := wasteland.LoadConfig(townRoot); err == nil {
-		fmt.Printf("%s Already joined wasteland: %s\n", style.Dim.Render("⚠"), existing.Upstream)
-		fmt.Printf("  Fork: %s/%s\n", existing.ForkOrg, existing.ForkDB)
-		fmt.Printf("  Local: %s\n", existing.LocalDir)
-		return nil
-	}
-
 	// Load town config for identity
 	townConfigPath := filepath.Join(townRoot, workspace.PrimaryMarker)
 	townCfg, err := config.LoadTownConfig(townConfigPath)

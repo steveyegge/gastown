@@ -130,29 +130,6 @@ func TestWlFormatPriority(t *testing.T) {
 	}
 }
 
-func TestWlEscapeSQL(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"hello", "hello"},
-		{"it's", "it''s"},
-		{"", ""},
-		{"'; DROP TABLE wanted;--", "''; DROP TABLE wanted;--"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			got := wlEscapeSQL(tt.input)
-			if got != tt.want {
-				t.Errorf("wlEscapeSQL(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBuildBrowseQuery_DefaultFilters(t *testing.T) {
 	t.Parallel()
 	f := BrowseFilter{

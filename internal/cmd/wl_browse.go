@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -114,13 +115,13 @@ func buildBrowseQuery(f BrowseFilter) string {
 	var conditions []string
 
 	if f.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status = '%s'", wlEscapeSQL(f.Status)))
+		conditions = append(conditions, fmt.Sprintf("status = '%s'", doltserver.EscapeSQL(f.Status)))
 	}
 	if f.Project != "" {
-		conditions = append(conditions, fmt.Sprintf("project = '%s'", wlEscapeSQL(f.Project)))
+		conditions = append(conditions, fmt.Sprintf("project = '%s'", doltserver.EscapeSQL(f.Project)))
 	}
 	if f.Type != "" {
-		conditions = append(conditions, fmt.Sprintf("type = '%s'", wlEscapeSQL(f.Type)))
+		conditions = append(conditions, fmt.Sprintf("type = '%s'", doltserver.EscapeSQL(f.Type)))
 	}
 	if f.Priority >= 0 {
 		conditions = append(conditions, fmt.Sprintf("priority = %d", f.Priority))
@@ -134,10 +135,6 @@ func buildBrowseQuery(f BrowseFilter) string {
 	query += fmt.Sprintf(" LIMIT %d", f.Limit)
 
 	return query
-}
-
-func wlEscapeSQL(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
 }
 
 func renderWLBrowseTable(doltPath, cloneDir, query string) error {
