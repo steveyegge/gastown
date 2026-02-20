@@ -325,8 +325,17 @@ func handleStepContinue(cwd, townRoot string, nextStep *beads.Issue, dryRun bool
 
 	t := tmux.NewTmux()
 
-	// Kill all processes in the pane before respawning to prevent process leaks
-	if err := t.KillPaneProcesses(pane); err != nil {
+	// Kill all processes in the pane EXCEPT ourselves and the pane shell before
+	// respawning to prevent process leaks. Uses KillPaneProcessesExcluding (not
+	// KillPaneProcesses) because gt mol step done runs inside the pane —
+	// KillPaneProcesses would kill our own process before we can call RespawnPane.
+	// Exclude panePID to prevent SIGHUP from session leader death killing us.
+	selfPID := fmt.Sprintf("%d", os.Getpid())
+	excludePIDs := []string{selfPID}
+	if panePID, err := t.GetPanePID(pane); err == nil && panePID != "" {
+		excludePIDs = append(excludePIDs, panePID)
+	}
+	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
 		// Non-fatal but log the warning
 		style.PrintWarning("could not kill pane processes: %v", err)
 	}
