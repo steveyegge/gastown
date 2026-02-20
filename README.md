@@ -216,9 +216,9 @@ gt convoy list                         # Check progress
 
 **Best for:** Predefined, repeatable processes
 
-Formulas are TOML-defined workflows stored in `.beads/formulas/`.
+Formulas are TOML-defined workflows embedded in the `gt` binary (source in `internal/formula/formulas/`).
 
-**Example Formula** (`.beads/formulas/release.formula.toml`):
+**Example Formula** (`internal/formula/formulas/release.formula.toml`):
 
 ```toml
 description = "Standard release process"
@@ -372,7 +372,7 @@ bd mol list                 # List active instances
 
 ## Cooking Formulas
 
-Gas Town includes built-in formulas for common workflows. See `.beads/formulas/` for available recipes.
+Gas Town includes built-in formulas for common workflows. See `internal/formula/formulas/` for available recipes.
 
 ## Dashboard
 

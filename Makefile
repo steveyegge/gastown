@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-e2e-container generate check-up-to-date
+.PHONY: build install clean test test-e2e-container check-up-to-date
 
 BINARY := gt
 BUILD_DIR := .
@@ -14,10 +14,7 @@ LDFLAGS := -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
            -X github.com/steveyegge/gastown/internal/cmd.BuildTime=$(BUILD_TIME) \
            -X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1
 
-generate:
-	go generate ./...
-
-build: generate
+build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gt
 ifeq ($(shell uname),Darwin)
 	@codesign -s - -f $(BUILD_DIR)/$(BINARY) 2>/dev/null || true

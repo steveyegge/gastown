@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 )
 
-// Generate formulas directory from canonical source at .beads/formulas/
-//go:generate sh -c "rm -rf formulas && mkdir -p formulas && cp ../../.beads/formulas/*.formula.toml formulas/"
+// Formulas live in internal/formula/formulas/ (source of truth).
+// They are embedded into the binary and provisioned to .beads/formulas/ at install time.
 
 //go:embed formulas/*.formula.toml
 var formulasFS embed.FS

@@ -46,10 +46,6 @@ jobs:
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
 
-      - name: Generate embedded files
-        shell: msys2 {0}
-        run: go generate ./internal/formula/...
-
       - name: Build
         shell: msys2 {0}
         run: go build -v ./cmd/gt

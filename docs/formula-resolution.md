@@ -5,8 +5,8 @@
 ## The Problem
 
 Formulas currently exist in multiple locations with no clear precedence:
-- `.beads/formulas/` (source of truth for a project)
-- `internal/formula/formulas/` (embedded copy for `go install`)
+- `internal/formula/formulas/` (source of truth, embedded in binary)
+- `.beads/formulas/` (provisioned at runtime by `gt install`)
 - Crew directories have their own `.beads/formulas/` (diverging copies)
 
 When an agent runs `bd cook mol-polecat-work`, which version do they get?
@@ -41,7 +41,7 @@ TIER 2: TOWN (user-level)
 
 TIER 3: SYSTEM (embedded)
   Location: Compiled into gt binary
-  Source:   gastown/mayor/rig/.beads/formulas/ at build time
+  Source:   internal/formula/formulas/ at build time
   Use case: Defaults, blessed patterns, fallback
   Example:  mol-polecat-work.formula.toml (factory default)
 ```
