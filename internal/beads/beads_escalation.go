@@ -29,12 +29,6 @@ type EscalationFields struct {
 	LastReescalatedBy  string // Who last re-escalated (empty if never)
 }
 
-// EscalationState constants for bead status tracking.
-const (
-	EscalationOpen   = "open"   // Unacknowledged
-	EscalationAcked  = "acked"  // Acknowledged but not resolved
-	EscalationClosed = "closed" // Resolved/closed
-)
 
 // FormatEscalationDescription creates a description string from escalation fields.
 func FormatEscalationDescription(title string, fields *EscalationFields) string {

@@ -170,9 +170,9 @@ func TestIntegration(t *testing.T) {
 	// In multi-worktree setups, worktrees have .beads/redirect pointing to
 	// the canonical beads location (e.g., mayor/rig/.beads)
 	beadsDir := ResolveBeadsDir(dir)
-	dbPath := filepath.Join(beadsDir, "beads.db")
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Skip("no beads.db found (JSONL-only repo)")
+	doltPath := filepath.Join(beadsDir, "dolt")
+	if _, err := os.Stat(doltPath); os.IsNotExist(err) {
+		t.Skip("no dolt database found")
 	}
 
 	b := New(dir)
@@ -2046,7 +2046,7 @@ func TestSetupRedirect(t *testing.T) {
 		mayorRigBeads := filepath.Join(rigRoot, "mayor", "rig", ".beads")
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
-		// Create rig/.beads with metadata but NO database (no dolt/ or beads.db)
+		// Create rig/.beads with metadata but NO database (no dolt/)
 		if err := os.MkdirAll(rigBeads, 0755); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}

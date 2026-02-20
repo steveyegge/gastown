@@ -110,8 +110,6 @@ func TestStateIsActive(t *testing.T) {
 		{StateWorking, true},
 		{StateDone, false},
 		{StateStuck, false},
-		// Legacy active state is treated as active
-		{StateActive, true},
 	}
 
 	for _, tt := range tests {
@@ -126,7 +124,6 @@ func TestStateIsWorking(t *testing.T) {
 		state   State
 		working bool
 	}{
-		{StateActive, false},
 		{StateWorking, true},
 		{StateDone, false},
 		{StateStuck, false},
@@ -335,7 +332,7 @@ func TestSetStateWithoutBeads(t *testing.T) {
 	m := NewManager(r, git.NewGit(root), nil)
 
 	// SetState should succeed (no-op when no issue assigned)
-	err := m.SetState("Test", StateActive)
+	err := m.SetState("Test", StateWorking)
 	if err != nil {
 		t.Errorf("SetState: %v (expected no error when no beads/issue)", err)
 	}
@@ -1329,5 +1326,245 @@ func TestStalePendingMarkerIsCleanedUp(t *testing.T) {
 
 	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
 		t.Errorf("stale .pending file was not cleaned up by cleanupOrphanPolecatState")
+	}
+}
+
+// TestAddWithOptions_RollbackReleasesName verifies that when AddWithOptions fails,
+// the allocated name is released back to the pool and the polecat directory is cleaned up.
+// Regression test for gt-2vs22: cleanupOnError previously only removed the directory,
+// leaking pool names on spawn failure.
+func TestAddWithOptions_RollbackReleasesName(t *testing.T) {
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure (acts as repo base)
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo in mayor/rig
+	cmd := exec.Command("git", "init")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	// Create and commit a file
+	if err := os.WriteFile(filepath.Join(mayorRig, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Add origin remote but deliberately DON'T create origin/main ref.
+	// This will cause AddWithOptions to fail at ref validation, testing rollback.
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	// Allocate a name (simulates what gt sling does before AddWithOptions)
+	name, err := m.AllocateName()
+	if err != nil {
+		t.Fatalf("AllocateName: %v", err)
+	}
+
+	// Verify name is active in pool after allocation
+	activeBeforeAdd := m.namePool.ActiveCount()
+	if activeBeforeAdd == 0 {
+		t.Fatal("expected at least 1 active name after AllocateName")
+	}
+
+	// Try to create polecat — should fail because origin/main doesn't exist
+	_, err = m.AddWithOptions(name, AddOptions{})
+	if err == nil {
+		t.Fatal("AddWithOptions should have failed without origin/main ref")
+	}
+
+	// Verify name was released back to pool (gt-2vs22 fix)
+	activeNames := m.namePool.ActiveNames()
+	for _, n := range activeNames {
+		if n == name {
+			t.Errorf("name %q still active in pool after failed AddWithOptions — rollback didn't release it", name)
+		}
+	}
+
+	// Verify polecat directory was cleaned up
+	polecatDir := m.polecatDir(name)
+	if _, err := os.Stat(polecatDir); !os.IsNotExist(err) {
+		t.Errorf("polecat directory %s still exists after failed AddWithOptions", polecatDir)
+	}
+
+	// Verify pending marker was cleaned up
+	pendingPath := m.pendingPath(name)
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Errorf("pending marker %s still exists after failed AddWithOptions", pendingPath)
+	}
+}
+
+// TestAddWithOptions_RollbackCleansWorktree verifies that when AddWithOptions fails
+// AFTER the worktree is created (e.g., agent bead creation fails), the worktree
+// registration is cleaned up along with the directory and pool name.
+// Regression test for gt-2vs22.
+func TestAddWithOptions_RollbackCleansWorktree(t *testing.T) {
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo with a commit
+	cmd := exec.Command("git", "init")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(mayorRig, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Set up origin/main ref (so worktree creation succeeds)
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
+	}
+
+	// Install a mock bd that FAILS on create (simulates agent bead creation failure)
+	binDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		psPath := filepath.Join(binDir, "bd.ps1")
+		psScript := `$cmd = ''
+foreach ($arg in $args) {
+  if ($arg -like '--*') { continue }
+  $cmd = $arg
+  break
+}
+switch ($cmd) {
+  'create' {
+    Write-Error 'error: database not initialized'
+    exit 1
+  }
+  default { exit 0 }
+}
+`
+		cmdScript := "@echo off\r\npwsh -NoProfile -NoLogo -File \"" + psPath + "\" %*\r\n"
+		if err := os.WriteFile(psPath, []byte(psScript), 0644); err != nil {
+			t.Fatalf("write mock bd.ps1: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "bd.cmd"), []byte(cmdScript), 0644); err != nil {
+			t.Fatalf("write mock bd.cmd: %v", err)
+		}
+	} else {
+		script := `#!/bin/sh
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+case "$cmd" in
+  create)
+    echo "error: database not initialized" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+		if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0755); err != nil {
+			t.Fatalf("write mock bd: %v", err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Create rig-level .beads directory
+	rigBeads := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	mayorBeads := filepath.Join(mayorRig, ".beads")
+	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		t.Fatalf("mkdir mayor .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+		t.Fatalf("write redirect: %v", err)
+	}
+	// Write custom-types sentinel so EnsureCustomTypes is a no-op
+	_ = os.WriteFile(filepath.Join(mayorBeads, ".gt-types-configured"), []byte("v1\n"), 0644)
+
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	// Allocate a name
+	name, err := m.AllocateName()
+	if err != nil {
+		t.Fatalf("AllocateName: %v", err)
+	}
+
+	// AddWithOptions should fail at agent bead creation (mock bd fails on create)
+	_, err = m.AddWithOptions(name, AddOptions{})
+	if err == nil {
+		t.Fatal("AddWithOptions should have failed with mock bd failing on create")
+	}
+
+	// Verify name was released back to pool
+	activeNames := m.namePool.ActiveNames()
+	for _, n := range activeNames {
+		if n == name {
+			t.Errorf("name %q still active in pool after failed AddWithOptions — rollback didn't release it", name)
+		}
+	}
+
+	// Verify polecat directory was cleaned up
+	polecatDir := m.polecatDir(name)
+	if _, err := os.Stat(polecatDir); !os.IsNotExist(err) {
+		t.Errorf("polecat directory %s still exists after rollback", polecatDir)
+	}
+
+	// Verify worktree registration was cleaned up from git.
+	// The branch ref may remain (cleaned later by CleanupStaleBranches),
+	// but the worktree entry should be removed so git doesn't track a stale path.
+	clonePath := filepath.Join(polecatDir, r.Name)
+	cmd = exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = mayorRig
+	out, cmdErr := cmd.CombinedOutput()
+	if cmdErr == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, clonePath) {
+				t.Errorf("stale worktree entry for %s still registered in git after rollback", clonePath)
+			}
+		}
 	}
 }

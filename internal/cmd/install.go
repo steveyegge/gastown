@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,12 +13,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/hooks"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -28,17 +28,17 @@ import (
 )
 
 var (
-	installForce        bool
-	installName         string
-	installOwner        string
-	installPublicName   string
-	installNoBeads      bool
-	installGit          bool
-	installGitHub       string
-	installPublic       bool
-	installShell        bool
-	installWrappers     bool
-	installSupervisor   bool
+	installForce      bool
+	installName       string
+	installOwner      string
+	installPublicName string
+	installNoBeads    bool
+	installGit        bool
+	installGitHub     string
+	installPublic     bool
+	installShell      bool
+	installWrappers   bool
+	installSupervisor bool
 )
 
 var installCmd = &cobra.Command{
@@ -350,6 +350,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// Set beads routing mode to explicit (required by gt doctor).
 		routingCmd := exec.Command("bd", "config", "set", "routing.mode", "explicit")
 		routingCmd.Dir = absPath
+		routingCmd.Env = withBeadsDirEnv(filepath.Join(absPath, ".beads"))
 		if out, err := routingCmd.CombinedOutput(); err != nil {
 			fmt.Printf("   %s Could not set routing.mode: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(out)))
 		}
@@ -511,8 +512,10 @@ func writeJSON(path string, data interface{}) error {
 func initTownBeads(townPath string) error {
 	// Run: bd init --prefix hq --server
 	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
+	// Filter inherited BEADS_DIR so bd init targets this town, not a parent .beads.
 	cmd := exec.Command("bd", "init", "--prefix", "hq", "--server")
 	cmd.Dir = townPath
+	cmd.Env = withBeadsDirEnv(filepath.Join(townPath, ".beads"))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -530,9 +533,23 @@ func initTownBeads(townPath string) error {
 		return fmt.Errorf("bd init succeeded but .beads directory not created (check bd daemon interference)")
 	}
 
+	// Ensure metadata.json has dolt_database set (EnsureMetadata fills missing
+	// values but does not overwrite existing ones).
+	if err := doltserver.EnsureMetadata(townPath, "hq"); err != nil {
+		return fmt.Errorf("ensuring hq metadata: %w", err)
+	}
+
+	// Ensure config.yaml exists with a stable prefix for clone/adopt workflows.
+	if err := beads.EnsureConfigYAML(beadsDir, "hq"); err != nil {
+		return fmt.Errorf("ensuring config.yaml: %w", err)
+	}
+
+	beadsEnv := withBeadsDirEnv(beadsDir)
+
 	// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
 	prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", "hq")
 	prefixSetCmd.Dir = townPath
+	prefixSetCmd.Env = beadsEnv
 	if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
 		return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
 	}
@@ -547,6 +564,7 @@ func initTownBeads(townPath string) error {
 	// This allows bd create --id=hq-cv-xxx to pass prefix validation.
 	prefixCmd := exec.Command("bd", "config", "set", "allowed_prefixes", "hq,hq-cv")
 	prefixCmd.Dir = townPath
+	prefixCmd.Env = beadsEnv
 	if prefixOutput, prefixErr := prefixCmd.CombinedOutput(); prefixErr != nil {
 		fmt.Printf("   %s Could not set allowed_prefixes: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(prefixOutput)))
 	}
@@ -575,6 +593,20 @@ func initTownBeads(townPath string) error {
 	}
 
 	return nil
+}
+
+// withBeadsDirEnv returns an environment with BEADS_DIR pinned to the target
+// beads directory and any inherited BEADS_DIR removed.
+func withBeadsDirEnv(beadsDir string) []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, "BEADS_DIR=") {
+			filtered = append(filtered, e)
+		}
+	}
+	filtered = append(filtered, "BEADS_DIR="+beadsDir)
+	return filtered
 }
 
 // ensureCustomTypes registers Gas Town custom issue types with beads.

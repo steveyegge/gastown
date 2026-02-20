@@ -16,8 +16,8 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -219,6 +219,12 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// Sync remotes from mayor/rig so crew clone matches the rig's remote config.
 	// This prevents origin pointing to upstream instead of the fork.
 	if err := m.syncRemotesFromRig(crewPath); err != nil {
+		if m.rig.PushURL != "" {
+			if rmErr := os.RemoveAll(crewPath); rmErr != nil {
+				style.PrintWarning("could not clean up orphaned clone at %s: %v", crewPath, rmErr)
+			}
+			return nil, fmt.Errorf("syncing remotes from rig (push URL required): %w", err)
+		}
 		style.PrintWarning("could not sync remotes from rig: %v", err)
 	}
 
@@ -351,11 +357,50 @@ func (m *Manager) syncRemotesFromRig(crewPath string) error {
 			}
 		}
 
-		// Sync push URL if configured (for read-only upstream forks)
-		pushURL, pushErr := rigGit.GetPushURL(remote)
-		if pushErr == nil && pushURL != "" && pushURL != url {
-			if cfgErr := crewGit.ConfigurePushURL(remote, pushURL); cfgErr != nil {
-				fmt.Printf("Warning: could not sync push URL for %s: %v\n", remote, cfgErr)
+		// Sync push URL for read-only upstream forks.
+		// Dual-source authority model: origin's push URL comes from town.json
+		// (via m.rig.PushURL, which config.json populates). Non-origin remotes
+		// get push URLs from mayor's git config. This split relies on town.json
+		// and config.json staying in sync — RegisterRig writes both to ensure this.
+		if remote == "origin" {
+			configPushURL := strings.TrimSpace(m.rig.PushURL)
+			if configPushURL != "" {
+				if cfgErr := crewGit.ConfigurePushURL(remote, configPushURL); cfgErr != nil {
+					return fmt.Errorf("syncing origin push URL: %w", cfgErr)
+				}
+			} else {
+				// Config has no push URL — only clear if crew has a stale custom push URL.
+				crewPush, pushErr := crewGit.GetPushURL(remote)
+				crewFetch, fetchErr := crewGit.RemoteURL(remote)
+				if pushErr != nil || fetchErr != nil {
+					style.PrintWarning("could not read crew remote URLs for %s, skipping cleanup: push=%v fetch=%v", remote, pushErr, fetchErr)
+				} else if crewPush != crewFetch {
+					style.PrintWarning("clearing stale push URL for %s (was: %s)", remote, util.RedactURL(crewPush))
+					if clrErr := crewGit.ClearPushURL(remote); clrErr != nil {
+						style.PrintWarning("could not clear push URL for %s: %v", remote, clrErr)
+					}
+				}
+			}
+		} else {
+			pushURL, pushErr := rigGit.GetPushURL(remote)
+			if pushErr != nil {
+				style.PrintWarning("could not read push URL for %s, skipping: %v", remote, pushErr)
+			} else if pushURL != "" && pushURL != url {
+				if cfgErr := crewGit.ConfigurePushURL(remote, pushURL); cfgErr != nil {
+					style.PrintWarning("could not sync push URL for %s: %v", remote, cfgErr)
+				}
+			} else {
+				// Mayor has no custom push URL — only clear if crew has a stale one.
+				crewPush, cpErr := crewGit.GetPushURL(remote)
+				crewFetch, cfErr := crewGit.RemoteURL(remote)
+				if cpErr != nil || cfErr != nil {
+					style.PrintWarning("could not read crew remote URLs for %s, skipping cleanup: push=%v fetch=%v", remote, cpErr, cfErr)
+				} else if crewPush != crewFetch {
+					style.PrintWarning("clearing stale push URL for %s (was: %s)", remote, util.RedactURL(crewPush))
+					if clrErr := crewGit.ClearPushURL(remote); clrErr != nil {
+						style.PrintWarning("could not clear push URL for %s: %v", remote, clrErr)
+					}
+				}
 			}
 		}
 	}
@@ -649,8 +694,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		AgentName:        name,
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
-		Agent:            opts.AgentOverride,
 	})
+	if opts.AgentOverride != "" {
+		envVars["GT_AGENT"] = opts.AgentOverride
+	}
 
 	// Build startup command (also includes env vars via 'exec env' for
 	// WaitForCommand detection — belt and suspenders with -e flags)

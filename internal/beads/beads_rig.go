@@ -93,11 +93,46 @@ func ParseRigFields(description string) *RigFields {
 	return fields
 }
 
+// EnsureRigBead returns the rig identity bead, creating it if it doesn't exist.
+// This is idempotent: if the bead already exists, it is returned as-is.
+// Handles races and Dolt query hiccups where Show may fail even when the bead
+// exists (gt-d8681).
+func (b *Beads) EnsureRigBead(name string, fields *RigFields) (*Issue, error) {
+	prefix := "gt"
+	if fields != nil && fields.Prefix != "" {
+		prefix = fields.Prefix
+	}
+	id := RigBeadIDWithPrefix(prefix, name)
+
+	// Try to find existing bead first
+	if existing, err := b.Show(id); err == nil {
+		return existing, nil
+	}
+
+	// Not found — try to create
+	created, createErr := b.CreateRigBead(name, fields)
+	if createErr == nil {
+		return created, nil
+	}
+
+	// Create failed (likely duplicate key from race or Dolt hiccup) — retry Show
+	if existing, err := b.Show(id); err == nil {
+		return existing, nil
+	}
+
+	return nil, fmt.Errorf("ensuring rig bead %s: %w", id, createErr)
+}
+
 // CreateRigBead creates a rig identity bead for tracking rig metadata.
 // The ID format is: <prefix>-rig-<name> (e.g., gt-rig-gastown)
 // The ID is constructed internally from fields.Prefix and name.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateRigBead(name string, fields *RigFields) (*Issue, error) {
+	// Guard against flag-like rig names (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(name) {
+		return nil, fmt.Errorf("refusing to create rig bead: %w (got %q)", ErrFlagTitle, name)
+	}
+
 	if fields != nil && fields.State != "" && !ValidRigState(fields.State) {
 		return nil, fmt.Errorf("invalid rig state %q: must be one of active, archived, maintenance", fields.State)
 	}

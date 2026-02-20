@@ -179,7 +179,7 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture).
 	// For dolt backend, the actual database lives at mayor/rig/.beads/dolt/, not at rig/.beads/.
 	// The rig-root .beads/ only has metadata.json (runtime state). If rig/.beads exists but has
-	// no database (no dolt/ and no beads.db), redirect to mayor/rig/.beads where the DB is.
+	// no database (no dolt/), redirect to mayor/rig/.beads where the DB is.
 	usesMayorFallback := false
 	rigBeadsExists := false
 	if _, err := os.Stat(rigBeadsPath); err == nil {
@@ -187,10 +187,8 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 	}
 	rigHasDB := false
 	if rigBeadsExists {
-		// Check for actual database: dolt/ directory or beads.db file
+		// Check for actual database: dolt/ directory
 		if _, err := os.Stat(filepath.Join(rigBeadsPath, "dolt")); err == nil {
-			rigHasDB = true
-		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "beads.db")); err == nil {
 			rigHasDB = true
 		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "redirect")); err == nil {
 			// A redirect file is a valid beads configuration (tracked beads case).

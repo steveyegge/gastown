@@ -135,6 +135,55 @@ needs = ["{target}.draft"]
 	}
 }
 
+func TestParse_WorkflowWithAcceptance(t *testing.T) {
+	data := []byte(`
+description = "Test workflow with acceptance"
+formula = "test-acceptance"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "design"
+title = "Design"
+description = "Plan it"
+acceptance = "Design doc committed"
+
+[[steps]]
+id = "implement"
+title = "Implement"
+description = "Build it"
+needs = ["design"]
+acceptance = "All code written and committed"
+
+[[steps]]
+id = "test"
+title = "Test"
+description = "Test it"
+needs = ["implement"]
+`)
+
+	f, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(f.Steps) != 3 {
+		t.Fatalf("len(Steps) = %d, want 3", len(f.Steps))
+	}
+
+	// Steps with acceptance criteria
+	if f.Steps[0].Acceptance != "Design doc committed" {
+		t.Errorf("step[0].Acceptance = %q, want %q", f.Steps[0].Acceptance, "Design doc committed")
+	}
+	if f.Steps[1].Acceptance != "All code written and committed" {
+		t.Errorf("step[1].Acceptance = %q, want %q", f.Steps[1].Acceptance, "All code written and committed")
+	}
+	// Step without acceptance criteria
+	if f.Steps[2].Acceptance != "" {
+		t.Errorf("step[2].Acceptance = %q, want empty", f.Steps[2].Acceptance)
+	}
+}
+
 func TestValidate_MissingName(t *testing.T) {
 	data := []byte(`
 type = "workflow"

@@ -72,6 +72,7 @@ func TestIsProtocolMessage(t *testing.T) {
 		{"MERGED Toast", true},
 		{"MERGE_FAILED ace", true},
 		{"REWORK_REQUEST valkyrie", true},
+		{"CONVOY_NEEDS_FEEDING hq-cv123", true},
 		{"Unknown subject", false},
 		{"", false},
 		{"Hello world", false},
@@ -179,6 +180,95 @@ Verified: clean git state`
 	}
 	if payload.Rig != "gastown" {
 		t.Errorf("Rig = %q, want %q", payload.Rig, "gastown")
+	}
+}
+
+func TestParseMessageType_ConvoyNeedsFeeding(t *testing.T) {
+	tests := []struct {
+		subject  string
+		expected MessageType
+	}{
+		{"CONVOY_NEEDS_FEEDING hq-cv123", TypeConvoyNeedsFeeding},
+		{"CONVOY_NEEDS_FEEDING", TypeConvoyNeedsFeeding},
+		{"CONVOY_NEEDS_FEEDINGX", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.subject, func(t *testing.T) {
+			result := ParseMessageType(tt.subject)
+			if result != tt.expected {
+				t.Errorf("ParseMessageType(%q) = %q, want %q", tt.subject, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNewConvoyNeedsFeedingMessage(t *testing.T) {
+	msg := NewConvoyNeedsFeedingMessage("gastown", "hq-cv123", "gt-abc")
+
+	if msg.Subject != "CONVOY_NEEDS_FEEDING hq-cv123" {
+		t.Errorf("Subject = %q, want %q", msg.Subject, "CONVOY_NEEDS_FEEDING hq-cv123")
+	}
+	if msg.From != "gastown/refinery" {
+		t.Errorf("From = %q, want %q", msg.From, "gastown/refinery")
+	}
+	if msg.To != "deacon/" {
+		t.Errorf("To = %q, want %q", msg.To, "deacon/")
+	}
+	if msg.Priority != mail.PriorityHigh {
+		t.Errorf("Priority = %q, want %q", msg.Priority, mail.PriorityHigh)
+	}
+	if !strings.Contains(msg.Body, "ConvoyID: hq-cv123") {
+		t.Errorf("Body missing ConvoyID: %s", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "SourceIssue: gt-abc") {
+		t.Errorf("Body missing SourceIssue: %s", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "Rig: gastown") {
+		t.Errorf("Body missing Rig: %s", msg.Body)
+	}
+}
+
+func TestParseConvoyNeedsFeedingPayload(t *testing.T) {
+	ts := time.Now().Format(time.RFC3339)
+	body := "ConvoyID: hq-cv123\nSourceIssue: gt-abc\nRig: gastown\nMerged-At: " + ts
+
+	payload, err := ParseConvoyNeedsFeedingPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if payload.ConvoyID != "hq-cv123" {
+		t.Errorf("ConvoyID = %q, want %q", payload.ConvoyID, "hq-cv123")
+	}
+	if payload.SourceIssue != "gt-abc" {
+		t.Errorf("SourceIssue = %q, want %q", payload.SourceIssue, "gt-abc")
+	}
+	if payload.Rig != "gastown" {
+		t.Errorf("Rig = %q, want %q", payload.Rig, "gastown")
+	}
+}
+
+func TestParseConvoyNeedsFeedingPayload_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing convoy id", "Rig: gastown\nSourceIssue: gt-abc"},
+		{"missing rig", "ConvoyID: hq-cv123\nSourceIssue: gt-abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := ParseConvoyNeedsFeedingPayload(tt.body)
+			if err == nil {
+				t.Errorf("expected error for body %q, got payload: %+v", tt.body, payload)
+			}
+			if payload != nil {
+				t.Errorf("expected nil payload on error, got: %+v", payload)
+			}
+		})
 	}
 }
 

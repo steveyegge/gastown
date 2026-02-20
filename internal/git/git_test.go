@@ -1391,3 +1391,166 @@ func TestStashCount_FiltersByBranch(t *testing.T) {
 		t.Errorf("StashCount from main after worktree stash = %d, want 1", mainCount)
 	}
 }
+
+// TestStashCount_DetachedHEAD verifies that StashCount counts all stashes
+// when in detached HEAD state (cannot determine branch, falls back to counting all).
+func TestStashCount_DetachedHEAD(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Create a stash on main
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash", "push", "-m", "some-stash")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash: %v", err)
+	}
+
+	// Detach HEAD
+	cmd = exec.Command("git", "checkout", "--detach")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git checkout --detach: %v", err)
+	}
+
+	// In detached HEAD, StashCount should count all stashes (safe fallback)
+	count, err := g.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("StashCount in detached HEAD = %d, want 1 (should count all stashes)", count)
+	}
+}
+
+// TestStashCount_CustomMessage verifies that StashCount handles both
+// "WIP on <branch>:" (auto-stash) and "On <branch>:" (custom message) formats.
+func TestStashCount_CustomMessage(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Create a stash with custom message (produces "On <branch>: <message>" format)
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash", "push", "-m", "my custom message")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash: %v", err)
+	}
+
+	// Should count the custom-message stash on current branch
+	count, err := g.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("StashCount with custom message stash = %d, want 1", count)
+	}
+}
+
+// TestStashCount_NoFalsePositiveFromCommitMessage verifies that a stash
+// from branch "develop" with commit message containing "on fix:" does NOT
+// match when the current branch is "fix".
+func TestStashCount_NoFalsePositiveFromCommitMessage(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+
+	// Create branch "develop" and make a commit with message containing "on fix:"
+	cmd := exec.Command("git", "checkout", "-b", "develop")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git checkout -b develop: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "work.txt"), []byte("work on fix: edge case"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "work on fix: edge case")
+	cmd.Dir = dir
+	_ = cmd.Run()
+
+	// Create a stash on "develop" — its reflog line will contain "on fix:" in the
+	// commit message, but the branch prefix is "WIP on develop:"
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash: %v", err)
+	}
+
+	// Switch to branch "fix" — should NOT see the "develop" stash
+	cmd = exec.Command("git", "checkout", "-b", "fix")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git checkout -b fix: %v", err)
+	}
+
+	fixGit := NewGit(dir)
+	count, err := fixGit.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("StashCount on 'fix' branch = %d, want 0 (stash belongs to 'develop', commit msg has 'on fix:')", count)
+	}
+}
+
+func TestClearPushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	fetchURL := "https://github.com/upstream/repo.git"
+	pushURL := "https://github.com/fork/repo.git"
+
+	cmd := exec.Command("git", "remote", "add", "origin", fetchURL)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// Set a custom push URL
+	if err := g.ConfigurePushURL("origin", pushURL); err != nil {
+		t.Fatalf("ConfigurePushURL: %v", err)
+	}
+	got, _ := g.GetPushURL("origin")
+	if got != pushURL {
+		t.Fatalf("push URL after set = %q, want %q", got, pushURL)
+	}
+
+	// Clear the custom push URL
+	if err := g.ClearPushURL("origin"); err != nil {
+		t.Fatalf("ClearPushURL: %v", err)
+	}
+
+	// After clearing, GetPushURL should return the fetch URL
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL after clear: %v", err)
+	}
+	if got != fetchURL {
+		t.Errorf("push URL after clear = %q, want %q (fetch URL)", got, fetchURL)
+	}
+
+	// Clearing again should be a no-op (not an error)
+	if err := g.ClearPushURL("origin"); err != nil {
+		t.Errorf("ClearPushURL (idempotent) should not error, got: %v", err)
+	}
+}

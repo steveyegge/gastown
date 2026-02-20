@@ -44,6 +44,7 @@ Infrastructure checks:
   - beads-binary             Check that beads (bd) is installed and meets minimum version
   - daemon                   Check if daemon is running (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
+  - town-beads-config        Verify town .beads/config.yaml exists (fixable)
 
 Cleanup checks (fixable):
   - orphan-sessions          Detect orphaned tmux sessions
@@ -147,6 +148,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPreCheckoutHookCheck())
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewBootHealthCheck())
+	d.Register(doctor.NewTownBeadsConfigCheck())
 	d.Register(doctor.NewCustomTypesCheck())
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
@@ -164,6 +166,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewStaleBeadsRedirectCheck())
+	d.Register(doctor.NewBeadsRedirectTargetCheck())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewDefaultBranchAllRigsCheck())
@@ -261,4 +264,3 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-

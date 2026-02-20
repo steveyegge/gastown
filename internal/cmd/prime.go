@@ -523,11 +523,54 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 	}
 	fmt.Println()
 
+	// Ralph loop mode: output Ralph Wiggum loop command instead of step-by-step execution
+	if attachment.Mode == "ralph" {
+		outputRalphLoopDirective(ctx, attachment)
+		return
+	}
+
 	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
 
 	fmt.Println()
 	fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
 	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
+}
+
+// outputRalphLoopDirective emits the Ralph Wiggum loop command for ralphcat mode.
+// The agent sees this and runs the slash command, activating the Ralph plugin's
+// stop hook loop. Each iteration gets a fresh context window while preserving
+// artifacts on disk via git.
+func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields) {
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🐱 RALPH LOOP MODE (RALPHCAT)"))
+	fmt.Println("This work uses Ralph Wiggum loop mode for multi-step execution.")
+	fmt.Println("Each step runs in a fresh context window to avoid context exhaustion.")
+	fmt.Println()
+
+	// Build the ralph prompt from the molecule steps
+	prompt := buildRalphPromptFromMolecule(attachment)
+
+	fmt.Printf("Run this command NOW:\n\n")
+	fmt.Printf("```\n/ralph-loop \"%s\" --max-iterations 20 --completion-phrase \"POLECAT_DONE\"\n```\n\n",
+		strings.ReplaceAll(prompt, "\"", "\\\""))
+
+	fmt.Println("The Ralph loop will:")
+	fmt.Println("1. Execute each step in a fresh context")
+	fmt.Println("2. Preserve work via git commits between steps")
+	fmt.Println("3. Stop when POLECAT_DONE is output or max iterations reached")
+	fmt.Println()
+	fmt.Printf("%s\n", style.Bold.Render("⚠️  Run the /ralph-loop command above. Do NOT work step-by-step manually."))
+}
+
+// buildRalphPromptFromMolecule constructs the Ralph loop prompt text from molecule steps.
+func buildRalphPromptFromMolecule(attachment *beads.AttachmentFields) string {
+	var b strings.Builder
+	b.WriteString("Execute the attached molecule workflow. ")
+	if attachment.AttachedArgs != "" {
+		b.WriteString("Context: " + attachment.AttachedArgs + ". ")
+	}
+	b.WriteString("Work through steps in order, committing after each. ")
+	b.WriteString("When all steps complete, output POLECAT_DONE.")
+	return b.String()
 }
 
 // outputBeadPreview runs `bd show` and displays a truncated preview of the bead.

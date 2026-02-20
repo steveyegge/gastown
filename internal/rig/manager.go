@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/templates/commands"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -164,7 +165,7 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		Name:      name,
 		Path:      rigPath,
 		GitURL:    entry.GitURL,
-		PushURL:   entry.PushURL,
+		PushURL:   strings.TrimSpace(entry.PushURL),
 		LocalRepo: entry.LocalRepo,
 		Config:    entry.BeadsConfig,
 	}
@@ -376,7 +377,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		if err := bareGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
 			return nil, fmt.Errorf("configuring push URL: %w", err)
 		}
-		fmt.Printf("   ✓ Configured push URL (fork: %s)\n", opts.PushURL)
+		fmt.Printf("   ✓ Configured push URL (fork: %s)\n", util.RedactURL(opts.PushURL)) // fmt.Printf matches AddRig's established success output pattern
 	}
 
 	// Determine default branch: use provided value or auto-detect from remote
@@ -796,13 +797,8 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 	cmd.Env = filteredEnv
 	_, bdInitErr := cmd.CombinedOutput()
 	if bdInitErr != nil {
-		// bd might not be installed or failed, create minimal structure
-		// Note: beads currently expects YAML format for config
-		configPath := filepath.Join(beadsDir, "config.yaml")
-		configContent := fmt.Sprintf("prefix: %s\nissue-prefix: %s\n", prefix, prefix)
-		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
-			return writeErr
-		}
+		// bd might not be installed or failed — the shared helper below will
+		// create config.yaml with the required defaults as a fallback.
 	} else {
 		// bd init succeeded - configure the Dolt database
 
@@ -822,6 +818,19 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 		if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
 			return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
 		}
+
+		// Default to Dolt-native sync mode for new Gas Town rig beads.
+		// Non-fatal: the shared helper below will persist sync.mode to config.yaml.
+		syncModeCmd := exec.Command("bd", "config", "set", "sync.mode", "dolt-native")
+		syncModeCmd.Dir = rigPath
+		syncModeCmd.Env = filteredEnv
+		if syncModeOutput, syncModeErr := syncModeCmd.CombinedOutput(); syncModeErr != nil {
+			fmt.Printf("   ⚠ Could not set sync.mode via bd: %s\n", strings.TrimSpace(string(syncModeOutput)))
+		}
+	}
+
+	if err := beads.EnsureConfigYAML(beadsDir, prefix); err != nil {
+		return fmt.Errorf("ensuring config.yaml: %w", err)
 	}
 
 	// Ensure database has repository fingerprint (GH #25).
@@ -1175,6 +1184,7 @@ func (m *Manager) RemoveRig(name string) error {
 type RegisterRigOptions struct {
 	Name        string // Rig name (directory name)
 	GitURL      string // Override git URL (auto-detected from origin if empty)
+	PushURL     string // Override push URL (auto-detected from existing config/remotes if empty)
 	BeadsPrefix string // Beads issue prefix (defaults to derived from name or existing config)
 	Force       bool   // Register even if directory structure looks incomplete
 }
@@ -1256,12 +1266,70 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		result.BeadsPrefix = opts.BeadsPrefix
 	}
 
-	// Detect push URL from existing repo (adopt preserves existing configuration)
+	// Determine push URL: explicit option > existing config > auto-detect from remotes.
+	// Only explicit option and config.json with non-empty push_url are "authoritative"
+	// (trusted for clearing decisions). Auto-detection runs when no authoritative source
+	// provides a push URL — this covers both fresh adopts and legacy configs that predate
+	// the push_url feature. Auto-detection may fail silently (returns empty on git errors)
+	// and must not trigger stale URL clearing.
 	pushURL := ""
-	if existingConfig != nil && existingConfig.PushURL != "" {
+	pushURLAuthoritative := false // whether the source can be trusted for clearing decisions
+	if opts.PushURL != "" {
+		pushURL = opts.PushURL
+		pushURLAuthoritative = true
+	} else if existingConfig != nil && existingConfig.PushURL != "" {
+		// Config.json has an explicit push URL — use it as authoritative
 		pushURL = existingConfig.PushURL
+		pushURLAuthoritative = true
 	} else {
+		// No authoritative push URL source: either no config.json (fresh adopt) or
+		// legacy config without push_url field. Auto-detect from existing git remotes.
 		pushURL = m.detectPushURL(rigPath)
+		// Not authoritative — only use for positive detection, never for clearing
+	}
+
+	// Apply push URL to existing repos (mirrors AddRig behavior).
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	if pushURL != "" {
+		if _, err := os.Stat(bareRepoPath); err == nil {
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			if cfgErr := bareGit.ConfigurePushURL("origin", pushURL); cfgErr != nil {
+				return nil, fmt.Errorf("configuring push URL on bare repo: %w", cfgErr)
+			}
+		}
+		if _, err := os.Stat(mayorRigPath); err == nil {
+			mayorGit := git.NewGit(mayorRigPath)
+			if cfgErr := mayorGit.ConfigurePushURL("origin", pushURL); cfgErr != nil {
+				return nil, fmt.Errorf("configuring mayor push URL: %w", cfgErr)
+			}
+		}
+	} else if pushURLAuthoritative {
+		// Clear stale push URLs only when an authoritative source says "no push URL".
+		// Auto-detection returning empty could be a git error — don't clear in that case.
+		// Note: currently unreachable — authoritative sources always set non-empty pushURL.
+		// Retained for future --no-push-url flag support.
+		if _, err := os.Stat(bareRepoPath); err == nil {
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			if clrErr := bareGit.ClearPushURL("origin"); clrErr != nil {
+				return nil, fmt.Errorf("clearing stale push URL on bare repo: %w", clrErr)
+			}
+		}
+		if _, err := os.Stat(mayorRigPath); err == nil {
+			mayorGit := git.NewGit(mayorRigPath)
+			if clrErr := mayorGit.ClearPushURL("origin"); clrErr != nil {
+				return nil, fmt.Errorf("clearing stale mayor push URL: %w", clrErr)
+			}
+		}
+	}
+
+	// Sync push URL to config.json so doctor check sees it
+	if existingConfig != nil && existingConfig.PushURL != pushURL {
+		existingConfig.PushURL = pushURL
+		if saveErr := m.saveRigConfig(rigPath, existingConfig); saveErr != nil {
+			// Non-fatal: town.json has the value, but doctor may flag a mismatch
+			fmt.Fprintf(os.Stderr, "Warning: could not update config.json with push URL: %v\n", saveErr)
+		}
 	}
 
 	// Register in town config
@@ -1280,30 +1348,47 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 // detectPushURL attempts to detect a custom push URL from an existing repository.
 // Returns empty string if push URL matches fetch URL (no custom push URL configured).
 func (m *Manager) detectPushURL(rigPath string) string {
-	possiblePaths := []string{
+	// Check bare repo first (polecat-preferred source of truth), then clones.
+	// .repo.git is a bare repo and requires NewGitWithDir; the rest are regular clones.
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if pushURL := detectPushURLFrom(git.NewGitWithDir(bareRepoPath, "")); pushURL != "" {
+		return pushURL
+	}
+
+	clonePaths := []string{
 		rigPath,
 		filepath.Join(rigPath, "mayor", "rig"),
 		filepath.Join(rigPath, "refinery", "rig"),
 	}
-	for _, p := range possiblePaths {
-		g := git.NewGit(p)
-		fetchURL, fetchErr := g.RemoteURL("origin")
-		if fetchErr != nil {
-			continue
-		}
-		pushURL, pushErr := g.GetPushURL("origin")
-		if pushErr != nil || pushURL == "" {
-			continue
-		}
-		// Only return if push URL differs from fetch URL (custom push URL)
-		if strings.TrimSpace(pushURL) != strings.TrimSpace(fetchURL) {
-			return strings.TrimSpace(pushURL)
+	for _, p := range clonePaths {
+		if pushURL := detectPushURLFrom(git.NewGit(p)); pushURL != "" {
+			return pushURL
 		}
 	}
 	return ""
 }
 
+// detectPushURLFrom checks a single git repo for a custom push URL.
+func detectPushURLFrom(g *git.Git) string {
+	fetchURL, fetchErr := g.RemoteURL("origin")
+	if fetchErr != nil {
+		return ""
+	}
+	pushURL, pushErr := g.GetPushURL("origin")
+	if pushErr != nil || pushURL == "" {
+		return ""
+	}
+	if strings.TrimSpace(pushURL) != strings.TrimSpace(fetchURL) {
+		return strings.TrimSpace(pushURL)
+	}
+	return ""
+}
+
 // detectGitURL attempts to detect the git remote URL from an existing repository.
+// detectGitURL finds the origin remote URL from available clones.
+// Note: .repo.git is intentionally not checked here — it's a bare repo shared by worktrees
+// and requires NewGitWithDir (not NewGit). detectPushURL checks .repo.git because push URL
+// is primarily configured there. For git URL, the clone-based paths are authoritative.
 func (m *Manager) detectGitURL(rigPath string) (string, error) {
 	possiblePaths := []string{
 		rigPath,

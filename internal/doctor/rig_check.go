@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/git"
 )
 
 // RigIsGitRepoCheck verifies the rig has a valid mayor/rig git clone.
@@ -1021,10 +1023,8 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
-			// bd might not be installed - create minimal config.yaml
-			configPath := filepath.Join(rigBeadsDir, "config.yaml")
-			configContent := fmt.Sprintf("prefix: %s\n", prefix)
-			if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
+			// bd might not be installed — create config.yaml via shared helper.
+			if writeErr := beads.EnsureConfigYAML(rigBeadsDir, prefix); writeErr != nil {
 				return fmt.Errorf("bd init failed (%v) and fallback config creation failed: %w", err, writeErr)
 			}
 			// Continue - minimal config created
@@ -1254,8 +1254,8 @@ func (c *DefaultBranchExistsCheck) Run(ctx *CheckContext) *CheckResult {
 	cmd := exec.Command("git", "-C", bareRepoPath, "rev-parse", "--verify", ref)
 	if err := cmd.Run(); err != nil {
 		return &CheckResult{
-			Name:   c.Name(),
-			Status: StatusError,
+			Name:    c.Name(),
+			Status:  StatusError,
 			Message: fmt.Sprintf("default_branch %q not found on remote", cfg.DefaultBranch),
 			Details: []string{
 				fmt.Sprintf("Ref %s does not exist in bare repo", ref),
@@ -1375,6 +1375,7 @@ func (c *DefaultBranchAllRigsCheck) Run(ctx *CheckContext) *CheckResult {
 type BareRepoExistsCheck struct {
 	FixableCheck
 	brokenWorktrees []string // worktree paths with broken .repo.git references
+	pushURLMismatch bool     // config.json push_url differs from .repo.git push URL
 }
 
 // NewBareRepoExistsCheck creates a new bare repo exists check.
@@ -1404,8 +1405,9 @@ func (c *BareRepoExistsCheck) Run(ctx *CheckContext) *CheckResult {
 	rigPath := ctx.RigPath()
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
 
-	// Find worktrees that reference .repo.git
+	// Reset mutable state to avoid stale values if check is reused across rigs.
 	c.brokenWorktrees = nil
+	c.pushURLMismatch = false
 	worktreeDirs := c.findWorktreeDirs(rigPath, ctx.RigName)
 
 	for _, wtDir := range worktreeDirs {
@@ -1450,12 +1452,140 @@ func (c *BareRepoExistsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// If .repo.git exists and no broken worktrees, all good
-	if _, err := os.Stat(bareRepoPath); err == nil && len(c.brokenWorktrees) == 0 {
+	// If .repo.git exists, also verify push URL matches config.json
+	if _, err := os.Stat(bareRepoPath); err == nil {
+		c.pushURLMismatch = false
+		var configWarning string // track config read issues for combined reporting
+
+		// Read push_url from config.json directly (not via config.RigEntry/loadRig).
+		// The doctor check reads on-disk config independently of the loaded town.json state.
+		// If push_url field semantics change in config.RigEntry, update this struct to match.
+		configPath := filepath.Join(rigPath, "config.json")
+		cfgData, readErr := os.ReadFile(configPath)
+		if readErr != nil {
+			if !os.IsNotExist(readErr) {
+				// config.json exists but unreadable — warn about permissions
+				if len(c.brokenWorktrees) == 0 {
+					return &CheckResult{
+						Name:     c.Name(),
+						Status:   StatusWarning,
+						Message:  "Shared bare repo exists but config.json is unreadable",
+						Details:  []string{readErr.Error()},
+						FixHint:  "Check file permissions on " + configPath,
+						Category: c.Category(),
+					}
+				}
+				configWarning = "config.json unreadable: " + readErr.Error()
+			}
+			// config.json missing — skip push URL validation (bare repo can exist without config)
+		} else {
+			var cfg struct {
+				PushURL string `json:"push_url,omitempty"`
+			}
+			if jsonErr := json.Unmarshal(cfgData, &cfg); jsonErr != nil {
+				// config.json is malformed — cannot validate push URL
+				if len(c.brokenWorktrees) == 0 {
+					return &CheckResult{
+						Name:     c.Name(),
+						Status:   StatusWarning,
+						Message:  "Shared bare repo exists but config.json is malformed",
+						Details:  []string{jsonErr.Error()},
+						FixHint:  "Check config.json syntax in " + configPath,
+						Category: c.Category(),
+					}
+				}
+				configWarning = "config.json malformed: " + jsonErr.Error()
+			} else {
+				cfgPushURL := strings.TrimSpace(cfg.PushURL)
+				// Get actual push and fetch URLs from .repo.git using git wrapper
+				bareGit := git.NewGitWithDir(bareRepoPath, "")
+				actualPush, pushErr := bareGit.GetPushURL("origin")
+				actualFetch, fetchErr := bareGit.RemoteURL("origin")
+				if pushErr != nil || fetchErr != nil {
+					// Cannot query remote config — report warning
+					if len(c.brokenWorktrees) == 0 {
+						details := []string{}
+						if pushErr != nil {
+							details = append(details, "push URL query failed: "+pushErr.Error())
+						}
+						if fetchErr != nil {
+							details = append(details, "fetch URL query failed: "+fetchErr.Error())
+						}
+						return &CheckResult{
+							Name:     c.Name(),
+							Status:   StatusWarning,
+							Message:  "Cannot validate push URL — git remote query failed",
+							Details:  details,
+							FixHint:  "Check .repo.git remote configuration for " + ctx.RigName,
+							Category: c.Category(),
+						}
+					}
+					configWarning = fmt.Sprintf("git remote query failed (push: %v, fetch: %v)", pushErr, fetchErr)
+				} else {
+					actualFetch = strings.TrimSpace(actualFetch)
+					if cfgPushURL != "" {
+						// Config specifies a push URL — it should match actual
+						if actualPush != cfgPushURL {
+							c.pushURLMismatch = true
+						}
+					} else {
+						// Config has no push URL — this may be a legacy config that
+						// predates the push_url feature. Don't flag a mismatch; the
+						// existing git push URL (if any) may be intentionally set.
+						// RegisterRig will auto-detect and sync to config.json on next run.
+					}
+				}
+			}
+		}
+
+		// Return based on the combination of conditions.
+		// All paths return from here — no fall-through to the "missing .repo.git" block.
+		if len(c.brokenWorktrees) == 0 && !c.pushURLMismatch {
+			return &CheckResult{
+				Name:     c.Name(),
+				Status:   StatusOK,
+				Message:  "Shared bare repo exists and worktrees are valid",
+				Category: c.Category(),
+			}
+		}
+		if c.pushURLMismatch && len(c.brokenWorktrees) == 0 {
+			return &CheckResult{
+				Name:     c.Name(),
+				Status:   StatusWarning,
+				Message:  "Shared bare repo push URL does not match config.json",
+				Details:  []string{"Note: manual config.json edits require 'gt rig add <name> --adopt' to propagate to town.json"},
+				FixHint:  "Run 'gt doctor --fix --rig " + ctx.RigName + "' to update push URL",
+				Category: c.Category(),
+			}
+		}
+		if c.pushURLMismatch {
+			// Both push URL mismatch and broken worktrees
+			details := []string{fmt.Sprintf("Push URL mismatch and %d broken worktree(s)", len(c.brokenWorktrees))}
+			if configWarning != "" {
+				details = append(details, configWarning)
+			}
+			details = append(details, c.brokenWorktrees...)
+			return &CheckResult{
+				Name:     c.Name(),
+				Status:   StatusError,
+				Message:  fmt.Sprintf("Push URL mismatch and %d broken worktree(s)", len(c.brokenWorktrees)),
+				Details:  details,
+				FixHint:  "Run 'gt doctor --fix --rig " + ctx.RigName + "' to repair",
+				Category: c.Category(),
+			}
+		}
+		// Broken worktrees only (.repo.git exists but worktree refs are stale)
+		details := []string{fmt.Sprintf("Bare repo exists at %s but %d worktree(s) have broken references", bareRepoPath, len(c.brokenWorktrees))}
+		if configWarning != "" {
+			details = append(details, configWarning)
+		}
+		details = append(details, c.brokenWorktrees...)
 		return &CheckResult{
 			Name:     c.Name(),
-			Status:   StatusOK,
-			Message:  "Shared bare repo exists and worktrees are valid",
+			Status:   StatusError,
+			Message:  fmt.Sprintf("%d worktree(s) have broken references in .repo.git", len(c.brokenWorktrees)),
+			Details:  details,
+			FixHint:  "Run 'gt doctor --fix --rig " + ctx.RigName + "' to recreate worktree entries",
 			Category: c.Category(),
 		}
 	}
@@ -1484,60 +1614,105 @@ func (c *BareRepoExistsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix recreates the .repo.git bare repo from the rig's git_url and re-registers
-// existing worktrees.
+// existing worktrees. Also fixes push URL mismatches on existing repos.
 func (c *BareRepoExistsCheck) Fix(ctx *CheckContext) error {
-	if ctx.RigName == "" || len(c.brokenWorktrees) == 0 {
+	if ctx.RigName == "" {
 		return nil
 	}
 
 	rigPath := ctx.RigPath()
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
 
-	// Don't recreate if it already exists
-	if _, err := os.Stat(bareRepoPath); err == nil {
+	// Fix push URL mismatch on existing .repo.git.
+	// Only apply if .repo.git exists — if missing, recreation below sets the correct push URL.
+	// Note: config.json is parsed inline here (not via config.RigEntry) because the doctor
+	// check needs to read the on-disk config independently of the loaded town.json state.
+	if c.pushURLMismatch {
+		if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+			configPath := filepath.Join(rigPath, "config.json")
+			cfgData, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				return fmt.Errorf("cannot read config.json to fix push URL: %w", readErr)
+			}
+			var cfg struct {
+				PushURL string `json:"push_url,omitempty"`
+			}
+			if jsonErr := json.Unmarshal(cfgData, &cfg); jsonErr != nil {
+				return fmt.Errorf("cannot parse config.json to fix push URL: %w", jsonErr)
+			}
+			cfgPushURL := strings.TrimSpace(cfg.PushURL)
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			if cfgPushURL != "" {
+				if err := bareGit.ConfigurePushURL("origin", cfgPushURL); err != nil {
+					return fmt.Errorf("updating push URL on .repo.git: %w", err)
+				}
+			} else {
+				// Config has no push URL — this may be a legacy config that
+				// predates the push_url feature. Don't clear; the existing
+				// git push URL (if any) may be intentionally set.
+			}
+		}
+	}
+
+	if len(c.brokenWorktrees) == 0 {
+		// No worktrees to fix — push URL mismatch (if any) already handled above
 		return nil
 	}
 
-	// Read git_url from config.json
-	configPath := filepath.Join(rigPath, "config.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("cannot read config.json to get git_url: %w", err)
-	}
+	// Recreate .repo.git if it's missing; skip clone if it already exists
+	if _, err := os.Stat(bareRepoPath); err != nil {
+		// Read git_url from config.json
+		configPath := filepath.Join(rigPath, "config.json")
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("cannot read config.json to get git_url: %w", err)
+		}
 
-	var cfg struct {
-		GitURL string `json:"git_url"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("cannot parse config.json: %w", err)
-	}
-	if cfg.GitURL == "" {
-		return fmt.Errorf("config.json has no git_url, cannot recreate .repo.git")
-	}
+		var cfg struct {
+			GitURL  string `json:"git_url"`
+			PushURL string `json:"push_url,omitempty"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("cannot parse config.json: %w", err)
+		}
+		if cfg.GitURL == "" {
+			return fmt.Errorf("config.json has no git_url, cannot recreate .repo.git")
+		}
 
-	// Clone bare repo
-	cmd := exec.Command("git", "clone", "--bare", cfg.GitURL, bareRepoPath)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cloning bare repo: %s", strings.TrimSpace(stderr.String()))
-	}
+		// Clone bare repo
+		cmd := exec.Command("git", "clone", "--bare", cfg.GitURL, bareRepoPath)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("cloning bare repo: %s", strings.TrimSpace(stderr.String()))
+		}
 
-	// Configure refspec so worktrees can fetch origin/* refs
-	stderr.Reset()
-	configCmd := exec.Command("git", "-C", bareRepoPath, "config",
-		"remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-	configCmd.Stderr = &stderr
-	if err := configCmd.Run(); err != nil {
-		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
-	}
+		// Configure refspec so worktrees can fetch origin/* refs
+		stderr.Reset()
+		configCmd := exec.Command("git", "-C", bareRepoPath, "config",
+			"remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+		configCmd.Stderr = &stderr
+		if err := configCmd.Run(); err != nil {
+			return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
+		}
 
-	// Fetch to populate remote refs
-	stderr.Reset()
-	fetchCmd := exec.Command("git", "-C", bareRepoPath, "fetch", "origin")
-	fetchCmd.Stderr = &stderr
-	if err := fetchCmd.Run(); err != nil {
-		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
+		// Fetch to populate remote refs
+		stderr.Reset()
+		fetchCmd := exec.Command("git", "-C", bareRepoPath, "fetch", "origin")
+		fetchCmd.Stderr = &stderr
+		if err := fetchCmd.Run(); err != nil {
+			return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
+		}
+
+		// Restore push URL if configured (for read-only upstream repos)
+		if cfg.PushURL != "" {
+			stderr.Reset()
+			pushURLCmd := exec.Command("git", "-C", bareRepoPath, "remote", "set-url", "--push", "origin", cfg.PushURL)
+			pushURLCmd.Stderr = &stderr
+			if err := pushURLCmd.Run(); err != nil {
+				return fmt.Errorf("configuring push URL: %s", strings.TrimSpace(stderr.String()))
+			}
+		}
 	}
 
 	// Re-register broken worktrees so the bare repo knows about them.

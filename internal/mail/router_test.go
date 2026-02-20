@@ -236,7 +236,7 @@ func TestShouldBeWisp(t *testing.T) {
 func TestResolveBeadsDir(t *testing.T) {
 	// With town root set
 	r := NewRouterWithTownRoot("/work/dir", "/home/user/gt")
-	got := r.resolveBeadsDir("gastown/Toast")
+	got := r.resolveBeadsDir()
 	want := "/home/user/gt/.beads"
 	if filepath.ToSlash(got) != want {
 		t.Errorf("resolveBeadsDir with townRoot = %q, want %q", got, want)
@@ -244,7 +244,7 @@ func TestResolveBeadsDir(t *testing.T) {
 
 	// Without town root (fallback to workDir)
 	r2 := &Router{workDir: "/work/dir", townRoot: ""}
-	got2 := r2.resolveBeadsDir("mayor/")
+	got2 := r2.resolveBeadsDir()
 	want2 := "/work/dir/.beads"
 	if filepath.ToSlash(got2) != want2 {
 		t.Errorf("resolveBeadsDir without townRoot = %q, want %q", got2, want2)

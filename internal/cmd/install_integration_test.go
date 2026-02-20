@@ -98,6 +98,43 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	doltDir := filepath.Join(beadsDir, "dolt")
 	assertDirExists(t, doltDir, ".beads/dolt/")
 
+	// Verify metadata points to canonical HQ Dolt database, not beads_hq.
+	var metadata struct {
+		DoltMode     string `json:"dolt_mode"`
+		DoltDatabase string `json:"dolt_database"`
+	}
+	metadataBytes, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("reading metadata.json: %v", err)
+	}
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		t.Fatalf("parsing metadata.json: %v", err)
+	}
+	if metadata.DoltMode != "server" {
+		t.Errorf("metadata dolt_mode = %q, want %q", metadata.DoltMode, "server")
+	}
+	if metadata.DoltDatabase != "hq" {
+		t.Errorf("metadata dolt_database = %q, want %q", metadata.DoltDatabase, "hq")
+	}
+
+	// Verify top-level config.yaml exists with hq prefix keys.
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	assertFileExists(t, configPath, ".beads/config.yaml")
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading config.yaml: %v", err)
+	}
+	configText := string(configBytes)
+	if !strings.Contains(configText, "prefix: hq") {
+		t.Errorf("config.yaml missing prefix: hq, got:\n%s", configText)
+	}
+	if !strings.Contains(configText, "issue-prefix: hq") {
+		t.Errorf("config.yaml missing issue-prefix: hq, got:\n%s", configText)
+	}
+	if !strings.Contains(configText, "sync.mode: dolt-native") {
+		t.Errorf("config.yaml missing sync.mode: dolt-native, got:\n%s", configText)
+	}
+
 	// Verify prefix by running bd config get issue_prefix
 	bdCmd := exec.Command("bd", "config", "get", "issue_prefix")
 	bdCmd.Dir = hqPath

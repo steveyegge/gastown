@@ -16,12 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: true
 
       - name: Configure Git
@@ -31,14 +31,14 @@ jobs:
 
       - name: Cache beads (bd)
         id: cache-beads
-        uses: actions/cache@v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: ~/go/bin/bd
           key: beads-${{ hashFiles('.github/workflows/integration.yml') }}
 
       - name: Install beads (bd)
         if: steps.cache-beads.outputs.cache-hit != 'true'
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.52.0
+        run: go install github.com/steveyegge/beads/cmd/bd@v0.54.0
 
       - name: Install Dolt
         run: |

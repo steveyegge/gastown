@@ -40,10 +40,6 @@ const (
 	// Different from "stalled" (detected externally when session stops working).
 	StateStuck State = "stuck"
 
-	// StateActive is deprecated: use StateWorking.
-	// Kept only for backward compatibility with existing data.
-	StateActive State = "active"
-
 	// StateZombie means a tmux session exists but has no corresponding worktree directory.
 	// This is a detected condition: the polecat was incompletely nuked or has a
 	// session naming mismatch, leaving an orphaned tmux session.
@@ -56,10 +52,8 @@ func (s State) IsWorking() bool {
 }
 
 // IsActive returns true if the polecat session is actively working.
-// For transient polecats, this is true for working state and
-// legacy active state (treated as working).
 func (s State) IsActive() bool {
-	return s == StateWorking || s == StateActive
+	return s == StateWorking
 }
 
 // Polecat represents a worker agent in a rig.

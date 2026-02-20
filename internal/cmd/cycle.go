@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os/exec"
 	"sort"
 
@@ -130,32 +131,26 @@ func parseRigInfraSession(sess string) string {
 	return ""
 }
 
-// cycleRigInfraSession cycles between witness and refinery sessions for a rig.
-func cycleRigInfraSession(direction int, currentSession, rig string) error {
-	// Find running infra sessions for this rig
-	witnessSession := sessionpkg.WitnessSessionName(sessionpkg.PrefixFor(rig))
-	refinerySession := sessionpkg.RefinerySessionName(sessionpkg.PrefixFor(rig))
-
-	var sessions []string
-	allSessions, err := listTmuxSessions()
-	if err != nil {
-		return err
+// resolveCurrentSession returns the current tmux session, using override if provided.
+func resolveCurrentSession(override string) (string, error) {
+	if override != "" {
+		return override, nil
 	}
+	return getCurrentTmuxSession()
+}
 
-	for _, s := range allSessions {
-		if s == witnessSession || s == refinerySession {
-			sessions = append(sessions, s)
-		}
-	}
-
+// cycleInGroup cycles between sessions in a sorted group.
+// direction: 1 for next, -1 for previous.
+// currentSession: the current tmux session name.
+// sessions: candidate sessions in the group (will be sorted).
+// Returns nil if there's nothing to switch to.
+func cycleInGroup(direction int, currentSession string, sessions []string) error {
 	if len(sessions) == 0 {
-		return nil // No infra sessions running
+		return nil
 	}
 
-	// Sort for consistent ordering
 	sort.Strings(sessions)
 
-	// Find current position
 	currentIdx := -1
 	for i, s := range sessions {
 		if s == currentSession {
@@ -168,16 +163,33 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 		return nil // Current session not in list
 	}
 
-	// Calculate target index (with wrapping)
 	targetIdx := (currentIdx + direction + len(sessions)) % len(sessions)
-
 	if targetIdx == currentIdx {
 		return nil // Only one session
 	}
 
-	// Switch to target session
 	cmd := exec.Command("tmux", "-u", "switch-client", "-t", sessions[targetIdx])
 	return cmd.Run()
+}
+
+// cycleRigInfraSession cycles between witness and refinery sessions for a rig.
+func cycleRigInfraSession(direction int, currentSession, rig string) error {
+	witnessSession := sessionpkg.WitnessSessionName(sessionpkg.PrefixFor(rig))
+	refinerySession := sessionpkg.RefinerySessionName(sessionpkg.PrefixFor(rig))
+
+	allSessions, err := listTmuxSessions()
+	if err != nil {
+		return fmt.Errorf("listing sessions: %w", err)
+	}
+
+	var sessions []string
+	for _, s := range allSessions {
+		if s == witnessSession || s == refinerySession {
+			sessions = append(sessions, s)
+		}
+	}
+
+	return cycleInGroup(direction, currentSession, sessions)
 }
 
 // listTmuxSessions returns all tmux session names.

@@ -394,6 +394,11 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 		description += fmt.Sprintf("\nPR: #%d", formulaRunPR)
 	}
 
+	// Guard against flag-like convoy titles (gt-e0kx5)
+	if beads.IsFlagLikeTitle(convoyTitle) {
+		return fmt.Errorf("refusing to create formula convoy: title %q looks like a CLI flag", convoyTitle)
+	}
+
 	createArgs := []string{
 		"create",
 		"--type=convoy",

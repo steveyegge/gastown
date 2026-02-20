@@ -24,6 +24,19 @@ var (
 	ErrFlagTitle    = errors.New("title looks like a CLI flag (starts with '-'); use --title=\"...\" to set flag-like titles intentionally")
 )
 
+// ExtractIssueID strips the external:prefix:id wrapper from bead IDs.
+// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
+// but consumers need the raw bead ID for display and lookups.
+func ExtractIssueID(id string) string {
+	if strings.HasPrefix(id, "external:") {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return id
+}
+
 // IsFlagLikeTitle returns true if the title looks like it was accidentally set
 // from a CLI flag (e.g., "--help", "--json", "-v"). This catches a common
 // mistake where `bd create --title --help` consumes --help as the title value

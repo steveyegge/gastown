@@ -2,6 +2,7 @@ package rig
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -451,7 +452,7 @@ exit 1
 	if err != nil {
 		t.Fatalf("reading config.yaml: %v", err)
 	}
-	want := "prefix: gt\nissue-prefix: gt\n"
+	want := "prefix: gt\nissue-prefix: gt\nsync.mode: dolt-native\n"
 	if string(config) != want {
 		t.Fatalf("config.yaml = %q, want %q", string(config), want)
 	}
@@ -497,6 +498,10 @@ exit 0
 	// Verify bd config set issue_prefix was called with the correct prefix
 	if !strings.Contains(cmds, "config set issue_prefix myrig") {
 		t.Errorf("expected 'bd config set issue_prefix myrig' in commands log, got:\n%s", cmds)
+	}
+	// Verify sync mode is explicitly set to dolt-native for new rig beads.
+	if !strings.Contains(cmds, "config set sync.mode dolt-native") {
+		t.Errorf("expected 'bd config set sync.mode dolt-native' in commands log, got:\n%s", cmds)
 	}
 }
 
@@ -554,13 +559,16 @@ case "$cmd" in
   config)
     # Accept config commands (e.g., "bd config set types.custom ...")
     ;;
+  init)
+    # Accept init commands (e.g., "bd init --prefix gt --server")
+    ;;
   *)
     echo "unexpected command: $cmd" >&2
     exit 1
     ;;
 esac
 `
-	windowsScript := "@echo off\r\nsetlocal enabledelayedexpansion\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nset \"cmd=%1\"\r\nset \"arg2=%2\"\r\nset \"arg3=%3\"\r\nif \"%cmd%\"==\"--allow-stale\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"show\" (\r\n  echo []\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"create\" (\r\n  set \"id=\"\r\n  set \"title=\"\r\n  for %%A in (%*) do (\r\n    set \"arg=%%~A\"\r\n    if /i \"!arg:~0,5!\"==\"--id=\" set \"id=!arg:~5!\"\r\n    if /i \"!arg:~0,8!\"==\"--title=\" set \"title=!arg:~8!\"\r\n  )\r\n  if defined AGENT_LOG (\r\n    echo !id!>>\"%AGENT_LOG%\"\r\n  )\r\n  echo {\"id\":\"!id!\",\"title\":\"!title!\",\"description\":\"\",\"issue_type\":\"agent\"}\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"slot\" exit /b 0\r\nif \"%cmd%\"==\"config\" exit /b 0\r\nexit /b 1\r\n"
+	windowsScript := "@echo off\r\nsetlocal enabledelayedexpansion\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nset \"cmd=%1\"\r\nset \"arg2=%2\"\r\nset \"arg3=%3\"\r\nif \"%cmd%\"==\"--allow-stale\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"show\" (\r\n  echo []\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"create\" (\r\n  set \"id=\"\r\n  set \"title=\"\r\n  for %%A in (%*) do (\r\n    set \"arg=%%~A\"\r\n    if /i \"!arg:~0,5!\"==\"--id=\" set \"id=!arg:~5!\"\r\n    if /i \"!arg:~0,8!\"==\"--title=\" set \"title=!arg:~8!\"\r\n  )\r\n  if defined AGENT_LOG (\r\n    echo !id!>>\"%AGENT_LOG%\"\r\n  )\r\n  echo {\"id\":\"!id!\",\"title\":\"!title!\",\"description\":\"\",\"issue_type\":\"agent\"}\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"slot\" exit /b 0\r\nif \"%cmd%\"==\"config\" exit /b 0\r\nif \"%cmd%\"==\"init\" exit /b 0\r\nexit /b 1\r\n"
 
 	binDir := writeFakeBD(t, script, windowsScript)
 	agentLog := filepath.Join(t.TempDir(), "agents.log")
@@ -1074,6 +1082,108 @@ func TestRegisterRig_DetectPushURLEmptyWhenPushEqualsFetch(t *testing.T) {
 	if entry.PushURL != "" {
 		t.Errorf("PushURL = %q, want empty when push URL equals fetch URL", entry.PushURL)
 	}
+}
+
+func TestDetectGitURL_MayorRigFallback(t *testing.T) {
+	// Verify detectGitURL finds the origin remote from mayor/rig when the
+	// root rigPath has no git repo. This exercises the fallback path that
+	// was fixed by switching from NewGitWithDir to NewGit.
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigName := "detectme"
+	rigPath := filepath.Join(root, rigName)
+
+	// Create mayor/rig as a clone (but do NOT create a git repo at rigPath itself)
+	upstreamURL := filepath.Join(root, "detect-upstream.git")
+	cmd := exec.Command("git", "init", "--bare", upstreamURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init bare repo failed: %v\n%s", err, string(out))
+	}
+	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
+	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
+		t.Fatalf("mkdir mayor dir: %v", err)
+	}
+	cloneCmd := exec.Command("git", "clone", upstreamURL, mayorRigPath)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone failed: %v\n%s", err, string(out))
+	}
+
+	// detectGitURL is unexported, so test via RegisterRig with no --url
+	result, err := manager.RegisterRig(RegisterRigOptions{Name: rigName, Force: true})
+	if err != nil {
+		t.Fatalf("RegisterRig: %v", err)
+	}
+	if result.GitURL != upstreamURL {
+		t.Errorf("GitURL = %q, want %q (should detect from mayor/rig)", result.GitURL, upstreamURL)
+	}
+}
+
+func TestRegisterRig_LegacyConfigPreservesExistingPushURL(t *testing.T) {
+	// Legacy config.json (pre-push_url feature) has no push_url field.
+	// RegisterRig should NOT clear existing push URLs in .repo.git because
+	// empty push_url in legacy config is indistinguishable from "never set"
+	// due to omitempty. Existing git push URLs are preserved.
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigName := "legacyrig"
+	rigPath := filepath.Join(root, rigName)
+
+	upstreamURL := filepath.Join(root, "upstream-legacy.git")
+	forkURL := filepath.Join(root, "fork-legacy.git")
+	for _, u := range []string{upstreamURL, forkURL} {
+		cmd := exec.Command("git", "init", "--bare", u)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("init bare repo %s failed: %v\n%s", u, err, string(out))
+		}
+	}
+
+	// Create .repo.git bare repo with a custom push URL (user configured manually)
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if err := os.MkdirAll(filepath.Dir(bareRepoPath), 0755); err != nil {
+		t.Fatalf("mkdir rig dir: %v", err)
+	}
+	cloneCmd := exec.Command("git", "clone", "--bare", upstreamURL, bareRepoPath)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone failed: %v\n%s", err, string(out))
+	}
+	pushCmd := exec.Command("git", "--git-dir", bareRepoPath, "remote", "set-url", "origin", "--push", forkURL)
+	if out, err := pushCmd.CombinedOutput(); err != nil {
+		t.Fatalf("set push URL failed: %v\n%s", err, string(out))
+	}
+
+	// Write legacy config.json WITHOUT push_url field
+	configData := fmt.Sprintf(`{"type":"rig","version":1,"name":"%s","git_url":"%s","default_branch":"main"}`, rigName, upstreamURL)
+	if err := os.WriteFile(filepath.Join(rigPath, "config.json"), []byte(configData), 0644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+
+	result, err := manager.RegisterRig(RegisterRigOptions{Name: rigName, GitURL: upstreamURL})
+	if err != nil {
+		t.Fatalf("RegisterRig: %v", err)
+	}
+
+	// Legacy config has empty PushURL, so auto-detect runs and finds the fork URL
+	// from .repo.git. The detected push URL is persisted to both config.json and
+	// town config (RigEntry.PushURL), while keeping "not authoritative" semantics
+	// (no clearing on empty detect).
+	entry := rigsConfig.Rigs[rigName]
+	if entry.PushURL != forkURL {
+		t.Errorf("town config PushURL = %q, want %q (auto-detected from .repo.git)", entry.PushURL, forkURL)
+	}
+
+	// Verify .repo.git push URL was preserved
+	pushOut, err := exec.Command("git", "--git-dir", bareRepoPath, "remote", "get-url", "--push", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("get push URL: %v\n%s", err, string(pushOut))
+	}
+	pushURLResult := strings.TrimSpace(string(pushOut))
+	if pushURLResult != forkURL {
+		t.Errorf(".repo.git push URL = %q, want %q (should be preserved for legacy config)", pushURLResult, forkURL)
+	}
+
+	_ = result
 }
 
 func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {

@@ -402,7 +402,29 @@ func (g *Git) ConfigurePushURL(remote, pushURL string) error {
 	return err
 }
 
-// GetPushURL returns the push URL for a remote, or empty string if not configured.
+// ClearPushURL removes a custom push URL for a remote, reverting to the fetch URL.
+// If no custom push URL is set, this is a no-op.
+// Uses --unset-all to handle multi-valued pushurl entries; with --unset-all,
+// exit code 5 unambiguously means "key not found" (safe to ignore).
+func (g *Git) ClearPushURL(remote string) error {
+	_, err := g.run("config", "--unset-all", fmt.Sprintf("remote.%s.pushurl", remote))
+	if err != nil {
+		// git config --unset-all returns exit code 5 if the key doesn't exist — that's fine.
+		var ge *GitError
+		if errors.As(err, &ge) {
+			var exitErr *exec.ExitError
+			if errors.As(ge.Err, &exitErr) && exitErr.ExitCode() == 5 {
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// GetPushURL returns the effective push URL for a remote.
+// Note: git returns the fetch URL when no custom push URL is configured, so this
+// never returns empty for a valid remote. Compare with RemoteURL to detect custom push URLs.
 func (g *Git) GetPushURL(remote string) (string, error) {
 	out, err := g.run("remote", "get-url", "--push", remote)
 	if err != nil {
@@ -628,6 +650,32 @@ func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
 func (g *Git) DeleteRemoteBranch(remote, branch string) error {
 	_, err := g.run("push", remote, "--delete", branch)
 	return err
+}
+
+// ListRemoteRefs returns remote ref names matching a prefix using ls-remote.
+// The prefix filters refs (e.g., "refs/heads/polecat/" for all polecat branches).
+// Returns full ref names like "refs/heads/polecat/furiosa-abc123".
+func (g *Git) ListRemoteRefs(remote, prefix string) ([]string, error) {
+	out, err := g.run("ls-remote", "--refs", remote, prefix+"*")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var refs []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// ls-remote output format: <sha>\t<refname>
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			refs = append(refs, parts[1])
+		}
+	}
+	return refs, nil
 }
 
 // Rebase rebases the current branch onto the given ref.
@@ -1104,6 +1152,14 @@ func (g *Git) StashCount() (int, error) {
 	branch, branchErr := g.CurrentBranch()
 	filterByBranch := branchErr == nil && branch != "" && branch != "HEAD"
 
+	// Stash reflog lines have the format:
+	//   stash@{N}: WIP on <branch>: <hash> <message>
+	//   stash@{N}: On <branch>: <message>
+	// We anchor the match to ": WIP on <branch>:" or ": On <branch>:" to avoid
+	// false positives from commit messages that happen to contain "on <branch>:".
+	wipPrefix := ": WIP on " + branch + ":"
+	onPrefix := ": On " + branch + ":"
+
 	lines := strings.Split(out, "\n")
 	count := 0
 	for _, line := range lines {
@@ -1111,9 +1167,7 @@ func (g *Git) StashCount() (int, error) {
 			continue
 		}
 		if filterByBranch {
-			// Stash reflog messages use "WIP on <branch>:" or "On <branch>:" format.
-			// Only count stashes that were created on the current branch.
-			if !strings.Contains(line, "on "+branch+":") && !strings.Contains(line, "On "+branch+":") {
+			if !strings.Contains(line, wipPrefix) && !strings.Contains(line, onPrefix) {
 				continue
 			}
 		}

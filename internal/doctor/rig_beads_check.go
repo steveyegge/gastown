@@ -149,25 +149,22 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
 		bd := beads.New(rigBeadsPath)
 
+		// Try to get git URL from rig config
+		rigPath := filepath.Join(ctx.TownRoot, rigName)
+		gitURL := ""
+		if cfg, err := rig.LoadRigConfig(rigPath); err == nil {
+			gitURL = cfg.GitURL
+		}
+
+		fields := &beads.RigFields{
+			Repo:   gitURL,
+			Prefix: info.prefix,
+			State:  beads.RigStateActive,
+		}
+
 		rigBeadID := beads.RigBeadIDWithPrefix(info.prefix, rigName)
-		if _, err := bd.Show(rigBeadID); err != nil {
-			// Bead doesn't exist - create it
-			// Try to get git URL from rig config
-			rigPath := filepath.Join(ctx.TownRoot, rigName)
-			gitURL := ""
-			if cfg, err := rig.LoadRigConfig(rigPath); err == nil {
-				gitURL = cfg.GitURL
-			}
-
-			fields := &beads.RigFields{
-				Repo:   gitURL,
-				Prefix: info.prefix,
-				State:  beads.RigStateActive,
-			}
-
-			if _, err := bd.CreateRigBead(rigName, fields); err != nil {
-				errs = append(errs, fmt.Errorf("creating %s: %w", rigBeadID, err))
-			}
+		if _, err := bd.EnsureRigBead(rigName, fields); err != nil {
+			errs = append(errs, fmt.Errorf("ensuring %s: %w", rigBeadID, err))
 		}
 	}
 

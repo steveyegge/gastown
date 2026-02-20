@@ -107,14 +107,6 @@ func (hb *Heartbeat) IsVeryStale() bool {
 	return hb == nil || hb.Age() >= 15*time.Minute
 }
 
-// ShouldPoke returns true if the daemon should poke the Deacon.
-// The Deacon should be poked if:
-// - No heartbeat exists
-// - Heartbeat is very stale (>5 minutes)
-func (hb *Heartbeat) ShouldPoke() bool {
-	return hb.IsVeryStale()
-}
-
 // Touch writes a minimal heartbeat with just the timestamp.
 // This is a convenience function for simple heartbeat updates.
 func Touch(townRoot string) error {

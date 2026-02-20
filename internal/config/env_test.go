@@ -173,31 +173,6 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 	assertEnv(t, env, "GT_RIG", "myrig")
 }
 
-func TestAgentEnv_WithAgentOverride(t *testing.T) {
-	t.Parallel()
-	env := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       "myrig",
-		AgentName: "Toast",
-		TownRoot:  "/town",
-		Agent:     "codex",
-	})
-
-	assertEnv(t, env, "GT_AGENT", "codex")
-}
-
-func TestAgentEnv_WithoutAgentOverride(t *testing.T) {
-	t.Parallel()
-	env := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       "myrig",
-		AgentName: "Toast",
-		TownRoot:  "/town",
-	})
-
-	assertNotSet(t, env, "GT_AGENT")
-}
-
 func TestShellQuote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

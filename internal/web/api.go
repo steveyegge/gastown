@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -984,20 +985,12 @@ func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "Missing issue ID", http.StatusBadRequest)
 		return
 	}
-	// Issue IDs may use external:prefix:id format for cross-rig dependencies
-	// (see internal/web/fetcher.go:extractIssueID). Unwrap to the raw bead ID
-	// before validation and before passing to bd show, which doesn't handle
-	// the external: prefix. This also fixes a pre-existing bug where the
-	// wrapped ID was passed to bd show and always failed to resolve.
-	showID := issueID
-	if strings.HasPrefix(issueID, "external:") {
-		parts := strings.SplitN(issueID, ":", 3)
-		if len(parts) == 3 {
-			showID = parts[2]
-		} else {
-			h.sendError(w, "Malformed external issue ID (expected external:prefix:id)", http.StatusBadRequest)
-			return
-		}
+	// Issue IDs may use external:prefix:id format for cross-rig dependencies.
+	// Unwrap to the raw bead ID before validation and bd show.
+	showID := beads.ExtractIssueID(issueID)
+	if strings.HasPrefix(issueID, "external:") && showID == issueID {
+		h.sendError(w, "Malformed external issue ID (expected external:prefix:id)", http.StatusBadRequest)
+		return
 	}
 	if !isValidID(showID) {
 		h.sendError(w, "Invalid issue ID format", http.StatusBadRequest)

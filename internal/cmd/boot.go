@@ -326,7 +326,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 	// A session can exist but be stuck (not making progress)
 	if townRoot != "" {
 		hb := deacon.ReadHeartbeat(townRoot)
-		if hb.ShouldPoke() {
+		if hb.IsVeryStale() {
 			// Heartbeat is stale (>15 min) - Deacon is stuck
 			// Nudge the session to try to wake it up
 			age := hb.Age()

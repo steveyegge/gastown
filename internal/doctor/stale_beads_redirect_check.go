@@ -54,7 +54,7 @@ func NewStaleBeadsRedirectCheck() *StaleBeadsRedirectCheck {
 // These are gitignored runtime files that would conflict with redirected data.
 // Note: config.yaml is NOT included because it may be tracked in git.
 var staleFilePatterns = []string{
-	// SQLite databases
+	// Dolt databases
 	"*.db",
 	"*.db-*",
 	"*.db?*",

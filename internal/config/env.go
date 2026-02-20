@@ -31,13 +31,6 @@ type AgentEnvConfig struct {
 	// SessionIDEnv is the environment variable name that holds the session ID.
 	// Sets GT_SESSION_ID_ENV so the runtime knows where to find the session ID.
 	SessionIDEnv string
-
-	// Agent is the agent override (e.g., "codex", "gemini").
-	// If set, GT_AGENT is written to the tmux session table via SetEnvironment
-	// so that IsAgentAlive and waitForPolecatReady can read it via GetEnvironment.
-	// Without this, GetEnvironment returns empty (tmux show-environment reads the
-	// session table, not the process env set via exec env in the startup command).
-	Agent string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -119,13 +112,6 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add session ID env var name if provided
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
-	}
-
-	// Set GT_AGENT when an agent override is in use.
-	// This makes the override visible via tmux show-environment so that
-	// IsAgentAlive and waitForPolecatReady use the correct process names.
-	if cfg.Agent != "" {
-		env["GT_AGENT"] = cfg.Agent
 	}
 
 	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)

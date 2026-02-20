@@ -6,26 +6,6 @@ import (
 	"testing"
 )
 
-func TestStateConstants(t *testing.T) {
-	tests := []struct {
-		name  string
-		state State
-		value string
-	}{
-		{"StateStopped", StateStopped, "stopped"},
-		{"StateRunning", StateRunning, "running"},
-		{"StatePaused", StatePaused, "paused"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if string(tt.state) != tt.value {
-				t.Errorf("State constant = %q, want %q", tt.state, tt.value)
-			}
-		})
-	}
-}
-
 func TestStateManager_StateFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	manager := NewStateManager[TestState](tmpDir, "test-state.json", func() *TestState {
@@ -115,23 +95,6 @@ func TestStateManager_Load_InvalidJSON(t *testing.T) {
 	_, err := manager.Load()
 	if err == nil {
 		t.Error("Load() with invalid JSON should return error")
-	}
-}
-
-func TestState_String(t *testing.T) {
-	tests := []struct {
-		state State
-		want  string
-	}{
-		{StateStopped, "stopped"},
-		{StateRunning, "running"},
-		{StatePaused, "paused"},
-	}
-
-	for _, tt := range tests {
-		if string(tt.state) != tt.want {
-			t.Errorf("State(%q) = %q, want %q", tt.state, string(tt.state), tt.want)
-		}
 	}
 }
 

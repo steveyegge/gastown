@@ -198,6 +198,33 @@ func getConvoyInfoForIssue(issueID string) *ConvoyInfo {
 	return info
 }
 
+// getConvoyInfoFromIssue reads convoy info directly from the issue's attachment fields.
+// This is the primary lookup method (gt-7b6wf fix): gt sling stores convoy_id and
+// merge_strategy on the issue when dispatching, avoiding unreliable cross-rig dep
+// resolution. Returns nil if the issue has no convoy fields in its description.
+func getConvoyInfoFromIssue(issueID, cwd string) *ConvoyInfo {
+	if issueID == "" {
+		return nil
+	}
+
+	bd := beads.New(beads.ResolveBeadsDir(cwd))
+	issue, err := bd.Show(issueID)
+	if err != nil {
+		return nil
+	}
+
+	attachment := beads.ParseAttachmentFields(issue)
+	if attachment == nil || attachment.ConvoyID == "" {
+		return nil
+	}
+
+	return &ConvoyInfo{
+		ID:            attachment.ConvoyID,
+		MergeStrategy: attachment.MergeStrategy,
+		Owned:         attachment.ConvoyOwned,
+	}
+}
+
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.
 // If owned is true, the convoy is marked with the gt:owned label for caller-managed lifecycle.
 // mergeStrategy is optional: "direct", "mr", or "local" (empty = default mr).

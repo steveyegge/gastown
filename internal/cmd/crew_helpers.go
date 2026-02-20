@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -112,32 +111,25 @@ func parseCrewSessionName(sessionName string) (rigName, crewName, prefix string,
 	return identity.Rig, identity.Name, identity.Prefix, true
 }
 
-// findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
-// Uses tmux list-sessions to find sessions matching <prefix>-crew-* pattern.
+// findRigCrewSessions returns all crew sessions for a given rig.
+// Finds sessions matching <prefix>-crew-* pattern.
 // rigPrefix is the rig's beads prefix (e.g., "gt", "bd") — passed directly from
 // the parsed session identity to avoid re-derivation failures when the registry
 // isn't loaded.
 func findRigCrewSessions(rigPrefix string) ([]string, error) { //nolint:unparam // error return kept for future use
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-	out, err := cmd.Output()
+	allSessions, err := listTmuxSessions()
 	if err != nil {
-		// No tmux server or no sessions
 		return nil, nil
 	}
 
 	prefix := rigPrefix + "-crew-"
 	var sessions []string
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, prefix) {
-			sessions = append(sessions, line)
+	for _, s := range allSessions {
+		if strings.HasPrefix(s, prefix) {
+			sessions = append(sessions, s)
 		}
 	}
 
-	// Sessions are already sorted by tmux, but sort explicitly for consistency
-	// (alphabetical by session name means alphabetical by crew name)
 	return sessions, nil
 }

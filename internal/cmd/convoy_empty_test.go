@@ -156,6 +156,10 @@ func TestFindStrandedConvoys_MixedConvoys(t *testing.T) {
 	if err := os.MkdirAll(townBeads, 0755); err != nil {
 		t.Fatalf("mkdir townBeads: %v", err)
 	}
+	// Routes needed so isSlingableBead can resolve gt- prefix to a rig
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
 
 	bdPath := filepath.Join(binDir, "bd")
 

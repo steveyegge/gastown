@@ -35,7 +35,12 @@ default = "patrol"
 id = "inbox-check"
 title = "Handle callbacks from agents"
 description = """
-Handle callbacks from agents.
+First, clean up any stale patrol wisps from abnormal exits in previous cycles:
+```bash
+bd mol wisp gc --age 1h
+```
+
+Then handle callbacks from agents.
 
 Check the Mayor's inbox for messages from:
 - Witnesses reporting polecat status
@@ -76,6 +81,23 @@ gt mail archive <message-id>
 ```
 Dogs return to idle automatically. The report is informational - no action needed
 unless the dog reports errors that require escalation.
+
+**CONVOY_NEEDS_FEEDING messages** (from Refinery):
+After merging a convoy-eligible MR, the Refinery sends this to trigger immediate
+convoy feeding. The convoy may have newly-ready issues after the merge.
+Subject format: `CONVOY_NEEDS_FEEDING <convoy-id>`
+```bash
+# For each CONVOY_NEEDS_FEEDING message:
+gt mail read <id>
+# Extract convoy ID from subject, then run stranded check for that convoy
+gt convoy stranded --json
+# If the convoy has ready work, dispatch a dog to feed it:
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+gt mail archive <message-id>
+```
+
+This is time-sensitive — the whole point is to avoid waiting for the next patrol
+cycle. Process CONVOY_NEEDS_FEEDING messages before lower-priority inbox items.
 
 **RECOVERED_BEAD messages** (from Witness):
 When a Witness detects a dead polecat with abandoned work, it resets the bead
