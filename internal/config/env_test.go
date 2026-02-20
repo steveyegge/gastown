@@ -198,6 +198,43 @@ func TestAgentEnv_WithoutAgentOverride(t *testing.T) {
 	assertNotSet(t, env, "GT_AGENT")
 }
 
+// TestAgentEnv_WithoutAgentOverride_RequiresFallback documents that callers
+// must set GT_AGENT from RuntimeConfig.ResolvedAgent when AgentEnvConfig.Agent
+// is empty. AgentEnv intentionally omits GT_AGENT without an explicit override,
+// but tmux session table consumers (IsAgentAlive, GT_AGENT validation) need it.
+// Regression test for PR #1776 which removed the session_manager.go fallback.
+func TestAgentEnv_WithoutAgentOverride_RequiresFallback(t *testing.T) {
+	t.Parallel()
+
+	// Simulate the default polecat dispatch path (no --agent flag).
+	// This is what session_manager.go calls when gt queue run / gt sling dispatches.
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+		Agent:     "", // no explicit override — the common case
+	})
+
+	// GT_AGENT must NOT be in the map — this confirms callers need a fallback.
+	// session_manager.go must compensate by writing runtimeConfig.ResolvedAgent
+	// to the tmux session table via SetEnvironment.
+	if _, ok := env["GT_AGENT"]; ok {
+		t.Error("AgentEnv should NOT set GT_AGENT when Agent is empty; " +
+			"callers must fall back to runtimeConfig.ResolvedAgent")
+	}
+
+	// With an explicit override, GT_AGENT IS set.
+	envWithOverride := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+		Agent:     "codex",
+	})
+	assertEnv(t, envWithOverride, "GT_AGENT", "codex")
+}
+
 // TestAgentEnv_AgentOverrideAllRoles verifies that GT_AGENT is emitted for
 // every role that supports agent overrides. This mirrors the actual
 // AgentEnvConfig constructions in each manager's Start method.

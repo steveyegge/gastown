@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -363,6 +364,64 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 			if resolved != tc.expectedDir {
 				t.Errorf("resolveBeadsDir(%q, %q) = %q, want %q",
 					tc.issueID, polecatWorkDir, resolved, tc.expectedDir)
+			}
+		})
+	}
+}
+
+// TestAgentEnvOmitsGTAgent_FallbackRequired verifies that the AgentEnv path
+// used by session_manager.Start does NOT include GT_AGENT when opts.Agent is
+// empty (the default dispatch path). This confirms the session_manager must
+// fall back to runtimeConfig.ResolvedAgent for setting GT_AGENT in the tmux
+// session table.
+//
+// Without the fallback, GT_AGENT is never written to the tmux session table,
+// and the post-startup validation kills the session with:
+//   "GT_AGENT not set in session ... witness patrol will misidentify this polecat"
+//
+// Regression test for the bug introduced in PR #1776 which removed the
+// unconditional runtimeConfig.ResolvedAgent → SetEnvironment("GT_AGENT") logic
+// and replaced it with an AgentEnv-only path that requires opts.Agent to be set.
+func TestAgentEnvOmitsGTAgent_FallbackRequired(t *testing.T) {
+	t.Parallel()
+
+	// Simulate what session_manager.Start calls for each dispatch scenario.
+	cases := []struct {
+		name       string
+		agent      string // opts.Agent value
+		wantGTAgent bool  // whether GT_AGENT should be in AgentEnv output
+	}{
+		{
+			name:       "default dispatch (no --agent flag)",
+			agent:      "",
+			wantGTAgent: false, // fallback needed
+		},
+		{
+			name:       "explicit --agent codex",
+			agent:      "codex",
+			wantGTAgent: true,
+		},
+		{
+			name:       "explicit --agent gemini",
+			agent:      "gemini",
+			wantGTAgent: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := config.AgentEnv(config.AgentEnvConfig{
+				Role:      "polecat",
+				Rig:       "gastown",
+				AgentName: "Toast",
+				TownRoot:  "/tmp/town",
+				Agent:     tc.agent,
+			})
+			_, hasGTAgent := env["GT_AGENT"]
+			if hasGTAgent != tc.wantGTAgent {
+				t.Errorf("AgentEnv(Agent=%q): GT_AGENT present=%v, want %v",
+					tc.agent, hasGTAgent, tc.wantGTAgent)
 			}
 		})
 	}
