@@ -47,10 +47,11 @@ type Daemon struct {
 	logger        *log.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
-	curator       *feed.Curator
-	convoyWatcher *ConvoyWatcher
-	doltServer    *DoltServerManager
-	krcPruner     *KRCPruner
+	curator        *feed.Curator
+	convoyWatcher  *ConvoyWatcher
+	discordWatcher *DiscordWatcher
+	doltServer     *DoltServerManager
+	krcPruner      *KRCPruner
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -242,6 +243,16 @@ func (d *Daemon) Run() error {
 			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
 		} else {
 			d.logger.Println("KRC pruner started")
+		}
+	}
+
+	// Start Discord watcher if configured (opt-in patrol)
+	if IsPatrolEnabled(d.patrolConfig, "discord_watcher") {
+		d.discordWatcher = NewDiscordWatcher(d.config.TownRoot, d.logger.Printf)
+		if err := d.discordWatcher.Start(); err != nil {
+			d.logger.Printf("Warning: failed to start Discord watcher: %v", err)
+		} else {
+			d.logger.Println("Discord watcher started")
 		}
 	}
 
@@ -1031,6 +1042,11 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 	if d.convoyWatcher != nil {
 		d.convoyWatcher.Stop()
 		d.logger.Println("Convoy watcher stopped")
+	}
+
+	// Stop Discord watcher
+	if d.discordWatcher != nil {
+		d.discordWatcher.Stop()
 	}
 
 	// Stop KRC pruner

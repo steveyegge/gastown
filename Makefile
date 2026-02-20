@@ -42,6 +42,9 @@ install: check-up-to-date build
 	@mkdir -p $(INSTALL_DIR)
 	@rm -f $(INSTALL_DIR)/$(BINARY)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@# Install Discord watcher script next to binary
+	@mkdir -p $(INSTALL_DIR)/discord
+	@cp discord/watcher.py $(INSTALL_DIR)/discord/watcher.py
 	@# Nuke any stale go-install binaries that shadow the canonical location
 	@for bad in $(HOME)/go/bin/$(BINARY) $(HOME)/bin/$(BINARY); do \
 		if [ -f "$$bad" ]; then \

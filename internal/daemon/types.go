@@ -113,11 +113,20 @@ type PatrolConfig struct {
 
 // PatrolsConfig holds configuration for all patrols.
 type PatrolsConfig struct {
-	Refinery    *PatrolConfig      `json:"refinery,omitempty"`
-	Witness     *PatrolConfig      `json:"witness,omitempty"`
-	Deacon      *PatrolConfig      `json:"deacon,omitempty"`
-	DoltServer  *DoltServerConfig  `json:"dolt_server,omitempty"`
-	DoltRemotes *DoltRemotesConfig `json:"dolt_remotes,omitempty"`
+	Refinery      *PatrolConfig        `json:"refinery,omitempty"`
+	Witness       *PatrolConfig        `json:"witness,omitempty"`
+	Deacon        *PatrolConfig        `json:"deacon,omitempty"`
+	DoltServer    *DoltServerConfig    `json:"dolt_server,omitempty"`
+	DoltRemotes   *DoltRemotesConfig   `json:"dolt_remotes,omitempty"`
+	DiscordWatcher *DiscordWatcherConfig `json:"discord_watcher,omitempty"`
+}
+
+// DiscordWatcherConfig holds configuration for the Discord watcher patrol.
+// This patrol runs a Python subprocess that listens for @mentions and DMs
+// and forwards them to mayor/ via gt mail.
+type DiscordWatcherConfig struct {
+	// Enabled controls whether the Discord watcher runs.
+	Enabled bool `json:"enabled"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -181,6 +190,13 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.DoltRemotes.Enabled
+	}
+
+	if patrol == "discord_watcher" {
+		if config == nil || config.Patrols == nil || config.Patrols.DiscordWatcher == nil {
+			return false
+		}
+		return config.Patrols.DiscordWatcher.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {
