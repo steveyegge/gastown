@@ -1,14 +1,19 @@
 package wasteland
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
 func TestJoin_Success(t *testing.T) {
 	t.Parallel()
+	log := NewCallLog()
 	api := NewFakeDoltHubAPI()
+	api.Log = log
 	cli := NewFakeDoltCLI()
+	cli.Log = log
 	cfgStore := NewFakeConfigStore()
 
 	svc := &Service{API: api, CLI: cli, Config: cfgStore}
@@ -60,19 +65,18 @@ func TestJoin_Success(t *testing.T) {
 		t.Errorf("saved config doesn't match returned config")
 	}
 
-	// Verify call ordering: fork, clone, remote, register, push
+	// Verify call ordering from unified log: fork, clone, remote, register, push
 	expectedOrder := []string{"ForkRepo", "Clone", "AddUpstreamRemote", "RegisterRig", "Push"}
-	allCalls := append(api.Calls, cli.Calls...)
-	if len(allCalls) < len(expectedOrder) {
-		t.Fatalf("expected at least %d calls, got %d", len(expectedOrder), len(allCalls))
+	if len(log.Calls) < len(expectedOrder) {
+		t.Fatalf("expected at least %d calls in unified log, got %d: %v", len(expectedOrder), len(log.Calls), log.Calls)
 	}
 	for i, want := range expectedOrder {
-		if i >= len(allCalls) {
+		if i >= len(log.Calls) {
 			break
 		}
-		got := allCalls[i]
-		if len(got) < len(want) || got[:len(want)] != want {
-			t.Errorf("call[%d] = %q, want prefix %q", i, got, want)
+		got := log.Calls[i]
+		if !strings.HasPrefix(got, want) {
+			t.Errorf("unified log[%d] = %q, want prefix %q", i, got, want)
 		}
 	}
 }
@@ -154,6 +158,59 @@ func TestJoin_AlreadyJoined(t *testing.T) {
 	}
 	if len(cli.Calls) != 0 {
 		t.Errorf("expected 0 CLI calls for already-joined, got %d", len(cli.Calls))
+	}
+}
+
+func TestJoin_DifferentUpstreamAlreadyJoined(t *testing.T) {
+	t.Parallel()
+	api := NewFakeDoltHubAPI()
+	cli := NewFakeDoltCLI()
+	cfgStore := NewFakeConfigStore()
+
+	existing := &Config{
+		Upstream:  "org1/commons",
+		ForkOrg:   "alice-dev",
+		ForkDB:    "commons",
+		RigHandle: "alice-rig",
+	}
+	cfgStore.Configs["/tmp/town"] = existing
+
+	svc := &Service{API: api, CLI: cli, Config: cfgStore}
+
+	_, err := svc.Join("org2/commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	if err == nil {
+		t.Fatal("Join() should error when already joined to a different upstream")
+	}
+	if !strings.Contains(err.Error(), "already joined to org1/commons") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "already joined to org1/commons")
+	}
+
+	// No API calls should have been made
+	if len(api.Calls) != 0 {
+		t.Errorf("expected 0 API calls, got %d", len(api.Calls))
+	}
+}
+
+func TestJoin_ConfigLoadError(t *testing.T) {
+	t.Parallel()
+	api := NewFakeDoltHubAPI()
+	cli := NewFakeDoltCLI()
+	cfgStore := NewFakeConfigStore()
+	cfgStore.LoadErr = fmt.Errorf("reading wasteland config: permission denied")
+
+	svc := &Service{API: api, CLI: cli, Config: cfgStore}
+
+	_, err := svc.Join("steveyegge/wl-commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	if err == nil {
+		t.Fatal("Join() should error when config load fails with non-not-found error")
+	}
+	if errors.Is(err, ErrNotJoined) {
+		t.Error("error should NOT be ErrNotJoined for disk/permission errors")
+	}
+
+	// No API calls should have been made — the error should surface immediately
+	if len(api.Calls) != 0 {
+		t.Errorf("expected 0 API calls, got %d", len(api.Calls))
 	}
 }
 

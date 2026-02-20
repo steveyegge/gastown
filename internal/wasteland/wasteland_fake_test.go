@@ -5,11 +5,28 @@ import (
 	"sync"
 )
 
+// CallLog is a shared ordered log for recording cross-component call sequences.
+type CallLog struct {
+	mu    sync.Mutex
+	Calls []string
+}
+
+func NewCallLog() *CallLog {
+	return &CallLog{}
+}
+
+func (l *CallLog) Record(call string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.Calls = append(l.Calls, call)
+}
+
 // FakeDoltHubAPI is a test double for DoltHubAPI.
 type FakeDoltHubAPI struct {
 	mu     sync.Mutex
 	Forked map[string]bool // "fromOrg/fromDB -> toOrg" => true
 	Calls  []string
+	Log    *CallLog // shared ordered log (optional)
 
 	ForkErr error
 }
@@ -21,7 +38,11 @@ func NewFakeDoltHubAPI() *FakeDoltHubAPI {
 func (f *FakeDoltHubAPI) ForkRepo(fromOrg, fromDB, toOrg, token string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf("ForkRepo(%s, %s, %s)", fromOrg, fromDB, toOrg))
+	call := fmt.Sprintf("ForkRepo(%s, %s, %s)", fromOrg, fromDB, toOrg)
+	f.Calls = append(f.Calls, call)
+	if f.Log != nil {
+		f.Log.Record(call)
+	}
 	if f.ForkErr != nil {
 		return f.ForkErr
 	}
@@ -37,6 +58,7 @@ type FakeDoltCLI struct {
 	Pushed     map[string]bool // "localDir"
 	Remotes    map[string]bool // "localDir -> upstreamOrg/upstreamDB"
 	Calls      []string
+	Log        *CallLog // shared ordered log (optional)
 
 	CloneErr    error
 	RegisterErr error
@@ -56,7 +78,11 @@ func NewFakeDoltCLI() *FakeDoltCLI {
 func (f *FakeDoltCLI) Clone(org, db, targetDir string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf("Clone(%s, %s, %s)", org, db, targetDir))
+	call := fmt.Sprintf("Clone(%s, %s, %s)", org, db, targetDir)
+	f.Calls = append(f.Calls, call)
+	if f.Log != nil {
+		f.Log.Record(call)
+	}
 	if f.CloneErr != nil {
 		return f.CloneErr
 	}
@@ -67,7 +93,11 @@ func (f *FakeDoltCLI) Clone(org, db, targetDir string) error {
 func (f *FakeDoltCLI) RegisterRig(localDir, handle, dolthubOrg, displayName, ownerEmail, gtVersion string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf("RegisterRig(%s, %s)", localDir, handle))
+	call := fmt.Sprintf("RegisterRig(%s, %s)", localDir, handle)
+	f.Calls = append(f.Calls, call)
+	if f.Log != nil {
+		f.Log.Record(call)
+	}
 	if f.RegisterErr != nil {
 		return f.RegisterErr
 	}
@@ -78,7 +108,11 @@ func (f *FakeDoltCLI) RegisterRig(localDir, handle, dolthubOrg, displayName, own
 func (f *FakeDoltCLI) Push(localDir string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf("Push(%s)", localDir))
+	call := fmt.Sprintf("Push(%s)", localDir)
+	f.Calls = append(f.Calls, call)
+	if f.Log != nil {
+		f.Log.Record(call)
+	}
 	if f.PushErr != nil {
 		return f.PushErr
 	}
@@ -89,7 +123,11 @@ func (f *FakeDoltCLI) Push(localDir string) error {
 func (f *FakeDoltCLI) AddUpstreamRemote(localDir, upstreamOrg, upstreamDB string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Calls = append(f.Calls, fmt.Sprintf("AddUpstreamRemote(%s, %s, %s)", localDir, upstreamOrg, upstreamDB))
+	call := fmt.Sprintf("AddUpstreamRemote(%s, %s, %s)", localDir, upstreamOrg, upstreamDB)
+	f.Calls = append(f.Calls, call)
+	if f.Log != nil {
+		f.Log.Record(call)
+	}
 	if f.RemoteErr != nil {
 		return f.RemoteErr
 	}
@@ -118,7 +156,7 @@ func (f *FakeConfigStore) Load(townRoot string) (*Config, error) {
 	}
 	cfg, ok := f.Configs[townRoot]
 	if !ok {
-		return nil, fmt.Errorf("rig has not joined a wasteland (run 'gt wl join <upstream>')")
+		return nil, ErrNotJoined
 	}
 	return cfg, nil
 }

@@ -64,6 +64,11 @@ type WantedItem struct {
 	SandboxRequired bool
 }
 
+// EscapeSQL escapes single quotes in SQL string literals.
+func EscapeSQL(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // GenerateWantedID generates a unique wanted item ID in the format w-<10-char-hash>.
 func GenerateWantedID(title string) string {
 	randomBytes := make([]byte, 8)
@@ -230,33 +235,29 @@ func InsertWanted(townRoot string, item *WantedItem) error {
 		tagsJSON = fmt.Sprintf("'[\"%s\"]'", strings.Join(escaped, `","`))
 	}
 
-	esc := func(s string) string {
-		return strings.ReplaceAll(s, "'", "''")
-	}
-
 	descField := "NULL"
 	if item.Description != "" {
-		descField = fmt.Sprintf("'%s'", esc(item.Description))
+		descField = fmt.Sprintf("'%s'", EscapeSQL(item.Description))
 	}
 	projectField := "NULL"
 	if item.Project != "" {
-		projectField = fmt.Sprintf("'%s'", esc(item.Project))
+		projectField = fmt.Sprintf("'%s'", EscapeSQL(item.Project))
 	}
 	typeField := "NULL"
 	if item.Type != "" {
-		typeField = fmt.Sprintf("'%s'", esc(item.Type))
+		typeField = fmt.Sprintf("'%s'", EscapeSQL(item.Type))
 	}
 	postedByField := "NULL"
 	if item.PostedBy != "" {
-		postedByField = fmt.Sprintf("'%s'", esc(item.PostedBy))
+		postedByField = fmt.Sprintf("'%s'", EscapeSQL(item.PostedBy))
 	}
 	effortField := "'medium'"
 	if item.EffortLevel != "" {
-		effortField = fmt.Sprintf("'%s'", esc(item.EffortLevel))
+		effortField = fmt.Sprintf("'%s'", EscapeSQL(item.EffortLevel))
 	}
 	status := "'open'"
 	if item.Status != "" {
-		status = fmt.Sprintf("'%s'", esc(item.Status))
+		status = fmt.Sprintf("'%s'", EscapeSQL(item.Status))
 	}
 
 	script := fmt.Sprintf(`USE %s;
@@ -268,10 +269,10 @@ CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl post: %s');
 `,
 		WLCommonsDB,
-		esc(item.ID), esc(item.Title), descField, projectField, typeField,
+		EscapeSQL(item.ID), EscapeSQL(item.Title), descField, projectField, typeField,
 		item.Priority, tagsJSON, postedByField, status, effortField,
 		now, now,
-		esc(item.Title))
+		EscapeSQL(item.Title))
 
 	return doltSQLScriptWithRetry(townRoot, script)
 }
@@ -279,10 +280,6 @@ CALL DOLT_COMMIT('-m', 'wl post: %s');
 // ClaimWanted updates a wanted item's status to claimed.
 // Returns an error if the item does not exist or is not open (0 rows affected).
 func ClaimWanted(townRoot, wantedID, rigHandle string) error {
-	esc := func(s string) string {
-		return strings.ReplaceAll(s, "'", "''")
-	}
-
 	// Split into two sessions to detect TOCTOU races:
 	// 1. UPDATE + ROW_COUNT via doltSQLQuery (needs CSV output to read rc).
 	// 2. DOLT_ADD + DOLT_COMMIT via doltSQLScriptWithRetry (needs script mode).
@@ -290,12 +287,12 @@ func ClaimWanted(townRoot, wantedID, rigHandle string) error {
 	// to the COMMIT. The outer retry loop covers transient errors in either step.
 
 	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW() WHERE id='%s' AND status='open'; SELECT ROW_COUNT() AS rc;`,
-		WLCommonsDB, esc(rigHandle), esc(wantedID))
+		WLCommonsDB, EscapeSQL(rigHandle), EscapeSQL(wantedID))
 
 	commitScript := fmt.Sprintf(`USE %s;
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
-`, WLCommonsDB, esc(wantedID))
+`, WLCommonsDB, EscapeSQL(wantedID))
 
 	const maxRetries = 3
 	var lastErr error
@@ -316,7 +313,12 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 		}
 
 		if err := doltSQLScriptWithRetry(townRoot, commitScript); err != nil {
-			return err
+			// Rollback dirty working set to avoid stuck state where the
+			// UPDATE applied but COMMIT failed, leaving status='claimed'
+			// in the uncommitted working set.
+			resetScript := fmt.Sprintf("USE %s;\nCALL DOLT_RESET('--hard');\n", WLCommonsDB)
+			_ = doltSQLScriptWithRetry(townRoot, resetScript)
+			return fmt.Errorf("claim commit failed (working set reset): %w", err)
 		}
 		return nil
 	}
@@ -325,10 +327,6 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 
 // SubmitCompletion inserts a completion record and updates the wanted status.
 func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
-	esc := func(s string) string {
-		return strings.ReplaceAll(s, "'", "''")
-	}
-
 	script := fmt.Sprintf(`USE %s;
 
 INSERT INTO completions (id, wanted_id, completed_by, evidence, completed_at)
@@ -341,25 +339,21 @@ CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');
 `,
 		WLCommonsDB,
-		esc(completionID),
-		esc(wantedID),
-		esc(rigHandle),
-		esc(evidence),
-		esc(evidence),
-		esc(wantedID),
-		esc(wantedID))
+		EscapeSQL(completionID),
+		EscapeSQL(wantedID),
+		EscapeSQL(rigHandle),
+		EscapeSQL(evidence),
+		EscapeSQL(evidence),
+		EscapeSQL(wantedID),
+		EscapeSQL(wantedID))
 
 	return doltSQLScriptWithRetry(townRoot, script)
 }
 
 // QueryWanted fetches a wanted item by ID. Returns nil if not found.
 func QueryWanted(townRoot, wantedID string) (*WantedItem, error) {
-	esc := func(s string) string {
-		return strings.ReplaceAll(s, "'", "''")
-	}
-
 	query := fmt.Sprintf(`USE %s; SELECT id, title, status, COALESCE(claimed_by, '') as claimed_by FROM wanted WHERE id='%s';`,
-		WLCommonsDB, esc(wantedID))
+		WLCommonsDB, EscapeSQL(wantedID))
 
 	output, err := doltSQLQuery(townRoot, query)
 	if err != nil {
@@ -396,20 +390,21 @@ func doltSQLQuery(townRoot, query string) (string, error) {
 }
 
 // parseSimpleCSV parses CSV output from dolt sql into a slice of maps.
+// Handles quoted fields containing commas and escaped quotes.
 func parseSimpleCSV(data string) []map[string]string {
 	lines := strings.Split(strings.TrimSpace(data), "\n")
 	if len(lines) < 2 {
 		return nil
 	}
 
-	headers := strings.Split(lines[0], ",")
+	headers := parseCSVLine(lines[0])
 	var result []map[string]string
 
 	for _, line := range lines[1:] {
 		if line == "" {
 			continue
 		}
-		fields := strings.Split(line, ",")
+		fields := parseCSVLine(line)
 		row := make(map[string]string)
 		for i, h := range headers {
 			if i < len(fields) {
@@ -419,4 +414,33 @@ func parseSimpleCSV(data string) []map[string]string {
 		result = append(result, row)
 	}
 	return result
+}
+
+// parseCSVLine parses a single CSV line, handling quoted fields.
+func parseCSVLine(line string) []string {
+	var fields []string
+	var field strings.Builder
+	inQuote := false
+
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		switch {
+		case ch == '"' && !inQuote:
+			inQuote = true
+		case ch == '"' && inQuote:
+			if i+1 < len(line) && line[i+1] == '"' {
+				field.WriteByte('"')
+				i++
+			} else {
+				inQuote = false
+			}
+		case ch == ',' && !inQuote:
+			fields = append(fields, field.String())
+			field.Reset()
+		default:
+			field.WriteByte(ch)
+		}
+	}
+	fields = append(fields, field.String())
+	return fields
 }

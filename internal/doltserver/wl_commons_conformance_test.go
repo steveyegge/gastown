@@ -203,6 +203,42 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		}
 	})
 
+	t.Run("SubmitCompletionOnOpenItem", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t)
+
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf08", Title: "Open item"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+
+		// SubmitCompletion on an open (unclaimed) item should fail
+		err := store.SubmitCompletion("c-conf02", "w-conf08", "some-rig", "https://pr/2")
+		if err == nil {
+			t.Error("SubmitCompletion on open item should return an error")
+		}
+
+		// Status should remain open
+		got, err := store.QueryWanted("w-conf08")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
+		if got.Status != "open" {
+			t.Errorf("Status = %q, want %q (should not change on failed completion)", got.Status, "open")
+		}
+	})
+
+	t.Run("DatabaseExistsWrongName", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t)
+
+		if err := store.EnsureDB(); err != nil {
+			t.Fatalf("EnsureDB() error: %v", err)
+		}
+		if store.DatabaseExists("wrong_db_name") {
+			t.Error("DatabaseExists(wrong_db_name) = true, want false")
+		}
+	})
+
 	t.Run("ClaimSetsClaimedBy", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t)

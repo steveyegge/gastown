@@ -11,6 +11,7 @@ package wasteland
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +20,9 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrNotJoined indicates the rig has not joined a wasteland.
+var ErrNotJoined = errors.New("rig has not joined a wasteland")
 
 // Config holds the wasteland configuration for a rig.
 type Config struct {
@@ -51,7 +55,7 @@ func LoadConfig(townRoot string) (*Config, error) {
 	data, err := os.ReadFile(ConfigPath(townRoot))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("rig has not joined a wasteland (run 'gt wl join <upstream>')")
+			return nil, fmt.Errorf("%w (run 'gt wl join <upstream>')", ErrNotJoined)
 		}
 		return nil, fmt.Errorf("reading wasteland config: %w", err)
 	}
@@ -294,7 +298,12 @@ func (s *Service) Join(upstream, forkOrg, token, handle, displayName, ownerEmail
 
 	// Check if already joined
 	if existing, err := s.Config.Load(townRoot); err == nil {
+		if existing.Upstream != upstream {
+			return nil, fmt.Errorf("already joined to %s; run gt wl leave first", existing.Upstream)
+		}
 		return existing, nil
+	} else if !errors.Is(err, ErrNotJoined) {
+		return nil, fmt.Errorf("loading wasteland config: %w", err)
 	}
 
 	localDir := LocalCloneDir(townRoot, upstreamOrg, upstreamDB)

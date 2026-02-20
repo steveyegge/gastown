@@ -35,8 +35,8 @@ func (f *fakeWLCommonsStore) EnsureDB() error {
 	return nil
 }
 
-func (f *fakeWLCommonsStore) DatabaseExists(_ string) bool {
-	return f.dbOK
+func (f *fakeWLCommonsStore) DatabaseExists(dbName string) bool {
+	return f.dbOK && dbName == WLCommonsDB
 }
 
 func (f *fakeWLCommonsStore) InsertWanted(item *WantedItem) error {
@@ -93,10 +93,10 @@ func (f *fakeWLCommonsStore) SubmitCompletion(completionID, wantedID, rigHandle,
 	if !ok {
 		return fmt.Errorf("wanted item %q not found", wantedID)
 	}
+	if item.Status != "claimed" {
+		return fmt.Errorf("wanted item %q is not claimed (status: %s)", wantedID, item.Status)
+	}
 	item.Status = "in_review"
-	_ = completionID
-	_ = rigHandle
-	_ = evidence
 	return nil
 }
 
