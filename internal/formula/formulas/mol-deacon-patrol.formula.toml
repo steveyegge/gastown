@@ -582,9 +582,43 @@ No action needed - Witness is doing its job.
 investigate why the Witness isn't cleaning up properly."""
 
 [[steps]]
+id = "step-drift-nudge"
+title = "Detect and nudge step-drifting polecats"
+needs = ["zombie-scan"]
+description = """
+Detect polecats with unclosed molecule steps and nudge them.
+
+Step drift occurs when a polecat has been working for several minutes without
+closing any molecule steps. This indicates the polecat may not be following the
+formula or is stuck without signaling.
+
+**Run the step-drift scan with nudge:**
+```bash
+gt patrol step-drift --agent --nudge
+```
+
+This command:
+1. Lists all working polecats across all rigs
+2. Reads step status from each polecat's isolated Dolt branch
+3. Detects drift (default: 5 min with 0 steps closed)
+4. Sends a nudge to drifting polecats reminding them to close steps
+5. Returns JSON report for logging
+
+**Interpreting results:**
+- `drifting: true` — polecat exceeded threshold with 0 steps closed
+- `nudged: true` — nudge message was sent
+- `closed: N` — number of canonical steps completed
+
+**If many polecats are drifting:**
+This may indicate a systemic issue (formula too complex, tooling broken).
+Escalate to Mayor if >50% of active polecats show drift.
+
+**Exit criteria:** Step-drift scan completed, drifting polecats nudged."""
+
+[[steps]]
 id = "plugin-run"
 title = "Execute registered plugins"
-needs = ["zombie-scan"]
+needs = ["step-drift-nudge"]
 description = """
 Execute registered plugins.
 
