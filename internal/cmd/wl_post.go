@@ -69,66 +69,83 @@ func runWlPost(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	validTypes := map[string]bool{
-		"feature": true, "bug": true, "design": true, "rfc": true, "docs": true,
-	}
-	if wlPostType != "" && !validTypes[wlPostType] {
-		return fmt.Errorf("invalid type %q: must be one of feature, bug, design, rfc, docs", wlPostType)
+	if err := validatePostInputs(wlPostType, wlPostEffort, wlPostPriority); err != nil {
+		return err
 	}
 
-	validEfforts := map[string]bool{
-		"trivial": true, "small": true, "medium": true, "large": true, "epic": true,
-	}
-	if !validEfforts[wlPostEffort] {
-		return fmt.Errorf("invalid effort %q: must be one of trivial, small, medium, large, epic", wlPostEffort)
-	}
-
-	if wlPostPriority < 0 || wlPostPriority > 4 {
-		return fmt.Errorf("invalid priority %d: must be 0-4", wlPostPriority)
-	}
-
-	if err := doltserver.EnsureWLCommons(townRoot); err != nil {
-		return fmt.Errorf("ensuring wl-commons database: %w", err)
-	}
+	store := doltserver.NewWLCommons(townRoot)
 
 	wlCfg, err := wasteland.LoadConfig(townRoot)
 	if err != nil {
 		return fmt.Errorf("loading wasteland config: %w", err)
 	}
 
-	id := doltserver.GenerateWantedID(wlPostTitle)
-	handle := wlCfg.RigHandle
-
 	item := &doltserver.WantedItem{
-		ID:          id,
+		ID:          doltserver.GenerateWantedID(wlPostTitle),
 		Title:       wlPostTitle,
 		Description: wlPostDescription,
 		Project:     wlPostProject,
 		Type:        wlPostType,
 		Priority:    wlPostPriority,
 		Tags:        tags,
-		PostedBy:    handle,
+		PostedBy:    wlCfg.RigHandle,
 		EffortLevel: wlPostEffort,
 	}
 
-	if err := doltserver.InsertWanted(townRoot, item); err != nil {
-		return fmt.Errorf("posting wanted item: %w", err)
+	if err := postWanted(store, item); err != nil {
+		return err
 	}
 
-	fmt.Printf("%s Posted wanted item: %s\n", style.Bold.Render("✓"), style.Bold.Render(id))
-	fmt.Printf("  Title:    %s\n", wlPostTitle)
-	if wlPostProject != "" {
-		fmt.Printf("  Project:  %s\n", wlPostProject)
+	fmt.Printf("%s Posted wanted item: %s\n", style.Bold.Render("✓"), style.Bold.Render(item.ID))
+	fmt.Printf("  Title:    %s\n", item.Title)
+	if item.Project != "" {
+		fmt.Printf("  Project:  %s\n", item.Project)
 	}
-	if wlPostType != "" {
-		fmt.Printf("  Type:     %s\n", wlPostType)
+	if item.Type != "" {
+		fmt.Printf("  Type:     %s\n", item.Type)
 	}
-	fmt.Printf("  Priority: %d\n", wlPostPriority)
-	fmt.Printf("  Effort:   %s\n", wlPostEffort)
-	if len(tags) > 0 {
-		fmt.Printf("  Tags:     %s\n", strings.Join(tags, ", "))
+	fmt.Printf("  Priority: %d\n", item.Priority)
+	fmt.Printf("  Effort:   %s\n", item.EffortLevel)
+	if len(item.Tags) > 0 {
+		fmt.Printf("  Tags:     %s\n", strings.Join(item.Tags, ", "))
 	}
-	fmt.Printf("  Posted by: %s\n", handle)
+	fmt.Printf("  Posted by: %s\n", item.PostedBy)
+
+	return nil
+}
+
+// validatePostInputs validates the type, effort, and priority fields.
+func validatePostInputs(itemType, effort string, priority int) error {
+	validTypes := map[string]bool{
+		"feature": true, "bug": true, "design": true, "rfc": true, "docs": true,
+	}
+	if itemType != "" && !validTypes[itemType] {
+		return fmt.Errorf("invalid type %q: must be one of feature, bug, design, rfc, docs", itemType)
+	}
+
+	validEfforts := map[string]bool{
+		"trivial": true, "small": true, "medium": true, "large": true, "epic": true,
+	}
+	if !validEfforts[effort] {
+		return fmt.Errorf("invalid effort %q: must be one of trivial, small, medium, large, epic", effort)
+	}
+
+	if priority < 0 || priority > 4 {
+		return fmt.Errorf("invalid priority %d: must be 0-4", priority)
+	}
+
+	return nil
+}
+
+// postWanted contains the testable business logic for posting a wanted item.
+func postWanted(store doltserver.WLCommonsStore, item *doltserver.WantedItem) error {
+	if err := store.EnsureDB(); err != nil {
+		return fmt.Errorf("ensuring wl-commons database: %w", err)
+	}
+
+	if err := store.InsertWanted(item); err != nil {
+		return fmt.Errorf("posting wanted item: %w", err)
+	}
 
 	return nil
 }

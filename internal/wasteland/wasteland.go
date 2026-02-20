@@ -256,3 +256,121 @@ func LocalCloneDir(townRoot, upstreamOrg, upstreamDB string) string {
 func escapeSQLString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
+
+// DoltHubAPI abstracts DoltHub REST API operations.
+type DoltHubAPI interface {
+	ForkRepo(fromOrg, fromDB, toOrg, token string) error
+}
+
+// DoltCLI abstracts dolt CLI subprocess operations.
+type DoltCLI interface {
+	Clone(org, db, targetDir string) error
+	RegisterRig(localDir, handle, dolthubOrg, displayName, ownerEmail, gtVersion string) error
+	Push(localDir string) error
+	AddUpstreamRemote(localDir, upstreamOrg, upstreamDB string) error
+}
+
+// ConfigStore abstracts wasteland config persistence.
+type ConfigStore interface {
+	Load(townRoot string) (*Config, error)
+	Save(townRoot string, cfg *Config) error
+}
+
+// Service coordinates wasteland operations with injectable dependencies.
+type Service struct {
+	API    DoltHubAPI
+	CLI    DoltCLI
+	Config ConfigStore
+}
+
+// Join orchestrates the wasteland join workflow: fork -> clone -> add upstream -> register -> push -> save config.
+func (s *Service) Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot string) error {
+	upstreamOrg, upstreamDB, err := ParseUpstream(upstream)
+	if err != nil {
+		return err
+	}
+
+	// Check if already joined
+	if existing, err := s.Config.Load(townRoot); err == nil {
+		_ = existing // already joined
+		return nil
+	}
+
+	localDir := LocalCloneDir(townRoot, upstreamOrg, upstreamDB)
+
+	if err := s.API.ForkRepo(upstreamOrg, upstreamDB, forkOrg, token); err != nil {
+		return fmt.Errorf("forking commons: %w", err)
+	}
+
+	if err := s.CLI.Clone(forkOrg, upstreamDB, localDir); err != nil {
+		return fmt.Errorf("cloning fork: %w", err)
+	}
+
+	if err := s.CLI.AddUpstreamRemote(localDir, upstreamOrg, upstreamDB); err != nil {
+		return fmt.Errorf("adding upstream remote: %w", err)
+	}
+
+	if err := s.CLI.RegisterRig(localDir, handle, forkOrg, displayName, ownerEmail, gtVersion); err != nil {
+		return fmt.Errorf("registering rig: %w", err)
+	}
+
+	if err := s.CLI.Push(localDir); err != nil {
+		return fmt.Errorf("pushing to fork: %w", err)
+	}
+
+	cfg := &Config{
+		Upstream:  upstream,
+		ForkOrg:   forkOrg,
+		ForkDB:    upstreamDB,
+		LocalDir:  localDir,
+		RigHandle: handle,
+		JoinedAt:  time.Now(),
+	}
+	if err := s.Config.Save(townRoot, cfg); err != nil {
+		return fmt.Errorf("saving wasteland config: %w", err)
+	}
+
+	return nil
+}
+
+// httpDoltHubAPI implements DoltHubAPI using the real DoltHub REST API.
+type httpDoltHubAPI struct{}
+
+func (h *httpDoltHubAPI) ForkRepo(fromOrg, fromDB, toOrg, token string) error {
+	return ForkDoltHubRepo(fromOrg, fromDB, toOrg, token)
+}
+
+// execDoltCLI implements DoltCLI using real dolt subprocess calls.
+type execDoltCLI struct{}
+
+func (e *execDoltCLI) Clone(org, db, targetDir string) error {
+	return CloneLocally(org, db, targetDir)
+}
+func (e *execDoltCLI) RegisterRig(localDir, handle, dolthubOrg, displayName, ownerEmail, gtVersion string) error {
+	return RegisterRig(localDir, handle, dolthubOrg, displayName, ownerEmail, gtVersion)
+}
+func (e *execDoltCLI) Push(localDir string) error {
+	return PushToOrigin(localDir)
+}
+func (e *execDoltCLI) AddUpstreamRemote(localDir, upstreamOrg, upstreamDB string) error {
+	return AddUpstreamRemote(localDir, upstreamOrg, upstreamDB)
+}
+
+// fileConfigStore implements ConfigStore using filesystem persistence.
+type fileConfigStore struct{}
+
+func (f *fileConfigStore) Load(townRoot string) (*Config, error) {
+	return LoadConfig(townRoot)
+}
+func (f *fileConfigStore) Save(townRoot string, cfg *Config) error {
+	return SaveConfig(townRoot, cfg)
+}
+
+// NewService creates a Service with real (production) dependencies.
+func NewService() *Service {
+	return &Service{
+		API:    &httpDoltHubAPI{},
+		CLI:    &execDoltCLI{},
+		Config: &fileConfigStore{},
+	}
+}

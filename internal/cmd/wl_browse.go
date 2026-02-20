@@ -82,7 +82,13 @@ func runWLBrowse(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("%s Cloned successfully\n\n", style.Bold.Render("✓"))
 
-	query := buildWLBrowseQuery()
+	query := buildBrowseQuery(BrowseFilter{
+		Status:   wlBrowseStatus,
+		Project:  wlBrowseProject,
+		Type:     wlBrowseType,
+		Priority: wlBrowsePriority,
+		Limit:    wlBrowseLimit,
+	})
 
 	if wlBrowseJSON {
 		sqlCmd := exec.Command(doltPath, "sql", "-q", query, "-r", "json")
@@ -95,20 +101,29 @@ func runWLBrowse(cmd *cobra.Command, args []string) error {
 	return renderWLBrowseTable(doltPath, cloneDir, query)
 }
 
-func buildWLBrowseQuery() string {
+// BrowseFilter holds filter parameters for building a browse query.
+type BrowseFilter struct {
+	Status   string
+	Project  string
+	Type     string
+	Priority int
+	Limit    int
+}
+
+func buildBrowseQuery(f BrowseFilter) string {
 	var conditions []string
 
-	if wlBrowseStatus != "" {
-		conditions = append(conditions, fmt.Sprintf("status = '%s'", wlEscapeSQL(wlBrowseStatus)))
+	if f.Status != "" {
+		conditions = append(conditions, fmt.Sprintf("status = '%s'", wlEscapeSQL(f.Status)))
 	}
-	if wlBrowseProject != "" {
-		conditions = append(conditions, fmt.Sprintf("project = '%s'", wlEscapeSQL(wlBrowseProject)))
+	if f.Project != "" {
+		conditions = append(conditions, fmt.Sprintf("project = '%s'", wlEscapeSQL(f.Project)))
 	}
-	if wlBrowseType != "" {
-		conditions = append(conditions, fmt.Sprintf("type = '%s'", wlEscapeSQL(wlBrowseType)))
+	if f.Type != "" {
+		conditions = append(conditions, fmt.Sprintf("type = '%s'", wlEscapeSQL(f.Type)))
 	}
-	if wlBrowsePriority >= 0 {
-		conditions = append(conditions, fmt.Sprintf("priority = %d", wlBrowsePriority))
+	if f.Priority >= 0 {
+		conditions = append(conditions, fmt.Sprintf("priority = %d", f.Priority))
 	}
 
 	query := "SELECT id, title, project, type, priority, posted_by, status, effort_level FROM wanted"
@@ -116,7 +131,7 @@ func buildWLBrowseQuery() string {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	query += " ORDER BY priority ASC, created_at DESC"
-	query += fmt.Sprintf(" LIMIT %d", wlBrowseLimit)
+	query += fmt.Sprintf(" LIMIT %d", f.Limit)
 
 	return query
 }

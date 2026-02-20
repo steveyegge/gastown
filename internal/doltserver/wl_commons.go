@@ -19,6 +19,35 @@ import (
 // WLCommonsDB is the database name for the wl-commons shared wanted board.
 const WLCommonsDB = "wl_commons"
 
+// WLCommonsStore abstracts wl-commons database operations.
+type WLCommonsStore interface {
+	EnsureDB() error
+	DatabaseExists(dbName string) bool
+	InsertWanted(item *WantedItem) error
+	ClaimWanted(wantedID, rigHandle string) error
+	SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error
+	QueryWanted(wantedID string) (*WantedItem, error)
+}
+
+// WLCommons implements WLCommonsStore using the real Dolt server.
+type WLCommons struct{ townRoot string }
+
+// NewWLCommons creates a WLCommonsStore backed by the real Dolt server.
+func NewWLCommons(townRoot string) *WLCommons { return &WLCommons{townRoot: townRoot} }
+
+func (w *WLCommons) EnsureDB() error           { return EnsureWLCommons(w.townRoot) }
+func (w *WLCommons) DatabaseExists(db string) bool { return DatabaseExists(w.townRoot, db) }
+func (w *WLCommons) InsertWanted(item *WantedItem) error { return InsertWanted(w.townRoot, item) }
+func (w *WLCommons) ClaimWanted(wantedID, rigHandle string) error {
+	return ClaimWanted(w.townRoot, wantedID, rigHandle)
+}
+func (w *WLCommons) SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error {
+	return SubmitCompletion(w.townRoot, completionID, wantedID, rigHandle, evidence)
+}
+func (w *WLCommons) QueryWanted(wantedID string) (*WantedItem, error) {
+	return QueryWanted(w.townRoot, wantedID)
+}
+
 // WantedItem represents a row in the wanted table.
 type WantedItem struct {
 	ID              string

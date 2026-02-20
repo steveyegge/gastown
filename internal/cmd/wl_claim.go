@@ -49,17 +49,10 @@ func runWlClaim(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
 	}
 
-	item, err := doltserver.QueryWanted(townRoot, wantedID)
+	store := doltserver.NewWLCommons(townRoot)
+	item, err := claimWanted(store, wantedID, rigHandle)
 	if err != nil {
-		return fmt.Errorf("querying wanted item: %w", err)
-	}
-
-	if item.Status != "open" {
-		return fmt.Errorf("wanted item %s is not open (status: %s)", wantedID, item.Status)
-	}
-
-	if err := doltserver.ClaimWanted(townRoot, wantedID, rigHandle); err != nil {
-		return fmt.Errorf("claiming wanted item: %w", err)
+		return err
 	}
 
 	fmt.Printf("%s Claimed %s\n", style.Bold.Render("✓"), wantedID)
@@ -67,4 +60,22 @@ func runWlClaim(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Title: %s\n", item.Title)
 
 	return nil
+}
+
+// claimWanted contains the testable business logic for claiming a wanted item.
+func claimWanted(store doltserver.WLCommonsStore, wantedID, rigHandle string) (*doltserver.WantedItem, error) {
+	item, err := store.QueryWanted(wantedID)
+	if err != nil {
+		return nil, fmt.Errorf("querying wanted item: %w", err)
+	}
+
+	if item.Status != "open" {
+		return nil, fmt.Errorf("wanted item %s is not open (status: %s)", wantedID, item.Status)
+	}
+
+	if err := store.ClaimWanted(wantedID, rigHandle); err != nil {
+		return nil, fmt.Errorf("claiming wanted item: %w", err)
+	}
+
+	return item, nil
 }

@@ -59,7 +59,25 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
 	}
 
-	item, err := doltserver.QueryWanted(townRoot, wantedID)
+	store := doltserver.NewWLCommons(townRoot)
+	completionID := generateCompletionID(wantedID, rigHandle)
+
+	if err := submitDone(store, wantedID, rigHandle, wlDoneEvidence, completionID); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s Completion submitted for %s\n", style.Bold.Render("✓"), wantedID)
+	fmt.Printf("  Completion ID: %s\n", completionID)
+	fmt.Printf("  Completed by: %s\n", rigHandle)
+	fmt.Printf("  Evidence: %s\n", wlDoneEvidence)
+	fmt.Printf("  Status: in_review\n")
+
+	return nil
+}
+
+// submitDone contains the testable business logic for submitting a completion.
+func submitDone(store doltserver.WLCommonsStore, wantedID, rigHandle, evidence, completionID string) error {
+	item, err := store.QueryWanted(wantedID)
 	if err != nil {
 		return fmt.Errorf("querying wanted item: %w", err)
 	}
@@ -72,17 +90,9 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("wanted item %s is claimed by %q, not %q", wantedID, item.ClaimedBy, rigHandle)
 	}
 
-	completionID := generateCompletionID(wantedID, rigHandle)
-
-	if err := doltserver.SubmitCompletion(townRoot, completionID, wantedID, rigHandle, wlDoneEvidence); err != nil {
+	if err := store.SubmitCompletion(completionID, wantedID, rigHandle, evidence); err != nil {
 		return fmt.Errorf("submitting completion: %w", err)
 	}
-
-	fmt.Printf("%s Completion submitted for %s\n", style.Bold.Render("✓"), wantedID)
-	fmt.Printf("  Completion ID: %s\n", completionID)
-	fmt.Printf("  Completed by: %s\n", rigHandle)
-	fmt.Printf("  Evidence: %s\n", wlDoneEvidence)
-	fmt.Printf("  Status: in_review\n")
 
 	return nil
 }
