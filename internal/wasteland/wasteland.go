@@ -256,8 +256,9 @@ func LocalCloneDir(townRoot, upstreamOrg, upstreamDB string) string {
 	return filepath.Join(WastelandDir(townRoot), upstreamOrg, upstreamDB)
 }
 
-// escapeSQLString escapes single quotes in SQL strings.
+// escapeSQLString escapes backslashes and single quotes for SQL string literals.
 func escapeSQLString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, "'", "''")
 }
 

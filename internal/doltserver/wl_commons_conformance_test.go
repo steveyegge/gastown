@@ -227,6 +227,33 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		}
 	})
 
+	t.Run("SubmitCompletionByWrongRig", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t)
+
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf09", Title: "Wrong rig item"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		if err := store.ClaimWanted("w-conf09", "rig-alpha"); err != nil {
+			t.Fatalf("ClaimWanted() error: %v", err)
+		}
+
+		// SubmitCompletion by a different rig should fail
+		err := store.SubmitCompletion("c-conf03", "w-conf09", "rig-beta", "https://pr/3")
+		if err == nil {
+			t.Error("SubmitCompletion by wrong rig should return an error")
+		}
+
+		// Status should remain claimed
+		got, err := store.QueryWanted("w-conf09")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
+		if got.Status != "claimed" {
+			t.Errorf("Status = %q, want %q (should not change on wrong-rig completion)", got.Status, "claimed")
+		}
+	})
+
 	t.Run("DatabaseExistsWrongName", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t)

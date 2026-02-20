@@ -126,6 +126,19 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s\n", step)
 	}
 
+	// Check if already joined before doing work
+	existing, loadErr := wasteland.LoadConfig(townRoot)
+	if loadErr == nil {
+		if existing.Upstream != upstream {
+			return fmt.Errorf("already joined to %s; run gt wl leave first", existing.Upstream)
+		}
+		fmt.Printf("%s Already joined wasteland: %s\n", style.Bold.Render("⚠"), upstream)
+		fmt.Printf("  Handle: %s\n", existing.RigHandle)
+		fmt.Printf("  Fork: %s/%s\n", existing.ForkOrg, existing.ForkDB)
+		fmt.Printf("  Local: %s\n", existing.LocalDir)
+		return nil
+	}
+
 	fmt.Printf("Joining wasteland %s (fork to %s/%s)...\n", upstream, forkOrg, upstream[strings.Index(upstream, "/")+1:])
 	cfg, err := svc.Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot)
 	if err != nil {
@@ -133,7 +146,7 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Joined wasteland: %s\n", style.Bold.Render("✓"), upstream)
-	fmt.Printf("  Handle: %s\n", handle)
+	fmt.Printf("  Handle: %s\n", cfg.RigHandle)
 	fmt.Printf("  Fork: %s/%s\n", cfg.ForkOrg, cfg.ForkDB)
 	fmt.Printf("  Local: %s\n", cfg.LocalDir)
 	fmt.Printf("\n  %s\n", style.Dim.Render("Next: gt wl browse  — browse the wanted board"))
