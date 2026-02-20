@@ -574,6 +574,55 @@ func GetProcessNames(agentName string) []string {
 	return info.ProcessNames
 }
 
+// ResolveProcessNames determines the correct process names for liveness detection
+// given an agent name and the actual command binary. This handles custom agents
+// that shadow built-in preset names (e.g., a custom "codex" agent that runs
+// "opencode" instead of the built-in "codex" binary).
+//
+// Resolution order:
+//  1. If agentName matches a built-in preset AND the preset's Command matches
+//     the actual command → use the preset's ProcessNames (no mismatch).
+//  2. Otherwise, find a built-in preset whose Command matches the actual command
+//     and use its ProcessNames (custom agent using a known launcher).
+//  3. Fallback: [command] (fully custom binary).
+func ResolveProcessNames(agentName, command string) []string {
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	// Normalize command to basename for comparison. Commands may be
+	// path-resolved (e.g., "/home/user/.claude/local/claude" from
+	// resolveClaudePath), but built-in presets store bare names ("claude").
+	// Process matching (processMatchesNames, pgrep) also uses basenames.
+	cmdBase := command
+	if command != "" {
+		cmdBase = filepath.Base(command)
+	}
+
+	// Check if agentName matches a built-in/registered preset with matching command.
+	// Compare against both the raw command and basename to handle registry entries
+	// that store absolute-path commands (e.g., "/opt/bin/my-tool").
+	if info, ok := globalRegistry.Agents[agentName]; ok && len(info.ProcessNames) > 0 {
+		if info.Command == command || info.Command == cmdBase || filepath.Base(info.Command) == cmdBase || cmdBase == "" {
+			return info.ProcessNames
+		}
+	}
+
+	// Agent name doesn't match or command differs — look up by command
+	if cmdBase != "" {
+		for _, info := range globalRegistry.Agents {
+			if (info.Command == command || filepath.Base(info.Command) == cmdBase) && len(info.ProcessNames) > 0 {
+				return info.ProcessNames
+			}
+		}
+		// Unknown command — use the binary basename itself
+		return []string{cmdBase}
+	}
+
+	// No command provided, agent not in registry — Claude defaults
+	return []string{"node", "claude"}
+}
+
 // MergeWithPreset applies preset defaults to a RuntimeConfig.
 // User-specified values take precedence over preset defaults.
 // Returns a new RuntimeConfig without modifying the original.
@@ -680,6 +729,15 @@ func ResetRegistryForTesting() {
 	globalRegistry = nil
 	loadedPaths = make(map[string]bool)
 	registryInitialized = false
+}
+
+// RegisterAgentForTesting adds a custom agent preset to the registry.
+// The registry is initialized first if needed. Intended for test use only.
+func RegisterAgentForTesting(name string, info AgentPresetInfo) {
+	ensureRegistry()
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	globalRegistry.Agents[name] = &info
 }
 
 // ResetHookInstallersForTesting clears all hook installer registrations.

@@ -3877,6 +3877,61 @@ func TestBuildStartupCommandWithAgentOverride_SetsGTAgent(t *testing.T) {
 	}
 }
 
+func TestBuildStartupCommandWithAgentOverride_SetsGTProcessNames(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create necessary config files
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": constants.RoleWitness},
+		rigPath,
+		"",
+		"gemini",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should include GT_PROCESS_NAMES with gemini's process names
+	if !strings.Contains(cmd, "GT_PROCESS_NAMES=gemini") {
+		t.Errorf("expected GT_PROCESS_NAMES=gemini in command, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_SetsGTProcessNames(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(
+		map[string]string{"GT_ROLE": constants.RoleWitness},
+		rigPath,
+		"",
+	)
+
+	// Default agent is claude — GT_PROCESS_NAMES should include node,claude
+	if !strings.Contains(cmd, "GT_PROCESS_NAMES=") {
+		t.Errorf("expected GT_PROCESS_NAMES in command, got: %q", cmd)
+	}
+}
+
 // TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot tests that
 // agentOverride is respected even when findTownRootFromCwd fails.
 // This is a regression test for the bug where `gt deacon start --agent codex`
@@ -3951,9 +4006,10 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
 	}
 
-	// Should NOT include GT_AGENT when no override is used
-	if strings.Contains(cmd, "GT_AGENT=") {
-		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
+	// GT_AGENT should be set from the resolved provider for liveness detection,
+	// even when no explicit override is used.
+	if !strings.Contains(cmd, "GT_AGENT=") {
+		t.Errorf("expected GT_AGENT in command for liveness detection, got: %q", cmd)
 	}
 }
 

@@ -204,6 +204,8 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// If handing off a different session, we need to find its pane and respawn there
 	if targetSession != currentSession {
+		// Update tmux session env before respawn (not during dry-run — see below)
+		updateSessionEnvForHandoff(t, targetSession, "")
 		return handoffRemoteSession(t, targetSession, restartCmd)
 	}
 
@@ -230,6 +232,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
 		return nil
 	}
+
+	// Update tmux session environment for liveness detection.
+	// IsAgentAlive reads GT_PROCESS_NAMES via tmux show-environment (session env),
+	// not from shell exports. The restart command sets shell exports for the child
+	// process, but we must also update the session env so liveness checks work.
+	// Placed after the dry-run guard to avoid mutating session state during dry-run.
+	updateSessionEnvForHandoff(t, currentSession, "")
 
 	// Send handoff mail to self (defaults applied inside sendHandoffMail).
 	// The mail is auto-hooked so the next session picks it up.
@@ -597,6 +606,19 @@ func buildRestartCommand(sessionName string) (string, error) {
 		exports = append(exports, "GT_AGENT="+currentAgent)
 	}
 
+	// Preserve GT_PROCESS_NAMES across handoff for accurate liveness detection.
+	// Without this, custom agents that shadow built-in presets (e.g., custom
+	// "codex" running "opencode") would revert to GT_AGENT-based lookup after
+	// handoff, causing false liveness failures.
+	if processNames := os.Getenv("GT_PROCESS_NAMES"); processNames != "" {
+		// Preserve existing process names from environment
+		exports = append(exports, "GT_PROCESS_NAMES="+processNames)
+	} else if currentAgent != "" {
+		// First boot or missing GT_PROCESS_NAMES — compute from agent config
+		resolved := config.ResolveProcessNames(currentAgent, "")
+		exports = append(exports, "GT_PROCESS_NAMES="+strings.Join(resolved, ","))
+	}
+
 	// Add Claude-related env vars from current environment
 	for _, name := range claudeEnvVars {
 		if val := os.Getenv(name); val != "" {
@@ -622,6 +644,64 @@ func buildRestartCommand(sessionName string) (string, error) {
 		return fmt.Sprintf("cd %s && export %s && exec %s", workDir, strings.Join(exports, " "), runtimeCmd), nil
 	}
 	return fmt.Sprintf("cd %s && exec %s", workDir, runtimeCmd), nil
+}
+
+// updateSessionEnvForHandoff updates the tmux session environment with the
+// agent name and process names for liveness detection. IsAgentAlive reads
+// GT_PROCESS_NAMES from the tmux session env (via tmux show-environment), not
+// from shell exports in the pane. Without this, post-handoff liveness checks
+// would use stale values from the previous agent.
+func updateSessionEnvForHandoff(t *tmux.Tmux, sessionName, agentOverride string) {
+	// Resolve current agent using the same priority as buildRestartCommandWithAgent
+	var currentAgent string
+	if agentOverride != "" {
+		currentAgent = agentOverride
+	} else {
+		currentAgent = os.Getenv("GT_AGENT")
+		if currentAgent == "" {
+			if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
+				currentAgent = val
+			}
+		}
+	}
+
+	if currentAgent == "" {
+		return
+	}
+
+	// Update GT_AGENT in session env
+	_ = t.SetEnvironment(sessionName, "GT_AGENT", currentAgent)
+
+	// Resolve and update GT_PROCESS_NAMES in session env
+	// When switching agents, recompute from config. When preserving, use env value.
+	var processNames string
+	if agentOverride != "" {
+		// Agent is changing — resolve config to get the command for process name resolution
+		townRoot := detectTownRootFromCwd()
+		if townRoot != "" {
+			identity, err := session.ParseSessionName(sessionName)
+			rigPath := ""
+			if err == nil && identity.Rig != "" {
+				rigPath = filepath.Join(townRoot, identity.Rig)
+			}
+			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
+			if err == nil {
+				resolved := config.ResolveProcessNames(currentAgent, rc.Command)
+				processNames = strings.Join(resolved, ",")
+			}
+		}
+	}
+	if processNames == "" {
+		// Preserve existing value or compute from current agent
+		if pn := os.Getenv("GT_PROCESS_NAMES"); pn != "" {
+			processNames = pn
+		} else {
+			resolved := config.ResolveProcessNames(currentAgent, "")
+			processNames = strings.Join(resolved, ",")
+		}
+	}
+
+	_ = t.SetEnvironment(sessionName, "GT_PROCESS_NAMES", processNames)
 }
 
 // sessionWorkDir returns the correct working directory for a session.
