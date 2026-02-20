@@ -602,6 +602,93 @@ func TestParseMailInboxText_UnreadMarker(t *testing.T) {
 	}
 }
 
+// --- groupIntoThreads tests ---
+
+func TestGroupIntoThreads_SingleMessages(t *testing.T) {
+	msgs := []MailMessage{
+		{ID: "msg-1", From: "alice", Subject: "Hello", Timestamp: "2026-01-01T10:00:00Z"},
+		{ID: "msg-2", From: "bob", Subject: "World", Timestamp: "2026-01-01T11:00:00Z"},
+	}
+	threads := groupIntoThreads(msgs)
+	if len(threads) != 2 {
+		t.Fatalf("got %d threads, want 2", len(threads))
+	}
+	if threads[0].Count != 1 {
+		t.Errorf("thread 0 count = %d, want 1", threads[0].Count)
+	}
+	if threads[1].Subject != "World" {
+		t.Errorf("thread 1 subject = %q, want %q", threads[1].Subject, "World")
+	}
+}
+
+func TestGroupIntoThreads_ByThreadID(t *testing.T) {
+	msgs := []MailMessage{
+		{ID: "msg-1", From: "alice", Subject: "Status update", ThreadID: "t-001", Timestamp: "2026-01-01T10:00:00Z"},
+		{ID: "msg-2", From: "bob", Subject: "Re: Status update", ThreadID: "t-001", Timestamp: "2026-01-01T11:00:00Z"},
+		{ID: "msg-3", From: "carol", Subject: "Other topic", Timestamp: "2026-01-01T12:00:00Z"},
+	}
+	threads := groupIntoThreads(msgs)
+	if len(threads) != 2 {
+		t.Fatalf("got %d threads, want 2", len(threads))
+	}
+	// First thread should have 2 messages grouped by ThreadID
+	if threads[0].Count != 2 {
+		t.Errorf("thread 0 count = %d, want 2", threads[0].Count)
+	}
+	if threads[0].Subject != "Status update" {
+		t.Errorf("thread 0 subject = %q, want %q", threads[0].Subject, "Status update")
+	}
+	if threads[0].LastMessage.ID != "msg-2" {
+		t.Errorf("thread 0 last message ID = %q, want %q", threads[0].LastMessage.ID, "msg-2")
+	}
+	// Second thread is standalone
+	if threads[1].Count != 1 {
+		t.Errorf("thread 1 count = %d, want 1", threads[1].Count)
+	}
+}
+
+func TestGroupIntoThreads_ByReplyTo(t *testing.T) {
+	msgs := []MailMessage{
+		{ID: "msg-1", From: "alice", Subject: "Question", Timestamp: "2026-01-01T10:00:00Z"},
+		{ID: "msg-2", From: "bob", Subject: "Re: Question", ReplyTo: "msg-1", Timestamp: "2026-01-01T11:00:00Z"},
+	}
+	threads := groupIntoThreads(msgs)
+	if len(threads) != 1 {
+		t.Fatalf("got %d threads, want 1", len(threads))
+	}
+	if threads[0].Count != 2 {
+		t.Errorf("thread count = %d, want 2", threads[0].Count)
+	}
+	if threads[0].Subject != "Question" {
+		t.Errorf("thread subject = %q, want %q", threads[0].Subject, "Question")
+	}
+}
+
+func TestGroupIntoThreads_UnreadCount(t *testing.T) {
+	msgs := []MailMessage{
+		{ID: "msg-1", From: "alice", Subject: "Update", ThreadID: "t-001", Read: true},
+		{ID: "msg-2", From: "bob", Subject: "Re: Update", ThreadID: "t-001", Read: false},
+		{ID: "msg-3", From: "carol", Subject: "Re: Update", ThreadID: "t-001", Read: false},
+	}
+	threads := groupIntoThreads(msgs)
+	if len(threads) != 1 {
+		t.Fatalf("got %d threads, want 1", len(threads))
+	}
+	if threads[0].UnreadCount != 2 {
+		t.Errorf("unread count = %d, want 2", threads[0].UnreadCount)
+	}
+}
+
+func TestGroupIntoThreads_ReSubjectStrip(t *testing.T) {
+	msgs := []MailMessage{
+		{ID: "msg-1", From: "alice", Subject: "Re: Original topic", ThreadID: "t-001"},
+	}
+	threads := groupIntoThreads(msgs)
+	if threads[0].Subject != "Original topic" {
+		t.Errorf("subject = %q, want %q", threads[0].Subject, "Original topic")
+	}
+}
+
 // --- parseIssueShowJSON tests (issue #1228: prefer structured JSON over text parsing) ---
 
 func TestParseIssueShowJSON_ValidOutput(t *testing.T) {
@@ -753,6 +840,61 @@ func TestOptionsCacheConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestParseConvoyListJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want []string
+	}{
+		{
+			name: "valid JSON with convoys",
+			json: `[{"id":"hq-cv-abc","title":"Deploy widgets"},{"id":"hq-cv-def","title":"Fix bugs"}]`,
+			want: []string{"hq-cv-abc", "hq-cv-def"},
+		},
+		{
+			name: "empty array",
+			json: `[]`,
+			want: []string{},
+		},
+		{
+			name: "invalid JSON",
+			json: `{not valid`,
+			want: nil,
+		},
+		{
+			name: "empty string",
+			json: ``,
+			want: nil,
+		},
+		{
+			name: "skips empty IDs",
+			json: `[{"id":"hq-cv-abc"},{"id":""},{"id":"hq-cv-def"}]`,
+			want: []string{"hq-cv-abc", "hq-cv-def"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConvoyListJSON(tt.json)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("parseConvoyListJSON(%q) = %v, want nil", tt.json, got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("parseConvoyListJSON(%q) = %v, want %v", tt.json, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("parseConvoyListJSON(%q)[%d] = %q, want %q", tt.json, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
 }
 
 // TestRunGtCommandSemaphore verifies that runGtCommand limits concurrent

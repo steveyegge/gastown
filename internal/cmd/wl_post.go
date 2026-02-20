@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/wasteland"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -28,8 +29,8 @@ var wlPostCmd = &cobra.Command{
 Creates a wanted item with a unique w-<hash> ID and inserts it into the
 wl-commons database. Phase 1 (wild-west): direct write to main branch.
 
-The posted_by field is set to the town's DoltHub org (DOLTHUB_ORG) or
-falls back to the town directory name.
+The posted_by field is set to the rig's DoltHub org (DOLTHUB_ORG) or
+falls back to the directory name.
 
 Examples:
   gt wl post --title "Fix auth bug" --project gastown --type bug
@@ -90,8 +91,13 @@ func runWlPost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensuring wl-commons database: %w", err)
 	}
 
+	wlCfg, err := wasteland.LoadConfig(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading wasteland config: %w", err)
+	}
+
 	id := doltserver.GenerateWantedID(wlPostTitle)
-	handle := doltserver.GetTownHandle(townRoot)
+	handle := wlCfg.RigHandle
 
 	item := &doltserver.WantedItem{
 		ID:          id,

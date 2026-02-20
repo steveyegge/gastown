@@ -30,7 +30,7 @@ var AllowedCommands = map[string]CommandMeta{
 	"agents list": {Safe: true, Desc: "List active agents", Category: "Status"},
 	"convoy list": {Safe: true, Desc: "List convoys", Category: "Convoys"},
 	"convoy show":   {Safe: true, Desc: "Show convoy details", Category: "Convoys", Args: "<convoy-id>", ArgType: "convoys"},
-	"convoy status": {Safe: true, Desc: "Show convoy status with issues", Category: "Convoys", Args: "<convoy-id>", ArgType: "convoys"},
+	"convoy status": {Safe: true, Desc: "Show convoy status with tracked issues", Category: "Convoys", Args: "<convoy-id> --json", ArgType: "convoys"},
 	"mail inbox":  {Safe: true, Desc: "Check inbox", Category: "Mail"},
 	"mail check":  {Safe: true, Desc: "Check for new mail", Category: "Mail"},
 	"mail peek":   {Safe: true, Desc: "Peek at message", Category: "Mail", Args: "<message-id>"},

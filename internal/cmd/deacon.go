@@ -504,6 +504,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: townRoot,
+		Agent:    agentOverride,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)

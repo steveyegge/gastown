@@ -351,10 +351,140 @@
             margin-top: 12px;
         }
 
-        /* Expandable issues */
+        /* Convoy toggle arrow */
+        .convoy-toggle {
+            display: inline-block;
+            width: 14px;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: transform 0.15s ease;
+            margin-right: 4px;
+        }
+
+        .convoy-expanded {
+            background: rgba(89, 194, 255, 0.06);
+        }
+
+        /* Convoy detail row (expanded sub-table) */
+        .convoy-detail-row {
+            background: none;
+        }
+
+        .convoy-detail-row:hover {
+            background: none;
+        }
+
+        .convoy-detail-row td {
+            padding: 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Expandable issues container */
         .tracked-issues {
             background: var(--bg-dark);
             border-top: 1px solid var(--border);
+        }
+
+        .tracked-issues-loading,
+        .tracked-issues-error,
+        .tracked-issues-empty {
+            padding: 12px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .tracked-issues-error {
+            color: var(--red);
+        }
+
+        /* Tracked issues sub-table */
+        .tracked-issues-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .tracked-issues-table th {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .tracked-issues-table td {
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(45, 54, 63, 0.5);
+        }
+
+        .tracked-issue-row:hover {
+            background: rgba(89, 194, 255, 0.06);
+        }
+
+        .tracked-issue-row.tracked-issue-closed {
+            opacity: 0.7;
+        }
+
+        .tracked-issue-title {
+            color: var(--text-secondary);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tracked-issue-assignee {
+            color: var(--purple);
+            font-size: 0.75rem;
+        }
+
+        .tracked-issue-progress {
+            font-size: 0.75rem;
+        }
+
+        .convoy-progress-done {
+            color: var(--green);
+        }
+
+        .convoy-progress-active {
+            color: var(--cyan);
+        }
+
+        .convoy-progress-age {
+            color: var(--text-muted);
+        }
+
+        /* Tracked issues progress summary */
+        .tracked-issues-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .tracked-issues-progress-bar {
+            flex: 1;
+            max-width: 120px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .tracked-issues-progress-fill {
+            height: 100%;
+            background: var(--green);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .tracked-issues-progress-text {
+            font-size: 0.7rem;
+            color: var(--text-muted);
         }
 
         .tracked-issue {
@@ -2171,6 +2301,8 @@
         .panel.expanded .issue-title,
         .panel.expanded .hook-title,
         .panel.expanded .mail-subject,
+        .panel.expanded .mail-thread-preview,
+        .panel.expanded .mail-thread-left .mail-from,
         .panel.expanded .feed-summary,
         .panel.expanded .tl-summary,
         .panel.expanded td {
@@ -2815,6 +2947,176 @@
             color: var(--text-primary);
         }
 
+        /* Mail thread styles */
+        .mail-thread {
+            border-bottom: 1px solid var(--border);
+            transition: background 0.15s ease;
+        }
+
+        .mail-thread:last-child {
+            border-bottom: none;
+        }
+
+        .mail-thread-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .mail-thread-header:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .mail-thread-unread .mail-thread-header {
+            background: rgba(89, 194, 255, 0.06);
+        }
+
+        .mail-thread-unread .mail-thread-header:hover {
+            background: rgba(89, 194, 255, 0.12);
+        }
+
+        .mail-thread-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 120px;
+            flex-shrink: 0;
+        }
+
+        .mail-thread-left .mail-from {
+            font-size: 0.8rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 110px;
+        }
+
+        .mail-thread-unread .mail-thread-left .mail-from {
+            font-weight: 600;
+        }
+
+        .thread-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            background: var(--border-accent);
+            border-radius: 9px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .mail-thread-unread .thread-count {
+            background: var(--blue);
+            color: var(--bg-dark);
+        }
+
+        .thread-unread-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--blue);
+            flex-shrink: 0;
+        }
+
+        .mail-thread-center {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mail-thread-center .mail-subject {
+            font-size: 0.85rem;
+        }
+
+        .mail-thread-unread .mail-thread-center .mail-subject {
+            font-weight: 600;
+        }
+
+        .mail-thread-preview {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .mail-thread-right {
+            flex-shrink: 0;
+        }
+
+        .mail-thread-right .mail-time {
+            font-size: 0.75rem;
+        }
+
+        /* Expanded thread */
+        .mail-thread-expanded {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .mail-thread-expanded .mail-thread-header {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .mail-thread-messages {
+            padding-left: 20px;
+            border-left: 2px solid var(--border-accent);
+            margin-left: 18px;
+        }
+
+        .mail-thread-msg {
+            padding: 6px 12px;
+            border-bottom: 1px solid rgba(45, 54, 63, 0.5);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .mail-thread-msg:last-child {
+            border-bottom: none;
+        }
+
+        .mail-thread-msg:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .mail-thread-msg.mail-unread {
+            background: rgba(89, 194, 255, 0.05);
+        }
+
+        .mail-thread-msg-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .mail-thread-msg-header .mail-from {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .mail-thread-msg.mail-unread .mail-from {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .mail-thread-msg-header .mail-time {
+            font-size: 0.7rem;
+        }
+
+        .mail-thread-msg-subject {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* Mail panel interactions */
         .loading-state {
             padding: 20px;
@@ -3273,6 +3575,54 @@
             background: transparent !important;
             color: var(--red) !important;
             border-color: var(--red) !important;
+        }
+
+        /* Session row clickable */
+        .session-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .session-row:hover {
+            background: rgba(138, 180, 248, 0.12);
+        }
+
+        /* Session terminal preview */
+        .session-preview-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .session-preview-title {
+            font-weight: 600;
+            color: var(--cyan);
+            font-size: 0.9rem;
+        }
+
+        .session-preview-refresh-status {
+            margin-left: auto;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .session-preview-content {
+            margin: 0;
+            padding: 12px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            min-height: 100px;
         }
 
         @keyframes slideIn {

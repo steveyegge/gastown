@@ -1,13 +1,107 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 )
+
+// TestSquashJitterInvalidDuration verifies that an invalid --jitter value
+// returns a parse error immediately (before any workspace operations).
+func TestSquashJitterInvalidDuration(t *testing.T) {
+	prev := moleculeJitter
+	t.Cleanup(func() { moleculeJitter = prev })
+
+	moleculeJitter = "bogus"
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runMoleculeSquash(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid jitter duration, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --jitter duration") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestSquashJitterNegativeDuration verifies that a negative --jitter value
+// is rejected with a clear error rather than silently skipped.
+func TestSquashJitterNegativeDuration(t *testing.T) {
+	prev := moleculeJitter
+	t.Cleanup(func() { moleculeJitter = prev })
+
+	moleculeJitter = "-5s"
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runMoleculeSquash(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for negative jitter duration, got nil")
+	}
+	if !strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("expected non-negative error, got: %v", err)
+	}
+}
+
+// TestSquashJitterZeroDuration verifies that --jitter 0s proceeds without
+// sleeping (the jitterMax > 0 guard skips the sleep block).
+// This tests the parse path only — the command will fail at workspace lookup
+// since we're not in a gastown workspace, but the jitter parsing should succeed.
+func TestSquashJitterZeroDuration(t *testing.T) {
+	prev := moleculeJitter
+	t.Cleanup(func() { moleculeJitter = prev })
+
+	moleculeJitter = "0s"
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runMoleculeSquash(cmd, nil)
+	// Should fail at workspace lookup, NOT at jitter parsing
+	if err == nil {
+		t.Fatal("expected workspace error, got nil")
+	}
+	if strings.Contains(err.Error(), "jitter") {
+		t.Errorf("jitter 0s should be accepted, but got jitter error: %v", err)
+	}
+}
+
+// TestSquashJitterContextCancellation verifies that the jitter sleep respects
+// context cancellation and returns promptly instead of blocking.
+func TestSquashJitterContextCancellation(t *testing.T) {
+	prev := moleculeJitter
+	t.Cleanup(func() { moleculeJitter = prev })
+
+	// Use a long jitter so the sleep would block if cancellation didn't work
+	moleculeJitter = "10m"
+	cmd := &cobra.Command{}
+
+	// Create a pre-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cmd.SetContext(ctx)
+
+	start := time.Now()
+	err := runMoleculeSquash(cmd, nil)
+	elapsed := time.Since(start)
+
+	// Should return quickly (the workspace lookup might fail first on some systems,
+	// but if it reaches the jitter block, cancellation should fire immediately)
+	if elapsed > 5*time.Second {
+		t.Errorf("jitter sleep should have been cancelled, but took %v", elapsed)
+	}
+	// Accept either context error or workspace error (depends on execution order)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
 
 // TestSlingFormulaOnBeadHooksBaseBead verifies that when using
 // "gt sling <formula> --on <bead>", the BASE bead is hooked (not the wisp).

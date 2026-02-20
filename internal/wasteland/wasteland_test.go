@@ -61,7 +61,7 @@ func TestConfigSaveLoad(t *testing.T) {
 		ForkOrg:    "alice-dev",
 		ForkDB:     "wl-commons",
 		LocalDir:   "/tmp/test/wl-commons",
-		TownHandle: "alice-dev",
+		RigHandle: "alice-dev",
 	}
 
 	if err := SaveConfig(tmpDir, cfg); err != nil {
@@ -82,8 +82,8 @@ func TestConfigSaveLoad(t *testing.T) {
 	if loaded.ForkDB != cfg.ForkDB {
 		t.Errorf("ForkDB = %q, want %q", loaded.ForkDB, cfg.ForkDB)
 	}
-	if loaded.TownHandle != cfg.TownHandle {
-		t.Errorf("TownHandle = %q, want %q", loaded.TownHandle, cfg.TownHandle)
+	if loaded.RigHandle != cfg.RigHandle {
+		t.Errorf("RigHandle = %q, want %q", loaded.RigHandle, cfg.RigHandle)
 	}
 }
 

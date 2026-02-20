@@ -26,9 +26,9 @@ var wlCmd = &cobra.Command{
 	RunE:    requireSubcommand,
 	Long: `Manage Wasteland federation — join communities, post work, earn reputation.
 
-The Wasteland is a federation of Gas Towns via DoltHub. Each town has a
+The Wasteland is a federation of Gas Towns via DoltHub. Each rig has a
 sovereign fork of a shared commons database containing the wanted board
-(open work), town registry, and validated completions.
+(open work), rig registry, and validated completions.
 
 Getting started:
   gt wl join steveyegge/wl-commons   # Join the default wasteland
@@ -44,7 +44,7 @@ var wlJoinCmd = &cobra.Command{
 This command:
   1. Forks the upstream commons to your DoltHub org
   2. Clones the fork locally
-  3. Registers your town in the towns table
+  3. Registers your rig in the rigs table
   4. Pushes the registration to your fork
   5. Saves wasteland configuration locally
 
@@ -56,15 +56,15 @@ Required environment variables:
 
 Examples:
   gt wl join steveyegge/wl-commons
-  gt wl join steveyegge/wl-commons --handle my-town
+  gt wl join steveyegge/wl-commons --handle my-rig
   gt wl join steveyegge/wl-commons --display-name "Alice's Workshop"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWlJoin,
 }
 
 func init() {
-	wlJoinCmd.Flags().StringVar(&wlJoinHandle, "handle", "", "Town handle for registration (default: town name from config)")
-	wlJoinCmd.Flags().StringVar(&wlJoinDisplayName, "display-name", "", "Display name for the town registry")
+	wlJoinCmd.Flags().StringVar(&wlJoinHandle, "handle", "", "Rig handle for registration (default: DoltHub org)")
+	wlJoinCmd.Flags().StringVar(&wlJoinDisplayName, "display-name", "", "Display name for the rig registry")
 
 	wlCmd.AddCommand(wlJoinCmd)
 	rootCmd.AddCommand(wlCmd)
@@ -154,12 +154,12 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %s Upstream remote configured\n", style.Bold.Render("✓"))
 
-	// Step 4: Register town in the towns table
-	fmt.Printf("Registering town '%s' in the commons...\n", handle)
-	if err := wasteland.RegisterTown(localDir, handle, forkOrg, displayName, ownerEmail, gtVersion); err != nil {
-		return fmt.Errorf("registering town: %w", err)
+	// Step 4: Register rig in the rigs table
+	fmt.Printf("Registering rig '%s' in the commons...\n", handle)
+	if err := wasteland.RegisterRig(localDir, handle, forkOrg, displayName, ownerEmail, gtVersion); err != nil {
+		return fmt.Errorf("registering rig: %w", err)
 	}
-	fmt.Printf("  %s Town registered\n", style.Bold.Render("✓"))
+	fmt.Printf("  %s Rig registered\n", style.Bold.Render("✓"))
 
 	// Step 5: Push to origin (the fork)
 	fmt.Printf("Pushing registration to fork...\n")
@@ -174,7 +174,7 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 		ForkOrg:    forkOrg,
 		ForkDB:     upstreamDB,
 		LocalDir:   localDir,
-		TownHandle: handle,
+		RigHandle: handle,
 		JoinedAt:   time.Now(),
 	}
 	if err := wasteland.SaveConfig(townRoot, cfg); err != nil {

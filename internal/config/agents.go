@@ -331,6 +331,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeFlag:          "",    // No resume support yet
 		ResumeStyle:         "",
 		SupportsHooks:       true,  // Uses .pi/extensions/gastown-hooks.js
+		HooksProvider:       "pi",
+		HooksDir:            ".pi/extensions",
+		HooksSettingsFile:   "gastown-hooks.js",
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",

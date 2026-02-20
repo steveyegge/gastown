@@ -161,6 +161,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		Role:     "witness",
 		Rig:      m.rig.Name,
 		TownRoot: townRoot,
+		Agent:    agentOverride,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
@@ -240,7 +241,7 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: fmt.Sprintf("%s/witness", rigName),
+		Recipient: session.BeaconRecipient("witness", "", rigName),
 		Sender:    "deacon",
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")

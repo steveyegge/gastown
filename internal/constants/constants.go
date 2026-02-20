@@ -101,6 +101,9 @@ const (
 	// Written by gt handoff before respawn, cleared by gt prime after detection.
 	// This prevents the handoff loop bug where agents re-run /handoff from context.
 	FileHandoffMarker = "handoff_to_successor"
+
+	// FileQuotaJSON is the quota state file in mayor/.
+	FileQuotaJSON = "quota.json"
 )
 
 // Beads configuration constants.
@@ -279,4 +282,19 @@ func RigSettingsPath(rigPath string) string {
 // MayorAccountsPath returns the path to mayor/accounts.json within a town root.
 func MayorAccountsPath(townRoot string) string {
 	return townRoot + "/" + DirMayor + "/" + FileAccountsJSON
+}
+
+// MayorQuotaPath returns the path to mayor/quota.json within a town root.
+func MayorQuotaPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileQuotaJSON
+}
+
+// DefaultRateLimitPatterns are the default patterns that indicate a session
+// is rate-limited. These are matched against tmux pane content.
+// Note: patterns are compiled with (?i) for case-insensitive matching.
+var DefaultRateLimitPatterns = []string{
+	`You've hit your limit`,
+	`resets \d+[:\d]*(am|pm)\b`,               // "resets 7pm", "resets 3:00 AM" — anchored to digit
+	`Stop and wait for limit to reset`,        // /rate-limit-options TUI prompt option 1
+	`Add funds to continue with extra usage`,  // /rate-limit-options TUI prompt option 2
 }

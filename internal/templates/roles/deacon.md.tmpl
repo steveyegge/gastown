@@ -237,7 +237,7 @@ Then squash and decide:
 
 ```bash
 # Squash the wisp to a digest
-bd mol squash <wisp-id> --summary="Patrol complete: checked inbox, scanned health, no issues"
+gt mol squash --jitter 10s --summary="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
 {{ cmd }} patrol new

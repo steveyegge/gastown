@@ -143,6 +143,7 @@
                                 {{range .Convoys}}
                                 <tr class="convoy-row" data-convoy-id="{{.ID}}">
                                     <td>
+                                        <span class="convoy-toggle">▶</span>
                                         {{if eq .WorkStatus "complete"}}
                                         <span class="badge badge-green">✓</span>
                                         {{else if eq .WorkStatus "active"}}
@@ -361,7 +362,7 @@
                         </thead>
                         <tbody>
                             {{range .Sessions}}
-                            <tr>
+                            <tr class="session-row" data-session-name="{{.Name}}">
                                 <td>
                                     <span class="role-{{.Role}}">{{.Role}}</span>
                                 </td>
@@ -377,6 +378,15 @@
                         <p>No active sessions</p>
                     </div>
                     {{end}}
+                    <!-- Session terminal preview -->
+                    <div id="session-preview" style="display:none;">
+                        <div class="session-preview-header">
+                            <button id="session-preview-back" class="mail-back-btn">← Back</button>
+                            <span id="session-preview-name" class="session-preview-title"></span>
+                            <span id="session-preview-status" class="session-preview-refresh-status"></span>
+                        </div>
+                        <pre id="session-preview-content" class="session-preview-content">Loading...</pre>
+                    </div>
                 </div>
             </div>
 
@@ -462,20 +472,10 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    <!-- Inbox view (overseer inbox via API) -->
+                    <!-- Inbox view (threaded conversations via API) -->
                     <div id="mail-list">
                         <div class="loading-state" id="mail-loading">Loading inbox...</div>
-                        <table id="mail-table" style="display: none;">
-                            <thead>
-                                <tr>
-                                    <th>From</th>
-                                    <th>Subject</th>
-                                    <th>Time</th>
-                                </tr>
-                            </thead>
-                            <tbody id="mail-tbody">
-                            </tbody>
-                        </table>
+                        <div id="mail-threads" style="display: none;"></div>
                         <div class="empty-state" id="mail-empty" style="display: none;">
                             <p>No mail in inbox</p>
                         </div>

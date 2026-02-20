@@ -86,6 +86,12 @@ func TestIsInGasTownWorkspace(t *testing.T) {
 	// Do NOT add t.Parallel() here or to any test in this file—concurrent
 	// tests sharing the same process would race on the working directory.
 
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir)
+
 	// Create a temporary directory structure simulating a Gas Town workspace
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
@@ -97,19 +103,17 @@ func TestIsInGasTownWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Our process may or may not be in a GT workspace depending on where
-	// the tests are run. If already in a GT workspace (e.g. running from
-	// a crew worktree), skip this assertion.
-	if isInGasTownWorkspace(os.Getpid()) {
-		t.Log("skipping negative check: test process is already in a GT workspace")
-	}
-
-	// Change to the workspace dir and verify it detects correctly
-	origDir, err := os.Getwd()
-	if err != nil {
+	// Move to a non-workspace temp dir first, so the "not in workspace" check
+	// works even when tests are run from inside a real GT workspace.
+	nonWorkspaceDir := t.TempDir()
+	if err := os.Chdir(nonWorkspaceDir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(origDir)
+
+	// Our process is NOT in the temp workspace, so should return false
+	if isInGasTownWorkspace(os.Getpid()) {
+		t.Error("isInGasTownWorkspace(self) = true, want false (not in a GT workspace)")
+	}
 
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatal(err)

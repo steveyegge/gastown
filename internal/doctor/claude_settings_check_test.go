@@ -880,7 +880,7 @@ func TestClaudeSettingsCheck_FixPreservesTrackedCleanFiles(t *testing.T) {
 // TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor were removed because
 // CLAUDE.md at town root is now intentionally created by gt install.
 // It serves as an identity anchor for Mayor/Deacon who run from the town root.
-// See install.go createTownRootCLAUDEmd() for details.
+// See install.go createTownRootAgentMDs() for details.
 
 func TestClaudeSettingsCheck_GitIgnoredFilesNotFlagged(t *testing.T) {
 	tmpDir := t.TempDir()

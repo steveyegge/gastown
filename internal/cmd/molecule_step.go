@@ -476,7 +476,7 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	if roleCtx.Role == RolePolecat {
 		fmt.Printf("%s Signaling completion to witness...\n", style.Bold.Render("📤"))
 
-		doneCmd := exec.Command("gt", "done", "--exit", "DEFERRED")
+		doneCmd := exec.Command("gt", "done", "--status", "DEFERRED")
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()

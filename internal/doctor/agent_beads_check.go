@@ -274,7 +274,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 
 // addLabelToBead adds a label to an existing bead via bd update.
 func addLabelToBead(townRoot, id, label string) error {
-	cmd := exec.Command("bd", "update", id, "--add-labels="+label)
+	cmd := exec.Command("bd", "update", id, "--add-label="+label)
 	cmd.Dir = townRoot
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))

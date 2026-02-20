@@ -100,6 +100,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleOptions(w, r)
 	case path == "/mail/inbox" && r.Method == http.MethodGet:
 		h.handleMailInbox(w, r)
+	case path == "/mail/threads" && r.Method == http.MethodGet:
+		h.handleMailThreads(w, r)
 	case path == "/mail/read" && r.Method == http.MethodGet:
 		h.handleMailRead(w, r)
 	case path == "/mail/send" && r.Method == http.MethodPost:
@@ -120,6 +122,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleReady(w, r)
 	case path == "/events" && r.Method == http.MethodGet:
 		h.handleSSE(w, r)
+	case path == "/session/preview" && r.Method == http.MethodGet:
+		h.handleSessionPreview(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -264,6 +268,8 @@ type MailMessage struct {
 	Timestamp string `json:"timestamp"`
 	Read      bool   `json:"read"`
 	Priority  string `json:"priority,omitempty"`
+	ThreadID  string `json:"thread_id,omitempty"`
+	ReplyTo   string `json:"reply_to,omitempty"`
 }
 
 // MailInboxResponse is the response for /api/mail/inbox.
@@ -271,6 +277,23 @@ type MailInboxResponse struct {
 	Messages    []MailMessage `json:"messages"`
 	UnreadCount int           `json:"unread_count"`
 	Total       int           `json:"total"`
+}
+
+// MailThread represents a group of messages in a conversation thread.
+type MailThread struct {
+	ThreadID    string        `json:"thread_id"`
+	Subject     string        `json:"subject"`
+	LastMessage MailMessage   `json:"last_message"`
+	Messages    []MailMessage `json:"messages"`
+	Count       int           `json:"count"`
+	UnreadCount int           `json:"unread_count"`
+}
+
+// MailThreadsResponse is the response for /api/mail/threads.
+type MailThreadsResponse struct {
+	Threads     []MailThread `json:"threads"`
+	UnreadCount int          `json:"unread_count"`
+	Total       int          `json:"total"`
 }
 
 // handleMailInbox returns the user's inbox.
@@ -320,6 +343,132 @@ func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
 		UnreadCount: unread,
 		Total:       len(messages),
 	})
+}
+
+// handleMailThreads returns the inbox grouped by conversation threads.
+func (h *APIHandler) handleMailThreads(w http.ResponseWriter, r *http.Request) {
+	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox", "--json"})
+	if err != nil {
+		// Fall back to text parsing
+		output, err = h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox"})
+		if err != nil {
+			h.sendError(w, "Failed to fetch inbox: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		messages := parseMailInboxText(output)
+		threads := groupIntoThreads(messages)
+		unread := 0
+		for _, t := range threads {
+			unread += t.UnreadCount
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(MailThreadsResponse{
+			Threads:     threads,
+			UnreadCount: unread,
+			Total:       len(messages),
+		})
+		return
+	}
+
+	var messages []MailMessage
+	if err := json.Unmarshal([]byte(output), &messages); err != nil {
+		h.sendError(w, "Failed to parse inbox: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	threads := groupIntoThreads(messages)
+	unread := 0
+	for _, t := range threads {
+		unread += t.UnreadCount
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(MailThreadsResponse{
+		Threads:     threads,
+		UnreadCount: unread,
+		Total:       len(messages),
+	})
+}
+
+// groupIntoThreads groups messages into conversation threads.
+// Messages are grouped by ThreadID when available, otherwise by ReplyTo chain,
+// and finally by subject similarity as a fallback.
+func groupIntoThreads(messages []MailMessage) []MailThread {
+	// Map from thread key to slice of messages
+	threadMap := make(map[string][]MailMessage)
+	// Track message ID -> thread key for reply-to chaining
+	msgToThread := make(map[string]string)
+	// Maintain insertion order of thread keys
+	var threadOrder []string
+	threadSeen := make(map[string]bool)
+
+	for _, msg := range messages {
+		var threadKey string
+
+		// Priority 1: Use ThreadID if present
+		if msg.ThreadID != "" {
+			threadKey = "thread:" + msg.ThreadID
+		} else if msg.ReplyTo != "" {
+			// Priority 2: Follow reply-to chain
+			if parentKey, ok := msgToThread[msg.ReplyTo]; ok {
+				threadKey = parentKey
+			} else {
+				// Start a new thread anchored to the reply-to ID
+				threadKey = "reply:" + msg.ReplyTo
+			}
+		} else {
+			// Priority 3: Standalone message (its own thread)
+			threadKey = "msg:" + msg.ID
+		}
+
+		threadMap[threadKey] = append(threadMap[threadKey], msg)
+		msgToThread[msg.ID] = threadKey
+
+		if !threadSeen[threadKey] {
+			threadOrder = append(threadOrder, threadKey)
+			threadSeen[threadKey] = true
+		}
+	}
+
+	// Build thread structs, ordered by most recent message
+	var threads []MailThread
+	for _, key := range threadOrder {
+		msgs := threadMap[key]
+		if len(msgs) == 0 {
+			continue
+		}
+
+		// Last message is the most recent (messages come in chronological order)
+		last := msgs[len(msgs)-1]
+
+		// Use the first message's subject as the thread subject (strip Re: prefixes)
+		subject := msgs[0].Subject
+		subject = strings.TrimPrefix(subject, "Re: ")
+		subject = strings.TrimPrefix(subject, "RE: ")
+
+		unread := 0
+		for _, m := range msgs {
+			if !m.Read {
+				unread++
+			}
+		}
+
+		threadID := key
+		if last.ThreadID != "" {
+			threadID = last.ThreadID
+		}
+
+		threads = append(threads, MailThread{
+			ThreadID:    threadID,
+			Subject:     subject,
+			LastMessage: last,
+			Messages:    msgs,
+			Count:       len(msgs),
+			UnreadCount: unread,
+		})
+	}
+
+	return threads
 }
 
 // handleMailRead reads a specific message by ID.
@@ -486,6 +635,10 @@ func parseMailReadOutput(output string, msgID string) MailMessage {
 			msg.To = strings.TrimPrefix(line, "To: ")
 		} else if strings.HasPrefix(line, "ID: ") {
 			msg.ID = strings.TrimPrefix(line, "ID: ")
+		} else if strings.HasPrefix(line, "Thread: ") {
+			msg.ThreadID = strings.TrimSpace(strings.TrimPrefix(line, "Thread: "))
+		} else if strings.HasPrefix(line, "Reply-To: ") {
+			msg.ReplyTo = strings.TrimSpace(strings.TrimPrefix(line, "Reply-To: "))
 		} else if line == "" && msg.From != "" && !inBody {
 			inBody = true
 		} else if inBody {
@@ -573,9 +726,9 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runBdCommand(r.Context(), 3*time.Second, []string{"list", "--type=convoy", "--json"}); err == nil {
 			mu.Lock()
-			resp.Convoys = parseConvoyListOutput(output)
+			resp.Convoys = parseConvoyListJSON(output)
 			mu.Unlock()
 		} else {
 			log.Printf("warning: handleOptions: convoy list: %v", err)
@@ -668,22 +821,22 @@ func parseRigListOutput(output string) []string {
 	return rigs
 }
 
-// parseConvoyListOutput extracts convoy IDs from text output.
-func parseConvoyListOutput(output string) []string {
-	var convoys []string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		// Look for lines that start with convoy ID pattern
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && !strings.HasPrefix(trimmed, "Convoy") && !strings.HasPrefix(trimmed, "No ") {
-			// Try to extract the first word as convoy ID
-			parts := strings.Fields(trimmed)
-			if len(parts) > 0 {
-				convoys = append(convoys, parts[0])
-			}
+// parseConvoyListJSON extracts convoy IDs from JSON output of "bd list --type=convoy --json".
+func parseConvoyListJSON(jsonStr string) []string {
+	var convoys []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &convoys); err != nil {
+		log.Printf("warning: parseConvoyListJSON: %v", err)
+		return nil
+	}
+	ids := make([]string, 0, len(convoys))
+	for _, c := range convoys {
+		if c.ID != "" {
+			ids = append(ids, c.ID)
 		}
 	}
-	return convoys
+	return ids
 }
 
 // parseHooksListOutput extracts bead names from hooks list output.
@@ -1799,6 +1952,60 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SessionPreviewResponse is the response for /api/session/preview.
+type SessionPreviewResponse struct {
+	Session   string `json:"session"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// handleSessionPreview returns the last N lines of tmux capture-pane output for a session.
+func (h *APIHandler) handleSessionPreview(w http.ResponseWriter, r *http.Request) {
+	sessionName := r.URL.Query().Get("session")
+	if sessionName == "" {
+		h.sendError(w, "Missing session parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Validate session name: must start with "gt-" and contain only safe characters
+	if !strings.HasPrefix(sessionName, "gt-") {
+		h.sendError(w, "Invalid session name: must start with gt-", http.StatusBadRequest)
+		return
+	}
+	for _, c := range sessionName {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			h.sendError(w, "Invalid session name: contains invalid characters", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Run tmux capture-pane to get the last 30 lines
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", sessionName, "-p", "-J", "-S", "-30")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			h.sendError(w, "tmux capture-pane timed out", http.StatusGatewayTimeout)
+			return
+		}
+		h.sendError(w, "Failed to capture pane: "+stderr.String(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(SessionPreviewResponse{
+		Session:   sessionName,
+		Content:   stdout.String(),
+		Timestamp: time.Now().Format(time.RFC3339),
+	})
 }
 
 // parseCommandArgs splits a command string into args, respecting quotes.

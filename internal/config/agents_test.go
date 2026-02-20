@@ -1088,3 +1088,27 @@ func TestPiRuntimeConfigFromPreset(t *testing.T) {
 		t.Errorf("Expected nil/empty Env for Pi preset, got %v", rc.Env)
 	}
 }
+
+// TestAllHookSupportingAgentsHaveHookFields ensures that every built-in preset
+// with SupportsHooks=true also declares the three fields required by the hooks
+// install path: HooksProvider, HooksDir, and HooksSettingsFile.
+//
+// If this test fails, add the missing fields to the offending preset in
+// builtinPresets (agents.go) before setting SupportsHooks=true.
+func TestAllHookSupportingAgentsHaveHookFields(t *testing.T) {
+	t.Parallel()
+	for name, preset := range builtinPresets {
+		if !preset.SupportsHooks {
+			continue
+		}
+		if preset.HooksProvider == "" {
+			t.Errorf("agent %q: SupportsHooks=true but HooksProvider is empty", name)
+		}
+		if preset.HooksDir == "" {
+			t.Errorf("agent %q: SupportsHooks=true but HooksDir is empty", name)
+		}
+		if preset.HooksSettingsFile == "" {
+			t.Errorf("agent %q: SupportsHooks=true but HooksSettingsFile is empty", name)
+		}
+	}
+}

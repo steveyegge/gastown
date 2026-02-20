@@ -555,6 +555,57 @@ func TestHandler_IssueCreate_FlagTitle(t *testing.T) {
 	}
 }
 
+func TestHandler_SessionPreview_MissingParam(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/preview", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GET /api/session/preview (no param) status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_SessionPreview_InvalidPrefix(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/preview?session=evil-session", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GET /api/session/preview (no gt- prefix) status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_SessionPreview_InvalidChars(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+
+	// Session name with shell metacharacters should be rejected
+	req := httptest.NewRequest(http.MethodGet, "/api/session/preview?session=gt-evil;rm+-rf+/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GET /api/session/preview (invalid chars) status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_SessionPreview_ValidName(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+
+	// A valid session name should pass validation and reach tmux capture-pane.
+	// tmux isn't available in test, so expect 500 (command failed), NOT 400 (validation).
+	req := httptest.NewRequest(http.MethodGet, "/api/session/preview?session=gt-gastown-nux", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code == http.StatusBadRequest {
+		t.Errorf("GET /api/session/preview with valid name rejected as bad request")
+	}
+}
+
 func TestExpandHomePath_RootUser(t *testing.T) {
 	// Verify that expandHomePath works when home is "/" (root user).
 	// We can't easily mock os.UserHomeDir, but we can verify the containment

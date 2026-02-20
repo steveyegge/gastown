@@ -350,6 +350,14 @@ func (m *Manager) syncRemotesFromRig(crewPath string) error {
 				style.PrintWarning("could not update remote %s: %v", remote, setErr)
 			}
 		}
+
+		// Sync push URL if configured (for read-only upstream forks)
+		pushURL, pushErr := rigGit.GetPushURL(remote)
+		if pushErr == nil && pushURL != "" && pushURL != url {
+			if cfgErr := crewGit.ConfigurePushURL(remote, pushURL); cfgErr != nil {
+				fmt.Printf("Warning: could not sync push URL for %s: %v\n", remote, cfgErr)
+			}
+		}
 	}
 
 	return nil
@@ -648,10 +656,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		AgentName:        name,
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
+		Agent:            opts.AgentOverride,
 	})
-	if opts.AgentOverride != "" {
-		envVars["GT_AGENT"] = opts.AgentOverride
-	}
 
 	// Build startup command (also includes env vars via 'exec env' for
 	// WaitForCommand detection — belt and suspenders with -e flags)
@@ -694,7 +700,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	} else {
 		// Normal start: build beacon for predecessor discovery via /resume.
 		// Only used in fresh-start mode — resumed sessions already have context.
-		address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
+		address := session.BeaconRecipient("crew", name, m.rig.Name)
 		topic := opts.Topic
 		if topic == "" {
 			topic = "start"

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
+	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
@@ -22,15 +25,18 @@ var orphansCmd = &cobra.Command{
 	Use:     "orphans",
 	GroupID: GroupWork,
 	Short:   "Find lost polecat work",
-	Long: `Find orphaned commits that were never merged to main.
+	Long: `Find orphaned commits and unmerged polecat branches.
 
 Polecat work can get lost when:
 - Session killed before merge
 - Refinery fails to process
 - Network issues during push
 
-This command uses 'git fsck --unreachable' to find dangling commits,
-filters to recent ones, and shows details to help recovery.
+This command scans for:
+1. Orphaned commits via 'git fsck --unreachable' (filtered by --days/--all)
+2. Unmerged polecat worktree branches (always shown)
+
+Note: --days and --all only apply to orphaned commits, not polecat branches.
 
 Examples:
   gt orphans              # Last 7 days (default), infers rig from cwd
@@ -68,6 +74,9 @@ This command performs a complete orphan cleanup:
 
 WARNING: This operation is irreversible. Once commits are pruned,
 they cannot be recovered.
+
+Note: This only affects orphaned commits and processes. Unmerged polecat
+branches (shown by 'gt orphans') must be recovered or cleaned up manually.
 
 The command will:
 1. Find orphaned commits (same as 'gt orphans')
@@ -205,52 +214,212 @@ func runOrphans(cmd *cobra.Command, args []string) error {
 
 	// We need to run from the mayor's clone (main git repo for the rig)
 	mayorPath := r.Path + "/mayor/rig"
+	foundAnything := false
 
+	// --- Orphaned commits (git fsck) ---
 	fmt.Printf("Scanning for orphaned commits in %s...\n\n", rigName)
 
-	// Run git fsck
 	orphans, err := findOrphanCommits(mayorPath)
 	if err != nil {
 		return fmt.Errorf("finding orphans: %w", err)
 	}
 
-	if len(orphans) == 0 {
-		fmt.Printf("%s No orphaned commits found\n", style.Bold.Render("✓"))
-		return nil
-	}
-
 	// Filter by date unless --all
 	cutoff := time.Now().AddDate(0, 0, -orphansDays)
 	var filtered []OrphanCommit
-
 	for _, o := range orphans {
 		if orphansAll || o.Date.After(cutoff) {
 			filtered = append(filtered, o)
 		}
 	}
 
-	if len(filtered) == 0 {
-		fmt.Printf("%s No orphaned commits in the last %d days\n", style.Bold.Render("✓"), orphansDays)
-		fmt.Printf("%s Use --days=N or --all to see older orphans\n", style.Dim.Render("Hint:"))
-		return nil
+	if len(filtered) > 0 {
+		foundAnything = true
+		fmt.Printf("%s Found %d orphaned commit(s):\n\n", style.Warning.Render("⚠"), len(filtered))
+		for _, o := range filtered {
+			age := formatAge(o.Date)
+			fmt.Printf("  %s %s\n", style.Bold.Render(o.SHA[:8]), o.Subject)
+			fmt.Printf("    %s by %s\n\n", style.Dim.Render(age), o.Author)
+		}
+		fmt.Printf("%s\n", style.Dim.Render("To recover a commit:"))
+		fmt.Printf("%s\n", style.Dim.Render("  git cherry-pick <sha>     # Apply to current branch"))
+		fmt.Printf("%s\n", style.Dim.Render("  git show <sha>            # View full commit"))
+		fmt.Printf("%s\n\n", style.Dim.Render("  git branch rescue <sha>   # Create branch from commit"))
 	}
 
-	// Display results
-	fmt.Printf("%s Found %d orphaned commit(s):\n\n", style.Warning.Render("⚠"), len(filtered))
+	// --- Unmerged polecat worktree branches ---
+	defaultBranch := r.DefaultBranch()
+	fmt.Printf("Scanning polecat worktrees for unmerged branches...\n\n")
 
-	for _, o := range filtered {
-		age := formatAge(o.Date)
-		fmt.Printf("  %s %s\n", style.Bold.Render(o.SHA[:8]), o.Subject)
-		fmt.Printf("    %s by %s\n\n", style.Dim.Render(age), o.Author)
+	polecatBranches, skipped, err := findOrphanPolecatBranches(r.Path, rigName, defaultBranch)
+	if err != nil {
+		// Non-fatal: report the error but continue
+		fmt.Printf("%s Could not scan polecat worktrees: %v\n\n", style.Dim.Render("ℹ"), err)
+	} else if len(polecatBranches) > 0 {
+		foundAnything = true
+		fmt.Printf("%s Found %d unmerged polecat branch(es):\n\n", style.Warning.Render("⚠"), len(polecatBranches))
+		for _, b := range polecatBranches {
+			fmt.Printf("  %s %s (%d commit(s) ahead of %s)\n",
+				style.Bold.Render(b.Polecat), b.Branch, b.AheadCount, defaultBranch)
+			if b.LatestSubject != "" {
+				fmt.Printf("    %s %s\n", style.Dim.Render("latest:"), b.LatestSubject)
+			}
+			if b.HasUncommitted {
+				fmt.Printf("    %s\n", style.Warning.Render("has uncommitted changes"))
+			}
+			fmt.Printf("    %s %s\n", style.Dim.Render("path:"), b.WorktreePath)
+			fmt.Println()
+		}
+		fmt.Printf("%s\n", style.Dim.Render("To recover polecat work:"))
+		fmt.Printf("  %s\n", style.Dim.Render("cd <path>                   # Enter the worktree (see path above)"))
+		fmt.Printf("  %s\n\n", style.Dim.Render(fmt.Sprintf("git log %s..HEAD        # View unmerged commits", defaultBranch)))
 	}
 
-	// Recovery hints
-	fmt.Printf("%s\n", style.Dim.Render("To recover a commit:"))
-	fmt.Printf("%s\n", style.Dim.Render("  git cherry-pick <sha>     # Apply to current branch"))
-	fmt.Printf("%s\n", style.Dim.Render("  git show <sha>            # View full commit"))
-	fmt.Printf("%s\n", style.Dim.Render("  git branch rescue <sha>   # Create branch from commit"))
+	if len(skipped) > 0 {
+		fmt.Printf("%s Skipped %d polecat(s) due to errors:\n", style.Warning.Render("⚠"), len(skipped))
+		for _, s := range skipped {
+			fmt.Printf("  %s: %s\n", s.Polecat, s.Err)
+		}
+		fmt.Println()
+	}
+
+	if !foundAnything {
+		if len(orphans) > 0 && len(filtered) == 0 {
+			fmt.Printf("%s No orphaned commits in the last %d days\n", style.Bold.Render("✓"), orphansDays)
+			fmt.Printf("%s Use --days=N or --all to see older orphans\n", style.Dim.Render("Hint:"))
+		} else {
+			fmt.Printf("%s No orphaned work found\n", style.Bold.Render("✓"))
+		}
+	}
 
 	return nil
+}
+
+// OrphanBranch represents a polecat worktree with unmerged work.
+type OrphanBranch struct {
+	Polecat        string // Polecat name
+	Branch         string // Branch name
+	AheadCount     int    // Commits ahead of default branch
+	LatestSubject  string // Subject of the latest commit
+	HasUncommitted bool   // Whether the worktree has uncommitted changes
+	WorktreePath   string // Actual resolved worktree path
+}
+
+// skippedPolecat records a polecat that was skipped due to errors during scanning.
+type skippedPolecat struct {
+	Polecat string
+	Err     string
+}
+
+// resolvePolecatWorktree determines the worktree path for a polecat,
+// mirroring the canonical clonePath logic in polecat/session_manager.go.
+func resolvePolecatWorktree(polecatsDir, polecatName, rigName string) string {
+	// New structure: polecats/<name>/<rigname>/
+	newPath := filepath.Join(polecatsDir, polecatName, rigName)
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+		return newPath
+	}
+
+	// Old structure: polecats/<name>/ (backward compat)
+	oldPath := filepath.Join(polecatsDir, polecatName)
+	if info, err := os.Stat(oldPath); err == nil && info.IsDir() {
+		gitPath := filepath.Join(oldPath, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return oldPath
+		}
+	}
+
+	return "" // No valid worktree found
+}
+
+// findOrphanPolecatBranches scans polecat worktrees for branches with
+// commits that have not been merged to the default branch.
+func findOrphanPolecatBranches(rigPath, rigName, defaultBranch string) ([]OrphanBranch, []skippedPolecat, error) {
+	polecatsDir := filepath.Join(rigPath, constants.DirPolecats)
+	entries, err := os.ReadDir(polecatsDir)
+	if os.IsNotExist(err) {
+		return nil, nil, nil // No polecats directory
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading polecats dir: %w", err)
+	}
+
+	var branches []OrphanBranch
+	var skipped []skippedPolecat
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		polecatName := entry.Name()
+
+		worktreePath := resolvePolecatWorktree(polecatsDir, polecatName, rigName)
+		if worktreePath == "" {
+			continue // No valid git worktree
+		}
+
+		g := gitpkg.NewGit(worktreePath)
+
+		// Get current branch
+		branch, err := g.CurrentBranch()
+		if err != nil {
+			skipped = append(skipped, skippedPolecat{polecatName, fmt.Sprintf("cannot determine branch: %v", err)})
+			continue
+		}
+		branch = strings.TrimSpace(branch)
+		if branch == "" || branch == "HEAD" || branch == defaultBranch {
+			continue // On default branch or detached HEAD — nothing unmerged
+		}
+
+		// Count commits ahead of default branch (try local ref, then origin/)
+		baseRef := defaultBranch
+		revListCmd := exec.Command("git", "-C", worktreePath, "rev-list", "--count", baseRef+"..HEAD")
+		countOut, err := revListCmd.Output()
+		if err != nil {
+			baseRef = "origin/" + defaultBranch
+			revListCmd = exec.Command("git", "-C", worktreePath, "rev-list", "--count", baseRef+"..HEAD")
+			countOut, err = revListCmd.Output()
+			if err != nil {
+				skipped = append(skipped, skippedPolecat{polecatName, fmt.Sprintf("rev-list failed: %v", err)})
+				continue
+			}
+		}
+		count, err := strconv.Atoi(strings.TrimSpace(string(countOut)))
+		if err != nil || count == 0 {
+			continue // No commits ahead
+		}
+
+		// Get the latest commit subject
+		logCmd := exec.Command("git", "-C", worktreePath, "log", "-1", "--format=%s")
+		logOut, err := logCmd.Output()
+		latestSubject := ""
+		if err != nil {
+			skipped = append(skipped, skippedPolecat{polecatName, fmt.Sprintf("git log failed: %v", err)})
+			continue
+		}
+		latestSubject = strings.TrimSpace(string(logOut))
+
+		// Check for uncommitted changes
+		gitStatus, err := g.Status()
+		hasUncommitted := false
+		if err != nil {
+			skipped = append(skipped, skippedPolecat{polecatName, fmt.Sprintf("git status failed: %v", err)})
+			continue
+		}
+		hasUncommitted = !gitStatus.Clean
+
+		branches = append(branches, OrphanBranch{
+			Polecat:        polecatName,
+			Branch:         branch,
+			AheadCount:     count,
+			LatestSubject:  latestSubject,
+			HasUncommitted: hasUncommitted,
+			WorktreePath:   worktreePath,
+		})
+	}
+
+	return branches, skipped, nil
 }
 
 // findOrphanCommits runs git fsck and parses orphaned commits

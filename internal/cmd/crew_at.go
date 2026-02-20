@@ -191,6 +191,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			AgentName:        name,
 			TownRoot:         townRoot,
 			RuntimeConfigDir: claudeConfigDir,
+			Agent:            crewAgentOverride,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)
@@ -215,7 +216,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Build startup beacon for predecessor discovery via /resume
 		// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 		// The SessionStart hook handles context injection (gt prime --hook)
-		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		address := session.BeaconRecipient("crew", name, r.Name)
 		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",
@@ -260,7 +261,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 			// Build startup beacon for predecessor discovery via /resume
 			// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
-			address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+			address := session.BeaconRecipient("crew", name, r.Name)
 			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: address,
 				Sender:    "human",
@@ -320,7 +321,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 		// We're in the session at a shell prompt - start the agent
 		// Build startup beacon for predecessor discovery via /resume
-		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
+		address := session.BeaconRecipient("crew", name, r.Name)
 		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",

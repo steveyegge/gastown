@@ -1056,41 +1056,49 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 }
 
 // deriveSessionName derives the tmux session name from GT_* environment variables.
-// Uses session.* helpers for canonical naming.
+// Uses session.* helpers for canonical naming. Parses GT_ROLE via parseRoleString
+// so compound forms (e.g. "gastown/witness") resolve to their canonical session names.
 func deriveSessionName() string {
 	role := os.Getenv("GT_ROLE")
 	rig := os.Getenv("GT_RIG")
 	polecat := os.Getenv("GT_POLECAT")
 	crew := os.Getenv("GT_CREW")
 
+	// Parse GT_ROLE once to handle both bare and compound forms.
+	parsedRole, _, parsedName := parseRoleString(role)
+
 	// Polecat: {prefix}-{polecat}
+	// Gate on GT_ROLE: coordinators may have stale GT_POLECAT from spawning polecats.
 	if polecat != "" && rig != "" {
-		return session.PolecatSessionName(session.PrefixFor(rig), polecat)
+		if role == "" || parsedRole == RolePolecat {
+			return session.PolecatSessionName(session.PrefixFor(rig), polecat)
+		}
 	}
 
-	// Crew: {prefix}-crew-{crew}
+	// Crew: {prefix}-crew-{crew} (from GT_CREW or parsed compound role)
+	if parsedRole == RoleCrew && parsedName != "" && rig != "" {
+		return session.CrewSessionName(session.PrefixFor(rig), parsedName)
+	}
 	if crew != "" && rig != "" {
 		return session.CrewSessionName(session.PrefixFor(rig), crew)
 	}
 
 	// Town-level roles (mayor, deacon)
-	if role == "mayor" || role == "deacon" {
-		if role == "mayor" {
-			return session.MayorSessionName()
-		}
+	if parsedRole == RoleMayor {
+		return session.MayorSessionName()
+	}
+	if parsedRole == RoleDeacon {
 		return session.DeaconSessionName()
 	}
 
 	// Rig-based roles (witness, refinery): {prefix}-{role}
-	if role != "" && rig != "" {
+	if rig != "" {
 		prefix := session.PrefixFor(rig)
-		switch role {
-		case "witness":
+		switch parsedRole {
+		case RoleWitness:
 			return session.WitnessSessionName(prefix)
-		case "refinery":
+		case RoleRefinery:
 			return session.RefinerySessionName(prefix)
-		default:
-			return session.PolecatSessionName(prefix, role)
 		}
 	}
 

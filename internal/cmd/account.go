@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -193,6 +194,12 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 	// Create the config directory
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	// Symlink global commands (e.g., SuperClaude) so they're available
+	// when CLAUDE_CONFIG_DIR points at this account directory.
+	if err := ensureSharedCommandsSymlink(configDir); err != nil {
+		style.PrintWarning("could not symlink global commands: %v", err)
 	}
 
 	// Add account
@@ -455,6 +462,45 @@ func runAccountSwitch(cmd *cobra.Command, args []string) error {
 	fmt.Println(style.Warning.Render("⚠️  Restart Claude Code for the change to take effect"))
 
 	return nil
+}
+
+// ensureSharedCommandsSymlink creates a symlink from configDir/commands to the
+// global commands directory (~/.claude/commands) so that custom commands (e.g.,
+// SuperClaude) are available regardless of which account is active via CLAUDE_CONFIG_DIR.
+func ensureSharedCommandsSymlink(configDir string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	// Resolve the real path to the global commands directory.
+	// This follows any symlinks (e.g., if ~/.claude is itself a symlink).
+	globalCmds := filepath.Join(home, ".claude", "commands")
+	realCmds, err := filepath.EvalSymlinks(globalCmds)
+	if err != nil {
+		// No global commands directory — nothing to share.
+		return nil
+	}
+
+	acctCmds := filepath.Join(configDir, "commands")
+
+	// If account already resolves to the same real directory, skip.
+	if acctReal, err := filepath.EvalSymlinks(acctCmds); err == nil && acctReal == realCmds {
+		return nil
+	}
+
+	// If something exists at acctCmds, handle it.
+	if info, err := os.Lstat(acctCmds); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Stale symlink — remove and recreate.
+			_ = os.Remove(acctCmds)
+		} else {
+			// Real directory — don't overwrite user's custom commands.
+			return nil
+		}
+	}
+
+	return os.Symlink(realCmds, acctCmds)
 }
 
 func init() {

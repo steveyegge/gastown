@@ -118,12 +118,14 @@
         var prDetail = document.getElementById('pr-detail');
         var convoyDetailView = document.getElementById('convoy-detail');
         var convoyCreateView = document.getElementById('convoy-create-form');
+        var sessionPreview = document.getElementById('session-preview');
         var inDetailView = (mailDetail && mailDetail.style.display !== 'none') ||
                           (mailCompose && mailCompose.style.display !== 'none') ||
                           (issueDetail && issueDetail.style.display !== 'none') ||
                           (prDetail && prDetail.style.display !== 'none') ||
                           (convoyDetailView && convoyDetailView.style.display !== 'none') ||
-                          (convoyCreateView && convoyCreateView.style.display !== 'none');
+                          (convoyCreateView && convoyCreateView.style.display !== 'none') ||
+                          (sessionPreview && sessionPreview.style.display !== 'none');
         if (!inDetailView && !hasExpanded) {
             window.pauseRefresh = false;
         }
@@ -862,41 +864,87 @@
         });
     });
 
-    // Load mail inbox on page load
+    // Load mail inbox as threaded conversations
     function loadMailInbox() {
         var loading = document.getElementById('mail-loading');
-        var table = document.getElementById('mail-table');
-        var tbody = document.getElementById('mail-tbody');
+        var threadsContainer = document.getElementById('mail-threads');
         var empty = document.getElementById('mail-empty');
         var count = document.getElementById('mail-count');
 
-        if (!loading || !table || !tbody) return;
+        if (!loading || !threadsContainer) return;
 
-        fetch('/api/mail/inbox')
+        fetch('/api/mail/threads')
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 loading.style.display = 'none';
 
-                if (data.messages && data.messages.length > 0) {
-                    table.style.display = 'table';
+                if (data.threads && data.threads.length > 0) {
+                    threadsContainer.style.display = 'block';
                     empty.style.display = 'none';
-                    tbody.innerHTML = '';
+                    threadsContainer.innerHTML = '';
 
-                    data.messages.forEach(function(msg) {
-                        var tr = document.createElement('tr');
-                        tr.className = 'mail-row' + (msg.read ? '' : ' mail-unread');
-                        tr.setAttribute('data-msg-id', msg.id);
-                        tr.setAttribute('data-from', msg.from);
+                    data.threads.forEach(function(thread) {
+                        var threadEl = document.createElement('div');
+                        threadEl.className = 'mail-thread' + (thread.unread_count > 0 ? ' mail-thread-unread' : '');
+
+                        var last = thread.last_message;
+                        var hasMultiple = thread.count > 1;
+                        var countBadge = hasMultiple ? '<span class="thread-count">' + thread.count + '</span>' : '';
+                        var unreadDot = thread.unread_count > 0 ? '<span class="thread-unread-dot"></span>' : '';
 
                         var priorityIcon = '';
-                        if (msg.priority === 'urgent') priorityIcon = '<span class="priority-urgent">⚡</span> ';
-                        else if (msg.priority === 'high') priorityIcon = '<span class="priority-high">!</span> ';
+                        if (last.priority === 'urgent') priorityIcon = '<span class="priority-urgent">⚡</span> ';
+                        else if (last.priority === 'high') priorityIcon = '<span class="priority-high">!</span> ';
 
-                        tr.innerHTML =
-                            '<td class="mail-from">' + escapeHtml(msg.from) + '</td>' +
-                            '<td>' + priorityIcon + '<span class="mail-subject">' + escapeHtml(msg.subject) + '</span></td>' +
-                            '<td class="mail-time">' + formatMailTime(msg.timestamp) + '</td>';
-                        tbody.appendChild(tr);
+                        // Thread header (always visible)
+                        var headerEl = document.createElement('div');
+                        headerEl.className = 'mail-thread-header';
+                        headerEl.setAttribute('data-thread-id', thread.thread_id);
+                        headerEl.innerHTML =
+                            '<div class="mail-thread-left">' +
+                                unreadDot +
+                                '<span class="mail-from">' + escapeHtml(last.from) + '</span>' +
+                                countBadge +
+                            '</div>' +
+                            '<div class="mail-thread-center">' +
+                                priorityIcon +
+                                '<span class="mail-subject">' + escapeHtml(thread.subject) + '</span>' +
+                                (hasMultiple ? '<span class="mail-thread-preview"> — ' + escapeHtml(last.body ? last.body.substring(0, 60) : '') + '</span>' : '') +
+                            '</div>' +
+                            '<div class="mail-thread-right">' +
+                                '<span class="mail-time">' + formatMailTime(last.timestamp) + '</span>' +
+                            '</div>';
+
+                        threadEl.appendChild(headerEl);
+
+                        // Thread messages (collapsed by default, only for multi-message threads)
+                        if (hasMultiple) {
+                            var msgsEl = document.createElement('div');
+                            msgsEl.className = 'mail-thread-messages';
+                            msgsEl.style.display = 'none';
+
+                            thread.messages.forEach(function(msg) {
+                                var msgEl = document.createElement('div');
+                                msgEl.className = 'mail-thread-msg' + (msg.read ? '' : ' mail-unread');
+                                msgEl.setAttribute('data-msg-id', msg.id);
+                                msgEl.setAttribute('data-from', msg.from);
+                                msgEl.innerHTML =
+                                    '<div class="mail-thread-msg-header">' +
+                                        '<span class="mail-from">' + escapeHtml(msg.from) + '</span>' +
+                                        '<span class="mail-time">' + formatMailTime(msg.timestamp) + '</span>' +
+                                    '</div>' +
+                                    '<div class="mail-thread-msg-subject">' + escapeHtml(msg.subject) + '</div>';
+                                msgsEl.appendChild(msgEl);
+                            });
+
+                            threadEl.appendChild(msgsEl);
+                        } else {
+                            // Single message thread - clicking opens the message directly
+                            headerEl.setAttribute('data-msg-id', last.id);
+                            headerEl.setAttribute('data-from', last.from);
+                        }
+
+                        threadsContainer.appendChild(threadEl);
                     });
 
                     // Update count
@@ -904,9 +952,10 @@
                         var unread = data.unread_count || 0;
                         count.textContent = unread > 0 ? unread + ' unread' : data.total;
                         if (unread > 0) count.classList.add('has-unread');
+                        else count.classList.remove('has-unread');
                     }
                 } else {
-                    table.style.display = 'none';
+                    threadsContainer.style.display = 'none';
                     empty.style.display = 'block';
                     if (count) count.textContent = '0';
                 }
@@ -1803,8 +1852,43 @@
         });
     }
 
-    // Click on mail row to read message
+    // Click on mail thread header - toggle expand or open single message
     document.addEventListener('click', function(e) {
+        // Handle click on individual message within expanded thread
+        var threadMsg = e.target.closest('.mail-thread-msg');
+        if (threadMsg) {
+            e.preventDefault();
+            var msgId = threadMsg.getAttribute('data-msg-id');
+            var from = threadMsg.getAttribute('data-from');
+            if (msgId) {
+                openMailDetail(msgId, from);
+            }
+            return;
+        }
+
+        // Handle click on thread header
+        var threadHeader = e.target.closest('.mail-thread-header');
+        if (threadHeader) {
+            e.preventDefault();
+            var msgId = threadHeader.getAttribute('data-msg-id');
+            if (msgId) {
+                // Single message thread - open directly
+                var from = threadHeader.getAttribute('data-from');
+                openMailDetail(msgId, from);
+            } else {
+                // Multi-message thread - toggle expand/collapse
+                var threadEl = threadHeader.closest('.mail-thread');
+                var msgsEl = threadEl ? threadEl.querySelector('.mail-thread-messages') : null;
+                if (msgsEl) {
+                    var isExpanded = msgsEl.style.display !== 'none';
+                    msgsEl.style.display = isExpanded ? 'none' : 'block';
+                    threadEl.classList.toggle('mail-thread-expanded', !isExpanded);
+                }
+            }
+            return;
+        }
+
+        // Legacy: handle click on mail-row (All Traffic tab)
         var mailRow = e.target.closest('.mail-row');
         if (mailRow) {
             e.preventDefault();
@@ -2881,5 +2965,246 @@
         initTimelineFilters();
     });
 
+    // ============================================
+    // SESSION TERMINAL PREVIEW
+    // ============================================
+    var sessionPreviewInterval = null;
+    var sessionsTable = null; // will be set when opening preview
+
+    // Click on session row to preview terminal output
+    document.addEventListener('click', function(e) {
+        var sessionRow = e.target.closest('.session-row');
+        if (sessionRow) {
+            e.preventDefault();
+            var sessionName = sessionRow.getAttribute('data-session-name');
+            if (sessionName) {
+                openSessionPreview(sessionName);
+            }
+        }
+    });
+
+    function openSessionPreview(sessionName) {
+        window.pauseRefresh = true;
+
+        var preview = document.getElementById('session-preview');
+        var nameEl = document.getElementById('session-preview-name');
+        var contentEl = document.getElementById('session-preview-content');
+        var statusEl = document.getElementById('session-preview-status');
+
+        if (!preview || !contentEl) return;
+
+        // Hide the sessions table, show preview
+        sessionsTable = preview.parentNode.querySelector('table');
+        if (sessionsTable) sessionsTable.style.display = 'none';
+        var emptyState = preview.parentNode.querySelector('.empty-state');
+        if (emptyState) emptyState.style.display = 'none';
+
+        nameEl.textContent = sessionName;
+        contentEl.textContent = 'Loading...';
+        statusEl.textContent = '';
+        preview.style.display = 'block';
+
+        // Fetch immediately
+        fetchSessionPreview(sessionName, contentEl, statusEl);
+
+        // Auto-refresh every 3 seconds
+        if (sessionPreviewInterval) clearInterval(sessionPreviewInterval);
+        sessionPreviewInterval = setInterval(function() {
+            fetchSessionPreview(sessionName, contentEl, statusEl);
+        }, 3000);
+    }
+
+    function fetchSessionPreview(sessionName, contentEl, statusEl) {
+        fetch('/api/session/preview?session=' + encodeURIComponent(sessionName))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    contentEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                contentEl.textContent = data.content || '(empty)';
+                // Auto-scroll to bottom
+                contentEl.scrollTop = contentEl.scrollHeight;
+                // Show refresh timestamp
+                var now = new Date();
+                var timeStr = now.getHours() + ':' + (now.getMinutes() < 10 ? '0' : '') + now.getMinutes() + ':' + (now.getSeconds() < 10 ? '0' : '') + now.getSeconds();
+                statusEl.textContent = 'refreshed ' + timeStr;
+            })
+            .catch(function(err) {
+                contentEl.textContent = 'Failed to load preview: ' + err.message;
+            });
+    }
+
+    function closeSessionPreview() {
+        if (sessionPreviewInterval) {
+            clearInterval(sessionPreviewInterval);
+            sessionPreviewInterval = null;
+        }
+
+        var preview = document.getElementById('session-preview');
+        if (preview) preview.style.display = 'none';
+
+        // Show the sessions table again
+        if (sessionsTable) sessionsTable.style.display = '';
+
+        window.pauseRefresh = false;
+    }
+
+    // Back button from session preview
+    var sessionPreviewBack = document.getElementById('session-preview-back');
+    if (sessionPreviewBack) {
+        sessionPreviewBack.addEventListener('click', closeSessionPreview);
+    }
+
+    // ============================================
+    // CONVOY DRILL-DOWN (expand rows to show tracked issues)
+    // ============================================
+    var convoyCache = {}; // Cache fetched convoy data by ID
+
+    document.addEventListener('click', function(e) {
+        var row = e.target.closest('.convoy-row');
+        if (!row) return;
+
+        e.preventDefault();
+        var convoyId = row.getAttribute('data-convoy-id');
+        if (!convoyId) return;
+
+        // Check if already expanded
+        var existingDetail = row.nextElementSibling;
+        if (existingDetail && existingDetail.classList.contains('convoy-detail-row')) {
+            // Collapse: remove the detail row
+            existingDetail.remove();
+            row.classList.remove('convoy-expanded');
+            var toggle = row.querySelector('.convoy-toggle');
+            if (toggle) toggle.textContent = '▶';
+            return;
+        }
+
+        // Collapse any other expanded convoy
+        document.querySelectorAll('.convoy-detail-row').forEach(function(r) { r.remove(); });
+        document.querySelectorAll('.convoy-row.convoy-expanded').forEach(function(r) {
+            r.classList.remove('convoy-expanded');
+            var t = r.querySelector('.convoy-toggle');
+            if (t) t.textContent = '▶';
+        });
+
+        // Mark this row as expanded
+        row.classList.add('convoy-expanded');
+        var toggleEl = row.querySelector('.convoy-toggle');
+        if (toggleEl) toggleEl.textContent = '▼';
+
+        // Create detail row
+        var detailRow = document.createElement('tr');
+        detailRow.className = 'convoy-detail-row';
+        var detailCell = document.createElement('td');
+        detailCell.colSpan = 4;
+        detailCell.innerHTML = '<div class="tracked-issues"><div class="tracked-issues-loading">Loading tracked issues...</div></div>';
+        detailRow.appendChild(detailCell);
+        row.parentNode.insertBefore(detailRow, row.nextSibling);
+
+        // Check cache first
+        if (convoyCache[convoyId]) {
+            renderConvoyIssues(detailCell, convoyCache[convoyId]);
+            return;
+        }
+
+        // Fetch via /api/run
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'convoy status ' + convoyId + ' --json' })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                detailCell.innerHTML = '<div class="tracked-issues"><div class="tracked-issues-error">Failed to load: ' + escapeHtml(data.error || 'Unknown error') + '</div></div>';
+                return;
+            }
+            try {
+                var parsed = JSON.parse(data.output);
+                convoyCache[convoyId] = parsed;
+                renderConvoyIssues(detailCell, parsed);
+            } catch (err) {
+                detailCell.innerHTML = '<div class="tracked-issues"><div class="tracked-issues-error">Failed to parse response</div></div>';
+            }
+        })
+        .catch(function(err) {
+            detailCell.innerHTML = '<div class="tracked-issues"><div class="tracked-issues-error">Request failed: ' + escapeHtml(err.message) + '</div></div>';
+        });
+    });
+
+    function renderConvoyIssues(cell, data) {
+        var issues = data.tracked || [];
+        if (issues.length === 0) {
+            cell.innerHTML = '<div class="tracked-issues"><div class="tracked-issues-empty">No tracked issues</div></div>';
+            return;
+        }
+
+        var html = '<div class="tracked-issues">';
+        html += '<table class="tracked-issues-table">';
+        html += '<thead><tr><th>Status</th><th>ID</th><th>Title</th><th>Assignee</th><th>Progress</th></tr></thead>';
+        html += '<tbody>';
+
+        for (var i = 0; i < issues.length; i++) {
+            var issue = issues[i];
+
+            // Status badge
+            var statusBadge = '';
+            switch (issue.status) {
+                case 'closed':
+                    statusBadge = '<span class="badge badge-green">Done</span>';
+                    break;
+                case 'in_progress':
+                    statusBadge = '<span class="badge badge-yellow">In Progress</span>';
+                    break;
+                case 'hooked':
+                    statusBadge = '<span class="badge badge-blue">Hooked</span>';
+                    break;
+                default:
+                    statusBadge = '<span class="badge badge-muted">Open</span>';
+            }
+
+            // Assignee - extract short name
+            var assignee = '—';
+            if (issue.assignee) {
+                var parts = issue.assignee.split('/');
+                assignee = parts[parts.length - 1];
+            }
+
+            // Worker info as progress indicator
+            var progress = '';
+            if (issue.status === 'closed') {
+                progress = '<span class="convoy-progress-done">✓</span>';
+            } else if (issue.worker) {
+                var workerName = issue.worker.split('/').pop();
+                progress = '<span class="convoy-progress-active">@' + escapeHtml(workerName) + '</span>';
+                if (issue.worker_age) {
+                    progress += ' <span class="convoy-progress-age">' + escapeHtml(issue.worker_age) + '</span>';
+                }
+            }
+
+            html += '<tr class="tracked-issue-row tracked-issue-' + escapeHtml(issue.status) + '">' +
+                '<td>' + statusBadge + '</td>' +
+                '<td><span class="issue-id">' + escapeHtml(issue.id) + '</span></td>' +
+                '<td class="tracked-issue-title">' + escapeHtml(issue.title) + '</td>' +
+                '<td class="tracked-issue-assignee">' + escapeHtml(assignee) + '</td>' +
+                '<td class="tracked-issue-progress">' + progress + '</td>' +
+                '</tr>';
+        }
+
+        html += '</tbody></table>';
+
+        // Progress summary
+        var completed = data.completed || 0;
+        var total = data.total || issues.length;
+        var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        html += '<div class="tracked-issues-summary">';
+        html += '<div class="tracked-issues-progress-bar"><div class="tracked-issues-progress-fill" style="width: ' + pct + '%;"></div></div>';
+        html += '<span class="tracked-issues-progress-text">' + completed + '/' + total + ' completed (' + pct + '%)</span>';
+        html += '</div>';
+
+        html += '</div>';
+        cell.innerHTML = html;
+    }
 
 })();

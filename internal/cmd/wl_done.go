@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/wasteland"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -19,12 +20,12 @@ var wlDoneCmd = &cobra.Command{
 	Long: `Submit completion evidence for a claimed wanted item.
 
 Inserts a completion record and updates the wanted item status to 'in_review'.
-The item must be claimed by your town.
+The item must be claimed by your rig.
 
 The --evidence flag provides the evidence URL (PR link, commit hash, etc.).
 
 A completion ID is generated as c-<hash> where hash is derived from the
-wanted ID, town handle, and timestamp.
+wanted ID, rig handle, and timestamp.
 
 Examples:
   gt wl done w-abc123 --evidence 'https://github.com/org/repo/pull/123'
@@ -48,10 +49,11 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	townName, err := workspace.GetTownName(townRoot)
+	wlCfg, err := wasteland.LoadConfig(townRoot)
 	if err != nil {
-		return fmt.Errorf("getting town handle: %w", err)
+		return fmt.Errorf("loading wasteland config: %w", err)
 	}
+	rigHandle := wlCfg.RigHandle
 
 	if !doltserver.DatabaseExists(townRoot, doltserver.WLCommonsDB) {
 		return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
@@ -66,27 +68,27 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("wanted item %s is not claimed (status: %s)", wantedID, item.Status)
 	}
 
-	if item.ClaimedBy != townName {
-		return fmt.Errorf("wanted item %s is claimed by %q, not %q", wantedID, item.ClaimedBy, townName)
+	if item.ClaimedBy != rigHandle {
+		return fmt.Errorf("wanted item %s is claimed by %q, not %q", wantedID, item.ClaimedBy, rigHandle)
 	}
 
-	completionID := generateCompletionID(wantedID, townName)
+	completionID := generateCompletionID(wantedID, rigHandle)
 
-	if err := doltserver.SubmitCompletion(townRoot, completionID, wantedID, townName, wlDoneEvidence); err != nil {
+	if err := doltserver.SubmitCompletion(townRoot, completionID, wantedID, rigHandle, wlDoneEvidence); err != nil {
 		return fmt.Errorf("submitting completion: %w", err)
 	}
 
 	fmt.Printf("%s Completion submitted for %s\n", style.Bold.Render("✓"), wantedID)
 	fmt.Printf("  Completion ID: %s\n", completionID)
-	fmt.Printf("  Completed by: %s\n", townName)
+	fmt.Printf("  Completed by: %s\n", rigHandle)
 	fmt.Printf("  Evidence: %s\n", wlDoneEvidence)
 	fmt.Printf("  Status: in_review\n")
 
 	return nil
 }
 
-func generateCompletionID(wantedID, townHandle string) string {
+func generateCompletionID(wantedID, rigHandle string) string {
 	now := time.Now().UTC().Format(time.RFC3339)
-	h := sha256.Sum256([]byte(wantedID + "|" + townHandle + "|" + now))
+	h := sha256.Sum256([]byte(wantedID + "|" + rigHandle + "|" + now))
 	return fmt.Sprintf("c-%x", h[:8])
 }

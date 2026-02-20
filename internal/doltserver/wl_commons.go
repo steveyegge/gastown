@@ -83,15 +83,18 @@ CREATE TABLE IF NOT EXISTS _meta (
 INSERT IGNORE INTO _meta (%s, value) VALUES ('schema_version', '1.0');
 INSERT IGNORE INTO _meta (%s, value) VALUES ('wasteland_name', 'Gas Town Wasteland');
 
-CREATE TABLE IF NOT EXISTS towns (
+CREATE TABLE IF NOT EXISTS rigs (
     handle VARCHAR(255) PRIMARY KEY,
     display_name VARCHAR(255),
     dolthub_org VARCHAR(255),
+    hop_uri VARCHAR(512),
     owner_email VARCHAR(255),
     gt_version VARCHAR(32),
-    trust_level INT DEFAULT 1,
+    trust_level INT DEFAULT 0,
     registered_at TIMESTAMP,
-    last_seen TIMESTAMP
+    last_seen TIMESTAMP,
+    rig_type VARCHAR(16) DEFAULT 'human',
+    parent_rig VARCHAR(255)
 );
 
 CREATE TABLE IF NOT EXISTS wanted (
@@ -119,23 +122,47 @@ CREATE TABLE IF NOT EXISTS completions (
     wanted_id VARCHAR(64),
     completed_by VARCHAR(255),
     evidence TEXT,
-    completed_at TIMESTAMP
+    validated_by VARCHAR(255),
+    stamp_id VARCHAR(64),
+    parent_completion_id VARCHAR(64),
+    block_hash VARCHAR(64),
+    hop_uri VARCHAR(512),
+    completed_at TIMESTAMP,
+    validated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS stamps (
     id VARCHAR(64) PRIMARY KEY,
-    completion_id VARCHAR(64),
-    stamper VARCHAR(255),
-    value_dimension VARCHAR(32),
-    confidence DECIMAL(3,2),
-    stamped_at TIMESTAMP
+    author VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    valence JSON NOT NULL,
+    confidence FLOAT DEFAULT 1,
+    severity VARCHAR(16) DEFAULT 'leaf',
+    context_id VARCHAR(64),
+    context_type VARCHAR(32),
+    skill_tags JSON,
+    message TEXT,
+    prev_stamp_hash VARCHAR(64),
+    block_hash VARCHAR(64),
+    hop_uri VARCHAR(512),
+    created_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS badges (
     id VARCHAR(64) PRIMARY KEY,
-    holder VARCHAR(255),
+    rig_handle VARCHAR(255),
     badge_type VARCHAR(64),
-    awarded_at TIMESTAMP
+    awarded_at TIMESTAMP,
+    evidence TEXT
+);
+
+CREATE TABLE IF NOT EXISTS chain_meta (
+    chain_id VARCHAR(64) PRIMARY KEY,
+    chain_type VARCHAR(32),
+    parent_chain_id VARCHAR(64),
+    hop_uri VARCHAR(512),
+    dolt_database VARCHAR(255),
+    created_at TIMESTAMP
 );
 
 CALL DOLT_ADD('-A');
@@ -219,16 +246,8 @@ CALL DOLT_COMMIT('-m', 'wl post: %s');
 	return doltSQLScriptWithRetry(townRoot, script)
 }
 
-// GetTownHandle returns the town's handle for the posted_by field.
-func GetTownHandle(townRoot string) string {
-	if org := DoltHubOrg(); org != "" {
-		return org
-	}
-	return filepath.Base(townRoot)
-}
-
 // ClaimWanted updates a wanted item's status to claimed.
-func ClaimWanted(townRoot, wantedID, townHandle string) error {
+func ClaimWanted(townRoot, wantedID, rigHandle string) error {
 	esc := func(s string) string {
 		return strings.ReplaceAll(s, "'", "''")
 	}
@@ -242,7 +261,7 @@ CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
 `,
 		WLCommonsDB,
-		esc(townHandle),
+		esc(rigHandle),
 		esc(wantedID),
 		esc(wantedID))
 
@@ -250,7 +269,7 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 }
 
 // SubmitCompletion inserts a completion record and updates the wanted status.
-func SubmitCompletion(townRoot, completionID, wantedID, townHandle, evidence string) error {
+func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
 	esc := func(s string) string {
 		return strings.ReplaceAll(s, "'", "''")
 	}
@@ -269,7 +288,7 @@ CALL DOLT_COMMIT('-m', 'wl done: %s');
 		WLCommonsDB,
 		esc(completionID),
 		esc(wantedID),
-		esc(townHandle),
+		esc(rigHandle),
 		esc(evidence),
 		esc(evidence),
 		esc(wantedID),

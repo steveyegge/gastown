@@ -432,6 +432,14 @@ func (m *Manager) polecatDir(name string) string {
 	return filepath.Join(m.rig.Path, "polecats", name)
 }
 
+// pendingPath returns the path of the allocation reservation marker for a name.
+// Written inside the pool lock by AllocateName; removed by AddWithOptions after
+// the polecat directory is created. Prevents concurrent processes from allocating
+// the same name during the window between pool save and directory creation.
+func (m *Manager) pendingPath(name string) string {
+	return filepath.Join(m.rig.Path, "polecats", name+".pending")
+}
+
 // clonePath returns the path where the git worktree lives.
 // New structure: polecats/<name>/<rigname>/ - gives LLMs recognizable repo context.
 // Falls back to old structure: polecats/<name>/ for backward compatibility.
@@ -617,6 +625,11 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating polecat dir: %w", err)
 	}
+
+	// Directory created — remove the allocation reservation marker.
+	// reconcilePoolInternal will now find the directory directly and treat the
+	// name as in-use without needing the .pending file.
+	_ = os.Remove(m.pendingPath(name))
 
 	// cleanupOnError removes polecatDir if worktree creation fails.
 	// This ensures exists() returns false for incomplete polecats, preventing
@@ -1012,6 +1025,22 @@ func (m *Manager) AllocateName() (string, error) {
 		return "", fmt.Errorf("saving pool state: %w", err)
 	}
 
+	// Write a reservation marker inside the pool lock scope.
+	// This closes the TOCTOU window between pool save and directory creation:
+	// reconcilePoolInternal uses directories as the source of truth for in-use
+	// names, so a concurrent process calling AllocateName (after this lock is
+	// released but before AddWithOptions creates the directory) would see the
+	// name as available and reallocate it. The marker acts as a stand-in
+	// directory until AddWithOptions removes it after os.MkdirAll succeeds.
+	// Stale markers (process crashed before AddWithOptions) are cleaned up by
+	// cleanupOrphanPolecatState after pendingMaxAge.
+	if err := os.MkdirAll(filepath.Join(m.rig.Path, "polecats"), 0755); err != nil {
+		return "", fmt.Errorf("creating polecats dir for reservation marker: %w", err)
+	}
+	if err := os.WriteFile(m.pendingPath(name), []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		return "", fmt.Errorf("writing reservation marker: %w", err)
+	}
+
 	// Kill any lingering tmux session for this name (gt-pqf9x).
 	// ReconcilePool kills sessions for names without directories, but a name
 	// can be allocated after its directory was cleaned up while the tmux session
@@ -1242,6 +1271,19 @@ func (m *Manager) reconcilePoolInternal() {
 		namesWithDirs = append(namesWithDirs, p.Name)
 	}
 
+	// Include names with pending reservation markers.
+	// A .pending file means AllocateName has claimed the name but AddWithOptions
+	// hasn't created the directory yet. Without this, Reconcile would see no
+	// directory and treat the name as available, causing a duplicate allocation.
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+	if entries, err := os.ReadDir(polecatsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".pending") {
+				namesWithDirs = append(namesWithDirs, strings.TrimSuffix(e.Name(), ".pending"))
+			}
+		}
+	}
+
 	// Get names with tmux sessions
 	var namesWithSessions []string
 	if m.tmux != nil {
@@ -1323,11 +1365,17 @@ func isSessionProcessDead(t *tmux.Tmux, sessionName string) bool {
 	return false
 }
 
+// pendingMaxAge is how long a .pending reservation marker may exist before
+// it is considered stale. gt sling completes in seconds, so 5 minutes is
+// a conservative bound that avoids false positives on slow machines.
+const pendingMaxAge = 5 * time.Minute
+
 // cleanupOrphanPolecatState removes partial/broken polecat state during allocation.
 // This handles the race condition where worktree creation fails mid-way, leaving:
 // - Empty polecat directories without .git
 // - Directories with invalid/corrupt .git files
 // - Stale git worktree registrations
+// - Stale .pending reservation markers (gt sling crashed before AddWithOptions)
 func (m *Manager) cleanupOrphanPolecatState() {
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
 
@@ -1337,6 +1385,18 @@ func (m *Manager) cleanupOrphanPolecatState() {
 	}
 
 	for _, entry := range entries {
+		// Clean up stale allocation reservation markers.
+		// A .pending file older than pendingMaxAge means gt sling crashed after
+		// AllocateName but before AddWithOptions created the directory. Remove it
+		// so the name can be reallocated on the next reconcile.
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".pending") {
+			info, err := entry.Info()
+			if err == nil && time.Since(info.ModTime()) > pendingMaxAge {
+				_ = os.Remove(filepath.Join(polecatsDir, entry.Name()))
+			}
+			continue
+		}
+
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}

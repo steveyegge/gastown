@@ -213,8 +213,17 @@ func runHook(_ *cobra.Command, args []string) error {
 		targetAgent = args[1]
 	}
 
-	// Polecats cannot hook - they use gt done for lifecycle
-	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+	// Polecats cannot hook - they use gt done for lifecycle.
+	// Check GT_ROLE first: coordinators (mayor, witness, etc.) may have a stale
+	// GT_POLECAT in their environment from spawning polecats. Only block if the
+	// parsed role is actually polecat (handles compound forms like
+	// "gastown/polecats/Toast"). If GT_ROLE is unset, fall back to GT_POLECAT.
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		parsedRole, _, _ := parseRoleString(role)
+		if parsedRole == RolePolecat {
+			return fmt.Errorf("polecats cannot hook work (use gt done for handoff)")
+		}
+	} else if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
 		return fmt.Errorf("polecats cannot hook work (use gt done for handoff)")
 	}
 

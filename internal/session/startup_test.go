@@ -5,28 +5,242 @@ import (
 	"testing"
 )
 
-func TestFormatStartupBeacon(t *testing.T) {
+func TestBeaconRecipient(t *testing.T) {
 	tests := []struct {
 		name     string
-		cfg      BeaconConfig
-		wantSub  []string // substrings that must appear
-		wantNot  []string // substrings that must NOT appear
+		role     string
+		agentNm  string
+		rig      string
+		want     string
+		wantNot  []string // must NOT contain these (path separators, etc.)
 	}{
 		{
-			name: "assigned with mol-id",
+			name:    "polecat with rig",
+			role:    "polecat",
+			agentNm: "rust",
+			rig:     "testrig",
+			want:    "polecat rust (rig: testrig)",
+			wantNot: []string{"/"},
+		},
+		{
+			name:    "crew with rig",
+			role:    "crew",
+			agentNm: "gus",
+			rig:     "gastown",
+			want:    "crew gus (rig: gastown)",
+			wantNot: []string{"/"},
+		},
+		{
+			name:    "witness singleton with rig",
+			role:    "witness",
+			agentNm: "",
+			rig:     "gastown",
+			want:    "witness (rig: gastown)",
+			wantNot: []string{"/"},
+		},
+		{
+			name:    "refinery singleton with rig",
+			role:    "refinery",
+			agentNm: "",
+			rig:     "myrig",
+			want:    "refinery (rig: myrig)",
+			wantNot: []string{"/"},
+		},
+		{
+			name:    "dog with no rig",
+			role:    "dog",
+			agentNm: "fido",
+			rig:     "",
+			want:    "dog fido",
+			wantNot: []string{"/", "(rig:"},
+		},
+		{
+			name:    "town-level role no rig no name",
+			role:    "mayor",
+			agentNm: "",
+			rig:     "",
+			want:    "mayor",
+			wantNot: []string{"/", "(rig:"},
+		},
+		{
+			name:    "deacon no rig no name",
+			role:    "deacon",
+			agentNm: "",
+			rig:     "",
+			want:    "deacon",
+		},
+		{
+			name:    "polecat name with hyphen",
+			role:    "polecat",
+			agentNm: "my-worker",
+			rig:     "prod-rig",
+			want:    "polecat my-worker (rig: prod-rig)",
+			wantNot: []string{"prod-rig/"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BeaconRecipient(tt.role, tt.agentNm, tt.rig)
+			if got != tt.want {
+				t.Errorf("BeaconRecipient(%q, %q, %q) = %q, want %q",
+					tt.role, tt.agentNm, tt.rig, got, tt.want)
+			}
+			for _, bad := range tt.wantNot {
+				if strings.Contains(got, bad) {
+					t.Errorf("BeaconRecipient(%q, %q, %q) = %q, should NOT contain %q",
+						tt.role, tt.agentNm, tt.rig, got, bad)
+				}
+			}
+		})
+	}
+}
+
+func TestBeaconRecipientContainsNoPathSeparators(t *testing.T) {
+	// Exhaustive check: no BeaconRecipient output should contain "/" which
+	// could trick LLMs into interpreting it as a filesystem path.
+	cases := []struct{ role, name, rig string }{
+		{"polecat", "rust", "testrig"},
+		{"crew", "gus", "gastown"},
+		{"witness", "", "gastown"},
+		{"refinery", "", "gastown"},
+		{"dog", "fido", ""},
+		{"mayor", "", ""},
+		{"deacon", "", ""},
+		{"boot", "", ""},
+		{"polecat", "a/b", "c/d"}, // edge case: slashes in inputs
+	}
+	for _, c := range cases {
+		got := BeaconRecipient(c.role, c.name, c.rig)
+		// The function should not introduce "/" on its own.
+		// (If inputs contain "/" that's a caller bug, but at minimum the
+		// function shouldn't add new ones.)
+		if c.name == "" && c.rig == "" && strings.Contains(got, "/") {
+			t.Errorf("BeaconRecipient(%q, %q, %q) = %q contains /",
+				c.role, c.name, c.rig, got)
+		}
+	}
+}
+
+func TestAgentIdentityBeaconAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      AgentIdentity
+		want    string
+		wantNot []string
+	}{
+		{
+			name: "mayor",
+			id:   AgentIdentity{Role: RoleMayor},
+			want: "mayor",
+		},
+		{
+			name: "deacon",
+			id:   AgentIdentity{Role: RoleDeacon},
+			want: "deacon",
+		},
+		{
+			name:    "witness",
+			id:      AgentIdentity{Role: RoleWitness, Rig: "gastown"},
+			want:    "witness (rig: gastown)",
+			wantNot: []string{"gastown/witness"},
+		},
+		{
+			name:    "refinery",
+			id:      AgentIdentity{Role: RoleRefinery, Rig: "gastown"},
+			want:    "refinery (rig: gastown)",
+			wantNot: []string{"gastown/refinery"},
+		},
+		{
+			name:    "crew",
+			id:      AgentIdentity{Role: RoleCrew, Rig: "gastown", Name: "max"},
+			want:    "crew max (rig: gastown)",
+			wantNot: []string{"gastown/crew/max"},
+		},
+		{
+			name:    "polecat",
+			id:      AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "Toast"},
+			want:    "polecat Toast (rig: gastown)",
+			wantNot: []string{"gastown/polecats/Toast"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.id.BeaconAddress()
+			if got != tt.want {
+				t.Errorf("BeaconAddress() = %q, want %q", got, tt.want)
+			}
+			for _, bad := range tt.wantNot {
+				if strings.Contains(got, bad) {
+					t.Errorf("BeaconAddress() = %q, should NOT contain path-like %q", got, bad)
+				}
+			}
+		})
+	}
+}
+
+func TestBeaconAddressVsAddress(t *testing.T) {
+	// Verify that BeaconAddress produces different (non-path) output
+	// while Address produces the traditional path-like output.
+	ids := []AgentIdentity{
+		{Role: RoleWitness, Rig: "gastown"},
+		{Role: RoleRefinery, Rig: "gastown"},
+		{Role: RoleCrew, Rig: "gastown", Name: "max"},
+		{Role: RolePolecat, Rig: "gastown", Name: "Toast"},
+	}
+	for _, id := range ids {
+		addr := id.Address()
+		beacon := id.BeaconAddress()
+
+		// Address should contain "/" (path-like)
+		if !strings.Contains(addr, "/") {
+			t.Errorf("Address() for %v = %q, expected path-like with /", id.Role, addr)
+		}
+		// BeaconAddress should NOT contain "/" (non-path)
+		if strings.Contains(beacon, "/") {
+			t.Errorf("BeaconAddress() for %v = %q, should NOT contain /", id.Role, beacon)
+		}
+		// Both should contain the rig name
+		if !strings.Contains(beacon, "gastown") {
+			t.Errorf("BeaconAddress() for %v = %q, missing rig name", id.Role, beacon)
+		}
+	}
+
+	// Town-level roles should be identical
+	for _, role := range []Role{RoleMayor, RoleDeacon} {
+		id := AgentIdentity{Role: role}
+		if id.Address() != id.BeaconAddress() {
+			t.Errorf("For %v: Address()=%q != BeaconAddress()=%q", role, id.Address(), id.BeaconAddress())
+		}
+	}
+}
+
+func TestFormatStartupBeacon(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     BeaconConfig
+		wantSub []string // substrings that must appear
+		wantNot []string // substrings that must NOT appear
+	}{
+		{
+			name: "assigned with mol-id uses new format",
 			cfg: BeaconConfig{
-				Recipient: "gastown/crew/gus",
+				Recipient: BeaconRecipient("crew", "gus", "gastown"),
 				Sender:    "deacon",
 				Topic:     "assigned",
 				MolID:     "gt-abc12",
 			},
 			wantSub: []string{
 				"[GAS TOWN]",
-				"gastown/crew/gus",
+				"crew gus (rig: gastown)",
 				"<- deacon",
 				"assigned:gt-abc12",
-				"gt prime --hook", // prime before anything else
-				"begin work",     // then work on hook
+				"gt prime --hook",
+				"begin work",
+			},
+			wantNot: []string{
+				"gastown/crew/gus", // must NOT contain path-like format
 			},
 		},
 		{
@@ -41,41 +255,46 @@ func TestFormatStartupBeacon(t *testing.T) {
 				"deacon",
 				"<- mayor",
 				"cold-start",
-				"Check your hook and mail", // cold-start includes explicit instructions (like handoff)
+				"Check your hook and mail",
 				"gt hook",
 				"gt mail inbox",
 			},
-			// No wantNot - timestamp contains ":"
 		},
 		{
-			name: "handoff self",
+			name: "handoff self uses new format",
 			cfg: BeaconConfig{
-				Recipient: "gastown/witness",
+				Recipient: BeaconRecipient("witness", "", "gastown"),
 				Sender:    "self",
 				Topic:     "handoff",
 			},
 			wantSub: []string{
 				"[GAS TOWN]",
-				"gastown/witness",
+				"witness (rig: gastown)",
 				"<- self",
 				"handoff",
-				"Check your hook and mail", // handoff includes explicit instructions
+				"Check your hook and mail",
 				"gt hook",
 				"gt mail inbox",
 			},
+			wantNot: []string{
+				"gastown/witness",
+			},
 		},
 		{
-			name: "mol-id only",
+			name: "polecat assigned uses new format",
 			cfg: BeaconConfig{
-				Recipient: "gastown/polecats/Toast",
+				Recipient: BeaconRecipient("polecat", "Toast", "gastown"),
 				Sender:    "witness",
 				MolID:     "gt-xyz99",
 			},
 			wantSub: []string{
 				"[GAS TOWN]",
-				"gastown/polecats/Toast",
+				"polecat Toast (rig: gastown)",
 				"<- witness",
 				"gt-xyz99",
+			},
+			wantNot: []string{
+				"gastown/polecats/Toast",
 			},
 		},
 		{
@@ -92,34 +311,68 @@ func TestFormatStartupBeacon(t *testing.T) {
 		{
 			name: "start beacon has no prime instruction",
 			cfg: BeaconConfig{
-				Recipient: "beads/crew/fang",
+				Recipient: BeaconRecipient("crew", "fang", "beads"),
 				Sender:    "human",
 				Topic:     "start",
 			},
 			wantSub: []string{
 				"[GAS TOWN]",
-				"beads/crew/fang",
+				"crew fang (rig: beads)",
 				"<- human",
 				"start",
 			},
 			wantNot: []string{
 				"gt prime",
+				"beads/crew/fang",
 			},
 		},
 		{
 			name: "restart beacon has no prime instruction",
 			cfg: BeaconConfig{
-				Recipient: "gastown/crew/george",
+				Recipient: BeaconRecipient("crew", "george", "gastown"),
 				Sender:    "human",
 				Topic:     "restart",
 			},
 			wantSub: []string{
 				"[GAS TOWN]",
-				"gastown/crew/george",
+				"crew george (rig: gastown)",
 				"restart",
 			},
 			wantNot: []string{
 				"gt prime",
+				"gastown/crew/george",
+			},
+		},
+		{
+			name: "include prime instruction for non-hook agents",
+			cfg: BeaconConfig{
+				Recipient:               BeaconRecipient("polecat", "ruby", "myrig"),
+				Sender:                  "witness",
+				Topic:                   "assigned",
+				IncludePrimeInstruction: true,
+			},
+			wantSub: []string{
+				"[GAS TOWN]",
+				"polecat ruby (rig: myrig)",
+				"gt prime",
+			},
+			wantNot: []string{
+				"begin work", // excluded when IncludePrimeInstruction is set
+			},
+		},
+		{
+			name: "attach topic includes hook/mail instructions",
+			cfg: BeaconConfig{
+				Recipient: "mayor",
+				Sender:    "human",
+				Topic:     "attach",
+			},
+			wantSub: []string{
+				"[GAS TOWN]",
+				"mayor",
+				"attach",
+				"gt hook",
+				"gt mail inbox",
 			},
 		},
 	}

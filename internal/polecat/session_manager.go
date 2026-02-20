@@ -73,6 +73,11 @@ type SessionStartOptions struct {
 	// DoltBranch is the polecat-specific Dolt branch for write isolation.
 	// If set, BD_BRANCH env var is injected into the polecat session.
 	DoltBranch string
+
+	// Agent is the agent override for this polecat session (e.g., "codex", "gemini").
+	// If set, GT_AGENT is written to the tmux session environment table so that
+	// IsAgentAlive and waitForPolecatReady read the correct process names.
+	Agent string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -239,7 +244,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Build startup command with beacon for predecessor discovery.
 	// Configure beacon based on agent's hook/prompt capabilities.
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	address := session.BeaconRecipient("polecat", polecat, m.rig.Name)
 	beaconConfig := session.BeaconConfig{
 		Recipient:               address,
 		Sender:                  "witness",
@@ -308,6 +313,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		AgentName:        polecat,
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.RuntimeConfigDir,
+		Agent:            opts.Agent,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))

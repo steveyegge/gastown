@@ -268,6 +268,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		DoltBranch:       s.DoltBranch,
+		Agent:            s.agent,
 	}
 	if s.agent != "" {
 		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)

@@ -111,7 +111,7 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		TownRoot:  m.townRoot,
 		AgentName: dogName,
 		Beacon: session.BeaconConfig{
-			Recipient: fmt.Sprintf("deacon/dogs/%s", dogName),
+			Recipient: session.BeaconRecipient("dog", dogName, ""),
 			Sender:    "deacon",
 			Topic:     "assigned",
 		},

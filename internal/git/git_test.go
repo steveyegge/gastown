@@ -535,6 +535,37 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	}
 }
 
+func TestIsEmpty_EmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	g := NewGit(dir)
+	empty, err := g.IsEmpty()
+	if err != nil {
+		t.Fatalf("IsEmpty: %v", err)
+	}
+	if !empty {
+		t.Error("expected newly-initialized repo to be empty")
+	}
+}
+
+func TestIsEmpty_RepoWithCommit(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	empty, err := g.IsEmpty()
+	if err != nil {
+		t.Fatalf("IsEmpty: %v", err)
+	}
+	if empty {
+		t.Error("expected repo with commits to not be empty")
+	}
+}
+
 func TestRefExists_ValidRef(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)
@@ -1217,5 +1248,146 @@ func TestPushSubmoduleCommit(t *testing.T) {
 	remoteSHA = strings.Fields(string(lsOut))[0]
 	if remoteSHA != sha {
 		t.Errorf("expected remote main to be %s, got %s", sha, remoteSHA)
+	}
+}
+
+func TestConfigurePushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Add a remote
+	cmd := exec.Command("git", "remote", "add", "origin", "https://github.com/upstream/repo.git")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// Configure push URL
+	pushURL := "https://github.com/fork/repo.git"
+	if err := g.ConfigurePushURL("origin", pushURL); err != nil {
+		t.Fatalf("ConfigurePushURL: %v", err)
+	}
+
+	// Verify via GetPushURL
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL: %v", err)
+	}
+	if got != pushURL {
+		t.Errorf("GetPushURL = %q, want %q", got, pushURL)
+	}
+
+	// Verify fetch URL is unchanged
+	fetchCmd := exec.Command("git", "remote", "get-url", "origin")
+	fetchCmd.Dir = dir
+	out, err := fetchCmd.Output()
+	if err != nil {
+		t.Fatalf("get fetch url: %v", err)
+	}
+	fetchURL := strings.TrimSpace(string(out))
+	if fetchURL != "https://github.com/upstream/repo.git" {
+		t.Errorf("fetch URL changed to %q, should be unchanged", fetchURL)
+	}
+}
+
+func TestGetPushURL_NoPushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Add remote without custom push URL
+	cmd := exec.Command("git", "remote", "add", "origin", "https://github.com/upstream/repo.git")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// GetPushURL returns fetch URL when no custom push URL is set
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL: %v", err)
+	}
+	if got != "https://github.com/upstream/repo.git" {
+		t.Errorf("GetPushURL = %q, want fetch URL when no push URL configured", got)
+	}
+}
+
+// TestStashCount_FiltersByBranch verifies that StashCount only counts stashes
+// belonging to the current branch, not stashes from other worktrees/branches.
+// Git stashes are repo-wide (stored in .git/refs/stash), so without filtering
+// a worktree would see sibling stashes and block Remove(force=true).
+func TestStashCount_FiltersByBranch(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Create a stash on the default branch
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash", "push", "-m", "main-stash")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash: %v", err)
+	}
+
+	// Create a worktree on a different branch
+	wtDir := t.TempDir()
+	cmd = exec.Command("git", "worktree", "add", wtDir, "-b", "polecat-branch")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	// StashCount from worktree should be 0 (stash belongs to main, not polecat-branch)
+	wtGit := NewGit(wtDir)
+	count, err := wtGit.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("StashCount from worktree = %d, want 0 (stash belongs to different branch)", count)
+	}
+
+	// StashCount from main repo should be 1
+	mainCount, err := g.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if mainCount != 1 {
+		t.Errorf("StashCount from main = %d, want 1", mainCount)
+	}
+
+	// Create a stash on the worktree branch
+	if err := os.WriteFile(filepath.Join(wtDir, "wt-dirty.txt"), []byte("wt-dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = wtDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash", "push", "-m", "wt-stash")
+	cmd.Dir = wtDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash in worktree: %v", err)
+	}
+
+	// Now worktree should see 1 (its own stash)
+	count, err = wtGit.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("StashCount from worktree after own stash = %d, want 1", count)
+	}
+
+	// Main repo should still see 1 (only its own stash)
+	mainCount, err = g.StashCount()
+	if err != nil {
+		t.Fatalf("StashCount: %v", err)
+	}
+	if mainCount != 1 {
+		t.Errorf("StashCount from main after worktree stash = %d, want 1", mainCount)
 	}
 }

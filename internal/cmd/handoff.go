@@ -100,14 +100,33 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return runHandoffAuto()
 	}
 
-	// Check if we're a polecat - polecats use gt done instead
-	// GT_POLECAT is set by the session manager when starting polecat sessions
-	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+	// Check if we're a polecat - polecats use gt done instead.
+	// Check GT_ROLE first: coordinators (mayor, witness, etc.) may have a stale
+	// GT_POLECAT in their environment from spawning polecats. Only block if the
+	// parsed role is actually polecat (handles compound forms like
+	// "gastown/polecats/Toast"). If GT_ROLE is unset, fall back to GT_POLECAT.
+	isPolecat := false
+	polecatName := ""
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		parsedRole, _, name := parseRoleString(role)
+		if parsedRole == RolePolecat {
+			isPolecat = true
+			polecatName = name
+			// Bare "polecat" role yields empty name; fall back to GT_POLECAT.
+			if polecatName == "" {
+				polecatName = os.Getenv("GT_POLECAT")
+			}
+		}
+	} else if name := os.Getenv("GT_POLECAT"); name != "" {
+		isPolecat = true
+		polecatName = name
+	}
+	if isPolecat {
 		fmt.Printf("%s Polecat detected (%s) - using gt done for handoff\n",
 			style.Bold.Render("🐾"), polecatName)
 		// Polecats don't respawn themselves - Witness handles lifecycle
-		// Call gt done with DEFERRED exit type to preserve work state
-		doneCmd := exec.Command("gt", "done", "--exit", "DEFERRED")
+		// Call gt done with DEFERRED status to preserve work state
+		doneCmd := exec.Command("gt", "done", "--status", "DEFERRED")
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()
@@ -507,7 +526,7 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 	// The SessionStart hook handles context injection (gt prime --hook)
 	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: identity.Address(),
+		Recipient: identity.BeaconAddress(),
 		Sender:    "self",
 		Topic:     "handoff",
 	})

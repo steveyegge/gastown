@@ -121,7 +121,7 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy issues
-	stdout, err := f.runBdCmd(f.townRoot, "list", "--label=gt:convoy", "--status=open", "--json")
+	stdout, err := f.runBdCmd(f.townRoot, "list", "--type=convoy", "--status=open", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}

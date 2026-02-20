@@ -278,6 +278,7 @@ type RigsConfig struct {
 // RigEntry represents a single rig in the registry.
 type RigEntry struct {
 	GitURL      string       `json:"git_url"`
+	PushURL     string       `json:"push_url,omitempty"`
 	LocalRepo   string       `json:"local_repo,omitempty"`
 	AddedAt     time.Time    `json:"added_at"`
 	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
@@ -309,6 +310,7 @@ type RigConfig struct {
 	Version   int          `json:"version"` // schema version
 	Name      string       `json:"name"`    // rig name
 	GitURL    string       `json:"git_url"` // git repository URL
+	PushURL   string       `json:"push_url,omitempty"` // optional push URL (fork for read-only upstreams)
 	LocalRepo string       `json:"local_repo,omitempty"`
 	CreatedAt time.Time    `json:"created_at"` // when the rig was created
 	Beads     *BeadsConfig `json:"beads,omitempty"`
@@ -1001,6 +1003,38 @@ func DefaultAccountsConfigDir() (string, error) {
 	}
 	return home + "/.claude-accounts", nil
 }
+
+// QuotaState represents the quota management state (mayor/quota.json).
+// Tracks which accounts are rate-limited and when they were last rotated.
+type QuotaState struct {
+	Version  int                         `json:"version"`  // schema version
+	Accounts map[string]AccountQuotaState `json:"accounts"` // handle -> quota state
+}
+
+// AccountQuotaStatus is the rate-limit status of an account.
+type AccountQuotaStatus string
+
+const (
+	// QuotaStatusAvailable means the account is not rate-limited.
+	QuotaStatusAvailable AccountQuotaStatus = "available"
+
+	// QuotaStatusLimited means the account has been detected as rate-limited.
+	QuotaStatusLimited AccountQuotaStatus = "limited"
+
+	// QuotaStatusCooldown means the account was limited and is in cooldown.
+	QuotaStatusCooldown AccountQuotaStatus = "cooldown"
+)
+
+// AccountQuotaState tracks the quota status of a single account.
+type AccountQuotaState struct {
+	Status    AccountQuotaStatus `json:"status"`              // current status
+	LimitedAt string             `json:"limited_at,omitempty"` // RFC3339 when limit was detected
+	ResetsAt  string             `json:"resets_at,omitempty"`  // Human-readable reset time from provider (e.g. "7pm (America/Los_Angeles)")
+	LastUsed  string             `json:"last_used,omitempty"`  // RFC3339 when account was last assigned to a session
+}
+
+// CurrentQuotaVersion is the current schema version for QuotaState.
+const CurrentQuotaVersion = 1
 
 // MessagingConfig represents the messaging configuration (config/messaging.json).
 // This defines mailing lists, work queues, and announcement channels.

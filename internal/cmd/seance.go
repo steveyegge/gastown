@@ -452,12 +452,6 @@ func findSessionLocation(townRoot, sessionID string) *sessionLocation {
 // it to the current account so Claude can access it.
 // Returns a cleanup function to remove the symlink after use.
 func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(), err error) {
-	// Find where the session lives
-	loc := findSessionLocation(townRoot, sessionID)
-	if loc == nil {
-		return nil, fmt.Errorf("session not found in any account")
-	}
-
 	// Get current account's config directory (resolve ~/.claude symlink)
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -471,8 +465,21 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		currentConfigDir = claudeDir
 	}
 
-	// If session is already in current account, nothing to do
-	if loc.configDir == currentConfigDir {
+	return symlinkSessionToConfigDir(townRoot, sessionID, currentConfigDir)
+}
+
+// symlinkSessionToConfigDir symlinks a session file from its source account into the
+// given target config directory, updating the sessions-index.json so Claude can find it.
+// Returns a cleanup function (may be nil if no work was needed) and any error.
+func symlinkSessionToConfigDir(townRoot, sessionID, targetConfigDir string) (cleanup func(), err error) {
+	// Find where the session lives
+	loc := findSessionLocation(townRoot, sessionID)
+	if loc == nil {
+		return nil, fmt.Errorf("session not found in any account")
+	}
+
+	// If session is already in the target account, nothing to do
+	if loc.configDir == targetConfigDir {
 		return nil, nil
 	}
 
@@ -484,8 +491,8 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		return nil, fmt.Errorf("session file not found: %s", sourceSessionFile)
 	}
 
-	// Target: the project directory in current account
-	currentProjectDir := filepath.Join(currentConfigDir, "projects", loc.projectDir)
+	// Target: the project directory in the target account
+	currentProjectDir := filepath.Join(targetConfigDir, "projects", loc.projectDir)
 
 	// Create project directory if it doesn't exist
 	if err := os.MkdirAll(currentProjectDir, 0755); err != nil {

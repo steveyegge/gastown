@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
@@ -1243,5 +1244,90 @@ func TestOverflowNameSessionFormat(t *testing.T) {
 	// Verify no double-prefix
 	if strings.Contains(sessionName, "testrig-testrig") {
 		t.Errorf("double-prefix detected in session name: %s", sessionName)
+	}
+}
+
+// TestPendingMarkerBlocksReallocation verifies that a .pending reservation file
+// written by AllocateName prevents a concurrent reconcile from treating the name
+// as available (the TOCTOU fix: hq-ypvza / gt-601kx).
+func TestPendingMarkerBlocksReallocation(t *testing.T) {
+	t.Parallel()
+
+	tmpDir, err := os.MkdirTemp("", "pending-marker-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Use "myrig" which hashes to mad-max theme (furiosa is first name)
+	r := &rig.Rig{
+		Name: "myrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	// Simulate AllocateName: create polecats/ dir and write a .pending marker
+	// for "furiosa" (as if AllocateName ran but AddWithOptions hasn't yet).
+	polecatsDir := filepath.Join(tmpDir, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pendingPath := m.pendingPath("furiosa")
+	if err := os.WriteFile(pendingPath, []byte("999"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a concurrent reconcile (no directories exist, only the marker).
+	// reconcilePoolInternal should treat "furiosa" as in-use via the marker.
+	m.reconcilePoolInternal()
+
+	// Now allocate — should NOT get furiosa (it's reserved by .pending).
+	name, err := m.namePool.Allocate()
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	if name == "furiosa" {
+		t.Errorf("allocated furiosa despite active .pending marker — TOCTOU race not fixed")
+	}
+}
+
+// TestStalePendingMarkerIsCleanedUp verifies that cleanupOrphanPolecatState
+// removes .pending files older than pendingMaxAge.
+func TestStalePendingMarkerIsCleanedUp(t *testing.T) {
+	t.Parallel()
+
+	tmpDir, err := os.MkdirTemp("", "stale-pending-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	r := &rig.Rig{
+		Name: "myrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	polecatsDir := filepath.Join(tmpDir, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	pendingPath := m.pendingPath("furiosa")
+	if err := os.WriteFile(pendingPath, []byte("999"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backdate the file to simulate a stale marker (older than pendingMaxAge).
+	staleTime := time.Now().Add(-(pendingMaxAge + time.Minute))
+	if err := os.Chtimes(pendingPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// cleanupOrphanPolecatState should remove stale markers.
+	m.cleanupOrphanPolecatState()
+
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Errorf("stale .pending file was not cleaned up by cleanupOrphanPolecatState")
 	}
 }

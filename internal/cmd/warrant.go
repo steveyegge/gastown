@@ -303,34 +303,69 @@ func runWarrantExecute(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Determine session name from target
-	sessionName, err := targetToSessionName(target)
-	if err != nil {
-		return fmt.Errorf("determining session name: %w", err)
-	}
-
-	// Kill the session if it exists
 	tm := tmux.NewTmux()
-	if has, _ := tm.HasSession(sessionName); has {
-		if err := tm.KillSession(sessionName); err != nil {
-			return fmt.Errorf("killing session %s: %w", sessionName, err)
-		}
-		fmt.Printf("✓ Terminated session %s\n", sessionName)
-	} else {
-		fmt.Printf("  Session %s not found (already dead)\n", sessionName)
-	}
 
-	// Mark warrant as executed
 	if warrant != nil {
-		now := time.Now()
-		warrant.Executed = true
-		warrant.ExecutedAt = &now
-
-		data, _ := json.MarshalIndent(warrant, "", "  ")
-		_ = os.WriteFile(warrantPath, data, 0644)
+		if err := executeOneWarrant(warrant, warrantPath, tm); err != nil {
+			return fmt.Errorf("executing warrant: %w", err)
+		}
+	} else {
+		// --force without a warrant file: just kill the session
+		sessionName, err := targetToSessionName(target)
+		if err != nil {
+			return fmt.Errorf("determining session name: %w", err)
+		}
+		if has, err := tm.HasSession(sessionName); err != nil {
+			return fmt.Errorf("checking session %s: %w", sessionName, err)
+		} else if has {
+			if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+				return fmt.Errorf("killing session %s: %w", sessionName, err)
+			}
+			fmt.Printf("✓ Terminated session %s\n", sessionName)
+		} else {
+			fmt.Printf("  Session %s not found (already dead)\n", sessionName)
+		}
 	}
 
 	fmt.Printf("✓ Warrant executed for %s\n", style.Bold.Render(target))
+	return nil
+}
+
+// executeOneWarrant executes a single pending warrant: checks if the target
+// session exists, kills it with full process tree cleanup, and marks the warrant
+// as executed on disk. Returns nil on success. On error, the warrant is NOT
+// marked as executed so it can be retried on the next triage cycle.
+func executeOneWarrant(w *Warrant, warrantPath string, tm *tmux.Tmux) error {
+	sessionName, err := targetToSessionName(w.Target)
+	if err != nil {
+		return fmt.Errorf("invalid target %s: %w", w.Target, err)
+	}
+
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session %s: %w", sessionName, err)
+	}
+
+	if has {
+		if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+			return fmt.Errorf("killing session %s: %w", sessionName, err)
+		}
+		fmt.Printf("Warrant executed: terminated session %s (%s)\n", sessionName, w.Target)
+	} else {
+		fmt.Printf("Warrant executed: session %s already dead (%s)\n", sessionName, w.Target)
+	}
+
+	now := time.Now()
+	w.Executed = true
+	w.ExecutedAt = &now
+	data, err := json.MarshalIndent(w, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling warrant: %w", err)
+	}
+	if err := os.WriteFile(warrantPath, data, 0644); err != nil {
+		return fmt.Errorf("writing warrant file: %w", err)
+	}
+
 	return nil
 }
 

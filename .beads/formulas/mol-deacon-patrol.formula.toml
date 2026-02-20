@@ -1011,7 +1011,7 @@ After await-signal returns (either by signal or timeout):
 1. Generate a brief summary of this patrol cycle
 2. Squash the current wisp:
 ```bash
-bd mol squash <mol-id> --summary "<patrol-summary>"
+gt mol squash --jitter 10s --summary "<patrol-summary>"
 ```
 3. Create and hook a new patrol wisp:
 ```bash

@@ -4150,7 +4150,7 @@ func TestMergeQueueConfig_PartialJSON_NilPointers(t *testing.T) {
 
 func TestTryResolveFromEphemeralTier(t *testing.T) {
 	t.Run("no env var returns not handled", func(t *testing.T) {
-		os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "")
 		rc, handled := tryResolveFromEphemeralTier("witness")
 		if handled {
 			t.Error("expected handled=false when GT_COST_TIER not set")
@@ -4161,8 +4161,7 @@ func TestTryResolveFromEphemeralTier(t *testing.T) {
 	})
 
 	t.Run("invalid tier returns not handled", func(t *testing.T) {
-		os.Setenv("GT_COST_TIER", "premium")
-		defer os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "premium")
 		rc, handled := tryResolveFromEphemeralTier("witness")
 		if handled {
 			t.Error("expected handled=false for invalid tier")
@@ -4173,8 +4172,7 @@ func TestTryResolveFromEphemeralTier(t *testing.T) {
 	})
 
 	t.Run("budget tier witness gets haiku", func(t *testing.T) {
-		os.Setenv("GT_COST_TIER", "budget")
-		defer os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "budget")
 		rc, handled := tryResolveFromEphemeralTier("witness")
 		if !handled {
 			t.Fatal("expected handled=true for witness in budget tier")
@@ -4198,8 +4196,7 @@ func TestTryResolveFromEphemeralTier(t *testing.T) {
 	})
 
 	t.Run("economy tier polecat returns handled with nil rc (use default)", func(t *testing.T) {
-		os.Setenv("GT_COST_TIER", "economy")
-		defer os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "economy")
 		rc, handled := tryResolveFromEphemeralTier("polecat")
 		if !handled {
 			t.Error("expected handled=true for polecat in economy tier (tier manages this role)")
@@ -4210,8 +4207,7 @@ func TestTryResolveFromEphemeralTier(t *testing.T) {
 	})
 
 	t.Run("economy tier mayor gets sonnet", func(t *testing.T) {
-		os.Setenv("GT_COST_TIER", "economy")
-		defer os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "economy")
 		rc, handled := tryResolveFromEphemeralTier("mayor")
 		if !handled {
 			t.Fatal("expected handled=true for mayor in economy tier")
@@ -4232,8 +4228,7 @@ func TestTryResolveFromEphemeralTier(t *testing.T) {
 	})
 
 	t.Run("standard tier returns handled with nil rc for all roles", func(t *testing.T) {
-		os.Setenv("GT_COST_TIER", "standard")
-		defer os.Unsetenv("GT_COST_TIER")
+		t.Setenv("GT_COST_TIER", "standard")
 		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"} {
 			rc, handled := tryResolveFromEphemeralTier(role)
 			if !handled {
@@ -4255,8 +4250,7 @@ func TestResolveRoleAgentConfig_WithEphemeralTier(t *testing.T) {
 		t.Fatalf("SaveTownSettings: %v", err)
 	}
 
-	os.Setenv("GT_COST_TIER", "budget")
-	defer os.Unsetenv("GT_COST_TIER")
+	t.Setenv("GT_COST_TIER", "budget")
 
 	rc := ResolveRoleAgentConfig("witness", townRoot, "")
 	if rc == nil {
@@ -4290,8 +4284,7 @@ func TestResolveRoleAgentConfig_EphemeralOverridesPersistent(t *testing.T) {
 	}
 
 	// Set ephemeral to budget — should override
-	os.Setenv("GT_COST_TIER", "budget")
-	defer os.Unsetenv("GT_COST_TIER")
+	t.Setenv("GT_COST_TIER", "budget")
 
 	// witness is sonnet in economy, haiku in budget
 	rc := ResolveRoleAgentConfig("witness", townRoot, "")
@@ -4323,8 +4316,7 @@ func TestResolveRoleAgentConfig_EphemeralStandardSkipsPersisted(t *testing.T) {
 	}
 
 	// Set ephemeral to standard — should skip persisted budget config
-	os.Setenv("GT_COST_TIER", "standard")
-	defer os.Unsetenv("GT_COST_TIER")
+	t.Setenv("GT_COST_TIER", "standard")
 
 	// polecat was claude-sonnet in budget, should now use default (opus/claude)
 	rc := ResolveRoleAgentConfig("polecat", townRoot, "")
@@ -4373,8 +4365,7 @@ func TestResolveRoleAgentConfig_EphemeralRespectsNonClaudeOverride(t *testing.T)
 	}
 
 	// Set ephemeral budget tier — should NOT override the gemini witness
-	os.Setenv("GT_COST_TIER", "budget")
-	defer os.Unsetenv("GT_COST_TIER")
+	t.Setenv("GT_COST_TIER", "budget")
 
 	rc := ResolveRoleAgentConfig("witness", townRoot, rigPath)
 	if rc == nil {
@@ -4383,5 +4374,49 @@ func TestResolveRoleAgentConfig_EphemeralRespectsNonClaudeOverride(t *testing.T)
 	// Should still be gemini, not claude-haiku from budget tier
 	if rc.Command != "gemini" {
 		t.Errorf("expected gemini for witness (non-Claude rig override), got Command=%q", rc.Command)
+	}
+}
+
+func TestResolveRoleAgentConfig_EphemeralDefaultPreservesNonClaudeOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := t.TempDir()
+
+	// Create rig settings with gemini as polecat (non-Claude agent)
+	rigSettingsDir := filepath.Join(rigPath, ".settings")
+	if err := os.MkdirAll(rigSettingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	rigSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: 1,
+		RoleAgents: map[string]string{
+			"polecat": "gemini",
+		},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// Create town settings with gemini agent defined
+	townSettings := NewTownSettings()
+	townSettings.Agents["gemini"] = &RuntimeConfig{
+		Command: "gemini",
+		Args:    []string{},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Economy tier maps polecat to "" (use default) — should NOT override gemini
+	t.Setenv("GT_COST_TIER", "economy")
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for polecat")
+	}
+	// Should still be gemini, not default claude — the nil-rc path must
+	// preserve explicit non-Claude overrides
+	if rc.Command != "gemini" {
+		t.Errorf("expected gemini for polecat (non-Claude rig override with tier default), got Command=%q", rc.Command)
 	}
 }

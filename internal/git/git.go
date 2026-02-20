@@ -394,6 +394,23 @@ func (g *Git) Pull(remote, branch string) error {
 	return err
 }
 
+// ConfigurePushURL sets the push URL for a remote while keeping the fetch URL.
+// This is useful for read-only upstream repos where you want to push to a fork.
+// Example: ConfigurePushURL("origin", "https://github.com/user/fork.git")
+func (g *Git) ConfigurePushURL(remote, pushURL string) error {
+	_, err := g.run("remote", "set-url", remote, "--push", pushURL)
+	return err
+}
+
+// GetPushURL returns the push URL for a remote, or empty string if not configured.
+func (g *Git) GetPushURL(remote string) (string, error) {
+	out, err := g.run("remote", "get-url", "--push", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // Push pushes to the remote branch.
 func (g *Git) Push(remote, branch string, force bool) error {
 	args := []string{"push", remote, branch}
@@ -768,6 +785,20 @@ func (g *Git) RefExists(ref string) (bool, error) {
 	return true, nil
 }
 
+// IsEmpty returns true if the repository has no refs (an empty/unborn repo).
+// This is the case for newly-created repos with no commits.
+func (g *Git) IsEmpty() (bool, error) {
+	out, err := g.run("show-ref")
+	if err != nil {
+		// git show-ref exits 1 when there are no refs — that means empty
+		if strings.Contains(err.Error(), "exit status 1") {
+			return true, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
 // RemoteBranchExists checks if a branch exists on the remote.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)
@@ -1051,7 +1082,12 @@ func (g *Git) CountCommitsBehind(ref string) (int, error) {
 	return count, nil
 }
 
-// StashCount returns the number of stashes in the repository.
+// StashCount returns the number of stashes belonging to the current branch.
+// Git stashes are stored in the main repo (.git/refs/stash) and shared across
+// all worktrees. Counting all stashes is incorrect for worktree-based polecats:
+// a fresh polecat worktree would inherit stash count from siblings, blocking
+// Remove(force=true) on work it never created. Filter by current branch name
+// to only count stashes that actually belong to this worktree.
 func (g *Git) StashCount() (int, error) {
 	out, err := g.run("stash", "list")
 	if err != nil {
@@ -1062,13 +1098,26 @@ func (g *Git) StashCount() (int, error) {
 		return 0, nil
 	}
 
-	// Count lines in the stash list
+	// Get current branch to filter stashes.
+	// If we can't determine the branch (detached HEAD, error), count all
+	// stashes as a safe fallback — better to over-count than silently lose work.
+	branch, branchErr := g.CurrentBranch()
+	filterByBranch := branchErr == nil && branch != "" && branch != "HEAD"
+
 	lines := strings.Split(out, "\n")
 	count := 0
 	for _, line := range lines {
-		if line != "" {
-			count++
+		if line == "" {
+			continue
 		}
+		if filterByBranch {
+			// Stash reflog messages use "WIP on <branch>:" or "On <branch>:" format.
+			// Only count stashes that were created on the current branch.
+			if !strings.Contains(line, "on "+branch+":") && !strings.Contains(line, "On "+branch+":") {
+				continue
+			}
+		}
+		count++
 	}
 	return count, nil
 }

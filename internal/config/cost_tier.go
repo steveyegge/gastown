@@ -35,6 +35,9 @@ func IsValidTier(tier string) bool {
 // TierManagedRoles is the set of roles whose model selection is managed by cost tiers.
 // These are the only roles that ApplyCostTier modifies — any other custom RoleAgents
 // entries (e.g., user-defined roles or non-Claude agents for non-tier roles) are preserved.
+//
+// Excluded roles: "dog" (watchdog/monitoring utility — always uses default agent)
+// and "boot" (deacon bootstrap sub-role — transient, always uses default agent).
 var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
 
 // CostTierRoleAgents returns the role_agents mapping for a given tier.

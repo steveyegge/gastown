@@ -431,6 +431,14 @@ func runStatusWatch(_ *cobra.Command, _ []string) error {
 
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
+	// Cache the last successful status to handle transient tmux/beads
+	// failures. Watch mode spawns many tmux subprocesses per iteration;
+	// under load the tmux server can intermittently fail, causing all
+	// agents to appear as not running (empty bubbles).
+	var cachedStatus *TownStatus
+	var cachedAt time.Time
+	maxStale := time.Duration(statusInterval) * time.Second * 5
+
 	for {
 		var buf bytes.Buffer
 
@@ -447,10 +455,61 @@ func runStatusWatch(_ *cobra.Command, _ []string) error {
 		}
 
 		status, err := gatherStatus()
+		usedCache := false
+
+		// On error, retry once before giving up.
+		if err != nil {
+			status, err = gatherStatus()
+		}
+
+		if err == nil {
+			// Detect degraded results: zero running agents when we
+			// previously had some. This indicates a transient tmux
+			// failure rather than all agents legitimately stopping.
+			running := countRunningAgents(status)
+			if running == 0 && cachedStatus != nil &&
+				countRunningAgents(*cachedStatus) > 0 {
+				// Retry once to confirm.
+				retry, retryErr := gatherStatus()
+				if retryErr == nil &&
+					countRunningAgents(retry) > 0 {
+					status = retry
+				} else if time.Since(cachedAt) < maxStale {
+					status = *cachedStatus
+					usedCache = true
+				}
+			}
+		} else if cachedStatus != nil &&
+			time.Since(cachedAt) < maxStale {
+			// Complete failure even after retry — use cache.
+			status = *cachedStatus
+			usedCache = true
+			err = nil
+		}
+
 		if err != nil {
 			fmt.Fprintf(&buf, "Error: %v\n", err)
-		} else if err := outputStatusText(&buf, status); err != nil {
-			fmt.Fprintf(&buf, "Error: %v\n", err)
+		} else {
+			if !usedCache {
+				statusCopy := status
+				cachedStatus = &statusCopy
+				cachedAt = time.Now()
+			}
+			if usedCache {
+				staleNote := fmt.Sprintf(
+					"(using cached data from %s)",
+					cachedAt.Format("15:04:05"),
+				)
+				if isTTY {
+					fmt.Fprintf(&buf, "%s\n",
+						style.Dim.Render(staleNote))
+				} else {
+					fmt.Fprintf(&buf, "%s\n", staleNote)
+				}
+			}
+			if err := outputStatusText(&buf, status); err != nil {
+				fmt.Fprintf(&buf, "Error: %v\n", err)
+			}
 		}
 
 		// Write the entire frame atomically to prevent the terminal from
@@ -466,6 +525,25 @@ func runStatusWatch(_ *cobra.Command, _ []string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// countRunningAgents returns the number of agents with Running=true
+// across all global agents and rig agents in the status.
+func countRunningAgents(s TownStatus) int {
+	count := 0
+	for _, a := range s.Agents {
+		if a.Running {
+			count++
+		}
+	}
+	for _, r := range s.Rigs {
+		for _, a := range r.Agents {
+			if a.Running {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func runStatusOnce(_ *cobra.Command, _ []string) error {

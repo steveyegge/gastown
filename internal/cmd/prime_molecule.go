@@ -260,7 +260,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 			"Execute the step (heartbeat, mail, health checks, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -283,7 +283,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 			"Execute the step (survey polecats, inspect, nudge, etc.)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)
@@ -307,7 +307,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 			"Execute the step (queue scan, process branch, tests, merge)",
 			"Close step: `bd close <step-id>`",
 			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `bd mol squash <mol-id> --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
 		},
 	}
 	outputPatrolContext(cfg)

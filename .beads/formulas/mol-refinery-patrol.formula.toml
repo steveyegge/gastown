@@ -663,7 +663,7 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
 ```bash
-bd list --type=agent --status=open --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.description | test("(?m)^\\s*rig: <YOUR_RIG>\\s*$")) | .id'
+bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\s*rig: <YOUR_RIG>\\s*$")) | .id'
 ```
 This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
 
@@ -698,7 +698,7 @@ After await-signal returns (either by signal or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
 2. Squash the current wisp:
 ```bash
-bd mol squash <mol-id> --summary "<patrol-summary>"
+gt mol squash --jitter 10s --summary "<patrol-summary>"
 ```
 3. Create and hook a new patrol wisp:
 ```bash

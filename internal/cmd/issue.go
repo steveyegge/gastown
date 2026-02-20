@@ -123,21 +123,27 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 // detectCurrentSession tries to find the tmux session name from env.
 func detectCurrentSession() string {
 	// Try to build session name from GT env vars
+	role := os.Getenv("GT_ROLE")
 	rig := os.Getenv("GT_RIG")
 	polecat := os.Getenv("GT_POLECAT")
 	crew := os.Getenv("GT_CREW")
 
+	// Gate polecat path on GT_ROLE: coordinators may have stale GT_POLECAT.
 	if rig != "" {
 		if polecat != "" {
-			return session.PolecatSessionName(session.PrefixFor(rig), polecat)
+			parsedRole, _, _ := parseRoleString(role)
+			if role == "" || parsedRole == RolePolecat {
+				return session.PolecatSessionName(session.PrefixFor(rig), polecat)
+			}
 		}
 		if crew != "" {
 			return session.CrewSessionName(session.PrefixFor(rig), crew)
 		}
 	}
 
-	// Check if we're mayor
-	if os.Getenv("GT_ROLE") == "mayor" {
+	// Check if we're mayor (handles both bare and compound forms)
+	parsedRole, _, _ := parseRoleString(role)
+	if parsedRole == RoleMayor {
 		return getMayorSessionName()
 	}
 

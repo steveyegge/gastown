@@ -76,6 +76,10 @@ func TestPatrolFormulasHaveBackoffLogic(t *testing.T) {
 // the wisp via status=hooked on session restart.
 //
 // Regression test for steveyegge/gastown#1371.
+//
+// Also enforces that squash uses `gt mol squash --jitter` to desynchronize
+// concurrent Dolt lock acquisitions from deacon/witness/refinery patrol agents.
+// See: hq-vytww2 (Reduce Dolt lock contention from concurrent patrol agents).
 func TestPatrolFormulasHaveSquashCycle(t *testing.T) {
 	type patrolFormula struct {
 		name       string
@@ -114,14 +118,15 @@ func TestPatrolFormulasHaveSquashCycle(t *testing.T) {
 			}
 
 			// The loop step must contain all three parts of the cycle:
-			// 1. Squash the current wisp
+			// 1. Squash the current wisp (using gt mol squash --jitter to reduce lock contention)
 			// 2. Create a new patrol wisp
 			// 3. Hook/assign the new wisp
 			requiredPatterns := []struct {
 				pattern string
 				reason  string
 			}{
-				{"bd mol squash", "squash current wisp to reset step beads"},
+				{"gt mol squash", "squash current wisp using gt command (not bd) for jitter support"},
+				{"--jitter", "jitter flag required to desynchronize concurrent Dolt lock acquisitions (hq-vytww2)"},
 				{fmt.Sprintf("bd mol wisp %s", pf.molName), "create new patrol wisp for next cycle"},
 				{"--status=hooked", "hook the new wisp so findActivePatrol can find it"},
 			}
@@ -129,8 +134,8 @@ func TestPatrolFormulasHaveSquashCycle(t *testing.T) {
 			for _, rp := range requiredPatterns {
 				if !strings.Contains(loopDesc, rp.pattern) {
 					t.Errorf("%s %s step missing %q (%s)\n"+
-						"All patrol formulas must include the squash/create-wisp/hook cycle.\n"+
-						"See steveyegge/gastown#1371.",
+						"All patrol formulas must include the squash/create-wisp/hook cycle with jitter.\n"+
+						"See steveyegge/gastown#1371 (squash cycle) and hq-vytww2 (jitter requirement).",
 						pf.name, pf.loopStepID, rp.pattern, rp.reason)
 				}
 			}
