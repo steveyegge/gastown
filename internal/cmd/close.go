@@ -133,7 +133,7 @@ func checkConvoyCompletion(beadIDs []string) {
 	hqBeadsDir := filepath.Join(townRoot, ".beads")
 	ctx := context.Background()
 
-	store, err := beadsdk.OpenFromConfig(ctx, hqBeadsDir)
+	store, err := beadsdk.Open(ctx, hqBeadsDir)
 	if err != nil {
 		return
 	}
