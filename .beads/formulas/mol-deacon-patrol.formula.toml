@@ -35,7 +35,12 @@ default = "patrol"
 id = "inbox-check"
 title = "Handle callbacks from agents"
 description = """
-Handle callbacks from agents.
+First, clean up any stale patrol wisps from abnormal exits in previous cycles:
+```bash
+bd mol wisp gc --age 1h
+```
+
+Then handle callbacks from agents.
 
 Check the Mayor's inbox for messages from:
 - Witnesses reporting polecat status

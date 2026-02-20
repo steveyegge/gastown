@@ -8,9 +8,7 @@
 //   - Rig-level: <rig>/plugins/ (project-specific)
 package plugin
 
-import (
-	"time"
-)
+
 
 // Plugin represents a discovered plugin definition.
 type Plugin struct {
@@ -154,12 +152,4 @@ func (p *Plugin) Summary() PluginSummary {
 	}
 }
 
-// PluginRun represents a single execution of a plugin.
-type PluginRun struct {
-	PluginName string    `json:"plugin_name"`
-	RigName    string    `json:"rig_name,omitempty"`
-	StartTime  time.Time `json:"start_time"`
-	EndTime    time.Time `json:"end_time,omitempty"`
-	Result     string    `json:"result"` // "success" or "failure"
-	Message    string    `json:"message,omitempty"`
-}
+

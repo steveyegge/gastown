@@ -37,13 +37,13 @@ func TestNudgeRefinerySessionName(t *testing.T) {
 		{
 			name:        "simple rig name",
 			rigName:     "gastown",
-			message:     "MR submitted: gt-abc branch=polecat/Nux/gt-abc",
+			message:     "MERGE_READY received - check inbox for pending work",
 			wantSession: "gt-refinery",
 		},
 		{
 			name:        "hyphenated rig name",
 			rigName:     "my-project",
-			message:     "MR submitted: mp-xyz branch=polecat/Toast/mp-xyz",
+			message:     "MERGE_READY received - check inbox for pending work",
 			wantSession: "mp-refinery",
 		},
 	}
@@ -111,6 +111,33 @@ func TestNudgeRefineryNoOpWithoutLog(t *testing.T) {
 
 	// Should not panic even though no tmux session exists
 	nudgeRefinery("nonexistent-rig", "test message")
+}
+
+func TestIsDeferredBead(t *testing.T) {
+	tests := []struct {
+		name string
+		info *beadInfo
+		want bool
+	}{
+		{"open bead is not deferred", &beadInfo{Status: "open", Description: "some task"}, false},
+		{"in_progress bead is not deferred", &beadInfo{Status: "in_progress", Description: "working on it"}, false},
+		{"deferred status", &beadInfo{Status: "deferred", Description: "some task"}, true},
+		{"description says deferred to post-launch", &beadInfo{Status: "open", Description: "deferred to post-launch"}, true},
+		{"description says deferred to post launch", &beadInfo{Status: "open", Description: "deferred to post launch"}, true},
+		{"description says status: deferred", &beadInfo{Status: "open", Description: "status: deferred\nsome other notes"}, true},
+		{"case insensitive description", &beadInfo{Status: "open", Description: "Deferred to Post-Launch"}, true},
+		{"deferred keyword not in deferral phrase", &beadInfo{Status: "open", Description: "the user deferred this action"}, false},
+		{"empty description", &beadInfo{Status: "open", Description: ""}, false},
+		{"hooked bead not deferred", &beadInfo{Status: "hooked", Description: "some work"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDeferredBead(tt.info); got != tt.want {
+				t.Errorf("isDeferredBead(%+v) = %v, want %v", tt.info, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestIsSlingConfigError(t *testing.T) {

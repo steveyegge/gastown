@@ -8,13 +8,13 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -126,18 +126,6 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	return convoys, nil
 }
 
-// extractIssueID strips the external:prefix:id wrapper from bead IDs.
-// bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
-// but consumers need the raw bead ID for display and lookups.
-func extractIssueID(id string) string {
-	if strings.HasPrefix(id, "external:") {
-		parts := strings.SplitN(id, ":", 3)
-		if len(parts) == 3 {
-			return parts[2]
-		}
-	}
-	return id
-}
 
 // loadTrackedIssues loads issues tracked by a convoy.
 func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
@@ -172,7 +160,7 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	// bd dep list returns status from the dependency record in HQ beads
 	// which is never updated when cross-rig issues are closed in their rig.
 	for i := range tracked {
-		tracked[i].ID = extractIssueID(tracked[i].ID)
+		tracked[i].ID = beads.ExtractIssueID(tracked[i].ID)
 	}
 	freshStatus := refreshIssueStatus(ctx, tracked)
 

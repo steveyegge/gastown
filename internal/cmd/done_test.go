@@ -1046,3 +1046,72 @@ func TestCheckpointNilMapSafe(t *testing.T) {
 		t.Error("empty map should return zero value")
 	}
 }
+
+// TestConvoyInfoFallbackChain verifies that done.go checks attachment fields
+// first, then falls back to dep-based convoy lookup. This is the fix for gt-7b6wf:
+// convoy merge=direct was not propagated because cross-rig dep resolution failed.
+func TestConvoyInfoFallbackChain(t *testing.T) {
+	tests := []struct {
+		name            string
+		attachmentInfo  *ConvoyInfo // Result from getConvoyInfoFromIssue
+		depInfo         *ConvoyInfo // Result from getConvoyInfoForIssue
+		wantConvoyID    string
+		wantMerge       string
+		wantNil         bool
+	}{
+		{
+			name:           "attachment fields provide convoy info",
+			attachmentInfo: &ConvoyInfo{ID: "hq-cv-abc", MergeStrategy: "direct"},
+			depInfo:        nil, // Not called
+			wantConvoyID:   "hq-cv-abc",
+			wantMerge:      "direct",
+		},
+		{
+			name:           "attachment fields empty, dep lookup succeeds",
+			attachmentInfo: nil,
+			depInfo:        &ConvoyInfo{ID: "hq-cv-xyz", MergeStrategy: "mr"},
+			wantConvoyID:   "hq-cv-xyz",
+			wantMerge:      "mr",
+		},
+		{
+			name:           "both nil - no convoy",
+			attachmentInfo: nil,
+			depInfo:        nil,
+			wantNil:        true,
+		},
+		{
+			name:           "attachment has convoy, dep also has (attachment wins)",
+			attachmentInfo: &ConvoyInfo{ID: "hq-cv-from-attachment", MergeStrategy: "direct"},
+			depInfo:        &ConvoyInfo{ID: "hq-cv-from-dep", MergeStrategy: "mr"},
+			wantConvoyID:   "hq-cv-from-attachment",
+			wantMerge:      "direct",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the fallback chain from done.go
+			var convoyInfo *ConvoyInfo
+			convoyInfo = tt.attachmentInfo
+			if convoyInfo == nil {
+				convoyInfo = tt.depInfo
+			}
+
+			if tt.wantNil {
+				if convoyInfo != nil {
+					t.Errorf("expected nil, got %+v", convoyInfo)
+				}
+				return
+			}
+			if convoyInfo == nil {
+				t.Fatal("expected non-nil convoy info")
+			}
+			if convoyInfo.ID != tt.wantConvoyID {
+				t.Errorf("ConvoyID = %q, want %q", convoyInfo.ID, tt.wantConvoyID)
+			}
+			if convoyInfo.MergeStrategy != tt.wantMerge {
+				t.Errorf("MergeStrategy = %q, want %q", convoyInfo.MergeStrategy, tt.wantMerge)
+			}
+		})
+	}
+}

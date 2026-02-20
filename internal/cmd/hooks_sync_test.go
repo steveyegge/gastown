@@ -143,12 +143,13 @@ func TestSyncTargetUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Compute expected config for crew to ensure existing matches
+	expected, err := hooks.ComputeExpected("crew")
+	if err != nil {
+		t.Fatalf("ComputeExpected failed: %v", err)
+	}
 	existing := hooks.SettingsJSON{
-		Hooks: hooks.HooksConfig{
-			SessionStart: []hooks.HookEntry{
-				{Matcher: "", Hooks: []hooks.Hook{{Type: "command", Command: "same-command"}}},
-			},
-		},
+		Hooks: *expected,
 	}
 	data, marshalErr := hooks.MarshalSettings(&existing)
 	if marshalErr != nil {

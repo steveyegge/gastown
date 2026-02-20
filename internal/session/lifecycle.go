@@ -3,6 +3,7 @@ package session
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -191,13 +192,12 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (*StartResult, error) {
 		AgentName:        cfg.AgentName,
 		TownRoot:         cfg.TownRoot,
 		RuntimeConfigDir: cfg.RuntimeConfigDir,
-		Agent:            cfg.AgentOverride,
 	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(cfg.SessionID, k, v)
+	for _, k := range mapKeysSorted(envVars) {
+		_ = t.SetEnvironment(cfg.SessionID, k, envVars[k])
 	}
-	for k, v := range cfg.ExtraEnv {
-		_ = t.SetEnvironment(cfg.SessionID, k, v)
+	for _, k := range mapKeysSorted(cfg.ExtraEnv) {
+		_ = t.SetEnvironment(cfg.SessionID, k, cfg.ExtraEnv[k])
 	}
 
 	// 7. Apply theme.
@@ -276,6 +276,18 @@ func StopSession(t *tmux.Tmux, sessionID string, graceful bool) error {
 	}
 
 	return nil
+}
+
+func mapKeysSorted(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // KillExistingSession kills an existing session if one is found.

@@ -67,24 +67,21 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// Get available accounts
 	available := mgr.AvailableAccounts(state)
 
-	// Plan assignments: assign available accounts to limited sessions (LRU order)
+	// Plan assignments: assign all limited sessions to the best available account.
+	// Strategy: pick the first available account (LRU) that isn't already the
+	// session's current account. All sessions rotate to the same account so the
+	// operator can drain one account at a time, then move on.
 	assignments := make(map[string]string)
-	availIdx := 0
-	for _, r := range limitedSessions {
-		if availIdx >= len(available) {
-			break // No more available accounts
-		}
-		// Don't assign the same account the session already has
-		candidate := available[availIdx]
-		if candidate == r.AccountHandle {
-			availIdx++
-			if availIdx >= len(available) {
-				break
+	if len(available) > 0 {
+		for _, r := range limitedSessions {
+			// Find the first available account that differs from current
+			for _, candidate := range available {
+				if candidate != r.AccountHandle {
+					assignments[r.Session] = candidate
+					break
+				}
 			}
-			candidate = available[availIdx]
 		}
-		assignments[r.Session] = candidate
-		availIdx++
 	}
 
 	return &RotatePlan{

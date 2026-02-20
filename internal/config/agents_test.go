@@ -258,6 +258,149 @@ func TestGetProcessNamesRespectsRegistryOverride(t *testing.T) {
 	}
 }
 
+func TestResolveProcessNames(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tests := []struct {
+		name      string
+		agentName string
+		command   string
+		want      []string
+	}{
+		{
+			name:      "built-in preset with matching command",
+			agentName: "claude",
+			command:   "claude",
+			want:      []string{"node", "claude"},
+		},
+		{
+			name:      "built-in preset with matching command (opencode)",
+			agentName: "opencode",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "custom agent shadowing built-in with different command",
+			agentName: "codex",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "custom agent shadowing built-in with same command",
+			agentName: "codex",
+			command:   "codex",
+			want:      []string{"codex"},
+		},
+		{
+			name:      "unknown agent with known command",
+			agentName: "my-custom-agent",
+			command:   "claude",
+			want:      []string{"node", "claude"},
+		},
+		{
+			name:      "unknown agent with unknown command",
+			agentName: "my-custom-agent",
+			command:   "my-binary",
+			want:      []string{"my-binary"},
+		},
+		{
+			name:      "empty agent name with command",
+			agentName: "",
+			command:   "opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "path-resolved command matches built-in preset",
+			agentName: "claude",
+			command:   "/usr/local/bin/claude",
+			want:      []string{"node", "claude"},
+		},
+		{
+			name:      "path-resolved command with unknown agent",
+			agentName: "my-custom-agent",
+			command:   "/opt/bin/opencode",
+			want:      []string{"opencode", "node", "bun"},
+		},
+		{
+			name:      "path-resolved unknown command falls back to basename",
+			agentName: "my-agent",
+			command:   "/usr/local/bin/my-binary",
+			want:      []string{"my-binary"},
+		},
+		{
+			name:      "empty agent and command",
+			agentName: "",
+			command:   "",
+			want:      []string{"node", "claude"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveProcessNames(tt.agentName, tt.command)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ResolveProcessNames(%q, %q) = %v, want %v", tt.agentName, tt.command, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ResolveProcessNames(%q, %q)[%d] = %q, want %q", tt.agentName, tt.command, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+
+	// Test registry preset with absolute-path command.
+	// Custom agents loaded from agents.json may store full paths in Command.
+	// ResolveProcessNames must normalize both sides to match correctly.
+	t.Run("registry preset with absolute-path command matches", func(t *testing.T) {
+		RegisterAgentForTesting("custom-tool", AgentPresetInfo{
+			Name:         "custom-tool",
+			Command:      "/opt/bin/custom-tool",
+			ProcessNames: []string{"custom-tool", "node"},
+		})
+		t.Cleanup(func() {
+			ResetRegistryForTesting()
+		})
+
+		// Query with basename — should match via filepath.Base normalization
+		got := ResolveProcessNames("custom-tool", "custom-tool")
+		want := []string{"custom-tool", "node"}
+		if len(got) != len(want) {
+			t.Fatalf("ResolveProcessNames with abs-path registry = %v, want %v", got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("registry preset with absolute-path command matches via command lookup", func(t *testing.T) {
+		RegisterAgentForTesting("abs-tool", AgentPresetInfo{
+			Name:         "abs-tool",
+			Command:      "/usr/local/bin/special-binary",
+			ProcessNames: []string{"special-binary", "helper"},
+		})
+		t.Cleanup(func() {
+			ResetRegistryForTesting()
+		})
+
+		// Query with different agent name but matching command basename
+		got := ResolveProcessNames("unknown-agent", "special-binary")
+		want := []string{"special-binary", "helper"}
+		if len(got) != len(want) {
+			t.Fatalf("ResolveProcessNames command-based lookup with abs-path = %v, want %v", got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+}
+
 func TestAgentPresetApprovalFlags(t *testing.T) {
 	t.Parallel()
 	// Verify permissive-approval flags are set correctly for each E2E tested agent.

@@ -221,68 +221,77 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
 	childrenClosed := closeDescendants(b, moleculeID)
 
-	// Get progress info for the digest
-	progress, _ := getMoleculeProgressInfo(b, moleculeID)
+	// Skip digest creation if --no-digest flag is set (gt-t2bjt).
+	// Patrol molecules (deacon, witness, refinery) run frequently and their
+	// digests pollute the database with thousands of low-value beads.
+	if !moleculeNoDigest {
+		// Get progress info for the digest
+		progress, _ := getMoleculeProgressInfo(b, moleculeID)
 
-	// Create a digest issue
-	digestTitle := fmt.Sprintf("Digest: %s", moleculeID)
-	digestDesc := fmt.Sprintf(`Squashed molecule execution.
+		// Create a digest issue
+		digestTitle := fmt.Sprintf("Digest: %s", moleculeID)
+		digestDesc := fmt.Sprintf(`Squashed molecule execution.
 
 molecule: %s
 agent: %s
 squashed_at: %s
 `, moleculeID, target, time.Now().UTC().Format(time.RFC3339))
 
-	if moleculeSummary != "" {
-		digestDesc += fmt.Sprintf("\n## Summary\n%s\n", moleculeSummary)
-	}
+		if moleculeSummary != "" {
+			digestDesc += fmt.Sprintf("\n## Summary\n%s\n", moleculeSummary)
+		}
 
-	if progress != nil {
-		digestDesc += fmt.Sprintf(`
+		if progress != nil {
+			digestDesc += fmt.Sprintf(`
 ## Execution Summary
 - Steps: %d/%d completed
 - Status: %s
 `, progress.DoneSteps, progress.TotalSteps, func() string {
-			if progress.Complete {
-				return "complete"
-			}
-			return "partial"
-		}())
-	}
+				if progress.Complete {
+					return "complete"
+				}
+				return "partial"
+			}())
+		}
 
-	// Create the digest bead (ephemeral to avoid JSONL pollution)
-	// Per-cycle digests are aggregated daily by 'gt patrol digest'
-	digestIssue, err := b.Create(beads.CreateOptions{
-		Title:       digestTitle,
-		Description: digestDesc,
-		Type:        "task",
-		Priority:    4,       // P4 - backlog priority for digests
-		Actor:       target,
-		Ephemeral:   true,    // Don't export to JSONL - daily aggregation handles permanent record
-	})
-	if err != nil {
-		return fmt.Errorf("creating digest: %w", err)
-	}
+		// Create the digest bead (ephemeral to avoid JSONL pollution)
+		// Per-cycle digests are aggregated daily by 'gt patrol digest'
+		digestIssue, err := b.Create(beads.CreateOptions{
+			Title:       digestTitle,
+			Description: digestDesc,
+			Type:        "task",
+			Priority:    4,       // P4 - backlog priority for digests
+			Actor:       target,
+			Ephemeral:   true,    // Don't export to JSONL - daily aggregation handles permanent record
+		})
+		if err != nil {
+			return fmt.Errorf("creating digest: %w", err)
+		}
 
-	// Add the digest label (non-fatal: digest works without label)
-	_ = b.Update(digestIssue.ID, beads.UpdateOptions{
-		AddLabels: []string{"digest"},
-	})
+		// Add the digest label (non-fatal: digest works without label)
+		_ = b.Update(digestIssue.ID, beads.UpdateOptions{
+			AddLabels: []string{"digest"},
+		})
 
-	// Close the digest immediately
-	closedStatus := "closed"
-	err = b.Update(digestIssue.ID, beads.UpdateOptions{
-		Status: &closedStatus,
-	})
-	if err != nil {
-		style.PrintWarning("Created digest but couldn't close it: %v", err)
+		// Close the digest immediately
+		closedStatus := "closed"
+		err = b.Update(digestIssue.ID, beads.UpdateOptions{
+			Status: &closedStatus,
+		})
+		if err != nil {
+			style.PrintWarning("Created digest but couldn't close it: %v", err)
+		}
 	}
 
 	// Detach the molecule from the handoff bead with audit logging
+	detachReason := "molecule squashed (no digest)"
+	if !moleculeNoDigest {
+		detachReason = "molecule squashed"
+	}
 	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
 		Operation: "squash",
 		Agent:     target,
-		Reason:    fmt.Sprintf("molecule squashed to digest %s", digestIssue.ID),
+		Reason:    detachReason,
 	})
 	if err != nil {
 		return fmt.Errorf("detaching molecule: %w", err)
@@ -291,18 +300,23 @@ squashed_at: %s
 	if moleculeJSON {
 		result := map[string]interface{}{
 			"squashed":        moleculeID,
-			"digest_id":       digestIssue.ID,
 			"from":            target,
 			"handoff_id":      handoff.ID,
 			"children_closed": childrenClosed,
+			"digest_skipped":  moleculeNoDigest,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(result)
 	}
 
-	fmt.Printf("%s Squashed molecule %s → digest %s\n",
-		style.Bold.Render("📦"), moleculeID, digestIssue.ID)
+	if moleculeNoDigest {
+		fmt.Printf("%s Squashed molecule %s (no digest)\n",
+			style.Bold.Render("📦"), moleculeID)
+	} else {
+		fmt.Printf("%s Squashed molecule %s\n",
+			style.Bold.Render("📦"), moleculeID)
+	}
 	if childrenClosed > 0 {
 		fmt.Printf("  Closed %d step issues\n", childrenClosed)
 	}

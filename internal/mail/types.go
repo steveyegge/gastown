@@ -534,10 +534,43 @@ func ParseMessageType(s string) MessageType {
 	}
 }
 
-// AddressToIdentity converts a GGT address to a beads identity.
+// normalizeAddress handles the common normalization logic shared by
+// AddressToIdentity and identityToAddress.
 //
-// Liberal normalization: accepts multiple address formats and normalizes
-// to canonical form (Postel's Law - be liberal in what you accept).
+// Liberal normalization (Postel's Law - be liberal in what you accept):
+//   - "overseer" → "overseer" (human operator, no trailing slash)
+//   - "mayor" or "mayor/" → "mayor/" (town-level, trailing slash)
+//   - "deacon" or "deacon/" → "deacon/" (town-level, trailing slash)
+//   - "gastown/polecats/Toast" → "gastown/Toast" (crew/polecats normalized)
+//   - "gastown/crew/max" → "gastown/max" (crew/polecats normalized)
+//   - "gastown/Toast" → "gastown/Toast" (already canonical)
+//   - "gastown/refinery" → "gastown/refinery"
+func normalizeAddress(s string) string {
+	// Overseer (human operator) - no trailing slash, distinct from agents
+	if s == "overseer" {
+		return "overseer"
+	}
+
+	// Town-level agents: mayor and deacon keep trailing slash
+	if s == "mayor" || s == "mayor/" {
+		return "mayor/"
+	}
+	if s == "deacon" || s == "deacon/" {
+		return "deacon/"
+	}
+
+	// Normalize crew/ and polecats/ to canonical form:
+	// "rig/crew/name" → "rig/name"
+	// "rig/polecats/name" → "rig/name"
+	parts := strings.Split(s, "/")
+	if len(parts) == 3 && (parts[1] == "crew" || parts[1] == "polecats") {
+		return parts[0] + "/" + parts[2]
+	}
+
+	return s
+}
+
+// AddressToIdentity converts a GGT address to a beads identity.
 //
 // Addresses use slash format:
 //   - "overseer" → "overseer" (human operator, no trailing slash)
@@ -551,38 +584,17 @@ func ParseMessageType(s string) MessageType {
 //   - "gastown/refinery" → "gastown/refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
 func AddressToIdentity(address string) string {
-	// Overseer (human operator) - no trailing slash, distinct from agents
-	if address == "overseer" {
-		return "overseer"
-	}
-
-	// Town-level agents: mayor and deacon keep trailing slash
-	if address == "mayor" || address == "mayor/" {
-		return "mayor/"
-	}
-	if address == "deacon" || address == "deacon/" {
-		return "deacon/"
-	}
-
-	// Trim trailing slash for rig-level addresses
+	// Trim trailing slash for rig-level addresses before normalization.
+	// normalizeAddress handles mayor/ and deacon/ correctly even after trimming.
 	if len(address) > 0 && address[len(address)-1] == '/' {
 		address = address[:len(address)-1]
 	}
-
-	// Normalize crew/ and polecats/ to canonical form:
-	// "rig/crew/name" → "rig/name"
-	// "rig/polecats/name" → "rig/name"
-	parts := strings.Split(address, "/")
-	if len(parts) == 3 && (parts[1] == "crew" || parts[1] == "polecats") {
-		return parts[0] + "/" + parts[2]
-	}
-
-	return address
+	return normalizeAddress(address)
 }
 
 // identityToAddress converts a beads identity back to a GGT address.
 //
-// Liberal normalization (Postel's Law):
+// Examples:
 //   - "overseer" → "overseer" (human operator)
 //   - "mayor/" → "mayor/"
 //   - "deacon/" → "deacon/"
@@ -591,24 +603,5 @@ func AddressToIdentity(address string) string {
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 func identityToAddress(identity string) string {
-	// Overseer (human operator) - no trailing slash
-	if identity == "overseer" {
-		return "overseer"
-	}
-
-	// Town-level agents ensure trailing slash
-	if identity == "mayor" || identity == "mayor/" {
-		return "mayor/"
-	}
-	if identity == "deacon" || identity == "deacon/" {
-		return "deacon/"
-	}
-
-	// Normalize crew/ and polecats/ to canonical form
-	parts := strings.Split(identity, "/")
-	if len(parts) == 3 && (parts[1] == "crew" || parts[1] == "polecats") {
-		return parts[0] + "/" + parts[2]
-	}
-
-	return identity
+	return normalizeAddress(identity)
 }

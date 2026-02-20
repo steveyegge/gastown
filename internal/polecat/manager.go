@@ -631,12 +631,33 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// name as in-use without needing the .pending file.
 	_ = os.Remove(m.pendingPath(name))
 
-	// cleanupOnError removes polecatDir if worktree creation fails.
-	// This ensures exists() returns false for incomplete polecats, preventing
-	// a partial state where polecatDir exists but the worktree doesn't.
-	// See: br-w2ee9 (worktrees not being created)
+	// Track resources created for rollback on error.
+	// AddWithOptions creates several resources in sequence (directory, worktree,
+	// agent bead); on failure, all created resources must be cleaned up to prevent
+	// leaking names, orphaning beads, or leaving stale worktree registrations.
+	// See: gt-2vs22
+	var worktreeCreated bool
 	cleanupOnError := func() {
+		// Best-effort reset of agent bead (may have been partially created
+		// by a failed createAgentBeadWithRetry)
+		aid := m.agentBeadID(name)
+		_ = m.beads.ResetAgentBeadForReuse(aid, "spawn rollback")
+
+		// Remove git worktree registration if worktree was successfully added.
+		// Must happen before directory removal so git can clean up properly.
+		if worktreeCreated {
+			if rg, repoErr := m.repoBase(); repoErr == nil {
+				_ = rg.WorktreeRemove(clonePath, true)
+			}
+		}
+
+		// Remove polecat directory
 		_ = os.RemoveAll(polecatDir)
+
+		// Release name back to pool so it can be reallocated immediately
+		// rather than waiting for the next reconcile cycle.
+		m.namePool.Release(name)
+		_ = m.namePool.Save()
 	}
 
 	// Get the repo base (bare repo or mayor/rig)
@@ -686,6 +707,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		cleanupOnError()
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
+	worktreeCreated = true
 
 	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
 	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
@@ -1344,15 +1366,23 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 }
 
 // isSessionProcessDead checks if a tmux session's pane process has exited.
-// Returns true if the process is dead or cannot be checked (conservative: allows cleanup).
+// Returns true only when we can confirm the process is dead, not on transient
+// tmux query failures (gt-kncti: permission denied false positives).
 func isSessionProcessDead(t *tmux.Tmux, sessionName string) bool {
 	pidStr, err := t.GetPanePID(sessionName)
-	if err != nil || pidStr == "" {
+	if err != nil {
+		// Tmux query failed — could be permission denied, server busy, etc.
+		// Don't assume dead; let a future cycle retry.
+		return false
+	}
+	if pidStr == "" {
+		// No PID means no process — session is dead.
 		return true
 	}
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		return true
+		// Got a non-numeric PID — shouldn't happen, but don't kill.
+		return false
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
@@ -1475,7 +1505,7 @@ func (m *Manager) Get(name string) (*Polecat, error) {
 
 // SetState updates a polecat's state.
 // In the beads model, state is derived from issue status:
-// - StateWorking/StateActive: issue status set to in_progress
+// - StateWorking: issue status set to in_progress
 // SetAgentState updates the agent bead's agent_state field.
 // This is called after a polecat session successfully starts to transition
 // from "spawning" to "working", making gt polecat identity show accurate status.
@@ -1502,7 +1532,7 @@ func (m *Manager) SetState(name string, state State) error {
 	}
 
 	switch state {
-	case StateWorking, StateActive:
+	case StateWorking:
 		// Set issue to in_progress if there is one
 		if issue != nil {
 			status := "in_progress"

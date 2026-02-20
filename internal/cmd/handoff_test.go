@@ -442,3 +442,57 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 		}
 	})
 }
+
+func TestHandoffProcessNames(t *testing.T) {
+	t.Run("same-agent restart preserves GT_PROCESS_NAMES from env", func(t *testing.T) {
+		setupHandoffTestRegistry(t)
+
+		tmpTown := t.TempDir()
+		mayorDir := filepath.Join(tmpTown, "mayor")
+		os.MkdirAll(mayorDir, 0755)
+		os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644)
+
+		t.Setenv("GT_ROOT", tmpTown)
+		t.Setenv("GT_AGENT", "claude")
+		t.Setenv("GT_PROCESS_NAMES", "node,claude")
+		origCwd, _ := os.Getwd()
+		os.Chdir(os.TempDir())
+		t.Cleanup(func() { os.Chdir(origCwd) })
+
+		// Same-agent restart should preserve existing process names from env
+		cmd, err := buildRestartCommand("gt-crew-propane")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(cmd, "GT_PROCESS_NAMES=node,claude") {
+			t.Errorf("expected GT_PROCESS_NAMES=node,claude preserved from env, got: %q", cmd)
+		}
+	})
+
+	t.Run("first boot without GT_PROCESS_NAMES computes from config", func(t *testing.T) {
+		setupHandoffTestRegistry(t)
+
+		tmpTown := t.TempDir()
+		mayorDir := filepath.Join(tmpTown, "mayor")
+		os.MkdirAll(mayorDir, 0755)
+		os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644)
+
+		t.Setenv("GT_ROOT", tmpTown)
+		t.Setenv("GT_AGENT", "claude")
+		// Explicitly clear GT_PROCESS_NAMES to simulate first boot
+		t.Setenv("GT_PROCESS_NAMES", "")
+		origCwd, _ := os.Getwd()
+		os.Chdir(os.TempDir())
+		t.Cleanup(func() { os.Chdir(origCwd) })
+
+		// No GT_PROCESS_NAMES in env — should compute from agent config
+		cmd, err := buildRestartCommand("gt-crew-propane")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Claude's default process names are "node,claude"
+		if !strings.Contains(cmd, "GT_PROCESS_NAMES=node,claude") {
+			t.Errorf("expected GT_PROCESS_NAMES=node,claude computed from config, got: %q", cmd)
+		}
+	})
+}

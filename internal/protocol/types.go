@@ -38,6 +38,12 @@ const (
 	// branch needs rebasing due to conflicts with the target branch.
 	// Subject format: "REWORK_REQUEST <polecat-name>"
 	TypeReworkRequest MessageType = "REWORK_REQUEST"
+
+	// TypeConvoyNeedsFeeding is sent from Refinery to Deacon after a
+	// convoy-eligible merge completes. This triggers immediate convoy
+	// feeding instead of waiting for the next deacon patrol cycle.
+	// Subject format: "CONVOY_NEEDS_FEEDING <convoy-id>"
+	TypeConvoyNeedsFeeding MessageType = "CONVOY_NEEDS_FEEDING"
 )
 
 // ParseMessageType extracts the protocol message type from a mail subject.
@@ -51,6 +57,7 @@ func ParseMessageType(subject string) MessageType {
 		TypeMerged,
 		TypeMergeFailed,
 		TypeReworkRequest,
+		TypeConvoyNeedsFeeding,
 	}
 
 	for _, prefix := range prefixes {
@@ -202,6 +209,22 @@ type PolecatDonePayload struct {
 // standard witness/refinery merge pipeline (owned convoy + direct merge).
 func (p *PolecatDonePayload) SkipMergeFlow() bool {
 	return p.ConvoyOwned && p.MergeStrategy == "direct"
+}
+
+// ConvoyNeedsFeedingPayload contains the data for a CONVOY_NEEDS_FEEDING message.
+// Sent by Refinery to Deacon after a convoy-eligible merge completes.
+type ConvoyNeedsFeedingPayload struct {
+	// ConvoyID is the convoy that may have newly-ready issues.
+	ConvoyID string `json:"convoy_id"`
+
+	// SourceIssue is the issue that was just merged and closed.
+	SourceIssue string `json:"source_issue"`
+
+	// Rig is the rig where the merge happened.
+	Rig string `json:"rig"`
+
+	// MergedAt is when the merge completed.
+	MergedAt time.Time `json:"merged_at"`
 }
 
 // IsProtocolMessage returns true if the subject matches a known protocol type.

@@ -36,11 +36,19 @@ func TestBeadsBinaryCheck_BdInstalled(t *testing.T) {
 	ctx := &CheckContext{TownRoot: t.TempDir()}
 
 	result := check.Run(ctx)
-	if result.Status != StatusOK {
-		t.Errorf("expected StatusOK when bd is installed, got %v: %s", result.Status, result.Message)
-	}
-	if !strings.Contains(result.Message, "bd") {
-		t.Errorf("expected version string in message, got %q", result.Message)
+	// Non-hermetic: the installed bd may or may not meet MinBeadsVersion.
+	// We just verify it produces a meaningful result (not NotFound/Unknown).
+	switch result.Status {
+	case StatusOK:
+		if !strings.Contains(result.Message, "bd") {
+			t.Errorf("expected version string in message, got %q", result.Message)
+		}
+	case StatusError:
+		if !strings.Contains(result.Message, "too old") {
+			t.Errorf("expected 'too old' in error message, got %q", result.Message)
+		}
+	default:
+		t.Errorf("unexpected status %v when bd is installed: %s", result.Status, result.Message)
 	}
 }
 
@@ -63,8 +71,8 @@ func writeFakeBd(t *testing.T, dir string, script string, batScript string) {
 func TestBeadsBinaryCheck_HermeticSuccess(t *testing.T) {
 	fakeDir := t.TempDir()
 	writeFakeBd(t, fakeDir,
-		"#!/bin/sh\necho 'bd version 0.52.0'\n",
-		"@echo off\r\necho bd version 0.52.0\r\n",
+		"#!/bin/sh\necho 'bd version 0.54.0'\n",
+		"@echo off\r\necho bd version 0.54.0\r\n",
 	)
 
 	t.Setenv("PATH", fakeDir)
@@ -76,7 +84,7 @@ func TestBeadsBinaryCheck_HermeticSuccess(t *testing.T) {
 	if result.Status != StatusOK {
 		t.Errorf("expected StatusOK with fake bd, got %v: %s", result.Status, result.Message)
 	}
-	if !strings.Contains(result.Message, "0.52.0") {
+	if !strings.Contains(result.Message, "0.54.0") {
 		t.Errorf("expected version in message, got %q", result.Message)
 	}
 }

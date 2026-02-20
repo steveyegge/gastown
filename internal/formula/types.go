@@ -95,7 +95,8 @@ type Step struct {
 	Title       string   `toml:"title"`
 	Description string   `toml:"description"`
 	Needs       []string `toml:"needs"`
-	Parallel    bool     `toml:"parallel"` // If true, this step can run concurrently with other parallel steps that share the same needs
+	Parallel    bool     `toml:"parallel"`   // If true, this step can run concurrently with other parallel steps that share the same needs
+	Acceptance  string   `toml:"acceptance"` // Exit criteria for this step (used by Ralph loop mode)
 }
 
 // Template represents a template step in an expansion formula.

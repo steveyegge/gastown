@@ -165,17 +165,40 @@ func Merge(base, override *HooksConfig) *HooksConfig {
 }
 
 // DefaultOverrides returns built-in role-specific hook overrides.
-// Currently empty — the merge mechanism is retained for future use.
-// On-disk overrides (in ~/.gt/hooks-overrides/) layer on top of DefaultBase().
+// On-disk overrides (in ~/.gt/hooks-overrides/) layer on top of these.
+//
+// Crew workers get auto-session-cycling on PreCompact: instead of compacting
+// context (which degrades quality), the session is replaced with a fresh one.
+// The successor picks up hooked work via SessionStart hook (gt prime --hook).
 func DefaultOverrides() map[string]*HooksConfig {
-	return map[string]*HooksConfig{}
+	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
+
+	return map[string]*HooksConfig{
+		// Crew workers: auto-cycle session on context compaction (gt-op78).
+		// Instead of compacting (lossy), replace with fresh session that
+		// inherits hooked work. The --cycle flag does: collect state →
+		// send handoff mail → respawn pane with fresh Claude instance.
+		"crew": {
+			PreCompact: []HookEntry{
+				{
+					Matcher: "",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf("%s && gt handoff --cycle --reason compaction", pathSetup),
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // ComputeExpected computes the expected HooksConfig for a target by loading
 // the base config and applying all applicable overrides in order of specificity.
 // If no base config exists, uses DefaultBase().
 //
-// For each override key, built-in defaults (from DefaultOverrides, currently empty)
+// For each override key, built-in defaults (from DefaultOverrides)
 // are merged first, then on-disk overrides layer on top. On-disk overrides can
 // replace or extend base hooks by providing matching PreToolUse entries.
 func ComputeExpected(target string) (*HooksConfig, error) {

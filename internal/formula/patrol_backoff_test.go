@@ -142,3 +142,53 @@ func TestPatrolFormulasHaveSquashCycle(t *testing.T) {
 		})
 	}
 }
+
+// TestPatrolFormulasHaveWispGC verifies that all three patrol formulas
+// include `bd mol wisp gc` in their inbox-check step to clean up stale
+// wisps from abnormal exits in previous cycles.
+//
+// Without this, patrol agents that die/restart abnormally before reaching
+// the loop-or-exit squash step leave their wisps open indefinitely.
+//
+// Regression test for steveyegge/gastown#1712.
+func TestPatrolFormulasHaveWispGC(t *testing.T) {
+	patrolFormulas := []string{
+		"mol-witness-patrol.formula.toml",
+		"mol-deacon-patrol.formula.toml",
+		"mol-refinery-patrol.formula.toml",
+	}
+
+	for _, name := range patrolFormulas {
+		t.Run(name, func(t *testing.T) {
+			content, err := formulasFS.ReadFile("formulas/" + name)
+			if err != nil {
+				t.Fatalf("reading %s: %v", name, err)
+			}
+
+			f, err := Parse(content)
+			if err != nil {
+				t.Fatalf("parsing %s: %v", name, err)
+			}
+
+			// Find the inbox-check step (first step in all patrol formulas)
+			var inboxDesc string
+			for _, step := range f.Steps {
+				if step.ID == "inbox-check" {
+					inboxDesc = step.Description
+					break
+				}
+			}
+			if inboxDesc == "" {
+				t.Fatalf("%s: inbox-check step not found or has empty description", name)
+			}
+
+			if !strings.Contains(inboxDesc, "bd mol wisp gc") {
+				t.Errorf("%s inbox-check step missing \"bd mol wisp gc\"\n"+
+					"All patrol formulas must run wisp GC at the start of each cycle\n"+
+					"to clean up stale wisps from abnormal exits.\n"+
+					"See steveyegge/gastown#1712.",
+					name)
+			}
+		})
+	}
+}

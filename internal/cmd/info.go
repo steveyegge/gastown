@@ -155,7 +155,7 @@ var versionChanges = []VersionChange{
 			"FIX: Crew session stability - Don't kill pane processes on new sessions",
 			"FIX: Auto-recover from stale tmux pane references",
 			"FIX: KillPaneProcesses now kills pane process itself, not just descendants",
-			"FIX: Convoy ID propagation in refinery and convoy watcher",
+			"FIX: Convoy ID propagation in refinery and convoy manager",
 			"FIX: Multi-repo routing for custom types and role slots",
 		},
 	},

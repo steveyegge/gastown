@@ -56,11 +56,26 @@ func (m *Manager) SessionName() string {
 	return session.RefinerySessionName(session.PrefixFor(m.rig.Name))
 }
 
-// IsRunning checks if the refinery session is active.
-// ZFC: tmux session existence is the source of truth.
+// IsRunning checks if the refinery session is active and healthy.
+// Checks both tmux session existence AND agent process liveness to avoid
+// reporting zombie sessions (tmux alive but Claude dead) as "running".
+// ZFC: tmux session existence is the source of truth for session state,
+// but agent liveness determines if the session is actually functional.
 func (m *Manager) IsRunning() (bool, error) {
 	t := tmux.NewTmux()
-	return t.HasSession(m.SessionName())
+	sessionName := m.SessionName()
+	status := t.CheckSessionHealth(sessionName, 0)
+	return status == tmux.SessionHealthy, nil
+}
+
+// IsHealthy checks if the refinery is running and has been active recently.
+// Unlike IsRunning which only checks process liveness, this also detects hung
+// sessions where Claude is alive but hasn't produced output in maxInactivity.
+// Returns the detailed ZombieStatus for callers that need to distinguish
+// between different failure modes.
+func (m *Manager) IsHealthy(maxInactivity time.Duration) tmux.ZombieStatus {
+	t := tmux.NewTmux()
+	return t.CheckSessionHealth(m.SessionName(), maxInactivity)
 }
 
 // Status returns information about the refinery session.
@@ -164,7 +179,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Role:     "refinery",
 		Rig:      m.rig.Name,
 		TownRoot: townRoot,
-		Agent:    agentOverride,
 	})
 
 	// Add refinery-specific flag

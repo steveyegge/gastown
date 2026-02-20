@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
@@ -553,6 +554,11 @@ func createSynthesisBead(convoyID string, meta *ConvoyMeta, f *formula.Formula,
 		outputPath := strings.ReplaceAll(f.Output.Directory, "{{review_id}}", reviewID)
 		outputPath = filepath.Join(outputPath, f.Output.Synthesis)
 		desc.WriteString(fmt.Sprintf("\n## Output\n\nWrite synthesis to: %s\n", outputPath))
+	}
+
+	// Guard against flag-like synthesis titles (gt-e0kx5)
+	if beads.IsFlagLikeTitle(title) {
+		return "", fmt.Errorf("refusing to create synthesis bead: title %q looks like a CLI flag", title)
 	}
 
 	// Create the bead

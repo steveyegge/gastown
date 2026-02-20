@@ -53,16 +53,19 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	var issues []*beads.Issue
 
 	if mqListReady {
-		// Use ready query which filters by no blockers
-		allReady, err := b.Ready()
+		// Query all open MRs and filter out blocked ones manually.
+		// Cannot use b.Ready() because it excludes ephemeral beads,
+		// and MRs are ephemeral by design (see gt-t5t6y).
+		opts.Status = "open"
+		allOpen, err := b.List(opts)
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
-		// Filter to only merge-request label (issue_type field is deprecated)
-		for _, issue := range allReady {
-			if beads.HasLabel(issue, "gt:merge-request") {
-				issues = append(issues, issue)
+		for _, issue := range allOpen {
+			if len(issue.BlockedBy) > 0 || issue.BlockedByCount > 0 {
+				continue // Skip blocked issues
 			}
+			issues = append(issues, issue)
 		}
 	} else {
 		issues, err = b.List(opts)

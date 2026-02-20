@@ -48,6 +48,11 @@ The --collect (-c) flag gathers current state (hooked work, inbox, ready beads,
 in-progress items) and includes it in the handoff mail. This provides context
 for the next session without manual summarization.
 
+The --cycle flag triggers automatic session cycling (used by PreCompact hooks).
+Unlike --auto (state only) or normal handoff (polecat→gt-done redirect), --cycle
+always does a full respawn regardless of role. This enables crew workers and
+polecats to get a fresh context window when the current one fills up.
+
 Any molecule on the hook will be auto-continued by the new session.
 The SessionStart hook runs 'gt prime' to restore context.`,
 	RunE: runHandoff,
@@ -61,6 +66,7 @@ var (
 	handoffCollect    bool
 	handoffStdin      bool
 	handoffAuto       bool
+	handoffCycle      bool
 	handoffReason     string
 	handoffNoGitCheck bool
 )
@@ -73,6 +79,7 @@ func init() {
 	handoffCmd.Flags().BoolVarP(&handoffCollect, "collect", "c", false, "Auto-collect state (status, inbox, beads) into handoff message")
 	handoffCmd.Flags().BoolVar(&handoffStdin, "stdin", false, "Read message body from stdin (avoids shell quoting issues)")
 	handoffCmd.Flags().BoolVar(&handoffAuto, "auto", false, "Save state only, no session cycling (for PreCompact hooks)")
+	handoffCmd.Flags().BoolVar(&handoffCycle, "cycle", false, "Auto-cycle session (for PreCompact hooks that want full session replacement)")
 	handoffCmd.Flags().StringVar(&handoffReason, "reason", "", "Reason for handoff (e.g., 'compaction', 'idle')")
 	handoffCmd.Flags().BoolVar(&handoffNoGitCheck, "no-git-check", false, "Skip git workspace cleanliness check")
 	rootCmd.AddCommand(handoffCmd)
@@ -98,6 +105,17 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// spam warnings. The --no-git-check flag has no effect in auto mode.
 	if handoffAuto {
 		return runHandoffAuto()
+	}
+
+	// --cycle mode: full session cycling, triggered by PreCompact hook.
+	// Unlike --auto (state only), this replaces the current session with a fresh one.
+	// Unlike normal handoff, this skips the polecat→gt-done redirect because
+	// cycling preserves work state (the hook stays attached).
+	//
+	// Flow: collect state → send handoff mail → respawn pane (fresh Claude instance)
+	// The successor session picks up hooked work via SessionStart hook (gt prime --hook).
+	if handoffCycle {
+		return runHandoffCycle()
 	}
 
 	// Check if we're a polecat - polecats use gt done instead.
@@ -204,6 +222,8 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// If handing off a different session, we need to find its pane and respawn there
 	if targetSession != currentSession {
+		// Update tmux session env before respawn (not during dry-run — see below)
+		updateSessionEnvForHandoff(t, targetSession, "")
 		return handoffRemoteSession(t, targetSession, restartCmd)
 	}
 
@@ -230,6 +250,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Would execute: tmux respawn-pane -k -t %s %s\n", pane, restartCmd)
 		return nil
 	}
+
+	// Update tmux session environment for liveness detection.
+	// IsAgentAlive reads GT_PROCESS_NAMES via tmux show-environment (session env),
+	// not from shell exports. The restart command sets shell exports for the child
+	// process, but we must also update the session env so liveness checks work.
+	// Placed after the dry-run guard to avoid mutating session state during dry-run.
+	updateSessionEnvForHandoff(t, currentSession, "")
 
 	// Send handoff mail to self (defaults applied inside sendHandoffMail).
 	// The mail is auto-hooked so the next session picks it up.
@@ -353,6 +380,134 @@ func runHandoffAuto() error {
 	}
 
 	return nil
+}
+
+// runHandoffCycle performs a full session cycle — save state AND respawn.
+// This is the PreCompact-triggered session succession mechanism (gt-op78).
+//
+// Unlike --auto (state only) or normal handoff (polecat→gt-done redirect),
+// --cycle always does a full respawn regardless of role. This enables
+// crew workers (and polecats) to get a fresh context window when the
+// current one fills up.
+//
+// The flow:
+//  1. Auto-collect state (inbox, ready beads, hooked work)
+//  2. Send handoff mail to self (auto-hooked for successor)
+//  3. Write handoff marker (prevents handoff loop)
+//  4. Respawn the tmux pane with a fresh Claude instance
+//
+// The successor session starts via SessionStart hook (gt prime --hook),
+// finds the hooked work, and continues from where we left off.
+func runHandoffCycle() error {
+	// Build subject
+	subject := handoffSubject
+	if subject == "" {
+		reason := handoffReason
+		if reason == "" {
+			reason = "context-cycle"
+		}
+		subject = fmt.Sprintf("🤝 HANDOFF: %s", reason)
+	}
+
+	// Auto-collect state if no explicit message
+	message := handoffMessage
+	if message == "" {
+		message = collectHandoffState()
+	}
+
+	// Must be in tmux to respawn
+	if !tmux.IsInsideTmux() {
+		// Fall back to auto mode (save state only) if not in tmux
+		fmt.Fprintf(os.Stderr, "handoff --cycle: not in tmux, falling back to state-save only\n")
+		handoffMessage = message
+		handoffSubject = subject
+		return runHandoffAuto()
+	}
+
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		fmt.Fprintf(os.Stderr, "handoff --cycle: TMUX_PANE not set, falling back to state-save only\n")
+		handoffMessage = message
+		handoffSubject = subject
+		return runHandoffAuto()
+	}
+
+	currentSession, err := getCurrentTmuxSession()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "handoff --cycle: could not get session: %v, falling back to state-save only\n", err)
+		handoffMessage = message
+		handoffSubject = subject
+		return runHandoffAuto()
+	}
+
+	t := tmux.NewTmux()
+
+	if handoffDryRun {
+		fmt.Printf("[cycle] Would send handoff mail: subject=%q\n", subject)
+		fmt.Printf("[cycle] Would write handoff marker\n")
+		fmt.Printf("[cycle] Would execute: tmux clear-history -t %s\n", pane)
+		fmt.Printf("[cycle] Would execute: tmux respawn-pane -k -t %s <restart-cmd>\n", pane)
+		return nil
+	}
+
+	// Send handoff mail to self (auto-hooked for successor)
+	beadID, err := sendHandoffMail(subject, message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "handoff --cycle: could not send mail: %v\n", err)
+		// Continue — respawn is more important than mail
+	} else {
+		fmt.Fprintf(os.Stderr, "handoff --cycle: saved state to %s\n", beadID)
+	}
+
+	// Write handoff marker so post-cycle prime knows it's post-handoff
+	if cwd, err := os.Getwd(); err == nil {
+		runtimeDir := filepath.Join(cwd, constants.DirRuntime)
+		_ = os.MkdirAll(runtimeDir, 0755)
+		markerPath := filepath.Join(runtimeDir, constants.FileHandoffMarker)
+		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
+	}
+
+	// Log cycle event
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		agent := sessionToGTRole(currentSession)
+		if agent == "" {
+			agent = currentSession
+		}
+		_ = LogHandoff(townRoot, agent, subject)
+		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(subject, true))
+	}
+
+	// Build restart command for fresh session
+	restartCmd, err := buildRestartCommand(currentSession)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "handoff --cycle: could not build restart command: %v\n", err)
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "handoff --cycle: cycling session %s\n", currentSession)
+
+	// Set remain-on-exit so the pane survives process death during handoff
+	if err := t.SetRemainOnExit(pane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
+	// Clear scrollback history before respawn
+	if err := t.ClearHistory(pane); err != nil {
+		style.PrintWarning("could not clear history: %v", err)
+	}
+
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
+	if paneWorkDir != "" {
+		if _, err := os.Stat(paneWorkDir); err != nil {
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				return t.RespawnPaneWithWorkDir(pane, townRoot, restartCmd)
+			}
+		}
+	}
+
+	// Respawn pane — this atomically kills current process and starts fresh
+	return t.RespawnPane(pane, restartCmd)
 }
 
 // getCurrentTmuxSession returns the current tmux session name.
@@ -597,6 +752,19 @@ func buildRestartCommand(sessionName string) (string, error) {
 		exports = append(exports, "GT_AGENT="+currentAgent)
 	}
 
+	// Preserve GT_PROCESS_NAMES across handoff for accurate liveness detection.
+	// Without this, custom agents that shadow built-in presets (e.g., custom
+	// "codex" running "opencode") would revert to GT_AGENT-based lookup after
+	// handoff, causing false liveness failures.
+	if processNames := os.Getenv("GT_PROCESS_NAMES"); processNames != "" {
+		// Preserve existing process names from environment
+		exports = append(exports, "GT_PROCESS_NAMES="+processNames)
+	} else if currentAgent != "" {
+		// First boot or missing GT_PROCESS_NAMES — compute from agent config
+		resolved := config.ResolveProcessNames(currentAgent, "")
+		exports = append(exports, "GT_PROCESS_NAMES="+strings.Join(resolved, ","))
+	}
+
 	// Add Claude-related env vars from current environment
 	for _, name := range claudeEnvVars {
 		if val := os.Getenv(name); val != "" {
@@ -622,6 +790,64 @@ func buildRestartCommand(sessionName string) (string, error) {
 		return fmt.Sprintf("cd %s && export %s && exec %s", workDir, strings.Join(exports, " "), runtimeCmd), nil
 	}
 	return fmt.Sprintf("cd %s && exec %s", workDir, runtimeCmd), nil
+}
+
+// updateSessionEnvForHandoff updates the tmux session environment with the
+// agent name and process names for liveness detection. IsAgentAlive reads
+// GT_PROCESS_NAMES from the tmux session env (via tmux show-environment), not
+// from shell exports in the pane. Without this, post-handoff liveness checks
+// would use stale values from the previous agent.
+func updateSessionEnvForHandoff(t *tmux.Tmux, sessionName, agentOverride string) {
+	// Resolve current agent using the same priority as buildRestartCommandWithAgent
+	var currentAgent string
+	if agentOverride != "" {
+		currentAgent = agentOverride
+	} else {
+		currentAgent = os.Getenv("GT_AGENT")
+		if currentAgent == "" {
+			if val, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && val != "" {
+				currentAgent = val
+			}
+		}
+	}
+
+	if currentAgent == "" {
+		return
+	}
+
+	// Update GT_AGENT in session env
+	_ = t.SetEnvironment(sessionName, "GT_AGENT", currentAgent)
+
+	// Resolve and update GT_PROCESS_NAMES in session env
+	// When switching agents, recompute from config. When preserving, use env value.
+	var processNames string
+	if agentOverride != "" {
+		// Agent is changing — resolve config to get the command for process name resolution
+		townRoot := detectTownRootFromCwd()
+		if townRoot != "" {
+			identity, err := session.ParseSessionName(sessionName)
+			rigPath := ""
+			if err == nil && identity.Rig != "" {
+				rigPath = filepath.Join(townRoot, identity.Rig)
+			}
+			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
+			if err == nil {
+				resolved := config.ResolveProcessNames(currentAgent, rc.Command)
+				processNames = strings.Join(resolved, ",")
+			}
+		}
+	}
+	if processNames == "" {
+		// Preserve existing value or compute from current agent
+		if pn := os.Getenv("GT_PROCESS_NAMES"); pn != "" {
+			processNames = pn
+		} else {
+			resolved := config.ResolveProcessNames(currentAgent, "")
+			processNames = strings.Join(resolved, ",")
+		}
+	}
+
+	_ = t.SetEnvironment(sessionName, "GT_PROCESS_NAMES", processNames)
 }
 
 // sessionWorkDir returns the correct working directory for a session.

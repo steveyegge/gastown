@@ -168,6 +168,11 @@ func QueueBeadID(name string, isTownLevel bool) string {
 // The ID format is: <prefix>-q-<name> (e.g., gt-q-merge, hq-q-dispatch)
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateQueueBead(id, title string, fields *QueueFields) (*Issue, error) {
+	// Guard against flag-like titles (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(title) {
+		return nil, fmt.Errorf("refusing to create queue bead: %w (got %q)", ErrFlagTitle, title)
+	}
+
 	description := FormatQueueDescription(title, fields)
 
 	args := []string{"create", "--json",

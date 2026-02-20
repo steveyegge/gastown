@@ -335,6 +335,47 @@ This helps the Deacon understand which recovered beads need attention.`,
 	RunE: runDeaconRedispatchState,
 }
 
+var deaconFeedStrandedCmd = &cobra.Command{
+	Use:   "feed-stranded",
+	Short: "Detect and feed stranded convoys automatically",
+	Long: `Detect stranded convoys and dispatch dogs to feed them.
+
+A convoy is "stranded" when it is open AND either:
+- Has ready issues (open, unblocked, no assignee) but no workers
+- Has 0 tracked issues (empty — needs auto-close)
+
+This command:
+1. Runs 'gt convoy stranded --json' to find stranded convoys
+2. For feedable convoys (ready_count > 0): dispatches a dog via gt sling
+3. For empty convoys (ready_count == 0): auto-closes via gt convoy check
+4. Rate limits to avoid spawning too many dogs at once
+
+Rate limiting:
+- Per-cycle limit (default 3): max convoys fed per invocation
+- Per-convoy cooldown (default 10m): prevents re-feeding before dog finishes
+
+This is called by the Deacon during patrol. Run manually for debugging.
+
+Examples:
+  gt deacon feed-stranded                  # Feed stranded convoys
+  gt deacon feed-stranded --max-feeds 5    # Allow up to 5 feeds per cycle
+  gt deacon feed-stranded --cooldown 5m    # 5 minute per-convoy cooldown
+  gt deacon feed-stranded --json           # Machine-readable output`,
+	RunE: runDeaconFeedStranded,
+}
+
+var deaconFeedStrandedStateCmd = &cobra.Command{
+	Use:   "feed-stranded-state",
+	Short: "Show feed-stranded state for tracked convoys",
+	Long: `Display the current feed-stranded tracking state including:
+- Feed counts per convoy
+- Cooldown status
+- Last feed times
+
+This helps the Deacon understand which convoys have been recently fed.`,
+	RunE: runDeaconFeedStrandedState,
+}
+
 var (
 	triggerTimeout time.Duration
 
@@ -364,6 +405,11 @@ var (
 	redispatchRig         string
 	redispatchMaxAttempts int
 	redispatchCooldown    time.Duration
+
+	// Feed-stranded flags
+	feedStrandedMaxFeeds int
+	feedStrandedCooldown time.Duration
+	feedStrandedJSON     bool
 )
 
 func init() {
@@ -384,6 +430,8 @@ func init() {
 	deaconCmd.AddCommand(deaconZombieScanCmd)
 	deaconCmd.AddCommand(deaconRedispatchCmd)
 	deaconCmd.AddCommand(deaconRedispatchStateCmd)
+	deaconCmd.AddCommand(deaconFeedStrandedCmd)
+	deaconCmd.AddCommand(deaconFeedStrandedStateCmd)
 
 	// Flags for status
 	deaconStatusCmd.Flags().BoolVar(&deaconStatusJSON, "json", false, "Output as JSON")
@@ -427,6 +475,14 @@ func init() {
 		"Max re-dispatch attempts before escalating to Mayor (default: 3)")
 	deaconRedispatchCmd.Flags().DurationVar(&redispatchCooldown, "cooldown", 0,
 		"Minimum time between re-dispatches of same bead (default: 5m)")
+
+	// Flags for feed-stranded
+	deaconFeedStrandedCmd.Flags().IntVar(&feedStrandedMaxFeeds, "max-feeds", 0,
+		"Max convoys to feed per invocation (default: 3)")
+	deaconFeedStrandedCmd.Flags().DurationVar(&feedStrandedCooldown, "cooldown", 0,
+		"Minimum time between feeds of same convoy (default: 10m)")
+	deaconFeedStrandedCmd.Flags().BoolVar(&feedStrandedJSON, "json", false,
+		"Output results as JSON")
 
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
@@ -504,7 +560,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: townRoot,
-		Agent:    agentOverride,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)
@@ -1550,6 +1605,94 @@ func runDeaconRedispatchState(cmd *cobra.Command, args []string) error {
 		cooldown := deacon.DefaultRedispatchCooldown
 		if beadState.IsInCooldown(cooldown) {
 			remaining := beadState.CooldownRemaining(cooldown)
+			fmt.Printf("  Cooldown: %s remaining\n", remaining.Round(time.Second))
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+// runDeaconFeedStranded detects stranded convoys and feeds them.
+func runDeaconFeedStranded(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	result := deacon.FeedStranded(townRoot, feedStrandedMaxFeeds, feedStrandedCooldown)
+
+	// JSON output
+	if feedStrandedJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	// Human-readable output
+	if len(result.Details) == 0 {
+		fmt.Printf("%s No stranded convoys found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	for _, d := range result.Details {
+		switch d.Action {
+		case "fed":
+			fmt.Printf("  %s %s: %s\n", style.Bold.Render("✓"), d.ConvoyID, d.Message)
+		case "closed":
+			fmt.Printf("  %s %s: %s\n", style.Bold.Render("✓"), d.ConvoyID, d.Message)
+		case "cooldown":
+			fmt.Printf("  %s %s: %s\n", style.Dim.Render("○"), d.ConvoyID, d.Message)
+		case "limit":
+			fmt.Printf("  %s %s: %s\n", style.Dim.Render("○"), d.ConvoyID, d.Message)
+		case "error":
+			id := d.ConvoyID
+			if id == "" {
+				id = "(general)"
+			}
+			fmt.Printf("  %s %s: %s\n", style.Dim.Render("✗"), id, d.Message)
+		}
+	}
+
+	// Summary
+	fmt.Printf("\n%s Fed: %d, Closed: %d, Skipped: %d, Errors: %d\n",
+		style.Bold.Render("●"), result.Fed, result.Closed, result.Skipped, result.Errors)
+
+	return nil
+}
+
+// runDeaconFeedStrandedState shows the current feed-stranded state.
+func runDeaconFeedStrandedState(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	state, err := deacon.LoadFeedStrandedState(townRoot)
+	if err != nil {
+		return fmt.Errorf("loading feed-stranded state: %w", err)
+	}
+
+	if len(state.Convoys) == 0 {
+		fmt.Printf("%s No feed-stranded state recorded yet\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Feed-Stranded State (updated %s)\n\n",
+		style.Bold.Render("●"),
+		state.LastUpdated.Format(time.RFC3339))
+
+	for convoyID, convoyState := range state.Convoys {
+		fmt.Printf("Convoy: %s\n", style.Bold.Render(convoyID))
+		fmt.Printf("  Feed count: %d\n", convoyState.FeedCount)
+
+		if !convoyState.LastFeedTime.IsZero() {
+			fmt.Printf("  Last feed: %s ago\n", time.Since(convoyState.LastFeedTime).Round(time.Second))
+		}
+
+		cooldown := deacon.DefaultFeedCooldown
+		if convoyState.IsInCooldown(cooldown) {
+			remaining := convoyState.CooldownRemaining(cooldown)
 			fmt.Printf("  Cooldown: %s remaining\n", remaining.Round(time.Second))
 		}
 		fmt.Println()

@@ -1,10 +1,14 @@
 package doctor
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/git"
 )
 
 func TestBareRepoExistsCheck_Name(t *testing.T) {
@@ -203,5 +207,215 @@ func TestBareRepoExistsCheck_NonRepoGitWorktree(t *testing.T) {
 	result := check.Run(ctx)
 	if result.Status != StatusOK {
 		t.Errorf("expected StatusOK when worktrees don't reference .repo.git, got %v", result.Status)
+	}
+}
+
+// initBareRepoWithRemote creates a real git bare repo with an origin remote.
+// Returns the bare repo path.
+func initBareRepoWithRemote(t *testing.T, rigDir, fetchURL string) string {
+	t.Helper()
+	bareRepo := filepath.Join(rigDir, ".repo.git")
+	cmd := exec.Command("git", "init", "--bare", bareRepo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "-C", bareRepo, "remote", "add", "origin", fetchURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add failed: %v\n%s", err, out)
+	}
+	return bareRepo
+}
+
+// setupWorktreeRef creates a refinery/rig directory with a .git file pointing to .repo.git.
+func setupWorktreeRef(t *testing.T, rigDir, bareRepo string) {
+	t.Helper()
+	refineryRig := filepath.Join(rigDir, "refinery", "rig")
+	if err := os.MkdirAll(refineryRig, 0755); err != nil {
+		t.Fatal(err)
+	}
+	worktreeDir := filepath.Join(bareRepo, "worktrees", "rig")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitContent := "gitdir: " + filepath.Join(bareRepo, "worktrees", "rig") + "\n"
+	if err := os.WriteFile(filepath.Join(refineryRig, ".git"), []byte(gitContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeConfigJSON writes a config.json with optional push_url.
+func writeConfigJSON(t *testing.T, rigDir, gitURL, pushURL string) {
+	t.Helper()
+	cfg := map[string]string{"git_url": gitURL}
+	if pushURL != "" {
+		cfg["push_url"] = pushURL
+	}
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(filepath.Join(rigDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBareRepoExistsCheck_PushURLMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	fetchURL := "https://github.com/example/repo.git"
+	bareRepo := initBareRepoWithRemote(t, rigDir, fetchURL)
+
+	// Set a push URL on the bare repo that differs from config
+	cmd := exec.Command("git", "-C", bareRepo, "remote", "set-url", "--push", "origin", "https://github.com/user/wrong-fork.git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url --push failed: %v\n%s", err, out)
+	}
+
+	// Config says the push URL should be something else
+	writeConfigJSON(t, rigDir, fetchURL, "https://github.com/user/correct-fork.git")
+	setupWorktreeRef(t, rigDir, bareRepo)
+
+	check := NewBareRepoExistsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning for push URL mismatch, got %v: %s", result.Status, result.Message)
+	}
+	if !strings.Contains(result.Message, "push URL") {
+		t.Errorf("expected message about push URL, got %q", result.Message)
+	}
+}
+
+func TestBareRepoExistsCheck_LegacyConfigIgnoresPushURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	fetchURL := "https://github.com/example/repo.git"
+	bareRepo := initBareRepoWithRemote(t, rigDir, fetchURL)
+
+	// Set a push URL on the bare repo (may be from a pre-push_url-feature setup)
+	cmd := exec.Command("git", "-C", bareRepo, "remote", "set-url", "--push", "origin", "https://github.com/user/old-fork.git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url --push failed: %v\n%s", err, out)
+	}
+
+	// Config has NO push_url — legacy config that predates the push_url feature.
+	// Doctor should NOT flag a mismatch; the existing push URL may be intentional.
+	writeConfigJSON(t, rigDir, fetchURL, "")
+	setupWorktreeRef(t, rigDir, bareRepo)
+
+	check := NewBareRepoExistsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for legacy config (no push_url field), got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestBareRepoExistsCheck_PushURLMatchesConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	fetchURL := "https://github.com/example/repo.git"
+	pushURL := "https://github.com/user/fork.git"
+	bareRepo := initBareRepoWithRemote(t, rigDir, fetchURL)
+
+	// Set push URL matching config
+	cmd := exec.Command("git", "-C", bareRepo, "remote", "set-url", "--push", "origin", pushURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url --push failed: %v\n%s", err, out)
+	}
+
+	writeConfigJSON(t, rigDir, fetchURL, pushURL)
+	setupWorktreeRef(t, rigDir, bareRepo)
+
+	check := NewBareRepoExistsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when push URL matches config, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestBareRepoExistsCheck_FixPushURLMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	fetchURL := "https://github.com/example/repo.git"
+	correctPushURL := "https://github.com/user/correct-fork.git"
+	bareRepo := initBareRepoWithRemote(t, rigDir, fetchURL)
+
+	// Set wrong push URL
+	cmd := exec.Command("git", "-C", bareRepo, "remote", "set-url", "--push", "origin", "https://github.com/user/wrong-fork.git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url --push failed: %v\n%s", err, out)
+	}
+
+	writeConfigJSON(t, rigDir, fetchURL, correctPushURL)
+	setupWorktreeRef(t, rigDir, bareRepo)
+
+	check := NewBareRepoExistsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Run should detect mismatch
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning, got %v: %s", result.Status, result.Message)
+	}
+
+	// Fix should correct it
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Re-run should show OK
+	check2 := NewBareRepoExistsCheck()
+	result2 := check2.Run(ctx)
+	if result2.Status != StatusOK {
+		t.Errorf("expected StatusOK after fix, got %v: %s", result2.Status, result2.Message)
+	}
+}
+
+func TestBareRepoExistsCheck_FixPreservesLegacyPushURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	fetchURL := "https://github.com/example/repo.git"
+	legacyPushURL := "https://github.com/user/old-fork.git"
+	bareRepo := initBareRepoWithRemote(t, rigDir, fetchURL)
+
+	// Set a push URL (from a pre-push_url-feature setup)
+	cmd := exec.Command("git", "-C", bareRepo, "remote", "set-url", "--push", "origin", legacyPushURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url --push failed: %v\n%s", err, out)
+	}
+
+	// Config has no push_url — legacy config
+	writeConfigJSON(t, rigDir, fetchURL, "")
+	setupWorktreeRef(t, rigDir, bareRepo)
+
+	check := NewBareRepoExistsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Run should NOT flag a mismatch for legacy configs
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Fatalf("expected StatusOK for legacy config, got %v: %s", result.Status, result.Message)
+	}
+
+	// Verify the push URL is preserved (not cleared)
+	bareGit := git.NewGitWithDir(bareRepo, "")
+	actualPush, err := bareGit.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL failed: %v", err)
+	}
+	if actualPush != legacyPushURL {
+		t.Errorf("expected push URL to be preserved as %q, got %q", legacyPushURL, actualPush)
 	}
 }

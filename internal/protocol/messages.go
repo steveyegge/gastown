@@ -191,6 +191,70 @@ func formatRebaseInstructions(targetBranch string) string {
 The Refinery will retry the merge after rebase is complete.`, targetBranch, targetBranch)
 }
 
+// NewConvoyNeedsFeedingMessage creates a CONVOY_NEEDS_FEEDING protocol message.
+// Sent by Refinery to Deacon after a convoy-eligible merge completes, so the
+// deacon can immediately feed the convoy instead of waiting for the next patrol.
+func NewConvoyNeedsFeedingMessage(rig, convoyID, sourceIssue string) *mail.Message {
+	payload := ConvoyNeedsFeedingPayload{
+		ConvoyID:    convoyID,
+		SourceIssue: sourceIssue,
+		Rig:         rig,
+		MergedAt:    time.Now(),
+	}
+
+	body := formatConvoyNeedsFeedingBody(payload)
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/refinery", rig),
+		"deacon/",
+		fmt.Sprintf("CONVOY_NEEDS_FEEDING %s", convoyID),
+		body,
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// formatConvoyNeedsFeedingBody formats the body of a CONVOY_NEEDS_FEEDING message.
+func formatConvoyNeedsFeedingBody(p ConvoyNeedsFeedingPayload) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("ConvoyID: %s\n", p.ConvoyID))
+	sb.WriteString(fmt.Sprintf("SourceIssue: %s\n", p.SourceIssue))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", p.Rig))
+	sb.WriteString(fmt.Sprintf("Merged-At: %s\n", p.MergedAt.Format(time.RFC3339)))
+	return sb.String()
+}
+
+// ParseConvoyNeedsFeedingPayload parses a CONVOY_NEEDS_FEEDING message body.
+// Returns an error if required fields (ConvoyID, Rig) are missing.
+func ParseConvoyNeedsFeedingPayload(body string) (*ConvoyNeedsFeedingPayload, error) {
+	payload := &ConvoyNeedsFeedingPayload{
+		ConvoyID:    parseField(body, "ConvoyID"),
+		SourceIssue: parseField(body, "SourceIssue"),
+		Rig:         parseField(body, "Rig"),
+	}
+
+	if ts := parseField(body, "Merged-At"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			payload.MergedAt = t
+		}
+	}
+
+	var errs []string
+	if payload.ConvoyID == "" {
+		errs = append(errs, "ConvoyID")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid CONVOY_NEEDS_FEEDING payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
+
 // ParseMergeReadyPayload parses a MERGE_READY message body into a payload.
 // Returns an error if required fields (Branch, Polecat, Rig) are missing.
 func ParseMergeReadyPayload(body string) (*MergeReadyPayload, error) {

@@ -95,23 +95,16 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		prefix = r.Config.Prefix
 	}
 
-	// Find the rig identity bead
-	rigBeadID := beads.RigBeadIDWithPrefix(prefix, rigName)
+	// Find or create the rig identity bead (idempotent; handles duplicates
+	// and Dolt query hiccups gracefully — gt-d8681).
 	bd := beads.New(r.BeadsPath())
-
-	// Check if rig bead exists, create if not
-	rigBead, err := bd.Show(rigBeadID)
+	rigBead, err := bd.EnsureRigBead(rigName, &beads.RigFields{
+		Repo:   r.GitURL,
+		Prefix: prefix,
+		State:  beads.RigStateActive,
+	})
 	if err != nil {
-		// Rig identity bead doesn't exist (legacy rig) - create it
-		fmt.Printf("  Creating rig identity bead %s...\n", rigBeadID)
-		rigBead, err = bd.CreateRigBead(rigName, &beads.RigFields{
-			Repo:   r.GitURL,
-			Prefix: prefix,
-			State:  beads.RigStateActive,
-		})
-		if err != nil {
-			return fmt.Errorf("creating rig identity bead: %w", err)
-		}
+		return fmt.Errorf("ensuring rig identity bead: %w", err)
 	}
 
 	// Check if already docked
@@ -167,7 +160,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set docked label on rig identity bead
-	if err := bd.Update(rigBeadID, beads.UpdateOptions{
+	if err := bd.Update(rigBead.ID, beads.UpdateOptions{
 		AddLabels: []string{RigDockedLabel},
 	}); err != nil {
 		return fmt.Errorf("setting docked label: %w", err)

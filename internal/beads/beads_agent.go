@@ -42,6 +42,7 @@ type AgentFields struct {
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
 	PersonaBead       string // Bead ID of assigned persona (empty = none)
+	Mode              string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
 }
@@ -101,6 +102,9 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 	if fields.PersonaBead != "" {
 		lines = append(lines, fmt.Sprintf("persona_bead: %s", fields.PersonaBead))
 	}
+	if fields.Mode != "" {
+		lines = append(lines, fmt.Sprintf("mode: %s", fields.Mode))
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -145,6 +149,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.NotificationLevel = value
 		case "persona_bead":
 			fields.PersonaBead = value
+		case "mode":
+			fields.Mode = value
 		}
 	}
 
@@ -161,6 +167,11 @@ func ParseAgentFields(description string) *AgentFields {
 // where the bead may be routed to a different database than the one this wrapper
 // is connected to.
 func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
+	// Guard against flag-like titles (gt-e0kx5: --help garbage beads)
+	if IsFlagLikeTitle(title) {
+		return nil, fmt.Errorf("refusing to create agent bead: %w (got %q)", ErrFlagTitle, title)
+	}
+
 	// Resolve where this bead will actually be written (handles multi-repo routing)
 	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
 
@@ -460,6 +471,7 @@ type AgentFieldUpdates struct {
 	ActiveMR          *string
 	NotificationLevel *string
 	PersonaBead       *string
+	Mode              *string
 }
 
 // UpdateAgentDescriptionFields atomically updates one or more agent description
@@ -502,6 +514,9 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 	}
 	if updates.PersonaBead != nil {
 		fields.PersonaBead = *updates.PersonaBead
+	}
+	if updates.Mode != nil {
+		fields.Mode = *updates.Mode
 	}
 
 	description := FormatAgentDescription(issue.Title, fields)

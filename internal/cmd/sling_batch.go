@@ -102,6 +102,13 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			continue
 		}
 
+		// Guard against slinging deferred beads (gt-1326mw).
+		if isDeferredBead(info) && !slingForce {
+			results = append(results, slingResult{beadID: beadID, success: false, errMsg: "deferred"})
+			fmt.Printf("  %s Skipping deferred bead %s (use --force to override)\n", style.Dim.Render("✗"), beadID)
+			continue
+		}
+
 		// Guard: burn existing molecules before applying new formula.
 		// Runs before polecat spawn to avoid wasted spawn/cleanup on rejected beads.
 		if formulaName != "" {

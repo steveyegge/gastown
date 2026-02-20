@@ -411,6 +411,12 @@ type RuntimeConfig struct {
 
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
+
+	// ResolvedAgent is the agent name that was resolved during config lookup.
+	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
+	// BuildStartupCommand can export GT_AGENT for process detection.
+	// Not serialized — this is a runtime-only field.
+	ResolvedAgent string `json:"-"`
 }
 
 // RuntimeSessionConfig configures how Gas Town discovers runtime session IDs.

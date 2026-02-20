@@ -2326,6 +2326,7 @@ func TestFillRuntimeDefaults(t *testing.T) {
 			Env:           map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
 			InitialPrompt: "test prompt",
 			PromptMode:    "none",
+			ResolvedAgent: "opencode",
 			Session: &RuntimeSessionConfig{
 				SessionIDEnv: "OPENCODE_SESSION_ID",
 			},
@@ -2371,6 +2372,9 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 		if result.Instructions == nil || result.Instructions.File != input.Instructions.File {
 			t.Errorf("Instructions: got %+v, want %+v", result.Instructions, input.Instructions)
+		}
+		if result.ResolvedAgent != input.ResolvedAgent {
+			t.Errorf("ResolvedAgent: got %q, want %q", result.ResolvedAgent, input.ResolvedAgent)
 		}
 	})
 
@@ -3877,6 +3881,61 @@ func TestBuildStartupCommandWithAgentOverride_SetsGTAgent(t *testing.T) {
 	}
 }
 
+func TestBuildStartupCommandWithAgentOverride_SetsGTProcessNames(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create necessary config files
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": constants.RoleWitness},
+		rigPath,
+		"",
+		"gemini",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should include GT_PROCESS_NAMES with gemini's process names
+	if !strings.Contains(cmd, "GT_PROCESS_NAMES=gemini") {
+		t.Errorf("expected GT_PROCESS_NAMES=gemini in command, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_SetsGTProcessNames(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(
+		map[string]string{"GT_ROLE": constants.RoleWitness},
+		rigPath,
+		"",
+	)
+
+	// Default agent is claude — GT_PROCESS_NAMES should include node,claude
+	if !strings.Contains(cmd, "GT_PROCESS_NAMES=") {
+		t.Errorf("expected GT_PROCESS_NAMES in command, got: %q", cmd)
+	}
+}
+
 // TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot tests that
 // agentOverride is respected even when findTownRootFromCwd fails.
 // This is a regression test for the bug where `gt deacon start --agent codex`
@@ -3927,7 +3986,7 @@ func TestBuildStartupCommandWithAgentOverride_UsesOverrideWhenNoTownRoot(t *test
 	}
 }
 
-func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing.T) {
+func TestBuildStartupCommandWithAgentOverride_GTAgentFromResolvedAgent(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
@@ -3945,15 +4004,81 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 		map[string]string{"GT_ROLE": constants.RoleWitness},
 		rigPath,
 		"",
-		"", // No override
+		"", // No override — should still get GT_AGENT from resolved agent
 	)
 	if err != nil {
 		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
 	}
 
-	// Should NOT include GT_AGENT when no override is used
-	if strings.Contains(cmd, "GT_AGENT=") {
-		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
+	// GT_AGENT should be set from the resolved agent for liveness detection,
+	// even when no explicit override is used.
+	if !strings.Contains(cmd, "GT_AGENT=") {
+		t.Errorf("expected GT_AGENT in command for liveness detection, got: %q", cmd)
+	}
+}
+
+// TestBuildStartupCommand_RoleAgentsSetGTAgent verifies that when a non-Claude agent
+// is configured via role_agents, GT_AGENT is set in the startup command.
+// Without this, IsAgentAlive falls back to ["node", "claude"] and witness patrol
+// auto-nukes polecats running non-Claude agents. See: fix/gt-agent-role-agents.
+func TestBuildStartupCommand_RoleAgentsSetGTAgent(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure opencode as the polecat agent via role_agents.
+	// Define it as a custom agent so the test doesn't depend on the
+	// opencode binary being in PATH (ValidateAgentConfig calls exec.LookPath).
+	townSettings := NewTownSettings()
+	townSettings.Agents["opencode"] = &RuntimeConfig{
+		Command: "opencode",
+	}
+	townSettings.RoleAgents = map[string]string{
+		"polecat": "opencode",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildPolecatStartupCommand("testrig", "furiosa", rigPath, "do work")
+
+	// GT_AGENT must be set to "opencode" so IsAgentAlive detects the process
+	if !strings.Contains(cmd, "GT_AGENT=opencode") {
+		t.Errorf("expected GT_AGENT=opencode in command, got: %q", cmd)
+	}
+}
+
+// TestBuildStartupCommand_RoleAgentsCustomAgentSetGTAgent verifies that custom
+// agents defined in town settings and used via role_agents also get GT_AGENT set.
+func TestBuildStartupCommand_RoleAgentsCustomAgentSetGTAgent(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure a custom agent "codex" mapped to opencode
+	townSettings := NewTownSettings()
+	townSettings.Agents["codex"] = &RuntimeConfig{
+		Command: "opencode",
+		Args:    []string{"-m", "openai/gpt-5.3-codex"},
+	}
+	townSettings.RoleAgents = map[string]string{
+		"polecat": "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildPolecatStartupCommand("testrig", "furiosa", rigPath, "do work")
+
+	// GT_AGENT must be set to the custom agent name "codex"
+	if !strings.Contains(cmd, "GT_AGENT=codex") {
+		t.Errorf("expected GT_AGENT=codex in command, got: %q", cmd)
 	}
 }
 

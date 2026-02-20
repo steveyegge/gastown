@@ -233,7 +233,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 
 		// Nudge refinery to pick up the new MR
-		nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrIssue.ID, branch))
+		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
 	// Success output
