@@ -35,6 +35,13 @@ func EnsurePersonaBead(b *Beads, prefix, rig, name, content, hash string, force 
 		source = "town"
 	}
 
+	// Ensure the persona type is registered in the target database before
+	// any create/update. Mirrors what CreateAgentBead does for agent beads.
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	if err := EnsureCustomTypes(targetDir); err != nil {
+		return "", false, fmt.Errorf("preparing database for persona bead %s: %w", id, err)
+	}
+
 	// Always store the real content hash in the bead description so subsequent
 	// regular syncs are idempotent.
 	desc := formatPersonaDescription(name, hash, source, content)
