@@ -278,44 +278,54 @@ type ConfigStore interface {
 
 // Service coordinates wasteland operations with injectable dependencies.
 type Service struct {
-	API    DoltHubAPI
-	CLI    DoltCLI
-	Config ConfigStore
+	API        DoltHubAPI
+	CLI        DoltCLI
+	Config     ConfigStore
+	OnProgress func(step string) // optional callback for progress reporting
 }
 
 // Join orchestrates the wasteland join workflow: fork -> clone -> add upstream -> register -> push -> save config.
-func (s *Service) Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot string) error {
+// Returns the saved Config on success, or the existing Config if already joined.
+func (s *Service) Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot string) (*Config, error) {
 	upstreamOrg, upstreamDB, err := ParseUpstream(upstream)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Check if already joined
 	if existing, err := s.Config.Load(townRoot); err == nil {
-		_ = existing // already joined
-		return nil
+		return existing, nil
 	}
 
 	localDir := LocalCloneDir(townRoot, upstreamOrg, upstreamDB)
+	progress := s.OnProgress
+	if progress == nil {
+		progress = func(string) {}
+	}
 
+	progress("Forking commons...")
 	if err := s.API.ForkRepo(upstreamOrg, upstreamDB, forkOrg, token); err != nil {
-		return fmt.Errorf("forking commons: %w", err)
+		return nil, fmt.Errorf("forking commons: %w", err)
 	}
 
+	progress("Cloning fork locally...")
 	if err := s.CLI.Clone(forkOrg, upstreamDB, localDir); err != nil {
-		return fmt.Errorf("cloning fork: %w", err)
+		return nil, fmt.Errorf("cloning fork: %w", err)
 	}
 
+	progress("Adding upstream remote...")
 	if err := s.CLI.AddUpstreamRemote(localDir, upstreamOrg, upstreamDB); err != nil {
-		return fmt.Errorf("adding upstream remote: %w", err)
+		return nil, fmt.Errorf("adding upstream remote: %w", err)
 	}
 
+	progress("Registering rig...")
 	if err := s.CLI.RegisterRig(localDir, handle, forkOrg, displayName, ownerEmail, gtVersion); err != nil {
-		return fmt.Errorf("registering rig: %w", err)
+		return nil, fmt.Errorf("registering rig: %w", err)
 	}
 
+	progress("Pushing to fork...")
 	if err := s.CLI.Push(localDir); err != nil {
-		return fmt.Errorf("pushing to fork: %w", err)
+		return nil, fmt.Errorf("pushing to fork: %w", err)
 	}
 
 	cfg := &Config{
@@ -327,10 +337,10 @@ func (s *Service) Join(upstream, forkOrg, token, handle, displayName, ownerEmail
 		JoinedAt:  time.Now(),
 	}
 	if err := s.Config.Save(townRoot, cfg); err != nil {
-		return fmt.Errorf("saving wasteland config: %w", err)
+		return nil, fmt.Errorf("saving wasteland config: %w", err)
 	}
 
-	return nil
+	return cfg, nil
 }
 
 // httpDoltHubAPI implements DoltHubAPI using the real DoltHub REST API.

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -129,16 +130,19 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 	gtVersion := "dev"
 
 	svc := wasteland.NewService()
+	svc.OnProgress = func(step string) {
+		fmt.Printf("  %s\n", step)
+	}
 
-	fmt.Printf("Joining wasteland %s as %s...\n", upstream, handle)
-	if err := svc.Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot); err != nil {
+	fmt.Printf("Joining wasteland %s (fork to %s/%s)...\n", upstream, forkOrg, upstream[strings.Index(upstream, "/")+1:])
+	cfg, err := svc.Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot)
+	if err != nil {
 		return err
 	}
 
-	cfg, _ := wasteland.LoadConfig(townRoot)
 	fmt.Printf("\n%s Joined wasteland: %s\n", style.Bold.Render("✓"), upstream)
 	fmt.Printf("  Handle: %s\n", handle)
-	fmt.Printf("  Fork: %s/%s\n", forkOrg, cfg.ForkDB)
+	fmt.Printf("  Fork: %s/%s\n", cfg.ForkOrg, cfg.ForkDB)
 	fmt.Printf("  Local: %s\n", cfg.LocalDir)
 	fmt.Printf("\n  %s\n", style.Dim.Render("Next: gt wl browse  — browse the wanted board"))
 	return nil

@@ -5,8 +5,9 @@ import (
 	"sync"
 )
 
-// FakeWLCommonsStore is an in-memory implementation of WLCommonsStore for testing.
-type FakeWLCommonsStore struct {
+// fakeWLCommonsStore is an in-memory implementation of WLCommonsStore for testing.
+// It enforces the same business rules as the real SQL implementation.
+type fakeWLCommonsStore struct {
 	mu    sync.Mutex
 	items map[string]*WantedItem
 	dbOK  bool
@@ -19,15 +20,14 @@ type FakeWLCommonsStore struct {
 	QueryWantedErr      error
 }
 
-// NewFakeWLCommonsStore creates a ready-to-use fake store.
-func NewFakeWLCommonsStore() *FakeWLCommonsStore {
-	return &FakeWLCommonsStore{
+func newFakeWLCommonsStore() *fakeWLCommonsStore {
+	return &fakeWLCommonsStore{
 		items: make(map[string]*WantedItem),
 		dbOK:  true,
 	}
 }
 
-func (f *FakeWLCommonsStore) EnsureDB() error {
+func (f *fakeWLCommonsStore) EnsureDB() error {
 	if f.EnsureDBErr != nil {
 		return f.EnsureDBErr
 	}
@@ -35,11 +35,11 @@ func (f *FakeWLCommonsStore) EnsureDB() error {
 	return nil
 }
 
-func (f *FakeWLCommonsStore) DatabaseExists(_ string) bool {
+func (f *fakeWLCommonsStore) DatabaseExists(_ string) bool {
 	return f.dbOK
 }
 
-func (f *FakeWLCommonsStore) InsertWanted(item *WantedItem) error {
+func (f *fakeWLCommonsStore) InsertWanted(item *WantedItem) error {
 	if f.InsertWantedErr != nil {
 		return f.InsertWantedErr
 	}
@@ -53,7 +53,6 @@ func (f *FakeWLCommonsStore) InsertWanted(item *WantedItem) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Copy to avoid aliasing
 	stored := *item
 	if stored.Status == "" {
 		stored.Status = "open"
@@ -62,7 +61,7 @@ func (f *FakeWLCommonsStore) InsertWanted(item *WantedItem) error {
 	return nil
 }
 
-func (f *FakeWLCommonsStore) ClaimWanted(wantedID, rigHandle string) error {
+func (f *fakeWLCommonsStore) ClaimWanted(wantedID, rigHandle string) error {
 	if f.ClaimWantedErr != nil {
 		return f.ClaimWantedErr
 	}
@@ -82,7 +81,7 @@ func (f *FakeWLCommonsStore) ClaimWanted(wantedID, rigHandle string) error {
 	return nil
 }
 
-func (f *FakeWLCommonsStore) SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error {
+func (f *fakeWLCommonsStore) SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error {
 	if f.SubmitCompletionErr != nil {
 		return f.SubmitCompletionErr
 	}
@@ -101,7 +100,7 @@ func (f *FakeWLCommonsStore) SubmitCompletion(completionID, wantedID, rigHandle,
 	return nil
 }
 
-func (f *FakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
+func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
 	if f.QueryWantedErr != nil {
 		return nil, f.QueryWantedErr
 	}
@@ -113,7 +112,6 @@ func (f *FakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
 	if !ok {
 		return nil, fmt.Errorf("wanted item %q not found", wantedID)
 	}
-	// Return a copy to avoid aliasing
 	cp := *item
 	return &cp, nil
 }

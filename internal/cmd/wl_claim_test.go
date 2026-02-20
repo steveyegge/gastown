@@ -8,7 +8,7 @@ import (
 
 func TestClaimWanted_Success(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-abc123",
 		Title: "Fix auth bug",
@@ -34,7 +34,7 @@ func TestClaimWanted_Success(t *testing.T) {
 
 func TestClaimWanted_NotOpen(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:     "w-abc123",
 		Title:  "Fix auth bug",
@@ -49,7 +49,7 @@ func TestClaimWanted_NotOpen(t *testing.T) {
 
 func TestClaimWanted_NotFound(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	_, err := claimWanted(store, "w-nonexistent", "my-rig")
 	if err == nil {

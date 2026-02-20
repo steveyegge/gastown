@@ -46,12 +46,17 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf02", Title: "Claimable"})
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf02", Title: "Claimable"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
 		if err := store.ClaimWanted("w-conf02", "claimer-rig"); err != nil {
 			t.Fatalf("ClaimWanted() error: %v", err)
 		}
 
-		got, _ := store.QueryWanted("w-conf02")
+		got, err := store.QueryWanted("w-conf02")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if got.Status != "claimed" {
 			t.Errorf("Status = %q, want %q", got.Status, "claimed")
 		}
@@ -64,8 +69,12 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf03", Title: "Already claimed"})
-		_ = store.ClaimWanted("w-conf03", "rig-1")
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf03", Title: "Already claimed"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		if err := store.ClaimWanted("w-conf03", "rig-1"); err != nil {
+			t.Fatalf("first ClaimWanted() error: %v", err)
+		}
 
 		// Second claim on non-open item must return an error.
 		// Both fake and real now enforce this: the real SQL checks
@@ -75,7 +84,10 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 			t.Error("ClaimWanted on non-open item should return an error")
 		}
 
-		got, _ := store.QueryWanted("w-conf03")
+		got, err := store.QueryWanted("w-conf03")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if got.ClaimedBy != "rig-1" {
 			t.Errorf("ClaimedBy = %q, want %q (should not be overwritten)", got.ClaimedBy, "rig-1")
 		}
@@ -85,14 +97,21 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf04", Title: "Completable"})
-		_ = store.ClaimWanted("w-conf04", "worker-rig")
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf04", Title: "Completable"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		if err := store.ClaimWanted("w-conf04", "worker-rig"); err != nil {
+			t.Fatalf("ClaimWanted() error: %v", err)
+		}
 
 		if err := store.SubmitCompletion("c-conf01", "w-conf04", "worker-rig", "https://pr/1"); err != nil {
 			t.Fatalf("SubmitCompletion() error: %v", err)
 		}
 
-		got, _ := store.QueryWanted("w-conf04")
+		got, err := store.QueryWanted("w-conf04")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if got.Status != "in_review" {
 			t.Errorf("Status = %q, want %q", got.Status, "in_review")
 		}
@@ -144,7 +163,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.EnsureDB()
+		if err := store.EnsureDB(); err != nil {
+			t.Fatalf("EnsureDB() error: %v", err)
+		}
 		if !store.DatabaseExists(WLCommonsDB) {
 			t.Error("DatabaseExists() = false after EnsureDB()")
 		}
@@ -154,8 +175,13 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf05", Title: "Default status"})
-		got, _ := store.QueryWanted("w-conf05")
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf05", Title: "Default status"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		got, err := store.QueryWanted("w-conf05")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if got.Status != "open" {
 			t.Errorf("default Status = %q, want %q", got.Status, "open")
 		}
@@ -165,8 +191,13 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf06", Title: "Explicit status", Status: "withdrawn"})
-		got, _ := store.QueryWanted("w-conf06")
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf06", Title: "Explicit status", Status: "withdrawn"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		got, err := store.QueryWanted("w-conf06")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if got.Status != "withdrawn" {
 			t.Errorf("explicit Status = %q, want %q", got.Status, "withdrawn")
 		}
@@ -176,10 +207,17 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		t.Parallel()
 		store := newStore(t)
 
-		_ = store.InsertWanted(&WantedItem{ID: "w-conf07", Title: "Check claimer"})
-		_ = store.ClaimWanted("w-conf07", "specific-rig")
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf07", Title: "Check claimer"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		if err := store.ClaimWanted("w-conf07", "specific-rig"); err != nil {
+			t.Fatalf("ClaimWanted() error: %v", err)
+		}
 
-		got, _ := store.QueryWanted("w-conf07")
+		got, err := store.QueryWanted("w-conf07")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
 		if !strings.Contains(got.ClaimedBy, "specific-rig") {
 			t.Errorf("ClaimedBy = %q, want to contain %q", got.ClaimedBy, "specific-rig")
 		}
@@ -189,6 +227,6 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 // TestFakeWLCommonsStore_Conformance runs the conformance suite against the fake.
 func TestFakeWLCommonsStore_Conformance(t *testing.T) {
 	wlCommonsConformance(t, func(t *testing.T) WLCommonsStore {
-		return NewFakeWLCommonsStore()
+		return newFakeWLCommonsStore()
 	})
 }

@@ -283,28 +283,44 @@ func ClaimWanted(townRoot, wantedID, rigHandle string) error {
 		return strings.ReplaceAll(s, "'", "''")
 	}
 
-	// Run the UPDATE and check ROW_COUNT() to detect TOCTOU races:
-	// another rig may have claimed the item between the caller's
-	// QueryWanted pre-check and this UPDATE.
+	// Split into two sessions to detect TOCTOU races:
+	// 1. UPDATE + ROW_COUNT via doltSQLQuery (needs CSV output to read rc).
+	// 2. DOLT_ADD + DOLT_COMMIT via doltSQLScriptWithRetry (needs script mode).
+	// Dolt's working set persists across sessions, so the UPDATE is visible
+	// to the COMMIT. The outer retry loop covers transient errors in either step.
+
 	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW() WHERE id='%s' AND status='open'; SELECT ROW_COUNT() AS rc;`,
 		WLCommonsDB, esc(rigHandle), esc(wantedID))
-
-	output, err := doltSQLQuery(townRoot, updateQuery)
-	if err != nil {
-		return fmt.Errorf("claim update failed: %w", err)
-	}
-
-	rows := parseSimpleCSV(output)
-	if len(rows) == 0 || rows[0]["rc"] == "0" {
-		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
-	}
 
 	commitScript := fmt.Sprintf(`USE %s;
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
 `, WLCommonsDB, esc(wantedID))
 
-	return doltSQLScriptWithRetry(townRoot, commitScript)
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		output, err := doltSQLQuery(townRoot, updateQuery)
+		if err != nil {
+			lastErr = fmt.Errorf("claim update failed: %w", err)
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			}
+			continue
+		}
+
+		rows := parseSimpleCSV(output)
+		if len(rows) == 0 || rows[0]["rc"] == "0" {
+			// Not a transient error — the item genuinely isn't open
+			return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+		}
+
+		if err := doltSQLScriptWithRetry(townRoot, commitScript); err != nil {
+			return err
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // SubmitCompletion inserts a completion record and updates the wanted status.

@@ -13,9 +13,17 @@ func TestJoin_Success(t *testing.T) {
 
 	svc := &Service{API: api, CLI: cli, Config: cfgStore}
 
-	err := svc.Join("steveyegge/wl-commons", "alice-dev", "token123", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	cfg, err := svc.Join("steveyegge/wl-commons", "alice-dev", "token123", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
 	if err != nil {
 		t.Fatalf("Join() error: %v", err)
+	}
+
+	// Verify returned config
+	if cfg.Upstream != "steveyegge/wl-commons" {
+		t.Errorf("Upstream = %q, want %q", cfg.Upstream, "steveyegge/wl-commons")
+	}
+	if cfg.RigHandle != "alice-rig" {
+		t.Errorf("RigHandle = %q, want %q", cfg.RigHandle, "alice-rig")
 	}
 
 	// Verify fork happened
@@ -44,15 +52,12 @@ func TestJoin_Success(t *testing.T) {
 	}
 
 	// Verify config saved
-	cfg, err := cfgStore.Load("/tmp/town")
+	saved, err := cfgStore.Load("/tmp/town")
 	if err != nil {
 		t.Fatalf("config not saved: %v", err)
 	}
-	if cfg.Upstream != "steveyegge/wl-commons" {
-		t.Errorf("Upstream = %q, want %q", cfg.Upstream, "steveyegge/wl-commons")
-	}
-	if cfg.RigHandle != "alice-rig" {
-		t.Errorf("RigHandle = %q, want %q", cfg.RigHandle, "alice-rig")
+	if saved.Upstream != cfg.Upstream {
+		t.Errorf("saved config doesn't match returned config")
 	}
 
 	// Verify call ordering: fork, clone, remote, register, push
@@ -81,7 +86,7 @@ func TestJoin_ForkFails(t *testing.T) {
 
 	svc := &Service{API: api, CLI: cli, Config: cfgStore}
 
-	err := svc.Join("steveyegge/wl-commons", "alice-dev", "bad-token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	_, err := svc.Join("steveyegge/wl-commons", "alice-dev", "bad-token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
 	if err == nil {
 		t.Fatal("Join() expected error when fork fails")
 	}
@@ -101,7 +106,7 @@ func TestJoin_CloneFails(t *testing.T) {
 
 	svc := &Service{API: api, CLI: cli, Config: cfgStore}
 
-	err := svc.Join("steveyegge/wl-commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	_, err := svc.Join("steveyegge/wl-commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
 	if err == nil {
 		t.Fatal("Join() expected error when clone fails")
 	}
@@ -123,19 +128,24 @@ func TestJoin_AlreadyJoined(t *testing.T) {
 	cli := NewFakeDoltCLI()
 	cfgStore := NewFakeConfigStore()
 
-	// Pre-populate config to simulate already-joined state
-	cfgStore.Configs["/tmp/town"] = &Config{
+	existing := &Config{
 		Upstream:  "steveyegge/wl-commons",
 		ForkOrg:   "alice-dev",
 		ForkDB:    "wl-commons",
 		RigHandle: "alice-rig",
 	}
+	cfgStore.Configs["/tmp/town"] = existing
 
 	svc := &Service{API: api, CLI: cli, Config: cfgStore}
 
-	err := svc.Join("steveyegge/wl-commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
+	cfg, err := svc.Join("steveyegge/wl-commons", "alice-dev", "token", "alice-rig", "Alice", "alice@example.com", "dev", "/tmp/town")
 	if err != nil {
 		t.Fatalf("Join() should succeed (no-op) when already joined: %v", err)
+	}
+
+	// Should return existing config
+	if cfg.RigHandle != "alice-rig" {
+		t.Errorf("returned config RigHandle = %q, want %q", cfg.RigHandle, "alice-rig")
 	}
 
 	// No API calls should have been made
@@ -155,7 +165,7 @@ func TestJoin_InvalidUpstream(t *testing.T) {
 		Config: NewFakeConfigStore(),
 	}
 
-	err := svc.Join("invalid", "org", "token", "handle", "name", "email", "v1", "/tmp/town")
+	_, err := svc.Join("invalid", "org", "token", "handle", "name", "email", "v1", "/tmp/town")
 	if err == nil {
 		t.Fatal("Join() expected error for invalid upstream")
 	}

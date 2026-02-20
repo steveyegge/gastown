@@ -8,7 +8,7 @@ import (
 
 func TestLifecycle_PostClaimDone(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	// Post
 	item := &doltserver.WantedItem{
@@ -53,7 +53,7 @@ func TestLifecycle_PostClaimDone(t *testing.T) {
 
 func TestLifecycle_DoubleClaim(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-double",
 		Title: "Double claim test",
@@ -74,7 +74,7 @@ func TestLifecycle_DoubleClaim(t *testing.T) {
 
 func TestLifecycle_DoneWithoutClaim(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-noclaim",
 		Title: "No claim test",
@@ -89,7 +89,7 @@ func TestLifecycle_DoneWithoutClaim(t *testing.T) {
 
 func TestLifecycle_ClaimCompletedItem(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-completed",
 		Title: "Completed item test",

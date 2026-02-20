@@ -16,11 +16,12 @@ func requireDoltServer(t *testing.T) {
 	}
 }
 
-// setupTestTown creates a temporary town root with a running Dolt server for testing.
+// setupTestTown creates a temporary town root with Dolt data directory matching
+// DefaultConfig().DataDir so the runtime paths are consistent.
 func setupTestTown(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
-	dataDir := tmpDir + "/dolt-data"
+	dataDir := DefaultConfig(tmpDir).DataDir
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +32,10 @@ func setupTestTown(t *testing.T) string {
 func TestRealWLCommonsStore_Conformance(t *testing.T) {
 	requireDoltServer(t)
 	wlCommonsConformance(t, func(t *testing.T) WLCommonsStore {
-		return NewWLCommons(setupTestTown(t))
+		store := NewWLCommons(setupTestTown(t))
+		if err := store.EnsureDB(); err != nil {
+			t.Fatalf("EnsureDB() error: %v", err)
+		}
+		return store
 	})
 }

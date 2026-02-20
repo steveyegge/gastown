@@ -9,7 +9,7 @@ import (
 
 func TestPostWanted_Success(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	item := &doltserver.WantedItem{
 		ID:          "w-test123",
@@ -42,7 +42,7 @@ func TestPostWanted_Success(t *testing.T) {
 
 func TestPostWanted_EmptyID(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	item := &doltserver.WantedItem{
 		ID:    "",
@@ -57,7 +57,7 @@ func TestPostWanted_EmptyID(t *testing.T) {
 
 func TestPostWanted_EmptyTitle(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	item := &doltserver.WantedItem{
 		ID:    "w-test",
@@ -72,7 +72,7 @@ func TestPostWanted_EmptyTitle(t *testing.T) {
 
 func TestPostWanted_EnsureDBFails(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	store.EnsureDBErr = fmt.Errorf("server down")
 
 	item := &doltserver.WantedItem{

@@ -42,7 +42,7 @@ func TestGenerateCompletionID_DeterministicInputs(t *testing.T) {
 
 func TestSubmitDone_Success(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-abc",
 		Title: "Fix bug",
@@ -64,7 +64,7 @@ func TestSubmitDone_Success(t *testing.T) {
 
 func TestSubmitDone_NotClaimed(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-abc",
 		Title: "Fix bug",
@@ -78,7 +78,7 @@ func TestSubmitDone_NotClaimed(t *testing.T) {
 
 func TestSubmitDone_WrongClaimer(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 	_ = store.InsertWanted(&doltserver.WantedItem{
 		ID:    "w-abc",
 		Title: "Fix bug",
@@ -93,7 +93,7 @@ func TestSubmitDone_WrongClaimer(t *testing.T) {
 
 func TestSubmitDone_NotFound(t *testing.T) {
 	t.Parallel()
-	store := doltserver.NewFakeWLCommonsStore()
+	store := newFakeWLCommonsStore()
 
 	err := submitDone(store, "w-nonexistent", "my-rig", "evidence", "c-test")
 	if err == nil {
