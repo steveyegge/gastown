@@ -327,14 +327,14 @@ UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
   WHERE id='%s' AND status='claimed' AND claimed_by='%s';
 INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
   SELECT '%s', '%s', '%s', '%s', NOW()
-  FROM wanted WHERE id='%s' AND status='in_review';
+  FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');
 `,
 		WLCommonsDB,
 		EscapeSQL(evidence), EscapeSQL(wantedID), EscapeSQL(rigHandle),
 		EscapeSQL(completionID), EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(evidence),
-		EscapeSQL(wantedID),
+		EscapeSQL(wantedID), EscapeSQL(rigHandle),
 		EscapeSQL(wantedID))
 
 	err := doltSQLScriptWithRetry(townRoot, script)

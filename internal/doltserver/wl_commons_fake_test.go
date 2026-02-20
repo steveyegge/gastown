@@ -53,6 +53,10 @@ func (f *fakeWLCommonsStore) InsertWanted(item *WantedItem) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if _, exists := f.items[item.ID]; exists {
+		return fmt.Errorf("duplicate wanted ID %q", item.ID)
+	}
+
 	stored := *item
 	if stored.Status == "" {
 		stored.Status = "open"

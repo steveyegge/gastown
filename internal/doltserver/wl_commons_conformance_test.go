@@ -266,6 +266,20 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		}
 	})
 
+	t.Run("InsertDuplicateIDFails", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t)
+
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf10", Title: "First insert"}); err != nil {
+			t.Fatalf("first InsertWanted() error: %v", err)
+		}
+
+		err := store.InsertWanted(&WantedItem{ID: "w-conf10", Title: "Duplicate insert"})
+		if err == nil {
+			t.Fatal("InsertWanted() expected error for duplicate ID")
+		}
+	})
+
 	t.Run("ClaimSetsClaimedBy", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t)
