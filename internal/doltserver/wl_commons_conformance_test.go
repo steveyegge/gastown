@@ -67,11 +67,13 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		_ = store.InsertWanted(&WantedItem{ID: "w-conf03", Title: "Already claimed"})
 		_ = store.ClaimWanted("w-conf03", "rig-1")
 
-		// Second claim on non-open item
+		// Second claim on non-open item must return an error.
+		// Both fake and real now enforce this: the real SQL checks
+		// ROW_COUNT() after the UPDATE to detect 0 rows affected.
 		err := store.ClaimWanted("w-conf03", "rig-2")
-		// The fake returns an error; the real SQL silently succeeds (0 rows affected).
-		// Conformance: we verify the item is still claimed by rig-1 either way.
-		_ = err
+		if err == nil {
+			t.Error("ClaimWanted on non-open item should return an error")
+		}
 
 		got, _ := store.QueryWanted("w-conf03")
 		if got.ClaimedBy != "rig-1" {

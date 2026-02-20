@@ -277,25 +277,34 @@ CALL DOLT_COMMIT('-m', 'wl post: %s');
 }
 
 // ClaimWanted updates a wanted item's status to claimed.
+// Returns an error if the item does not exist or is not open (0 rows affected).
 func ClaimWanted(townRoot, wantedID, rigHandle string) error {
 	esc := func(s string) string {
 		return strings.ReplaceAll(s, "'", "''")
 	}
 
-	script := fmt.Sprintf(`USE %s;
+	// Run the UPDATE and check ROW_COUNT() to detect TOCTOU races:
+	// another rig may have claimed the item between the caller's
+	// QueryWanted pre-check and this UPDATE.
+	updateQuery := fmt.Sprintf(`USE %s; UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW() WHERE id='%s' AND status='open'; SELECT ROW_COUNT() AS rc;`,
+		WLCommonsDB, esc(rigHandle), esc(wantedID))
 
-UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW()
-WHERE id='%s' AND status='open';
+	output, err := doltSQLQuery(townRoot, updateQuery)
+	if err != nil {
+		return fmt.Errorf("claim update failed: %w", err)
+	}
 
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 || rows[0]["rc"] == "0" {
+		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+	}
+
+	commitScript := fmt.Sprintf(`USE %s;
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
-`,
-		WLCommonsDB,
-		esc(rigHandle),
-		esc(wantedID),
-		esc(wantedID))
+`, WLCommonsDB, esc(wantedID))
 
-	return doltSQLScriptWithRetry(townRoot, script)
+	return doltSQLScriptWithRetry(townRoot, commitScript)
 }
 
 // SubmitCompletion inserts a completion record and updates the wanted status.
