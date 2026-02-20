@@ -2,10 +2,13 @@ package deacon
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -24,6 +27,7 @@ type mockTmux struct {
 	// Call tracking
 	killCalls       []string
 	newSessionCalls int
+	envVars         map[string]string // Track SetEnvironment calls
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
@@ -45,7 +49,13 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 }
 
 func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
+func (m *mockTmux) SetEnvironment(_, key, value string) error {
+	if m.envVars == nil {
+		m.envVars = make(map[string]string)
+	}
+	m.envVars[key] = value
+	return nil
+}
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }
@@ -54,9 +64,9 @@ func (m *mockTmux) WaitForCommand(_ string, _ []string, _ time.Duration) error {
 	return m.waitErr
 }
 
-func (m *mockTmux) SetAutoRespawnHook(_ string) error              { return nil }
-func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error  { return nil }
-func (m *mockTmux) SendKeysRaw(_, _ string) error                  { return m.sendKeysErr }
+func (m *mockTmux) SetAutoRespawnHook(_ string) error             { return nil }
+func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error { return nil }
+func (m *mockTmux) SendKeysRaw(_, _ string) error                 { return m.sendKeysErr }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
@@ -307,11 +317,11 @@ func TestStop_KillFails(t *testing.T) {
 
 func TestIsRunning(t *testing.T) {
 	tests := []struct {
-		name     string
-		running  bool
-		err      error
-		wantRun  bool
-		wantErr  bool
+		name    string
+		running bool
+		err     error
+		wantRun bool
+		wantErr bool
 	}{
 		{
 			name:    "running",
@@ -420,5 +430,51 @@ func TestStatus_GetSessionInfoError(t *testing.T) {
 	}
 	if info != nil {
 		t.Error("Status() should return nil info on error")
+	}
+}
+
+func TestStart_SetsGTProcessNames(t *testing.T) {
+	townRoot := t.TempDir()
+	deaconDir := filepath.Join(townRoot, "deacon")
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		t.Fatalf("creating deacon dir: %v", err)
+	}
+
+	townSettings := config.NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	mock := &mockTmux{
+		hasSessionResult: false,
+		newSessionErr:    nil,
+		waitErr:          nil,
+	}
+	m := newTestManager(townRoot, mock)
+
+	_ = m.Start("")
+
+	if mock.newSessionCalls == 0 {
+		t.Skip("config setup didn't reach NewSessionWithCommand")
+	}
+
+	if mock.envVars == nil {
+		t.Fatal("SetEnvironment was never called")
+	}
+
+	if _, ok := mock.envVars["GT_AGENT"]; !ok {
+		t.Error("GT_AGENT not set in environment")
+	}
+
+	processNames, ok := mock.envVars["GT_PROCESS_NAMES"]
+	if !ok {
+		t.Error("GT_PROCESS_NAMES not set in environment")
+	}
+	if processNames == "" {
+		t.Error("GT_PROCESS_NAMES is empty")
+	}
+	if !strings.Contains(processNames, "claude") {
+		t.Errorf("GT_PROCESS_NAMES should contain 'claude', got: %s", processNames)
 	}
 }
