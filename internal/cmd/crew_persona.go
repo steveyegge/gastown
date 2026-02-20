@@ -134,7 +134,7 @@ func runCrewPersonaShow(cmd *cobra.Command, args []string) error {
 	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	if len(args) == 0 {
-		return showAllPersonas(mgr, r.Path, townRoot, prefix, r.Name, bd)
+		return showAllPersonas(mgr, r.Path, townRoot, r.Name, bd)
 	}
 
 	name := args[0]
@@ -215,7 +215,7 @@ func runCrewPersonaSync(cmd *cobra.Command, args []string) error {
 
 func showAllPersonas(
 	mgr *crew.Manager,
-	rigPath, townRoot, prefix, rigName string,
+	rigPath, townRoot, rigName string,
 	bd *beads.Beads,
 ) error {
 	// List persona beads
