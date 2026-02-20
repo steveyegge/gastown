@@ -278,11 +278,6 @@ func runHook(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	// Unset BD_BRANCH to read from main rig branch for hooked work visibility
-	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
-		os.Unsetenv("BD_BRANCH")
-	}
-
 	b := beads.New(workDir)
 
 	// Check for existing hooked bead for this agent
