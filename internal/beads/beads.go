@@ -883,49 +883,17 @@ func (b *Beads) IsBeadsRepo() bool {
 	return err == nil && info.IsDir()
 }
 
-// primeContent is the Gas Town PRIME.md content that provides essential context
-// for crew workers. This is the fallback if the SessionStart hook fails.
+// primeContent is the Gas Town PRIME.md content — compact fallback when gt prime hook fails.
+// Role templates provide full context; this covers only essentials.
 const primeContent = `# Gas Town Worker Context
 
-> **Context Recovery**: Run ` + "`gt prime`" + ` for full context after compaction or new session.
+Recovery: ` + "`gt prime`" + ` for full context. Hook has work → RUN IT (no waiting).
+Commands: ` + "`gt hook`" + `, ` + "`gt mail inbox`" + `, ` + "`bd ready`" + `, ` + "`bd show <id>`" + `, ` + "`bd close <id>`" + `
 
-## The Propulsion Principle (GUPP)
+## Session Close
 
-**If you find work on your hook, YOU RUN IT.**
-
-No confirmation. No waiting. No announcements. The hook having work IS the assignment.
-This is physics, not politeness. Gas Town is a steam engine - you are a piston.
-
-**Failure mode we're preventing:**
-- Agent starts with work on hook
-- Agent announces itself and waits for human to say "ok go"
-- Human is AFK / trusting the engine to run
-- Work sits idle. The whole system stalls.
-
-## Startup Protocol
-
-1. Check your hook: ` + "`gt mol status`" + `
-2. If work is hooked → EXECUTE (no announcement, no waiting)
-3. If hook empty → Check mail: ` + "`gt mail inbox`" + `
-4. Still nothing? Wait for user instructions
-
-## Key Commands
-
-- ` + "`gt prime`" + ` - Get full role context (run after compaction)
-- ` + "`gt mol status`" + ` - Check your hooked work
-- ` + "`gt mail inbox`" + ` - Check for messages
-- ` + "`bd ready`" + ` - Find available work (no blockers)
-
-## Session Close Protocol
-
-Before signaling completion:
-1. git status (check what changed)
-2. git add <files> (stage code changes)
-3. git commit -m "..." (commit code)
-4. git push (push to remote)
-5. ` + "`gt done`" + ` (submit to merge queue and exit)
-
-**Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
+1. ` + "`git status && git add <files> && git commit -m \"...\" && git push`" + `
+2. ` + "`gt done`" + ` (polecats: submits to merge queue and exits)
 `
 
 // ProvisionPrimeMD writes the Gas Town PRIME.md file to the specified beads directory.

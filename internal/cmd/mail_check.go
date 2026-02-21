@@ -126,47 +126,37 @@ func formatInjectOutput(messages []*mail.Message) string {
 	var b strings.Builder
 
 	if len(urgent) > 0 {
-		// Urgent mail: interrupt — agent should stop and read.
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "URGENT: %d urgent message(s) require immediate attention.\n\n", len(urgent))
+		fmt.Fprintf(&b, "URGENT: %d message(s) — read NOW with `gt mail read <id>`\n", len(urgent))
 		for _, msg := range urgent {
 			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
 		}
-		// Show high-priority messages separately so their "process before idle"
-		// framing is preserved even when urgent messages are present.
 		if len(high) > 0 {
-			fmt.Fprintf(&b, "\nAlso %d high-priority message(s) — process before going idle:\n", len(high))
+			fmt.Fprintf(&b, "\n+%d high-priority (process before idle):\n", len(high))
 			for _, msg := range high {
 				fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
 			}
 		}
 		if len(normal) > 0 {
-			fmt.Fprintf(&b, "\n(Plus %d additional message(s) — check after current task.)\n", len(normal))
+			fmt.Fprintf(&b, "\n+%d more in inbox\n", len(normal))
 		}
-		b.WriteString("\nRun 'gt mail read <id>' to read urgent messages.\n")
 		b.WriteString("</system-reminder>\n")
 	} else if len(high) > 0 {
-		// High-priority mail: don't interrupt, but process promptly at task boundary.
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "You have %d high-priority message(s) in your inbox.\n\n", len(high))
+		fmt.Fprintf(&b, "%d high-priority message(s) — process at task boundary:\n", len(high))
 		for _, msg := range high {
 			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
 		}
 		if len(normal) > 0 {
-			fmt.Fprintf(&b, "\n(Plus %d additional message(s).)\n", len(normal))
+			fmt.Fprintf(&b, "+%d more in inbox\n", len(normal))
 		}
-		b.WriteString("\nContinue your current task. When it completes, process these messages\n")
-		b.WriteString("before going idle: 'gt mail inbox'\n")
 		b.WriteString("</system-reminder>\n")
 	} else {
-		// Normal/low mail: informational, process at next task boundary.
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "You have %d unread message(s) in your inbox.\n\n", len(normal))
+		fmt.Fprintf(&b, "%d unread message(s) — check before idle:\n", len(normal))
 		for _, msg := range normal {
 			fmt.Fprintf(&b, "- %s from %s: %s\n", msg.ID, msg.From, msg.Subject)
 		}
-		b.WriteString("\nContinue your current task. When it completes, check these messages\n")
-		b.WriteString("before going idle: 'gt mail inbox'\n")
 		b.WriteString("</system-reminder>\n")
 	}
 
