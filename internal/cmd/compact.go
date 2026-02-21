@@ -55,7 +55,7 @@ var compactCmd = &cobra.Command{
 
 For non-closed wisps past TTL: promotes to permanent beads (something is stuck).
 For closed wisps past TTL: deletes them (Dolt AS OF preserves history).
-Wisps with comments, references, or keep labels are always promoted.
+Wisps with comments or keep labels are always promoted.
 
 TTLs by wisp type:
   heartbeat, ping:              6h
@@ -238,7 +238,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		}
 
 		ttl := getTTL(ttls, w.WispType)
-		shouldPromote := hasComments(w) || isReferenced(w) || hasKeepLabel(w)
+		shouldPromote := hasComments(w) || hasKeepLabel(w)
 
 		if w.Status != "closed" {
 			// Non-closed wisps
