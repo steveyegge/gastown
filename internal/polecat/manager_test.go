@@ -1361,9 +1361,10 @@ func TestAddWithOptions_RollbackReleasesName(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Add origin remote but deliberately DON'T create origin/main ref.
-	// This will cause AddWithOptions to fail at ref validation, testing rollback.
-	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	// Add origin remote pointing to a nonexistent path so that fetch fails
+	// and origin/main is never created. This causes AddWithOptions to fail at
+	// ref validation, testing rollback.
+	cmd = exec.Command("git", "remote", "add", "origin", "/nonexistent/repo")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git remote add: %v\n%s", err, out)
