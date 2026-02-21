@@ -488,14 +488,13 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	createCmd.Stdout = &stdout
-	createCmd.Stderr = &stderr
-
-	if err := createCmd.Run(); err != nil {
+	if err := BdCmd(createArgs...).
+		WithAutoCommit().
+		Dir(townBeads).
+		Stderr(&stderr).
+		Build().Run(); err != nil {
 		return fmt.Errorf("creating convoy: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 
@@ -505,13 +504,12 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
 		// Use --type=tracks for non-blocking tracking relation
-		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
 		var depStderr bytes.Buffer
-		depCmd.Stderr = &depStderr
-
-		if err := depCmd.Run(); err != nil {
+		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
+			WithAutoCommit().
+			Dir(townBeads).
+			Stderr(&depStderr).
+			Run(); err != nil {
 			errMsg := strings.TrimSpace(depStderr.String())
 			if errMsg == "" {
 				errMsg = err.Error()

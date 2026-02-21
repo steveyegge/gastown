@@ -136,8 +136,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	for _, v := range cfg.ExtraVars {
 		spawnArgs = append(spawnArgs, "--var", v)
 	}
-	cmdSpawn := exec.Command("bd", spawnArgs...)
-	cmdSpawn.Dir = cfg.BeadsDir
+	cmdSpawn := BdCmd(spawnArgs...).
+		WithAutoCommit().
+		Dir(cfg.BeadsDir).
+		Build()
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
 	cmdSpawn.Stderr = &stderrSpawn
@@ -177,9 +179,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
-	cmdPin := exec.Command("bd", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
-	cmdPin.Dir = cfg.BeadsDir
-	if err := cmdPin.Run(); err != nil {
+	if err := BdCmd("update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee).
+		WithAutoCommit().
+		Dir(cfg.BeadsDir).
+		Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
 	}
 

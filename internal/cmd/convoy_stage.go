@@ -398,22 +398,22 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 		taskCount, len(waves), time.Now().UTC().Format(time.RFC3339))
 
 	// Create the convoy via bd create.
-	createCmd := exec.Command("bd", "create",
+	if err := BdCmd("create",
 		"--type=convoy",
 		"--id="+convoyID,
 		"--title="+title,
 		"--description="+description,
 		"--status="+status,
-	)
-	if out, err := createCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("bd create convoy: %w\noutput: %s", err, out)
+	).WithAutoCommit().Run(); err != nil {
+		return "", fmt.Errorf("bd create convoy: %w", err)
 	}
 
 	// Track each slingable bead via bd dep add.
 	for _, beadID := range slingableIDs {
-		depCmd := exec.Command("bd", "dep", "add", convoyID, beadID, "--type=tracks")
-		if out, err := depCmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, beadID, err, out)
+		if err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
+			WithAutoCommit().
+			Run(); err != nil {
+			return "", fmt.Errorf("bd dep add %s %s: %w", convoyID, beadID, err)
 		}
 	}
 
