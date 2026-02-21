@@ -150,3 +150,140 @@ func TestSwarmE2ELifecycle(t *testing.T) {
 	// See the docstring above for the complete test procedure.
 	t.Skip("E2E test requires beads infrastructure - see docstring for manual test protocol")
 }
+
+// TestIsValidTransition tests all valid and invalid state transitions.
+func TestIsValidTransition(t *testing.T) {
+	tests := []struct {
+		name string
+		from SwarmState
+		to   SwarmState
+		want bool
+	}{
+		// Valid transitions from Created
+		{"created->active", SwarmCreated, SwarmActive, true},
+		{"created->canceled", SwarmCreated, SwarmCanceled, true},
+
+		// Valid transitions from Active
+		{"active->merging", SwarmActive, SwarmMerging, true},
+		{"active->failed", SwarmActive, SwarmFailed, true},
+		{"active->canceled", SwarmActive, SwarmCanceled, true},
+
+		// Valid transitions from Merging
+		{"merging->landed", SwarmMerging, SwarmLanded, true},
+		{"merging->failed", SwarmMerging, SwarmFailed, true},
+		{"merging->canceled", SwarmMerging, SwarmCanceled, true},
+
+		// Terminal states: no transitions allowed
+		{"landed->active", SwarmLanded, SwarmActive, false},
+		{"landed->merging", SwarmLanded, SwarmMerging, false},
+		{"landed->failed", SwarmLanded, SwarmFailed, false},
+		{"landed->canceled", SwarmLanded, SwarmCanceled, false},
+		{"failed->active", SwarmFailed, SwarmActive, false},
+		{"failed->created", SwarmFailed, SwarmCreated, false},
+		{"canceled->active", SwarmCanceled, SwarmActive, false},
+		{"canceled->created", SwarmCanceled, SwarmCreated, false},
+
+		// Invalid transitions (skipping states)
+		{"created->merging", SwarmCreated, SwarmMerging, false},
+		{"created->landed", SwarmCreated, SwarmLanded, false},
+		{"created->failed", SwarmCreated, SwarmFailed, false},
+		{"active->created", SwarmActive, SwarmCreated, false},
+		{"active->landed", SwarmActive, SwarmLanded, false},
+		{"merging->created", SwarmMerging, SwarmCreated, false},
+		{"merging->active", SwarmMerging, SwarmActive, false},
+
+		// Self-transitions (not allowed)
+		{"created->created", SwarmCreated, SwarmCreated, false},
+		{"active->active", SwarmActive, SwarmActive, false},
+		{"merging->merging", SwarmMerging, SwarmMerging, false},
+
+		// Unknown state
+		{"unknown->active", SwarmState("unknown"), SwarmActive, false},
+		{"active->unknown", SwarmActive, SwarmState("unknown"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidTransition(tt.from, tt.to)
+			if got != tt.want {
+				t.Errorf("isValidTransition(%q, %q) = %v, want %v",
+					tt.from, tt.to, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAppendUnique tests appending unique strings to a slice.
+func TestAppendUnique(t *testing.T) {
+	tests := []struct {
+		name  string
+		slice []string
+		s     string
+		want  []string
+	}{
+		{
+			name:  "add to empty slice",
+			slice: []string{},
+			s:     "alpha",
+			want:  []string{"alpha"},
+		},
+		{
+			name:  "add to nil slice",
+			slice: nil,
+			s:     "alpha",
+			want:  []string{"alpha"},
+		},
+		{
+			name:  "add unique element",
+			slice: []string{"alpha", "bravo"},
+			s:     "charlie",
+			want:  []string{"alpha", "bravo", "charlie"},
+		},
+		{
+			name:  "add duplicate element",
+			slice: []string{"alpha", "bravo"},
+			s:     "alpha",
+			want:  []string{"alpha", "bravo"},
+		},
+		{
+			name:  "add duplicate last element",
+			slice: []string{"alpha", "bravo"},
+			s:     "bravo",
+			want:  []string{"alpha", "bravo"},
+		},
+		{
+			name:  "add empty string to empty slice",
+			slice: []string{},
+			s:     "",
+			want:  []string{""},
+		},
+		{
+			name:  "add empty string duplicate",
+			slice: []string{""},
+			s:     "",
+			want:  []string{""},
+		},
+		{
+			name:  "add empty string to non-empty slice",
+			slice: []string{"alpha"},
+			s:     "",
+			want:  []string{"alpha", ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendUnique(tt.slice, tt.s)
+			if len(got) != len(tt.want) {
+				t.Fatalf("appendUnique(%v, %q) length = %d, want %d",
+					tt.slice, tt.s, len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("appendUnique(%v, %q)[%d] = %q, want %q",
+						tt.slice, tt.s, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
