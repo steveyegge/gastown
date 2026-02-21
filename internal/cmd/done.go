@@ -838,6 +838,8 @@ notifyWitness:
 		}
 		// Unset BD_BRANCH so subsequent bd operations (updateAgentStateOnDone)
 		// write directly to main instead of the now-deleted branch.
+		// Note: this is a lifecycle transition (branch deleted). The systematic fix
+		// for BD_BRANCH leaking into read operations is in beads.go (OnMain/StripBdBranch).
 		os.Unsetenv("BD_BRANCH")
 	}
 

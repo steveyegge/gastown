@@ -191,6 +191,7 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 func verifyBeadExists(beadID string) error {
 	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = resolveBeadDir(beadID)
+	cmd.Env = beads.StripBdBranch(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
@@ -206,6 +207,7 @@ func verifyBeadExists(beadID string) error {
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	cmd.Dir = resolveBeadDir(beadID)
+	cmd.Env = beads.StripBdBranch(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
@@ -247,9 +249,10 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 
 	issue := &beads.Issue{}
 	if logPath == "" {
-		// Read the bead once
+		// Read the bead once (strip BD_BRANCH so we read from main)
 		showCmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 		showCmd.Dir = resolveBeadDir(beadID)
+		showCmd.Env = beads.StripBdBranch(os.Environ())
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -310,6 +313,10 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
+	// Write retains BD_BRANCH intentionally — polecat writes need branch isolation.
+	// The read/write asymmetry is correct: read from main (source of truth for existing
+	// fields), write to polecat branch (for isolation). This function is called from sling
+	// (typically Mayor/Deacon context where BD_BRANCH is absent anyway).
 	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
 	updateCmd.Dir = resolveBeadDir(beadID)
 	updateCmd.Stderr = os.Stderr

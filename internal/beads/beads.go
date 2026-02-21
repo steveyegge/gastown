@@ -170,6 +170,7 @@ type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
 	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+	onMain   bool   // If true, strip BD_BRANCH so reads target main (not polecat branch)
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -193,6 +194,39 @@ func NewIsolated(workDir string) *Beads {
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
+}
+
+// OnMain returns a shallow copy of the Beads wrapper with onMain set to true.
+// When onMain is true, BD_BRANCH is stripped from the environment so that
+// bd read operations target the main branch instead of a polecat's write-isolation
+// branch. This fixes #1796: polecats couldn't find hooked work because
+// findAgentWork() was reading from the polecat's empty branch instead of main.
+//
+// Use OnMain() for READ operations that need main-branch data (work discovery,
+// hook lookups). Do NOT use it for write operations that need branch isolation.
+func (b *Beads) OnMain() *Beads {
+	return &Beads{
+		workDir:  b.workDir,
+		beadsDir: b.beadsDir,
+		isolated: b.isolated,
+		onMain:   true,
+		// townRoot and townRootOnce are not copied (sync.Once is not copyable).
+		// The new instance will re-derive townRoot lazily on first call if needed.
+	}
+}
+
+// StripBdBranch removes BD_BRANCH from an environment variable slice.
+// Use this for direct exec.Command("bd", ...) calls that need to read from
+// the main branch instead of a polecat's write-isolation branch.
+// This is the exec.Command counterpart to OnMain() (which is for Beads wrapper paths).
+func StripBdBranch(environ []string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		if !strings.HasPrefix(env, "BD_BRANCH=") {
+			filtered = append(filtered, env)
+		}
+	}
+	return filtered
 }
 
 // getActor returns the BD_ACTOR value for this context.
@@ -258,11 +292,14 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Build environment: filter beads env vars when in isolated mode (tests)
-	// to prevent routing to production databases.
+	// Build environment: filter beads env vars when in isolated mode (tests),
+	// strip BD_BRANCH when in onMain mode (read from main, not polecat branch).
+	// Note: isolated is a superset of onMain — filterBeadsEnv strips BD_BRANCH too.
 	var env []string
 	if b.isolated {
 		env = filterBeadsEnv(os.Environ())
+	} else if b.onMain {
+		env = StripBdBranch(os.Environ())
 	} else {
 		env = os.Environ()
 	}
@@ -300,15 +337,15 @@ func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unpara
 
 	// Build environment WITHOUT BEADS_DIR so bd discovers routes via directory traversal.
 	// In isolated mode, also filter other beads env vars for test isolation.
+	// In onMain mode, also strip BD_BRANCH so reads target main branch.
+	// Note: isolated is a superset of onMain — filterBeadsEnv strips BD_BRANCH too.
 	var env []string
 	if b.isolated {
 		env = filterBeadsEnv(os.Environ())
+	} else if b.onMain {
+		env = stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
 	} else {
-		for _, e := range os.Environ() {
-			if !strings.HasPrefix(e, "BEADS_DIR=") {
-				env = append(env, e)
-			}
-		}
+		env = stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 	}
 	cmd.Env = env
 
@@ -367,16 +404,37 @@ func filterBeadsEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {
 		// Skip beads-related env vars that could interfere with test isolation
-		// BD_ACTOR, BEADS_* - direct beads config
+		// BD_ACTOR, BD_BRANCH, BEADS_* - direct beads config
 		// GT_ROOT - causes bd to find global routes file
 		// HOME - causes bd to find ~/.beads-planning routing
 		if strings.HasPrefix(env, "BD_ACTOR=") ||
+			strings.HasPrefix(env, "BD_BRANCH=") ||
 			strings.HasPrefix(env, "BEADS_") ||
 			strings.HasPrefix(env, "GT_ROOT=") ||
 			strings.HasPrefix(env, "HOME=") {
 			continue
 		}
 		filtered = append(filtered, env)
+	}
+	return filtered
+}
+
+// stripEnvPrefixes removes entries matching any of the given prefixes from an
+// environment variable slice. Used by runWithRouting to strip BEADS_DIR and
+// optionally BD_BRANCH without duplicating the StripBdBranch filtering logic.
+func stripEnvPrefixes(environ []string, prefixes ...string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(env, prefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, env)
+		}
 	}
 	return filtered
 }

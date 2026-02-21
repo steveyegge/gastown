@@ -1169,7 +1169,7 @@ func scanAllRigsForHookedBeads(townRoot, target string) []*beads.Issue {
 			continue
 		}
 
-		b := beads.New(rigBeadsDir)
+		b := beads.New(rigBeadsDir).OnMain()
 
 		// First check for hooked beads
 		hookedBeads, err := b.List(beads.ListOptions{
