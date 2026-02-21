@@ -661,34 +661,40 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Use await-signal with exponential backoff to wait for MQ activity:
+Use await-event to subscribe to the refinery event channel with exponential backoff:
 
 ```bash
-gt mol step await-signal --agent-bead gt-<rig>-refinery \
-  --backoff-base 30s --backoff-mult 2 --backoff-max 5m
+gt mol step await-event --channel refinery --agent-bead gt-<rig>-refinery \
+  --backoff-base 30s --backoff-mult 2 --backoff-max 5m --cleanup
 ```
 
 This command:
-1. Subscribes to `bd activity --follow` (beads activity feed)
-2. Returns IMMEDIATELY when any beads activity occurs (e.g., MR submission)
-3. If no activity, times out with exponential backoff:
+1. Watches `~/gt/events/refinery/` for event files (via inotifywait)
+2. Returns IMMEDIATELY when an event is emitted (MERGE_READY, PATROL_WAKE, MQ_SUBMIT)
+3. If no events, times out with exponential backoff:
    - First timeout: 30s
    - Second timeout: 60s
    - Third timeout: 120s
    - ...capped at 5 minutes max
 4. Tracks `idle:N` label on refinery agent bead for backoff state
+5. `--cleanup` auto-deletes processed event files
 
-**On signal received** (activity detected):
+**Supported events:**
+- `MERGE_READY` — from witness when polecat branch is pushed and ready to merge
+- `PATROL_WAKE` — from witness when MRs waiting but refinery appears idle
+- `MQ_SUBMIT` — from polecat via `gt mq submit`
+
+**On event received** (refinery-specific activity):
 Reset the idle counter and start next patrol cycle:
 ```bash
 gt agent state gt-<rig>-refinery --set idle=0
 ```
 
-**On timeout** (no activity):
+**On timeout** (no events):
 The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
 
-After await-signal returns (either by signal or timeout):
+After await-event returns (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
 2. Squash the current wisp:
 ```bash
