@@ -378,6 +378,84 @@ func TestAtomicWriteFileLargeData(t *testing.T) {
 	}
 }
 
+func TestEnsureDirAndWriteJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deep", "nested", "file.json")
+
+	data := map[string]int{"count": 42}
+	if err := EnsureDirAndWriteJSON(path, data); err != nil {
+		t.Fatalf("EnsureDirAndWriteJSON error: %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+
+	var result map[string]int
+	if err := json.Unmarshal(content, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if result["count"] != 42 {
+		t.Errorf("count = %d, want 42", result["count"])
+	}
+}
+
+func TestEnsureDirAndWriteJSONWithPerm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secure", "secret.json")
+
+	data := map[string]string{"key": "value"}
+	if err := EnsureDirAndWriteJSONWithPerm(path, data, 0600); err != nil {
+		t.Fatalf("EnsureDirAndWriteJSONWithPerm error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat error: %v", err)
+	}
+	perm := info.Mode().Perm()
+	if perm&0600 != 0600 {
+		t.Errorf("permissions = %o, want at least 0600", perm)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]string
+	json.Unmarshal(content, &result)
+	if result["key"] != "value" {
+		t.Errorf("key = %q, want %q", result["key"], "value")
+	}
+}
+
+func TestAtomicWriteJSONWithPerm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "perm.json")
+
+	if err := AtomicWriteJSONWithPerm(path, "test", 0600); err != nil {
+		t.Fatalf("AtomicWriteJSONWithPerm error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0600 != 0600 {
+		t.Errorf("permissions = %o", info.Mode().Perm())
+	}
+}
+
+func TestAtomicWriteJSONWithPerm_Unmarshallable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	err := AtomicWriteJSONWithPerm(path, make(chan int), 0644)
+	if err == nil {
+		t.Error("expected error for unmarshallable type")
+	}
+}
+
 func TestAtomicWriteFileConcurrentIntegrity(t *testing.T) {
 	// This test verifies the core fix: concurrent writers to the same path
 	// must each produce self-consistent content (no cross-writer corruption).
