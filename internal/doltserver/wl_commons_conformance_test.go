@@ -254,6 +254,36 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 		}
 	})
 
+	t.Run("SubmitCompletionAlreadyDone", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t)
+
+		if err := store.InsertWanted(&WantedItem{ID: "w-conf11", Title: "Already done"}); err != nil {
+			t.Fatalf("InsertWanted() error: %v", err)
+		}
+		if err := store.ClaimWanted("w-conf11", "worker-rig"); err != nil {
+			t.Fatalf("ClaimWanted() error: %v", err)
+		}
+		if err := store.SubmitCompletion("c-conf04", "w-conf11", "worker-rig", "https://pr/4"); err != nil {
+			t.Fatalf("first SubmitCompletion() error: %v", err)
+		}
+
+		// Second completion on an already in_review item must fail
+		err := store.SubmitCompletion("c-conf05", "w-conf11", "worker-rig", "https://pr/5")
+		if err == nil {
+			t.Error("second SubmitCompletion on already-completed item should return an error")
+		}
+
+		// Status should remain in_review
+		got, err := store.QueryWanted("w-conf11")
+		if err != nil {
+			t.Fatalf("QueryWanted() error: %v", err)
+		}
+		if got.Status != "in_review" {
+			t.Errorf("Status = %q, want %q", got.Status, "in_review")
+		}
+	})
+
 	t.Run("DatabaseExistsWrongName", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t)

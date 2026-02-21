@@ -318,23 +318,25 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 // completing an item claimed by another rig.
 //
 // Uses a single-script approach like ClaimWanted. The INSERT uses INSERT IGNORE
-// with a SELECT conditional on status='in_review' (which only holds if the
-// UPDATE succeeded). INSERT IGNORE makes the script idempotent on retry since
-// completions.id is a PRIMARY KEY.
+// with a SELECT conditional on status='in_review' AND claimed_by AND NOT EXISTS
+// (prior completion). INSERT IGNORE makes the script idempotent on retry since
+// completions.id is a PRIMARY KEY. NOT EXISTS prevents multiple completions per
+// wanted item, ensuring the lifecycle is strictly post→claim→done.
 func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
 	script := fmt.Sprintf(`USE %s;
 UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
   WHERE id='%s' AND status='claimed' AND claimed_by='%s';
 INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
   SELECT '%s', '%s', '%s', '%s', NOW()
-  FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s';
+  FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s'
+  AND NOT EXISTS (SELECT 1 FROM completions WHERE wanted_id='%s');
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');
 `,
 		WLCommonsDB,
 		EscapeSQL(evidence), EscapeSQL(wantedID), EscapeSQL(rigHandle),
 		EscapeSQL(completionID), EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(evidence),
-		EscapeSQL(wantedID), EscapeSQL(rigHandle),
+		EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(wantedID),
 		EscapeSQL(wantedID))
 
 	err := doltSQLScriptWithRetry(townRoot, script)
