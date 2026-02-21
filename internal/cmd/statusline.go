@@ -87,15 +87,23 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 	return runWorkerStatusLine(t, statusLineSession, rigName, polecat, crew, issue)
 }
 
+// dim wraps text in tmux dim formatting.
+func dim(s string) string {
+	return fmt.Sprintf("#[dim]%s#[nodim]", s)
+}
+
+// sep returns a dimmed pipe separator for tmux status lines.
+func sep() string {
+	return dim(" | ")
+}
+
 // runWorkerStatusLine outputs status for crew or polecat sessions.
 func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue string) error {
-	// Determine agent type and identity
-	var icon, identity string
+	// Determine identity
+	var identity string
 	if polecat != "" {
-		icon = AgentTypeIcons[AgentPolecat]
 		identity = fmt.Sprintf("%s/%s", rigName, polecat)
 	} else if crew != "" {
-		icon = AgentTypeIcons[AgentCrew]
 		identity = fmt.Sprintf("%s/crew/%s", rigName, crew)
 	}
 
@@ -126,20 +134,11 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 
 	// Show hooked work (takes precedence)
 	if hookedWork != "" {
-		if icon != "" {
-			parts = append(parts, fmt.Sprintf("%s 🪝 %s", icon, hookedWork))
-		} else {
-			parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
-		}
+		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
 	} else if currentWork != "" {
-		// Fall back to current work (in_progress)
-		if icon != "" {
-			parts = append(parts, fmt.Sprintf("%s %s", icon, currentWork))
-		} else {
-			parts = append(parts, currentWork)
-		}
-	} else if icon != "" {
-		parts = append(parts, icon)
+		parts = append(parts, currentWork)
+	} else {
+		parts = append(parts, dim("idle"))
 	}
 
 	// Mail preview - only show if hook is empty
@@ -154,9 +153,9 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		}
 	}
 
-	// Output
+	// Output with dimmed separators
 	if len(parts) > 0 {
-		fmt.Print(strings.Join(parts, " | ") + " |")
+		fmt.Print(strings.Join(parts, sep()) + sep())
 	}
 
 	return nil
@@ -192,6 +191,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	type rigStatus struct {
 		hasWitness  bool
 		hasRefinery bool
+		crewCount   int
 		opState     string // "OPERATIONAL", "PARKED", or "DOCKED"
 	}
 	rigStatuses := make(map[string]*rigStatus)
@@ -221,8 +221,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			continue
 		}
 
-		// Track rig-level status (witness/refinery presence)
-		// Polecats are not tracked in tmux - they're a GC concern, not a display concern
+		// Track rig-level status (witness/refinery/crew presence)
 		if agent.Rig != "" && registeredRigs[agent.Rig] {
 			if rigStatuses[agent.Rig] == nil {
 				rigStatuses[agent.Rig] = &rigStatus{}
@@ -232,6 +231,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				rigStatuses[agent.Rig].hasWitness = true
 			case AgentRefinery:
 				rigStatuses[agent.Rig].hasRefinery = true
+			case AgentCrew:
+				rigStatuses[agent.Rig].crewCount++
 			}
 		}
 
@@ -265,9 +266,6 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 	// Add per-agent-type health in consistent order
 	// Format: "1/3 👁️" = 1 working out of 3 total
-	// Only show agent types that have sessions
-	// Note: Polecats excluded - idle state is misleading noise
-	// Deacon gets just an icon (no count) - shown separately below
 	agentOrder := []AgentType{AgentWitness, AgentRefinery}
 	var agentParts []string
 	for _, agentType := range agentOrder {
@@ -282,14 +280,13 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		parts = append(parts, strings.Join(agentParts, " "))
 	}
 
-	// Add deacon icon if running (just presence, no count)
+	// Add deacon icon if running
 	if hasDeacon {
 		parts = append(parts, AgentTypeIcons[AgentDeacon])
 	}
 
-	// Build rig status display with LED indicators (see GetRigLED for definitions)
+	// Build rig status display: LED + prefix + crew count
 
-	// Create sortable rig list
 	type rigInfo struct {
 		name   string
 		status *rigStatus
@@ -299,29 +296,21 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		rigs = append(rigs, rigInfo{name: rigName, status: status})
 	}
 
-	// Sort by: 1) running state, 2) operational state, 3) alphabetical
 	sort.Slice(rigs, func(i, j int) bool {
 		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
 		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
-
-		// Primary sort: running rigs before non-running rigs
 		if isRunningI != isRunningJ {
 			return isRunningI
 		}
-
-		// Secondary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
 		stateOrder := map[string]int{"OPERATIONAL": 0, "PARKED": 1, "DOCKED": 2}
 		stateI := stateOrder[rigs[i].status.opState]
 		stateJ := stateOrder[rigs[j].status.opState]
 		if stateI != stateJ {
 			return stateI < stateJ
 		}
-
-		// Tertiary sort: alphabetical
 		return rigs[i].name < rigs[j].name
 	})
 
-	// Build display with group separators
 	var rigParts []string
 	var lastGroup string
 	for _, rig := range rigs {
@@ -333,16 +322,14 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			currentGroup = "idle-" + rig.status.opState
 		}
 
-		// Add separator when group changes (running -> non-running, or different opStates within non-running)
 		if lastGroup != "" && lastGroup != currentGroup {
-			rigParts = append(rigParts, "|")
+			rigParts = append(rigParts, dim("|"))
 		}
 		lastGroup = currentGroup
 
 		status := rig.status
 		led := GetRigLED(status.hasWitness, status.hasRefinery, status.opState)
 
-		// All icons get 1 space, Park gets 2
 		space := " "
 		if led == "🅿️" {
 			space = "  "
@@ -354,7 +341,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				displayName = prefix
 			}
 		}
-		rigParts = append(rigParts, led+space+displayName)
+		// Append crew count if any
+		crewSuffix := ""
+		if status.crewCount > 0 {
+			crewSuffix = fmt.Sprintf(dim("(%d)"), status.crewCount)
+		}
+		rigParts = append(rigParts, led+space+displayName+crewSuffix)
 	}
 
 	if len(rigParts) > 0 {
@@ -380,7 +372,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
-	fmt.Print(strings.Join(parts, " | ") + " |")
+	fmt.Print(strings.Join(parts, sep()) + sep())
 	return nil
 }
 
@@ -449,7 +441,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
-	fmt.Print(strings.Join(parts, " | ") + " |")
+	fmt.Print(strings.Join(parts, sep()) + sep())
 	return nil
 }
 
@@ -517,7 +509,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	fmt.Print(strings.Join(parts, " | ") + " |")
+	fmt.Print(strings.Join(parts, sep()) + sep())
 	return nil
 }
 
@@ -532,7 +524,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	}
 
 	if rigName == "" {
-		fmt.Printf("%s ? |", AgentTypeIcons[AgentRefinery])
+		fmt.Print("?" + sep())
 		return nil
 	}
 
@@ -547,16 +539,14 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	// Get refinery manager using shared helper
 	mgr, _, _, err := getRefineryManager(rigName)
 	if err != nil {
-		// Fallback to simple status if we can't access refinery
-		fmt.Printf("%s MQ: ? |", AgentTypeIcons[AgentRefinery])
+		fmt.Print("MQ: ?" + sep())
 		return nil
 	}
 
 	// Get queue
 	queue, err := mgr.Queue()
 	if err != nil {
-		// Fallback to simple status if we can't read queue
-		fmt.Printf("%s MQ: ? |", AgentTypeIcons[AgentRefinery])
+		fmt.Print("MQ: ?" + sep())
 		return nil
 	}
 
@@ -584,7 +574,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	} else if pending > 0 {
 		parts = append(parts, fmt.Sprintf("%d queued", pending))
 	} else {
-		parts = append(parts, "idle")
+		parts = append(parts, dim("idle"))
 	}
 
 	// Priority 1: Check for hooked work (rig beads for refinery)
@@ -607,7 +597,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	fmt.Print(strings.Join(parts, " | ") + " |")
+	fmt.Print(strings.Join(parts, sep()) + sep())
 	return nil
 }
 

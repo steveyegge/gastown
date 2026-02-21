@@ -1867,25 +1867,24 @@ var roleIcons = map[string]string{
 }
 
 // SetStatusFormat configures the left side of the status bar.
-// Shows compact identity: icon + minimal context
+// Shows compact identity: icon + worker name only (no rig prefix).
 func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 	// Get icon for role (empty string if not found)
 	icon := roleIcons[role]
 
-	// Compact format - icon already identifies role
-	// Mayor: 🎩 Mayor
-	// Crew:  👷 gastown/crew/max (full path)
-	// Polecat: 😺 gastown/Toast
+	// Compact format: just icon + worker name
+	// Mayor:    🎩 Mayor
+	// Crew:     👷 tokensmith
+	// Witness:  👁️ witness
+	// Polecat:  😺 Toast
 	var left string
 	if rig == "" {
-		// Town-level agent (Mayor, Deacon) - keep as-is
-		left = fmt.Sprintf("%s %s ", icon, worker)
+		left = fmt.Sprintf(" %s %s ", icon, worker)
 	} else {
-		// Rig agents - use session name (already in prefix format: gt-crew-gus)
-		left = fmt.Sprintf("%s %s ", icon, session)
+		left = fmt.Sprintf(" %s %s ", icon, worker)
 	}
 
-	if _, err := t.run("set-option", "-t", session, "status-left-length", "25"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-left-length", "20"); err != nil {
 		return err
 	}
 	_, err := t.run("set-option", "-t", session, "status-left", left)
