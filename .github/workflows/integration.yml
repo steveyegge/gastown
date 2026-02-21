@@ -3,11 +3,7 @@ name: Integration Tests
 on:
   pull_request:
     paths:
-      - 'internal/cmd/install.go'
-      - 'internal/cmd/rig.go'
-      - 'internal/config/**'
-      - 'internal/routing/**'
-      - 'internal/cmd/*_integration_test.go'
+      - 'internal/**'
       - '.github/workflows/integration.yml'
 
 jobs:
@@ -60,7 +56,7 @@ jobs:
         run: go build -v ./cmd/gt
 
       - name: Run integration tests
-        run: gotestsum --format testname --junitfile junit.xml -- -v -tags=integration -timeout=8m ./internal/cmd/...
+        run: gotestsum --format testname --junitfile junit.xml -- -v -tags=integration -timeout=8m ./...
 
       - name: Test Report
         if: always()
