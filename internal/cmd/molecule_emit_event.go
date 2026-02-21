@@ -6,11 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// emitEventSeq is an atomic counter to ensure unique event filenames even when
+// time.Now().UnixNano() has low resolution (e.g., Windows ~100ns granularity).
+var emitEventSeq atomic.Uint64
 
 var (
 	emitEventChannel string
@@ -155,8 +160,9 @@ func emitEventImpl(eventDir, channel, eventType string, payloadPairs []string) (
 		return "", fmt.Errorf("marshaling event: %w", err)
 	}
 
-	// Write event file with nanosecond timestamp + PID for uniqueness
-	eventFile := filepath.Join(eventDir, fmt.Sprintf("%d-%d.event", now.UnixNano(), os.Getpid()))
+	// Write event file with nanosecond timestamp + sequence + PID for uniqueness
+	seq := emitEventSeq.Add(1)
+	eventFile := filepath.Join(eventDir, fmt.Sprintf("%d-%d-%d.event", now.UnixNano(), seq, os.Getpid()))
 	if err := os.WriteFile(eventFile, data, 0644); err != nil {
 		return "", fmt.Errorf("writing event file: %w", err)
 	}

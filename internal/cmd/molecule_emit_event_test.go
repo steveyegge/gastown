@@ -161,14 +161,14 @@ func TestEmitEventPIDInFilename(t *testing.T) {
 		t.Fatalf("emit failed: %v", err)
 	}
 
-	// Filename should contain PID for uniqueness: <nanoseconds>-<pid>.event
+	// Filename should contain PID for uniqueness: <nanoseconds>-<seq>-<pid>.event
 	base := filepath.Base(path)
 	if !strings.Contains(base, "-") {
-		t.Errorf("filename %q should contain PID separator '-'", base)
+		t.Errorf("filename %q should contain separator '-'", base)
 	}
-	parts := strings.SplitN(strings.TrimSuffix(base, ".event"), "-", 2)
-	if len(parts) != 2 {
-		t.Errorf("filename %q should be <nanos>-<pid>.event, got %d parts", base, len(parts))
+	parts := strings.Split(strings.TrimSuffix(base, ".event"), "-")
+	if len(parts) != 3 {
+		t.Errorf("filename %q should be <nanos>-<seq>-<pid>.event, got %d parts", base, len(parts))
 	}
 }
 

@@ -1,6 +1,7 @@
 package mayor
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestNewManager(t *testing.T) {
 func TestManager_mayorDir(t *testing.T) {
 	m := NewManager("/tmp/test-town")
 	got := m.mayorDir()
-	want := "/tmp/test-town/mayor"
+	want := filepath.Join("/tmp/test-town", "mayor")
 	if got != want {
 		t.Errorf("mayorDir() = %q, want %q", got, want)
 	}
