@@ -3512,7 +3512,7 @@ func TestWaitForReady_ServerAlreadyListening(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -3542,14 +3542,14 @@ func TestWaitForReady_TimeoutWhenNoServer(t *testing.T) {
 	}
 
 	// Use a port that is very unlikely to be in use
-	metadata := `{"backend":"dolt","mode":"server","port":19999}`
+	metadata := `{"backend":"dolt","dolt_mode":"server","port":19999}`
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GT_DOLT_PORT", "19999")
 
 	start := time.Now()
-	err = WaitForReady(townRoot, 500*time.Millisecond)
+	err := WaitForReady(townRoot, 500*time.Millisecond)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -3580,7 +3580,7 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}

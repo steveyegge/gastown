@@ -404,6 +404,45 @@ func CheckServerReachable(townRoot string) error {
 	return nil
 }
 
+// WaitForReady polls for the Dolt server to become reachable (TCP connection
+// succeeds) within the given timeout. Returns nil if the server is reachable
+// or if no server-mode metadata is configured (nothing to wait for).
+// Returns an error if the timeout expires before the server is reachable.
+//
+// This is used by gt up to ensure the Dolt server is ready before starting
+// agents (witnesses, refineries) that depend on beads database access.
+// Without this, agents race the Dolt server startup and get "connection refused".
+func WaitForReady(townRoot string, timeout time.Duration) error {
+	// Check if any rig is configured for server mode.
+	// If not, there's no Dolt server to wait for.
+	if len(HasServerModeMetadata(townRoot)) == 0 {
+		return nil
+	}
+
+	config := DefaultConfig(townRoot)
+	addr := config.HostPort()
+	deadline := time.Now().Add(timeout)
+	interval := 100 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(interval)
+		// Exponential backoff capped at 500ms
+		if interval < 500*time.Millisecond {
+			interval = interval * 2
+			if interval > 500*time.Millisecond {
+				interval = 500 * time.Millisecond
+			}
+		}
+	}
+
+	return fmt.Errorf("Dolt server not ready at %s after %v", addr, timeout)
+}
+
 // HasServerModeMetadata checks whether any rig has metadata.json configured for
 // Dolt server mode. Returns the list of rig names configured for server mode.
 // This is used to detect the split-brain risk: if metadata says "server" but

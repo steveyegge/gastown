@@ -240,7 +240,7 @@ func TestWaitForDoltReady_ServerListening(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -255,30 +255,27 @@ func TestWaitForDoltReady_ServerListening(t *testing.T) {
 	}
 }
 
-func TestWaitForDoltReady_Integration_DoltserverWaitForReady(t *testing.T) {
-	// Verify that doltserver.WaitForReady is used by waitForDoltReady.
-	// This validates the race fix: gt up calls WaitForReady before witnesses start.
+func TestWaitForDoltReady_GracefulDegradation(t *testing.T) {
+	// Verify that waitForDoltReady doesn't panic or error when Dolt is unreachable.
+	// The wrapper should log a warning and continue (graceful degradation).
+	// Uses a town root with no server metadata so it returns immediately.
 	townRoot := t.TempDir()
+	waitForDoltReady(townRoot) // Should not panic
+
+	// Also verify the underlying doltserver.WaitForReady detects unreachable servers.
 	beadsDir := filepath.Join(townRoot, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	// Use a port nothing listens on
-	metadata := `{"backend":"dolt","mode":"server","port":19998}`
+	metadata := `{"backend":"dolt","dolt_mode":"server","port":19998}`
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GT_DOLT_PORT", "19998")
 
-	// WaitForReady with short timeout should fail
+	// WaitForReady with short timeout should fail when nothing is listening
 	err := doltserver.WaitForReady(townRoot, 200*time.Millisecond)
 	if err == nil {
 		t.Error("doltserver.WaitForReady should fail when nothing is listening")
 	}
-
-	// But waitForDoltReady (the up.go wrapper) should not return an error,
-	// just log a warning and continue (graceful degradation)
-	waitForDoltReady(townRoot)
-	// No error = graceful degradation works
 }

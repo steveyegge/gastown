@@ -270,6 +270,12 @@ func runUp(cmd *cobra.Command, args []string) error {
 		allOK = false
 	}
 
+	// Ensure Dolt server is fully ready before starting agents that depend on it.
+	// Witnesses and refineries run bd commands on startup (via gt prime → patrol_helpers)
+	// that connect to the Dolt SQL server. Without this gate, they race the server
+	// and get "connection refused" errors. (gt-zou1n)
+	waitForDoltReady(townRoot)
+
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
 	witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors)
 
@@ -849,4 +855,20 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	return started, errors
+}
+
+// doltReadyTimeout is how long gt up waits for the Dolt SQL server to accept
+// connections before proceeding with witness/refinery startup. 10 seconds is
+// generous: doltserver.Start() already retries for 5s, so this covers the case
+// where the daemon (not gt up) started Dolt and it's still initializing.
+const doltReadyTimeout = 10 * time.Second
+
+// waitForDoltReady waits for the Dolt SQL server to be reachable before
+// starting agents that depend on beads database access. If the server is not
+// configured (no server-mode metadata), this is a no-op. If the timeout
+// expires, logs a warning and continues (graceful degradation). (gt-zou1n)
+func waitForDoltReady(townRoot string) {
+	if err := doltserver.WaitForReady(townRoot, doltReadyTimeout); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (agents may see connection errors)\n", err)
+	}
 }
