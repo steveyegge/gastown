@@ -86,3 +86,95 @@ func TestNames(t *testing.T) {
 		t.Errorf("expected handoff, got %s", names[0])
 	}
 }
+
+func TestIsKnownAgent(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  bool
+	}{
+		{"claude", true},
+		{"Claude", true}, // case insensitive
+		{"opencode", true},
+		{"copilot", true},
+		{"nonexistent", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			if got := IsKnownAgent(tt.agent); got != tt.want {
+				t.Errorf("IsKnownAgent(%q) = %v, want %v", tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProvisionFor(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := ProvisionFor(dir, "claude"); err != nil {
+		t.Fatalf("ProvisionFor() error = %v", err)
+	}
+
+	// Verify commands were created
+	missing := MissingFor(dir, "claude")
+	if len(missing) != 0 {
+		t.Errorf("MissingFor() = %v after provisioning", missing)
+	}
+}
+
+func TestProvisionFor_NoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+
+	// First provision
+	if err := ProvisionFor(dir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second provision should not error (skips existing)
+	if err := ProvisionFor(dir, "claude"); err != nil {
+		t.Fatalf("second ProvisionFor() error = %v", err)
+	}
+}
+
+func TestProvisionFor_UnknownAgent(t *testing.T) {
+	dir := t.TempDir()
+	err := ProvisionFor(dir, "unknown-agent")
+	if err == nil {
+		t.Error("ProvisionFor(unknown) should error")
+	}
+}
+
+func TestMissingFor_AllMissing(t *testing.T) {
+	dir := t.TempDir()
+	missing := MissingFor(dir, "claude")
+	if len(missing) != len(Commands) {
+		t.Errorf("MissingFor() = %d, want %d", len(missing), len(Commands))
+	}
+}
+
+func TestMissingFor_UnknownAgent(t *testing.T) {
+	dir := t.TempDir()
+	missing := MissingFor(dir, "unknown-agent")
+	if missing != nil {
+		t.Errorf("MissingFor(unknown) = %v, want nil", missing)
+	}
+}
+
+func TestProvisionFor_MultipleAgents(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, agent := range []string{"claude", "opencode", "copilot"} {
+		t.Run(agent, func(t *testing.T) {
+			if !IsKnownAgent(agent) {
+				t.Skipf("%s not a known agent", agent)
+			}
+			if err := ProvisionFor(dir, agent); err != nil {
+				t.Fatalf("ProvisionFor(%s) error = %v", agent, err)
+			}
+			missing := MissingFor(dir, agent)
+			if len(missing) != 0 {
+				t.Errorf("MissingFor(%s) = %v", agent, missing)
+			}
+		})
+	}
+}
