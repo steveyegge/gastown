@@ -45,3 +45,18 @@ func multiLineOnMainChain() {
 		OnMain()
 	_ = b
 }
+
+func lookPathVariableArg() {
+	// Variable arg to exec.LookPath — not a string literal, no diagnostic.
+	prog := "bd"
+	path, _ := exec.LookPath(prog)
+	_ = path
+}
+
+func execCommandFuncCallArg() {
+	// Function call result as arg to exec.Command — not a BasicLit, no diagnostic.
+	cmd := exec.Command(getName())
+	_ = cmd
+}
+
+func getName() string { return "bd" }
