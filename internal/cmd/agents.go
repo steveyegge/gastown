@@ -48,6 +48,14 @@ var AgentTypeColors = map[AgentType]string{
 	AgentPolecat:  "#[fg=white,dim]",
 }
 
+// rigTypeOrder defines the display order of rig-level agent types.
+var rigTypeOrder = map[AgentType]int{
+	AgentRefinery: 0,
+	AgentWitness:  1,
+	AgentCrew:     2,
+	AgentPolecat:  3,
+}
+
 // AgentTypeIcons maps agent types to display icons.
 // Uses centralized emojis from constants package.
 var AgentTypeIcons = map[AgentType]string{
@@ -159,6 +167,8 @@ func categorizeSession(name string) *AgentSession {
 		sess.Type = AgentCrew
 	case session.RolePolecat:
 		sess.Type = AgentPolecat
+	case session.RoleOverseer:
+		return nil // overseer is the human operator, not a display agent
 	default:
 		return nil
 	}
@@ -218,14 +228,8 @@ func filterAndSortSessions(sessionNames []string, includePolecats bool) []*Agent
 		}
 
 		// Within rig: refinery, witness, crew, polecat
-		typeOrder := map[AgentType]int{
-			AgentRefinery: 0,
-			AgentWitness:  1,
-			AgentCrew:     2,
-			AgentPolecat:  3,
-		}
-		if typeOrder[a.Type] != typeOrder[b.Type] {
-			return typeOrder[a.Type] < typeOrder[b.Type]
+		if rigTypeOrder[a.Type] != rigTypeOrder[b.Type] {
+			return rigTypeOrder[a.Type] < rigTypeOrder[b.Type]
 		}
 
 		// Same type: alphabetical by agent name

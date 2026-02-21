@@ -372,7 +372,35 @@ func TestRunAgentsList_EmptyList_Output(t *testing.T) {
 	// or a real agent listing if gastown sessions happen to be running.
 	if !strings.Contains(output, "No agent sessions running.") &&
 		!strings.Contains(output, "Mayor") &&
+		!strings.Contains(output, "Deacon") &&
 		!strings.Contains(output, "witness") {
 		t.Errorf("unexpected output from runAgentsList: %q", output)
+	}
+}
+
+func TestGuessSessionFromWorkerDir(t *testing.T) {
+	setupCmdTestRegistry(t)
+	townRoot := "/town"
+
+	tests := []struct {
+		name      string
+		workerDir string
+		want      string
+	}{
+		{"crew worker", "/town/gastown/crew/max", "gt-crew-max"},
+		{"polecat worker", "/town/gastown/polecats/furiosa", "gt-furiosa"},
+		{"witness (unsupported)", "/town/gastown/witness/main", ""},
+		{"too few path parts", "/town/gastown", ""},
+		{"different rig", "/town/myrig/crew/alpha", "mr-crew-alpha"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := guessSessionFromWorkerDir(tt.workerDir, townRoot)
+			if got != tt.want {
+				t.Errorf("guessSessionFromWorkerDir(%q, %q) = %q, want %q",
+					tt.workerDir, townRoot, got, tt.want)
+			}
+		})
 	}
 }
