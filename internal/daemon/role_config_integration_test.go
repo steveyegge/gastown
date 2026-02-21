@@ -31,9 +31,9 @@ func TestGetRoleConfigForIdentity_UsesBuiltinDefaults(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("cfg is nil, expected built-in defaults")
 	}
-	// Built-in witness has session pattern "gt-{rig}-witness"
-	if cfg.SessionPattern != "gt-{rig}-witness" {
-		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "gt-{rig}-witness")
+	// Built-in witness has session pattern "{prefix}-witness"
+	if cfg.SessionPattern != "{prefix}-witness" {
+		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "{prefix}-witness")
 	}
 }
 
@@ -80,8 +80,8 @@ start_command = "exec echo custom-town-command"
 		t.Errorf("cfg.StartCommand = %q, want %q", cfg.StartCommand, "exec echo custom-town-command")
 	}
 	// Should still have built-in session pattern (not overridden)
-	if cfg.SessionPattern != "gt-{rig}-witness" {
-		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "gt-{rig}-witness")
+	if cfg.SessionPattern != "{prefix}-witness" {
+		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "{prefix}-witness")
 	}
 }
 
