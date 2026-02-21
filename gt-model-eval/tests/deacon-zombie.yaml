@@ -304,8 +304,8 @@
     role_context: >
       You are the Deacon. This polecat session is alive and the terminal shows a Claude
       prompt ("> ") meaning the agent is waiting for input — it has finished processing
-      and is idle at the prompt. This is normal behavior, not stuck. The trigger-pending-spawns
-      step handles nudging these.
+      and is idle at the prompt. This is normal behavior, not stuck. The polecat startup
+      flow (GUPP/beacon) handles initialization; idle prompts may just need a nudge.
     formula_step: zombie-scan
     allowed_actions: '["file-warrant", "no-op", "nudge", "log-and-watch", "escalate-to-mayor", "create-cleanup-wisp"]'
     shell_output: |

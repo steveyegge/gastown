@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
-	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -118,25 +117,6 @@ Examples:
   gt deacon heartbeat                    # Touch heartbeat with timestamp
   gt deacon heartbeat "checking mayor"   # Touch with action description`,
 	RunE: runDeaconHeartbeat,
-}
-
-var deaconTriggerPendingCmd = &cobra.Command{
-	Use:   "trigger-pending",
-	Short: "Trigger pending polecat spawns (bootstrap mode)",
-	Long: `Check inbox for POLECAT_STARTED messages and trigger ready polecats.
-
-⚠️  BOOTSTRAP MODE ONLY - Uses regex detection (ZFC violation acceptable).
-
-This command uses WaitForRuntimeReady (regex) to detect when the runtime is ready.
-This is appropriate for daemon bootstrap when no AI is available.
-
-In steady-state, the Deacon should use AI-based observation instead:
-  gt deacon pending     # View pending spawns with captured output
-  gt peek <session>     # Observe session output (AI analyzes)
-  gt nudge <session>    # Trigger when AI determines ready
-
-This command is typically called by the daemon during cold startup.`,
-	RunE: runDeaconTriggerPending,
 }
 
 var deaconHealthCheckCmd = &cobra.Command{
@@ -377,8 +357,6 @@ This helps the Deacon understand which convoys have been recently fed.`,
 }
 
 var (
-	triggerTimeout time.Duration
-
 	// Status flags
 	deaconStatusJSON bool
 
@@ -419,7 +397,6 @@ func init() {
 	deaconCmd.AddCommand(deaconStatusCmd)
 	deaconCmd.AddCommand(deaconRestartCmd)
 	deaconCmd.AddCommand(deaconHeartbeatCmd)
-	deaconCmd.AddCommand(deaconTriggerPendingCmd)
 	deaconCmd.AddCommand(deaconHealthCheckCmd)
 	deaconCmd.AddCommand(deaconForceKillCmd)
 	deaconCmd.AddCommand(deaconHealthStateCmd)
@@ -435,10 +412,6 @@ func init() {
 
 	// Flags for status
 	deaconStatusCmd.Flags().BoolVar(&deaconStatusJSON, "json", false, "Output as JSON")
-
-	// Flags for trigger-pending
-	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
-		"Timeout for checking if Claude is ready")
 
 	// Flags for health-check
 	deaconHealthCheckCmd.Flags().DurationVar(&healthCheckTimeout, "timeout", 30*time.Second,
@@ -848,62 +821,6 @@ func runDeaconHeartbeat(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("updating heartbeat: %w", err)
 		}
 		fmt.Printf("%s Heartbeat updated\n", style.Bold.Render("✓"))
-	}
-
-	return nil
-}
-
-func runDeaconTriggerPending(cmd *cobra.Command, args []string) error {
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
-	// Step 1: Check inbox for new POLECAT_STARTED messages
-	pending, err := polecat.CheckInboxForSpawns(townRoot)
-	if err != nil {
-		return fmt.Errorf("checking inbox: %w", err)
-	}
-
-	if len(pending) == 0 {
-		fmt.Printf("%s No pending spawns\n", style.Dim.Render("○"))
-		return nil
-	}
-
-	fmt.Printf("%s Found %d pending spawn(s)\n", style.Bold.Render("●"), len(pending))
-
-	// Step 2: Try to trigger each pending spawn
-	results, err := polecat.TriggerPendingSpawns(townRoot, triggerTimeout)
-	if err != nil {
-		return fmt.Errorf("triggering: %w", err)
-	}
-
-	// Report results
-	triggered := 0
-	for _, r := range results {
-		if r.Triggered {
-			triggered++
-			fmt.Printf("  %s Triggered %s/%s\n",
-				style.Bold.Render("✓"),
-				r.Spawn.Rig, r.Spawn.Polecat)
-		} else if r.Error != nil {
-			fmt.Printf("  %s %s/%s: %v\n",
-				style.Dim.Render("⚠"),
-				r.Spawn.Rig, r.Spawn.Polecat, r.Error)
-		}
-	}
-
-	// Step 3: Prune stale pending spawns (older than 5 minutes)
-	pruned, _ := polecat.PruneStalePending(townRoot, 5*time.Minute)
-	if pruned > 0 {
-		fmt.Printf("  %s Pruned %d stale spawn(s)\n", style.Dim.Render("○"), pruned)
-	}
-
-	// Summary
-	remaining := len(pending) - triggered
-	if remaining > 0 {
-		fmt.Printf("%s %d spawn(s) still waiting for Claude\n",
-			style.Dim.Render("○"), remaining)
 	}
 
 	return nil

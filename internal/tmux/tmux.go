@@ -1700,12 +1700,9 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 // Steady-State (use AI observation instead):
 //
 //	Once any AI agent is running, observation should be AI-to-AI:
-//	- Deacon starting polecats → use 'gt deacon pending' + AI analysis
+//	- Deacon monitoring polecats → use patrol formula + AI analysis
 //	- Deacon restarting → Mayor watches via 'gt peek'
 //	- Mayor restarting → Deacon watches via 'gt peek'
-//
-// See: gt deacon pending (ZFC-compliant AI observation)
-// See: gt deacon trigger-pending (bootstrap mode, regex-based)
 
 // matchesPromptPrefix reports whether a captured pane line matches the
 // configured ready-prompt prefix. It normalizes non-breaking spaces

@@ -84,8 +84,7 @@ func (d *Daemon) heartbeatTick() {
     d.checkDeaconHeartbeat()        // 2. Belt-and-suspenders fallback
     d.ensureWitnessesRunning()      // 3. Witness health (checks tmux directly)
     d.ensureRefineriesRunning()     // 4. Refinery health (checks tmux directly)
-    d.triggerPendingSpawns()        // 5. Bootstrap polecats
-    d.processLifecycleRequests()    // 6. Cycle/restart requests
+    d.processLifecycleRequests()    // 5. Cycle/restart requests
     // Agent state derived from tmux, not recorded in beads (gt-zecmc)
 }
 ```

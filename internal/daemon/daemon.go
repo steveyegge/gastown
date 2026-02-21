@@ -27,7 +27,6 @@ import (
 	"github.com/steveyegge/gastown/internal/feed"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
-	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -451,12 +450,7 @@ func (d *Daemon) heartbeat(state *State) {
 	// 6. Ensure Mayor is running (restart if dead)
 	d.ensureMayorRunning()
 
-	// 7. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
-	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
-	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
-	d.triggerPendingSpawns()
-
-	// 8. Process lifecycle requests
+	// 7. Process lifecycle requests
 	d.processLifecycleRequests()
 
 	// 9. (Removed) Stale agent check - violated "discover, don't track"
@@ -1097,54 +1091,6 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	return true, ""
 }
 
-// triggerPendingSpawns polls pending polecat spawns and triggers those that are ready.
-// This is bootstrap mode - uses regex-based WaitForRuntimeReady which is acceptable
-// for daemon operations when no AI agent is guaranteed to be running.
-// The timeout is short (2s) to avoid blocking the heartbeat.
-func (d *Daemon) triggerPendingSpawns() {
-	const triggerTimeout = 2 * time.Second
-
-	// Check for pending spawns (from POLECAT_STARTED messages in Deacon inbox)
-	pending, err := polecat.CheckInboxForSpawns(d.config.TownRoot)
-	if err != nil {
-		d.logger.Printf("Error checking pending spawns: %v", err)
-		return
-	}
-
-	if len(pending) == 0 {
-		return
-	}
-
-	d.logger.Printf("Found %d pending spawn(s), attempting to trigger...", len(pending))
-
-	// Trigger pending spawns (uses WaitForRuntimeReady with short timeout)
-	results, err := polecat.TriggerPendingSpawns(d.config.TownRoot, triggerTimeout)
-	if err != nil {
-		d.logger.Printf("Error triggering spawns: %v", err)
-		return
-	}
-
-	// Log results
-	triggered := 0
-	for _, r := range results {
-		if r.Triggered {
-			triggered++
-			d.logger.Printf("Triggered polecat: %s/%s", r.Spawn.Rig, r.Spawn.Polecat)
-		} else if r.Error != nil {
-			d.logger.Printf("Error triggering %s: %v", r.Spawn.Session, r.Error)
-		}
-	}
-
-	if triggered > 0 {
-		d.logger.Printf("Triggered %d/%d pending spawn(s)", triggered, len(pending))
-	}
-
-	// Prune stale pending spawns (older than 5 minutes - likely dead sessions)
-	pruned, _ := polecat.PruneStalePending(d.config.TownRoot, 5*time.Minute)
-	if pruned > 0 {
-		d.logger.Printf("Pruned %d stale pending spawn(s)", pruned)
-	}
-}
 
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {
