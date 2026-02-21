@@ -71,8 +71,8 @@ func writeFakeBd(t *testing.T, dir string, script string, batScript string) {
 func TestBeadsBinaryCheck_HermeticSuccess(t *testing.T) {
 	fakeDir := t.TempDir()
 	writeFakeBd(t, fakeDir,
-		"#!/bin/sh\necho 'bd version 0.52.0'\n",
-		"@echo off\r\necho bd version 0.52.0\r\n",
+		"#!/bin/sh\necho 'bd version 0.55.4'\n",
+		"@echo off\r\necho bd version 0.55.4\r\n",
 	)
 
 	t.Setenv("PATH", fakeDir)
@@ -83,7 +83,7 @@ func TestBeadsBinaryCheck_HermeticSuccess(t *testing.T) {
 	result := check.Run(ctx)
 	switch result.Status {
 	case StatusOK:
-		if !strings.Contains(result.Message, "0.52.0") {
+		if !strings.Contains(result.Message, "0.55.4") {
 			t.Errorf("expected version in message, got %q", result.Message)
 		}
 	case StatusWarning:
