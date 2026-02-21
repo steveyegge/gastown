@@ -96,13 +96,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
 
-	// Initialize session prefix registry from rigs.json.
+	// Initialize session prefix registry and agent registry from town root.
 	// Best-effort: if town root not found, the default "gt" prefix is used.
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-		_ = session.InitRegistry(townRoot)
-		if err := config.LoadAgentRegistry(config.DefaultAgentRegistryPath(townRoot)); err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to load agent registry %s: %v\n",
-				config.DefaultAgentRegistryPath(townRoot), err)
+		if err := session.InitRegistry(townRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to initialize town registry: %v\n", err)
 		}
 	}
 
