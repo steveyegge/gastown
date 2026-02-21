@@ -85,6 +85,14 @@ func countBdCallsites(file *ast.File) *bdCallsiteCounts {
 			counts.OnMain++
 		}
 
+		// Count .StripBdBranch() method calls on BdCmd (0-arg fluent method),
+		// in addition to beads.StripBdBranch(env) already counted above.
+		if sel.Sel.Name == "StripBdBranch" && len(call.Args) == 0 {
+			if ident, ok := sel.X.(*ast.Ident); !ok || ident.Name != "beads" {
+				counts.StripBdBranch++
+			}
+		}
+
 		return true
 	})
 	return counts
@@ -616,7 +624,7 @@ func TestBdBranchProtectionCoverage(t *testing.T) {
 		{"hook.go", 2, 0},
 		{"statusline.go", 1, 0},
 		{"molecule_status.go", 1, 0},
-		{"sling_helpers.go", 0, 3},
+		{"sling_helpers.go", 0, 4},
 		{"show.go", 0, 1},
 	}
 

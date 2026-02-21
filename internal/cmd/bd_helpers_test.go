@@ -418,9 +418,11 @@ func TestBdCmd_MultipleAutoCommit_LastWins(t *testing.T) {
 }
 
 func TestBdCmd_EmptyGTRoot_Skipped(t *testing.T) {
-	// Test that empty GT_ROOT is not added to env
+	// Test that empty GT_ROOT is not added to env.
+	// Use a clean env to avoid inheriting GT_ROOT from the test runner.
 	bdc := BdCmd("show", "id").
 		WithGTRoot("")
+	bdc.env = filterEnv(bdc.env, "GT_ROOT")
 
 	cmd := bdc.Build()
 
@@ -631,4 +633,16 @@ func TestBdCmd_EnvImmutability(t *testing.T) {
 	if !found {
 		t.Error("BD_BRANCH was removed from original env (should be immutable)")
 	}
+}
+
+// filterEnv returns env with all entries matching the given key prefix removed.
+func filterEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
