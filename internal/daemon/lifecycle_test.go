@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // testDaemon creates a minimal Daemon for testing.
@@ -195,6 +197,7 @@ func TestIdentityToSession_Mayor(t *testing.T) {
 func TestIdentityToSession_Witness(t *testing.T) {
 	d := testDaemon()
 
+	// Default prefix registry: all unknown rigs map to DefaultPrefix ("gt")
 	tests := []struct {
 		identity string
 		expected string
@@ -202,6 +205,34 @@ func TestIdentityToSession_Witness(t *testing.T) {
 		{"gastown-witness", "gt-witness"},
 		{"myrig-witness", "gt-witness"},
 		{"my-rig-name-witness", "gt-witness"},
+	}
+
+	for _, tc := range tests {
+		result := d.identityToSession(tc.identity)
+		if result != tc.expected {
+			t.Errorf("identityToSession(%q) = %q, expected %q", tc.identity, result, tc.expected)
+		}
+	}
+}
+
+func TestIdentityToSession_WitnessWithPrefix(t *testing.T) {
+	d := testDaemon()
+
+	// Register a rig with a distinct prefix to verify prefix differentiation
+	oldRegistry := session.DefaultRegistry()
+	r := session.NewPrefixRegistry()
+	r.Register("gt", "gastown")
+	r.Register("bd", "beads")
+	session.SetDefaultRegistry(r)
+	defer session.SetDefaultRegistry(oldRegistry)
+
+	tests := []struct {
+		identity string
+		expected string
+	}{
+		{"gastown-witness", "gt-witness"},
+		{"beads-witness", "bd-witness"},
+		{"unknown-witness", "gt-witness"}, // unknown rig falls back to DefaultPrefix
 	}
 
 	for _, tc := range tests {
