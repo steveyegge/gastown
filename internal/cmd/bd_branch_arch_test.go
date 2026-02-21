@@ -496,7 +496,6 @@ var expectedExecBdCounts = map[string]int{
 	"mail_announce.go":       1,
 	"mail_channel.go":        1,
 	"mail_queue.go":          4,
-	"migrate_bead_labels.go": 2,
 	"molecule_await_signal.go": 4,
 	"molecule_step.go":       3,
 	"patrol.go":              5,
