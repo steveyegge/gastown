@@ -1361,6 +1361,7 @@ func TestExpandRolePattern(t *testing.T) {
 		rig      string
 		name     string
 		role     string
+		prefix   string
 		want     string
 	}{
 		{
@@ -1369,18 +1370,20 @@ func TestExpandRolePattern(t *testing.T) {
 			want:     "gt-mayor",
 		},
 		{
-			pattern:  "gt-{rig}-{role}",
+			pattern:  "{prefix}-{role}",
 			townRoot: "/Users/stevey/gt",
 			rig:      "gastown",
 			role:     "witness",
-			want:     "gt-gastown-witness",
+			prefix:   "gt",
+			want:     "gt-witness",
 		},
 		{
-			pattern:  "gt-{rig}-{name}",
+			pattern:  "{prefix}-{name}",
 			townRoot: "/Users/stevey/gt",
 			rig:      "gastown",
 			name:     "toast",
-			want:     "gt-gastown-toast",
+			prefix:   "gt",
+			want:     "gt-toast",
 		},
 		{
 			pattern:  "{town}/{rig}/polecats/{name}",
@@ -1407,7 +1410,7 @@ func TestExpandRolePattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
-			got := ExpandRolePattern(tt.pattern, tt.townRoot, tt.rig, tt.name, tt.role)
+			got := ExpandRolePattern(tt.pattern, tt.townRoot, tt.rig, tt.name, tt.role, tt.prefix)
 			if got != tt.want {
 				t.Errorf("ExpandRolePattern() = %q, want %q", got, tt.want)
 			}

@@ -199,9 +199,9 @@ func TestIdentityToSession_Witness(t *testing.T) {
 		identity string
 		expected string
 	}{
-		{"gastown-witness", "gt-gastown-witness"},
-		{"myrig-witness", "gt-myrig-witness"},
-		{"my-rig-name-witness", "gt-my-rig-name-witness"},
+		{"gastown-witness", "gt-witness"},
+		{"myrig-witness", "gt-witness"},
+		{"my-rig-name-witness", "gt-witness"},
 	}
 
 	for _, tc := range tests {

@@ -242,7 +242,7 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 	}
 	expanded := make(map[string]string, len(roleConfig.EnvVars))
 	for key, value := range roleConfig.EnvVars {
-		expanded[key] = beads.ExpandRolePattern(value, townRoot, rigName, "", "witness")
+		expanded[key] = beads.ExpandRolePattern(value, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 	}
 	return expanded
 }
@@ -252,7 +252,7 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
+		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),

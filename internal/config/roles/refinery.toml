@@ -7,7 +7,7 @@ nudge = "Run 'gt prime' to check merge queue and begin processing."
 prompt_template = "refinery.md.tmpl"
 
 [session]
-pattern = "gt-{rig}-refinery"
+pattern = "{prefix}-refinery"
 work_dir = "{town}/{rig}/refinery/rig"
 needs_pre_sync = true
 start_command = "exec claude --dangerously-skip-permissions"

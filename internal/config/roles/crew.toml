@@ -7,7 +7,7 @@ nudge = "Check your hook and mail, then act accordingly."
 prompt_template = "crew.md.tmpl"
 
 [session]
-pattern = "gt-{rig}-crew-{name}"
+pattern = "{prefix}-crew-{name}"
 work_dir = "{town}/{rig}/crew/{name}"
 needs_pre_sync = true
 start_command = "exec claude --dangerously-skip-permissions"

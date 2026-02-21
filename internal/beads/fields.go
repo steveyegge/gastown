@@ -655,12 +655,13 @@ func FormatRoleConfig(config *RoleConfig) string {
 }
 
 // ExpandRolePattern expands placeholders in a pattern string.
-// Supported placeholders: {town}, {rig}, {name}, {role}
-func ExpandRolePattern(pattern, townRoot, rig, name, role string) string {
+// Supported placeholders: {town}, {rig}, {name}, {role}, {prefix}
+func ExpandRolePattern(pattern, townRoot, rig, name, role, prefix string) string {
 	result := pattern
 	result = strings.ReplaceAll(result, "{town}", townRoot)
 	result = strings.ReplaceAll(result, "{rig}", rig)
 	result = strings.ReplaceAll(result, "{name}", name)
 	result = strings.ReplaceAll(result, "{role}", role)
+	result = strings.ReplaceAll(result, "{prefix}", prefix)
 	return result
 }
