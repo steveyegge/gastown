@@ -661,6 +661,296 @@ func TestMailboxLegacyConcurrentMarkRead(t *testing.T) {
 	}
 }
 
+func TestMailboxLegacyMarkUnread(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	msg := &Message{ID: "msg-001", Read: true}
+	if err := m.Append(msg); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+
+	// Mark as unread
+	if err := m.MarkUnread("msg-001"); err != nil {
+		t.Fatalf("MarkUnread error: %v", err)
+	}
+
+	got, err := m.Get("msg-001")
+	if err != nil {
+		t.Fatalf("Get error: %v", err)
+	}
+	if got.Read {
+		t.Error("Message should be unread after MarkUnread")
+	}
+
+	// MarkUnread non-existent
+	err = m.MarkUnread("msg-nonexistent")
+	if err != ErrMessageNotFound {
+		t.Errorf("MarkUnread non-existent = %v, want ErrMessageNotFound", err)
+	}
+}
+
+func TestMailboxIdentityVariants(t *testing.T) {
+	tests := []struct {
+		identity string
+		want     []string
+	}{
+		{"mayor/", []string{"mayor/", "mayor"}},
+		{"deacon/", []string{"deacon/", "deacon"}},
+		{"gastown/Toast", []string{"gastown/Toast"}},
+		{"overseer", []string{"overseer"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.identity, func(t *testing.T) {
+			m := &Mailbox{identity: tt.identity}
+			got := m.identityVariants()
+			if len(got) != len(tt.want) {
+				t.Fatalf("identityVariants() = %v, want %v", got, tt.want)
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("identityVariants()[%d] = %q, want %q", i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestArchivePath(t *testing.T) {
+	// Legacy mailbox
+	legacy := NewMailbox("/tmp/test")
+	if filepath.ToSlash(legacy.ArchivePath()) != "/tmp/test/inbox.jsonl.archive" {
+		t.Errorf("Legacy ArchivePath = %q, want '/tmp/test/inbox.jsonl.archive'", legacy.ArchivePath())
+	}
+
+	// Beads mailbox
+	beadsMbox := &Mailbox{beadsDir: "/custom/.beads", legacy: false}
+	if filepath.ToSlash(beadsMbox.ArchivePath()) != "/custom/.beads/archive.jsonl" {
+		t.Errorf("Beads ArchivePath = %q, want '/custom/.beads/archive.jsonl'", beadsMbox.ArchivePath())
+	}
+}
+
+func TestMailboxLegacyPurgeArchiveAll(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Add and archive some messages
+	msgs := []*Message{
+		{ID: "msg-001", Subject: "First", Timestamp: time.Now().Add(-48 * time.Hour)},
+		{ID: "msg-002", Subject: "Second", Timestamp: time.Now().Add(-24 * time.Hour)},
+		{ID: "msg-003", Subject: "Third", Timestamp: time.Now()},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+	for _, msg := range msgs {
+		if err := m.Archive(msg.ID); err != nil {
+			t.Fatalf("Archive error: %v", err)
+		}
+	}
+
+	// Verify archive has 3 messages
+	archived, err := m.ListArchived()
+	if err != nil {
+		t.Fatalf("ListArchived error: %v", err)
+	}
+	if len(archived) != 3 {
+		t.Fatalf("archive has %d messages, want 3", len(archived))
+	}
+
+	// Purge all (olderThanDays=0)
+	purged, err := m.PurgeArchive(0)
+	if err != nil {
+		t.Fatalf("PurgeArchive error: %v", err)
+	}
+	if purged != 3 {
+		t.Errorf("purged = %d, want 3", purged)
+	}
+
+	// Archive should be empty
+	archived, err = m.ListArchived()
+	if err != nil {
+		t.Fatalf("ListArchived after purge error: %v", err)
+	}
+	if archived != nil {
+		t.Errorf("archive should be nil after purge, got %d messages", len(archived))
+	}
+}
+
+func TestMailboxLegacyPurgeArchiveByAge(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Override timeNow for predictable results
+	origTimeNow := timeNow
+	fixedNow := time.Date(2026, 2, 21, 12, 0, 0, 0, time.UTC)
+	timeNow = func() time.Time { return fixedNow }
+	defer func() { timeNow = origTimeNow }()
+
+	msgs := []*Message{
+		{ID: "msg-old", Subject: "Old", Timestamp: fixedNow.Add(-10 * 24 * time.Hour)},
+		{ID: "msg-recent", Subject: "Recent", Timestamp: fixedNow.Add(-1 * time.Hour)},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+	for _, msg := range msgs {
+		if err := m.Archive(msg.ID); err != nil {
+			t.Fatalf("Archive error: %v", err)
+		}
+	}
+
+	// Purge messages older than 7 days
+	purged, err := m.PurgeArchive(7)
+	if err != nil {
+		t.Fatalf("PurgeArchive error: %v", err)
+	}
+	if purged != 1 {
+		t.Errorf("purged = %d, want 1", purged)
+	}
+
+	// Recent message should remain
+	archived, err := m.ListArchived()
+	if err != nil {
+		t.Fatalf("ListArchived error: %v", err)
+	}
+	if len(archived) != 1 {
+		t.Fatalf("archive has %d messages, want 1", len(archived))
+	}
+	if archived[0].ID != "msg-recent" {
+		t.Errorf("remaining message ID = %q, want 'msg-recent'", archived[0].ID)
+	}
+}
+
+func TestMailboxLegacyPurgeEmptyArchive(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	purged, err := m.PurgeArchive(0)
+	if err != nil {
+		t.Fatalf("PurgeArchive error: %v", err)
+	}
+	if purged != 0 {
+		t.Errorf("purged = %d, want 0", purged)
+	}
+}
+
+func TestMailboxLegacySearch(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	msgs := []*Message{
+		{ID: "msg-001", From: "mayor/", Subject: "Deploy Plan", Body: "Deploy to production", Timestamp: time.Now().Add(-2 * time.Hour)},
+		{ID: "msg-002", From: "gastown/Toast", Subject: "Bug Report", Body: "Found a bug in deploy", Timestamp: time.Now().Add(-1 * time.Hour)},
+		{ID: "msg-003", From: "mayor/", Subject: "Status Update", Body: "All systems operational", Timestamp: time.Now()},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+
+	// Search across subject and body
+	results, err := m.Search(SearchOptions{Query: "deploy"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("Search 'deploy' returned %d, want 2", len(results))
+	}
+
+	// Subject only
+	results, err = m.Search(SearchOptions{Query: "deploy", SubjectOnly: true})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Search 'deploy' subject-only returned %d, want 1", len(results))
+	}
+	if len(results) == 1 && results[0].ID != "msg-001" {
+		t.Errorf("Expected msg-001, got %s", results[0].ID)
+	}
+
+	// Body only
+	results, err = m.Search(SearchOptions{Query: "bug", BodyOnly: true})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Search 'bug' body-only returned %d, want 1", len(results))
+	}
+
+	// From filter
+	results, err = m.Search(SearchOptions{Query: "deploy", FromFilter: "mayor"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Search 'deploy' from mayor returned %d, want 1", len(results))
+	}
+
+	// No results
+	results, err = m.Search(SearchOptions{Query: "nonexistent"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Search 'nonexistent' returned %d, want 0", len(results))
+	}
+}
+
+func TestMailboxLegacySearchCaseInsensitive(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	msg := &Message{ID: "msg-001", Subject: "URGENT Deploy", Body: "need to deploy NOW"}
+	if err := m.Append(msg); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+
+	// Case-insensitive search
+	results, err := m.Search(SearchOptions{Query: "urgent"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Case-insensitive search returned %d, want 1", len(results))
+	}
+}
+
+func TestMailboxLegacySearchIncludesArchive(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	// Add one to inbox, archive another
+	inbox := &Message{ID: "msg-inbox", Subject: "Inbox Deploy", Timestamp: time.Now()}
+	archived := &Message{ID: "msg-arch", Subject: "Archive Deploy", Timestamp: time.Now().Add(-time.Hour)}
+
+	if err := m.Append(inbox); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+	if err := m.Append(archived); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+	if err := m.Archive("msg-arch"); err != nil {
+		t.Fatalf("Archive error: %v", err)
+	}
+
+	// Search should find both
+	results, err := m.Search(SearchOptions{Query: "deploy"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("Search across inbox+archive returned %d, want 2", len(results))
+	}
+}
+
 func TestMailboxLegacyAtomicArchive(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewMailbox(tmpDir)

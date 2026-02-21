@@ -597,6 +597,112 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
+// ============ Channel Address Tests ============
+
+func TestIsChannelAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{"channel:alerts", true},
+		{"channel:gastown/updates", true},
+		{"channel:", true}, // Edge case: empty name
+		{"mayor/", false},
+		{"gastown/witness", false},
+		{"channelalerts", false}, // Missing colon
+		{"announce:alerts", false},
+		{"queue:work", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := isChannelAddress(tt.address)
+			if got != tt.want {
+				t.Errorf("isChannelAddress(%q) = %v, want %v", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseChannelName(t *testing.T) {
+	tests := []struct {
+		address string
+		want    string
+	}{
+		{"channel:alerts", "alerts"},
+		{"channel:gastown/updates", "gastown/updates"},
+		{"channel:", ""},
+		{"channel:priority-alerts", "priority-alerts"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := parseChannelName(tt.address)
+			if got != tt.want {
+				t.Errorf("parseChannelName(%q) = %q, want %q", tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRigAgentAddressFromID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		// Named roles (crew, polecat) — require name segment
+		{"bd-beads-crew-beavis", "beads/beavis"},
+		{"ppf-pyspark_pipeline_framework-polecat-Toast", "pyspark_pipeline_framework/Toast"},
+		{"bd-beads-crew-my-agent", "beads/my-agent"},
+
+		// Singleton roles — no name segment allowed
+		{"bd-beads-witness", "beads/witness"},
+		{"db-debt_buying-refinery", "debt_buying/refinery"},
+
+		// Malformed singletons with name segment — rejected
+		{"bd-beads-witness-extra", ""},
+		{"bd-beads-refinery-extra", ""},
+
+		// Crew/polecat without name — malformed
+		{"bd-beads-crew", ""},
+
+		// Unknown role markers
+		{"bd-beads-unknown", ""},
+
+		// Empty/invalid
+		{"", ""},
+		{"bd", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := parseRigAgentAddressFromID(tt.id)
+			if got != tt.want {
+				t.Errorf("parseRigAgentAddressFromID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpandListAddress(t *testing.T) {
+	// Non-list address should error
+	r := &Router{workDir: "/tmp", townRoot: ""}
+	_, err := r.ExpandListAddress("mayor/")
+	if err == nil {
+		t.Error("ExpandListAddress on non-list should error")
+	}
+	if !contains(err.Error(), "not a list address") {
+		t.Errorf("error = %v, want containing 'not a list address'", err)
+	}
+}
+
+func TestWaitPendingNotifications(t *testing.T) {
+	r := &Router{}
+	// Should not block when nothing is pending
+	r.WaitPendingNotifications()
+}
+
 // ============ @group Address Tests ============
 
 func TestIsGroupAddress(t *testing.T) {

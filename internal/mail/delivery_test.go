@@ -6,6 +6,80 @@ import (
 	"time"
 )
 
+func TestDeliverySendLabels(t *testing.T) {
+	got := DeliverySendLabels()
+	if len(got) != 1 {
+		t.Fatalf("DeliverySendLabels() len = %d, want 1", len(got))
+	}
+	if got[0] != DeliveryLabelPending {
+		t.Errorf("DeliverySendLabels()[0] = %q, want %q", got[0], DeliveryLabelPending)
+	}
+}
+
+func TestParseDeliveryLabels_Empty(t *testing.T) {
+	state, by, at := ParseDeliveryLabels(nil)
+	if state != "" {
+		t.Errorf("state = %q, want empty", state)
+	}
+	if by != "" {
+		t.Errorf("ackedBy = %q, want empty", by)
+	}
+	if at != nil {
+		t.Errorf("ackedAt = %v, want nil", at)
+	}
+
+	// Also test empty slice
+	state2, by2, at2 := ParseDeliveryLabels([]string{})
+	if state2 != "" || by2 != "" || at2 != nil {
+		t.Errorf("empty slice: state=%q by=%q at=%v, want all empty/nil", state2, by2, at2)
+	}
+}
+
+func TestParseDeliveryLabels_InvalidTimestamp(t *testing.T) {
+	state, by, at := ParseDeliveryLabels([]string{
+		DeliveryLabelPending,
+		"delivery-acked-by:gastown/worker",
+		"delivery-acked-at:not-a-timestamp",
+		DeliveryLabelAcked,
+	})
+	if state != DeliveryStateAcked {
+		t.Errorf("state = %q, want %q", state, DeliveryStateAcked)
+	}
+	if by != "gastown/worker" {
+		t.Errorf("ackedBy = %q, want 'gastown/worker'", by)
+	}
+	if at != nil {
+		t.Errorf("ackedAt should be nil for invalid timestamp, got %v", at)
+	}
+}
+
+func TestParseDeliveryLabels_OnlyAcked(t *testing.T) {
+	// Only acked label, no pending — should still return acked
+	state, by, at := ParseDeliveryLabels([]string{
+		DeliveryLabelAcked,
+	})
+	if state != DeliveryStateAcked {
+		t.Errorf("state = %q, want %q", state, DeliveryStateAcked)
+	}
+	if by != "" {
+		t.Errorf("ackedBy = %q, want empty", by)
+	}
+	if at != nil {
+		t.Errorf("ackedAt = %v, want nil", at)
+	}
+}
+
+func TestParseDeliveryLabels_UnrelatedLabels(t *testing.T) {
+	state, by, at := ParseDeliveryLabels([]string{
+		"from:mayor/",
+		"gt:message",
+		"thread:t-001",
+	})
+	if state != "" || by != "" || at != nil {
+		t.Errorf("unrelated labels: state=%q by=%q at=%v, want all empty/nil", state, by, at)
+	}
+}
+
 func TestDeliveryAckLabelSequenceOrder(t *testing.T) {
 	at := time.Date(2026, 2, 17, 12, 0, 0, 0, time.UTC)
 	got := DeliveryAckLabelSequence("gastown/worker", at)

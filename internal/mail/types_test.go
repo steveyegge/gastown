@@ -902,6 +902,285 @@ func TestNewMessageValidatesForCrossRigAddresses(t *testing.T) {
 	}
 }
 
+func TestBeadsMessageGetCC(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-cc",
+		Labels: []string{"cc:gastown/Toast", "cc:gastown/nux", "from:mayor/"},
+	}
+	bm.ParseLabels()
+
+	cc := bm.GetCC()
+	if len(cc) != 2 {
+		t.Fatalf("GetCC() len = %d, want 2", len(cc))
+	}
+	if cc[0] != "gastown/Toast" {
+		t.Errorf("GetCC()[0] = %q, want 'gastown/Toast'", cc[0])
+	}
+	if cc[1] != "gastown/nux" {
+		t.Errorf("GetCC()[1] = %q, want 'gastown/nux'", cc[1])
+	}
+
+	// No CC labels
+	bm2 := BeadsMessage{ID: "hq-nocc", Labels: []string{"from:mayor/"}}
+	bm2.ParseLabels()
+	if got := bm2.GetCC(); got != nil {
+		t.Errorf("GetCC() = %v, want nil for no CC", got)
+	}
+}
+
+func TestBeadsMessageIsCCRecipient(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-cc",
+		Labels: []string{"cc:gastown/Toast", "cc:gastown/nux"},
+	}
+	bm.ParseLabels()
+
+	tests := []struct {
+		identity string
+		want     bool
+	}{
+		{"gastown/Toast", true},
+		{"gastown/nux", true},
+		{"gastown/unknown", false},
+		{"mayor/", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := bm.IsCCRecipient(tt.identity); got != tt.want {
+			t.Errorf("IsCCRecipient(%q) = %v, want %v", tt.identity, got, tt.want)
+		}
+	}
+}
+
+func TestBeadsMessageGetQueue(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-q",
+		Labels: []string{"queue:work-requests"},
+	}
+	bm.ParseLabels()
+	if got := bm.GetQueue(); got != "work-requests" {
+		t.Errorf("GetQueue() = %q, want 'work-requests'", got)
+	}
+
+	// No queue label
+	bm2 := BeadsMessage{ID: "hq-noq", Labels: []string{"from:mayor/"}}
+	bm2.ParseLabels()
+	if got := bm2.GetQueue(); got != "" {
+		t.Errorf("GetQueue() = %q, want empty", got)
+	}
+}
+
+func TestBeadsMessageGetChannel(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-ch",
+		Labels: []string{"channel:alerts"},
+	}
+	bm.ParseLabels()
+	if got := bm.GetChannel(); got != "alerts" {
+		t.Errorf("GetChannel() = %q, want 'alerts'", got)
+	}
+
+	// No channel label
+	bm2 := BeadsMessage{ID: "hq-noch", Labels: []string{"from:mayor/"}}
+	bm2.ParseLabels()
+	if got := bm2.GetChannel(); got != "" {
+		t.Errorf("GetChannel() = %q, want empty", got)
+	}
+}
+
+func TestBeadsMessageGetClaimedBy(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-claimed",
+		Labels: []string{"claimed-by:gastown/nux"},
+	}
+	bm.ParseLabels()
+	if got := bm.GetClaimedBy(); got != "gastown/nux" {
+		t.Errorf("GetClaimedBy() = %q, want 'gastown/nux'", got)
+	}
+
+	// Not claimed
+	bm2 := BeadsMessage{ID: "hq-unclaimed", Labels: []string{}}
+	bm2.ParseLabels()
+	if got := bm2.GetClaimedBy(); got != "" {
+		t.Errorf("GetClaimedBy() = %q, want empty", got)
+	}
+}
+
+func TestBeadsMessageGetClaimedAt(t *testing.T) {
+	claimedTime := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
+	bm := BeadsMessage{
+		ID:     "hq-claimed",
+		Labels: []string{"claimed-at:" + claimedTime.Format(time.RFC3339)},
+	}
+	bm.ParseLabels()
+	got := bm.GetClaimedAt()
+	if got == nil {
+		t.Fatal("GetClaimedAt() = nil, want non-nil")
+	}
+	if !got.Equal(claimedTime) {
+		t.Errorf("GetClaimedAt() = %v, want %v", got, claimedTime)
+	}
+
+	// Invalid timestamp
+	bm2 := BeadsMessage{
+		ID:     "hq-badtime",
+		Labels: []string{"claimed-at:not-a-timestamp"},
+	}
+	bm2.ParseLabels()
+	if got2 := bm2.GetClaimedAt(); got2 != nil {
+		t.Errorf("GetClaimedAt() = %v, want nil for bad timestamp", got2)
+	}
+
+	// No claimed-at label
+	bm3 := BeadsMessage{ID: "hq-notime", Labels: []string{}}
+	bm3.ParseLabels()
+	if got3 := bm3.GetClaimedAt(); got3 != nil {
+		t.Errorf("GetClaimedAt() = %v, want nil", got3)
+	}
+}
+
+func TestBeadsMessageHasLabel(t *testing.T) {
+	bm := BeadsMessage{
+		ID:     "hq-labels",
+		Labels: []string{"gt:message", "from:mayor/", "read", "delivery:pending"},
+	}
+
+	tests := []struct {
+		label string
+		want  bool
+	}{
+		{"gt:message", true},
+		{"from:mayor/", true},
+		{"read", true},
+		{"delivery:pending", true},
+		{"nonexistent", false},
+		{"", false},
+		{"gt:messag", false},  // Partial match should fail
+		{"GT:MESSAGE", false}, // Case-sensitive
+	}
+	for _, tt := range tests {
+		if got := bm.HasLabel(tt.label); got != tt.want {
+			t.Errorf("HasLabel(%q) = %v, want %v", tt.label, got, tt.want)
+		}
+	}
+}
+
+func TestBeadsMessageToMessageWithCCAddresses(t *testing.T) {
+	bm := BeadsMessage{
+		ID:          "hq-ccmsg",
+		Title:       "CC Test",
+		Description: "CC Body",
+		Status:      "open",
+		Assignee:    "gastown/Toast",
+		Labels: []string{
+			"from:mayor/",
+			"cc:gastown/polecats/nux",
+			"cc:deacon/",
+		},
+		Priority: 2,
+	}
+
+	msg := bm.ToMessage()
+	if len(msg.CC) != 2 {
+		t.Fatalf("CC len = %d, want 2", len(msg.CC))
+	}
+	// CC addresses are normalized via identityToAddress
+	if msg.CC[0] != "gastown/nux" {
+		t.Errorf("CC[0] = %q, want 'gastown/nux' (normalized)", msg.CC[0])
+	}
+	if msg.CC[1] != "deacon/" {
+		t.Errorf("CC[1] = %q, want 'deacon/'", msg.CC[1])
+	}
+}
+
+func TestBeadsMessageToMessageWisp(t *testing.T) {
+	bm := BeadsMessage{
+		ID:       "hq-wisp",
+		Title:    "Wisp Message",
+		Assignee: "gastown/Toast",
+		Wisp:     true,
+		Labels:   []string{"from:mayor/"},
+		Priority: 2,
+	}
+
+	msg := bm.ToMessage()
+	if !msg.Wisp {
+		t.Error("Wisp should be true")
+	}
+
+	// Non-wisp message
+	bm2 := BeadsMessage{
+		ID:       "hq-nowisp",
+		Title:    "Normal Message",
+		Assignee: "gastown/Toast",
+		Wisp:     false,
+		Labels:   []string{"from:mayor/"},
+		Priority: 2,
+	}
+	msg2 := bm2.ToMessage()
+	if msg2.Wisp {
+		t.Error("Wisp should be false")
+	}
+}
+
+func TestBeadsMessageToMessageReadViaLabel(t *testing.T) {
+	// Status "open" but has "read" label → should be marked as read
+	bm := BeadsMessage{
+		ID:       "hq-readlabel",
+		Title:    "Read via Label",
+		Status:   "open",
+		Assignee: "gastown/Toast",
+		Labels:   []string{"from:mayor/", "read"},
+		Priority: 2,
+	}
+
+	msg := bm.ToMessage()
+	if !msg.Read {
+		t.Error("Message with 'read' label should be marked Read=true")
+	}
+
+	// Status "closed" → should be read
+	bm2 := BeadsMessage{
+		ID:       "hq-closed",
+		Title:    "Closed",
+		Status:   "closed",
+		Assignee: "gastown/Toast",
+		Labels:   []string{"from:mayor/"},
+		Priority: 2,
+	}
+	msg2 := bm2.ToMessage()
+	if !msg2.Read {
+		t.Error("Closed message should be marked Read=true")
+	}
+
+	// Status "open" without "read" label → unread
+	bm3 := BeadsMessage{
+		ID:       "hq-unread",
+		Title:    "Unread",
+		Status:   "open",
+		Assignee: "gastown/Toast",
+		Labels:   []string{"from:mayor/"},
+		Priority: 2,
+	}
+	msg3 := bm3.ToMessage()
+	if msg3.Read {
+		t.Error("Open message without 'read' label should be Read=false")
+	}
+}
+
+func TestNormalizeAddressOverseer(t *testing.T) {
+	// Test overseer identity roundtrip
+	got := AddressToIdentity("overseer")
+	if got != "overseer" {
+		t.Errorf("AddressToIdentity('overseer') = %q, want 'overseer'", got)
+	}
+
+	got2 := identityToAddress("overseer")
+	if got2 != "overseer" {
+		t.Errorf("identityToAddress('overseer') = %q, want 'overseer'", got2)
+	}
+}
+
 func TestNewMessageFanOutCopiesGetUniqueIDs(t *testing.T) {
 	// When fanning out to multiple recipients, copies with cleared IDs
 	// should get unique IDs from sendToSingle (gt-rud3p).
