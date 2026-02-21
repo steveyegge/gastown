@@ -3070,3 +3070,134 @@ func TestBdBranch_SystemScenario_FilterBeadsEnvIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRunEnv_Default(t *testing.T) {
+	// Default Beads (not isolated, not onMain) returns os.Environ() unmodified.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	b := &Beads{workDir: "/tmp"}
+	env := b.buildRunEnv()
+	found := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "BD_BRANCH=") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected BD_BRANCH to be present in default buildRunEnv()")
+	}
+}
+
+func TestBuildRunEnv_OnMain(t *testing.T) {
+	// OnMain mode strips BD_BRANCH from the environment.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("PATH", "/usr/bin")
+	b := &Beads{workDir: "/tmp", onMain: true}
+	env := b.buildRunEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "BD_BRANCH=") {
+			t.Error("expected BD_BRANCH to be stripped in onMain buildRunEnv()")
+		}
+	}
+	// PATH should still be present.
+	pathFound := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			pathFound = true
+		}
+	}
+	if !pathFound {
+		t.Error("expected PATH to survive onMain buildRunEnv()")
+	}
+}
+
+func TestBuildRunEnv_Isolated(t *testing.T) {
+	// Isolated mode strips all beads-related env vars.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("BD_ACTOR", "test-actor")
+	t.Setenv("BEADS_DIR", "/tmp/beads")
+	b := &Beads{workDir: "/tmp", isolated: true}
+	env := b.buildRunEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "BD_BRANCH=") || strings.HasPrefix(e, "BD_ACTOR=") || strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Errorf("expected beads env var to be stripped in isolated buildRunEnv(), got %s", e)
+		}
+	}
+}
+
+func TestBuildRoutingEnv_Default(t *testing.T) {
+	// Default: strips BEADS_DIR but preserves BD_BRANCH.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("BEADS_DIR", "/tmp/beads")
+	b := &Beads{workDir: "/tmp"}
+	env := b.buildRoutingEnv()
+	branchFound := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Error("expected BEADS_DIR to be stripped in default buildRoutingEnv()")
+		}
+		if strings.HasPrefix(e, "BD_BRANCH=") {
+			branchFound = true
+		}
+	}
+	if !branchFound {
+		t.Error("expected BD_BRANCH to be preserved in default buildRoutingEnv()")
+	}
+}
+
+func TestBuildRoutingEnv_OnMain(t *testing.T) {
+	// OnMain: strips both BEADS_DIR and BD_BRANCH.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("BEADS_DIR", "/tmp/beads")
+	t.Setenv("PATH", "/usr/bin")
+	b := &Beads{workDir: "/tmp", onMain: true}
+	env := b.buildRoutingEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Error("expected BEADS_DIR to be stripped in onMain buildRoutingEnv()")
+		}
+		if strings.HasPrefix(e, "BD_BRANCH=") {
+			t.Error("expected BD_BRANCH to be stripped in onMain buildRoutingEnv()")
+		}
+	}
+}
+
+func TestBuildRoutingEnv_Isolated(t *testing.T) {
+	// Isolated: full beads env filtering (superset of onMain).
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("BD_ACTOR", "test-actor")
+	t.Setenv("BEADS_DIR", "/tmp/beads")
+	b := &Beads{workDir: "/tmp", isolated: true}
+	env := b.buildRoutingEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "BD_BRANCH=") || strings.HasPrefix(e, "BD_ACTOR=") || strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Errorf("expected beads env var to be stripped in isolated buildRoutingEnv(), got %s", e)
+		}
+	}
+}
+
+func TestBuildRunEnv_IsolatedTakesPrecedenceOverOnMain(t *testing.T) {
+	// When both isolated and onMain are true, isolated wins (filterBeadsEnv).
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("GT_ROOT", "/tmp/gt")
+	b := &Beads{workDir: "/tmp", isolated: true, onMain: true}
+	env := b.buildRunEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "GT_ROOT=") {
+			t.Error("expected GT_ROOT to be stripped when isolated (filterBeadsEnv), even with onMain")
+		}
+	}
+}
+
+func TestBuildRoutingEnv_IsolatedTakesPrecedenceOverOnMain(t *testing.T) {
+	// When both isolated and onMain are true, isolated wins.
+	t.Setenv("BD_BRANCH", "polecat-test-123")
+	t.Setenv("GT_ROOT", "/tmp/gt")
+	b := &Beads{workDir: "/tmp", isolated: true, onMain: true}
+	env := b.buildRoutingEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "GT_ROOT=") {
+			t.Error("expected GT_ROOT to be stripped when isolated, even with onMain")
+		}
+	}
+}

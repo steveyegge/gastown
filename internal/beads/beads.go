@@ -292,18 +292,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Build environment: filter beads env vars when in isolated mode (tests),
-	// strip BD_BRANCH when in onMain mode (read from main, not polecat branch).
-	// Note: isolated is a superset of onMain — filterBeadsEnv strips BD_BRANCH too.
-	var env []string
-	if b.isolated {
-		env = filterBeadsEnv(os.Environ())
-	} else if b.onMain {
-		env = StripBdBranch(os.Environ())
-	} else {
-		env = os.Environ()
-	}
-	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
+	cmd.Env = append(b.buildRunEnv(), "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -335,19 +324,7 @@ func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unpara
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Build environment WITHOUT BEADS_DIR so bd discovers routes via directory traversal.
-	// In isolated mode, also filter other beads env vars for test isolation.
-	// In onMain mode, also strip BD_BRANCH so reads target main branch.
-	// Note: isolated is a superset of onMain — filterBeadsEnv strips BD_BRANCH too.
-	var env []string
-	if b.isolated {
-		env = filterBeadsEnv(os.Environ())
-	} else if b.onMain {
-		env = stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
-	} else {
-		env = stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
-	}
-	cmd.Env = env
+	cmd.Env = b.buildRoutingEnv()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -395,6 +372,34 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 		return fmt.Errorf("bd %s: %s", strings.Join(args, " "), stderr)
 	}
 	return fmt.Errorf("bd %s: %w", strings.Join(args, " "), err)
+}
+
+// buildRunEnv builds the environment for run() calls.
+// In isolated mode: strips all beads-related env vars for test isolation.
+// In onMain mode: strips BD_BRANCH so reads target main branch.
+// Otherwise: passes through the current environment.
+func (b *Beads) buildRunEnv() []string {
+	if b.isolated {
+		return filterBeadsEnv(os.Environ())
+	}
+	if b.onMain {
+		return StripBdBranch(os.Environ())
+	}
+	return os.Environ()
+}
+
+// buildRoutingEnv builds the environment for runWithRouting() calls.
+// Always strips BEADS_DIR so bd uses native routing.
+// In isolated mode: also strips BD_ACTOR, BD_BRANCH, BEADS_*, GT_ROOT, HOME.
+// In onMain mode: also strips BD_BRANCH for main-branch reads.
+func (b *Beads) buildRoutingEnv() []string {
+	if b.isolated {
+		return filterBeadsEnv(os.Environ())
+	}
+	if b.onMain {
+		return stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
+	}
+	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
 
 // filterBeadsEnv removes beads-related environment variables from the given
