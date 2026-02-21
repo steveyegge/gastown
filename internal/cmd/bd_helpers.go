@@ -1,0 +1,121 @@
+package cmd
+
+import (
+	"io"
+	"os"
+	"os/exec"
+
+	"github.com/steveyegge/gastown/internal/beads"
+)
+
+// bdCmd is a builder for constructing bd exec.Command calls.
+// It provides a fluent API for configuring environment variables,
+// working directory, and I/O settings common to bd CLI invocations.
+type bdCmd struct {
+	args          []string
+	dir           string
+	env           []string
+	stderr        io.Writer
+	stripBdBranch bool
+	autoCommit    bool
+	gtRoot        string
+}
+
+// BdCmd creates a new bd command builder with the given arguments.
+// The command will execute "bd" with the provided arguments.
+//
+// Example:
+//
+//	err := cmd.BdCmd("show", beadID, "--json").
+//	    StripBdBranch().
+//	    Dir(workDir).
+//	    Run()
+func BdCmd(args ...string) *bdCmd {
+	return &bdCmd{
+		args:   args,
+		env:    os.Environ(),
+		stderr: os.Stderr,
+	}
+}
+
+// WithAutoCommit sets BD_DOLT_AUTO_COMMIT=on in the environment.
+// This is used for sequential dependent bd calls where each call
+// needs to see the changes from previous calls.
+func (b *bdCmd) WithAutoCommit() *bdCmd {
+	b.autoCommit = true
+	return b
+}
+
+// StripBdBranch removes BD_BRANCH from the environment.
+// This is used for read operations that need to access the main branch
+// instead of a polecat's write-isolation branch.
+func (b *bdCmd) StripBdBranch() *bdCmd {
+	b.stripBdBranch = true
+	return b
+}
+
+// WithGTRoot adds GT_ROOT=root to the environment.
+// This is required for bd to find town-level formulas and configuration.
+func (b *bdCmd) WithGTRoot(root string) *bdCmd {
+	b.gtRoot = root
+	return b
+}
+
+// Dir sets the working directory for the command.
+func (b *bdCmd) Dir(dir string) *bdCmd {
+	b.dir = dir
+	return b
+}
+
+// Stderr sets the stderr writer for the command.
+// Defaults to os.Stderr if not set.
+func (b *bdCmd) Stderr(w io.Writer) *bdCmd {
+	b.stderr = w
+	return b
+}
+
+// buildEnv constructs the final environment slice based on configured options.
+func (b *bdCmd) buildEnv() []string {
+	env := b.env
+
+	// Strip BD_BRANCH if requested (for reading from main branch)
+	if b.stripBdBranch {
+		env = beads.StripBdBranch(env)
+	}
+
+	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls
+	if b.autoCommit {
+		env = append(env, "BD_DOLT_AUTO_COMMIT=on")
+	}
+
+	// Add GT_ROOT if specified
+	if b.gtRoot != "" {
+		env = append(env, "GT_ROOT="+b.gtRoot)
+	}
+
+	return env
+}
+
+// Build returns the configured exec.Cmd.
+// This allows callers to further customize the command before execution.
+func (b *bdCmd) Build() *exec.Cmd {
+	cmd := exec.Command("bd", b.args...)
+	cmd.Dir = b.dir
+	cmd.Env = b.buildEnv()
+	cmd.Stderr = b.stderr
+	return cmd
+}
+
+// Run builds and runs the command, returning any error.
+// This is a convenience method equivalent to Build().Run().
+func (b *bdCmd) Run() error {
+	return b.Build().Run()
+}
+
+// Output builds and runs the command, returning stdout and any error.
+// This is a convenience method equivalent to Build().Output().
+// Note: Output() captures stdout but Stderr must still be configured
+// separately if you want to capture stderr instead of it going to os.Stderr.
+func (b *bdCmd) Output() ([]byte, error) {
+	return b.Build().Output()
+}
