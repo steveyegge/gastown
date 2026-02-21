@@ -22,12 +22,13 @@ func TestPatrolFormulasHaveBackoffLogic(t *testing.T) {
 	type patrolFormula struct {
 		name       string
 		loopStepID string
+		awaitCmd   string // "await-signal" or "await-event"
 	}
 
 	patrolFormulas := []patrolFormula{
-		{"mol-witness-patrol.formula.toml", "loop-or-exit"},
-		{"mol-deacon-patrol.formula.toml", "loop-or-exit"},
-		{"mol-refinery-patrol.formula.toml", "burn-or-loop"},
+		{"mol-witness-patrol.formula.toml", "loop-or-exit", "await-signal"},
+		{"mol-deacon-patrol.formula.toml", "loop-or-exit", "await-signal"},
+		{"mol-refinery-patrol.formula.toml", "burn-or-loop", "await-event"},
 	}
 
 	for _, pf := range patrolFormulas {
@@ -48,20 +49,22 @@ func TestPatrolFormulasHaveBackoffLogic(t *testing.T) {
 				t.Fatalf("%s: %s step not found", pf.name, pf.loopStepID)
 			}
 
-			// Verify the formula contains the required backoff patterns
+			// Verify the formula contains the required backoff patterns.
+			// Witness/deacon use await-signal; refinery uses await-event
+			// (file-based event channel system). Both provide backoff logic.
 			requiredPatterns := []string{
-				"await-signal",
+				pf.awaitCmd,
 				"backoff",
-				"gt mol step await-signal",
+				"gt mol step " + pf.awaitCmd,
 			}
 
 			for _, pattern := range requiredPatterns {
 				if !strings.Contains(contentStr, pattern) {
 					t.Errorf("%s missing required pattern %q\n"+
-						"The %s step must include await-signal with backoff logic "+
+						"The %s step must include %s with backoff logic "+
 						"to prevent tight loops when the rig is idle.\n"+
 						"See PR #1052 for the original fix.",
-						pf.name, pattern, pf.loopStepID)
+						pf.name, pattern, pf.loopStepID, pf.awaitCmd)
 				}
 			}
 		})
