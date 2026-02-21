@@ -34,13 +34,13 @@ func TestFormatInjectOutput(t *testing.T) {
 			wantContains: []string{
 				"<system-reminder>",
 				"</system-reminder>",
-				"URGENT: 1 urgent message(s)",
+				"URGENT: 1 message(s)",
 				"m1 from mayor/: Deploy now",
 				"gt mail read <id>",
 			},
 			wantAbsent: []string{
 				"high-priority",
-				"additional",
+				"more in inbox",
 			},
 		},
 		{
@@ -52,12 +52,11 @@ func TestFormatInjectOutput(t *testing.T) {
 				"<system-reminder>",
 				"1 high-priority message(s)",
 				"m2 from gastown/wolf: Review PR",
-				"process these messages",
-				"before going idle",
+				"process at task boundary",
 			},
 			wantAbsent: []string{
 				"URGENT",
-				"additional",
+				"more in inbox",
 			},
 		},
 		{
@@ -69,8 +68,7 @@ func TestFormatInjectOutput(t *testing.T) {
 				"<system-reminder>",
 				"1 unread message(s)",
 				"m3 from gastown/toast: FYI update",
-				"check these messages",
-				"before going idle",
+				"check before idle",
 			},
 			wantAbsent: []string{
 				"URGENT",
@@ -85,7 +83,7 @@ func TestFormatInjectOutput(t *testing.T) {
 			wantContains: []string{
 				"1 unread message(s)",
 				"m4 from gastown/nux: Backlog item",
-				"check these messages",
+				"check before idle",
 			},
 			wantAbsent: []string{
 				"URGENT",
@@ -99,11 +97,11 @@ func TestFormatInjectOutput(t *testing.T) {
 				msg("m6", "gastown/wolf", "Important review", mail.PriorityHigh),
 			},
 			wantContains: []string{
-				"URGENT: 1 urgent message(s)",
+				"URGENT: 1 message(s)",
 				"m5 from mayor/: Emergency",
-				"1 high-priority message(s)",
+				"high-priority",
 				"m6 from gastown/wolf: Important review",
-				"process before going idle",
+				"process before idle",
 				"gt mail read <id>",
 			},
 			wantAbsent: []string{
@@ -119,11 +117,11 @@ func TestFormatInjectOutput(t *testing.T) {
 				msg("m9", "gastown/toast", "Newsletter", mail.PriorityNormal),
 			},
 			wantContains: []string{
-				"URGENT: 1 urgent message(s)",
+				"URGENT: 1 message(s)",
 				"m7 from mayor/: Fire",
-				"1 high-priority message(s)",
+				"high-priority",
 				"m8 from gastown/wolf: Review ASAP",
-				"1 additional message(s)",
+				"+1 more in inbox",
 			},
 			wantAbsent: []string{
 				"normal-priority",
@@ -138,8 +136,8 @@ func TestFormatInjectOutput(t *testing.T) {
 				msg("m12", "gastown/toast", "Info", mail.PriorityNormal),
 			},
 			wantContains: []string{
-				"URGENT: 1 urgent message(s)",
-				"2 additional message(s)",
+				"URGENT: 1 message(s)",
+				"+2 more in inbox",
 			},
 			wantAbsent: []string{
 				"high-priority",
@@ -155,7 +153,7 @@ func TestFormatInjectOutput(t *testing.T) {
 			},
 			wantContains: []string{
 				"1 high-priority message(s)",
-				"2 additional message(s)",
+				"+2 more in inbox",
 			},
 			wantAbsent: []string{
 				"URGENT",
@@ -169,7 +167,7 @@ func TestFormatInjectOutput(t *testing.T) {
 				msg("m17", "deacon/", "Fire 2", mail.PriorityUrgent),
 			},
 			wantContains: []string{
-				"URGENT: 2 urgent message(s)",
+				"URGENT: 2 message(s)",
 				"m16 from mayor/: Fire 1",
 				"m17 from deacon/: Fire 2",
 			},
