@@ -3071,133 +3071,155 @@ func TestBdBranch_SystemScenario_FilterBeadsEnvIsolation(t *testing.T) {
 	}
 }
 
-func TestBuildRunEnv_Default(t *testing.T) {
-	// Default Beads (not isolated, not onMain) returns os.Environ() unmodified.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	b := &Beads{workDir: "/tmp"}
-	env := b.buildRunEnv()
-	found := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			found = true
-			break
-		}
+// TestBuildRunEnv verifies buildRunEnv() returns the correct environment
+// for each mode: default (passthrough), onMain (strip BD_BRANCH), and
+// isolated (strip all beads vars). Also verifies isolated takes precedence
+// over onMain when both are set.
+//
+// Note: run() calls buildRunEnv() at beads.go:295. This was verified
+// via diff review (commit d1bc6f30) — the inline if/else was replaced
+// with the helper call, preserving identical branching semantics.
+func TestBuildRunEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		isolated bool
+		onMain   bool
+		// envVars to inject via t.Setenv
+		envVars map[string]string
+		// mustContain: prefixes that MUST be present in the result
+		mustContain []string
+		// mustNotContain: prefixes that MUST NOT be present in the result
+		mustNotContain []string
+	}{
+		{
+			name:           "default preserves BD_BRANCH",
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123"},
+			mustContain:    []string{"BD_BRANCH="},
+			mustNotContain: nil,
+		},
+		{
+			name:           "onMain strips BD_BRANCH, preserves PATH",
+			onMain:         true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "PATH": "/usr/bin"},
+			mustContain:    []string{"PATH="},
+			mustNotContain: []string{"BD_BRANCH="},
+		},
+		{
+			name:           "isolated strips all beads vars",
+			isolated:       true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BD_ACTOR": "test-actor", "BEADS_DIR": "/tmp/beads"},
+			mustNotContain: []string{"BD_BRANCH=", "BD_ACTOR=", "BEADS_DIR="},
+		},
+		{
+			name:           "isolated takes precedence over onMain",
+			isolated:       true,
+			onMain:         true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "GT_ROOT": "/tmp/gt"},
+			mustNotContain: []string{"GT_ROOT=", "BD_BRANCH="},
+		},
 	}
-	if !found {
-		t.Error("expected BD_BRANCH to be present in default buildRunEnv()")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+			b := &Beads{workDir: "/tmp", isolated: tt.isolated, onMain: tt.onMain}
+			env := b.buildRunEnv()
+
+			for _, prefix := range tt.mustContain {
+				found := false
+				for _, e := range env {
+					if strings.HasPrefix(e, prefix) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %s to be present", prefix)
+				}
+			}
+			for _, prefix := range tt.mustNotContain {
+				for _, e := range env {
+					if strings.HasPrefix(e, prefix) {
+						t.Errorf("expected %s to be absent, got %s", prefix, e)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestBuildRunEnv_OnMain(t *testing.T) {
-	// OnMain mode strips BD_BRANCH from the environment.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("PATH", "/usr/bin")
-	b := &Beads{workDir: "/tmp", onMain: true}
-	env := b.buildRunEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Error("expected BD_BRANCH to be stripped in onMain buildRunEnv()")
-		}
+// TestBuildRoutingEnv verifies buildRoutingEnv() returns the correct environment
+// for each mode: default (strip BEADS_DIR only), onMain (strip BEADS_DIR + BD_BRANCH),
+// and isolated (strip all beads vars). Also verifies isolated takes precedence.
+//
+// Note: runWithRouting() calls buildRoutingEnv() at beads.go:327. This was verified
+// via diff review (commit d1bc6f30) — the inline if/else was replaced
+// with the helper call, preserving identical branching semantics.
+func TestBuildRoutingEnv(t *testing.T) {
+	tests := []struct {
+		name           string
+		isolated       bool
+		onMain         bool
+		envVars        map[string]string
+		mustContain    []string
+		mustNotContain []string
+	}{
+		{
+			name:           "default strips BEADS_DIR, preserves BD_BRANCH",
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BEADS_DIR": "/tmp/beads"},
+			mustContain:    []string{"BD_BRANCH="},
+			mustNotContain: []string{"BEADS_DIR="},
+		},
+		{
+			name:           "onMain strips BEADS_DIR and BD_BRANCH",
+			onMain:         true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BEADS_DIR": "/tmp/beads", "PATH": "/usr/bin"},
+			mustNotContain: []string{"BEADS_DIR=", "BD_BRANCH="},
+		},
+		{
+			name:           "isolated strips all beads vars",
+			isolated:       true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BD_ACTOR": "test-actor", "BEADS_DIR": "/tmp/beads"},
+			mustNotContain: []string{"BD_BRANCH=", "BD_ACTOR=", "BEADS_DIR="},
+		},
+		{
+			name:           "isolated takes precedence over onMain",
+			isolated:       true,
+			onMain:         true,
+			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "GT_ROOT": "/tmp/gt"},
+			mustNotContain: []string{"GT_ROOT=", "BD_BRANCH="},
+		},
 	}
-	// PATH should still be present.
-	pathFound := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			pathFound = true
-		}
-	}
-	if !pathFound {
-		t.Error("expected PATH to survive onMain buildRunEnv()")
-	}
-}
 
-func TestBuildRunEnv_Isolated(t *testing.T) {
-	// Isolated mode strips all beads-related env vars.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("BD_ACTOR", "test-actor")
-	t.Setenv("BEADS_DIR", "/tmp/beads")
-	b := &Beads{workDir: "/tmp", isolated: true}
-	env := b.buildRunEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") || strings.HasPrefix(e, "BD_ACTOR=") || strings.HasPrefix(e, "BEADS_DIR=") {
-			t.Errorf("expected beads env var to be stripped in isolated buildRunEnv(), got %s", e)
-		}
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+			b := &Beads{workDir: "/tmp", isolated: tt.isolated, onMain: tt.onMain}
+			env := b.buildRoutingEnv()
 
-func TestBuildRoutingEnv_Default(t *testing.T) {
-	// Default: strips BEADS_DIR but preserves BD_BRANCH.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("BEADS_DIR", "/tmp/beads")
-	b := &Beads{workDir: "/tmp"}
-	env := b.buildRoutingEnv()
-	branchFound := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "BEADS_DIR=") {
-			t.Error("expected BEADS_DIR to be stripped in default buildRoutingEnv()")
-		}
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			branchFound = true
-		}
-	}
-	if !branchFound {
-		t.Error("expected BD_BRANCH to be preserved in default buildRoutingEnv()")
-	}
-}
-
-func TestBuildRoutingEnv_OnMain(t *testing.T) {
-	// OnMain: strips both BEADS_DIR and BD_BRANCH.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("BEADS_DIR", "/tmp/beads")
-	t.Setenv("PATH", "/usr/bin")
-	b := &Beads{workDir: "/tmp", onMain: true}
-	env := b.buildRoutingEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "BEADS_DIR=") {
-			t.Error("expected BEADS_DIR to be stripped in onMain buildRoutingEnv()")
-		}
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Error("expected BD_BRANCH to be stripped in onMain buildRoutingEnv()")
-		}
-	}
-}
-
-func TestBuildRoutingEnv_Isolated(t *testing.T) {
-	// Isolated: full beads env filtering (superset of onMain).
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("BD_ACTOR", "test-actor")
-	t.Setenv("BEADS_DIR", "/tmp/beads")
-	b := &Beads{workDir: "/tmp", isolated: true}
-	env := b.buildRoutingEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") || strings.HasPrefix(e, "BD_ACTOR=") || strings.HasPrefix(e, "BEADS_DIR=") {
-			t.Errorf("expected beads env var to be stripped in isolated buildRoutingEnv(), got %s", e)
-		}
-	}
-}
-
-func TestBuildRunEnv_IsolatedTakesPrecedenceOverOnMain(t *testing.T) {
-	// When both isolated and onMain are true, isolated wins (filterBeadsEnv).
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("GT_ROOT", "/tmp/gt")
-	b := &Beads{workDir: "/tmp", isolated: true, onMain: true}
-	env := b.buildRunEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "GT_ROOT=") {
-			t.Error("expected GT_ROOT to be stripped when isolated (filterBeadsEnv), even with onMain")
-		}
-	}
-}
-
-func TestBuildRoutingEnv_IsolatedTakesPrecedenceOverOnMain(t *testing.T) {
-	// When both isolated and onMain are true, isolated wins.
-	t.Setenv("BD_BRANCH", "polecat-test-123")
-	t.Setenv("GT_ROOT", "/tmp/gt")
-	b := &Beads{workDir: "/tmp", isolated: true, onMain: true}
-	env := b.buildRoutingEnv()
-	for _, e := range env {
-		if strings.HasPrefix(e, "GT_ROOT=") {
-			t.Error("expected GT_ROOT to be stripped when isolated, even with onMain")
-		}
+			for _, prefix := range tt.mustContain {
+				found := false
+				for _, e := range env {
+					if strings.HasPrefix(e, prefix) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %s to be present", prefix)
+				}
+			}
+			for _, prefix := range tt.mustNotContain {
+				for _, e := range env {
+					if strings.HasPrefix(e, prefix) {
+						t.Errorf("expected %s to be absent, got %s", prefix, e)
+					}
+				}
+			}
+		})
 	}
 }
