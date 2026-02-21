@@ -449,26 +449,26 @@ func LoadRigAgentRegistry(path string) error {
 // GetAgentPreset returns the preset info for a given agent name.
 // Returns nil if the preset is not found.
 func GetAgentPreset(name AgentPreset) *AgentPresetInfo {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	return globalRegistry.Agents[string(name)]
 }
 
 // GetAgentPresetByName returns the preset info by string name.
 // Returns nil if not found, allowing caller to fall back to defaults.
 func GetAgentPresetByName(name string) *AgentPresetInfo {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	return globalRegistry.Agents[name]
 }
 
 // ListAgentPresets returns all known agent preset names.
 func ListAgentPresets() []string {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	names := make([]string, 0, len(globalRegistry.Agents))
 	for name := range globalRegistry.Agents {
 		names = append(names, name)
