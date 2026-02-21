@@ -1,6 +1,9 @@
 package version
 
 import (
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +82,162 @@ func TestCheckStaleBinary_NoCommit(t *testing.T) {
 	// Both are acceptable outcomes
 	if info.BinaryCommit == "" && info.Error == nil {
 		t.Error("expected error when binary commit is empty")
+	}
+}
+
+func TestCheckStaleBinary_NotGitRepo(t *testing.T) {
+	original := Commit
+	defer func() { Commit = original }()
+
+	Commit = "abcdef1234567"
+	info := CheckStaleBinary(t.TempDir()) // empty dir, not a git repo
+	if info == nil {
+		t.Fatal("CheckStaleBinary returned nil")
+	}
+	if info.Error == nil {
+		t.Error("expected error for non-git directory")
+	}
+}
+
+func TestCheckStaleBinary_MatchingCommit(t *testing.T) {
+	original := Commit
+	defer func() { Commit = original }()
+
+	dir := initGitRepo(t)
+	head := getGitHead(t, dir)
+	Commit = head
+
+	info := CheckStaleBinary(dir)
+	if info == nil {
+		t.Fatal("CheckStaleBinary returned nil")
+	}
+	if info.Error != nil {
+		t.Fatalf("unexpected error: %v", info.Error)
+	}
+	if info.IsStale {
+		t.Error("should not be stale when commits match")
+	}
+}
+
+func TestCheckStaleBinary_StaleCommit(t *testing.T) {
+	original := Commit
+	defer func() { Commit = original }()
+
+	dir := initGitRepo(t)
+	firstHead := getGitHead(t, dir)
+
+	// Add another commit
+	addGitCommit(t, dir, "second.txt", "second commit")
+
+	Commit = firstHead
+	info := CheckStaleBinary(dir)
+	if info == nil {
+		t.Fatal("CheckStaleBinary returned nil")
+	}
+	if info.Error != nil {
+		t.Fatalf("unexpected error: %v", info.Error)
+	}
+	if !info.IsStale {
+		t.Error("should be stale when commits differ")
+	}
+	if info.CommitsBehind < 1 {
+		t.Errorf("CommitsBehind = %d, want >= 1", info.CommitsBehind)
+	}
+}
+
+func TestStaleBinaryInfo_Fields(t *testing.T) {
+	info := &StaleBinaryInfo{
+		IsStale:       true,
+		BinaryCommit:  "abc123",
+		RepoCommit:    "def456",
+		CommitsBehind: 5,
+	}
+	if !info.IsStale {
+		t.Error("IsStale should be true")
+	}
+	if info.CommitsBehind != 5 {
+		t.Errorf("CommitsBehind = %d", info.CommitsBehind)
+	}
+}
+
+func TestResolveCommitHash_WithCommitVar(t *testing.T) {
+	original := Commit
+	defer func() { Commit = original }()
+
+	Commit = "explicit_commit_hash"
+	got := resolveCommitHash()
+	if got != "explicit_commit_hash" {
+		t.Errorf("resolveCommitHash() = %q, want %q", got, "explicit_commit_hash")
+	}
+}
+
+func TestHasGtSource(t *testing.T) {
+	t.Run("empty dir", func(t *testing.T) {
+		if hasGtSource(t.TempDir()) {
+			t.Error("should be false for empty dir")
+		}
+	})
+
+	t.Run("with marker file", func(t *testing.T) {
+		dir := t.TempDir()
+		os.MkdirAll(dir+"/cmd/gt", 0755)
+		os.WriteFile(dir+"/cmd/gt/main.go", []byte("package main"), 0644)
+		if !hasGtSource(dir) {
+			t.Error("should be true when cmd/gt/main.go exists")
+		}
+	})
+}
+
+func TestIsGitRepo(t *testing.T) {
+	t.Run("git repo", func(t *testing.T) {
+		dir := initGitRepo(t)
+		if !isGitRepo(dir) {
+			t.Error("should be true for git repo")
+		}
+	})
+
+	t.Run("not git repo", func(t *testing.T) {
+		if isGitRepo(t.TempDir()) {
+			t.Error("should be false for non-git dir")
+		}
+	})
+}
+
+// helpers
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run(t, dir, "git", "init")
+	run(t, dir, "git", "config", "user.email", "test@test.com")
+	run(t, dir, "git", "config", "user.name", "Test")
+	addGitCommit(t, dir, "init.txt", "initial commit")
+	return dir
+}
+
+func addGitCommit(t *testing.T, dir, filename, msg string) {
+	t.Helper()
+	os.WriteFile(dir+"/"+filename, []byte(msg), 0644)
+	run(t, dir, "git", "add", filename)
+	run(t, dir, "git", "commit", "-m", msg)
+}
+
+func getGitHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func run(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
 }
