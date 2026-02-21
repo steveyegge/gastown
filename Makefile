@@ -14,6 +14,17 @@ LDFLAGS := -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
            -X github.com/steveyegge/gastown/internal/cmd.BuildTime=$(BUILD_TIME) \
            -X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1
 
+# ICU4C detection for macOS (required by go-icu-regex transitive dependency).
+# Homebrew installs icu4c as a keg-only package, so headers/libs aren't on the
+# default search path. Auto-detect the prefix and export CGo flags.
+ifeq ($(shell uname),Darwin)
+  ICU_PREFIX := $(shell brew --prefix icu4c 2>/dev/null)
+  ifneq ($(ICU_PREFIX),)
+    export CGO_CPPFLAGS += -I$(ICU_PREFIX)/include
+    export CGO_LDFLAGS  += -L$(ICU_PREFIX)/lib
+  endif
+endif
+
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gt
 ifeq ($(shell uname),Darwin)
