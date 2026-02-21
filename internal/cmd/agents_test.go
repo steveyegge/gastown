@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -328,25 +327,53 @@ func TestFilterAndSortSessions_SortOrder(t *testing.T) {
 	}
 }
 
-func TestRunAgentsList_NoSessions_Output(t *testing.T) {
+func TestFilterAndSortSessions_CombinedFiltering(t *testing.T) {
+	setupCmdTestRegistry(t)
+	input := []string{
+		"hq-mayor",
+		"hq-boot",        // boot: always filtered
+		"gt-furiosa",     // polecat: filtered when includePolecats=false
+		"random-session", // non-gastown: always filtered
+		"gt-witness",
+	}
+
+	got := filterAndSortSessions(input, false)
+	if len(got) != 2 {
+		t.Fatalf("filterAndSortSessions(combined, polecats=false) returned %d agents, want 2 (mayor + witness)", len(got))
+	}
+	if got[0].Type != AgentMayor {
+		t.Errorf("position 0: type = %d, want AgentMayor", got[0].Type)
+	}
+	if got[1].Type != AgentWitness {
+		t.Errorf("position 1: type = %d, want AgentWitness", got[1].Type)
+	}
+
+	got = filterAndSortSessions(input, true)
+	if len(got) != 3 {
+		t.Fatalf("filterAndSortSessions(combined, polecats=true) returned %d agents, want 3 (mayor + witness + polecat)", len(got))
+	}
+}
+
+func TestRunAgentsList_EmptyList_Output(t *testing.T) {
 	setupCmdTestRegistry(t)
 
-	// runAgentsList calls getAgentSessions which needs tmux.
-	// If tmux isn't available or has no sessions, it will error.
-	// Instead, test the output path by calling the list display logic directly.
-	// We capture stdout when runAgentsList gets an empty session list.
-	//
-	// Since we can't easily mock tmux here, we test the specific output
-	// path: when getAgentSessions returns empty, it prints a message.
+	// Exercise the real runAgentsList code path. We set agentsAllFlag
+	// to false (default) and call the function with a nil command/args.
+	// If tmux is not running, getAgentSessions returns an error and
+	// runAgentsList returns it — so we only check the "no sessions" path
+	// when the function succeeds (tmux available but no gastown sessions).
 	output := captureStdout(t, func() {
-		agents := filterAndSortSessions([]string{}, false)
-		if len(agents) == 0 {
-			// This mirrors the logic in runAgentsList
-			fmt.Println("No agent sessions running.")
+		err := runAgentsList(nil, nil)
+		if err != nil {
+			// tmux not available — can't test stdout output path
+			t.Skip("tmux not available, skipping stdout check")
 		}
 	})
 
-	if !strings.Contains(output, "No agent sessions running.") {
-		t.Errorf("expected 'No agent sessions running.' in output, got %q", output)
+	// If runAgentsList succeeded (tmux is running), it either printed
+	// agents or the "No agent sessions running." message. In CI/test
+	// environments with no gastown sessions, we expect the empty message.
+	if output != "" && !strings.Contains(output, "agent") {
+		t.Errorf("unexpected output from runAgentsList: %q", output)
 	}
 }
