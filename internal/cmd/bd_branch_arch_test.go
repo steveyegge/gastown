@@ -30,12 +30,12 @@ import (
 
 // bdCallsiteCounts tracks BD_BRANCH-relevant patterns in a Go source file.
 type bdCallsiteCounts struct {
-	BeadsNew          int // beads.New( calls
-	NewWithBeadsDir   int // beads.NewWithBeadsDir( calls
-	OnMain            int // .OnMain() calls (0-arg method)
-	StripBdBranch     int // beads.StripBdBranch( calls
-	ExecCommandBd     int // exec.Command("bd", ...) calls
-	LookPathBd        int // exec.LookPath("bd") calls — proxy for syscall.Exec bd invocations
+	BeadsNew        int // beads.New( calls
+	NewWithBeadsDir int // beads.NewWithBeadsDir( calls
+	OnMain          int // .OnMain() calls (0-arg method)
+	StripBdBranch   int // beads.StripBdBranch( calls
+	ExecCommandBd   int // exec.Command("bd", ...) calls
+	LookPathBd      int // exec.LookPath("bd") calls — proxy for syscall.Exec bd invocations
 }
 
 // countBdCallsites walks a Go AST and counts BD_BRANCH-relevant call patterns.
@@ -475,44 +475,45 @@ var expectedLookPathBdCounts = map[string]int{
 
 // expectedExecBdCounts maps filename → expected exec.Command("bd",...) call count.
 var expectedExecBdCounts = map[string]int{
-	"agent_state.go":         2,
-	"bead.go":                4,
-	"boot.go":                3,
-	"cat.go":                 1,
-	"close.go":               1,
-	"compact_report.go":      3,
-	"convoy.go":              24,
-	"convoy_launch.go":       1,
-	"convoy_stage.go":        7,
-	"costs.go":               9,
-	"crew_lifecycle.go":      4,
-	"deacon.go":              2,
-	"dolt.go":                1,
-	"formula.go":             9,
-	"handoff.go":             6,
-	"hook.go":                2,
-	"init.go":                1,
-	"install.go":             6,
-	"mail_announce.go":       1,
-	"mail_channel.go":        1,
-	"mail_queue.go":          4,
-	"migrate_bead_labels.go": 2,
+	"agent_state.go":           2,
+	"bd_helpers.go":            1, // BdCmd helper wraps exec.Command("bd", ...)
+	"bead.go":                  4,
+	"boot.go":                  3,
+	"cat.go":                   1,
+	"close.go":                 1,
+	"compact_report.go":        3,
+	"convoy.go":                24,
+	"convoy_launch.go":         1,
+	"convoy_stage.go":          7,
+	"costs.go":                 9,
+	"crew_lifecycle.go":        4,
+	"deacon.go":                2,
+	"dolt.go":                  1,
+	"formula.go":               9,
+	"handoff.go":               6,
+	"hook.go":                  2,
+	"init.go":                  1,
+	"install.go":               6,
+	"mail_announce.go":         1,
+	"mail_channel.go":          1,
+	"mail_queue.go":            4,
+	"migrate_bead_labels.go":   2,
 	"molecule_await_signal.go": 4,
-	"molecule_step.go":       3,
-	"patrol.go":              5,
-	"patrol_helpers.go":      4,
-	"polecat.go":             1,
-	"polecat_identity.go":    1,
-	"prime.go":               3,
-	"prime_molecule.go":      1,
-	"rig.go":                 1,
-	"sling.go":               3,
-	"sling_batch.go":         1,
-	"sling_convoy.go":        10,
-	"sling_formula.go":       4,
-	"sling_helpers.go":       9,
-	"swarm.go":               16,
-	"synthesis.go":           5,
+	"molecule_step.go":         3,
+	"patrol.go":                5,
+	"patrol_helpers.go":        4,
+	"polecat.go":               1,
+	"polecat_identity.go":      1,
+	"prime.go":                 3,
+	"prime_molecule.go":        1,
+	"rig.go":                   1,
+	"sling.go":                 3,
+	"sling_batch.go":           1,
+	"sling_convoy.go":          10,
+	"sling_formula.go":         4,
+	"sling_helpers.go":         0, // Migrated to BdCmd (exec.Command calls now in bd_helpers.go)
+	"swarm.go":                 16,
+	"synthesis.go":             5,
 }
 
 func TestBdBranchCallsiteRegistry(t *testing.T) {
