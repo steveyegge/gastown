@@ -21,7 +21,8 @@ RUN apk add --no-cache \
     zstd-dev \
     icu-dev \
     procps \
-    lsof
+    lsof \
+    tmux
 
 # Install beads daemon (bd)
 RUN go install github.com/steveyegge/beads/cmd/bd@v0.52.0
