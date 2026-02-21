@@ -145,7 +145,8 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return runPrimeCompactResume(ctx, cwd)
 	}
 
-	if err := outputRoleContext(ctx); err != nil {
+	usedTemplates, err := outputRoleContext(ctx)
+	if err != nil {
 		return err
 	}
 
@@ -160,8 +161,10 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		checkPendingEscalations(ctx)
 	}
 
-	if !hasSlungWork {
-		explain(true, "Startup directive: normal mode (no hooked work)")
+	// Skip startup directive when templates were used — templates already
+	// contain startup protocols. Only emit for fallback (non-template) path.
+	if !hasSlungWork && !usedTemplates {
+		explain(true, "Startup directive: fallback mode (templates not available)")
 		outputStartupDirective(ctx)
 	}
 
@@ -300,19 +303,21 @@ func setupPrimeSession(ctx RoleContext, roleInfo RoleInfo) error {
 }
 
 // outputRoleContext emits session metadata and all role/context output sections.
-func outputRoleContext(ctx RoleContext) error {
+// Returns true if templates were used (startup protocol already in template output).
+func outputRoleContext(ctx RoleContext) (bool, error) {
 	explain(true, "Session metadata: always included for seance discovery")
 	outputSessionMetadata(ctx)
 
 	explain(true, fmt.Sprintf("Role context: detected role is %s", ctx.Role))
-	if err := outputPrimeContext(ctx); err != nil {
-		return err
+	usedTemplates, err := outputPrimeContext(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	outputContextFile(ctx)
 	outputHandoffContent(ctx)
 	outputAttachmentStatus(ctx)
-	return nil
+	return usedTemplates, nil
 }
 
 // runPrimeExternalTools runs bd prime and gt mail check --inject.
@@ -460,36 +465,20 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 	roleAnnounce := buildRoleAnnouncement(ctx)
 
 	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🚨 AUTONOMOUS WORK MODE 🚨"))
-	fmt.Println("Work is on your hook. After announcing your role, begin IMMEDIATELY.")
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🚨 AUTONOMOUS WORK MODE"))
+	fmt.Println("Work on hook → execute IMMEDIATELY. Hook takes priority over mail.")
 	fmt.Println()
-	fmt.Println("This is physics, not politeness. Gas Town is a steam engine - you are a piston.")
-	fmt.Println("Every moment you wait is a moment the engine stalls. Other agents may be")
-	fmt.Println("blocked waiting on YOUR output. The hook IS your assignment. RUN IT.")
-	fmt.Println()
-	fmt.Println("Remember: Every completion is recorded in the capability ledger. Your work")
-	fmt.Println("history is visible, and quality matters. Execute with care - you're building")
-	fmt.Println("a track record that proves autonomous execution works at scale.")
-	fmt.Println()
-	fmt.Println("1. Announce: \"" + roleAnnounce + "\" (ONE line, no elaboration)")
+	fmt.Println("1. Announce: \"" + roleAnnounce + "\" (one line)")
 
 	if hasMolecule {
-		fmt.Println("2. This bead has an ATTACHED MOLECULE (formula workflow)")
-		fmt.Println("3. Work through molecule steps in order - see CURRENT STEP below")
-		fmt.Println("4. Close each step with `bd close <step-id>`, then check `bd mol current` for next step")
+		fmt.Println("2. Work molecule steps in order (see CURRENT STEP below)")
+		fmt.Println("3. Close each: `bd close <step-id>` → `bd mol current`")
 	} else {
-		fmt.Printf("2. Then IMMEDIATELY run: `bd show %s`\n", hookedBead.ID)
-		fmt.Println("3. Begin execution - no waiting for user input")
+		fmt.Printf("2. Run: `bd show %s` → begin execution\n", hookedBead.ID)
 	}
+
 	fmt.Println()
-	fmt.Println("**DO NOT:**")
-	fmt.Println("- Wait for user response after announcing")
-	fmt.Println("- Ask clarifying questions")
-	fmt.Println("- Describe what you're going to do")
-	fmt.Println("- Check mail first (hook takes priority)")
-	if hasMolecule {
-		fmt.Println("- Skip molecule steps or work on the base bead directly")
-	}
+	fmt.Println("DO NOT wait, ask questions, describe plans, or check mail first.")
 	fmt.Println()
 }
 
@@ -515,50 +504,30 @@ func outputHookedBeadDetails(hookedBead *beads.Issue) {
 
 // outputMoleculeWorkflow displays attached molecule context with current step.
 func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields) {
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED MOLECULE (FORMULA WORKFLOW)"))
-	fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
+	fmt.Printf("%s\n", style.Bold.Render("## 🧬 MOLECULE WORKFLOW"))
+	fmt.Printf("ID: %s\n", attachment.AttachedMolecule)
 	if attachment.AttachedArgs != "" {
-		fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
-		fmt.Printf("  %s\n", attachment.AttachedArgs)
+		fmt.Printf("Args: %s\n", attachment.AttachedArgs)
 	}
 	fmt.Println()
 
-	// Ralph loop mode: output Ralph Wiggum loop command instead of step-by-step execution
 	if attachment.Mode == "ralph" {
 		outputRalphLoopDirective(ctx, attachment)
 		return
 	}
 
 	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
-
 	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
-	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
+	fmt.Println("Follow molecule steps, NOT the base bead.")
 }
 
 // outputRalphLoopDirective emits the Ralph Wiggum loop command for ralphcat mode.
-// The agent sees this and runs the slash command, activating the Ralph plugin's
-// stop hook loop. Each iteration gets a fresh context window while preserving
-// artifacts on disk via git.
 func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields) {
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🐱 RALPH LOOP MODE (RALPHCAT)"))
-	fmt.Println("This work uses Ralph Wiggum loop mode for multi-step execution.")
-	fmt.Println("Each step runs in a fresh context window to avoid context exhaustion.")
-	fmt.Println()
-
-	// Build the ralph prompt from the molecule steps
 	prompt := buildRalphPromptFromMolecule(attachment)
-
-	fmt.Printf("Run this command NOW:\n\n")
-	fmt.Printf("```\n/ralph-loop \"%s\" --max-iterations 20 --completion-phrase \"POLECAT_DONE\"\n```\n\n",
+	fmt.Printf("%s\n", style.Bold.Render("## 🐱 RALPH LOOP MODE"))
+	fmt.Println("Run NOW (do NOT work steps manually):")
+	fmt.Printf("```\n/ralph-loop \"%s\" --max-iterations 20 --completion-phrase \"POLECAT_DONE\"\n```\n",
 		strings.ReplaceAll(prompt, "\"", "\\\""))
-
-	fmt.Println("The Ralph loop will:")
-	fmt.Println("1. Execute each step in a fresh context")
-	fmt.Println("2. Preserve work via git commits between steps")
-	fmt.Println("3. Stop when POLECAT_DONE is output or max iterations reached")
-	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("⚠️  Run the /ralph-loop command above. Do NOT work step-by-step manually."))
 }
 
 // buildRalphPromptFromMolecule constructs the Ralph loop prompt text from molecule steps.
@@ -810,44 +779,34 @@ func checkPendingEscalations(ctx RoleContext) {
 		}
 	}
 
-	// Display prominently
+	// Display
 	fmt.Println()
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🚨 PENDING ESCALATIONS"))
-	fmt.Printf("There are %d escalation(s) awaiting human attention:\n\n", len(escalations))
-
+	fmt.Printf("%s (%d total", style.Bold.Render("## 🚨 ESCALATIONS"), len(escalations))
 	if critical > 0 {
-		fmt.Printf("  🔴 CRITICAL: %d\n", critical)
+		fmt.Printf(", %d critical", critical)
 	}
 	if high > 0 {
-		fmt.Printf("  🟠 HIGH: %d\n", high)
+		fmt.Printf(", %d high", high)
 	}
-	if medium > 0 {
-		fmt.Printf("  🟡 MEDIUM: %d\n", medium)
-	}
-	fmt.Println()
+	fmt.Println(")")
 
-	// Show first few escalations
 	maxShow := 5
 	if len(escalations) < maxShow {
 		maxShow = len(escalations)
 	}
 	for i := 0; i < maxShow; i++ {
 		e := escalations[i]
-		severity := "MEDIUM"
-		switch e.Priority {
-		case 0:
-			severity = "CRITICAL"
-		case 1:
-			severity = "HIGH"
+		sev := "MED"
+		if e.Priority == 0 {
+			sev = "CRIT"
+		} else if e.Priority == 1 {
+			sev = "HIGH"
 		}
-		fmt.Printf("  • [%s] %s (%s)\n", severity, e.Title, e.ID)
+		fmt.Printf("  [%s] %s (%s)\n", sev, e.Title, e.ID)
 	}
 	if len(escalations) > maxShow {
-		fmt.Printf("  ... and %d more\n", len(escalations)-maxShow)
+		fmt.Printf("  +%d more\n", len(escalations)-maxShow)
 	}
-	fmt.Println()
-
-	fmt.Println("**Action required:** Review escalations with `bd list --tag=escalation`")
-	fmt.Println("Close resolved ones with `bd close <id> --reason \"resolution\"`")
+	fmt.Println("Review: `bd list --tag=escalation`")
 	fmt.Println()
 }

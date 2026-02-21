@@ -69,39 +69,18 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 	fmt.Printf("**Progress:** %d/%d steps complete\n\n",
 		output.Completed, output.Total)
 
-	// Show current step if available
 	if output.NextStep != nil {
 		step := output.NextStep
-		fmt.Printf("%s\n\n", style.Bold.Render("## 🎬 CURRENT STEP: "+step.Title))
-		fmt.Printf("**Step ID:** %s\n", step.ID)
-		fmt.Printf("**Status:** %s (ready to execute)\n\n", step.Status)
-
-		// Show step description if available
+		fmt.Printf("%s (ID: %s)\n", style.Bold.Render("## 🎬 STEP: "+step.Title), step.ID)
 		if step.Description != "" {
-			fmt.Println("### Instructions")
-			fmt.Println()
-			// Indent the description for readability
-			lines := strings.Split(step.Description, "\n")
-			for _, line := range lines {
+			for _, line := range strings.Split(step.Description, "\n") {
 				fmt.Printf("%s\n", line)
 			}
 			fmt.Println()
 		}
-
-		// The propulsion directive
-		fmt.Println(style.Bold.Render("→ EXECUTE THIS STEP NOW."))
-		fmt.Println()
-		fmt.Println("When complete:")
-		fmt.Printf("  1. Close the step: bd close %s\n", step.ID)
-		fmt.Printf("  2. Check for next step: bd mol current %s\n", moleculeID)
-		fmt.Println("  3. Continue until molecule complete")
+		fmt.Printf("→ EXECUTE NOW. Then: `bd close %s` → `bd mol current %s`\n", step.ID, moleculeID)
 	} else {
-		// No next step - molecule may be complete
 		fmt.Println(style.Bold.Render("✓ MOLECULE COMPLETE"))
-		fmt.Println()
-		fmt.Println("All steps are done. You may:")
-		fmt.Println("  - Report completion to supervisor")
-		fmt.Println("  - Check for new work: bd mol current")
 	}
 }
 
@@ -156,22 +135,11 @@ func outputMoleculeContext(ctx RoleContext) {
 
 		// This is a molecule step - show context
 		fmt.Println()
-		fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 Molecule Workflow"))
-		fmt.Printf("You are working on a molecule step.\n")
-		fmt.Printf("  Current step: %s\n", issue.ID)
-		fmt.Printf("  Molecule: %s\n", moleculeID)
-		fmt.Printf("  Root issue: %s\n\n", rootID)
-
-		// Show molecule progress by finding sibling steps
+		fmt.Printf("%s\n", style.Bold.Render("## 🧬 Molecule"))
+		fmt.Printf("  Step: %s | Mol: %s | Root: %s\n", issue.ID, moleculeID, rootID)
 		showMoleculeProgress(b, rootID)
-
-		fmt.Println()
-		fmt.Println("**Molecule Work Loop:**")
-		fmt.Println("1. Complete current step, then `bd close " + issue.ID + "`")
-		fmt.Println("2. Check for next steps: `bd mol current`")
-		fmt.Println("3. Work on next ready step(s)")
-		fmt.Println("4. When all steps done, run `" + cli.Name() + " done`")
-		break // Only show context for first molecule step found
+		fmt.Printf("  Loop: `bd close %s` → `bd mol current` → next step → `%s done` when complete\n", issue.ID, cli.Name())
+		break
 	}
 }
 
@@ -247,67 +215,57 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		return
 	}
 
+	c := cli.Name()
 	cfg := PatrolConfig{
 		RoleName:        "deacon",
 		PatrolMolName:   "mol-deacon-patrol",
-		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
-		HeaderTitle:     "Patrol Status (Wisp-based)",
+		HeaderTitle:     "Patrol Status",
 		CheckInProgress: false,
 		WorkLoopSteps: []string{
-			"Check next step: `bd mol current`",
-			"Execute the step (heartbeat, mail, health checks, etc.)",
-			"Close step: `bd close <step-id>`",
-			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --no-digest --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"`bd mol current` → execute step → `bd close <step-id>` → repeat",
+			"Cycle end: LOW context → `" + c + " mol squash --no-digest --jitter 10s` then `" + c + " patrol new` | HIGH → `" + c + " handoff` and exit",
 		},
 	}
 	outputPatrolContext(cfg)
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
-// Witness AUTO-BONDS its patrol molecule on startup if one isn't already running.
 func outputWitnessPatrolContext(ctx RoleContext) {
+	c := cli.Name()
 	cfg := PatrolConfig{
 		RoleName:        "witness",
 		PatrolMolName:   "mol-witness-patrol",
 		BeadsDir:        ctx.WorkDir,
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
-		HeaderTitle:     "Witness Patrol Status",
+		HeaderTitle:     "Witness Patrol",
 		CheckInProgress: true,
 		WorkLoopSteps: []string{
-			"Check inbox: `" + cli.Name() + " mail inbox`",
-			"Check next step: `bd mol current`",
-			"Execute the step (survey polecats, inspect, nudge, etc.)",
-			"Close step: `bd close <step-id>`",
-			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --no-digest --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"`" + c + " mail inbox` → `bd mol current` → execute step → `bd close <step-id>` → repeat",
+			"Cycle end: LOW context → `" + c + " mol squash --no-digest --jitter 10s` then `" + c + " patrol new` | HIGH → `" + c + " handoff` and exit",
 		},
 	}
 	outputPatrolContext(cfg)
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
-// Refinery AUTO-BONDS its patrol molecule on startup if one isn't already running.
 func outputRefineryPatrolContext(ctx RoleContext) {
+	c := cli.Name()
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
 		PatrolMolName:   "mol-refinery-patrol",
 		BeadsDir:        ctx.WorkDir,
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
-		HeaderTitle:     "Refinery Patrol Status",
+		HeaderTitle:     "Refinery Patrol",
 		CheckInProgress: true,
 		ExtraVars:       buildRefineryPatrolVars(ctx),
 		WorkLoopSteps: []string{
-			"Check inbox: `" + cli.Name() + " mail inbox`",
-			"Check next step: `bd mol current`",
-			"Execute the step (queue scan, process branch, tests, merge)",
-			"Close step: `bd close <step-id>`",
-			"Check next: `bd mol current`",
-			"At cycle end (loop-or-exit step):\n   - If context LOW:\n     * Squash: `" + cli.Name() + " mol squash --no-digest --jitter 10s --summary \"<summary>\"`\n     * Create new patrol: `" + cli.Name() + " patrol new`\n     * Continue executing from inbox-check step\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
+			"`" + c + " mail inbox` → `bd mol current` → execute step → `bd close <step-id>` → repeat",
+			"Cycle end: LOW context → `" + c + " mol squash --no-digest --jitter 10s` then `" + c + " patrol new` | HIGH → `" + c + " handoff` and exit",
 		},
 	}
 	outputPatrolContext(cfg)
