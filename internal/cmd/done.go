@@ -1209,6 +1209,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 			// Order matters: wisp closes -> unblocks base bead -> base bead closes.
 			attachment := beads.ParseAttachmentFields(hookedBead)
 			if attachment != nil && attachment.AttachedMolecule != "" {
+				// Close molecule step descendants before closing the wisp root.
+				// bd close doesn't cascade — without this, open/in_progress steps
+				// from the molecule stay stuck forever after gt done completes.
+				// Order: step children -> wisp root -> base bead.
+				if n := closeDescendants(bd, attachment.AttachedMolecule); n > 0 {
+					fmt.Fprintf(os.Stderr, "Closed %d molecule step(s) for %s\n", n, attachment.AttachedMolecule)
+				}
+
 				// Retry molecule close with exponential backoff. Transient failures
 				// can leave wisps orphaned, blocking the work bead from closing.
 				var moleculeClosed bool
