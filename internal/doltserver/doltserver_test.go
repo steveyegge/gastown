@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -3475,5 +3477,139 @@ func TestBuildDoltSQLCmd_RemoteNoPassword(t *testing.T) {
 		if strings.HasPrefix(env, "DOLT_CLI_PASSWORD=") {
 			t.Error("remote cmd without password should not have DOLT_CLI_PASSWORD env var")
 		}
+	}
+}
+
+// =============================================================================
+// WaitForReady tests (gt-zou1n)
+// =============================================================================
+
+func TestWaitForReady_NoServerConfigured(t *testing.T) {
+	// When no server mode metadata exists, WaitForReady should return nil
+	// immediately (nothing to wait for).
+	townRoot := t.TempDir()
+
+	err := WaitForReady(townRoot, 1*time.Second)
+	if err != nil {
+		t.Errorf("WaitForReady should succeed when no server configured, got: %v", err)
+	}
+}
+
+func TestWaitForReady_ServerAlreadyListening(t *testing.T) {
+	// Start a TCP listener, then verify WaitForReady succeeds quickly.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer listener.Close()
+
+	// Extract the port from the listener
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	// Create a town root with server mode metadata pointing to this port
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override port via env var so DefaultConfig picks it up
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
+
+	start := time.Now()
+	err = WaitForReady(townRoot, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Errorf("WaitForReady should succeed when server is listening, got: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("WaitForReady took %v, should complete quickly when server is ready", elapsed)
+	}
+}
+
+func TestWaitForReady_TimeoutWhenNoServer(t *testing.T) {
+	// When server mode is configured but nothing is listening, WaitForReady
+	// should return an error after timeout.
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use a port that is very unlikely to be in use
+	metadata := `{"backend":"dolt","mode":"server","port":19999}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GT_DOLT_PORT", "19999")
+
+	start := time.Now()
+	err = WaitForReady(townRoot, 500*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("WaitForReady should return error when server not reachable within timeout")
+	}
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("WaitForReady returned too quickly (%v), should wait at least close to timeout", elapsed)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("WaitForReady took %v, should not exceed timeout by much", elapsed)
+	}
+}
+
+func TestWaitForReady_ServerBecomesReady(t *testing.T) {
+	// Simulate the race: start WaitForReady, then start a listener after a delay.
+	// WaitForReady should eventually succeed.
+
+	// Find a free port first
+	tmpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := tmpListener.Addr().(*net.TCPAddr).Port
+	tmpListener.Close() // Free the port
+
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
+
+	// Start the listener after 300ms delay
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			return // Port may be taken, test will timeout
+		}
+		defer listener.Close()
+		// Keep listening until test ends
+		time.Sleep(5 * time.Second)
+	}()
+
+	start := time.Now()
+	err = WaitForReady(townRoot, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Errorf("WaitForReady should succeed after server starts, got: %v", err)
+	}
+	// Should take at least 300ms (delay before server starts) but not too long
+	if elapsed < 200*time.Millisecond {
+		t.Errorf("WaitForReady completed too quickly (%v), server shouldn't be ready yet", elapsed)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("WaitForReady took too long (%v), should succeed shortly after server starts", elapsed)
 	}
 }

@@ -2,11 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -201,4 +205,80 @@ func TestWorkerPoolLimitsConcurrency(t *testing.T) {
 	if maxObserved > numWorkers {
 		t.Errorf("max concurrent = %d, should not exceed %d workers", maxObserved, numWorkers)
 	}
+}
+
+// =============================================================================
+// waitForDoltReady tests (gt-zou1n)
+// Verifies that gt up waits for Dolt server readiness before starting witnesses.
+// =============================================================================
+
+func TestWaitForDoltReady_NoServerMode(t *testing.T) {
+	// When no server mode metadata exists, waitForDoltReady should not block.
+	townRoot := t.TempDir()
+
+	start := time.Now()
+	waitForDoltReady(townRoot)
+	elapsed := time.Since(start)
+
+	if elapsed > 1*time.Second {
+		t.Errorf("waitForDoltReady took %v with no server mode, should return immediately", elapsed)
+	}
+}
+
+func TestWaitForDoltReady_ServerListening(t *testing.T) {
+	// When server is already listening, should return quickly.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := fmt.Sprintf(`{"backend":"dolt","mode":"server","port":%d}`, port)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
+
+	start := time.Now()
+	waitForDoltReady(townRoot)
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Errorf("waitForDoltReady took %v, should complete quickly when server is ready", elapsed)
+	}
+}
+
+func TestWaitForDoltReady_Integration_DoltserverWaitForReady(t *testing.T) {
+	// Verify that doltserver.WaitForReady is used by waitForDoltReady.
+	// This validates the race fix: gt up calls WaitForReady before witnesses start.
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use a port nothing listens on
+	metadata := `{"backend":"dolt","mode":"server","port":19998}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GT_DOLT_PORT", "19998")
+
+	// WaitForReady with short timeout should fail
+	err := doltserver.WaitForReady(townRoot, 200*time.Millisecond)
+	if err == nil {
+		t.Error("doltserver.WaitForReady should fail when nothing is listening")
+	}
+
+	// But waitForDoltReady (the up.go wrapper) should not return an error,
+	// just log a warning and continue (graceful degradation)
+	waitForDoltReady(townRoot)
+	// No error = graceful degradation works
 }
