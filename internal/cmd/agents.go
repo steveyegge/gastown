@@ -63,14 +63,14 @@ var agentsCmd = &cobra.Command{
 	Use:     "agents",
 	Aliases: []string{"ag"},
 	GroupID: GroupAgents,
-	Short:   "Switch between Gas Town agent sessions",
-	Long: `Display a popup menu of core Gas Town agent sessions.
+	Short:   "List Gas Town agent sessions",
+	Long: `List Gas Town agent sessions to stdout.
 
 Shows Mayor, Deacon, Witnesses, Refineries, and Crew workers.
 Polecats are hidden (use 'gt polecat list' to see them).
 
-The menu appears as a tmux popup for quick session switching.`,
-	RunE: runAgents,
+Use 'gt agents menu' for an interactive tmux popup menu.`,
+	RunE: runAgentsList,
 }
 
 var agentsListCmd = &cobra.Command{
@@ -78,6 +78,13 @@ var agentsListCmd = &cobra.Command{
 	Short: "List agent sessions (no popup)",
 	Long:  `List all agent sessions to stdout without the popup menu.`,
 	RunE:  runAgentsList,
+}
+
+var agentsMenuCmd = &cobra.Command{
+	Use:   "menu",
+	Short: "Interactive popup menu for session switching",
+	Long:  `Display a tmux popup menu of Gas Town agent sessions for quick switching.`,
+	RunE:  runAgents,
 }
 
 var agentsCheckCmd = &cobra.Command{
@@ -121,6 +128,7 @@ func init() {
 	agentsCheckCmd.Flags().BoolVar(&agentsCheckJSON, "json", false, "Output as JSON")
 
 	agentsCmd.AddCommand(agentsListCmd)
+	agentsCmd.AddCommand(agentsMenuCmd)
 	agentsCmd.AddCommand(agentsCheckCmd)
 	agentsCmd.AddCommand(agentsFixCmd)
 	rootCmd.AddCommand(agentsCmd)
@@ -165,9 +173,13 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	return filterAndSortSessions(sessions, includePolecats), nil
+}
 
+// filterAndSortSessions filters raw session names into categorized, sorted agents.
+func filterAndSortSessions(sessionNames []string, includePolecats bool) []*AgentSession {
 	var agents []*AgentSession
-	for _, name := range sessions {
+	for _, name := range sessionNames {
 		agent := categorizeSession(name)
 		if agent == nil {
 			continue
@@ -220,7 +232,7 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 		return a.AgentName < b.AgentName
 	})
 
-	return agents, nil
+	return agents
 }
 
 // displayLabel returns the menu display label for an agent.
