@@ -130,6 +130,9 @@ func (c *DoltMetadataCheck) Fix(ctx *CheckContext) error {
 }
 
 // hasDoltMetadata checks if a beads directory has proper dolt server config.
+// expectedDB is ignored for the dolt_database check — any non-empty value is
+// accepted, since the town's hq database name (e.g. "beads_hq") is the correct
+// shared database for all rigs in server mode.
 func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
@@ -149,7 +152,7 @@ func (c *DoltMetadataCheck) hasDoltMetadata(beadsDir, expectedDB string) bool {
 
 	return metadata.Backend == "dolt" &&
 		metadata.DoltMode == "server" &&
-		metadata.DoltDatabase == expectedDB &&
+		metadata.DoltDatabase != "" &&
 		metadata.JsonlExport == "issues.jsonl"
 }
 
@@ -174,7 +177,15 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 	existing["database"] = "dolt"
 	existing["backend"] = "dolt"
 	existing["dolt_mode"] = "server"
-	existing["dolt_database"] = rigName
+	// Use town's (hq) database name so all rigs share the same centralized
+	// database. Falls back to rigName only if hq metadata.json is not set up.
+	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
+		if hqDB := doltserver.ReadExistingDoltDatabase(filepath.Join(townRoot, ".beads")); hqDB != "" {
+			existing["dolt_database"] = hqDB
+		} else {
+			existing["dolt_database"] = rigName
+		}
+	}
 
 	// Always set jsonl_export to the canonical filename.
 	existing["jsonl_export"] = "issues.jsonl"

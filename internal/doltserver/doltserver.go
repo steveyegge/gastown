@@ -1309,9 +1309,9 @@ func FindOrphanedDatabases(townRoot string) ([]OrphanedDatabase, error) {
 	return orphans, nil
 }
 
-// readExistingDoltDatabase reads the dolt_database field from an existing metadata.json.
+// ReadExistingDoltDatabase reads the dolt_database field from an existing metadata.json.
 // Returns empty string if the file doesn't exist or can't be read.
-func readExistingDoltDatabase(beadsDir string) string {
+func ReadExistingDoltDatabase(beadsDir string) string {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -1334,7 +1334,7 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 
 	// Check town-level beads (hq)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if db := readExistingDoltDatabase(townBeadsDir); db != "" {
+	if db := ReadExistingDoltDatabase(townBeadsDir); db != "" {
 		referenced[db] = true
 	}
 
@@ -1356,7 +1356,7 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 		if beadsDir == "" {
 			continue
 		}
-		if db := readExistingDoltDatabase(beadsDir); db != "" {
+		if db := ReadExistingDoltDatabase(beadsDir); db != "" {
 			referenced[db] = true
 		}
 	}
@@ -1540,7 +1540,15 @@ func EnsureMetadata(townRoot, rigName string) error {
 	existing["backend"] = "dolt"
 	existing["dolt_mode"] = "server"
 	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
-		existing["dolt_database"] = rigName
+		// Use the town's (hq) database name so all rigs share the same
+		// centralized database in server mode. This prevents split-brain
+		// where rigs create separate databases named after themselves
+		// while the mayor operates on beads_<prefix>.
+		if hqDB := ReadExistingDoltDatabase(filepath.Join(townRoot, ".beads")); hqDB != "" {
+			existing["dolt_database"] = hqDB
+		} else {
+			existing["dolt_database"] = rigName
+		}
 	}
 
 	// Always set jsonl_export to the canonical filename.

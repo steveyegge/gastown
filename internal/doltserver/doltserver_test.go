@@ -462,6 +462,180 @@ func TestEnsureAllMetadata(t *testing.T) {
 	}
 }
 
+func TestReadExistingDoltDatabase(t *testing.T) {
+	t.Run("returns database name from metadata", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+			[]byte(`{"dolt_database": "beads_hq"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got := ReadExistingDoltDatabase(beadsDir)
+		if got != "beads_hq" {
+			t.Errorf("ReadExistingDoltDatabase() = %q, want %q", got, "beads_hq")
+		}
+	})
+
+	t.Run("returns empty for missing file", func(t *testing.T) {
+		got := ReadExistingDoltDatabase(filepath.Join(t.TempDir(), "nonexistent"))
+		if got != "" {
+			t.Errorf("ReadExistingDoltDatabase() = %q, want empty", got)
+		}
+	})
+
+	t.Run("returns empty for missing field", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+			[]byte(`{"backend": "dolt"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got := ReadExistingDoltDatabase(beadsDir)
+		if got != "" {
+			t.Errorf("ReadExistingDoltDatabase() = %q, want empty", got)
+		}
+	})
+
+	t.Run("returns empty for invalid JSON", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+			[]byte(`not json`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got := ReadExistingDoltDatabase(beadsDir)
+		if got != "" {
+			t.Errorf("ReadExistingDoltDatabase() = %q, want empty", got)
+		}
+	})
+}
+
+func TestEnsureMetadata_RigUsesHQDatabase(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Set up town-level .beads with hq database name
+	hqBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(hqBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hqBeadsDir, "metadata.json"),
+		[]byte(`{"dolt_database": "beads_hq", "backend": "dolt", "dolt_mode": "server"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads directory
+	rigBeadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// EnsureMetadata for the rig should pick up hq's database name
+	if err := EnsureMetadata(townRoot, "myrig"); err != nil {
+		t.Fatalf("EnsureMetadata failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(rigBeadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	// Should use hq's database name, NOT "myrig"
+	if metadata["dolt_database"] != "beads_hq" {
+		t.Errorf("dolt_database = %v, want beads_hq (from hq metadata)", metadata["dolt_database"])
+	}
+	if metadata["backend"] != "dolt" {
+		t.Errorf("backend = %v, want dolt", metadata["backend"])
+	}
+	if metadata["dolt_mode"] != "server" {
+		t.Errorf("dolt_mode = %v, want server", metadata["dolt_mode"])
+	}
+}
+
+func TestEnsureMetadata_RigFallsBackToRigName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// NO town-level .beads/metadata.json — hq database name unknown
+
+	// Create rig beads directory
+	rigBeadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureMetadata(townRoot, "myrig"); err != nil {
+		t.Fatalf("EnsureMetadata failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(rigBeadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	// No hq metadata → falls back to rigName
+	if metadata["dolt_database"] != "myrig" {
+		t.Errorf("dolt_database = %v, want myrig (fallback)", metadata["dolt_database"])
+	}
+}
+
+func TestEnsureMetadata_PreservesExistingDoltDatabase(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Set up town-level .beads with different database name
+	hqBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(hqBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hqBeadsDir, "metadata.json"),
+		[]byte(`{"dolt_database": "beads_hq"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads directory with an EXISTING dolt_database value
+	rigBeadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"),
+		[]byte(`{"dolt_database": "custom_db"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureMetadata(townRoot, "myrig"); err != nil {
+		t.Fatalf("EnsureMetadata failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(rigBeadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	// Should preserve the existing value, not overwrite with hq's or rigName
+	if metadata["dolt_database"] != "custom_db" {
+		t.Errorf("dolt_database = %v, want custom_db (preserved existing)", metadata["dolt_database"])
+	}
+}
+
 func TestFindRigBeadsDir(t *testing.T) {
 	townRoot := t.TempDir()
 
