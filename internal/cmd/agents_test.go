@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -76,27 +77,20 @@ func TestCategorizeSession_AllTypes(t *testing.T) {
 		name     string
 		input    string
 		wantType AgentType
-		wantNil  bool
 	}{
-		{"mayor", "hq-mayor", AgentMayor, false},
-		{"deacon", "hq-deacon", AgentDeacon, false},
+		{"mayor", "hq-mayor", AgentMayor},
+		{"deacon", "hq-deacon", AgentDeacon},
 		// Rig-level sessions require a registered prefix. Use "gt" which is
 		// commonly registered in the default PrefixRegistry.
-		{"witness", "gt-witness", AgentWitness, false},
-		{"refinery", "gt-refinery", AgentRefinery, false},
-		{"crew", "gt-crew-max", AgentCrew, false},
-		{"polecat", "gt-furiosa", AgentPolecat, false},
+		{"witness", "gt-witness", AgentWitness},
+		{"refinery", "gt-refinery", AgentRefinery},
+		{"crew", "gt-crew-max", AgentCrew},
+		{"polecat", "gt-furiosa", AgentPolecat},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := categorizeSession(tt.input)
-			if tt.wantNil {
-				if got != nil {
-					t.Errorf("categorizeSession(%q) = %+v, want nil", tt.input, got)
-				}
-				return
-			}
 			if got == nil {
 				t.Fatalf("categorizeSession(%q) = nil, want type %d", tt.input, tt.wantType)
 			}
@@ -357,23 +351,28 @@ func TestFilterAndSortSessions_CombinedFiltering(t *testing.T) {
 func TestRunAgentsList_EmptyList_Output(t *testing.T) {
 	setupCmdTestRegistry(t)
 
-	// Exercise the real runAgentsList code path. We set agentsAllFlag
-	// to false (default) and call the function with a nil command/args.
-	// If tmux is not running, getAgentSessions returns an error and
-	// runAgentsList returns it — so we only check the "no sessions" path
-	// when the function succeeds (tmux available but no gastown sessions).
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available, skipping stdout check")
+	}
+
+	// Exercise the real runAgentsList code path with stdout capture.
+	// tmux binary exists but the server may not be running, in which
+	// case runAgentsList returns an error and output is empty.
+	var runErr error
 	output := captureStdout(t, func() {
-		err := runAgentsList(nil, nil)
-		if err != nil {
-			// tmux not available — can't test stdout output path
-			t.Skip("tmux not available, skipping stdout check")
-		}
+		runErr = runAgentsList(nil, nil)
 	})
 
-	// If runAgentsList succeeded (tmux is running), it either printed
-	// agents or the "No agent sessions running." message. In CI/test
-	// environments with no gastown sessions, we expect the empty message.
-	if output != "" && !strings.Contains(output, "agent") {
+	if runErr != nil {
+		// tmux server not running — nothing to assert on stdout
+		return
+	}
+
+	// runAgentsList succeeded: output is either the empty-list message
+	// or a real agent listing if gastown sessions happen to be running.
+	if !strings.Contains(output, "No agent sessions running.") &&
+		!strings.Contains(output, "Mayor") &&
+		!strings.Contains(output, "witness") {
 		t.Errorf("unexpected output from runAgentsList: %q", output)
 	}
 }
