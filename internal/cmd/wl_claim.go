@@ -63,6 +63,8 @@ func runWlClaim(cmd *cobra.Command, args []string) error {
 }
 
 // claimWanted contains the testable business logic for claiming a wanted item.
+// The returned WantedItem reflects pre-claim state (status "open", empty ClaimedBy);
+// callers needing post-claim state should re-query.
 func claimWanted(store doltserver.WLCommonsStore, wantedID, rigHandle string) (*doltserver.WantedItem, error) {
 	item, err := store.QueryWanted(wantedID)
 	if err != nil {

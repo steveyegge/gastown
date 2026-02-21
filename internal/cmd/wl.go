@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -97,7 +96,20 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Load town config for identity
+	// Fast path: check if already joined before loading town config.
+	// This avoids failing on unrelated town-config errors for the no-op case.
+	if existing, loadErr := wasteland.LoadConfig(townRoot); loadErr == nil {
+		if existing.Upstream == upstream {
+			fmt.Printf("%s Already joined wasteland: %s\n", style.Bold.Render("⚠"), upstream)
+			fmt.Printf("  Handle: %s\n", existing.RigHandle)
+			fmt.Printf("  Fork: %s/%s\n", existing.ForkOrg, existing.ForkDB)
+			fmt.Printf("  Local: %s\n", existing.LocalDir)
+			return nil
+		}
+		return fmt.Errorf("already joined to %s; run gt wl leave first", existing.Upstream)
+	}
+
+	// Load town config for identity (only needed for fresh join)
 	townConfigPath := filepath.Join(townRoot, workspace.PrimaryMarker)
 	townCfg, err := config.LoadTownConfig(townConfigPath)
 	if err != nil {
@@ -128,23 +140,15 @@ func runWlJoin(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Joining wasteland %s (fork to %s/%s)...\n", upstream, forkOrg, upstream[strings.Index(upstream, "/")+1:])
-	beforeJoin := time.Now()
 	cfg, err := svc.Join(upstream, forkOrg, token, handle, displayName, ownerEmail, gtVersion, townRoot)
 	if err != nil {
 		return err
 	}
 
-	if cfg.JoinedAt.Before(beforeJoin) {
-		// Already joined — config was returned from existing state
-		fmt.Printf("%s Already joined wasteland: %s\n", style.Bold.Render("⚠"), upstream)
-	} else {
-		fmt.Printf("\n%s Joined wasteland: %s\n", style.Bold.Render("✓"), upstream)
-	}
+	fmt.Printf("\n%s Joined wasteland: %s\n", style.Bold.Render("✓"), upstream)
 	fmt.Printf("  Handle: %s\n", cfg.RigHandle)
 	fmt.Printf("  Fork: %s/%s\n", cfg.ForkOrg, cfg.ForkDB)
 	fmt.Printf("  Local: %s\n", cfg.LocalDir)
-	if !cfg.JoinedAt.Before(beforeJoin) {
-		fmt.Printf("\n  %s\n", style.Dim.Render("Next: gt wl browse  — browse the wanted board"))
-	}
+	fmt.Printf("\n  %s\n", style.Dim.Render("Next: gt wl browse  — browse the wanted board"))
 	return nil
 }
