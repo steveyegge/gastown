@@ -3535,21 +3535,29 @@ func TestWaitForReady_ServerAlreadyListening(t *testing.T) {
 func TestWaitForReady_TimeoutWhenNoServer(t *testing.T) {
 	// When server mode is configured but nothing is listening, WaitForReady
 	// should return an error after timeout.
+
+	// Find a free port, then immediately close to guarantee nothing is listening.
+	tmpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := tmpListener.Addr().(*net.TCPAddr).Port
+	tmpListener.Close()
+
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Use a port that is very unlikely to be in use
-	metadata := `{"backend":"dolt","dolt_mode":"server","port":19999}`
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GT_DOLT_PORT", "19999")
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
 
 	start := time.Now()
-	err := WaitForReady(townRoot, 500*time.Millisecond)
+	err = WaitForReady(townRoot, 500*time.Millisecond)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -3586,16 +3594,18 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 	}
 	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
 
-	// Start the listener after 300ms delay
+	// Start the listener after 300ms delay. Use a done channel to
+	// synchronize goroutine lifetime with test lifecycle. (review finding #3)
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
-			return // Port may be taken, test will timeout
+			return // Port may be taken (TOCTOU), test will timeout
 		}
 		defer listener.Close()
-		// Keep listening until test ends
-		time.Sleep(5 * time.Second)
+		<-done
 	}()
 
 	start := time.Now()

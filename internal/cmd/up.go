@@ -274,7 +274,11 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Witnesses and refineries run bd commands on startup (via gt prime → patrol_helpers)
 	// that connect to the Dolt SQL server. Without this gate, they race the server
 	// and get "connection refused" errors. (gt-zou1n)
-	waitForDoltReady(townRoot)
+	// Only wait if Dolt was actually started (or detected running). If it failed or
+	// was skipped, polling the port would just burn the full timeout. (review finding #1)
+	if !doltSkipped && doltOK {
+		waitForDoltReady(townRoot)
+	}
 
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
 	witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors)

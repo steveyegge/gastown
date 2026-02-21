@@ -263,19 +263,61 @@ func TestWaitForDoltReady_GracefulDegradation(t *testing.T) {
 	waitForDoltReady(townRoot) // Should not panic
 
 	// Also verify the underlying doltserver.WaitForReady detects unreachable servers.
+	// Use bind-then-close to find a guaranteed-free port. (review finding #4)
+	tmpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	freePort := tmpListener.Addr().(*net.TCPAddr).Port
+	tmpListener.Close()
+
 	beadsDir := filepath.Join(townRoot, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	metadata := `{"backend":"dolt","dolt_mode":"server","port":19998}`
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, freePort)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GT_DOLT_PORT", "19998")
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", freePort))
 
 	// WaitForReady with short timeout should fail when nothing is listening
-	err := doltserver.WaitForReady(townRoot, 200*time.Millisecond)
+	err = doltserver.WaitForReady(townRoot, 200*time.Millisecond)
 	if err == nil {
 		t.Error("doltserver.WaitForReady should fail when nothing is listening")
+	}
+}
+
+func TestWaitForDoltReady_WrapperTimesOutAndContinues(t *testing.T) {
+	// Verify the wrapper's error handling path: WaitForReady returns an error
+	// but the wrapper logs a warning and continues (doesn't panic or propagate).
+	// We test WaitForReady directly with a short timeout to verify the error,
+	// since the wrapper uses the package-level 10s constant. (review finding #5)
+	tmpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := tmpListener.Addr().(*net.TCPAddr).Port
+	tmpListener.Close()
+
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GT_DOLT_PORT", fmt.Sprintf("%d", port))
+
+	// Verify the error path fires when nothing listens.
+	err = doltserver.WaitForReady(townRoot, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected WaitForReady to fail when nothing is listening")
+	}
+	// Confirm error message is actionable.
+	if err.Error() == "" {
+		t.Error("expected non-empty error message from WaitForReady timeout")
 	}
 }

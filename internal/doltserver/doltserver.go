@@ -424,11 +424,26 @@ func WaitForReady(townRoot string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	interval := 100 * time.Millisecond
 
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		dialTimeout := 1 * time.Second
+		if remaining < dialTimeout {
+			dialTimeout = remaining
+		}
+		conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
 			_ = conn.Close()
 			return nil
+		}
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		if interval > remaining {
+			interval = remaining
 		}
 		time.Sleep(interval)
 		// Exponential backoff capped at 500ms
