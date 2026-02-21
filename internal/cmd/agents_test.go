@@ -120,6 +120,13 @@ func TestCategorizeSession_InvalidName(t *testing.T) {
 	}
 }
 
+func TestCategorizeSession_Overseer(t *testing.T) {
+	got := categorizeSession("hq-overseer")
+	if got != nil {
+		t.Errorf("categorizeSession(%q) = %+v, want nil (overseer is not a display agent)", "hq-overseer", got)
+	}
+}
+
 func TestCategorizeSession_EmptyString(t *testing.T) {
 	got := categorizeSession("")
 	if got != nil {
@@ -389,7 +396,9 @@ func TestGuessSessionFromWorkerDir(t *testing.T) {
 	}{
 		{"crew worker", "/town/gastown/crew/max", "gt-crew-max"},
 		{"polecat worker", "/town/gastown/polecats/furiosa", "gt-furiosa"},
-		{"witness (unsupported)", "/town/gastown/witness/main", ""},
+		{"witness worker", "/town/gastown/witness/main", "gt-witness"},
+		{"refinery worker", "/town/gastown/refinery/main", "gt-refinery"},
+		{"unknown type", "/town/gastown/unknown/thing", ""},
 		{"too few path parts", "/town/gastown", ""},
 		{"different rig", "/town/myrig/crew/alpha", "mr-crew-alpha"},
 	}

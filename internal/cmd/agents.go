@@ -566,6 +566,10 @@ func guessSessionFromWorkerDir(workerDir, townRoot string) string {
 		return session.CrewSessionName(session.PrefixFor(rig), workerName)
 	case "polecats":
 		return session.PolecatSessionName(session.PrefixFor(rig), workerName)
+	case "witness":
+		return session.WitnessSessionName(session.PrefixFor(rig))
+	case "refinery":
+		return session.RefinerySessionName(session.PrefixFor(rig))
 	}
 
 	return ""
