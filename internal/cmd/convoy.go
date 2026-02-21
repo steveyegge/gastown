@@ -488,13 +488,12 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		createArgs = append(createArgs, "--force")
 	}
 
-	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if err := BdCmd(createArgs...).
 		WithAutoCommit().
 		Dir(townBeads).
 		Stderr(&stderr).
-		Build().Run(); err != nil {
+		Run(); err != nil {
 		return fmt.Errorf("creating convoy: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 
