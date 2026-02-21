@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // TestIntegrationTownSetup verifies that a fresh town setup passes all doctor checks.
@@ -57,6 +59,19 @@ func TestIntegrationOrphanSessionDetection(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	townRoot := setupIntegrationTown(t)
+
+	// Create test rigs (gastown → prefix "ga", niflheim → prefix "ni")
+	createTestRig(t, townRoot, "gastown")
+	createTestRig(t, townRoot, "niflheim")
+
+	// Initialize the session prefix registry so ParseSessionName can resolve prefixes
+	oldRegistry := session.DefaultRegistry()
+	defer session.SetDefaultRegistry(oldRegistry)
+	if err := session.InitRegistry(townRoot); err != nil {
+		t.Fatalf("InitRegistry: %v", err)
+	}
+
 	tests := []struct {
 		name         string
 		sessionName  string
@@ -65,26 +80,20 @@ func TestIntegrationOrphanSessionDetection(t *testing.T) {
 		// Valid Gas Town sessions should NOT be detected as orphans
 		{"mayor_session", "hq-mayor", false},
 		{"deacon_session", "hq-deacon", false},
-		{"witness_session", "gt-gastown-witness", false},
-		{"refinery_session", "gt-gastown-refinery", false},
-		{"crew_session", "gt-gastown-crew-max", false},
-		{"polecat_session", "gt-gastown-polecat-abc123", false},
+		{"witness_session", "ga-witness", false},
+		{"refinery_session", "ga-refinery", false},
+		{"crew_session", "ga-crew-max", false},
+		{"polecat_session", "ga-abc123", false},
 
 		// Different rig names
-		{"niflheim_witness", "gt-niflheim-witness", false},
-		{"niflheim_crew", "gt-niflheim-crew-codex1", false},
+		{"niflheim_witness", "ni-witness", false},
+		{"niflheim_crew", "ni-crew-codex1", false},
 
 		// Invalid sessions SHOULD be detected as orphans
-		{"unknown_rig", "gt-unknownrig-witness", true},
-		{"malformed", "gt-only-two", true}, // Only 2 parts after gt
-		{"non_gt_prefix", "foo-gastown-witness", false}, // Not a gt- session, should be ignored
+		{"unknown_prefix", "xx-witness", true},          // Unregistered prefix
+		{"unregistered_prefix", "gt-only-two", true},    // "gt" not in test registry
+		{"non_gt_prefix", "foo-gastown-witness", false}, // Not a GT session, ignored
 	}
-
-	townRoot := setupIntegrationTown(t)
-
-	// Create test rigs
-	createTestRig(t, townRoot, "gastown")
-	createTestRig(t, townRoot, "niflheim")
 
 	check := NewOrphanSessionCheck()
 	ctx := &CheckContext{TownRoot: townRoot}
@@ -100,7 +109,7 @@ func TestIntegrationOrphanSessionDetection(t *testing.T) {
 			if tt.expectOrphan && isValid {
 				t.Errorf("session %q should be detected as orphan but was marked valid", tt.sessionName)
 			}
-			if !tt.expectOrphan && !isValid && strings.HasPrefix(tt.sessionName, "gt-") {
+			if !tt.expectOrphan && !isValid && session.HasKnownPrefix(tt.sessionName) {
 				t.Errorf("session %q should be valid but was detected as orphan", tt.sessionName)
 			}
 		})
@@ -115,17 +124,25 @@ func TestIntegrationOrphanSessionDetection(t *testing.T) {
 
 // TestIntegrationCrewSessionProtection verifies crew sessions are never auto-killed.
 func TestIntegrationCrewSessionProtection(t *testing.T) {
+	// Register prefixes so ParseSessionName can resolve session names
+	oldRegistry := session.DefaultRegistry()
+	defer session.SetDefaultRegistry(oldRegistry)
+	r := session.NewPrefixRegistry()
+	r.Register("ga", "gastown")
+	r.Register("ni", "niflheim")
+	session.SetDefaultRegistry(r)
+
 	tests := []struct {
 		name     string
 		session  string
 		isCrew   bool
 	}{
-		{"simple_crew", "gt-gastown-crew-max", true},
-		{"crew_with_numbers", "gt-gastown-crew-worker1", true},
-		{"crew_different_rig", "gt-niflheim-crew-codex1", true},
-		{"witness_not_crew", "gt-gastown-witness", false},
-		{"refinery_not_crew", "gt-gastown-refinery", false},
-		{"polecat_not_crew", "gt-gastown-polecat-abc", false},
+		{"simple_crew", "ga-crew-max", true},
+		{"crew_with_numbers", "ga-crew-worker1", true},
+		{"crew_different_rig", "ni-crew-codex1", true},
+		{"witness_not_crew", "ga-witness", false},
+		{"refinery_not_crew", "ga-refinery", false},
+		{"polecat_not_crew", "ga-abc", false},
 		{"mayor_not_crew", "hq-mayor", false},
 	}
 
@@ -248,15 +265,22 @@ func TestIntegrationBeadsDirRigLevel(t *testing.T) {
 // This catches the scenario where BEADS_DIR is set globally to town beads but a rig
 // session should have rig-level beads.
 func TestIntegrationEnvVarsBeadsDirMismatch(t *testing.T) {
+	// Register prefix so session names can be parsed
+	oldRegistry := session.DefaultRegistry()
+	defer session.SetDefaultRegistry(oldRegistry)
+	r := session.NewPrefixRegistry()
+	r.Register("ga", "gastown")
+	session.SetDefaultRegistry(r)
+
 	townRoot := "/town" // Fixed path for consistent expected values
 	townBeadsDir := townRoot + "/.beads"
 	rigBeadsDir := townRoot + "/gastown/.beads"
 
 	// Create mock reader with mismatched BEADS_DIR
 	reader := &mockEnvReaderIntegration{
-		sessions: []string{"gt-gastown-witness"},
+		sessions: []string{"ga-witness"},
 		sessionEnvs: map[string]map[string]string{
-			"gt-gastown-witness": {
+			"ga-witness": {
 				"GT_ROLE":   "witness",
 				"GT_RIG":    "gastown",
 				"BEADS_DIR": townBeadsDir, // WRONG: Should be rigBeadsDir
@@ -524,6 +548,14 @@ func TestIntegrationNoFalsePositives(t *testing.T) {
 
 // TestIntegrationSessionNaming verifies session name parsing is consistent.
 func TestIntegrationSessionNaming(t *testing.T) {
+	// Register prefixes so ParseSessionName can resolve session names
+	oldRegistry := session.DefaultRegistry()
+	defer session.SetDefaultRegistry(oldRegistry)
+	r := session.NewPrefixRegistry()
+	r.Register("ga", "gastown")
+	r.Register("ni", "niflheim")
+	session.SetDefaultRegistry(r)
+
 	tests := []struct {
 		name        string
 		sessionName string
@@ -540,21 +572,21 @@ func TestIntegrationSessionNaming(t *testing.T) {
 		},
 		{
 			name:        "witness",
-			sessionName: "gt-gastown-witness",
+			sessionName: "ga-witness",
 			wantRig:     "gastown",
 			wantRole:    "witness",
 			wantName:    "",
 		},
 		{
 			name:        "crew",
-			sessionName: "gt-gastown-crew-max",
+			sessionName: "ga-crew-max",
 			wantRig:     "gastown",
 			wantRole:    "crew",
 			wantName:    "max",
 		},
 		{
 			name:        "crew_multipart_name",
-			sessionName: "gt-niflheim-crew-codex1",
+			sessionName: "ni-crew-codex1",
 			wantRig:     "niflheim",
 			wantRole:    "crew",
 			wantName:    "codex1",
