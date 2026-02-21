@@ -1,6 +1,11 @@
 package events
 
 import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -255,5 +260,191 @@ func TestSessionPayload_Minimal(t *testing.T) {
 	}
 	if _, ok := p["cwd"]; ok {
 		t.Error("expected no cwd key when empty")
+	}
+}
+
+// setupFakeWorkspace creates a temp directory with mayor/town.json marker,
+// chdirs into it, and returns the workspace root and a cleanup function.
+func setupFakeWorkspace(t *testing.T) (string, func()) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test-town"}`), 0644); err != nil {
+		t.Fatalf("writing town.json: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getting cwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp: %v", err)
+	}
+
+	return tmpDir, func() {
+		os.Chdir(origDir)
+	}
+}
+
+func TestLog_WritesEventToFile(t *testing.T) {
+	root, cleanup := setupFakeWorkspace(t)
+	defer cleanup()
+
+	payload := map[string]interface{}{"key": "value"}
+	err := Log(TypeSling, "test-actor", payload, VisibilityBoth)
+	if err != nil {
+		t.Fatalf("Log() error: %v", err)
+	}
+
+	eventsPath := filepath.Join(root, EventsFile)
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("reading events file: %v", err)
+	}
+
+	var event Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatalf("unmarshaling event: %v", err)
+	}
+
+	if event.Type != TypeSling {
+		t.Errorf("type = %q, want %q", event.Type, TypeSling)
+	}
+	if event.Actor != "test-actor" {
+		t.Errorf("actor = %q, want test-actor", event.Actor)
+	}
+	if event.Source != "gt" {
+		t.Errorf("source = %q, want gt", event.Source)
+	}
+	if event.Visibility != VisibilityBoth {
+		t.Errorf("visibility = %q, want %q", event.Visibility, VisibilityBoth)
+	}
+	if event.Payload["key"] != "value" {
+		t.Errorf("payload key = %v, want value", event.Payload["key"])
+	}
+	if event.Timestamp == "" {
+		t.Error("timestamp should not be empty")
+	}
+}
+
+func TestLogFeed_SetsVisibilityFeed(t *testing.T) {
+	root, cleanup := setupFakeWorkspace(t)
+	defer cleanup()
+
+	err := LogFeed(TypeHook, "builder", map[string]interface{}{"bead": "gt-1"})
+	if err != nil {
+		t.Fatalf("LogFeed() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, EventsFile))
+	if err != nil {
+		t.Fatalf("reading events file: %v", err)
+	}
+
+	var event Event
+	json.Unmarshal(data, &event)
+	if event.Visibility != VisibilityFeed {
+		t.Errorf("visibility = %q, want %q", event.Visibility, VisibilityFeed)
+	}
+}
+
+func TestLogAudit_SetsVisibilityAudit(t *testing.T) {
+	root, cleanup := setupFakeWorkspace(t)
+	defer cleanup()
+
+	err := LogAudit(TypeBoot, "daemon", nil)
+	if err != nil {
+		t.Fatalf("LogAudit() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, EventsFile))
+	if err != nil {
+		t.Fatalf("reading events file: %v", err)
+	}
+
+	var event Event
+	json.Unmarshal(data, &event)
+	if event.Visibility != VisibilityAudit {
+		t.Errorf("visibility = %q, want %q", event.Visibility, VisibilityAudit)
+	}
+}
+
+func TestLog_MultipleEvents_AppendsToFile(t *testing.T) {
+	root, cleanup := setupFakeWorkspace(t)
+	defer cleanup()
+
+	for i := 0; i < 3; i++ {
+		if err := Log(TypeNudge, "actor", nil, VisibilityFeed); err != nil {
+			t.Fatalf("Log() iteration %d error: %v", i, err)
+		}
+	}
+
+	f, err := os.Open(filepath.Join(root, EventsFile))
+	if err != nil {
+		t.Fatalf("opening events file: %v", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		count++
+		var event Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal line %d: %v", count, err)
+		}
+		if event.Type != TypeNudge {
+			t.Errorf("line %d type = %q, want %q", count, event.Type, TypeNudge)
+		}
+	}
+	if count != 3 {
+		t.Errorf("got %d events, want 3", count)
+	}
+}
+
+func TestWrite_NoWorkspace_ReturnsNil(t *testing.T) {
+	// Chdir to a temp dir that is NOT a Gas Town workspace
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	err := write(Event{Type: "test"})
+	if err != nil {
+		t.Errorf("write() outside workspace should return nil, got: %v", err)
+	}
+
+	// Verify no events file was created
+	if _, err := os.Stat(filepath.Join(tmpDir, EventsFile)); !os.IsNotExist(err) {
+		t.Error("events file should not exist outside workspace")
+	}
+}
+
+func TestLog_NilPayload(t *testing.T) {
+	root, cleanup := setupFakeWorkspace(t)
+	defer cleanup()
+
+	err := Log(TypeHalt, "mayor", nil, VisibilityAudit)
+	if err != nil {
+		t.Fatalf("Log() with nil payload error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, EventsFile))
+	if err != nil {
+		t.Fatalf("reading events file: %v", err)
+	}
+
+	var event Event
+	json.Unmarshal(data, &event)
+	if event.Payload != nil {
+		t.Errorf("payload should be nil/omitted, got %v", event.Payload)
 	}
 }
