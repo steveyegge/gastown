@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -107,14 +109,18 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	//
 	// The defer does NOT nuke worktree — only kills session. Worktree cleanup is the
 	// Witness's job.
-	var sessionCleanupNeeded bool
-	var sessionKilled bool
+	var sessionCleanupNeeded atomic.Bool
+	var sessionKilled atomic.Bool
+	var deferredMu sync.Mutex
 	var deferredTownRoot string
 	var deferredRoleInfo RoleInfo
 	defer func() {
-		if sessionCleanupNeeded && !sessionKilled {
+		if sessionCleanupNeeded.Load() && !sessionKilled.Load() {
 			fmt.Printf("%s Deferred session cleanup (backstop)\n", style.Bold.Render("→"))
-			if err := selfKillSession(deferredTownRoot, deferredRoleInfo); err != nil {
+			deferredMu.Lock()
+			root, role := deferredTownRoot, deferredRoleInfo
+			deferredMu.Unlock()
+			if err := selfKillSession(root, role); err != nil {
 				style.PrintWarning("deferred session kill failed: %v", err)
 			}
 			retErr = NewSilentExit(0)
@@ -131,8 +137,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	go func() {
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\n%s Received SIGTERM — running deferred cleanup\n", style.Bold.Render("→"))
-		if sessionCleanupNeeded && !sessionKilled {
-			if err := selfKillSession(deferredTownRoot, deferredRoleInfo); err != nil {
+		if sessionCleanupNeeded.Load() && !sessionKilled.Load() {
+			deferredMu.Lock()
+			root, role := deferredTownRoot, deferredRoleInfo
+			deferredMu.Unlock()
+			if err := selfKillSession(root, role); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: SIGTERM cleanup failed: %v\n", err)
 			}
 		}
@@ -224,13 +233,15 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch.
 			// Arm session cleanup before returning so the polecat doesn't get stranded.
 			if polecatEnv := os.Getenv("GT_POLECAT"); polecatEnv != "" {
-				sessionCleanupNeeded = true
+				deferredMu.Lock()
 				deferredTownRoot = townRoot
 				deferredRoleInfo = RoleInfo{
 					Role:    RolePolecat,
 					Rig:     rigName,
 					Polecat: polecatEnv,
 				}
+				deferredMu.Unlock()
+				sessionCleanupNeeded.Store(true)
 			}
 			return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
 		}
@@ -315,9 +326,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// From this point forward, any return/error will trigger the defer
 		// to kill the session, preventing zombie sessions.
 		if roleInfo.Role == RolePolecat {
-			sessionCleanupNeeded = true
+			deferredMu.Lock()
 			deferredTownRoot = townRoot
 			deferredRoleInfo = roleInfo
+			deferredMu.Unlock()
+			sessionCleanupNeeded.Store(true)
 		}
 	}
 
@@ -967,7 +980,7 @@ afterDoltMerge:
 			// If session kill fails, fall through to normal exit
 			style.PrintWarning("session kill failed: %v", err)
 		} else {
-			sessionKilled = true // Prevent deferred kill from double-killing
+			sessionKilled.Store(true) // Prevent deferred kill from double-killing
 		}
 		// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 	}
