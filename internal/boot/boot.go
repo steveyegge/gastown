@@ -21,6 +21,17 @@ import (
 // MarkerFileName is the lock file for Boot startup coordination.
 const MarkerFileName = ".boot-running"
 
+// Package-level function vars for testability.
+// Tests can override these to mock tmux and exec operations.
+var (
+	hasSessionFn   = func(t *tmux.Tmux, name string) (bool, error) { return t.HasSession(name) }
+	killSessionFn  = func(t *tmux.Tmux, name string) error { return t.KillSessionWithProcesses(name) }
+	startSessionFn = func(t *tmux.Tmux, cfg session.SessionConfig) (*session.StartResult, error) {
+		return session.StartSession(t, cfg)
+	}
+	startCmdFn = func(cmd *exec.Cmd) error { return cmd.Start() }
+)
+
 // StatusFileName stores Boot's last execution status.
 const StatusFileName = ".boot-status.json"
 
@@ -78,7 +89,7 @@ func (b *Boot) IsRunning() bool {
 
 // IsSessionAlive checks if the Boot tmux session exists.
 func (b *Boot) IsSessionAlive() bool {
-	has, err := b.tmux.HasSession(session.BootSessionName())
+	has, err := hasSessionFn(b.tmux, session.BootSessionName())
 	return err == nil && has
 }
 
@@ -170,7 +181,7 @@ func (b *Boot) Spawn(agentOverride string) error {
 func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first (Boot is ephemeral).
 	if b.IsSessionAlive() {
-		_ = b.tmux.KillSessionWithProcesses(session.BootSessionName())
+		_ = killSessionFn(b.tmux, session.BootSessionName())
 	}
 
 	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
@@ -179,7 +190,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	}
 
 	// Use unified session lifecycle for config → settings → command → create → env.
-	_, err := session.StartSession(b.tmux, session.SessionConfig{
+	_, err := startSessionFn(b.tmux, session.SessionConfig{
 		SessionID: session.BootSessionName(),
 		WorkDir:   b.bootDir,
 		Role:      "boot",
@@ -212,7 +223,7 @@ func (b *Boot) spawnDegraded() error {
 	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")
 
 	// Run async - don't wait for completion
-	return cmd.Start()
+	return startCmdFn(cmd)
 }
 
 // IsDegraded returns whether Boot is in degraded mode.
