@@ -1217,35 +1217,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 					fmt.Fprintf(os.Stderr, "Closed %d molecule step(s) for %s\n", n, attachment.AttachedMolecule)
 				}
 
-				// Retry molecule close with exponential backoff. Transient failures
-				// can leave wisps orphaned, blocking the work bead from closing.
-				var moleculeClosed bool
-				var lastErr error
-				for attempt := 0; attempt < 3; attempt++ {
-					if err := bd.Close(attachment.AttachedMolecule); err == nil {
-						moleculeClosed = true
-						break
-					} else {
-						lastErr = err
-						// If the molecule doesn't exist (already burned/deleted),
-						// treat it as already closed and stop retrying.
-						if errors.Is(err, beads.ErrNotFound) {
-							moleculeClosed = true
-							fmt.Fprintf(os.Stderr, "Warning: attached molecule %s not found (already burned/deleted), treating as closed\n", attachment.AttachedMolecule)
-							break
-						}
-						if attempt < 2 {
-							time.Sleep(time.Duration(100<<attempt) * time.Millisecond) // 100ms, 200ms
-						}
+				// Close the wisp root with --force and audit reason.
+				// ForceCloseWithReason handles any status (hooked, open, in_progress)
+				// and records the reason + session for attribution.
+				// Same pattern as gt mol burn/squash (#1879).
+				if closeErr := bd.ForceCloseWithReason("done", attachment.AttachedMolecule); closeErr != nil {
+					if !errors.Is(closeErr, beads.ErrNotFound) {
+						fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s: %v\n", attachment.AttachedMolecule, closeErr)
+						// Don't try to close hookedBeadID - it may still be blocked
+						// The Witness will clean up orphaned state
+						return
 					}
-				}
-				if !moleculeClosed {
-					// All retries failed with non-"not found" errors - skip closing
-					// hooked bead (it's blocked by the molecule)
-					fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s after 3 attempts: %v\n", attachment.AttachedMolecule, lastErr)
-					// Don't try to close hookedBeadID - it will fail because it's still blocked
-					// The Witness will clean up orphaned state
-					return
+					// Not found = already burned/deleted by another path, continue
 				}
 			}
 

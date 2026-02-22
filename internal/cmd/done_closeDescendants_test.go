@@ -81,8 +81,9 @@ case "$cmd" in
     fi
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
@@ -253,8 +254,9 @@ case "$cmd" in
     echo '[]'
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
@@ -386,8 +388,9 @@ case "$cmd" in
     fi
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
@@ -537,8 +540,9 @@ case "$cmd" in
     fi
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
@@ -703,8 +707,9 @@ case "$cmd" in
     echo '[]'
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
@@ -826,8 +831,9 @@ case "$cmd" in
     exit 1
     ;;
   close)
-    # Log all arguments (closeDescendants batches IDs via b.Close(idsToClose...))
+    # Log bead IDs only, skip flags (--reason, --force, --session)
     for arg in "$@"; do
+      case "$arg" in --*) continue ;; esac
       echo "$arg" >> "%s"
     done
     ;;
