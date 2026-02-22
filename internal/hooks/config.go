@@ -32,6 +32,8 @@ type HooksConfig struct {
 	Stop             []HookEntry `json:"Stop,omitempty"`
 	PreCompact       []HookEntry `json:"PreCompact,omitempty"`
 	UserPromptSubmit []HookEntry `json:"UserPromptSubmit,omitempty"`
+	WorktreeCreate   []HookEntry `json:"WorktreeCreate,omitempty"`
+	WorktreeRemove   []HookEntry `json:"WorktreeRemove,omitempty"`
 }
 
 // SettingsJSON represents the full Claude Code settings.json structure.
@@ -370,7 +372,7 @@ func isRig(path string) bool {
 }
 
 // EventTypes returns the known hook event type names in display order.
-var EventTypes = []string{"PreToolUse", "PostToolUse", "SessionStart", "Stop", "PreCompact", "UserPromptSubmit"}
+var EventTypes = []string{"PreToolUse", "PostToolUse", "SessionStart", "Stop", "PreCompact", "UserPromptSubmit", "WorktreeCreate", "WorktreeRemove"}
 
 // GetEntries returns the hook entries for a given event type.
 func (c *HooksConfig) GetEntries(eventType string) []HookEntry {
@@ -387,6 +389,10 @@ func (c *HooksConfig) GetEntries(eventType string) []HookEntry {
 		return c.PreCompact
 	case "UserPromptSubmit":
 		return c.UserPromptSubmit
+	case "WorktreeCreate":
+		return c.WorktreeCreate
+	case "WorktreeRemove":
+		return c.WorktreeRemove
 	default:
 		return nil
 	}
@@ -407,6 +413,10 @@ func (c *HooksConfig) SetEntries(eventType string, entries []HookEntry) {
 		c.PreCompact = entries
 	case "UserPromptSubmit":
 		c.UserPromptSubmit = entries
+	case "WorktreeCreate":
+		c.WorktreeCreate = entries
+	case "WorktreeRemove":
+		c.WorktreeRemove = entries
 	}
 }
 
