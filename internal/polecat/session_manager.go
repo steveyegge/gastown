@@ -303,6 +303,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		"GT_RIG":          m.rig.Name,
 		"GT_POLECAT":      polecat,
 		"GT_ROLE":         fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
+		"BD_ACTOR":        fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat),
 		"GT_POLECAT_PATH": workDir,
 		"GT_TOWN_ROOT":    townRoot,
 	}
