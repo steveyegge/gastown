@@ -328,9 +328,10 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		return "merge-request type should be ephemeral"
 	}
 
-	// Agent type is NOT ephemeral: persistent polecats design (c410c10a) stores
-	// agent beads in the issues table for durability across polecat lifecycles.
-	// Previously flagged as ephemeral (gt-bewatn.9) but that was reversed.
+	// Check for agent type - agent operational state is ephemeral (gt-bewatn.9)
+	if issueType == "agent" {
+		return "agent type should be ephemeral"
+	}
 
 	// Check for event type - session/cost events are operational telemetry
 	if issueType == "event" {
@@ -355,9 +356,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		if label == "gt:mail" || label == "gt:handoff" {
 			return "mail/handoff label indicates ephemeral message"
 		}
-		// gt:agent label is NOT an ephemeral indicator: persistent polecats
-		// design (c410c10a) keeps agent beads in the issues table.
-		// Previously flagged here but that would undo the migration.
+		if label == "gt:agent" {
+			return "agent label indicates ephemeral operational state"
+		}
 	}
 
 	// Check for formula instance patterns in ID
