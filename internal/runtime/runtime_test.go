@@ -3,7 +3,6 @@ package runtime
 import (
 	"os"
 	"testing"
-	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 )
@@ -87,64 +86,6 @@ func TestSessionIDFromEnv_CustomEnvVar(t *testing.T) {
 	result := SessionIDFromEnv()
 	if result != "custom-session-456" {
 		t.Errorf("SessionIDFromEnv() with custom env = %q, want %q", result, "custom-session-456")
-	}
-}
-
-func TestSleepForReadyDelay_NilConfig(t *testing.T) {
-	// Should not panic with nil config
-	SleepForReadyDelay(nil)
-}
-
-func TestSleepForReadyDelay_ZeroDelay(t *testing.T) {
-	rc := &config.RuntimeConfig{
-		Tmux: &config.RuntimeTmuxConfig{
-			ReadyDelayMs: 0,
-		},
-	}
-
-	start := time.Now()
-	SleepForReadyDelay(rc)
-	elapsed := time.Since(start)
-
-	// Should return immediately
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("SleepForReadyDelay() with zero delay took too long: %v", elapsed)
-	}
-}
-
-func TestSleepForReadyDelay_WithDelay(t *testing.T) {
-	rc := &config.RuntimeConfig{
-		Tmux: &config.RuntimeTmuxConfig{
-			ReadyDelayMs: 10, // 10ms delay
-		},
-	}
-
-	start := time.Now()
-	SleepForReadyDelay(rc)
-	elapsed := time.Since(start)
-
-	// Should sleep for at least 10ms
-	if elapsed < 10*time.Millisecond {
-		t.Errorf("SleepForReadyDelay() should sleep for at least 10ms, took %v", elapsed)
-	}
-	// But not too long
-	if elapsed > 50*time.Millisecond {
-		t.Errorf("SleepForReadyDelay() slept too long: %v", elapsed)
-	}
-}
-
-func TestSleepForReadyDelay_NilTmuxConfig(t *testing.T) {
-	rc := &config.RuntimeConfig{
-		Tmux: nil,
-	}
-
-	start := time.Now()
-	SleepForReadyDelay(rc)
-	elapsed := time.Since(start)
-
-	// Should return immediately
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("SleepForReadyDelay() with nil Tmux config took too long: %v", elapsed)
 	}
 }
 
@@ -557,4 +498,80 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestRuntimeConfigWithMinDelay_NilConfig(t *testing.T) {
+	result := RuntimeConfigWithMinDelay(nil, 3000)
+	if result == nil {
+		t.Fatal("RuntimeConfigWithMinDelay(nil) should return non-nil config")
+	}
+	if result.Tmux == nil {
+		t.Fatal("RuntimeConfigWithMinDelay(nil) should have Tmux config")
+	}
+	if result.Tmux.ReadyDelayMs != 3000 {
+		t.Errorf("ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+	}
+}
+
+func TestRuntimeConfigWithMinDelay_NilTmux(t *testing.T) {
+	rc := &config.RuntimeConfig{PromptMode: "arg"}
+	result := RuntimeConfigWithMinDelay(rc, 2000)
+	if result.Tmux == nil {
+		t.Fatal("should have Tmux config")
+	}
+	if result.Tmux.ReadyDelayMs != 2000 {
+		t.Errorf("ReadyDelayMs = %d, want 2000", result.Tmux.ReadyDelayMs)
+	}
+	// Original should be unmodified
+	if rc.Tmux != nil {
+		t.Error("original config should not be modified")
+	}
+}
+
+func TestRuntimeConfigWithMinDelay_BelowMin(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyDelayMs:    500,
+			ReadyPromptPrefix: "❯ ",
+		},
+	}
+	result := RuntimeConfigWithMinDelay(rc, 2000)
+	if result.Tmux.ReadyDelayMs != 2000 {
+		t.Errorf("ReadyDelayMs = %d, want 2000 (should be raised to min)", result.Tmux.ReadyDelayMs)
+	}
+	// ReadyPromptPrefix should be cleared to force delay-based path
+	if result.Tmux.ReadyPromptPrefix != "" {
+		t.Errorf("ReadyPromptPrefix = %q, want empty (should be cleared to force delay path)", result.Tmux.ReadyPromptPrefix)
+	}
+	// Original should be unmodified
+	if rc.Tmux.ReadyDelayMs != 500 {
+		t.Errorf("original ReadyDelayMs = %d, want 500 (should not be modified)", rc.Tmux.ReadyDelayMs)
+	}
+	if rc.Tmux.ReadyPromptPrefix != "❯ " {
+		t.Error("original ReadyPromptPrefix should not be modified")
+	}
+}
+
+func TestRuntimeConfigWithMinDelay_AboveMin(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyDelayMs: 5000,
+		},
+	}
+	result := RuntimeConfigWithMinDelay(rc, 2000)
+	if result.Tmux.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %d, want 5000 (should not be lowered)", result.Tmux.ReadyDelayMs)
+	}
+}
+
+func TestRuntimeConfigWithMinDelay_ZeroMin(t *testing.T) {
+	rc := &config.RuntimeConfig{
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyDelayMs: 0,
+		},
+	}
+	result := RuntimeConfigWithMinDelay(rc, 0)
+	if result.Tmux.ReadyDelayMs != 0 {
+		t.Errorf("ReadyDelayMs = %d, want 0", result.Tmux.ReadyDelayMs)
+	}
 }

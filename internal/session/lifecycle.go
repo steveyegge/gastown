@@ -4,6 +4,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -233,9 +234,13 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		_ = t.AcceptBypassPermissionsWarning(cfg.SessionID)
 	}
 
-	// 11. Ready delay.
+	// 11. Ready delay: wait for agent to be fully ready at the prompt.
+	// Uses prompt-based polling for agents with ReadyPromptPrefix,
+	// falling back to ReadyDelayMs sleep for agents without prompt detection.
 	if cfg.ReadyDelay {
-		runtime.SleepForReadyDelay(runtimeConfig)
+		if err := t.WaitForRuntimeReady(cfg.SessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: agent readiness detection timed out for %s: %v\n", cfg.SessionID, err)
+		}
 	}
 
 	// 12. Verify session survived startup.
@@ -375,13 +380,6 @@ func buildCommand(cfg SessionConfig, prompt string) (string, error) {
 	}
 	return config.BuildAgentStartupCommand(
 		cfg.Role, cfg.RigName, cfg.TownRoot, cfg.RigPath, prompt), nil
-}
-
-// ReadyDelay sleeps for the runtime's configured readiness delay.
-// Exposed for callers that need to call it independently (e.g., when
-// using a pre-built StartResult).
-func ReadyDelay(rc *config.RuntimeConfig) {
-	runtime.SleepForReadyDelay(rc)
 }
 
 // ShutdownDelay is the standard delay after session creation.
