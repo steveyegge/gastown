@@ -694,7 +694,6 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		StripBdBranch().
 		Output()
 	if err != nil {
 		return nil, fmt.Errorf("bonding formula to bead: %w", err)
