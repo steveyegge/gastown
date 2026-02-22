@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -145,15 +146,29 @@ func TestRenderRole_Refinery_DefaultBranch(t *testing.T) {
 		t.Fatalf("RenderRole() error = %v", err)
 	}
 
-	// Check that the custom default branch is used in git commands
-	if !strings.Contains(output, "origin/develop") {
-		t.Error("output missing 'origin/develop' - DefaultBranch not being used for rebase")
+	// Check that the custom default branch is used in target-resolution guidance.
+	// The refinery template intentionally uses placeholders
+	// (<rebase-target>/<merge-target>) instead of literal branch commands, so this
+	// test verifies the rendered rule text + placeholders.
+	fallback := fmt.Sprintf("fallback `%s`", data.DefaultBranch)
+	alwaysUse := fmt.Sprintf("always use `%s`", data.DefaultBranch)
+	if !strings.Contains(output, "Target Resolution Rule (single source):") {
+		t.Error("output missing target resolution rule heading")
 	}
-	if !strings.Contains(output, "git checkout develop") {
-		t.Error("output missing 'git checkout develop' - DefaultBranch not being used for checkout")
+	if !strings.Contains(output, fallback) {
+		t.Errorf("output missing %q - DefaultBranch not being used in target fallback guidance", fallback)
 	}
-	if !strings.Contains(output, "git push origin develop") {
-		t.Error("output missing 'git push origin develop' - DefaultBranch not being used for push")
+	if !strings.Contains(output, alwaysUse) {
+		t.Errorf("output missing %q - DefaultBranch not being used in integration-disabled guidance", alwaysUse)
+	}
+	if !strings.Contains(output, "git rebase origin/<rebase-target>") {
+		t.Error("output missing placeholder rebase command")
+	}
+	if !strings.Contains(output, "git checkout <merge-target>") {
+		t.Error("output missing placeholder checkout command")
+	}
+	if !strings.Contains(output, "git push origin <merge-target>") {
+		t.Error("output missing placeholder push command")
 	}
 
 	// Verify it does NOT contain hardcoded "main" in git commands
@@ -247,4 +262,3 @@ func TestRoleNames(t *testing.T) {
 		}
 	}
 }
-
