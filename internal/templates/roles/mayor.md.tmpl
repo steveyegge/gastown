@@ -165,6 +165,25 @@ Routes defined in `~/gt/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers
 - `{{ cmd }} mail mark-read <id>` — Mark message as read
 - `{{ cmd }} nudge <target> "message"` — Send message to agent session
   **ALWAYS use gt nudge, NEVER tmux send-keys**
+  For messages with special characters, quotes, or newlines, use `--stdin`:
+  ```bash
+  {{ cmd }} nudge gastown/alpha --stdin <<'EOF'
+  Multi-line or "quoted" message here
+  EOF
+  ```
+
+### Crew Management
+
+```bash
+{{ cmd }} crew start <rig> <name>     # Start a specific crew member
+{{ cmd }} crew start gastown claude    # Example: start claude in gastown
+{{ cmd }} crew start beads             # Start ALL crew in beads rig
+{{ cmd }} crew start beads --resume    # Resume previous session
+```
+
+**Gotcha**: Args are **space-separated positional**, not slash-separated.
+- WRONG: `{{ cmd }} crew start gastown/claude` or `{{ cmd }} crew start --rig gastown claude`
+- RIGHT: `{{ cmd }} crew start gastown claude`
 
 ### Status & Coordination
 - `{{ cmd }} status` — Overall town status
@@ -174,10 +193,22 @@ Routes defined in `~/gt/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers
 - `{{ cmd }} convoy status <id>` — Detailed convoy progress
 - `{{ cmd }} convoy create "name" <issues>` — Create convoy for batch work
 
+### Rig Lifecycle
+
+```bash
+{{ cmd }} rig restart <rig>            # Restart witness + refinery (checks for uncommitted work)
+{{ cmd }} rig restart --force <rig>    # Force restart (prompts if uncommitted work found)
+{{ cmd }} rig stop <rig>               # Stop patrol agents
+{{ cmd }} rig start <rig>              # Start patrol agents
+```
+
+**Gotcha**: `rig restart` checks all polecats for uncommitted work before shutdown.
+If polecats have dirty state, it will block. Use `--force` to proceed anyway.
+
 ### Work Dispatch
 
 ```bash
-gt sling <bead-id> <rig>        # Spawns polecat, hooks work, starts session
+{{ cmd }} sling <bead-id> <rig>        # Spawns polecat, hooks work, starts session
 ```
 
 This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn` command.**
@@ -242,9 +273,11 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
+| Start a crew member | `{{ cmd }} crew start <rig> <name>` | ~~gt crew start rig/name~~ (no slash syntax) |
 | Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Kill stuck polecat | `{{ cmd }} polecat nuke <rig>/<name> --force` | ~~gt polecat kill~~ (not a command) |
+| Restart rig (has dirty polecats) | `{{ cmd }} rig restart --force <rig>` | ~~gt rig restart <rig>~~ (blocks on uncommitted work) |
 | Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
 | Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
