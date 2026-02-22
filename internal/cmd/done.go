@@ -51,7 +51,8 @@ Examples:
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
-	RunE: runDone,
+	RunE:         runDone,
+	SilenceUsage: true, // Don't print usage on operational errors (confuses agents)
 }
 
 var (
@@ -181,9 +182,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("cannot determine current rig (working directory may be deleted)")
 	}
 
-	// When gt is invoked via shell alias (cd ~/gt && gt), cwd is the town
-	// root, not the polecat's worktree. Detect and reconstruct actual path.
-	if cwdAvailable && cwd == townRoot {
+	// When gt is invoked via shell alias (cd ~/gt && gt), or when Claude Code
+	// resets the shell CWD to mayor/rig, cwd is NOT the polecat's worktree.
+	// Detect and reconstruct actual path.
+	//
+	// This triggers when cwd is:
+	// - The town root itself (cd ~/gt && gt)
+	// - The mayor rig path (Claude Code Bash tool CWD reset)
+	// - Any non-polecat path within the rig
+	cwdIsPolecatWorktree := strings.Contains(cwd, "/polecats/")
+	if cwdAvailable && !cwdIsPolecatWorktree {
 		if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" && rigName != "" {
 			polecatClone := filepath.Join(townRoot, rigName, "polecats", polecatName, rigName)
 			if _, err := os.Stat(polecatClone); err == nil {
