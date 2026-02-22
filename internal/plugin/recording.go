@@ -18,9 +18,10 @@ import (
 type RunResult string
 
 const (
-	ResultSuccess RunResult = "success"
-	ResultFailure RunResult = "failure"
-	ResultSkipped RunResult = "skipped"
+	ResultSuccess   RunResult = "success"
+	ResultFailure   RunResult = "failure"
+	ResultSkipped   RunResult = "skipped"
+	ResultTriggered RunResult = "triggered"
 )
 
 // PluginRunRecord represents data for creating a plugin run bead.

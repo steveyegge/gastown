@@ -438,8 +438,8 @@ func runPluginRun(cmd *cobra.Command, args []string) error {
 	beadID, err := recorder.RecordRun(plugin.PluginRunRecord{
 		PluginName: p.Name,
 		RigName:    p.RigName,
-		Result:     plugin.ResultSuccess, // Manual runs are marked success
-		Body:       "Manual run via gt plugin run",
+		Result:     plugin.ResultTriggered, // Instructions printed, not executed
+		Body:       "Manual trigger via gt plugin run (instructions printed, not executed)",
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to record run: %v\n", err)
@@ -495,6 +495,9 @@ func runPluginHistory(cmd *cobra.Command, args []string) error {
 		} else if run.Result == plugin.ResultSkipped {
 			resultStyle = style.Dim
 			resultIcon = "○"
+		} else if run.Result == plugin.ResultTriggered {
+			resultStyle = style.Warning
+			resultIcon = "▶"
 		}
 
 		fmt.Printf("  %s %s  %s\n",

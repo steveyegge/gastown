@@ -33,6 +33,9 @@ func TestRunResultConstants(t *testing.T) {
 	if ResultSkipped != "skipped" {
 		t.Errorf("expected ResultSkipped to be 'skipped', got %q", ResultSkipped)
 	}
+	if ResultTriggered != "triggered" {
+		t.Errorf("expected ResultTriggered to be 'triggered', got %q", ResultTriggered)
+	}
 }
 
 func TestNewRecorder(t *testing.T) {
