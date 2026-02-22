@@ -69,7 +69,7 @@ source of truth.
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 6
+version = 7
 
 [vars]
 [vars.wisp_type]
@@ -213,14 +213,21 @@ id = "process-branch"
 title = "Mechanical rebase"
 needs = ["queue-scan"]
 description = """
-Pick next branch from queue. Attempt mechanical rebase on current main.
+Pick next branch from queue. Attempt mechanical rebase on the MR's effective target branch.
 
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
 **Config: target_branch = {{target_branch}}**
+
+**Step 0: Determine rebase target (must match merge target)**
+
+Use the MR's explicit target branch when present (e.g. integration/release branches),
+and only fall back to {{target_branch}} when the MR target is empty.
+Do NOT hardcode `main` unless `main` is actually the resolved MR target.
 
 **Step 1: Checkout and attempt rebase**
 ```bash
 git checkout -b temp origin/<polecat-branch>
-git rebase origin/{{target_branch}}
+git rebase origin/<rebase-target>
 ```
 
 **Step 2: Check rebase result**
@@ -249,8 +256,8 @@ git rebase --abort
 
 2. **Record conflict metadata**:
 ```bash
-# Capture main SHA for reference
-MAIN_SHA=$(git rev-parse origin/main)
+# Capture target SHA for reference
+TARGET_SHA=$(git rev-parse origin/<rebase-target>)
 BRANCH_SHA=$(git rev-parse origin/<polecat-branch>)
 ```
 
@@ -263,12 +270,12 @@ bd create --type=task --priority=1 \
 Original MR: <mr-bead-id>
 Branch: <polecat-branch>
 Original Issue: <issue-id>
-Conflict with main at: ${MAIN_SHA}
+Conflict with target <rebase-target> at: ${TARGET_SHA}
 Branch SHA: ${BRANCH_SHA}
 
 ## Instructions
 1. Clone/checkout the branch
-2. Rebase on current main: git rebase origin/main
+2. Rebase on target: git rebase origin/<rebase-target>
 3. Resolve conflicts
 4. Force push: git push -f origin <branch>
 5. Close this task when done
@@ -644,9 +651,10 @@ bd list --type=merge-request --status=open
 
 For each open MR bead:
 1. Check if branch exists: `git ls-remote origin refs/heads/<branch>`
-2. If branch gone, verify work is on main: `git log origin/main --oneline | grep "<source_issue>"`
-3. If work on main → close MR with reason "Merged (verified on main)"
-4. If work NOT on main → investigate before closing:
+2. Determine merge target from MR metadata target field (fallback to {{target_branch}})
+3. If branch gone, verify work is on target: `git log origin/<merge-target> --oneline | grep "<source_issue>"`
+4. If work on target → close MR with reason "Merged (verified on <merge-target>)"
+5. If work NOT on target → investigate before closing:
    - Check source_issue validity (should be gt-xxxxx, not branch name)
    - Search reflog/dangling commits if possible
    - If unverifiable, close with reason "Unverifiable - no audit trail"

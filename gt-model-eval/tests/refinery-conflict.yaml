@@ -127,6 +127,28 @@
         const d = JSON.parse(output);
         return d.action === "proceed-to-tests";
 
+- description: "Integration target: rebase must use MR target, not main"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. This MR targets an integration branch that is already
+      ahead of main. Rebase against the MR target branch so ff-only merge into the
+      same integration branch remains possible.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/wave-2-api (PR #101)
+      ## MR metadata: {"target_branch": "integration/gt-epic", "source_branch": "feat/wave-2-api"}
+
+      $ git rebase origin/integration/gt-epic
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Integration target rebase succeeded. Proceed to tests."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "proceed-to-tests";
+
 - description: "Post-push: SHA matches — send MERGED notification"
   vars:
     role: refinery
