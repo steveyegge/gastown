@@ -199,7 +199,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		RuntimeConfigDir: cfg.RuntimeConfigDir,
 		Agent:            cfg.AgentOverride,
 	})
-	envVars = mergeRuntimeLivenessEnv(envVars, runtimeConfig)
+	envVars = MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 	for _, k := range mapKeysSorted(envVars) {
 		_ = t.SetEnvironment(cfg.SessionID, k, envVars[k])
 	}
@@ -301,10 +301,13 @@ func mapKeysSorted(m map[string]string) []string {
 	return keys
 }
 
-// mergeRuntimeLivenessEnv ensures liveness-critical env vars are present in the
+// MergeRuntimeLivenessEnv ensures liveness-critical env vars are present in the
 // tmux session environment table, even when agent resolution came from
 // workspace/default settings rather than an explicit --agent override.
-func mergeRuntimeLivenessEnv(envVars map[string]string, runtimeConfig *config.RuntimeConfig) map[string]string {
+//
+// Call this after config.AgentEnv() to add GT_AGENT and GT_PROCESS_NAMES
+// before writing env vars to the tmux session via SetEnvironment.
+func MergeRuntimeLivenessEnv(envVars map[string]string, runtimeConfig *config.RuntimeConfig) map[string]string {
 	if envVars == nil {
 		envVars = make(map[string]string)
 	}

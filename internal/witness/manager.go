@@ -177,6 +177,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		TownRoot: townRoot,
 		Agent:    agentOverride,
 	})
+	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
