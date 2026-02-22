@@ -68,6 +68,23 @@ var doltStopCmd = &cobra.Command{
 	RunE:  runDoltStop,
 }
 
+var doltRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the Dolt server (kills imposters)",
+	Long: `Stop the Dolt SQL server, kill any imposter servers on the configured port,
+and start the correct server from the configured data directory.
+
+This is the nuclear option for recovering from a hijacked port — when another
+process (e.g., bd's embedded Dolt server) has taken over the port with a
+different data directory, serving empty/wrong databases.
+
+Steps:
+  1. Stop the tracked server (via PID file)
+  2. Kill any other dolt sql-server on the configured port (imposters)
+  3. Start the correct server from .dolt-data/`,
+	RunE: runDoltRestart,
+}
+
 var doltStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Dolt server status",
@@ -249,6 +266,7 @@ func init() {
 	doltCmd.AddCommand(doltInitCmd)
 	doltCmd.AddCommand(doltStartCmd)
 	doltCmd.AddCommand(doltStopCmd)
+	doltCmd.AddCommand(doltRestartCmd)
 	doltCmd.AddCommand(doltStatusCmd)
 	doltCmd.AddCommand(doltLogsCmd)
 	doltCmd.AddCommand(doltSQLCmd)
@@ -349,6 +367,75 @@ func runDoltStop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Dolt server stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
+	return nil
+}
+
+func runDoltRestart(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	config := doltserver.DefaultConfig(townRoot)
+	if config.IsRemote() {
+		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally", config.HostPort())
+	}
+
+	// Step 1: Stop tracked server (if running)
+	running, pid, _ := doltserver.IsRunning(townRoot)
+	if running {
+		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
+		if err := doltserver.Stop(townRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stop failed: %v (continuing with imposter kill)\n", err)
+		} else {
+			fmt.Printf("%s Stopped\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Step 2: Kill any imposters on the port
+	fmt.Println("Checking for imposter servers...")
+	if err := doltserver.KillImposters(townRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: imposter kill failed: %v\n", err)
+	}
+
+	// Brief pause to let port be released
+	time.Sleep(500 * time.Millisecond)
+
+	// Step 3: Check for databases before starting
+	databases, _ := doltserver.ListDatabases(townRoot)
+	if len(databases) == 0 {
+		return fmt.Errorf("no databases found in %s\nInitialize with: gt dolt init-rig <name>", config.DataDir)
+	}
+
+	// Step 4: Start the correct server
+	fmt.Println("Starting Dolt server...")
+	if err := doltserver.Start(townRoot); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
+	}
+
+	// Display status (same as gt dolt start)
+	state, _ := doltserver.LoadState(townRoot)
+
+	fmt.Printf("%s Dolt server restarted (PID %d, port %d)\n",
+		style.Bold.Render("✓"), state.PID, config.Port)
+	fmt.Printf("  Data dir: %s\n", state.DataDir)
+	fmt.Printf("  Databases: %s\n", style.Dim.Render(strings.Join(state.Databases, ", ")))
+	fmt.Printf("  Connection: %s\n", style.Dim.Render(doltserver.GetConnectionString(townRoot)))
+
+	// Verify databases
+	served, missing, verifyErr := doltserver.VerifyDatabasesWithRetry(townRoot, 5)
+	if verifyErr != nil {
+		fmt.Printf("  %s Could not verify databases: %v\n", style.Dim.Render("⚠"), verifyErr)
+	} else if len(missing) > 0 {
+		fmt.Printf("\n%s Some databases exist on disk but are NOT served:\n", style.Bold.Render("⚠"))
+		for _, db := range missing {
+			fmt.Printf("  - %s\n", db)
+		}
+		fmt.Printf("\n  Served: %v\n", served)
+	} else {
+		fmt.Printf("  %s All %d databases verified\n", style.Bold.Render("✓"), len(served))
+	}
+
 	return nil
 }
 

@@ -529,6 +529,7 @@ func newTestManager(t *testing.T) *DoltServerManager {
 		logger:           func(format string, v ...interface{}) { t.Logf(format, v...) },
 		runningFn:        func() (int, bool) { return 0, false },
 		healthCheckFn:    func() error { return nil },
+		identityCheckFn:  func() error { return nil },
 		startFn:          func() error { return nil },
 		stopFn:           func() {},
 		unhealthyAlertFn: func(error) {},

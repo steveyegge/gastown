@@ -551,6 +551,144 @@ func isDoltProcess(pid int) bool {
 	return strings.Contains(cmdline, "dolt") && strings.Contains(cmdline, "sql-server")
 }
 
+// getProcessDataDir extracts the --data-dir value from a dolt sql-server process's
+// command line. Returns empty string if the process doesn't have --data-dir set
+// (meaning it's using CWD-based launch) or if the command line can't be read.
+func getProcessDataDir(pid int) string {
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	cmdline := strings.TrimSpace(string(output))
+
+	// Look for --data-dir flag in command line
+	parts := strings.Fields(cmdline)
+	for i, part := range parts {
+		if part == "--data-dir" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+		if strings.HasPrefix(part, "--data-dir=") {
+			return strings.TrimPrefix(part, "--data-dir=")
+		}
+	}
+	return ""
+}
+
+// VerifyServerDataDir checks whether the running Dolt server is serving the
+// expected databases from the correct data directory. Returns true if the server
+// is legitimate (serving databases from config.DataDir), false if it's an imposter
+// (e.g., started from a different data directory with different/empty databases).
+func VerifyServerDataDir(townRoot string) (bool, error) {
+	config := DefaultConfig(townRoot)
+
+	// First check: inspect the process's --data-dir flag
+	running, pid, err := IsRunning(townRoot)
+	if err != nil || !running {
+		return false, fmt.Errorf("server not running")
+	}
+
+	processDataDir := getProcessDataDir(pid)
+	if processDataDir != "" {
+		// Normalize paths for comparison
+		expectedDir, _ := filepath.Abs(config.DataDir)
+		actualDir, _ := filepath.Abs(processDataDir)
+		if expectedDir != actualDir {
+			return false, fmt.Errorf("server data-dir mismatch: expected %s, got %s (PID %d)", expectedDir, actualDir, pid)
+		}
+		return true, nil
+	}
+
+	// No --data-dir flag means CWD-based launch — check served databases
+	fsDatabases, fsErr := ListDatabases(townRoot)
+	if fsErr != nil || len(fsDatabases) == 0 {
+		// Can't verify if no databases expected
+		return true, nil
+	}
+
+	served, _, verifyErr := VerifyDatabases(townRoot)
+	if verifyErr != nil {
+		return false, fmt.Errorf("could not query server databases: %w", verifyErr)
+	}
+
+	// If the server is serving none of our expected databases, it's an imposter
+	servedSet := make(map[string]bool, len(served))
+	for _, db := range served {
+		servedSet[strings.ToLower(db)] = true
+	}
+	matchCount := 0
+	for _, db := range fsDatabases {
+		if servedSet[strings.ToLower(db)] {
+			matchCount++
+		}
+	}
+	if matchCount == 0 && len(fsDatabases) > 0 {
+		return false, fmt.Errorf("server serves none of the expected %d databases — likely an imposter", len(fsDatabases))
+	}
+
+	return true, nil
+}
+
+// KillImposters finds and kills any dolt sql-server process on the configured
+// port that is NOT serving from the expected data directory. This handles the
+// case where another tool (e.g., bd) launched its own embedded Dolt server
+// from a different directory, hijacking the port.
+func KillImposters(townRoot string) error {
+	config := DefaultConfig(townRoot)
+	pid := findDoltServerOnPort(config.Port)
+	if pid == 0 {
+		return nil // No server on port
+	}
+
+	processDataDir := getProcessDataDir(pid)
+	expectedDir, _ := filepath.Abs(config.DataDir)
+
+	isImposter := false
+	if processDataDir == "" {
+		// No --data-dir flag — CWD-based launch, likely an imposter
+		isImposter = true
+	} else {
+		actualDir, _ := filepath.Abs(processDataDir)
+		if expectedDir != actualDir {
+			isImposter = true
+		}
+	}
+
+	if !isImposter {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "Killing imposter dolt sql-server (PID %d, data-dir: %q, expected: %s)\n",
+		pid, processDataDir, expectedDir)
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding imposter process %d: %w", pid, err)
+	}
+
+	// SIGTERM first, then SIGKILL
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("sending SIGTERM to imposter PID %d: %w", pid, err)
+	}
+
+	// Wait for graceful shutdown
+	for i := 0; i < 10; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if err := process.Signal(syscall.Signal(0)); err != nil {
+			// Clean up PID file if it pointed to the imposter
+			_ = os.Remove(config.PidFile)
+			return nil
+		}
+	}
+
+	// Force kill
+	_ = process.Signal(syscall.SIGKILL)
+	time.Sleep(100 * time.Millisecond)
+	_ = os.Remove(config.PidFile)
+
+	return nil
+}
+
 // Start starts the Dolt SQL server.
 func Start(townRoot string) error {
 	config := DefaultConfig(townRoot)
@@ -593,27 +731,47 @@ func Start(townRoot string) error {
 			}
 			// Fall through to start a new server
 		} else {
-			// Server is running with valid data dir - verify PID file is correct (gm-ouur fix)
-			// If PID file is stale/missing but server is on port, update it
-			pidFromFile := 0
-			if data, err := os.ReadFile(config.PidFile); err == nil {
-				pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-			}
-			if pidFromFile != pid {
-				// PID file is stale/wrong - update it
-				fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
-				if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
+			// Server is running with valid data dir — check if it's an imposter
+			// (e.g., bd launched its own dolt server from a different data directory).
+			legitimate, verifyErr := VerifyServerDataDir(townRoot)
+			if verifyErr == nil && !legitimate {
+				fmt.Fprintf(os.Stderr, "Warning: running Dolt server (PID %d) is an imposter — killing and restarting\n", pid)
+				if killErr := KillImposters(townRoot); killErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to kill imposter: %v\n", killErr)
 				}
-				// Update state too
-				state, _ := LoadState(townRoot)
-				if state != nil && state.PID != pid {
-					state.PID = pid
-					state.Running = true
-					_ = SaveState(townRoot, state)
+				// Wait for port to be released
+				time.Sleep(500 * time.Millisecond)
+				// Fall through to start a new server
+			} else if verifyErr != nil && !legitimate {
+				// Verification failed but server is suspicious — log and try to kill
+				fmt.Fprintf(os.Stderr, "Warning: could not verify Dolt server identity: %v — killing and restarting\n", verifyErr)
+				if killErr := KillImposters(townRoot); killErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to kill imposter: %v\n", killErr)
 				}
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				// Server is legitimate — verify PID file is correct (gm-ouur fix)
+				// If PID file is stale/missing but server is on port, update it
+				pidFromFile := 0
+				if data, err := os.ReadFile(config.PidFile); err == nil {
+					pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+				}
+				if pidFromFile != pid {
+					// PID file is stale/wrong - update it
+					fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
+					if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
+					}
+					// Update state too
+					state, _ := LoadState(townRoot)
+					if state != nil && state.PID != pid {
+						state.PID = pid
+						state.Running = true
+						_ = SaveState(townRoot, state)
+					}
+				}
+				return fmt.Errorf("Dolt server already running (PID %d)", pid)
 			}
-			return fmt.Errorf("Dolt server already running (PID %d)", pid)
 		}
 	}
 
