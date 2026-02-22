@@ -282,8 +282,24 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	}
 
 	// Wait for runtime to be fully ready before returning.
+	// When an agent override is specified (e.g., --agent codex), resolve the runtime
+	// config from the override so WaitForRuntimeReady uses the correct readiness
+	// strategy (delay-based for Codex vs prompt-polling for Claude). Without this,
+	// ResolveRoleAgentConfig returns the default agent (Claude) and polls for "❯ "
+	// in a Codex session, always timing out after 30 seconds (gt-1j3m).
 	spawnTownRoot := filepath.Dir(r.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("polecat", spawnTownRoot, r.Path)
+	var runtimeConfig *config.RuntimeConfig
+	if s.agent != "" {
+		rc, _, err := config.ResolveAgentConfigWithOverride(spawnTownRoot, r.Path, s.agent)
+		if err != nil {
+			style.PrintWarning("resolving agent config for %s: %v (using default)", s.agent, err)
+			runtimeConfig = config.ResolveRoleAgentConfig("polecat", spawnTownRoot, r.Path)
+		} else {
+			runtimeConfig = rc
+		}
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig("polecat", spawnTownRoot, r.Path)
+	}
 	if err := t.WaitForRuntimeReady(s.SessionName, runtimeConfig, 30*time.Second); err != nil {
 		style.PrintWarning("runtime may not be fully ready: %v", err)
 	}
