@@ -171,6 +171,27 @@ gt convoy list
 gt agents
 ```
 
+### Event Monitoring with GT Feed
+
+`gt feed` is the built-in live event viewer for agents and operators.
+
+```bash
+# Live dashboard
+gt feed
+
+# Problem-first triage (stalled/GUPP/zombies)
+gt feed --problems
+
+# Script-friendly snapshot
+gt feed --plain --no-follow --since 1h
+
+# Filter by actor or keyword
+gt feed --actor gastown/crew --since 2h
+gt feed --contains conflict --since 2h
+```
+
+See the [GT Feed guide](docs/feed.md) for workflows and event legend.
+
 ## Common Workflows
 
 ### Mayor Workflow (Recommended)

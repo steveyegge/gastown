@@ -22,6 +22,8 @@ var (
 	feedMol      string
 	feedType     string
 	feedRig      string
+	feedActor    string
+	feedContains string
 	feedNoFollow bool
 	feedWindow   bool
 	feedPlain    bool
@@ -38,6 +40,8 @@ func init() {
 	feedCmd.Flags().StringVar(&feedMol, "mol", "", "Filter by molecule/issue ID prefix")
 	feedCmd.Flags().StringVar(&feedType, "type", "", "Filter by event type (create, update, delete, comment)")
 	feedCmd.Flags().StringVar(&feedRig, "rig", "", "Filter events by rig name")
+	feedCmd.Flags().StringVar(&feedActor, "actor", "", "Filter by actor address/name (case-insensitive substring)")
+	feedCmd.Flags().StringVar(&feedContains, "contains", "", "Filter by free text in message/target/actor (case-insensitive)")
 	feedCmd.Flags().BoolVarP(&feedWindow, "window", "w", false, "Open in dedicated tmux window (creates 'feed' window)")
 	feedCmd.Flags().BoolVar(&feedPlain, "plain", false, "Use plain text output (bd activity) instead of TUI")
 	feedCmd.Flags().BoolVarP(&feedProblems, "problems", "p", false, "Start in problems view (shows stuck agents)")
@@ -47,7 +51,7 @@ var feedCmd = &cobra.Command{
 	Use:     "feed",
 	GroupID: GroupDiag,
 	Short:   "Show real-time activity feed of gt events",
-	Long: `Display a real-time feed of issue changes and agent activity.
+	Long: `Display GT Feed: a real-time stream of issue changes and agent activity.
 
 By default, launches an interactive TUI dashboard with:
   - Agent tree (top): Shows all agents organized by role with latest activity
@@ -68,6 +72,8 @@ The feed combines multiple event sources:
   - Convoy status: In-progress and recently-landed convoys (refreshes every 10s)
 
 Use --plain for simple text output (reads .events.jsonl directly).
+Use --problems when you need a triage-first view of stalled or stuck agents.
+Query flags like --since/--type/--actor/--contains use plain mode automatically.
 
 Tmux Integration:
   Use --window to open the feed in a dedicated tmux window named 'feed'.
@@ -102,10 +108,27 @@ Examples:
   gt feed --problems            # Start in problems view
   gt feed -p                    # Short flag for problems view
   gt feed --plain               # Plain text output (bd activity)
+  gt feed --plain --no-follow   # Snapshot and exit (agent-friendly)
   gt feed --window              # Open in dedicated tmux window
   gt feed --since 1h            # Events from last hour
-  gt feed --rig greenplace      # Use gastown rig's beads`,
+  gt feed --actor gastown/crew  # Only crew actor events
+  gt feed --contains conflict   # Text search in event output fields
+  gt feed --type merge_failed --since 30m
+                               # Focus on recent merge failures
+  gt feed --mol hq-cv-abc       # Focus on one convoy/molecule
+  gt feed --rig greenplace      # Use another rig's beads`,
 	RunE: runFeed,
+}
+
+func hasFeedQueryFilters(cmd *cobra.Command) bool {
+	return feedSince != "" ||
+		feedMol != "" ||
+		feedType != "" ||
+		feedActor != "" ||
+		feedContains != "" ||
+		feedFollow ||
+		feedNoFollow ||
+		cmd.Flags().Changed("limit")
 }
 
 func runFeed(cmd *cobra.Command, args []string) error {
@@ -127,8 +150,9 @@ func runFeed(cmd *cobra.Command, args []string) error {
 		return runFeedInWindow(workDir, bdArgs)
 	}
 
-	// Use TUI by default if running in a terminal and not --plain
-	useTUI := !feedPlain && term.IsTerminal(int(os.Stdout.Fd()))
+	// Use TUI by default when no query-style filters are supplied.
+	// Query filters imply "inspect this event slice", which is better served by plain output.
+	useTUI := !feedPlain && !hasFeedQueryFilters(cmd) && term.IsTerminal(int(os.Stdout.Fd()))
 
 	if useTUI {
 		// TUI mode: resolve --rig to a beads directory for BdActivitySource
@@ -197,6 +221,14 @@ func buildFeedArgs() []string {
 		args = append(args, "--type", feedType)
 	}
 
+	if feedActor != "" {
+		args = append(args, "--actor", feedActor)
+	}
+
+	if feedContains != "" {
+		args = append(args, "--contains", feedContains)
+	}
+
 	if feedRig != "" {
 		args = append(args, "--rig", feedRig)
 	}
@@ -219,12 +251,14 @@ func runFeedDirect(townRoot string) error {
 	}
 
 	opts := feed.PrintOptions{
-		Limit:  feedLimit,
-		Follow: shouldFollow,
-		Since:  feedSince,
-		Mol:    feedMol,
-		Type:   feedType,
-		Rig:    feedRig,
+		Limit:    feedLimit,
+		Follow:   shouldFollow,
+		Since:    feedSince,
+		Mol:      feedMol,
+		Type:     feedType,
+		Rig:      feedRig,
+		Actor:    feedActor,
+		Contains: feedContains,
 	}
 
 	return feed.PrintGtEvents(townRoot, opts)

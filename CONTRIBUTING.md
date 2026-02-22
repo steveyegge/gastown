@@ -50,6 +50,17 @@ Branch naming conventions:
 - Add comments for non-obvious logic
 - Include tests for new functionality
 
+## Event-First Observability
+
+Gas Town operations should be diagnosable through `gt feed` without requiring
+tmux pane inspection or ad-hoc log spelunking.
+
+When changing command behavior:
+- Emit feed-visible events for major state transitions (start/stop, sling, handoff, done, escalation, merge).
+- Use structured payload helpers from `internal/events`.
+- Keep event logging best-effort (do not fail the command because event logging failed).
+- Update `docs/feed.md` when adding new high-signal event types.
+
 ## Design Philosophy
 
 Gas Town follows two core principles that shape every contribution. Understanding

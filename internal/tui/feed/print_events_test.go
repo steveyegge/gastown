@@ -344,12 +344,82 @@ func TestPrintGtEvents_RigFilter(t *testing.T) {
 	}
 }
 
+func TestPrintGtEvents_ActorFilter(t *testing.T) {
+	now := time.Now()
+	townRoot := writeTestEvents(t, []GtEvent{
+		{Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339), Source: "test", Type: "sling", Actor: "greenplace/crew/joe", Visibility: "feed", Payload: map[string]interface{}{"bead": "gt-1", "target": "p1"}},
+		{Timestamp: now.Add(-1 * time.Minute).Format(time.RFC3339), Source: "test", Type: "sling", Actor: "greenplace/crew/sam", Visibility: "feed", Payload: map[string]interface{}{"bead": "gt-2", "target": "p2"}},
+		{Timestamp: now.Format(time.RFC3339), Source: "test", Type: "done", Actor: "greenplace/crew/joe", Visibility: "feed", Payload: map[string]interface{}{"bead": "gt-1"}},
+	})
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := PrintGtEvents(townRoot, PrintOptions{Limit: 100, Actor: "CREW/JOE"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if err != nil {
+		t.Fatalf("PrintGtEvents returned error: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 joe events, got %d: %q", len(lines), output)
+	}
+	for _, line := range lines {
+		if !strings.Contains(strings.ToLower(line), "joe") {
+			t.Errorf("actor filter should only include joe events, got: %s", line)
+		}
+	}
+}
+
+func TestPrintGtEvents_ContainsFilter(t *testing.T) {
+	now := time.Now()
+	townRoot := writeTestEvents(t, []GtEvent{
+		{Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339), Source: "test", Type: "mail", Actor: "mayor", Visibility: "feed", Payload: map[string]interface{}{"subject": "Convoy hotfix", "to": "greenplace/crew/joe"}},
+		{Timestamp: now.Add(-1 * time.Minute).Format(time.RFC3339), Source: "test", Type: "done", Actor: "greenplace/crew/sam", Visibility: "feed", Payload: map[string]interface{}{"bead": "gt-123"}},
+		{Timestamp: now.Format(time.RFC3339), Source: "test", Type: "merge_failed", Actor: "greenplace/refinery", Visibility: "feed", Payload: map[string]interface{}{"reason": "conflict"}},
+	})
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := PrintGtEvents(townRoot, PrintOptions{Limit: 100, Contains: "HOTFIX"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if err != nil {
+		t.Fatalf("PrintGtEvents returned error: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 hotfix event, got %d: %q", len(lines), output)
+	}
+	if !strings.Contains(strings.ToLower(lines[0]), "hotfix") {
+		t.Errorf("expected output to contain hotfix, got: %s", lines[0])
+	}
+}
+
 func TestMatchesFilters(t *testing.T) {
 	now := time.Now()
 	event := &Event{
 		Time:    now,
 		Type:    "create",
-		Actor:   "gastown/witness",
+		Actor:   "greenplace/crew/joe",
 		Target:  "gt-abc-123",
 		Message: "created issue mol-42",
 		Rig:     "greenplace",
@@ -361,25 +431,32 @@ func TestMatchesFilters(t *testing.T) {
 		mol       string
 		eventType string
 		rig       string
+		actor     string
+		contains  string
 		want      bool
 	}{
-		{"no filters", time.Time{}, "", "", "", true},
-		{"since matches", now.Add(-1 * time.Minute), "", "", "", true},
-		{"since excludes", now.Add(1 * time.Minute), "", "", "", false},
-		{"mol matches target", time.Time{}, "gt-abc", "", "", true},
-		{"mol matches message", time.Time{}, "mol-42", "", "", true},
-		{"mol no match", time.Time{}, "nonexistent", "", "", false},
-		{"type matches", time.Time{}, "", "create", "", true},
-		{"type no match", time.Time{}, "", "delete", "", false},
-		{"rig matches", time.Time{}, "", "", "greenplace", true},
-		{"rig no match", time.Time{}, "", "", "otherrig", false},
-		{"combined all match", now.Add(-1 * time.Minute), "gt-abc", "create", "", true},
-		{"combined type mismatch", now.Add(-1 * time.Minute), "gt-abc", "delete", "", false},
+		{"no filters", time.Time{}, "", "", "", "", "", true},
+		{"since matches", now.Add(-1 * time.Minute), "", "", "", "", "", true},
+		{"since excludes", now.Add(1 * time.Minute), "", "", "", "", "", false},
+		{"mol matches target", time.Time{}, "gt-abc", "", "", "", "", true},
+		{"mol matches message", time.Time{}, "mol-42", "", "", "", "", true},
+		{"mol no match", time.Time{}, "nonexistent", "", "", "", "", false},
+		{"type matches case-insensitive", time.Time{}, "", "CREATE", "", "", "", true},
+		{"type no match", time.Time{}, "", "delete", "", "", "", false},
+		{"rig matches case-insensitive", time.Time{}, "", "", "GREENPLACE", "", "", true},
+		{"rig no match", time.Time{}, "", "", "otherrig", "", "", false},
+		{"actor matches", time.Time{}, "", "", "", "crew/joe", "", true},
+		{"actor no match", time.Time{}, "", "", "", "crew/sam", "", false},
+		{"contains matches message", time.Time{}, "", "", "", "", "ISSUE", true},
+		{"contains matches target", time.Time{}, "", "", "", "", "ABC-123", true},
+		{"contains no match", time.Time{}, "", "", "", "", "not-here", false},
+		{"combined all match", now.Add(-1 * time.Minute), "gt-abc", "create", "greenplace", "crew/joe", "mol-42", true},
+		{"combined actor mismatch", now.Add(-1 * time.Minute), "gt-abc", "create", "greenplace", "crew/sam", "mol-42", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := matchesFilters(event, tc.sinceTime, tc.mol, tc.eventType, tc.rig)
+			got := matchesFilters(event, tc.sinceTime, tc.mol, tc.eventType, tc.rig, tc.actor, tc.contains)
 			if got != tc.want {
 				t.Errorf("matchesFilters() = %v, want %v", got, tc.want)
 			}

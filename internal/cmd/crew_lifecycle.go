@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
@@ -70,6 +71,7 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			fmt.Printf("Killed session %s\n", sessionID)
+			_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(r.Name, "crew/"+name, "gt crew remove"))
 		}
 
 		// Determine workspace path
@@ -640,6 +642,7 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 			logger := townlog.NewLogger(townRoot)
 			_ = logger.Log(townlog.EventKill, agent, "gt crew stop")
 		}
+		_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(r.Name, "crew/"+name, "gt crew stop"))
 
 		// Log captured output (truncated)
 		if len(output) > 200 {
@@ -726,6 +729,7 @@ func runCrewStopAll() error {
 			logger := townlog.NewLogger(townRoot)
 			_ = logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
 		}
+		_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(agent.Rig, "crew/"+agent.AgentName, "gt crew stop --all"))
 
 		// Log captured output (truncated)
 		if len(output) > 200 {

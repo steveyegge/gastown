@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -284,6 +285,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		agent := fmt.Sprintf("%s/%s", rigName, polecatName)
 		logger := townlog.NewLogger(townRoot)
 		_ = logger.Log(townlog.EventWake, agent, sessionIssue)
+		_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 	}
 
 	return nil
@@ -320,6 +322,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 		}
 		logger := townlog.NewLogger(townRoot)
 		_ = logger.Log(townlog.EventKill, agent, reason)
+		_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(rigName, polecatName, reason))
 	}
 
 	return nil

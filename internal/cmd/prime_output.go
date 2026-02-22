@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"path/filepath"
 	"time"
@@ -327,6 +327,11 @@ func outputCommandQuickReference(ctx RoleContext) {
 		fmt.Printf("| Nudge the Deacon | `%s nudge deacon \"msg\"` | ~~tmux send-keys~~ (unreliable) |\n", c)
 	}
 
+	fmt.Println()
+	fmt.Println("**Operational awareness:**")
+	fmt.Printf("- `%s feed --problems` — triage stalled/GUPP/zombie agents\n", c)
+	fmt.Printf("- `%s feed --plain --no-follow --since 1h` — recent event snapshot\n", c)
+	fmt.Printf("- `%s feed --actor <agent> --contains <issue-or-keyword>` — focused event trace\n", c)
 	fmt.Println()
 	fmt.Println("**Rig lifecycle commands (park vs dock vs stop):**")
 	fmt.Println("- `park/unpark` — Temporary pause. Daemon skips parked rigs.")

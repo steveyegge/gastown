@@ -59,6 +59,27 @@ prefix maps to its beads location (the mayor's clone in that rig).
 
 Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
+## Activity Feed
+
+Use `gt feed` to inspect live operational events:
+
+```bash
+gt feed                          # Interactive dashboard
+gt feed --problems               # Triage stuck agents
+gt feed --plain --no-follow      # One-shot snapshot
+gt feed --type merge_failed      # Filter by event type
+gt feed --since 30m              # Time window
+gt feed --mol hq-cv-abc          # Filter by convoy/molecule ID
+gt feed --actor gastown/crew     # Filter by actor substring
+gt feed --contains conflict      # Free-text search
+gt feed --rig greenplace         # Scope to another rig
+```
+
+Query filters (`--since`, `--type`, `--mol`, `--actor`, `--contains`, `--limit`)
+automatically run in plain output mode.
+
+See [GT Feed](feed.md) for a full operator/agent guide.
+
 ## Configuration
 
 ### Rig Config (`config.json`)

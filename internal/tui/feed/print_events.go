@@ -14,13 +14,15 @@ import (
 
 // PrintOptions controls filtering and behavior for PrintGtEvents.
 type PrintOptions struct {
-	Limit  int
-	Follow bool
-	Since  string // duration string like "5m", "1h"
-	Mol    string // molecule/issue ID prefix filter
-	Type   string // event type filter
-	Rig    string // rig name filter (matches event's Rig field)
-	Ctx    context.Context // optional: controls follow-mode lifecycle; nil uses signal.NotifyContext
+	Limit    int
+	Follow   bool
+	Since    string          // duration string like "5m", "1h"
+	Mol      string          // molecule/issue ID prefix filter
+	Type     string          // event type filter
+	Rig      string          // rig name filter (matches event's Rig field)
+	Actor    string          // actor substring filter (case-insensitive)
+	Contains string          // free-text filter across message/target/actor/raw (case-insensitive)
+	Ctx      context.Context // optional: controls follow-mode lifecycle; nil uses signal.NotifyContext
 }
 
 // PrintGtEvents reads .events.jsonl and prints events to stdout.
@@ -51,7 +53,7 @@ func PrintGtEvents(townRoot string, opts PrintOptions) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if event := parseGtEventLine(line); event != nil {
-			if matchesFilters(event, sinceTime, opts.Mol, opts.Type, opts.Rig) {
+			if matchesFilters(event, sinceTime, opts.Mol, opts.Type, opts.Rig, opts.Actor, opts.Contains) {
 				events = append(events, *event)
 			}
 		}
@@ -113,7 +115,7 @@ func PrintGtEvents(townRoot string, opts PrintOptions) error {
 			for s.Scan() {
 				line := s.Text()
 				if event := parseGtEventLine(line); event != nil {
-					if matchesFilters(event, sinceTime, opts.Mol, opts.Type, opts.Rig) {
+					if matchesFilters(event, sinceTime, opts.Mol, opts.Type, opts.Rig, opts.Actor, opts.Contains) {
 						printEvent(*event)
 					}
 				}
@@ -122,18 +124,36 @@ func PrintGtEvents(townRoot string, opts PrintOptions) error {
 	}
 }
 
-// matchesFilters checks whether an event passes the --since, --mol, --type, and --rig filters.
-func matchesFilters(event *Event, sinceTime time.Time, mol, eventType, rig string) bool {
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
+}
+
+// matchesFilters checks whether an event passes feed CLI filters.
+func matchesFilters(event *Event, sinceTime time.Time, mol, eventType, rig, actor, contains string) bool {
 	if !sinceTime.IsZero() && event.Time.Before(sinceTime) {
 		return false
 	}
-	if mol != "" && !strings.Contains(event.Target, mol) && !strings.Contains(event.Message, mol) {
+	if mol != "" && !containsFold(event.Target, mol) && !containsFold(event.Message, mol) {
 		return false
 	}
-	if eventType != "" && event.Type != eventType {
+	if eventType != "" && !strings.EqualFold(event.Type, eventType) {
 		return false
 	}
-	if rig != "" && event.Rig != rig {
+	if rig != "" && !strings.EqualFold(event.Rig, rig) {
+		return false
+	}
+	if actor != "" && !containsFold(event.Actor, actor) {
+		return false
+	}
+	if contains != "" {
+		if !containsFold(event.Message, contains) &&
+			!containsFold(event.Target, contains) &&
+			!containsFold(event.Actor, contains) &&
+			!containsFold(event.Raw, contains) {
+			return false
+		}
+	}
+	if eventType != "" && event.Type == "" {
 		return false
 	}
 	return true
