@@ -731,12 +731,13 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	parsedRootID, parsed := parseBondSpawnRootIDWithStatus(bondOut, formulaName, beadID, wispRootID)
 	if !parsed {
 		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
-		if fallbackErr == nil {
-			return &FormulaOnBeadResult{
-				WispRootID: fallbackRootID,
-				BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
-			}, nil
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("bond output not parseable and direct formula bond fallback failed: %v", fallbackErr)
 		}
+		return &FormulaOnBeadResult{
+			WispRootID: fallbackRootID,
+			BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
+		}, nil
 	}
 	if parsedRootID != "" {
 		wispRootID = parsedRootID
@@ -851,6 +852,7 @@ func CookFormula(formulaName, workDir, townRoot string) error {
 	return BdCmd("cook", formulaName).
 		Dir(workDir).
 		WithGTRoot(townRoot).
+		StripBdBranch().
 		Run()
 }
 

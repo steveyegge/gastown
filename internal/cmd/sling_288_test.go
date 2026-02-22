@@ -578,3 +578,98 @@ exit /b 0
 		}
 	}
 }
+
+// TestInstantiateFormulaOnBead_ParseFailureFallbackFailure verifies that when
+// legacy bond exits 0 with non-JSON output AND the direct-bond fallback also
+// fails, InstantiateFormulaOnBead returns an error instead of silent success.
+func TestInstantiateFormulaOnBead_ParseFailureFallbackFailure(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(`{"prefix":"gt-","path":"."}`), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+
+	// Legacy bond exits 0 but returns non-JSON garbage.
+	// Direct-bond fallback also fails (all bond calls fail).
+	bdScript := `#!/bin/sh
+set -e
+echo "CMD:$*" >> "${BD_LOG}"
+cmd="$1"; shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"; shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-abc"}'
+        exit 0
+        ;;
+      bond)
+        left="$1"; shift || true
+        if [ "$left" = "gt-wisp-abc" ]; then
+          echo 'NOT-JSON-GARBAGE'
+          exit 0
+        fi
+        echo "Error: bond failed" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo CMD:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+set "left=%3"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-abc^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    if "%left%"=="gt-wisp-abc" (
+      echo NOT-JSON-GARBAGE
+      exit /b 0
+    )
+    echo Error: bond failed 1>&2
+    exit /b 1
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	_ = os.Chdir(townRoot)
+
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Feature", "", townRoot, false, nil)
+	if err == nil {
+		t.Fatal("expected error when bond returns non-JSON and fallback fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "not parseable") && !strings.Contains(err.Error(), "fallback failed") {
+		t.Fatalf("error message should mention parse failure and fallback: %v", err)
+	}
+}
