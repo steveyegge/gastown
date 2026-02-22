@@ -107,14 +107,19 @@ func TestBuildRestartCommand_UsesRoleAgentsWhenNoAgentOverride(t *testing.T) {
 	origGTAgent := os.Getenv("GT_AGENT")
 	origTownRoot := os.Getenv("GT_TOWN_ROOT")
 	origRoot := os.Getenv("GT_ROOT")
+
+	// TempDir must be called BEFORE registering the Chdir cleanup so that
+	// LIFO ordering restores the working directory before TempDir removal.
+	// On Windows the directory cannot be deleted while the process CWD is
+	// inside it.
+	townRoot := t.TempDir()
+
 	t.Cleanup(func() {
 		_ = os.Chdir(origCwd)
 		_ = os.Setenv("GT_AGENT", origGTAgent)
 		_ = os.Setenv("GT_TOWN_ROOT", origTownRoot)
 		_ = os.Setenv("GT_ROOT", origRoot)
 	})
-
-	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "gastown")
 	witnessDir := filepath.Join(rigPath, "witness")
 
