@@ -483,6 +483,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// branches persist indefinitely. This cleans them up periodically.
 	d.pruneStaleBranches()
 
+	// 14. Dispatch scheduled work (capacity-controlled polecat dispatch).
+	// Shells out to `gt scheduler run` to avoid circular import between daemon and cmd.
+	d.dispatchQueuedWork()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
@@ -1745,4 +1749,29 @@ func (d *Daemon) pruneStaleBranches() {
 
 	// Also prune in the town root itself (mayor clone)
 	pruneInDir(d.config.TownRoot, "town-root")
+}
+
+// dispatchQueuedWork shells out to `gt scheduler run` to dispatch scheduled beads.
+// This avoids circular import between the daemon and cmd packages.
+// Uses a 5m timeout to allow multi-bead dispatch with formula cooking and hook retries.
+//
+// Timeout safety: if the timeout fires mid-dispatch, a bead may be left with
+// metadata written but label not yet swapped (or vice versa). The dispatch flock
+// is released on process death, and dispatchSingleBead's label swap retry logic
+// prevents double-dispatch on the next cycle. The batch_size config (default: 1)
+// limits how many beads are in-flight per heartbeat, reducing the timeout window.
+func (d *Daemon) dispatchQueuedWork() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		d.logger.Printf("Scheduler dispatch timed out after 5m")
+	} else if err != nil {
+		d.logger.Printf("Scheduler dispatch failed: %v (output: %s)", err, string(out))
+	} else if len(out) > 0 {
+		d.logger.Printf("Scheduler dispatch: %s", string(out))
+	}
 }

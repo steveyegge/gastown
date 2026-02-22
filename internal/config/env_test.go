@@ -208,7 +208,7 @@ func TestAgentEnv_WithoutAgentOverride_RequiresFallback(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the default polecat dispatch path (no --agent flag).
-	// This is what session_manager.go calls when gt queue run / gt sling dispatches.
+	// This is what lifecycle.go calls when gt scheduler run / gt sling dispatches.
 	env := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       "myrig",

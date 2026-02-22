@@ -468,10 +468,13 @@ var expectedBeadsNewCounts = map[string]int{
 // NewWithBeadsDir creates Beads wrappers with explicit beads directory — these also
 // inherit BD_BRANCH and need the same safety review as beads.New().
 var expectedNewWithBeadsDirCounts = map[string]int{
-	"compact.go":    2,
-	"mail_queue.go": 5,
-	"rig.go":        1,
-	"rig_config.go": 2,
+	"capacity_dispatch.go": 3,
+	"compact.go":           2,
+	"mail_queue.go":        5,
+	"rig.go":               1,
+	"rig_config.go":        2,
+	"scheduler.go":         1,
+	"sling_schedule.go":    2,
 }
 
 // expectedLookPathBdCounts maps filename → expected exec.LookPath("bd") call count.
@@ -488,6 +491,7 @@ var expectedExecBdCounts = map[string]int{
 	"bd_helpers.go":            2, // BdCmd helper wraps exec.Command("bd", ...) in Build() and CombinedOutput()
 	"bead.go":                  4,
 	"boot.go":                  3,
+	"capacity_dispatch.go":     2,
 	"cat.go":                   1,
 	"close.go":                 1,
 	"compact_report.go":        3,
@@ -515,11 +519,14 @@ var expectedExecBdCounts = map[string]int{
 	"prime.go":                 3,
 	"prime_molecule.go":        1,
 	"rig.go":                   1,
+	"scheduler.go":             0,
+	"scheduler_epic.go":        1,
 	"sling.go":                 3,
-	"sling_batch.go":           1,
+	"sling_batch.go":           0,
 	"sling_convoy.go":          10,
 	"sling_formula.go":         0,
 	"sling_helpers.go":         0, // Migrated to BdCmd (exec.Command calls now in bd_helpers.go)
+	"sling_schedule.go":        0,
 	"swarm.go":                 16,
 	"synthesis.go":             5,
 }

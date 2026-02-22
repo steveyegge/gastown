@@ -1284,9 +1284,17 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 		// they can't be dispatched via gt sling -- they're handled by the deacon.
 		// Non-slingable types (epics, convoys, etc.) are also excluded.
 		townRoot := filepath.Dir(townBeads)
+
+		// Batch-check scheduling status for all tracked issues (single DB query).
+		var trackedIDs []string
+		for _, t := range tracked {
+			trackedIDs = append(trackedIDs, t.ID)
+		}
+		scheduledSet := areScheduled(trackedIDs)
+
 		var readyIssues []string
 		for _, t := range tracked {
-			if isReadyIssue(t) {
+			if isReadyIssue(t, scheduledSet) {
 				if !isSlingableBead(townRoot, t.ID) {
 					continue
 				}
@@ -1315,7 +1323,8 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 // - status = "open" AND (no assignee OR assignee session is dead)
 // - OR status = "in_progress"/"hooked" AND assignee session is dead (orphaned molecule)
 // - AND not blocked (cross-rig-aware from issue details)
-func isReadyIssue(t trackedIssueInfo) bool {
+// scheduledSet is a pre-computed set of bead IDs with open sling contexts (from areScheduled).
+func isReadyIssue(t trackedIssueInfo, scheduledSet map[string]bool) bool {
 	// Closed issues are never ready
 	if t.Status == "closed" || t.Status == "tombstone" {
 		return false
@@ -1323,6 +1332,11 @@ func isReadyIssue(t trackedIssueInfo) bool {
 
 	// Must not be blocked
 	if t.Blocked {
+		return false
+	}
+
+	// Scheduled beads are not stranded — they're waiting for dispatch capacity.
+	if scheduledSet[t.ID] {
 		return false
 	}
 
@@ -1941,10 +1955,11 @@ type trackedIssueInfo struct {
 	Status    string `json:"status"`
 	Type      string `json:"dependency_type"`
 	IssueType string `json:"issue_type"`
-	Blocked   bool   `json:"blocked,omitempty"`    // True if issue currently has blockers
-	Assignee  string `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
-	Worker    string `json:"worker,omitempty"`     // Worker currently assigned (e.g., gastown/nux)
-	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
+	Blocked   bool     `json:"blocked,omitempty"`    // True if issue currently has blockers
+	Assignee  string   `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
+	Labels    []string `json:"labels,omitempty"`     // Bead labels (propagated from trackedDependency)
+	Worker    string   `json:"worker,omitempty"`     // Worker currently assigned (e.g., gastown/nux)
+	WorkerAge string   `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
 // trackedDependency is dep-list data enriched with fresh issue details.
@@ -1971,6 +1986,13 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 	if dep.IssueType == "" {
 		dep.IssueType = details.IssueType
 	}
+	// Always refresh labels unconditionally — bd dep list may return stale
+	// labels from dependency records, but bd show returns current bead labels.
+	// This ensures isReadyIssue sees accurate queue labels (gt:queued,
+	// gt:queue-dispatched) for cross-rig beads. Assigning even when fresh
+	// labels are empty clears stale queue labels that would otherwise
+	// suppress stranded issue detection.
+	dep.Labels = details.Labels
 }
 
 // getTrackedIssues uses bd dep list to get issues tracked by a convoy.
@@ -2033,6 +2055,7 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 			IssueType: dep.IssueType,
 			Blocked:   dep.Blocked,
 			Assignee:  dep.Assignee,
+			Labels:    dep.Labels,
 		}
 
 		// Add worker info if available
@@ -2058,6 +2081,7 @@ type issueDetailsJSON struct {
 	Status         string            `json:"status"`
 	IssueType      string            `json:"issue_type"`
 	Assignee       string            `json:"assignee"`
+	Labels         []string          `json:"labels"`
 	BlockedBy      []string          `json:"blocked_by"`
 	BlockedByCount int               `json:"blocked_by_count"`
 	Dependencies   []issueDependency `json:"dependencies"`
@@ -2070,6 +2094,7 @@ func (issue issueDetailsJSON) toIssueDetails() *issueDetails {
 		Status:         issue.Status,
 		IssueType:      issue.IssueType,
 		Assignee:       issue.Assignee,
+		Labels:         issue.Labels,
 		BlockedBy:      issue.BlockedBy,
 		BlockedByCount: issue.BlockedByCount,
 		Dependencies:   issue.Dependencies,
@@ -2122,6 +2147,7 @@ type issueDetails struct {
 	Status         string
 	IssueType      string
 	Assignee       string
+	Labels         []string
 	BlockedBy      []string
 	BlockedByCount int
 	Dependencies   []issueDependency

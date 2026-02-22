@@ -74,11 +74,13 @@ func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
 
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
-	Title        string          `json:"title"`
-	Status       string          `json:"status"`
-	Assignee     string          `json:"assignee"`
-	Description  string          `json:"description"`
+	Title        string           `json:"title"`
+	Status       string           `json:"status"`
+	Assignee     string           `json:"assignee"`
+	Description  string           `json:"description"`
+	Labels       []string         `json:"labels,omitempty"`
 	Dependencies []beads.IssueDep `json:"dependencies,omitempty"`
+	IssueType    string           `json:"issue_type,omitempty"`
 }
 
 // isDeferredBead checks whether a bead should be rejected from slinging because
@@ -124,31 +126,6 @@ func collectExistingMolecules(info *beadInfo) []string {
 	}
 
 	return molecules
-}
-
-// ensureNoExistingMolecules checks whether a bead already has attached molecules
-// and either burns them (with --force) or returns an error. Returns nil when no
-// molecules exist or they were successfully burned. Dry-run mode only prints.
-func ensureNoExistingMolecules(info *beadInfo, beadID, townRoot string, force, dryRun bool) error {
-	existingMolecules := collectExistingMolecules(info)
-	if len(existingMolecules) == 0 {
-		return nil
-	}
-	if dryRun {
-		fmt.Printf("  Would burn %d stale molecule(s): %s\n",
-			len(existingMolecules), strings.Join(existingMolecules, ", "))
-		return nil
-	}
-	if !force {
-		return fmt.Errorf("bead %s already has %d attached molecule(s): %s\nUse --force to replace, or --hook-raw-bead to skip formula",
-			beadID, len(existingMolecules), strings.Join(existingMolecules, ", "))
-	}
-	fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
-		style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
-	if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
-		return fmt.Errorf("burning stale molecules: %w", err)
-	}
-	return nil
 }
 
 // burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
