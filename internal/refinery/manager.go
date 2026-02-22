@@ -182,6 +182,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		TownRoot: townRoot,
 		Agent:    agentOverride,
 	})
+	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 
 	// Add refinery-specific flag
 	envVars["GT_REFINERY"] = "1"
