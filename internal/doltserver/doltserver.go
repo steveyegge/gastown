@@ -2352,6 +2352,12 @@ CALL DOLT_MERGE('%s');
 `, rigDB, escaped, escaped, escaped)
 
 	if err := doltSQLScriptWithRetry(townRoot, script); err != nil {
+		// TEMPORARY DEBUG: log merge errors to persistent file (hq-vf5v investigation)
+		if f, ferr := os.OpenFile("/tmp/dolt-merge-errors.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
+			fmt.Fprintf(f, "[%s] MergePolecatBranch Phase1 FAILED: branch=%s db=%s err=%v\n", time.Now().Format(time.RFC3339), branchName, rigDB, err)
+			fmt.Fprintf(f, "  script:\n%s\n", script)
+			f.Close()
+		}
 		if !strings.Contains(err.Error(), "Merge conflict") {
 			return fmt.Errorf("merging %s to main in %s: %w", branchName, rigDB, err)
 		}
@@ -2370,8 +2376,19 @@ SET @@autocommit = 1;
 `, rigDB, escaped, escaped)
 
 		if err := doltSQLScriptWithRetry(townRoot, conflictScript); err != nil {
+			// TEMPORARY DEBUG: log Phase2 errors (hq-vf5v investigation)
+			if f, ferr := os.OpenFile("/tmp/dolt-merge-errors.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
+				fmt.Fprintf(f, "[%s] MergePolecatBranch Phase2 FAILED: branch=%s db=%s err=%v\n", time.Now().Format(time.RFC3339), branchName, rigDB, err)
+				f.Close()
+			}
 			return fmt.Errorf("conflict-resolving merge of %s in %s: %w", branchName, rigDB, err)
 		}
+	}
+
+	// TEMPORARY DEBUG: log successful merge (hq-vf5v investigation)
+	if f, ferr := os.OpenFile("/tmp/dolt-merge-errors.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
+		fmt.Fprintf(f, "[%s] MergePolecatBranch SUCCESS: branch=%s db=%s\n", time.Now().Format(time.RFC3339), branchName, rigDB)
+		f.Close()
 	}
 
 	// Delete branch only after successful merge (either phase).

@@ -831,11 +831,19 @@ notifyWitness:
 		goto afterDoltMerge
 	}
 
+	// TEMPORARY DEBUG: log BD_BRANCH value (hq-vf5v investigation)
+	if f, ferr := os.OpenFile("/tmp/dolt-merge-errors.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
+		bdBranchDebug := os.Getenv("BD_BRANCH")
+		fmt.Fprintf(f, "[%s] gt done: BD_BRANCH=%q actor=%q rig=%q\n", time.Now().Format(time.RFC3339), bdBranchDebug, os.Getenv("BD_ACTOR"), rigName)
+		f.Close()
+	}
 	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
 		fmt.Printf("Merging Dolt branch %s to main...\n", bdBranch)
 		if err := doltserver.MergePolecatBranch(townRoot, rigName, bdBranch); err != nil {
 			mergeFailed = true
-			style.PrintWarning("could not merge Dolt branch: %v (data still on branch %s)", err, bdBranch)
+			errMsg := fmt.Sprintf("could not merge Dolt branch: %v (data still on branch %s)", err, bdBranch)
+			style.PrintWarning("%s", errMsg)
+			doneErrors = append(doneErrors, errMsg)
 		} else {
 			fmt.Printf("%s Dolt branch merged to main\n", style.Bold.Render("✓"))
 		}
@@ -846,8 +854,9 @@ notifyWitness:
 		os.Unsetenv("BD_BRANCH")
 	}
 
-	// Write Dolt merge checkpoint for resume (gt-aufru)
-	if agentBeadID != "" {
+	// Write Dolt merge checkpoint for resume ONLY if merge succeeded (hq-vf5v).
+	// If merge failed, omitting the checkpoint allows resume to retry the merge.
+	if !mergeFailed && agentBeadID != "" {
 		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointDoltMerged, "ok")
 	}
