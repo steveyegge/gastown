@@ -128,9 +128,9 @@ func collectExistingMolecules(info *beadInfo) []string {
 	return molecules
 }
 
-// burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
-// First detaches the molecule from the base bead (clears attached_molecule in description),
-// then force-closes the orphaned wisp beads. Returns an error if detach fails, since
+// burnExistingMolecules burns all molecule wisps attached to a bead.
+// Order: force-close descendants → detach from bead → force-close roots.
+// Matches nukeCleanupMolecules pattern. Returns an error if detach fails, since
 // proceeding with a stale attached_molecule reference creates harder-to-debug orphans.
 func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	if len(molecules) == 0 {
@@ -138,11 +138,24 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	}
 	burnDir := beads.ResolveHookDir(townRoot, beadID, "")
 
-	// Step 1: Detach molecule from the base bead using the Go API (with audit logging
+	// Follows the same order as nukeCleanupMolecules:
+	//   1. Force-close descendants (children before parents)
+	//   2. Detach molecule from bead (clears attached_molecule in description)
+	//   3. Force-close molecule roots
+	// Closing descendants first ensures that if detach succeeds but a later step
+	// crashes, we don't leave a detached root with live children.
+	bd := beads.New(burnDir)
+
+	// Step 1: Force-close descendant steps before detaching. Uses force variant
+	// since burn is a destructive recovery path where prior state may be inconsistent.
+	for _, molID := range molecules {
+		forceCloseDescendants(bd, molID)
+	}
+
+	// Step 2: Detach molecule from the base bead using the Go API (with audit logging
 	// and advisory locking). This clears attached_molecule/attached_at from the description.
 	// Without this, storeFieldsInBead preserves the stale reference because it only
 	// overwrites when updates.AttachedMolecule is non-empty.
-	bd := beads.New(burnDir)
 	if _, err := bd.DetachMoleculeWithAudit(beadID, beads.DetachOptions{
 		Operation: "burn",
 		Reason:    "force re-sling: burning stale molecules",
@@ -150,8 +163,7 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 		return fmt.Errorf("detaching molecule from %s: %w", beadID, err)
 	}
 
-	// Step 2: Force-close the orphaned wisp beads so they don't linger.
-	// Uses --force to handle wisps with open child steps (matching gt done pattern).
+	// Step 3: Force-close the orphaned wisp roots so they don't linger.
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
 			style.Dim.Render("Warning:"), err)

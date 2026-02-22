@@ -107,6 +107,10 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		return result, fmt.Errorf("could not get bead info: %w", err)
 	}
 
+	// Save explicit force state before dead-agent auto-force, so the deferred
+	// gate below still requires an explicit --force for deferred beads.
+	explicitForce := params.Force
+
 	if (info.Status == "pinned" || info.Status == "hooked") && !params.Force {
 		// Auto-force when hooked agent's session is confirmed dead (gt-npzy).
 		// Mirrors the dead-agent detection in runSling (sling.go) so that
@@ -122,7 +126,9 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	}
 
 	// Guard against slinging deferred beads (gt-1326mw).
-	if isDeferredBead(info) && !params.Force {
+	// Uses explicitForce (not params.Force) so dead-agent auto-force doesn't
+	// accidentally bypass the deferred gate.
+	if isDeferredBead(info) && !explicitForce {
 		result.ErrMsg = "deferred"
 		return result, fmt.Errorf("bead %s is deferred (use --force to override)", params.BeadID)
 	}
