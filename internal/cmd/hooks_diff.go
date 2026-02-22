@@ -126,6 +126,8 @@ func diffHooksConfigs(current, expected *hooks.HooksConfig) []string {
 		{"Stop", current.Stop, expected.Stop},
 		{"PreCompact", current.PreCompact, expected.PreCompact},
 		{"UserPromptSubmit", current.UserPromptSubmit, expected.UserPromptSubmit},
+		{"WorktreeCreate", current.WorktreeCreate, expected.WorktreeCreate},
+		{"WorktreeRemove", current.WorktreeRemove, expected.WorktreeRemove},
 	}
 
 	for _, ht := range hookTypes {
