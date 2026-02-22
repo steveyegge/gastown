@@ -11,7 +11,6 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -28,8 +27,7 @@ type SpawnedPolecatInfo struct {
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
 	Pane        string // Tmux pane ID (empty until StartSession is called)
-	DoltBranch  string // Dolt branch for write isolation (empty if not created)
-	BaseBranch  string // Effective base branch (e.g., "main", "integration/epic-id")
+	BaseBranch string // Effective base branch (e.g., "main", "integration/epic-id")
 
 	// Internal fields for deferred session start
 	account string
@@ -191,12 +189,6 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			polecatName, err, rigName, polecatName)
 	}
 
-	// Branch-per-polecat: generate name but DEFER creation to after sling writes.
-	// DOLT_BRANCH forks from HEAD, but BD_DOLT_AUTO_COMMIT=off means writes
-	// stay in working set. Caller must call CreateDoltBranch() after all writes
-	// are complete to flush the working set and create the branch.
-	doltBranch := doltserver.PolecatBranchName(polecatName)
-
 	// Get session manager for session name (session start is deferred)
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 	sessionName := polecatSessMgr.SessionName(polecatName)
@@ -218,8 +210,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		ClonePath:   polecatObj.ClonePath,
 		SessionName: sessionName,
 		Pane:        "", // Empty until StartSession is called
-		DoltBranch:  doltBranch,
-		BaseBranch:  effectiveBranch,
+		BaseBranch: effectiveBranch,
 		account:     opts.Account,
 		agent:       opts.Agent,
 	}, nil
@@ -332,34 +323,6 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 
 	s.Pane = pane
 	return pane, nil
-}
-
-// CreateDoltBranch flushes the main working set to HEAD and creates the polecat's
-// Dolt branch. Must be called AFTER all sling writes (hook, formula, fields) so the
-// branch fork includes everything. This fixes the visibility gap where DOLT_BRANCH
-// forks from HEAD but BD_DOLT_AUTO_COMMIT=off leaves writes in working set only.
-//
-// On error, callers are responsible for cleaning up the spawned polecat (worktree,
-// agent bead) and unhooking any attached beads. See rollbackSlingArtifacts for the
-// standard cleanup pattern.
-func (s *SpawnedPolecatInfo) CreateDoltBranch() error {
-	if s.DoltBranch == "" {
-		return nil
-	}
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-	// Flush main working set to HEAD so DOLT_BRANCH includes all sling writes
-	if err := doltserver.CommitServerWorkingSet(townRoot, s.RigName, "sling: flush for "+s.PolecatName); err != nil {
-		return fmt.Errorf("flushing working set for %s: %w", s.PolecatName, err)
-	}
-	// Create branch from now-committed HEAD (includes all writes)
-	if err := doltserver.CreatePolecatBranch(townRoot, s.RigName, s.DoltBranch); err != nil {
-		return fmt.Errorf("creating Dolt branch %s: %w", s.DoltBranch, err)
-	}
-	fmt.Printf("%s Dolt branch: %s\n", style.Bold.Render("✓"), s.DoltBranch)
-	return nil
 }
 
 // IsRigName checks if a target string is a rig name (not a role or path).

@@ -305,17 +305,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		updateAgentMode(targetAgent, params.Mode, hookWorkDir, beadsDir)
 	}
 
-	// 11. Create Dolt branch AFTER all sling writes are complete.
-	if spawnInfo.DoltBranch != "" {
-		if err := spawnInfo.CreateDoltBranch(); err != nil {
-			fmt.Printf("  %s Could not create Dolt branch: %v, cleaning up...\n", style.Dim.Render("✗"), err)
-			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
-			result.ErrMsg = fmt.Sprintf("dolt branch failed: %v", err)
-			return result, fmt.Errorf("creating Dolt branch: %w", err)
-		}
-	}
-
-	// 12. Start polecat session
+	// 11. Start polecat session
 	pane, err := spawnInfo.StartSession()
 	if err != nil {
 		fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)

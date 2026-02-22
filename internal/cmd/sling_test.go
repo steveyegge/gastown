@@ -440,7 +440,7 @@ exit /b 0
 			RigName:     rigName,
 			PolecatName: "Toast",
 			ClonePath:   filepath.Join(townRoot, "fake-polecat"),
-			DoltBranch:  "",
+
 		}, nil
 	}
 
@@ -582,7 +582,7 @@ exit /b 0
 			RigName:     rigName,
 			PolecatName: "Toast",
 			ClonePath:   fakeWorkDir,
-			DoltBranch:  "",
+
 		}, nil
 	}
 

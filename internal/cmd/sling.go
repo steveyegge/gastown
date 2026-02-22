@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -888,16 +887,6 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		targetPane = pane
 	}
 
-	// Create Dolt branch AFTER all sling writes (hook, formula, fields) are complete.
-	// CommitWorkingSet flushes working set to HEAD, then CreatePolecatBranch forks
-	// from HEAD — ensuring the polecat's branch includes all writes.
-	if newPolecatInfo != nil && newPolecatInfo.DoltBranch != "" {
-		if err := newPolecatInfo.CreateDoltBranch(); err != nil {
-			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
-			return fmt.Errorf("creating Dolt branch: %w", err)
-		}
-	}
-
 	// Start polecat session now that attached_molecule is set.
 	// This ensures polecat sees the molecule when gt prime runs on session start.
 	freshlySpawned := newPolecatInfo != nil
@@ -1040,11 +1029,6 @@ func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir s
 		}
 	}
 
-	// 2. Clean up Dolt branch if it was created
-	if err == nil && spawnInfo.DoltBranch != "" && townRoot != "" {
-		doltserver.DeletePolecatBranch(townRoot, spawnInfo.RigName, spawnInfo.DoltBranch)
-	}
-
-	// 3. Clean up the spawned polecat (worktree, agent bead, etc.)
+	// 2. Clean up the spawned polecat (worktree, agent bead, etc.)
 	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName)
 }
