@@ -718,10 +718,10 @@ func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, 
 		return nil, fmt.Errorf("parsing agent query result: %w", err)
 	}
 
-	// Filter for open agents only (closed agents are inactive)
+	// Filter for active agents (closed/deleted agents are inactive)
 	var active []*agentBead
 	for _, agent := range agents {
-		if agent.Status == "open" || agent.Status == "in_progress" {
+		if agent.Status == "open" || agent.Status == "in_progress" || agent.Status == "hooked" {
 			active = append(active, agent)
 		}
 	}

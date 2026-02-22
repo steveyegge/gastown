@@ -278,11 +278,12 @@ exit 0
 	}
 
 	// Start manager with short scan interval; event poll is 5s (fixed).
-	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, nil)
-	// Skip seeding so pollAllStores processes events immediately.
-	m.seeded = true
+	stores := map[string]beadsdk.Storage{"hq": store}
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, stores, nil, nil)
+	// Skip seeding so pollStoresSnapshot processes events immediately.
+	m.seeded.Store(true)
 	// Drive one poll manually instead of waiting for the 5s ticker.
-	m.pollAllStores()
+	m.pollStoresSnapshot(stores)
 
 	mu.Lock()
 	snapshot := make([]string, len(logged))
@@ -392,10 +393,11 @@ exit 0
 		logged = append(logged, fmt.Sprintf(format, args...))
 	}
 
-	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, nil)
-	// Skip seeding so pollAllStores processes events immediately.
-	m.seeded = true
-	m.pollAllStores()
+	stores := map[string]beadsdk.Storage{"hq": store}
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, stores, nil, nil)
+	// Skip seeding so pollStoresSnapshot processes events immediately.
+	m.seeded.Store(true)
+	m.pollStoresSnapshot(stores)
 
 	mu.Lock()
 	snapshot := make([]string, len(logged))
@@ -506,10 +508,11 @@ exit 0
 		logged = append(logged, fmt.Sprintf(format, args...))
 	}
 
-	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, nil)
-	// Skip seeding so pollAllStores processes events immediately.
-	m.seeded = true
-	m.pollAllStores()
+	stores := map[string]beadsdk.Storage{"hq": store}
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, stores, nil, nil)
+	// Skip seeding so pollStoresSnapshot processes events immediately.
+	m.seeded.Store(true)
+	m.pollStoresSnapshot(stores)
 
 	mu.Lock()
 	snapshot := make([]string, len(logged))
@@ -631,10 +634,11 @@ exit 0
 
 	// isRigParked returns true for "gt" rig
 	parked := func(rig string) bool { return rig == "gt" }
-	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, map[string]beadsdk.Storage{"hq": store}, nil, parked)
-	// Skip seeding so pollAllStores processes events immediately.
-	m.seeded = true
-	m.pollAllStores()
+	stores := map[string]beadsdk.Storage{"hq": store}
+	m := NewConvoyManager(townRoot, logger, gtPath, 1*time.Hour, stores, nil, parked)
+	// Skip seeding so pollStoresSnapshot processes events immediately.
+	m.seeded.Store(true)
+	m.pollStoresSnapshot(stores)
 
 	mu.Lock()
 	snapshot := make([]string, len(logged))

@@ -27,10 +27,10 @@ import (
 	"github.com/steveyegge/gastown/internal/feed"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
-	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -75,6 +75,11 @@ type Daemon struct {
 
 	// Restart tracking with exponential backoff to prevent crash loops
 	restartTracker *RestartTracker
+
+	// telemetry exports metrics and logs to VictoriaMetrics / VictoriaLogs.
+	// Nil when telemetry is disabled (GT_OTEL_METRICS_URL / GT_OTEL_LOGS_URL not set).
+	otelProvider *telemetry.Provider
+	metrics      *daemonMetrics
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -113,8 +118,10 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Initialize session prefix registry from rigs.json.
-	_ = session.InitRegistry(config.TownRoot)
+	// Initialize session prefix and agent registries from town root.
+	if err := session.InitRegistry(config.TownRoot); err != nil {
+		logger.Printf("Warning: failed to initialize town registry: %v", err)
+	}
 
 	// Load patrol config from mayor/daemon.json (optional - nil if missing)
 	patrolConfig := LoadPatrolConfig(config.TownRoot)
@@ -149,6 +156,32 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Warning: failed to load restart state: %v", err)
 	}
 
+	// Initialize OpenTelemetry (best-effort — telemetry failure never blocks startup).
+	// Activate by setting GT_OTEL_METRICS_URL and/or GT_OTEL_LOGS_URL.
+	otelProvider, otelErr := telemetry.Init(ctx, "gastown-daemon", "")
+	if otelErr != nil {
+		logger.Printf("Warning: telemetry init failed: %v", otelErr)
+	}
+	var dm *daemonMetrics
+	if otelProvider != nil {
+		dm, err = newDaemonMetrics()
+		if err != nil {
+			logger.Printf("Warning: failed to register daemon metrics: %v", err)
+			dm = nil
+		} else {
+			metricsURL := os.Getenv(telemetry.EnvMetricsURL)
+			if metricsURL == "" {
+				metricsURL = telemetry.DefaultMetricsURL
+			}
+			logsURL := os.Getenv(telemetry.EnvLogsURL)
+			if logsURL == "" {
+				logsURL = telemetry.DefaultLogsURL
+			}
+			logger.Printf("Telemetry active (metrics → %s, logs → %s)",
+				metricsURL, logsURL)
+		}
+	}
+
 	return &Daemon{
 		config:         config,
 		patrolConfig:   patrolConfig,
@@ -160,6 +193,8 @@ func New(config *Config) (*Daemon, error) {
 		gtPath:         gtPath,
 		bdPath:         bdPath,
 		restartTracker: restartTracker,
+		otelProvider:   otelProvider,
+		metrics:        dm,
 	}, nil
 }
 
@@ -359,6 +394,7 @@ func (d *Daemon) heartbeat(state *State) {
 		return
 	}
 
+	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
 	// 0. Ensure Dolt server is running (if configured)
@@ -414,12 +450,14 @@ func (d *Daemon) heartbeat(state *State) {
 	// 6. Ensure Mayor is running (restart if dead)
 	d.ensureMayorRunning()
 
-	// 7. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
-	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
-	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
-	d.triggerPendingSpawns()
+	// 6.5. Handle Dog lifecycle: cleanup stuck dogs and dispatch plugins
+	if IsPatrolEnabled(d.patrolConfig, "handler") {
+		d.handleDogs()
+	} else {
+		d.logger.Printf("Handler patrol disabled in config, skipping")
+	}
 
-	// 8. Process lifecycle requests
+	// 7. Process lifecycle requests
 	d.processLifecycleRequests()
 
 	// 9. (Removed) Stale agent check - violated "discover, don't track"
@@ -445,6 +483,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// branches persist indefinitely. This cleans them up periodically.
 	d.pruneStaleBranches()
 
+	// 14. Dispatch scheduled work (capacity-controlled polecat dispatch).
+	// Shells out to `gt scheduler run` to avoid circular import between daemon and cmd.
+	d.dispatchQueuedWork()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
@@ -464,6 +506,18 @@ func (d *Daemon) ensureDoltServerRunning() {
 
 	if err := d.doltServer.EnsureRunning(); err != nil {
 		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
+	}
+
+	// Update OTel gauges with the latest Dolt health snapshot.
+	if d.metrics != nil {
+		h := doltserver.GetHealthMetrics(d.config.TownRoot)
+		d.metrics.updateDoltHealth(
+			int64(h.Connections),
+			int64(h.MaxConnections),
+			float64(h.QueryLatency.Milliseconds()),
+			h.DiskUsageBytes,
+			h.Healthy,
+		)
 	}
 }
 
@@ -632,6 +686,8 @@ func (d *Daemon) ensureDeaconRunning() {
 	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
 	// The heartbeat file will still be stale until the Deacon runs a full patrol cycle.
 	d.deaconLastStarted = time.Now()
+	d.metrics.recordRestart(d.ctx, "deacon")
+	telemetry.RecordDaemonRestart(d.ctx, "deacon")
 	d.logger.Println("Deacon started successfully")
 }
 
@@ -796,6 +852,8 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 		return
 	}
 
+	d.metrics.recordRestart(d.ctx, "witness")
+	telemetry.RecordDaemonRestart(d.ctx, "witness-"+rigName)
 	d.logger.Printf("Witness session for %s started successfully", rigName)
 }
 
@@ -846,6 +904,8 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		return
 	}
 
+	d.metrics.recordRestart(d.ctx, "refinery")
+	telemetry.RecordDaemonRestart(d.ctx, "refinery-"+rigName)
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
 
@@ -919,7 +979,7 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 
 	// Town-level store (hq)
 	hqBeadsDir := filepath.Join(d.config.TownRoot, ".beads")
-	if store, err := beadsdk.Open(d.ctx, hqBeadsDir); err == nil {
+	if store, err := beadsdk.OpenFromConfig(d.ctx, hqBeadsDir); err == nil {
 		stores["hq"] = store
 	} else {
 		d.logger.Printf("Convoy: hq beads store unavailable: %s", util.FirstLine(err.Error()))
@@ -931,7 +991,7 @@ func (d *Daemon) openBeadsStores() map[string]beadsdk.Storage {
 		if beadsDir == "" {
 			continue
 		}
-		store, err := beadsdk.Open(d.ctx, beadsDir)
+		store, err := beadsdk.OpenFromConfig(d.ctx, beadsDir)
 		if err != nil {
 			d.logger.Printf("Convoy: %s beads store unavailable: %s", rigName, util.FirstLine(err.Error()))
 			continue
@@ -1042,54 +1102,6 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	return true, ""
 }
 
-// triggerPendingSpawns polls pending polecat spawns and triggers those that are ready.
-// This is bootstrap mode - uses regex-based WaitForRuntimeReady which is acceptable
-// for daemon operations when no AI agent is guaranteed to be running.
-// The timeout is short (2s) to avoid blocking the heartbeat.
-func (d *Daemon) triggerPendingSpawns() {
-	const triggerTimeout = 2 * time.Second
-
-	// Check for pending spawns (from POLECAT_STARTED messages in Deacon inbox)
-	pending, err := polecat.CheckInboxForSpawns(d.config.TownRoot)
-	if err != nil {
-		d.logger.Printf("Error checking pending spawns: %v", err)
-		return
-	}
-
-	if len(pending) == 0 {
-		return
-	}
-
-	d.logger.Printf("Found %d pending spawn(s), attempting to trigger...", len(pending))
-
-	// Trigger pending spawns (uses WaitForRuntimeReady with short timeout)
-	results, err := polecat.TriggerPendingSpawns(d.config.TownRoot, triggerTimeout)
-	if err != nil {
-		d.logger.Printf("Error triggering spawns: %v", err)
-		return
-	}
-
-	// Log results
-	triggered := 0
-	for _, r := range results {
-		if r.Triggered {
-			triggered++
-			d.logger.Printf("Triggered polecat: %s/%s", r.Spawn.Rig, r.Spawn.Polecat)
-		} else if r.Error != nil {
-			d.logger.Printf("Error triggering %s: %v", r.Spawn.Session, r.Error)
-		}
-	}
-
-	if triggered > 0 {
-		d.logger.Printf("Triggered %d/%d pending spawn(s)", triggered, len(pending))
-	}
-
-	// Prune stale pending spawns (older than 5 minutes - likely dead sessions)
-	pruned, _ := polecat.PruneStalePending(d.config.TownRoot, 5*time.Minute)
-	if pruned > 0 {
-		d.logger.Printf("Pruned %d stale pending spawn(s)", pruned)
-	}
-}
 
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {
@@ -1119,12 +1131,24 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 		d.logger.Println("KRC pruner stopped")
 	}
 
+	// Push Dolt remotes before stopping the server (if patrol is enabled)
+	d.pushDoltRemotes()
+
 	// Stop Dolt server if we're managing it
 	if d.doltServer != nil && d.doltServer.IsEnabled() && !d.doltServer.IsExternal() {
 		if err := d.doltServer.Stop(); err != nil {
 			d.logger.Printf("Warning: failed to stop Dolt server: %v", err)
 		} else {
 			d.logger.Println("Dolt server stopped")
+		}
+	}
+
+	// Flush and stop OTel providers (5s deadline to avoid blocking shutdown).
+	if d.otelProvider != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.otelProvider.Shutdown(shutCtx); err != nil {
+			d.logger.Printf("Warning: telemetry shutdown: %v", err)
 		}
 	}
 
@@ -1725,4 +1749,29 @@ func (d *Daemon) pruneStaleBranches() {
 
 	// Also prune in the town root itself (mayor clone)
 	pruneInDir(d.config.TownRoot, "town-root")
+}
+
+// dispatchQueuedWork shells out to `gt scheduler run` to dispatch scheduled beads.
+// This avoids circular import between the daemon and cmd packages.
+// Uses a 5m timeout to allow multi-bead dispatch with formula cooking and hook retries.
+//
+// Timeout safety: if the timeout fires mid-dispatch, a bead may be left with
+// metadata written but label not yet swapped (or vice versa). The dispatch flock
+// is released on process death, and dispatchSingleBead's label swap retry logic
+// prevents double-dispatch on the next cycle. The batch_size config (default: 1)
+// limits how many beads are in-flight per heartbeat, reducing the timeout window.
+func (d *Daemon) dispatchQueuedWork() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		d.logger.Printf("Scheduler dispatch timed out after 5m")
+	} else if err != nil {
+		d.logger.Printf("Scheduler dispatch failed: %v (output: %s)", err, string(out))
+	} else if len(out) > 0 {
+		d.logger.Printf("Scheduler dispatch: %s", string(out))
+	}
 }

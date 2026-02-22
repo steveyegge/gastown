@@ -371,13 +371,6 @@ func initRegistryLocked() {
 	registryInitialized = true
 }
 
-// ensureRegistry ensures the registry is initialized for read operations.
-func ensureRegistry() {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	initRegistryLocked()
-}
-
 // loadAgentRegistryFromPath loads agent definitions from a JSON file and merges with built-ins.
 // Caller must hold registryMu write lock.
 func loadAgentRegistryFromPathLocked(path string) error {
@@ -449,26 +442,26 @@ func LoadRigAgentRegistry(path string) error {
 // GetAgentPreset returns the preset info for a given agent name.
 // Returns nil if the preset is not found.
 func GetAgentPreset(name AgentPreset) *AgentPresetInfo {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	return globalRegistry.Agents[string(name)]
 }
 
 // GetAgentPresetByName returns the preset info by string name.
 // Returns nil if not found, allowing caller to fall back to defaults.
 func GetAgentPresetByName(name string) *AgentPresetInfo {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	return globalRegistry.Agents[name]
 }
 
 // ListAgentPresets returns all known agent preset names.
 func ListAgentPresets() []string {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	names := make([]string, 0, len(globalRegistry.Agents))
 	for name := range globalRegistry.Agents {
 		names = append(names, name)
@@ -586,9 +579,9 @@ func GetProcessNames(agentName string) []string {
 //     and use its ProcessNames (custom agent using a known launcher).
 //  3. Fallback: [command] (fully custom binary).
 func ResolveProcessNames(agentName, command string) []string {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 
 	// Normalize command to basename for comparison. Commands may be
 	// path-resolved (e.g., "/home/user/.claude/local/claude" from
@@ -655,9 +648,9 @@ func (rc *RuntimeConfig) MergeWithPreset(preset AgentPreset) *RuntimeConfig {
 
 // IsKnownPreset checks if a string is a known agent preset name.
 func IsKnownPreset(name string) bool {
-	ensureRegistry()
-	registryMu.RLock()
-	defer registryMu.RUnlock()
+	registryMu.Lock()
+	initRegistryLocked()
+	defer registryMu.Unlock()
 	_, ok := globalRegistry.Agents[name]
 	return ok
 }
@@ -734,8 +727,8 @@ func ResetRegistryForTesting() {
 // RegisterAgentForTesting adds a custom agent preset to the registry.
 // The registry is initialized first if needed. Intended for test use only.
 func RegisterAgentForTesting(name string, info AgentPresetInfo) {
-	ensureRegistry()
 	registryMu.Lock()
+	initRegistryLocked()
 	defer registryMu.Unlock()
 	globalRegistry.Agents[name] = &info
 }

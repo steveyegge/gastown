@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -207,7 +208,7 @@ func TestAgentEnv_WithoutAgentOverride_RequiresFallback(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the default polecat dispatch path (no --agent flag).
-	// This is what session_manager.go calls when gt queue run / gt sling dispatches.
+	// This is what lifecycle.go calls when gt scheduler run / gt sling dispatches.
 	env := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       "myrig",
@@ -791,4 +792,141 @@ func TestBuildStartupCommandWithEnv_IncludesNodeOptions(t *testing.T) {
 	if result != expected {
 		t.Errorf("BuildStartupCommandWithEnv() = %q, want %q", result, expected)
 	}
+}
+
+func TestSanitizeOTELAttrValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "simple string unchanged",
+			input:  "hello world",
+			maxLen: 50,
+			want:   "hello world",
+		},
+		{
+			name:   "first line only",
+			input:  "first line\nsecond line\nthird line",
+			maxLen: 100,
+			want:   "first line",
+		},
+		{
+			name:   "commas replaced with pipe",
+			input:  "a,b,c",
+			maxLen: 50,
+			want:   "a|b|c",
+		},
+		{
+			name:   "truncated to maxLen",
+			input:  "abcdefghij",
+			maxLen: 5,
+			want:   "abcde",
+		},
+		{
+			name:   "beacon first line",
+			input:  "[GAS TOWN] polecat rust (rig: gastown) <- witness • 2025-12-30T15:42 • assigned:gt-abc12\n\nRun `gt prime --hook`",
+			maxLen: 120,
+			want:   "[GAS TOWN] polecat rust (rig: gastown) <- witness • 2025-12-30T15:42 • assigned:gt-abc12",
+		},
+		{
+			name:   "trims leading/trailing space",
+			input:  "  hello  ",
+			maxLen: 50,
+			want:   "hello",
+		},
+		{
+			name:   "empty string",
+			input:  "",
+			maxLen: 50,
+			want:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeOTELAttrValue(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("sanitizeOTELAttrValue() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentEnv_OTELPromptAndTown(t *testing.T) {
+	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
+	t.Setenv("GT_OTEL_LOGS_URL", "http://localhost:9428/insert/opentelemetry/v1/logs")
+
+	beacon := "[GAS TOWN] polecat rust (rig: gastown) <- witness • 2025-12-30T15:42 • assigned:gt-abc12\n\nRun `gt prime --hook`"
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "gastown",
+		AgentName: "rust",
+		TownRoot:  "/home/user/mytown",
+		Prompt:    beacon,
+	})
+
+	attrs := env["OTEL_RESOURCE_ATTRIBUTES"]
+	if attrs == "" {
+		t.Fatal("expected OTEL_RESOURCE_ATTRIBUTES to be set")
+	}
+
+	// gt.town should be basename of TownRoot
+	if !containsAttr(attrs, "gt.town=mytown") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES missing gt.town=mytown, got: %s", attrs)
+	}
+
+	// gt.prompt should be the first line of the beacon (no newlines, commas replaced)
+	wantPromptPrefix := "gt.prompt=[GAS TOWN] polecat rust"
+	if !contains(attrs, wantPromptPrefix) {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES missing %q, got: %s", wantPromptPrefix, attrs)
+	}
+
+	// No newlines in the value
+	if contains(attrs, "\n") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES must not contain newlines, got: %s", attrs)
+	}
+}
+
+func TestAgentEnv_OTELNoPromptNoTown(t *testing.T) {
+	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
+	t.Setenv("GT_OTEL_LOGS_URL", "http://localhost:9428/insert/opentelemetry/v1/logs")
+
+	env := AgentEnv(AgentEnvConfig{
+		Role: "mayor",
+		// No Prompt, no TownRoot
+	})
+
+	attrs := env["OTEL_RESOURCE_ATTRIBUTES"]
+	if contains(attrs, "gt.prompt") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES should not have gt.prompt when Prompt is empty, got: %s", attrs)
+	}
+	if contains(attrs, "gt.town") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES should not have gt.town when TownRoot is empty, got: %s", attrs)
+	}
+}
+
+func containsAttr(attrs, attr string) bool {
+	for _, part := range splitAttrs(attrs) {
+		if part == attr {
+			return true
+		}
+	}
+	return false
+}
+
+func splitAttrs(attrs string) []string {
+	var parts []string
+	for _, p := range strings.Split(attrs, ",") {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+func containsStr(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

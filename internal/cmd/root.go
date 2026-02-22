@@ -2,16 +2,19 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/version"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -62,9 +65,9 @@ var beadsExemptCommands = map[string]bool{
 	"tap":        true,
 	"dnd":        true,
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
+	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
-	"migrate-bead-labels": true, // Label migration handles its own beads access
 }
 
 // Commands exempt from the town root branch warning.
@@ -96,13 +99,14 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Initialize CLI theme (dark/light mode support)
 	initCLITheme()
 
-	// Initialize session prefix registry from rigs.json.
+	// Log command usage telemetry (fire-and-forget, excludes tap/signal)
+	logCommandUsage(cmd, args)
+
+	// Initialize session prefix registry and agent registry from town root.
 	// Best-effort: if town root not found, the default "gt" prefix is used.
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-		_ = session.InitRegistry(townRoot)
-		if err := config.LoadAgentRegistry(config.DefaultAgentRegistryPath(townRoot)); err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to load agent registry %s: %v\n",
-				config.DefaultAgentRegistryPath(townRoot), err)
+		if err := session.InitRegistry(townRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to initialize town registry: %v\n", err)
 		}
 	}
 
@@ -226,6 +230,22 @@ func checkStaleBinaryWarning() {
 // Execute runs the root command and returns an exit code.
 // The caller (main) should call os.Exit with this code.
 func Execute() int {
+	ctx := context.Background()
+	provider, err := telemetry.Init(ctx, "gastown", Version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: telemetry init: %v\n", err)
+	}
+	if provider != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = provider.Shutdown(shutdownCtx)
+		}()
+		// Set OTEL_RESOURCE_ATTRIBUTES in the process env so all bd subprocesses
+		// spawned via exec.Command inherit GT context automatically.
+		telemetry.SetProcessOTELAttrs()
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		// Check for silent exit (scripting commands that signal status via exit code)
 		if code, ok := IsSilentExit(err); ok {

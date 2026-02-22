@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -447,6 +448,70 @@ func TestComputeExpectedNoBase(t *testing.T) {
 	// But it should still have the base SessionStart hooks
 	if len(crew.SessionStart) != len(defaultBase.SessionStart) {
 		t.Error("expected crew to inherit SessionStart from DefaultBase")
+	}
+
+	// Witness should get DefaultBase + built-in patrol-formula-guard (gt-e47hxn)
+	witness, err := ComputeExpected("witness")
+	if err != nil {
+		t.Fatalf("ComputeExpected(witness) failed: %v", err)
+	}
+	// Witness has built-in PreToolUse overrides for patrol-formula-guard
+	if len(witness.PreToolUse) < 4 {
+		t.Errorf("expected witness to have at least 4 PreToolUse hooks from DefaultOverrides (patrol-formula-guard), got %d", len(witness.PreToolUse))
+	}
+	// Should still inherit base SessionStart
+	if len(witness.SessionStart) != len(defaultBase.SessionStart) {
+		t.Error("expected witness to inherit SessionStart from DefaultBase")
+	}
+	// Verify patrol matchers are present
+	patrolMatchers := map[string]bool{
+		"Bash(*bd mol pour*patrol*)":       false,
+		"Bash(*bd mol pour *mol-witness*)":  false,
+		"Bash(*bd mol pour *mol-deacon*)":   false,
+		"Bash(*bd mol pour *mol-refinery*)": false,
+	}
+	for _, entry := range witness.PreToolUse {
+		if _, ok := patrolMatchers[entry.Matcher]; ok {
+			patrolMatchers[entry.Matcher] = true
+		}
+	}
+	for matcher, found := range patrolMatchers {
+		if !found {
+			t.Errorf("witness missing patrol-formula-guard matcher: %s", matcher)
+		}
+	}
+}
+
+// TestComputeExpectedWitnessRigSpecific verifies patrol-formula-guard propagates
+// to rig-specific witness targets (e.g., sky/witness) via the witness role default.
+func TestComputeExpectedWitnessRigSpecific(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	// No on-disk overrides — all witnesses should still get patrol-formula-guard
+	// from the built-in DefaultOverrides for "witness".
+	skyWitness, err := ComputeExpected("sky/witness")
+	if err != nil {
+		t.Fatalf("ComputeExpected(sky/witness) failed: %v", err)
+	}
+
+	// Should have patrol-formula-guard matchers from DefaultOverrides["witness"]
+	patrolCount := 0
+	for _, entry := range skyWitness.PreToolUse {
+		if strings.Contains(entry.Matcher, "bd mol pour") {
+			patrolCount++
+		}
+	}
+	if patrolCount < 4 {
+		t.Errorf("sky/witness expected 4 patrol-formula-guard matchers, got %d", patrolCount)
+	}
+
+	// Should also inherit base hooks (pr-workflow-guard, etc.)
+	if len(skyWitness.SessionStart) == 0 {
+		t.Error("sky/witness should inherit SessionStart from DefaultBase")
+	}
+	if len(skyWitness.UserPromptSubmit) == 0 {
+		t.Error("sky/witness should inherit UserPromptSubmit (mail-check) from DefaultBase")
 	}
 }
 

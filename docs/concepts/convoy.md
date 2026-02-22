@@ -93,15 +93,14 @@ gt convoy create "Feature X" gt-a gt-b gt-c
 
 ### Add Issues
 
-> **Note**: `gt convoy add` is not yet implemented. Use `bd dep add` directly:
-
 ```bash
-# Add issue to existing convoy
-bd dep add hq-cv-abc gt-new-issue --type=tracks
+# Add issues to existing convoy
+gt convoy add hq-cv-abc gt-new-issue
+gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3
 
 # Adding to closed convoy requires reopening first
 bd update hq-cv-abc --status=open
-bd dep add hq-cv-abc gt-followup-fix --type=tracks
+gt convoy add hq-cv-abc gt-followup-fix
 ```
 
 ### Check Status

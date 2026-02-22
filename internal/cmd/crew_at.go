@@ -192,6 +192,8 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			TownRoot:         townRoot,
 			RuntimeConfigDir: claudeConfigDir,
 			Agent:            crewAgentOverride,
+			Topic:            "start",
+			SessionName:      sessionID,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)
@@ -226,7 +228,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Use respawn-pane to replace shell with runtime directly
 		// This gives cleaner lifecycle: runtime exits → session ends (no intermediate shell)
 		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
+		startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+			Role:        "crew",
+			Rig:         r.Name,
+			AgentName:   name,
+			TownRoot:    townRoot,
+			Prompt:      beacon,
+			Topic:       "start",
+			SessionName: sessionID,
+		}, r.Path, beacon, crewAgentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)
 		}
@@ -270,7 +280,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 			// Use respawn-pane to replace shell with runtime directly
 			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
+			startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+				Role:        "crew",
+				Rig:         r.Name,
+				AgentName:   name,
+				TownRoot:    townRoot,
+				Prompt:      beacon,
+				Topic:       "restart",
+				SessionName: sessionID,
+			}, r.Path, beacon, crewAgentOverride)
 			if err != nil {
 				return fmt.Errorf("building startup command: %w", err)
 			}

@@ -191,6 +191,42 @@ func DefaultOverrides() map[string]*HooksConfig {
 				},
 			},
 		},
+		// Witness roles: patrol-formula-guard (gt-e47hxn).
+		// Blocks patrol formulas from using persistent molecules — must use wisps.
+		// Without this, witnesses could accidentally create permanent patrol molecules
+		// that survive session restarts and accumulate unbounded.
+		"witness": {
+			PreToolUse: []HookEntry{
+				{
+					Matcher: "Bash(*bd mol pour*patrol*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-witness*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-deacon*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-refinery*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+			},
+		},
 	}
 }
 

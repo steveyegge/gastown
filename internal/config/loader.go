@@ -1365,6 +1365,16 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
 	}
 
+	// Dogs default to Haiku (cheap infrastructure workers), but respect
+	// explicit non-Claude overrides (e.g., RoleAgents["dog"] = "opencode").
+	if role == "dog" {
+		if hasExplicitNonClaudeOverride(role, townSettings, rigSettings) {
+			// Fall through to normal resolution below
+		} else {
+			return claudeHaikuPreset()
+		}
+	}
+
 	// Check ephemeral cost tier (GT_COST_TIER env var)
 	tierRC, tierHandled := tryResolveFromEphemeralTier(role)
 	if tierHandled {
@@ -2081,6 +2091,15 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	return cmd, nil
 }
 
+// BuildStartupCommandFromConfig builds a startup command from a complete AgentEnvConfig.
+// Use this (instead of Build*StartupCommand helpers) when you need full OTEL context:
+// Issue (gt.issue), Topic (gt.topic), SessionName (gt.session), etc.
+// The rigPath, prompt, and agentOverride are passed through directly.
+func BuildStartupCommandFromConfig(cfg AgentEnvConfig, rigPath, prompt, agentOverride string) (string, error) {
+	envVars := AgentEnv(cfg)
+	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+}
+
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It uses AgentEnv to set all standard environment variables.
 // For rig-level roles (witness, refinery), pass the rig name and rigPath.
@@ -2090,6 +2109,7 @@ func BuildAgentStartupCommand(role, rig, townRoot, rigPath, prompt string) strin
 		Role:     role,
 		Rig:      rig,
 		TownRoot: townRoot,
+		Prompt:   prompt,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
@@ -2100,6 +2120,7 @@ func BuildAgentStartupCommandWithAgentOverride(role, rig, townRoot, rigPath, pro
 		Role:     role,
 		Rig:      rig,
 		TownRoot: townRoot,
+		Prompt:   prompt,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
@@ -2116,6 +2137,7 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		Prompt:    prompt,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
@@ -2131,6 +2153,7 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		Prompt:    prompt,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
@@ -2147,6 +2170,7 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		Prompt:    prompt,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
@@ -2162,6 +2186,7 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		Prompt:    prompt,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }

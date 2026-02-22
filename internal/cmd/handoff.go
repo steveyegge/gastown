@@ -646,6 +646,26 @@ var claudeEnvVars = []string{
 	// AWS vars for Bedrock
 	"AWS_PROFILE",
 	"AWS_REGION",
+	// OTEL telemetry — propagate so Claude keeps sending metrics after handoff
+	// (tmux respawn-pane starts a fresh shell that doesn't inherit these)
+	"CLAUDE_CODE_ENABLE_TELEMETRY",
+	"OTEL_METRICS_EXPORTER",
+	"OTEL_METRIC_EXPORT_INTERVAL",
+	"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+	"OTEL_LOGS_EXPORTER",
+	"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+	"OTEL_LOG_TOOL_DETAILS",
+	"OTEL_LOG_TOOL_CONTENT",
+	"OTEL_LOG_USER_PROMPTS",
+	"OTEL_RESOURCE_ATTRIBUTES",
+	// bd telemetry — so `bd` calls inside Claude emit to VictoriaMetrics/Logs
+	"BD_OTEL_METRICS_URL",
+	"BD_OTEL_LOGS_URL",
+	// GT telemetry source vars — needed to recompute derived vars after handoff
+	"GT_OTEL_METRICS_URL",
+	"GT_OTEL_LOGS_URL",
 }
 
 // buildRestartCommand creates the command to run when respawning a session's pane.
@@ -1075,9 +1095,11 @@ func sendHandoffMail(subject, message string) (string, error) {
 		"--", subject,
 	}
 
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = townRoot // Run from town root for town-level beads
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
+	cmd := BdCmd(args...).
+		WithAutoCommit().
+		Dir(townRoot).
+		Build()
+	cmd.Env = append(cmd.Env, "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -1097,9 +1119,11 @@ func sendHandoffMail(subject, message string) (string, error) {
 	}
 
 	// Auto-hook the created mail bead
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
-	hookCmd.Dir = townRoot
-	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
+	hookCmd := BdCmd("update", beadID, "--status=hooked", "--assignee="+agentID).
+		WithAutoCommit().
+		Dir(townRoot).
+		Build()
+	hookCmd.Env = append(hookCmd.Env, "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
 	hookCmd.Stderr = os.Stderr
 
 	if err := hookCmd.Run(); err != nil {

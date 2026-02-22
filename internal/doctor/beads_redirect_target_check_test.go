@@ -447,3 +447,97 @@ func TestBeadsRedirectTargetCheck_ValidConfigYaml(t *testing.T) {
 		t.Errorf("Expected StatusOK for target with config.yaml, got %v: %s", result.Status, result.Message)
 	}
 }
+
+func TestBeadsRedirectTargetCheck_AbsolutePathRedirect(t *testing.T) {
+	// Redirect files containing absolute paths should resolve correctly
+	// without path-doubling (filepath.Join(wt, absPath) bug).
+	townRoot := t.TempDir()
+	rigDir := filepath.Join(townRoot, "myrig")
+	crewDir := filepath.Join(rigDir, "crew", "worker1")
+	crewBeadsDir := filepath.Join(crewDir, ".beads")
+
+	// Create an absolute target with valid beads setup
+	absTarget := filepath.Join(t.TempDir(), "canonical", ".beads")
+	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create crew with absolute-path redirect
+	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBeadsRedirectTargetCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("Expected StatusOK for valid absolute redirect, got %v: %s (details: %v)",
+			result.Status, result.Message, result.Details)
+	}
+}
+
+func TestBeadsRedirectTargetCheck_FixWithAbsoluteRigRedirect(t *testing.T) {
+	// When rig/.beads/redirect contains an absolute path, the doctor fix
+	// (recomputeRedirect) should pass it through as-is, not prepend upPath.
+	townRoot := t.TempDir()
+	rigDir := filepath.Join(townRoot, "myrig")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	crewDir := filepath.Join(rigDir, "crew", "worker1")
+	crewBeadsDir := filepath.Join(crewDir, ".beads")
+
+	// Create an absolute canonical beads location
+	absTarget := filepath.Join(t.TempDir(), "canonical", ".beads")
+	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads with absolute redirect to canonical location
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create crew with a broken redirect
+	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../nonexistent/.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBeadsRedirectTargetCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+
+	// Run to detect
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("Expected StatusWarning before fix, got %v: %s", result.Status, result.Message)
+	}
+
+	// Fix should rewrite redirect using the absolute rig redirect target
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify redirect is the absolute path (not "../../" + absolute path)
+	data, err := os.ReadFile(filepath.Join(crewBeadsDir, "redirect"))
+	if err != nil {
+		t.Fatalf("Redirect file missing after fix: %v", err)
+	}
+	content := strings.TrimSpace(string(data))
+	if content != absTarget {
+		t.Errorf("Expected redirect to %q (absolute), got %q", absTarget, content)
+	}
+}

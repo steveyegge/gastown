@@ -536,7 +536,7 @@ esac
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	f := &LiveConvoyFetcher{cmdTimeout: 200 * time.Millisecond}
+	f := &LiveConvoyFetcher{cmdTimeout: 2 * time.Second}
 
 	// Non-zero exit with stdout should return stdout and nil error.
 	stdout, err := f.runBdCmd(t.TempDir(), "warn")

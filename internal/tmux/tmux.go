@@ -3,6 +3,7 @@ package tmux
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // sessionNudgeLocks serializes nudges to the same session.
@@ -219,9 +221,10 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 }
 
 // KillSession terminates a tmux session.
-func (t *Tmux) KillSession(name string) error {
-	_, err := t.run("kill-session", "-t", name)
-	return err
+func (t *Tmux) KillSession(name string) (retErr error) {
+	defer func() { telemetry.RecordSessionStop(context.Background(), name, retErr) }()
+	_, retErr = t.run("kill-session", "-t", name)
+	return retErr
 }
 
 // processKillGracePeriod is how long to wait after SIGTERM before sending SIGKILL.
@@ -762,7 +765,8 @@ func (t *Tmux) SendKeys(session, keys string) error {
 // SendKeysDebounced sends keystrokes with a configurable delay before Enter.
 // The debounceMs parameter controls how long to wait after paste before sending Enter.
 // This prevents race conditions where Enter arrives before paste is processed.
-func (t *Tmux) SendKeysDebounced(session, keys string, debounceMs int) error {
+func (t *Tmux) SendKeysDebounced(session, keys string, debounceMs int) (retErr error) {
+	defer func() { telemetry.RecordPromptSend(context.Background(), session, keys, debounceMs, retErr) }()
 	// Send text using literal mode (-l) to handle special chars
 	if _, err := t.run("send-keys", "-t", session, "-l", keys); err != nil {
 		return err
@@ -772,8 +776,8 @@ func (t *Tmux) SendKeysDebounced(session, keys string, debounceMs int) error {
 		time.Sleep(time.Duration(debounceMs) * time.Millisecond)
 	}
 	// Send Enter separately - more reliable than appending to send-keys
-	_, err := t.run("send-keys", "-t", session, "Enter")
-	return err
+	_, retErr = t.run("send-keys", "-t", session, "Enter")
+	return retErr
 }
 
 // SendKeysRaw sends keystrokes without adding Enter.
@@ -1409,7 +1413,9 @@ func (t *Tmux) FindSessionByWorkDir(targetDir string, processNames []string) ([]
 
 // CapturePane captures the visible content of a pane.
 func (t *Tmux) CapturePane(session string, lines int) (string, error) {
-	return t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))
+	content, err := t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))
+	telemetry.RecordPaneRead(context.Background(), session, lines, len(content), err)
+	return content, err
 }
 
 // CapturePaneAll captures all scrollback history.
@@ -1694,12 +1700,9 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 // Steady-State (use AI observation instead):
 //
 //	Once any AI agent is running, observation should be AI-to-AI:
-//	- Deacon starting polecats → use 'gt deacon pending' + AI analysis
+//	- Deacon monitoring polecats → use patrol formula + AI analysis
 //	- Deacon restarting → Mayor watches via 'gt peek'
 //	- Mayor restarting → Deacon watches via 'gt peek'
-//
-// See: gt deacon pending (ZFC-compliant AI observation)
-// See: gt deacon trigger-pending (bootstrap mode, regex-based)
 
 // matchesPromptPrefix reports whether a captured pane line matches the
 // configured ready-prompt prefix. It normalizes non-breaking spaces

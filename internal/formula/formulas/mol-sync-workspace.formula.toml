@@ -32,7 +32,7 @@ Polecats can file a bead and delegate. Refinery must resolve inline.
 | setup_command | config | Setup/install command (empty = skip) |
 | typecheck_command | config | Type check command (empty = skip) |
 | lint_command | config | Lint command (empty = skip) |
-| test_command | config or default | Test command (default: `go test ./...`) |
+| test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
 | build_command | config | Build command (empty = skip) |
 
 ## Failure Modes
@@ -515,7 +515,7 @@ default = ""
 
 [vars.test_command]
 description = "Command to run tests (auto-detected from rig settings)"
-default = "go test ./..."
+default = ""
 
 [vars.build_command]
 description = "Command to run build. Empty = skip."

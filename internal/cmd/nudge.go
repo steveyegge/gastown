@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -190,7 +192,14 @@ var validNudgePriorities = map[string]bool{
 	nudge.PriorityUrgent: true,
 }
 
-func runNudge(cmd *cobra.Command, args []string) error {
+func runNudge(cmd *cobra.Command, args []string) (retErr error) {
+	defer func() {
+		target := ""
+		if len(args) > 0 {
+			target = args[0]
+		}
+		telemetry.RecordNudge(context.Background(), target, retErr)
+	}()
 	// Validate --mode and --priority before doing anything else.
 	if !validNudgeModes[nudgeModeFlag] {
 		return fmt.Errorf("invalid --mode %q: must be one of immediate, queue, wait-idle", nudgeModeFlag)

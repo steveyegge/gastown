@@ -42,14 +42,14 @@ func ResolveBeadsDir(workDir string) string {
 		return beadsDir
 	}
 
-	// Resolve relative to workDir (the redirect is written from the perspective
-	// of being inside workDir, not inside workDir/.beads)
-	// e.g., redirect contains "../../mayor/rig/.beads"
-	// from crew/max/, this resolves to mayor/rig/.beads
-	resolved := filepath.Join(workDir, redirectTarget)
-
-	// Clean the path to resolve .. components
-	resolved = filepath.Clean(resolved)
+	// Resolve redirect target. Absolute paths are used as-is;
+	// relative paths are resolved from workDir.
+	var resolved string
+	if filepath.IsAbs(redirectTarget) {
+		resolved = filepath.Clean(redirectTarget)
+	} else {
+		resolved = filepath.Clean(filepath.Join(workDir, redirectTarget))
+	}
 
 	// Detect circular redirects: if resolved path equals original beads dir,
 	// this is an errant redirect file (e.g., redirect in mayor/rig/.beads pointing to itself)
@@ -87,9 +87,15 @@ func resolveBeadsDirWithDepth(beadsDir string, maxDepth int) string {
 		return beadsDir
 	}
 
-	// Resolve relative to parent of beadsDir (the workDir)
+	// Resolve redirect target. Absolute paths are used as-is;
+	// relative paths are resolved from parent of beadsDir.
 	workDir := filepath.Dir(beadsDir)
-	resolved := filepath.Clean(filepath.Join(workDir, redirectTarget))
+	var resolved string
+	if filepath.IsAbs(redirectTarget) {
+		resolved = filepath.Clean(redirectTarget)
+	} else {
+		resolved = filepath.Clean(filepath.Join(workDir, redirectTarget))
+	}
 
 	// Detect circular redirect
 	if resolved == beadsDir {
@@ -230,9 +236,14 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 		if data, err := os.ReadFile(rigRedirectPath); err == nil {
 			rigRedirectTarget := strings.TrimSpace(string(data))
 			if rigRedirectTarget != "" {
-				// Rig has redirect (e.g., "mayor/rig/.beads" for tracked beads).
-				// Redirect worktree directly to the final destination.
-				redirectPath = upPath + rigRedirectTarget
+				if filepath.IsAbs(rigRedirectTarget) {
+					// Absolute redirect — pass through as-is (ResolveBeadsDir handles it)
+					redirectPath = rigRedirectTarget
+				} else {
+					// Relative redirect (e.g., "mayor/rig/.beads" for tracked beads).
+					// Redirect worktree directly to the final destination.
+					redirectPath = upPath + rigRedirectTarget
+				}
 			}
 		}
 	}

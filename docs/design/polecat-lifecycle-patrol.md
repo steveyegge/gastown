@@ -555,10 +555,12 @@ SessionManager.Start()
     └── New session discovers next step via bd mol current
 ```
 
-**Current implementation:** The daemon's `triggerPendingSpawns()` and
-`processLifecycleRequests()` handle this. When a session dies but the hook is
-still set, the daemon either sends a `LIFECYCLE:` message to the witness or
-directly restarts the session (depending on configuration).
+**Current implementation:** The daemon's `processLifecycleRequests()` handles
+this. When a session dies but the hook is still set, the daemon either sends a
+`LIFECYCLE:` message to the witness or directly restarts the session (depending
+on configuration). Polecat startup is handled end-to-end by the GUPP/beacon
+flow (SessionManager → StartupNudge → BuildStartupPrompt → SessionStart hook
+→ gt prime).
 
 **Future (AT integration):** The witness spawns replacement teammates directly
 via `Teammate({ operation: "spawn" })`. The SubagentStop hook detects teammate

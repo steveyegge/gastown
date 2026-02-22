@@ -104,7 +104,13 @@ func (m *Manager) Start(agentOverride string) error {
 		Sender:    "daemon",
 		Topic:     "patrol",
 	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.")
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
+	startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+		Role:        "deacon",
+		TownRoot:    m.townRoot,
+		Prompt:      initialPrompt,
+		Topic:       "patrol",
+		SessionName: sessionID,
+	}, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}

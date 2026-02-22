@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // lockAgentBead acquires an exclusive file lock for a specific agent bead ID.
@@ -382,7 +384,8 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 // This ensures consistency with `bd slot show` and other beads commands.
 // Previously, this function embedded these fields in the description text,
 // which caused inconsistencies with bd slot commands (see GH #gt-9v52).
-func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) error {
+func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) (retErr error) {
+	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, hookBead, retErr) }()
 	// Update agent state using bd agent state command
 	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
 	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.

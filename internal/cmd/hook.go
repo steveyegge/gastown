@@ -459,7 +459,7 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
-	b := beads.New(workDir)
+	b := beads.New(workDir).OnMain()
 
 	// Query for hooked beads assigned to the target
 	hookedBeads, err := b.List(beads.ListOptions{
@@ -480,7 +480,7 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 			// Check town beads for hooked items
 			townBeadsDir := filepath.Join(townRoot, ".beads")
 			if _, err := os.Stat(townBeadsDir); err == nil {
-				townBeads := beads.New(townBeadsDir)
+				townBeads := beads.New(townBeadsDir).OnMain()
 				townHooked, err := townBeads.List(beads.ListOptions{
 					Status:   beads.StatusHooked,
 					Assignee: target,

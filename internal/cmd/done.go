@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -78,6 +80,7 @@ func init() {
 }
 
 func runDone(cmd *cobra.Command, args []string) (retErr error) {
+	defer func() { telemetry.RecordDone(context.Background(), strings.ToUpper(doneStatus), retErr) }()
 	// Guard: Only polecats should call gt done
 	// Crew, deacons, witnesses etc. don't use gt done - they persist across tasks.
 	// Polecat sessions end with gt done — the session is cleaned up, but the
@@ -621,7 +624,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
+		// Read source issue from main (not polecat branch) — it was created there.
+		restore := onMainBranch()
 		sourceIssueForNoMerge, err := bd.Show(issueID)
+		restore()
 		if err == nil {
 			attachmentFields := beads.ParseAttachmentFields(sourceIssueForNoMerge)
 			if attachmentFields != nil && attachmentFields.NoMerge {
@@ -708,7 +714,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
 		}
 		if refineryEnabled {
+			restore = onMainBranch()
 			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+			restore()
 			if err == nil && autoTarget != "" {
 				target = autoTarget
 			}
@@ -719,8 +727,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if donePriority >= 0 {
 			priority = donePriority
 		} else {
-			// Try to inherit from source issue
+			// Read source issue from main where it was created (not polecat branch)
+			restore := onMainBranch()
 			sourceIssue, err := bd.Show(issueID)
+			restore()
 			if err != nil {
 				priority = 2 // Default
 			} else {
@@ -729,7 +739,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Check if MR bead already exists for this branch (idempotency)
+		// MR beads live on main, not polecat branch.
+		restore = onMainBranch()
 		existingMR, err := bd.FindMRForBranch(branch)
+		restore()
 		if err != nil {
 			style.PrintWarning("could not check for existing MR: %v", err)
 			// Continue with creation attempt - Create will fail if duplicate
@@ -757,7 +770,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			description += "\nlast_conflict_sha: null"
 			description += "\nconflict_task_id: null"
 
-			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+			// Create MR bead directly on main (not polecat branch).
+			// MR bead is a new unique INSERT — no contention risk —
+			// and must be visible to refinery immediately.
+			restore := onMainBranch()
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
 				Type:        "merge-request",
@@ -765,6 +781,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				Description: description,
 				Ephemeral:   true,
 			})
+			restore()
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.
 				// Push succeeded so branch is on remote, but MR bead failed.
@@ -838,6 +855,8 @@ notifyWitness:
 		}
 		// Unset BD_BRANCH so subsequent bd operations (updateAgentStateOnDone)
 		// write directly to main instead of the now-deleted branch.
+		// Note: this is a lifecycle transition (branch deleted). The systematic fix
+		// for BD_BRANCH leaking into read operations is in beads.go (OnMain/StripBdBranch).
 		os.Unsetenv("BD_BRANCH")
 	}
 
@@ -1204,35 +1223,26 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 			// Order matters: wisp closes -> unblocks base bead -> base bead closes.
 			attachment := beads.ParseAttachmentFields(hookedBead)
 			if attachment != nil && attachment.AttachedMolecule != "" {
-				// Retry molecule close with exponential backoff. Transient failures
-				// can leave wisps orphaned, blocking the work bead from closing.
-				var moleculeClosed bool
-				var lastErr error
-				for attempt := 0; attempt < 3; attempt++ {
-					if err := bd.Close(attachment.AttachedMolecule); err == nil {
-						moleculeClosed = true
-						break
-					} else {
-						lastErr = err
-						// If the molecule doesn't exist (already burned/deleted),
-						// treat it as already closed and stop retrying.
-						if errors.Is(err, beads.ErrNotFound) {
-							moleculeClosed = true
-							fmt.Fprintf(os.Stderr, "Warning: attached molecule %s not found (already burned/deleted), treating as closed\n", attachment.AttachedMolecule)
-							break
-						}
-						if attempt < 2 {
-							time.Sleep(time.Duration(100<<attempt) * time.Millisecond) // 100ms, 200ms
-						}
-					}
+				// Close molecule step descendants before closing the wisp root.
+				// bd close doesn't cascade — without this, open/in_progress steps
+				// from the molecule stay stuck forever after gt done completes.
+				// Order: step children -> wisp root -> base bead.
+				if n := closeDescendants(bd, attachment.AttachedMolecule); n > 0 {
+					fmt.Fprintf(os.Stderr, "Closed %d molecule step(s) for %s\n", n, attachment.AttachedMolecule)
 				}
-				if !moleculeClosed {
-					// All retries failed with non-"not found" errors - skip closing
-					// hooked bead (it's blocked by the molecule)
-					fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s after 3 attempts: %v\n", attachment.AttachedMolecule, lastErr)
-					// Don't try to close hookedBeadID - it will fail because it's still blocked
-					// The Witness will clean up orphaned state
-					return
+
+				// Close the wisp root with --force and audit reason.
+				// ForceCloseWithReason handles any status (hooked, open, in_progress)
+				// and records the reason + session for attribution.
+				// Same pattern as gt mol burn/squash (#1879).
+				if closeErr := bd.ForceCloseWithReason("done", attachment.AttachedMolecule); closeErr != nil {
+					if !errors.Is(closeErr, beads.ErrNotFound) {
+						fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s: %v\n", attachment.AttachedMolecule, closeErr)
+						// Don't try to close hookedBeadID - it may still be blocked
+						// The Witness will clean up orphaned state
+						return
+					}
+					// Not found = already burned/deleted by another path, continue
 				}
 			}
 
@@ -1371,6 +1381,23 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 func isPolecatActor(actor string) bool {
 	parts := strings.Split(actor, "/")
 	return len(parts) >= 2 && parts[1] == "polecats"
+}
+
+// onMainBranch temporarily clears BD_BRANCH so beads operations target
+// Dolt's main branch instead of the polecat's working branch.
+// Returns a restore function that must be called after the operation.
+//
+// Use this for operations that need to read/write beads visible to all agents
+// (e.g., source issue lookup, MR bead creation) rather than the polecat's
+// isolated Dolt branch.
+func onMainBranch() func() {
+	saved := os.Getenv("BD_BRANCH")
+	os.Unsetenv("BD_BRANCH")
+	return func() {
+		if saved != "" {
+			os.Setenv("BD_BRANCH", saved)
+		}
+	}
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.

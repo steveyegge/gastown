@@ -14,6 +14,17 @@ LDFLAGS := -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
            -X github.com/steveyegge/gastown/internal/cmd.BuildTime=$(BUILD_TIME) \
            -X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1
 
+# ICU4C detection for macOS (required by go-icu-regex transitive dependency).
+# Homebrew installs icu4c as a keg-only package, so headers/libs aren't on the
+# default search path. Auto-detect the prefix and export CGo flags.
+ifeq ($(shell uname),Darwin)
+  ICU_PREFIX := $(shell brew --prefix icu4c 2>/dev/null)
+  ifneq ($(ICU_PREFIX),)
+    export CGO_CPPFLAGS += -I$(ICU_PREFIX)/include
+    export CGO_LDFLAGS  += -L$(ICU_PREFIX)/lib
+  endif
+endif
+
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gt
 ifeq ($(shell uname),Darwin)
@@ -47,6 +58,16 @@ install: check-up-to-date build
 		fi; \
 	done
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@# Restart daemon so it picks up the new binary.
+	@# A stale daemon is a recurring source of bugs (wrong session prefixes, etc.)
+	@if $(INSTALL_DIR)/$(BINARY) daemon status >/dev/null 2>&1; then \
+		echo "Restarting daemon to pick up new binary..."; \
+		$(INSTALL_DIR)/$(BINARY) daemon stop >/dev/null 2>&1 || true; \
+		sleep 1; \
+		$(INSTALL_DIR)/$(BINARY) daemon start >/dev/null 2>&1 && \
+			echo "Daemon restarted." || \
+			echo "Warning: daemon restart failed (start manually with: gt daemon start)"; \
+	fi
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)

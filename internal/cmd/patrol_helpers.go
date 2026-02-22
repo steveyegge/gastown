@@ -3,11 +3,11 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"github.com/steveyegge/gastown/internal/cli"
-	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/style"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -15,84 +15,126 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName        string   // "deacon", "witness", "refinery"
-	PatrolMolName   string   // "mol-deacon-patrol", etc.
-	BeadsDir        string   // where to look for beads
-	Assignee        string   // agent identity for pinning
-	HeaderEmoji     string   // display emoji
-	HeaderTitle     string   // "Patrol Status", etc.
-	WorkLoopSteps   []string // role-specific instructions
-	CheckInProgress bool     // whether to check in_progress status first (witness/refinery do, deacon doesn't)
-	ExtraVars       []string // additional --var key=value args for wisp creation
+	RoleName      string   // "deacon", "witness", "refinery"
+	PatrolMolName string   // "mol-deacon-patrol", etc.
+	BeadsDir      string   // where to look for beads
+	Assignee      string   // agent identity for pinning
+	HeaderEmoji   string   // display emoji
+	HeaderTitle   string   // "Patrol Status", etc.
+	WorkLoopSteps []string // role-specific instructions
+	ExtraVars     []string // additional --var key=value args for wisp creation
 }
 
 // findActivePatrol finds an active patrol molecule for the role.
 // Returns the patrol ID, display line, and whether one was found.
-func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool) {
-	// Check for in-progress patrol first (if configured)
-	if cfg.CheckInProgress {
-		cmdList := exec.Command("bd", "list", "--status=in_progress", "--type=epic")
-		cmdList.Dir = cfg.BeadsDir
-		var stdoutList, stderrList bytes.Buffer
-		cmdList.Stdout = &stdoutList
-		cmdList.Stderr = &stderrList
+// Returns an error if discovery fails (e.g. transient bd failure),
+// so callers can distinguish "no patrol" from "discovery failed"
+// and avoid auto-spawning duplicates.
+//
+// Patrol molecules are intentionally hooked to the agent (hooked status).
+// This function looks up hooked patrols and distinguishes active ones
+// (with open/in_progress children) from stale ones (all children closed,
+// e.g. after a squash that didn't close the root). Stale patrols are
+// cleaned up automatically.
+func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool, err error) {
+	b := beads.New(cfg.BeadsDir)
 
-		if err := cmdList.Run(); err != nil {
-			if errMsg := strings.TrimSpace(stderrList.String()); errMsg != "" {
-				fmt.Fprintf(os.Stderr, "bd list: %s\n", errMsg)
-			}
-		} else {
-			lines := strings.Split(stdoutList.String(), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
-					parts := strings.Fields(line)
-					if len(parts) > 0 {
-						return parts[0], line, true
-					}
-				}
-			}
+	// Find hooked patrol beads for this agent
+	hookedBeads, listErr := b.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: cfg.Assignee,
+		Priority: -1,
+	})
+	if listErr != nil {
+		return "", "", false, fmt.Errorf("listing hooked beads: %w", listErr)
+	}
+
+	// First pass: identify active patrol and collect stale ones for cleanup.
+	// We process ALL hooked patrols to clean up accumulated orphans (~100
+	// stale patrols can build up over ~12 hours).
+	var activeBead *beads.Issue
+	var staleIDs []string
+	var skipped int // tracks patrols skipped due to child-listing errors
+
+	for _, bead := range hookedBeads {
+		if !strings.HasPrefix(bead.Title, cfg.PatrolMolName) {
+			continue
+		}
+
+		hasOpen, err := checkHasOpenChildren(b, bead.ID)
+		if err != nil {
+			// Transient error — skip this bead entirely to avoid
+			// destructive cleanup of a potentially active patrol.
+			style.PrintWarning("could not check children for %s: %v", bead.ID, err)
+			skipped++
+			continue
+		}
+
+		if !hasOpen {
+			// Stale patrol (no open children) — mark for cleanup
+			staleIDs = append(staleIDs, bead.ID)
+		} else if activeBead == nil {
+			// First active patrol found — this is the one we'll resume
+			activeBead = bead
+		}
+		// else: has open children but we already found an active patrol —
+		// leave it alone to avoid destroying a potentially running patrol
+	}
+
+	// Clean up all stale patrols
+	for _, id := range staleIDs {
+		closeDescendants(b, id)
+		if err := b.ForceCloseWithReason("stale patrol cleanup", id); err != nil {
+			style.PrintWarning("could not close stale patrol %s: %v", id, err)
 		}
 	}
 
-	// Check for hooked patrols first — autoSpawnPatrol sets status to hooked,
-	// so this is the most common state for an active patrol molecule.
-	if id, line, ok := findPatrolByStatus(cfg, "hooked"); ok {
-		return id, line, true
+	if activeBead != nil {
+		return activeBead.ID, formatBeadLine(activeBead), true, nil
 	}
 
-	// Check for open patrols with open children (active wisp)
-	if id, line, ok := findPatrolByStatus(cfg, "open"); ok {
-		return id, line, true
+	// If we found matching patrols but skipped them all due to errors,
+	// return an error so the caller doesn't auto-spawn a duplicate.
+	if skipped > 0 {
+		return "", "", false, fmt.Errorf("discovery incomplete: %d patrol(s) skipped due to child-listing errors", skipped)
 	}
-
-	return "", "", false
+	return "", "", false, nil
 }
 
-// findPatrolByStatus searches for a patrol molecule with the given status.
-func findPatrolByStatus(cfg PatrolConfig, status string) (patrolID, patrolLine string, found bool) {
-	cmdList := exec.Command("bd", "list", "--status="+status, "--type=epic")
-	cmdList.Dir = cfg.BeadsDir
-	var stdoutList, stderrList bytes.Buffer
-	cmdList.Stdout = &stdoutList
-	cmdList.Stderr = &stderrList
-
-	if err := cmdList.Run(); err != nil {
-		if errMsg := strings.TrimSpace(stderrList.String()); errMsg != "" {
-			fmt.Fprintf(os.Stderr, "bd list: %s\n", errMsg)
-		}
-		return "", "", false
+// checkHasOpenChildren returns true if the given parent has any children
+// that are not in closed status (i.e., open or in_progress).
+// Returns an error if the child listing fails, so the caller can avoid
+// destructive cleanup on transient failures.
+//
+// A parent with zero children is treated as "has open children" (returns true)
+// to protect against a race where a freshly created wisp hasn't had its step
+// children materialized yet. This prevents findActivePatrol from closing a
+// just-created patrol during the window between root creation and step population.
+func checkHasOpenChildren(b *beads.Beads, parentID string) (bool, error) {
+	children, err := b.List(beads.ListOptions{
+		Parent:   parentID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		return false, err
 	}
-
-	lines := strings.Split(stdoutList.String(), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, cfg.PatrolMolName) && !strings.Contains(line, "[template]") {
-			parts := strings.Fields(line)
-			if len(parts) > 0 {
-				return parts[0], line, true
-			}
+	// Zero children means the wisp may still be materializing steps —
+	// treat as active to avoid destroying a just-created patrol.
+	if len(children) == 0 {
+		return true, nil
+	}
+	for _, child := range children {
+		if child.Status != "closed" {
+			return true, nil
 		}
 	}
-	return "", "", false
+	return false, nil
+}
+
+// formatBeadLine formats a bead issue into a display line similar to bd list output.
+func formatBeadLine(issue *beads.Issue) string {
+	return fmt.Sprintf("%s  %s [%s]", issue.ID, issue.Title, issue.Status)
 }
 
 // autoSpawnPatrol creates and pins a new patrol wisp.
@@ -136,8 +178,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	for _, v := range cfg.ExtraVars {
 		spawnArgs = append(spawnArgs, "--var", v)
 	}
-	cmdSpawn := exec.Command("bd", spawnArgs...)
-	cmdSpawn.Dir = cfg.BeadsDir
+	cmdSpawn := BdCmd(spawnArgs...).
+		WithAutoCommit().
+		Dir(cfg.BeadsDir).
+		Build()
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
 	cmdSpawn.Stderr = &stderrSpawn
@@ -177,9 +221,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
-	cmdPin := exec.Command("bd", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
-	cmdPin.Dir = cfg.BeadsDir
-	if err := cmdPin.Run(); err != nil {
+	if err := BdCmd("update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee).
+		WithAutoCommit().
+		Dir(cfg.BeadsDir).
+		Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
 	}
 
@@ -193,7 +238,15 @@ func outputPatrolContext(cfg PatrolConfig) {
 	fmt.Printf("%s\n\n", style.Bold.Render(fmt.Sprintf("## %s %s", cfg.HeaderEmoji, cfg.HeaderTitle)))
 
 	// Try to find an active patrol
-	patrolID, patrolLine, hasPatrol := findActivePatrol(cfg)
+	patrolID, patrolLine, hasPatrol, findErr := findActivePatrol(cfg)
+
+	if findErr != nil {
+		// Discovery failed — do NOT auto-spawn to avoid creating duplicates
+		style.PrintWarning("patrol discovery failed: %v", findErr)
+		fmt.Println("Status: **Discovery failed** — cannot determine patrol state")
+		fmt.Println(style.Dim.Render("Check bd connectivity and retry. Not spawning new patrol to avoid duplicates."))
+		return
+	}
 
 	if !hasPatrol {
 		// No active patrol - auto-spawn one

@@ -34,7 +34,7 @@ for step details — do NOT read this file directly.
 | base_branch | sling vars | The base branch to rebase on (default: main) |
 | setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
 | typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
-| test_command | rig config | Test command (default: `go test ./...`) |
+| test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
 | lint_command | rig config | Lint command (e.g., `eslint .`). Empty = skip. |
 | build_command | rig config | Build command (e.g., `go build ./...`). Empty = skip. |
 
@@ -531,7 +531,7 @@ default = ""
 
 [vars.test_command]
 description = "Command to run tests (auto-detected from rig settings)"
-default = "go test ./..."
+default = ""
 
 [vars.lint_command]
 description = "Command to run linting. Empty = skip."

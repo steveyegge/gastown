@@ -486,6 +486,348 @@ exit /b 0
 	}
 }
 
+// TestBurnClosesWispRoot verifies that runMoleculeBurn closes the wisp root
+// via ForceCloseWithReason after detaching. Without this, patrol molecule roots
+// stay in "hooked" status indefinitely (issue #1828).
+func TestBurnClosesWispRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script bd stub not supported on Windows")
+	}
+
+	townRoot := t.TempDir()
+
+	// Workspace marker: mayor/ directory (SecondaryMarker)
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+
+	// .beads directory (for findLocalBeadsDir and lockBead)
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+		t.Fatalf("mkdir .beads/locks: %v", err)
+	}
+
+	// Stub bd binary
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	closesLog := filepath.Join(townRoot, "closes.log")
+	// The handoff bead has attached_molecule: gt-wisp-mol1
+	bdScript := fmt.Sprintf(`#!/bin/sh
+# Strip --allow-stale
+while [ "$1" = "--allow-stale" ]; do shift; done
+cmd="$1"; shift
+case "$cmd" in
+  list)
+    # FindHandoffBead: list --json --status=pinned --limit=0
+    if echo "$*" | grep -q "status=pinned"; then
+      echo '[{"id":"gt-handoff-1","title":"witness Handoff","status":"pinned","description":"attached_molecule: gt-wisp-mol1"}]'
+    else
+      # closeDescendants: list --json --parent=... --status=all
+      echo '[]'
+    fi
+    ;;
+  show)
+    # DetachMoleculeWithAudit calls Show twice
+    echo '[{"id":"gt-handoff-1","title":"witness Handoff","status":"pinned","description":"attached_molecule: gt-wisp-mol1"}]'
+    ;;
+  update)
+    exit 0
+    ;;
+  close)
+    # Log every close call
+    echo "$*" >> "%s"
+    ;;
+esac
+exit 0
+`, closesLog)
+
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "witness")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("BEADS_DIR", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flag state
+	prevJSON := moleculeJSON
+	t.Cleanup(func() { moleculeJSON = prevJSON })
+	moleculeJSON = false
+
+	err = runMoleculeBurn(nil, []string{"witness"})
+	if err != nil {
+		t.Fatalf("runMoleculeBurn: %v", err)
+	}
+
+	// Verify that bd close was called with the molecule root ID
+	closesBytes, err := os.ReadFile(closesLog)
+	if err != nil {
+		t.Fatalf("no close calls logged (closes.log not found): bd close was never called")
+	}
+	closes := string(closesBytes)
+	if !strings.Contains(closes, "gt-wisp-mol1") {
+		t.Errorf("molecule root gt-wisp-mol1 was NOT closed.\n"+
+			"ForceCloseWithReason should be called after DetachMoleculeWithAudit.\n"+
+			"Close calls: %s", closes)
+	}
+}
+
+// TestSquashClosesWispRoot verifies that runMoleculeSquash closes the wisp root
+// via ForceCloseWithReason after detaching. Without this, patrol molecule roots
+// stay in "hooked" status indefinitely (issue #1828).
+func TestSquashClosesWispRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script bd stub not supported on Windows")
+	}
+
+	townRoot := t.TempDir()
+
+	// Workspace marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+
+	// .beads directory
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+		t.Fatalf("mkdir .beads/locks: %v", err)
+	}
+
+	// Stub bd binary
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	closesLog := filepath.Join(townRoot, "closes.log")
+	bdScript := fmt.Sprintf(`#!/bin/sh
+while [ "$1" = "--allow-stale" ]; do shift; done
+cmd="$1"; shift
+case "$cmd" in
+  list)
+    if echo "$*" | grep -q "status=pinned"; then
+      echo '[{"id":"gt-handoff-1","title":"refinery Handoff","status":"pinned","description":"attached_molecule: gt-wisp-patrol1"}]'
+    else
+      echo '[]'
+    fi
+    ;;
+  show)
+    echo '[{"id":"gt-handoff-1","title":"refinery Handoff","status":"pinned","description":"attached_molecule: gt-wisp-patrol1"}]'
+    ;;
+  update)
+    exit 0
+    ;;
+  create)
+    # Digest creation
+    echo '{"id":"gt-digest-1","title":"Digest"}'
+    ;;
+  close)
+    echo "$*" >> "%s"
+    ;;
+esac
+exit 0
+`, closesLog)
+
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "refinery")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("BEADS_DIR", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flag state
+	prevJSON := moleculeJSON
+	prevJitter := moleculeJitter
+	prevNoDigest := moleculeNoDigest
+	prevSummary := moleculeSummary
+	t.Cleanup(func() {
+		moleculeJSON = prevJSON
+		moleculeJitter = prevJitter
+		moleculeNoDigest = prevNoDigest
+		moleculeSummary = prevSummary
+	})
+	moleculeJSON = false
+	moleculeJitter = ""
+	moleculeNoDigest = true // skip digest to simplify mock
+	moleculeSummary = ""
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err = runMoleculeSquash(cmd, []string{"refinery"})
+	if err != nil {
+		t.Fatalf("runMoleculeSquash: %v", err)
+	}
+
+	// Verify that bd close was called with the molecule root ID
+	closesBytes, err := os.ReadFile(closesLog)
+	if err != nil {
+		t.Fatalf("no close calls logged (closes.log not found): bd close was never called")
+	}
+	closes := string(closesBytes)
+	if !strings.Contains(closes, "gt-wisp-patrol1") {
+		t.Errorf("molecule root gt-wisp-patrol1 was NOT closed.\n"+
+			"ForceCloseWithReason should be called after DetachMoleculeWithAudit.\n"+
+			"Close calls: %s", closes)
+	}
+}
+
+// TestSquashClosesDescendantsAndRoot verifies the full close order:
+// descendants are closed first, then the root molecule itself.
+func TestSquashClosesDescendantsAndRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script bd stub not supported on Windows")
+	}
+
+	townRoot := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+		t.Fatalf("mkdir .beads/locks: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	closesLog := filepath.Join(townRoot, "closes.log")
+	// Mock returns 2 children for the molecule, one open and one closed
+	bdScript := fmt.Sprintf(`#!/bin/sh
+while [ "$1" = "--allow-stale" ]; do shift; done
+cmd="$1"; shift
+case "$cmd" in
+  list)
+    if echo "$*" | grep -q "status=pinned"; then
+      echo '[{"id":"gt-handoff-1","title":"witness Handoff","status":"pinned","description":"attached_molecule: gt-wisp-mol2"}]'
+    elif echo "$*" | grep -q "parent=gt-wisp-mol2"; then
+      echo '[{"id":"gt-step-1","title":"Step 1","status":"open"},{"id":"gt-step-2","title":"Step 2","status":"closed"}]'
+    elif echo "$*" | grep -q "parent=gt-step"; then
+      echo '[]'
+    else
+      echo '[]'
+    fi
+    ;;
+  show)
+    echo '[{"id":"gt-handoff-1","title":"witness Handoff","status":"pinned","description":"attached_molecule: gt-wisp-mol2"}]'
+    ;;
+  update)
+    exit 0
+    ;;
+  close)
+    echo "$*" >> "%s"
+    ;;
+esac
+exit 0
+`, closesLog)
+
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "witness")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("BEADS_DIR", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	prevJSON := moleculeJSON
+	t.Cleanup(func() { moleculeJSON = prevJSON })
+	moleculeJSON = false
+
+	err = runMoleculeBurn(nil, []string{"witness"})
+	if err != nil {
+		t.Fatalf("runMoleculeBurn: %v", err)
+	}
+
+	closesBytes, err := os.ReadFile(closesLog)
+	if err != nil {
+		t.Fatalf("no close calls logged: %v", err)
+	}
+	closes := string(closesBytes)
+	closeLines := strings.Split(strings.TrimSpace(closes), "\n")
+
+	// Verify: gt-step-1 is closed (open child), gt-step-2 is NOT closed (already closed)
+	foundStep1 := false
+	foundRoot := false
+	for _, line := range closeLines {
+		if strings.Contains(line, "gt-step-1") {
+			foundStep1 = true
+		}
+		if strings.Contains(line, "gt-wisp-mol2") {
+			foundRoot = true
+		}
+	}
+
+	if !foundStep1 {
+		t.Errorf("open child gt-step-1 was NOT closed.\nClose calls:\n%s", closes)
+	}
+	if !foundRoot {
+		t.Errorf("molecule root gt-wisp-mol2 was NOT closed.\nClose calls:\n%s", closes)
+	}
+
+	// Verify root is closed AFTER children (root should appear in a later close call)
+	step1Idx := -1
+	rootIdx := -1
+	for i, line := range closeLines {
+		if strings.Contains(line, "gt-step-1") {
+			step1Idx = i
+		}
+		if strings.Contains(line, "gt-wisp-mol2") {
+			rootIdx = i
+		}
+	}
+	if step1Idx >= 0 && rootIdx >= 0 && rootIdx < step1Idx {
+		t.Errorf("root was closed BEFORE children (root line %d, child line %d).\n"+
+			"Expected: descendants first, then root.\nClose calls:\n%s",
+			rootIdx, step1Idx, closes)
+	}
+}
+
 // TestDoneClosesAttachedMolecule verifies that gt done closes both the hooked
 // bead AND its attached molecule (wisp).
 //

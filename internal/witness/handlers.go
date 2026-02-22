@@ -27,12 +27,22 @@ import (
 // tmux output (tool calls, status updates). 30 minutes of silence is abnormal.
 const HungSessionThresholdMinutes = 30
 
-// initRegistryFromWorkDir initializes the session prefix registry from a work
-// directory. This ensures session.PrefixFor(rigName) returns the correct rig
-// prefix (e.g., "tr" for testrig) instead of the default "gt".
+// initRegistryFromWorkDir initializes the session prefix and agent registries
+// from a work directory. This ensures session.PrefixFor(rigName) returns the
+// correct rig prefix (e.g., "tr" for testrig) instead of the default "gt",
+// and that user-configured agent overrides (e.g., custom process_names) are
+// loaded for liveness checks.
 func initRegistryFromWorkDir(workDir string) {
 	if townRoot, err := workspace.Find(workDir); err == nil && townRoot != "" {
-		_ = session.InitRegistry(townRoot)
+		initRegistryFromTownRoot(townRoot)
+	}
+}
+
+// initRegistryFromTownRoot initializes registries from a known town root,
+// logging any errors so that misconfiguration is observable.
+func initRegistryFromTownRoot(townRoot string) {
+	if err := session.InitRegistry(townRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "witness: failed to initialize town registry: %v\n", err)
 	}
 }
 
@@ -609,7 +619,7 @@ Verified: clean git state`,
 // nudges would be stuck forever. Direct delivery is safe: if the
 // agent is busy, text buffers in tmux and is processed at next prompt.
 func nudgeRefinery(townRoot, rigName string) error {
-	_ = session.InitRegistry(townRoot)
+	initRegistryFromTownRoot(townRoot)
 	sessionName := session.RefinerySessionName(session.PrefixFor(rigName))
 
 	// Check if refinery is running
@@ -972,7 +982,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
-	_ = session.InitRegistry(townRoot)
+	initRegistryFromTownRoot(townRoot)
 
 	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
 	entries, err := os.ReadDir(polecatsDir)
@@ -1279,7 +1289,7 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
-	_ = session.InitRegistry(townRoot)
+	initRegistryFromTownRoot(townRoot)
 
 	// List all polecat directories
 	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
@@ -1450,7 +1460,7 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
-	_ = session.InitRegistry(townRoot)
+	initRegistryFromTownRoot(townRoot)
 
 	// Scan both in_progress and hooked beads — resetAbandonedBead handles both
 	// states, and orphaned beads can be stuck in either.
@@ -1588,7 +1598,7 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 	if err != nil || townRoot == "" {
 		townRoot = workDir
 	}
-	_ = session.InitRegistry(townRoot)
+	initRegistryFromTownRoot(townRoot)
 
 	// Step 1: List beads that could have attached molecules.
 	// Slung beads start as status=hooked; polecats may change them to in_progress.

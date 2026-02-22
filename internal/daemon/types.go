@@ -116,6 +116,7 @@ type PatrolsConfig struct {
 	Refinery    *PatrolConfig      `json:"refinery,omitempty"`
 	Witness     *PatrolConfig      `json:"witness,omitempty"`
 	Deacon      *PatrolConfig      `json:"deacon,omitempty"`
+	Handler     *PatrolConfig      `json:"handler,omitempty"`
 	DoltServer  *DoltServerConfig  `json:"dolt_server,omitempty"`
 	DoltRemotes *DoltRemotesConfig `json:"dolt_remotes,omitempty"`
 }
@@ -199,6 +200,10 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 	case "deacon":
 		if config.Patrols.Deacon != nil {
 			return config.Patrols.Deacon.Enabled
+		}
+	case "handler":
+		if config.Patrols.Handler != nil {
+			return config.Patrols.Handler.Enabled
 		}
 	}
 	return true // Default: enabled

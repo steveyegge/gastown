@@ -3,6 +3,7 @@ package beads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // Common errors
@@ -170,6 +173,7 @@ type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
 	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+	onMain   bool   // If true, strip BD_BRANCH so reads target main (not polecat branch)
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -193,6 +197,39 @@ func NewIsolated(workDir string) *Beads {
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
+}
+
+// OnMain returns a shallow copy of the Beads wrapper with onMain set to true.
+// When onMain is true, BD_BRANCH is stripped from the environment so that
+// bd read operations target the main branch instead of a polecat's write-isolation
+// branch. This fixes #1796: polecats couldn't find hooked work because
+// findAgentWork() was reading from the polecat's empty branch instead of main.
+//
+// Use OnMain() for READ operations that need main-branch data (work discovery,
+// hook lookups). Do NOT use it for write operations that need branch isolation.
+func (b *Beads) OnMain() *Beads {
+	return &Beads{
+		workDir:  b.workDir,
+		beadsDir: b.beadsDir,
+		isolated: b.isolated,
+		onMain:   true,
+		// townRoot and townRootOnce are not copied (sync.Once is not copyable).
+		// The new instance will re-derive townRoot lazily on first call if needed.
+	}
+}
+
+// StripBdBranch removes BD_BRANCH from an environment variable slice.
+// Use this for direct exec.Command("bd", ...) calls that need to read from
+// the main branch instead of a polecat's write-isolation branch.
+// This is the exec.Command counterpart to OnMain() (which is for Beads wrapper paths).
+func StripBdBranch(environ []string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		if !strings.HasPrefix(env, "BD_BRANCH=") {
+			filtered = append(filtered, env)
+		}
+	}
+	return filtered
 }
 
 // getActor returns the BD_ACTOR value for this context.
@@ -233,7 +270,13 @@ func (b *Beads) Init(prefix string) error {
 }
 
 // run executes a bd command and returns stdout.
-func (b *Beads) run(args ...string) ([]byte, error) {
+func (b *Beads) run(args ...string) (_ []byte, retErr error) {
+	start := time.Now()
+	// Declare buffers before defer so the closure captures them after cmd.Run.
+	var stdout, stderr bytes.Buffer
+	defer func() {
+		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
+	}()
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
 	fullArgs := append([]string{"--allow-stale"}, args...)
@@ -258,17 +301,9 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Build environment: filter beads env vars when in isolated mode (tests)
-	// to prevent routing to production databases.
-	var env []string
-	if b.isolated {
-		env = filterBeadsEnv(os.Environ())
-	} else {
-		env = os.Environ()
-	}
-	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
+	cmd.Env = append(b.buildRunEnv(), "BEADS_DIR="+beadsDir)
+	cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
 
-	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -292,27 +327,20 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 // This is needed for slot operations that reference beads with different prefixes
 // (e.g., setting an hq-* hook bead on a gt-* agent bead).
 // See: sling_helpers.go verifyBeadExists/hookBeadWithRetry for the same pattern.
-func (b *Beads) runWithRouting(args ...string) ([]byte, error) { //nolint:unparam // mirrors run() signature for consistency
+func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //nolint:unparam // mirrors run() signature for consistency
+	start := time.Now()
+	var stdout, stderr bytes.Buffer
+	defer func() {
+		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
+	}()
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Build environment WITHOUT BEADS_DIR so bd discovers routes via directory traversal.
-	// In isolated mode, also filter other beads env vars for test isolation.
-	var env []string
-	if b.isolated {
-		env = filterBeadsEnv(os.Environ())
-	} else {
-		for _, e := range os.Environ() {
-			if !strings.HasPrefix(e, "BEADS_DIR=") {
-				env = append(env, e)
-			}
-		}
-	}
-	cmd.Env = env
+	cmd.Env = b.buildRoutingEnv()
+	cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
 
-	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -360,6 +388,34 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	return fmt.Errorf("bd %s: %w", strings.Join(args, " "), err)
 }
 
+// buildRunEnv builds the environment for run() calls.
+// In isolated mode: strips all beads-related env vars for test isolation.
+// In onMain mode: strips BD_BRANCH so reads target main branch.
+// Otherwise: passes through the current environment.
+func (b *Beads) buildRunEnv() []string {
+	if b.isolated {
+		return filterBeadsEnv(os.Environ())
+	}
+	if b.onMain {
+		return StripBdBranch(os.Environ())
+	}
+	return os.Environ()
+}
+
+// buildRoutingEnv builds the environment for runWithRouting() calls.
+// Always strips BEADS_DIR so bd uses native routing.
+// In isolated mode: also strips BD_ACTOR, BD_BRANCH, BEADS_*, GT_ROOT, HOME.
+// In onMain mode: also strips BD_BRANCH for main-branch reads.
+func (b *Beads) buildRoutingEnv() []string {
+	if b.isolated {
+		return filterBeadsEnv(os.Environ())
+	}
+	if b.onMain {
+		return stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
+	}
+	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+}
+
 // filterBeadsEnv removes beads-related environment variables from the given
 // environment slice. This ensures test isolation by preventing inherited
 // BD_ACTOR, BEADS_DB, GT_ROOT, HOME etc. from routing commands to production databases.
@@ -367,16 +423,37 @@ func filterBeadsEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {
 		// Skip beads-related env vars that could interfere with test isolation
-		// BD_ACTOR, BEADS_* - direct beads config
+		// BD_ACTOR, BD_BRANCH, BEADS_* - direct beads config
 		// GT_ROOT - causes bd to find global routes file
 		// HOME - causes bd to find ~/.beads-planning routing
 		if strings.HasPrefix(env, "BD_ACTOR=") ||
+			strings.HasPrefix(env, "BD_BRANCH=") ||
 			strings.HasPrefix(env, "BEADS_") ||
 			strings.HasPrefix(env, "GT_ROOT=") ||
 			strings.HasPrefix(env, "HOME=") {
 			continue
 		}
 		filtered = append(filtered, env)
+	}
+	return filtered
+}
+
+// stripEnvPrefixes removes entries matching any of the given prefixes from an
+// environment variable slice. Used by runWithRouting to strip BEADS_DIR and
+// optionally BD_BRANCH without duplicating the StripBdBranch filtering logic.
+func stripEnvPrefixes(environ []string, prefixes ...string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(env, prefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, env)
+		}
 	}
 	return filtered
 }

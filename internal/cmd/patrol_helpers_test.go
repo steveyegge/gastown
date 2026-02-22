@@ -3,9 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -406,4 +408,239 @@ func splitFirstEquals(s string) []string {
 		return []string{s}
 	}
 	return []string{s[:idx], s[idx+1:]}
+}
+
+// --- Patrol discovery tests (findActivePatrol) ---
+
+func requireBd(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd CLI not installed, skipping patrol test")
+	}
+}
+
+func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	b := beads.NewIsolated(tmpDir)
+	if err := b.Init("pt"); err != nil {
+		t.Fatalf("bd init: %v", err)
+	}
+	return tmpDir, b
+}
+
+// createHookedPatrol creates a bead with a patrol title and hooks it.
+// If withOpenChild is true, creates an open child bead to simulate an active patrol.
+func createHookedPatrol(t *testing.T, b *beads.Beads, molName, assignee string, withOpenChild bool) string {
+	t.Helper()
+	root, err := b.Create(beads.CreateOptions{
+		Title:    molName + " (wisp)",
+		Priority: -1,
+	})
+	if err != nil {
+		t.Fatalf("create patrol root: %v", err)
+	}
+
+	hooked := beads.StatusHooked
+	if err := b.Update(root.ID, beads.UpdateOptions{
+		Status:   &hooked,
+		Assignee: &assignee,
+	}); err != nil {
+		t.Fatalf("hook patrol: %v", err)
+	}
+
+	if withOpenChild {
+		_, err := b.Create(beads.CreateOptions{
+			Title:    "inbox-check",
+			Parent:   root.ID,
+			Priority: -1,
+		})
+		if err != nil {
+			t.Fatalf("create child: %v", err)
+		}
+	}
+	return root.ID
+}
+
+func TestFindActivePatrolHooked(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	rootID := createHookedPatrol(t, b, molName, assignee, true /* withOpenChild */)
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+	}
+
+	patrolID, _, found, findErr := findActivePatrol(cfg)
+	if findErr != nil {
+		t.Fatalf("findActivePatrol error: %v", findErr)
+	}
+	if !found {
+		t.Fatal("expected to find active patrol, got not found")
+	}
+	if patrolID != rootID {
+		t.Errorf("patrolID = %q, want %q", patrolID, rootID)
+	}
+
+	// Verify the patrol is still hooked (not closed)
+	issue, err := b.Show(rootID)
+	if err != nil {
+		t.Fatalf("show patrol: %v", err)
+	}
+	if issue.Status != beads.StatusHooked {
+		t.Errorf("patrol status = %q, want %q", issue.Status, beads.StatusHooked)
+	}
+}
+
+func TestFindActivePatrolStale(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create a patrol with a closed child (simulates post-squash state)
+	rootID := createHookedPatrol(t, b, molName, assignee, true /* with child */)
+
+	// Close the child to make the patrol stale
+	children, err := b.List(beads.ListOptions{Parent: rootID, Status: "all", Priority: -1})
+	if err != nil {
+		t.Fatalf("list children: %v", err)
+	}
+	for _, child := range children {
+		if closeErr := b.ForceCloseWithReason("test cleanup", child.ID); closeErr != nil {
+			t.Fatalf("close child: %v", closeErr)
+		}
+	}
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+	}
+
+	_, _, found, findErr := findActivePatrol(cfg)
+	if findErr != nil {
+		t.Fatalf("findActivePatrol error: %v", findErr)
+	}
+	if found {
+		t.Fatal("expected stale patrol (all children closed) to NOT be found as active")
+	}
+
+	// Verify the stale patrol was closed
+	issue, err := b.Show(rootID)
+	if err != nil {
+		t.Fatalf("show patrol: %v", err)
+	}
+	if issue.Status != "closed" {
+		t.Errorf("stale patrol status = %q, want %q", issue.Status, "closed")
+	}
+}
+
+func TestFindActivePatrolZeroChildren(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create a patrol with NO children — simulates a freshly created wisp
+	// whose steps haven't materialized yet. Should be treated as active,
+	// not stale, to prevent race condition.
+	rootID := createHookedPatrol(t, b, molName, assignee, false /* no children */)
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+	}
+
+	patrolID, _, found, findErr := findActivePatrol(cfg)
+	if findErr != nil {
+		t.Fatalf("findActivePatrol error: %v", findErr)
+	}
+	if !found {
+		t.Fatal("expected zero-children patrol to be treated as active (not stale)")
+	}
+	if patrolID != rootID {
+		t.Errorf("patrolID = %q, want %q", patrolID, rootID)
+	}
+
+	// Verify it was NOT closed
+	issue, err := b.Show(rootID)
+	if err != nil {
+		t.Fatalf("show patrol: %v", err)
+	}
+	if issue.Status != beads.StatusHooked {
+		t.Errorf("zero-children patrol status = %q, want %q (should remain hooked)", issue.Status, beads.StatusHooked)
+	}
+}
+
+func TestFindActivePatrolMultiple(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create 2 stale patrols (with closed children) and 1 active patrol (with open child)
+	stale1 := createHookedPatrol(t, b, molName, assignee, true)
+	stale2 := createHookedPatrol(t, b, molName, assignee, true)
+	activeID := createHookedPatrol(t, b, molName, assignee, true)
+
+	// Close children of stale patrols to make them stale
+	for _, staleID := range []string{stale1, stale2} {
+		children, err := b.List(beads.ListOptions{Parent: staleID, Status: "all", Priority: -1})
+		if err != nil {
+			t.Fatalf("list children of %s: %v", staleID, err)
+		}
+		for _, child := range children {
+			if closeErr := b.ForceCloseWithReason("test cleanup", child.ID); closeErr != nil {
+				t.Fatalf("close child: %v", closeErr)
+			}
+		}
+	}
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+	}
+
+	patrolID, _, found, findErr := findActivePatrol(cfg)
+	if findErr != nil {
+		t.Fatalf("findActivePatrol error: %v", findErr)
+	}
+	if !found {
+		t.Fatal("expected to find active patrol")
+	}
+	if patrolID != activeID {
+		t.Errorf("patrolID = %q, want %q (should return the active one)", patrolID, activeID)
+	}
+
+	// Verify both stale patrols were closed
+	for _, id := range []string{stale1, stale2} {
+		issue, err := b.Show(id)
+		if err != nil {
+			t.Fatalf("show stale %s: %v", id, err)
+		}
+		if issue.Status != "closed" {
+			t.Errorf("stale patrol %s status = %q, want %q", id, issue.Status, "closed")
+		}
+	}
+
+	// Verify active patrol is still hooked
+	issue, err := b.Show(activeID)
+	if err != nil {
+		t.Fatalf("show active: %v", err)
+	}
+	if issue.Status != beads.StatusHooked {
+		t.Errorf("active patrol status = %q, want %q", issue.Status, beads.StatusHooked)
+	}
 }

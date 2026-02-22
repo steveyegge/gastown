@@ -22,12 +22,14 @@ import (
 )
 
 // outputPrimeContext outputs the role-specific context using templates or fallback.
-func outputPrimeContext(ctx RoleContext) error {
+// Returns the rendered template content (empty string when using fallback path).
+func outputPrimeContext(ctx RoleContext) (string, error) {
 	// Try to use templates first
 	tmpl, err := templates.New()
 	if err != nil {
 		// Fall back to hardcoded output if templates fail
-		return outputPrimeContextFallback(ctx)
+		outputPrimeContextFallback(ctx)
+		return "", nil
 	}
 
 	// Map role to template name
@@ -49,7 +51,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		roleName = "boot"
 	default:
 		// Unknown role - use fallback
-		return outputPrimeContextFallback(ctx)
+		outputPrimeContextFallback(ctx)
+		return "", nil
 	}
 
 	// Build template data
@@ -97,14 +100,14 @@ func outputPrimeContext(ctx RoleContext) error {
 	// Render and output
 	output, err := tmpl.RenderRole(roleName, data)
 	if err != nil {
-		return fmt.Errorf("rendering template: %w", err)
+		return "", fmt.Errorf("rendering template: %w", err)
 	}
 
 	fmt.Print(output)
-	return nil
+	return output, nil
 }
 
-func outputPrimeContextFallback(ctx RoleContext) error {
+func outputPrimeContextFallback(ctx RoleContext) {
 	switch ctx.Role {
 	case RoleMayor:
 		outputMayorContext(ctx)
@@ -121,7 +124,6 @@ func outputPrimeContextFallback(ctx RoleContext) error {
 	default:
 		outputUnknownContext(ctx)
 	}
-	return nil
 }
 
 func outputMayorContext(ctx RoleContext) {

@@ -13,3 +13,8 @@ func FlockAcquire(path string) (func(), error) {
 func flockAcquire(path string) (func(), error) {
 	return func() {}, nil
 }
+
+// FlockTryAcquire is a no-op on Windows. Always reports success.
+func FlockTryAcquire(path string) (func(), bool, error) {
+	return func() {}, true, nil
+}

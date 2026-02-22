@@ -254,7 +254,6 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
 		HeaderTitle:     "Patrol Status (Wisp-based)",
-		CheckInProgress: false,
 		WorkLoopSteps: []string{
 			"Check next step: `bd mol current`",
 			"Execute the step (heartbeat, mail, health checks, etc.)",
@@ -276,7 +275,6 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
-		CheckInProgress: true,
 		WorkLoopSteps: []string{
 			"Check inbox: `" + cli.Name() + " mail inbox`",
 			"Check next step: `bd mol current`",
@@ -299,7 +297,6 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",
-		CheckInProgress: true,
 		ExtraVars:       buildRefineryPatrolVars(ctx),
 		WorkLoopSteps: []string{
 			"Check inbox: `" + cli.Name() + " mail inbox`",

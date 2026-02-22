@@ -3,6 +3,7 @@
 package polecat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -24,6 +25,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -601,7 +603,8 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 // AddWithOptions creates a new polecat with the specified options.
 // This allows setting hook_bead atomically at creation time, avoiding
 // cross-beads routing issues when slinging work to new polecats.
-func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error) {
+func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retErr error) {
+	defer func() { telemetry.RecordPolecatSpawn(context.Background(), name, retErr) }()
 	// Acquire per-polecat file lock to prevent concurrent Add/Remove/Repair races
 	fl, err := m.lockPolecat(name)
 	if err != nil {
@@ -808,7 +811,8 @@ func (m *Manager) Remove(name string, force bool) error {
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
 // falls back to git check for backward compatibility.
-func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) error {
+func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) (retErr error) {
+	defer func() { telemetry.RecordPolecatRemove(context.Background(), name, retErr) }()
 	// Acquire per-polecat file lock to prevent concurrent Remove races
 	fl, err := m.lockPolecat(name)
 	if err != nil {

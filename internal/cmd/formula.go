@@ -515,20 +515,21 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 			legArgs = append(legArgs, "--force")
 		}
 
-		legCmd := exec.Command("bd", legArgs...)
-		legCmd.Dir = townBeads
-		legCmd.Stderr = os.Stderr
-		if err := legCmd.Run(); err != nil {
+		if err := BdCmd(legArgs...).
+			WithAutoCommit().
+			Dir(townBeads).
+			Stderr(os.Stderr).
+			Run(); err != nil {
 			fmt.Printf("%s Failed to create leg bead for %s: %v\n",
 				style.Dim.Render("Warning:"), leg.ID, err)
 			continue
 		}
 
 		// Track the leg with the convoy
-		trackArgs := []string{"dep", "add", convoyID, legBeadID, "--type=tracks"}
-		trackCmd := exec.Command("bd", trackArgs...)
-		trackCmd.Dir = townBeads
-		if err := trackCmd.Run(); err != nil {
+		if err := BdCmd("dep", "add", convoyID, legBeadID, "--type=tracks").
+			WithAutoCommit().
+			Dir(townBeads).
+			Run(); err != nil {
 			fmt.Printf("%s Failed to track leg %s: %v\n",
 				style.Dim.Render("Warning:"), leg.ID, err)
 		}
@@ -558,25 +559,26 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 			synArgs = append(synArgs, "--force")
 		}
 
-		synCmd := exec.Command("bd", synArgs...)
-		synCmd.Dir = townBeads
-		synCmd.Stderr = os.Stderr
-		if err := synCmd.Run(); err != nil {
+		if err := BdCmd(synArgs...).
+			WithAutoCommit().
+			Dir(townBeads).
+			Stderr(os.Stderr).
+			Run(); err != nil {
 			fmt.Printf("%s Failed to create synthesis bead: %v\n",
 				style.Dim.Render("Warning:"), err)
 		} else {
 			// Track synthesis with convoy
-			trackArgs := []string{"dep", "add", convoyID, synthesisBeadID, "--type=tracks"}
-			trackCmd := exec.Command("bd", trackArgs...)
-			trackCmd.Dir = townBeads
-			_ = trackCmd.Run()
+			_ = BdCmd("dep", "add", convoyID, synthesisBeadID, "--type=tracks").
+				WithAutoCommit().
+				Dir(townBeads).
+				Run()
 
 			// Add dependencies: synthesis depends on all legs
 			for _, legBeadID := range legBeads {
-				depArgs := []string{"dep", "add", synthesisBeadID, legBeadID}
-				depCmd := exec.Command("bd", depArgs...)
-				depCmd.Dir = townBeads
-				_ = depCmd.Run()
+				_ = BdCmd("dep", "add", synthesisBeadID, legBeadID).
+					WithAutoCommit().
+					Dir(townBeads).
+					Run()
 			}
 
 			fmt.Printf("  %s Created synthesis: %s\n", style.Dim.Render("★"), synthesisBeadID)

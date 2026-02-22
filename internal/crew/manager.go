@@ -748,7 +748,15 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			Sender:    "human",
 			Topic:     topic,
 		})
-		claudeCmd, err = config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+		claudeCmd, err = config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
+			Role:        "crew",
+			Rig:         m.rig.Name,
+			AgentName:   name,
+			TownRoot:    townRoot,
+			Prompt:      beacon,
+			Topic:       topic,
+			SessionName: m.SessionName(name),
+		}, m.rig.Path, beacon, opts.AgentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)
 		}

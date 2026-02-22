@@ -162,41 +162,6 @@ Log the error but continue patrol - this is best-effort cleanup.
 **Exit criteria:** Orphan cleanup attempted (success or logged failure)."""
 
 [[steps]]
-id = "trigger-pending-spawns"
-title = "Nudge newly spawned polecats"
-needs = ["orphan-process-cleanup"]
-description = """
-Nudge newly spawned polecats that are ready for input.
-
-When polecats are spawned, their Claude session takes 10-20 seconds to initialize. The spawn command returns immediately without waiting. This step finds spawned polecats that are now ready and sends them a trigger to start working.
-
-**ZFC-Compliant Observation** (AI observes AI):
-
-```bash
-# View pending spawns with captured terminal output
-gt deacon pending
-```
-
-For each pending session, analyze the captured output:
-- Look for Claude's prompt indicator "> " at the start of a line
-- If prompt is visible, Claude is ready for input
-- Make the judgment call yourself - you're the AI observer
-
-For each ready polecat:
-```bash
-# 1. Trigger the polecat
-gt nudge <session> "Begin."
-
-# 2. Clear from pending list
-gt deacon pending <session>
-```
-
-This triggers the UserPromptSubmit hook, which injects mail so the polecat sees its assignment.
-
-**Bootstrap mode** (daemon-only, no AI available):
-The daemon uses `gt deacon trigger-pending` with regex detection. This ZFC violation is acceptable during cold startup when no AI agent is running yet."""
-
-[[steps]]
 id = "gate-evaluation"
 title = "Evaluate pending async gates"
 needs = ["inbox-check"]
@@ -432,7 +397,7 @@ Keep notifications brief and actionable. The recipient can run bd show for detai
 [[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["trigger-pending-spawns", "dispatch-gated-molecules", "fire-notifications"]
+needs = ["orphan-process-cleanup", "dispatch-gated-molecules", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 

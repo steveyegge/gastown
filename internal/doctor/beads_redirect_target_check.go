@@ -70,8 +70,14 @@ func (c *BeadsRedirectTargetCheck) Run(ctx *CheckContext) *CheckResult {
 				continue
 			}
 
-			// Resolve the target path relative to the worktree
-			resolved := filepath.Clean(filepath.Join(wt, target))
+			// Resolve the target path relative to the worktree.
+			// Absolute paths are used as-is (same logic as beads.ResolveBeadsDir).
+			var resolved string
+			if filepath.IsAbs(target) {
+				resolved = filepath.Clean(target)
+			} else {
+				resolved = filepath.Clean(filepath.Join(wt, target))
+			}
 
 			// Check 1: Does the target directory exist?
 			info, err := os.Stat(resolved)
@@ -242,8 +248,13 @@ func recomputeRedirect(townRoot, worktreePath string) error {
 		if data, err := os.ReadFile(rigRedirectFile); err == nil {
 			rigTarget := strings.TrimSpace(string(data))
 			if rigTarget != "" {
-				// Skip intermediate hop, redirect directly to final destination
-				redirectContent = upPath + rigTarget
+				// Skip intermediate hop, redirect directly to final destination.
+				// Absolute paths are passed through as-is (same logic as beads.ComputeRedirectTarget).
+				if filepath.IsAbs(rigTarget) {
+					redirectContent = rigTarget
+				} else {
+					redirectContent = upPath + rigTarget
+				}
 				break
 			}
 		}

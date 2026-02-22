@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 const (
@@ -49,12 +51,14 @@ func (e *bdError) ContainsError(substr string) bool {
 // beadsDir is the BEADS_DIR environment variable value.
 // extraEnv contains additional environment variables to set (e.g., "BD_IDENTITY=...").
 // Returns stdout bytes on success, or a *bdError on failure.
-func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, extraEnv ...string) ([]byte, error) {
+func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, extraEnv ...string) (_ []byte, retErr error) {
+	defer func() { telemetry.RecordMail(ctx, "bd."+firstArg(args), retErr) }()
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = workDir
 
 	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	env = append(env, extraEnv...)
+	env = append(env, telemetry.OTELEnvForSubprocess()...)
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
@@ -71,6 +75,14 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// firstArg returns args[0] or "" when the slice is empty.
+func firstArg(args []string) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
 }
 
 // bdReadCtx returns a context with the standard bd read timeout.
