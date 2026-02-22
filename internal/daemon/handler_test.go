@@ -55,6 +55,128 @@ func testDogExists(townRoot, name string) bool {
 	return err == nil
 }
 
+// testSetupWorkingDogState creates a working dog with a work assignment.
+func testSetupWorkingDogState(t *testing.T, townRoot, name, work string, lastActive time.Time) {
+	t.Helper()
+
+	kennelDir := filepath.Join(townRoot, "deacon", "dogs", name)
+	if err := os.MkdirAll(kennelDir, 0755); err != nil {
+		t.Fatalf("Failed to create kennel dir for %s: %v", name, err)
+	}
+
+	ds := &dog.DogState{
+		Name:       name,
+		State:      dog.StateWorking,
+		Work:       work,
+		LastActive: lastActive,
+		Worktrees:  map[string]string{},
+		CreatedAt:  lastActive,
+		UpdatedAt:  lastActive,
+	}
+
+	data, err := json.MarshalIndent(ds, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal dog state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(kennelDir, ".dog.json"), data, 0644); err != nil {
+		t.Fatalf("Failed to write dog state: %v", err)
+	}
+}
+
+func TestDetectStaleWorkingDogs_ClearsStaleWorkers(t *testing.T) {
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	rigsConfig := &config.RigsConfig{Version: 1, Rigs: map[string]config.RigEntry{}}
+	mgr := dog.NewManager(townRoot, rigsConfig)
+	tm := tmux.NewTmux()
+	sm := dog.NewSessionManager(tm, townRoot, mgr)
+
+	// Dog working for 3 hours with no activity — should be cleared.
+	testSetupWorkingDogState(t, townRoot, "stale", "mol-convoy-feed", time.Now().Add(-3*time.Hour))
+
+	d.detectStaleWorkingDogs(mgr, sm)
+
+	dg, err := mgr.Get("stale")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if dg.State != dog.StateIdle {
+		t.Errorf("stale dog state = %q, want idle", dg.State)
+	}
+	if dg.Work != "" {
+		t.Errorf("stale dog work = %q, want empty", dg.Work)
+	}
+}
+
+func TestDetectStaleWorkingDogs_SkipsRecentWorkers(t *testing.T) {
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	rigsConfig := &config.RigsConfig{Version: 1, Rigs: map[string]config.RigEntry{}}
+	mgr := dog.NewManager(townRoot, rigsConfig)
+	tm := tmux.NewTmux()
+	sm := dog.NewSessionManager(tm, townRoot, mgr)
+
+	// Dog working for 30 minutes — should NOT be cleared.
+	testSetupWorkingDogState(t, townRoot, "active", "mol-convoy-feed", time.Now().Add(-30*time.Minute))
+
+	d.detectStaleWorkingDogs(mgr, sm)
+
+	dg, err := mgr.Get("active")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if dg.State != dog.StateWorking {
+		t.Errorf("active dog state = %q, want working", dg.State)
+	}
+	if dg.Work != "mol-convoy-feed" {
+		t.Errorf("active dog work = %q, want mol-convoy-feed", dg.Work)
+	}
+}
+
+func TestDetectStaleWorkingDogs_SkipsIdleDogs(t *testing.T) {
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	rigsConfig := &config.RigsConfig{Version: 1, Rigs: map[string]config.RigEntry{}}
+	mgr := dog.NewManager(townRoot, rigsConfig)
+	tm := tmux.NewTmux()
+	sm := dog.NewSessionManager(tm, townRoot, mgr)
+
+	// Idle dog with old last_active — should NOT be touched by this function.
+	testSetupDogState(t, townRoot, "idle-old", dog.StateIdle, time.Now().Add(-5*time.Hour))
+
+	d.detectStaleWorkingDogs(mgr, sm)
+
+	dg, err := mgr.Get("idle-old")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if dg.State != dog.StateIdle {
+		t.Errorf("idle dog state = %q, want idle", dg.State)
+	}
+}
+
+func TestDetectStaleWorkingDogs_EmptyKennel(t *testing.T) {
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	rigsConfig := &config.RigsConfig{Version: 1, Rigs: map[string]config.RigEntry{}}
+	mgr := dog.NewManager(townRoot, rigsConfig)
+	tm := tmux.NewTmux()
+	sm := dog.NewSessionManager(tm, townRoot, mgr)
+
+	// Should not panic or error with empty kennel.
+	d.detectStaleWorkingDogs(mgr, sm)
+}
+
+func TestDetectStaleWorkingDogs_Constants(t *testing.T) {
+	if staleWorkingTimeout != 2*time.Hour {
+		t.Errorf("staleWorkingTimeout = %v, want 2h", staleWorkingTimeout)
+	}
+}
+
 func TestReapIdleDogs_SkipsWorkingDogs(t *testing.T) {
 	townRoot := t.TempDir()
 	d := testHandlerDaemon(t, townRoot)
