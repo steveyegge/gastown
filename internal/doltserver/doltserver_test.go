@@ -1601,8 +1601,8 @@ func TestDefaultConfig_MaxConnections(t *testing.T) {
 	if config.MaxConnections != DefaultMaxConnections {
 		t.Errorf("MaxConnections = %d, want %d", config.MaxConnections, DefaultMaxConnections)
 	}
-	if config.MaxConnections != 50 {
-		t.Errorf("DefaultMaxConnections = %d, want 50", config.MaxConnections)
+	if config.MaxConnections != 200 {
+		t.Errorf("DefaultMaxConnections = %d, want 200", config.MaxConnections)
 	}
 }
 
