@@ -296,6 +296,8 @@ var (
 	rigAddLocalRepo    string
 	rigAddBranch       string
 	rigAddPushURL      string
+	rigAddForkWorkflow bool
+	rigAddUpstreamURL  string
 	rigAddAdopt        bool
 	rigAddAdoptURL     string
 	rigAddAdoptForce   bool
@@ -355,6 +357,8 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
 	rigAddCmd.Flags().StringVar(&rigAddPushURL, "push-url", "", "Push URL for read-only upstreams (push to fork)")
+	rigAddCmd.Flags().BoolVar(&rigAddForkWorkflow, "fork-workflow", false, "Enable fork workflow (PR-based instead of direct merge)")
+	rigAddCmd.Flags().StringVar(&rigAddUpstreamURL, "upstream-url", "", "Upstream URL for fork workflow (source of truth)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
 	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
@@ -521,6 +525,21 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid push URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddPushURL)
 	}
 
+	// Validate upstream URL if provided
+	rigAddUpstreamURL = strings.TrimSpace(rigAddUpstreamURL)
+	if rigAddUpstreamURL != "" && !isGitRemoteURL(rigAddUpstreamURL) {
+		return fmt.Errorf("invalid upstream URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddUpstreamURL)
+	}
+
+	// Auto-detect upstream URL if fork-workflow is enabled but no upstream URL provided
+	if rigAddForkWorkflow && rigAddUpstreamURL == "" {
+		// For GitHub repos, try to detect upstream from API
+		if upstream, err := detectGitHubUpstream(gitURL); err == nil && upstream != "" {
+			rigAddUpstreamURL = upstream
+			fmt.Printf("  Auto-detected upstream: %s\n", rigAddUpstreamURL)
+		}
+	}
+
 	startTime := time.Now()
 
 	// Add the rig
@@ -528,6 +547,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		Name:          name,
 		GitURL:        gitURL,
 		PushURL:       rigAddPushURL,
+		UpstreamURL:   rigAddUpstreamURL,
 		BeadsPrefix:   rigAddPrefix,
 		LocalRepo:     rigAddLocalRepo,
 		DefaultBranch: rigAddBranch,
@@ -545,6 +565,22 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {
 		// Non-fatal: daemon will still work, just won't auto-manage this rig
 		fmt.Printf("  %s Could not update daemon.json patrols: %v\n", style.Warning.Render("!"), err)
+	}
+
+	// Configure fork workflow if enabled
+	if rigAddForkWorkflow {
+		rigSettingsPath := filepath.Join(townRoot, name, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(filepath.Join(townRoot, name)); err == nil {
+			if settings.MergeQueue == nil {
+				settings.MergeQueue = config.DefaultMergeQueueConfig()
+			}
+			settings.MergeQueue.ForkWorkflow = boolPtr(true)
+			if err := config.SaveRigSettings(rigSettingsPath, settings); err != nil {
+				fmt.Printf("  %s Could not save fork workflow setting: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  Enabled fork workflow (PR-based merge)\n")
+			}
+		}
 	}
 
 	// Route registration is now handled inside AddRig (before agent bead creation)
@@ -2106,4 +2142,70 @@ func isGitRemoteURL(s string) bool {
 		return true
 	}
 	return false
+}
+
+// detectGitHubUpstream attempts to detect the upstream repository for a fork.
+// Uses the GitHub API to find the parent repository.
+// Returns empty string if detection fails or repo is not a fork.
+func detectGitHubUpstream(forkURL string) (string, error) {
+	// Only works for GitHub URLs
+	if !strings.Contains(forkURL, "github.com") {
+		return "", fmt.Errorf("not a GitHub URL")
+	}
+
+	// Extract owner/repo from URL
+	owner, repo := parseGitHubOwnerRepo(forkURL)
+	if owner == "" || repo == "" {
+		return "", fmt.Errorf("could not parse owner/repo from URL")
+	}
+
+	// Use gh CLI to get repo info (more reliable than parsing git remote)
+	cmd := exec.Command("gh", "repo", "view", fmt.Sprintf("%s/%s", owner, repo), "--json", "parent")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh repo view failed: %w", err)
+	}
+
+	var result struct {
+		Parent struct {
+			URL string `json:"url"`
+		} `json:"parent"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("parsing gh output: %w", err)
+	}
+
+	if result.Parent.URL == "" {
+		return "", fmt.Errorf("repo has no parent (not a fork)")
+	}
+
+	return result.Parent.URL, nil
+}
+
+// parseGitHubOwnerRepo extracts owner and repo from a GitHub URL.
+func parseGitHubOwnerRepo(url string) (owner, repo string) {
+	url = strings.TrimSuffix(url, ".git")
+
+	// https://github.com/owner/repo
+	if strings.HasPrefix(url, "https://github.com/") {
+		parts := strings.Split(url[19:], "/")
+		if len(parts) >= 2 {
+			return parts[0], parts[1]
+		}
+	}
+
+	// git@github.com:owner/repo
+	if strings.HasPrefix(url, "git@github.com:") {
+		parts := strings.Split(url[15:], "/")
+		if len(parts) >= 2 {
+			return parts[0], parts[1]
+		}
+	}
+
+	return "", ""
+}
+
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }

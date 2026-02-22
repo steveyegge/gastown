@@ -64,6 +64,9 @@ type RoleData struct {
 	IssuePrefix    string   // beads issue prefix
 	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name
 	DeaconSession  string   // e.g., "gt-ai-deacon" - dynamic deacon session name
+	ForkWorkflow   bool     // true for PR-based fork workflow
+	UpstreamURL    string   // upstream repository URL (for fork workflow)
+	UpstreamRepo   string   // upstream repo in "owner/repo" format (for gh commands)
 }
 
 // SpawnData contains information for spawn assignment messages.

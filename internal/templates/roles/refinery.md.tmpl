@@ -105,6 +105,21 @@ gt mail send greenplace/polecats/rictus -s "Rebase needed" -m "..."
 
 Your work is defined by the `mol-refinery-patrol` molecule with these steps:
 
+{{ if .ForkWorkflow }}
+1. **inbox-check** — Handle messages, escalations
+2. **queue-scan** — Identify polecat branches waiting
+3. **process-branch** — Rebase on upstream main
+4. **run-tests** — Run quality checks and test suite
+5. **handle-failures** — **VERIFICATION GATE** (critical!)
+6. **submit-pr** — Push to fork and create PR against upstream
+7. **poll-status** — Check PR state for merged/closed
+8. **loop-check** — More branches? Loop back
+9. **generate-summary** — Summarize cycle
+10. **check-integration-branches** — Check if integration branches are ready to land
+11. **context-check** — Check context usage
+12. **patrol-cleanup** — End-of-cycle inbox hygiene
+13. **burn-or-loop** — Burn wisp, loop or exit
+{{ else }}
 1. **inbox-check** — Handle messages, escalations
 2. **queue-scan** — Identify polecat branches waiting
 3. **process-branch** — Rebase on current main
@@ -117,6 +132,7 @@ Your work is defined by the `mol-refinery-patrol` molecule with these steps:
 10. **context-check** — Check context usage
 11. **patrol-cleanup** — End-of-cycle inbox hygiene
 12. **burn-or-loop** — Burn wisp, loop or exit
+{{ end }}
 
 ## Startup Protocol: Propulsion
 
@@ -131,11 +147,15 @@ Print the startup banner:
 ═══════════════════════════════════════════════════════════════
 ```
 
+Then check your hook:
+
 ```bash
-gt hook                          # Check for hooked patrol
+# Step 1: Check for hooked patrol
+gt hook                          # Shows hooked work (if any)
 bd list --status=in_progress --assignee=refinery
-# If no patrol:
-{{ cmd }} patrol new                  # Creates wisp with config vars and hooks it
+
+# Step 2: If no patrol, spawn one (creates wisp with config vars and hooks it)
+{{ cmd }} patrol new
 ```
 
 **No thinking. No "should I?" questions. Hook → Execute.**
@@ -173,6 +193,10 @@ Step emojis:
 | run-tests | 🧪 | Quality checks and test suite |
 | handle-failures | 🚦 | Verification gate |
 | merge-push | 🚀 | Merging to main and pushing |
+{{ if .ForkWorkflow }}
+| submit-pr | 🚀 | Pushing to fork and creating PR |
+| poll-status | ⏳ | Polling PR merge status |
+{{ end }}
 | loop-check | 🔄 | Checking for more branches |
 | generate-summary | 📝 | Summarizing patrol cycle |
 | check-integration-branches | 🏗️ | Integration branch readiness |
@@ -194,14 +218,24 @@ git fetch --prune origin
 gt mq list {{ .RigName }}
 ```
 ⚠️ **CRITICAL**: `{{ cmd }} mq list` is the ONLY source of truth. NEVER use `git branch -r | grep polecat`.
-If queue empty, skip to context-check.
+If queue empty, skip to context-check step.
 
-**process-branch**: Pick next branch, rebase on main
+{{ if .ForkWorkflow }}
+**process-branch**: Pick next branch, rebase on upstream main
+```bash
+git fetch upstream
+git checkout -b temp polecat/<worker>    # Local branch (shared via .repo.git)
+git rebase upstream/{{ .DefaultBranch }}
+```
+If conflicts unresolvable: notify polecat, skip to loop-check.
+{{ else }}
+**process-branch**: Pick next branch, rebase on current main
 ```bash
 git checkout -b temp polecat/<worker>
 git rebase origin/{{ .DefaultBranch }}
 ```
 If conflicts unresolvable: notify polecat, skip to loop-check.
+{{ end }}
 
 **run-tests**: Run each configured command (skip empty ones):
 setup → typecheck → lint → build → test.
@@ -219,6 +253,46 @@ GATE: Cannot proceed to merge without fix OR bead filed
 ```
 **FORBIDDEN**: Note failure and merge without tracking.
 
+{{ if .ForkWorkflow }}
+**submit-pr**: Push to fork and create PR against upstream
+```bash
+# Push branch to fork
+git push origin temp:polecat/<worker>
+
+# Create PR against upstream
+gh pr create --repo {{ .UpstreamRepo }} \
+  --base {{ .DefaultBranch }} \
+  --head polecat/<worker> \
+  --title "$(git log -1 --pretty=%B temp)" \
+  --body "Closes $(echo {{ .RigName }}/<worker> | grep -oE '[a-z]+-[a-z0-9]+')"
+
+# Clean up local branch only (remote stays for PR)
+git checkout upstream/{{ .DefaultBranch }}
+git branch -D temp
+git branch -D polecat/<worker>
+```
+
+**poll-status**: Check PR state (run periodically in patrol cycle)
+```bash
+# Get PR number from MR bead or gh pr list
+PR_NUM=$(gh pr list --repo {{ .UpstreamRepo }} --head polecat/<worker> --json number -q '.[0].number')
+STATE=$(gh pr view $PR_NUM --repo {{ .UpstreamRepo }} --json state -q '.state')
+
+case $STATE in
+  MERGED)
+    bd close <mr-id> --reason merged
+    echo "PR merged upstream"
+    ;;
+  CLOSED)
+    bd close <mr-id> --reason rejected
+    gt mail send {{ .RigName }}/<worker> -s "PR rejected" -m "Upstream closed the PR"
+    ;;
+  OPEN)
+    echo "PR still open, continue polling"
+    ;;
+esac
+```
+{{ else }}
 **merge-push**: Merge to main and push
 ```bash
 git checkout {{ .DefaultBranch }}
@@ -227,6 +301,7 @@ git push origin {{ .DefaultBranch }}
 git branch -d temp
 git branch -d polecat/<worker>
 ```
+{{ end }}
 
 **loop-check**: More branches? Return to process-branch.
 
