@@ -1228,6 +1228,9 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 	}
 
 	// Step 4: Delete branch (if we know it) — local and remote
+	// SAFETY (gt-3xal): Never delete a remote branch that has unmerged commits ahead of main.
+	// The refinery may not have created an MR yet, and deleting the remote branch would lose
+	// completed, pushed work. Only delete the remote branch if it's fully merged to main.
 	if branchToDelete != "" {
 		var repoGit *git.Git
 		bareRepoPath := filepath.Join(r.Path, ".repo.git")
@@ -1236,16 +1239,29 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		} else {
 			repoGit = git.NewGit(filepath.Join(r.Path, "mayor", "rig"))
 		}
+
+		// Check remote branch merge status BEFORE deleting local branch.
+		// After local deletion, the ref may not be resolvable for diff checks.
+		// Use "origin/<branch>" to check the remote tracking ref directly.
+		defaultBranch := repoGit.RemoteDefaultBranch()
+		remoteBranch := "origin/" + branchToDelete
+		remoteHasUnmergedWork := branchHasUnmergedWork(repoGit, remoteBranch, defaultBranch)
+
 		if err := repoGit.DeleteBranch(branchToDelete, true); err != nil {
 			fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
 		} else {
 			fmt.Printf("  %s deleted local branch %s\n", style.Success.Render("✓"), branchToDelete)
 		}
-		// Also delete remote branch if it exists
-		if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
-			fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+
+		if !remoteHasUnmergedWork {
+			if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
+				fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+			} else {
+				fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+			}
 		} else {
-			fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+			fmt.Printf("  %s preserved remote branch %s (has unmerged commits — refinery will process)\n",
+				style.Warning.Render("⚠"), branchToDelete)
 		}
 	}
 
@@ -1264,6 +1280,29 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 	}
 
 	return nil
+}
+
+// branchHasUnmergedWork checks if a branch has content that differs from origin/<defaultBranch>.
+// First checks if the branch is an ancestor of main (fast-forward merged).
+// Falls back to content diff check (handles squash merges where SHAs differ but content matches).
+// Returns true if the branch has unmerged work that would be lost if deleted.
+func branchHasUnmergedWork(repoGit *git.Git, branch, defaultBranch string) bool {
+	mainRef := "origin/" + defaultBranch
+
+	// First try: check if branch is ancestor of main (fully merged)
+	merged, err := repoGit.IsAncestor(branch, mainRef)
+	if err == nil && merged {
+		return false // Branch is merged, safe to delete
+	}
+
+	// Second try: content diff check (handles squash merges)
+	hasDiff, diffErr := repoGit.HasDiff(branch, mainRef)
+	if diffErr == nil && !hasDiff {
+		return false // No content difference, safe to delete
+	}
+
+	// Has unmerged work (or can't determine — be conservative)
+	return true
 }
 
 // cleanupOrphanedProcesses kills Claude processes that survived session termination.

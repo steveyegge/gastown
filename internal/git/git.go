@@ -854,6 +854,22 @@ func (g *Git) Rev(ref string) (string, error) {
 	return g.run("rev-parse", ref)
 }
 
+// HasDiff checks if two refs have different tree content.
+// Returns true if there is a diff, false if they are identical.
+// This is useful for detecting squash merges where commit SHAs differ but content matches.
+func (g *Git) HasDiff(ref1, ref2 string) (bool, error) {
+	_, err := g.run("diff", "--quiet", ref1, ref2)
+	if err != nil {
+		// Exit code 1 means there IS a diff
+		if strings.Contains(err.Error(), "exit status 1") {
+			return true, nil
+		}
+		return false, err
+	}
+	// Exit code 0 means no diff
+	return false, nil
+}
+
 // IsAncestor checks if ancestor is an ancestor of descendant.
 func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 	_, err := g.run("merge-base", "--is-ancestor", ancestor, descendant)

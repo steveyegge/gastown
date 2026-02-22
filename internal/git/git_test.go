@@ -1554,3 +1554,58 @@ func TestClearPushURL(t *testing.T) {
 		t.Errorf("ClearPushURL (idempotent) should not error, got: %v", err)
 	}
 }
+
+func TestHasDiff(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Determine the default branch name (master or main depending on git config)
+	defaultBranch, err := g.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Create a branch with different content
+	runGit(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "new-file.txt"), []byte("new content\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "add new file")
+
+	// feature vs default branch should have a diff
+	hasDiff, err := g.HasDiff("feature", defaultBranch)
+	if err != nil {
+		t.Fatalf("HasDiff: %v", err)
+	}
+	if !hasDiff {
+		t.Error("expected HasDiff=true between feature and default branch")
+	}
+
+	// same ref vs itself should have no diff
+	hasDiff, err = g.HasDiff(defaultBranch, defaultBranch)
+	if err != nil {
+		t.Fatalf("HasDiff: %v", err)
+	}
+	if hasDiff {
+		t.Error("expected HasDiff=false for same ref")
+	}
+
+	// Go back to default branch and apply same content (simulating squash merge)
+	runGit(t, dir, "checkout", defaultBranch)
+	if err := os.WriteFile(filepath.Join(dir, "new-file.txt"), []byte("new content\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "squash merge new file")
+
+	// Now feature vs default branch should have no content diff (different SHAs, same tree)
+	hasDiff, err = g.HasDiff("feature", defaultBranch)
+	if err != nil {
+		t.Fatalf("HasDiff: %v", err)
+	}
+	if hasDiff {
+		t.Error("expected HasDiff=false after squash merge (same content, different SHAs)")
+	}
+}
+
