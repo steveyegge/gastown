@@ -369,8 +369,21 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 // createStagedConvoy creates a convoy with the given staged status.
 // It generates a convoy ID, builds a title and description, then runs
 // `bd create` to create the convoy and `bd dep add` for each slingable bead.
+// Convoys live in the town HQ beads database (hq-cv-* prefix), so all bd
+// commands run against getTownBeadsDir(), matching gt convoy create behavior.
 // Returns the convoy ID.
 func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, error) {
+	// Convoys live in the town HQ beads database.
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Ensure custom types (including 'convoy') are registered in town beads.
+	if err := beads.EnsureCustomTypes(townBeads); err != nil {
+		return "", fmt.Errorf("ensuring custom types: %w", err)
+	}
+
 	// Generate convoy ID.
 	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
 
@@ -397,21 +410,32 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 	description := fmt.Sprintf("Staged convoy: %d tasks, %d waves. Staged at %s",
 		taskCount, len(waves), time.Now().UTC().Format(time.RFC3339))
 
-	// Create the convoy via bd create.
-	if out, err := BdCmd("create",
+	// Create the convoy via bd create in town beads, then set status via bd update.
+	createArgs := []string{
+		"create",
 		"--type=convoy",
-		"--id="+convoyID,
-		"--title="+title,
-		"--description="+description,
-		"--status="+status,
-	).WithAutoCommit().CombinedOutput(); err != nil {
+		"--id=" + convoyID,
+		"--title=" + title,
+		"--description=" + description,
+	}
+	if beads.NeedsForceForID(convoyID) {
+		createArgs = append(createArgs, "--force")
+	}
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
 		return "", fmt.Errorf("bd create convoy: %w\noutput: %s", err, out)
+	}
+
+	// Set the staged status.
+	statusCmd := exec.Command("bd", "update", convoyID, "--status="+status)
+	statusCmd.Dir = townBeads
+	if out, err := statusCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("bd update convoy status: %w\noutput: %s", err, out)
 	}
 
 	// Track each slingable bead via bd dep add.
 	for _, beadID := range slingableIDs {
 		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
-			WithAutoCommit().
+			Dir(townBeads).WithAutoCommit().
 			CombinedOutput(); err != nil {
 			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, beadID, err, out)
 		}
@@ -422,8 +446,16 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 
 // updateStagedConvoy updates an existing staged convoy in place.
 // It updates the status and description via `bd update` commands.
+// Convoy beads live in the town HQ beads database, so all bd commands
+// run against getTownBeadsDir().
 // It does NOT create a new convoy or re-add tracking deps.
 func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, status string) error {
+	// Convoys live in the town HQ beads database.
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
 	// Count slingable tasks for the description.
 	taskCount := 0
 	for _, node := range dag.Nodes {
@@ -434,7 +466,7 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 
 	// Update status.
 	if out, err := BdCmd("update", existingConvoyID, "--status="+status).
-		WithAutoCommit().
+		Dir(townBeads).WithAutoCommit().
 		CombinedOutput(); err != nil {
 		return fmt.Errorf("bd update %s --status: %w\noutput: %s", existingConvoyID, err, out)
 	}
@@ -443,7 +475,7 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	description := fmt.Sprintf("Staged convoy: %d tasks, %d waves. Re-staged at %s",
 		taskCount, len(waves), time.Now().UTC().Format(time.RFC3339))
 	if out, err := BdCmd("update", existingConvoyID, "--description="+description).
-		WithAutoCommit().
+		Dir(townBeads).WithAutoCommit().
 		CombinedOutput(); err != nil {
 		return fmt.Errorf("bd update %s --description: %w\noutput: %s", existingConvoyID, err, out)
 	}
@@ -873,10 +905,12 @@ type bdShowResult struct {
 }
 
 // bdDepResult matches the JSON output of `bd dep list <id> --json`.
+// Each entry is a bead that the queried issue depends on.
+// The IssueID is set by the caller (it's the bead we queried).
 type bdDepResult struct {
-	IssueID     string `json:"issue_id"`
-	DependsOnID string `json:"depends_on_id"`
-	Type        string `json:"type"`
+	IssueID        string `json:"-"`               // set by caller
+	DependsOnID    string `json:"id"`              // the dependency target
+	Type           string `json:"dependency_type"` // blocks, parent-child, etc.
 }
 
 // ---------------------------------------------------------------------------
@@ -903,6 +937,8 @@ func bdShow(beadID string) (*bdShowResult, error) {
 }
 
 // bdDepList runs `bd dep list <id> --json` and returns parsed deps.
+// bd dep list returns the beads that <id> depends on. Each result's
+// DependsOnID is the dependency target; IssueID is set to <id> by this func.
 func bdDepList(beadID string) ([]bdDepResult, error) {
 	out, err := exec.Command("bd", "dep", "list", beadID, "--json").Output()
 	if err != nil {
@@ -914,12 +950,24 @@ func bdDepList(beadID string) ([]bdDepResult, error) {
 		return nil, fmt.Errorf("bd dep list %s: parse JSON: %w (raw: %s)", beadID, err, out)
 	}
 
+	// Set the IssueID on each result (bd dep list returns deps OF beadID).
+	for i := range results {
+		results[i].IssueID = beadID
+	}
+
 	return results, nil
 }
 
 // bdListChildren runs `bd list --parent=<id> --json` and returns child beads.
+// bd list is CWD-sensitive — it only searches the beads database in the current
+// directory. We resolve the correct .beads directory from the bead's prefix via
+// routes.jsonl so this works regardless of the caller's working directory.
 func bdListChildren(parentID string) ([]bdShowResult, error) {
-	out, err := exec.Command("bd", "list", "--parent="+parentID, "--json").Output()
+	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json")
+	if dir := beadsDirForID(parentID); dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bd list --parent=%s: %w", parentID, err)
 	}
@@ -955,6 +1003,26 @@ func rigFromBeadID(beadID string) string {
 		return ""
 	}
 	return beads.GetRigNameForPrefix(townRoot, prefix)
+}
+
+// beadsDirForID resolves the .beads directory that owns a given bead ID by
+// looking up its prefix in routes.jsonl. This is needed for CWD-sensitive bd
+// commands like `bd list --parent=` which only search the local database.
+// Returns empty string if the prefix or workspace cannot be resolved.
+func beadsDirForID(beadID string) string {
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix == "" {
+		return ""
+	}
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return ""
+	}
+	rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+	if rigPath == "" {
+		return ""
+	}
+	return beads.ResolveBeadsDir(rigPath)
 }
 
 // collectBeads gathers all beads for staging based on the input kind.
