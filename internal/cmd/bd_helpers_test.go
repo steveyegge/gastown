@@ -58,9 +58,9 @@ func TestBdCmd_Build(t *testing.T) {
 			},
 		},
 		{
-			name: "with StripBdBranch",
+			name: "with OnMain",
 			setup: func() *bdCmd {
-				return BdCmd("show", "id").StripBdBranch()
+				return BdCmd("show", "id").OnMain()
 			},
 			wantArgs: []string{"bd", "show", "id"},
 			wantEnv: map[string]string{
@@ -124,7 +124,7 @@ func TestBdCmd_Build(t *testing.T) {
 	}
 }
 
-func TestBdCmd_StripBdBranch(t *testing.T) {
+func TestBdCmd_OnMain(t *testing.T) {
 	// Create an environment with BD_BRANCH set
 	baseEnv := append(os.Environ(), "BD_BRANCH=test-branch", "OTHER_VAR=value")
 
@@ -140,8 +140,8 @@ func TestBdCmd_StripBdBranch(t *testing.T) {
 		t.Fatal("BD_BRANCH should be in base environment for test setup")
 	}
 
-	// Apply StripBdBranch
-	bdc.StripBdBranch()
+	// Apply OnMain
+	bdc.OnMain()
 	cmd := bdc.Build()
 	envAfter := parseEnv(cmd.Env)
 
@@ -160,7 +160,7 @@ func TestBdCmd_Stderr(t *testing.T) {
 	var stderrBuf bytes.Buffer
 
 	bdc := BdCmd("show", "nonexistent-id").
-		StripBdBranch().
+		OnMain().
 		Stderr(&stderrBuf)
 
 	cmd := bdc.Build()
@@ -224,8 +224,8 @@ func TestBdCmd_Chaining(t *testing.T) {
 	if bdc.WithAutoCommit() != bdc {
 		t.Error("WithAutoCommit() should return receiver for chaining")
 	}
-	if bdc.StripBdBranch() != bdc {
-		t.Error("StripBdBranch() should return receiver for chaining")
+	if bdc.OnMain() != bdc {
+		t.Error("OnMain() should return receiver for chaining")
 	}
 	if bdc.WithGTRoot("/test") != bdc {
 		t.Error("WithGTRoot() should return receiver for chaining")
@@ -292,8 +292,8 @@ func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
 	}
 }
 
-func TestBdCmd_StripBdBranch_LeavesAutoCommit(t *testing.T) {
-	// Test that StripBdBranch() only strips BD_BRANCH, leaves BD_DOLT_AUTO_COMMIT intact
+func TestBdCmd_OnMain_LeavesAutoCommit(t *testing.T) {
+	// Test that OnMain() only strips BD_BRANCH, leaves BD_DOLT_AUTO_COMMIT intact
 	baseEnv := []string{"BD_BRANCH=test-branch", "BD_DOLT_AUTO_COMMIT=on", "OTHER=value"}
 
 	bdc := &bdCmd{
@@ -301,7 +301,7 @@ func TestBdCmd_StripBdBranch_LeavesAutoCommit(t *testing.T) {
 		env:    baseEnv,
 		stderr: os.Stderr,
 	}
-	bdc.StripBdBranch()
+	bdc.OnMain()
 	cmd := bdc.Build()
 	envMap := parseEnv(cmd.Env)
 
@@ -321,13 +321,13 @@ func TestBdCmd_StripBdBranch_LeavesAutoCommit(t *testing.T) {
 	}
 }
 
-func TestBdCmd_Chain_AutoCommitThenStrip(t *testing.T) {
-	// Test chaining: WithAutoCommit().StripBdBranch()
+func TestBdCmd_Chain_AutoCommitThenOnMain(t *testing.T) {
+	// Test chaining: WithAutoCommit().OnMain()
 	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
 
 	bdc := BdCmd("show", "id").
 		WithAutoCommit().
-		StripBdBranch()
+		OnMain()
 
 	// Override env for this test
 	bdc.env = baseEnv
@@ -345,12 +345,12 @@ func TestBdCmd_Chain_AutoCommitThenStrip(t *testing.T) {
 	}
 }
 
-func TestBdCmd_Chain_StripThenAutoCommit(t *testing.T) {
-	// Test chaining: StripBdBranch().WithAutoCommit() (order shouldn't matter for result)
+func TestBdCmd_Chain_OnMainThenAutoCommit(t *testing.T) {
+	// Test chaining: OnMain().WithAutoCommit() (order shouldn't matter for result)
 	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
 
 	bdc := BdCmd("show", "id").
-		StripBdBranch().
+		OnMain().
 		WithAutoCommit()
 
 	// Override env for this test
@@ -369,8 +369,8 @@ func TestBdCmd_Chain_StripThenAutoCommit(t *testing.T) {
 	}
 }
 
-func TestBdCmd_StripBdBranch_NoBdBranch(t *testing.T) {
-	// Test StripBdBranch when BD_BRANCH is not in env - should be no-op
+func TestBdCmd_OnMain_NoBdBranch(t *testing.T) {
+	// Test OnMain when BD_BRANCH is not in env - should be no-op
 	baseEnv := []string{"PATH=/usr/bin", "OTHER=value"}
 
 	bdc := &bdCmd{
@@ -378,7 +378,7 @@ func TestBdCmd_StripBdBranch_NoBdBranch(t *testing.T) {
 		env:    baseEnv,
 		stderr: os.Stderr,
 	}
-	bdc.StripBdBranch()
+	bdc.OnMain()
 	cmd := bdc.Build()
 	envMap := parseEnv(cmd.Env)
 
@@ -450,7 +450,7 @@ func TestBdCmd_EmptyGTRoot_Skipped(t *testing.T) {
 	}
 }
 
-func TestBdCmd_ReadOperations_StripBdBranch(t *testing.T) {
+func TestBdCmd_ReadOperations_OnMain(t *testing.T) {
 	// Verify that read operations (show, list, etc.) strip BD_BRANCH
 	testCases := []struct {
 		name     string
@@ -458,17 +458,17 @@ func TestBdCmd_ReadOperations_StripBdBranch(t *testing.T) {
 		expected bool // true if BD_BRANCH should be stripped
 	}{
 		{
-			name:     "show with StripBdBranch",
-			bdc:      BdCmd("show", "id").StripBdBranch(),
+			name:     "show with OnMain",
+			bdc:      BdCmd("show", "id").OnMain(),
 			expected: true,
 		},
 		{
-			name:     "list without StripBdBranch",
+			name:     "list without OnMain",
 			bdc:      BdCmd("list"),
 			expected: false,
 		},
 		{
-			name:     "update without StripBdBranch (write op)",
+			name:     "update without OnMain (write op)",
 			bdc:      BdCmd("update", "id", "--status=open"),
 			expected: false,
 		},
@@ -518,7 +518,7 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		stripBdBranch    bool
+		onMain           bool
 		autoCommit       bool
 		gtRoot           string
 		wantBdBranch     bool // true = should exist
@@ -526,11 +526,11 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 		wantGTRoot       bool
 	}{
 		{"none", false, false, "", true, false, false},
-		{"strip only", true, false, "", false, false, false},
+		{"onmain only", true, false, "", false, false, false},
 		{"autocommit only", false, true, "", true, true, false},
 		{"gtroot only", false, false, "/town", true, false, true},
-		{"strip+autocommit", true, true, "", false, true, false},
-		{"strip+gtroot", true, false, "/town", false, false, true},
+		{"onmain+autocommit", true, true, "", false, true, false},
+		{"onmain+gtroot", true, false, "/town", false, false, true},
 		{"autocommit+gtroot", false, true, "/town", true, true, true},
 		{"all three", true, true, "/town", false, true, true},
 	}
@@ -543,8 +543,8 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 				stderr: os.Stderr,
 			}
 
-			if tt.stripBdBranch {
-				bdc.stripBdBranch = true
+			if tt.onMain {
+				bdc.onMain = true
 			}
 			if tt.autoCommit {
 				bdc.autoCommit = true
@@ -627,7 +627,7 @@ func TestBdCmd_EnvImmutability(t *testing.T) {
 		env:    baseEnv,
 		stderr: os.Stderr,
 	}
-	bdc.WithAutoCommit().WithGTRoot("/town").StripBdBranch()
+	bdc.WithAutoCommit().WithGTRoot("/town").OnMain()
 
 	// Call buildEnv multiple times
 	_ = bdc.buildEnv()

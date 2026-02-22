@@ -13,13 +13,13 @@ import (
 // It provides a fluent API for configuring environment variables,
 // working directory, and I/O settings common to bd CLI invocations.
 type bdCmd struct {
-	args          []string
-	dir           string
-	env           []string
-	stderr        io.Writer
-	stripBdBranch bool
-	autoCommit    bool
-	gtRoot        string
+	args       []string
+	dir        string
+	env        []string
+	stderr     io.Writer
+	onMain     bool
+	autoCommit bool
+	gtRoot     string
 }
 
 // BdCmd creates a new bd command builder with the given arguments.
@@ -28,7 +28,7 @@ type bdCmd struct {
 // Example:
 //
 //	err := cmd.BdCmd("show", beadID, "--json").
-//	    StripBdBranch().
+//	    OnMain().
 //	    Dir(workDir).
 //	    Run()
 func BdCmd(args ...string) *bdCmd {
@@ -47,11 +47,11 @@ func (b *bdCmd) WithAutoCommit() *bdCmd {
 	return b
 }
 
-// StripBdBranch removes BD_BRANCH from the environment.
-// This is used for read operations that need to access the main branch
-// instead of a polecat's write-isolation branch.
-func (b *bdCmd) StripBdBranch() *bdCmd {
-	b.stripBdBranch = true
+// OnMain removes BD_BRANCH from the environment so the command
+// targets the main branch instead of a polecat's write-isolation branch.
+// This aligns with the beads.Beads.OnMain() API for the same operation.
+func (b *bdCmd) OnMain() *bdCmd {
+	b.onMain = true
 	return b
 }
 
@@ -94,7 +94,7 @@ func (b *bdCmd) buildEnv() []string {
 	env := b.env
 
 	// Strip BD_BRANCH if requested (for reading from main branch)
-	if b.stripBdBranch {
+	if b.onMain {
 		env = beads.StripBdBranch(env)
 	}
 
