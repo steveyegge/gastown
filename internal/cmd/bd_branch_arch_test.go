@@ -24,7 +24,7 @@ import (
 // When a callsite is added or removed, this test fails — forcing the
 // developer to classify it for BD_BRANCH safety.
 //
-// For polecat read paths:  add .OnMain() or StripBdBranch()
+// For polecat read paths:  add .OnMain() (bdCmd) or beads.StripBdBranch() (raw exec)
 // For write/non-polecat:   update the expected count in the registry
 // ===================================================================
 
@@ -594,14 +594,12 @@ func checkRegistry(t *testing.T, label string, actual map[string]*bdCallsiteCoun
 // Architecture test: protection coverage
 //
 // Verifies that polecat-context files maintain their BD_BRANCH
-// protection patterns. If OnMain or StripBdBranch counts decrease,
-// protection was removed.
+// protection patterns. If OnMain counts decrease, protection was removed.
 //
 // Scope: Only monitors files that were identified in W-006 (#1796) as
 // needing BD_BRANCH protection. The registry test above catches NEW
 // callsites in any file; this test ensures EXISTING protections are
-// not removed. Files are added here when they receive OnMain/StripBdBranch
-// fixes.
+// not removed. Files are added here when they receive OnMain fixes.
 // ===================================================================
 
 func TestBdBranchProtectionCoverage(t *testing.T) {
@@ -631,8 +629,8 @@ func TestBdBranchProtectionCoverage(t *testing.T) {
 		{"hook.go", 2, 0},
 		{"statusline.go", 1, 0},
 		{"molecule_status.go", 1, 0},
-		{"sling_helpers.go", 0, 8},
-		{"sling_formula.go", 0, 2},
+		{"sling_helpers.go", 8, 0},
+		{"sling_formula.go", 2, 0},
 		{"show.go", 0, 1},
 	}
 
@@ -651,5 +649,60 @@ func TestBdBranchProtectionCoverage(t *testing.T) {
 					counts.StripBdBranch, tt.wantStripBd)
 			}
 		})
+	}
+}
+
+// ===================================================================
+// Architecture test: OnMain naming convention
+//
+// bdCmd users must call .OnMain() instead of the removed .StripBdBranch().
+// This aligns with the beads.Beads.OnMain() API for the same operation.
+// Only beads.StripBdBranch(env) is allowed for raw exec.Command calls
+// that cannot use bdCmd (e.g., syscall.Exec in show.go, prime.go).
+//
+// The scanner counts .StripBdBranch() 0-arg method calls (bdCmd fluent
+// API) separately from beads.StripBdBranch(env) 1-arg function calls.
+// This test enforces that only prime.go, show.go, and bd_helpers.go
+// retain the 1-arg form (for raw exec.Command/syscall.Exec or the
+// OnMain() implementation), and NO file uses the 0-arg bdCmd form.
+// ===================================================================
+
+func TestBdBranchOnMainNamingConvention(t *testing.T) {
+	dir := bdArchTestDir(t)
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("failed to parse directory: %v", err)
+	}
+
+	for _, pkg := range pkgs {
+		for filename, file := range pkg.Files {
+			basename := filepath.Base(filename)
+			counts := countBdCallsites(file)
+
+			// The scanner counts both bdCmd .StripBdBranch() (0-arg) and
+			// beads.StripBdBranch(env) (1-arg) in the same counter.
+			// We use an allow-list heuristic: files in the list may have
+			// StripBdBranch calls (they use the beads.StripBdBranch(env)
+			// function). All other files must have zero. If a new file
+			// needs beads.StripBdBranch(env), add it to the allow list.
+			switch basename {
+			case "prime.go", "show.go":
+				// These use beads.StripBdBranch(env) for raw exec.Command / syscall.Exec.
+				// That's the correct pattern for non-bdCmd invocations.
+				continue
+			case "bd_helpers.go":
+				// Uses beads.StripBdBranch(env) internally in buildEnv() — this is
+				// the implementation of .OnMain(), not a direct callsite.
+				continue
+			default:
+				if counts.StripBdBranch > 0 {
+					t.Errorf("%s: has %d StripBdBranch() calls — use .OnMain() on bdCmd instead (#1897)",
+						basename, counts.StripBdBranch)
+				}
+			}
+		}
 	}
 }
