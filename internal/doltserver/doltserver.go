@@ -125,7 +125,7 @@ func setDoltGlobalConfig(key, value string) error {
 const (
 	DefaultPort           = 3307
 	DefaultUser           = "root" // Default Dolt user (no password for local access)
-	DefaultMaxConnections = 50     // Conservative default to prevent connection storms
+	DefaultMaxConnections = 200    // Support concurrent crews (10 conns/pool × ~15 bd processes + headroom)
 )
 
 // metadataMu provides per-path mutexes for EnsureMetadata goroutine synchronization.
