@@ -58,6 +58,14 @@ source of truth.
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
 
+## Target Resolution Rule
+
+When instructions reference `<effective-target>` (for rebase, merge, or verification),
+resolve it once using this rule:
+
+- If integration_branch_refinery_enabled = "true": use MR target when present, otherwise {{target_branch}}.
+- If integration_branch_refinery_enabled = "false": always use {{target_branch}}.
+
 ## FORBIDDEN Actions
 
 - FORBIDDEN: Landing integration branches to the default branch via raw git commands (`git merge`, `git push`).
@@ -220,9 +228,7 @@ Pick next branch from queue. Attempt mechanical rebase on the MR's effective tar
 
 **Step 0: Determine rebase target (must match merge target)**
 
-Resolve `<rebase-target>` with the same rule used by merge-push:
-- If integration_branch_refinery_enabled = "true": use MR target when present, otherwise {{target_branch}}.
-- If integration_branch_refinery_enabled = "false": always use {{target_branch}}.
+Resolve `<rebase-target>` using the **Target Resolution Rule** above.
 Do NOT hardcode `main` unless `main` is actually the resolved MR target.
 
 **Step 1: Checkout and attempt rebase**
@@ -409,9 +415,7 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 
 **Step 1: Merge and Push**
-Determine `<merge-target>` with the same rule used by process-branch:
-- If integration_branch_refinery_enabled = "true": use MR target when present, otherwise {{target_branch}}.
-- If integration_branch_refinery_enabled = "false": always use {{target_branch}}.
+Determine `<merge-target>` using the **Target Resolution Rule** above.
 ```bash
 git checkout <merge-target>
 git merge --ff-only temp
@@ -650,9 +654,7 @@ bd list --type=merge-request --status=open
 
 For each open MR bead:
 1. Check if branch exists: `git ls-remote origin refs/heads/<branch>`
-2. Determine merge target using the same rule as process-branch/merge-push:
-   - If integration_branch_refinery_enabled = "true": MR target when present, otherwise {{target_branch}}
-   - If integration_branch_refinery_enabled = "false": always {{target_branch}}
+2. Determine merge target using the **Target Resolution Rule** above.
 3. If branch gone, verify work is on target: `git log origin/<merge-target> --oneline | grep "<source_issue>"`
 4. If work on target → close MR with reason "Merged (verified on <merge-target>)"
 5. If work NOT on target → investigate before closing:

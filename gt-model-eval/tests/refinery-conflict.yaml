@@ -151,6 +151,8 @@
         const d = JSON.parse(output);
         return d.action === "proceed-to-tests";
 
+# Prompt-level safety guard: detects wrong rebase target from shell evidence.
+# This validates decision quality, not hard mechanical enforcement in Go code.
 - description: "Integration target: reject rebase against origin/main"
   vars:
     role: refinery
