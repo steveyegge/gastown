@@ -22,6 +22,11 @@ const (
 	// from the kennel entirely (only when pool is oversized).
 	dogIdleRemoveTimeout = 4 * time.Hour
 
+	// staleWorkingTimeout is how long a dog can be in state=working with no
+	// activity updates before it is considered stuck. Covers the gap where
+	// a tmux session is alive but sitting at an idle prompt.
+	staleWorkingTimeout = 2 * time.Hour
+
 	// maxDogPoolSize is the target pool size. Dogs idle beyond
 	// dogIdleRemoveTimeout are removed when the pool exceeds this count.
 	maxDogPoolSize = 4
@@ -41,6 +46,7 @@ func (d *Daemon) handleDogs() {
 	sm := dog.NewSessionManager(t, d.config.TownRoot, mgr)
 
 	d.cleanupStuckDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm)
 	d.reapIdleDogs(mgr, sm)
 	d.dispatchPlugins(mgr, sm, rigsConfig)
 }
@@ -73,6 +79,50 @@ func (d *Daemon) cleanupStuckDogs(mgr *dog.Manager, sm *dog.SessionManager) {
 		d.logger.Printf("Handler: dog %s is working but session is dead, clearing work", dg.Name)
 		if err := mgr.ClearWork(dg.Name); err != nil {
 			d.logger.Printf("Handler: failed to clear work for dog %s: %v", dg.Name, err)
+		}
+	}
+}
+
+// detectStaleWorkingDogs finds dogs in state=working whose last_active exceeds
+// staleWorkingTimeout. These dogs have live tmux sessions sitting idle at a
+// prompt — neither cleanupStuckDogs (needs dead session) nor reapIdleDogs
+// (needs state=idle) will catch them.
+func (d *Daemon) detectStaleWorkingDogs(mgr *dog.Manager, sm *dog.SessionManager) {
+	dogs, err := mgr.List()
+	if err != nil {
+		d.logger.Printf("Handler: failed to list dogs for stale-working check: %v", err)
+		return
+	}
+
+	now := time.Now()
+	for _, dg := range dogs {
+		if dg.State != dog.StateWorking {
+			continue
+		}
+
+		staleDuration := now.Sub(dg.LastActive)
+		if staleDuration < staleWorkingTimeout {
+			continue
+		}
+
+		d.logger.Printf("Handler: dog %s stuck in working state (inactive %v, work: %s), clearing",
+			dg.Name, staleDuration.Truncate(time.Minute), dg.Work)
+
+		if err := mgr.ClearWork(dg.Name); err != nil {
+			d.logger.Printf("Handler: failed to clear work for stale dog %s: %v", dg.Name, err)
+			continue
+		}
+
+		// Kill the tmux session — it's not doing anything useful.
+		running, err := sm.IsRunning(dg.Name)
+		if err != nil {
+			d.logger.Printf("Handler: error checking session for stale dog %s: %v", dg.Name, err)
+			continue
+		}
+		if running {
+			if err := sm.Stop(dg.Name, true); err != nil {
+				d.logger.Printf("Handler: failed to stop session for stale dog %s: %v", dg.Name, err)
+			}
 		}
 	}
 }
