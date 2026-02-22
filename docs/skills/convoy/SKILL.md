@@ -99,7 +99,6 @@ gt convoy stage hq-cv-abc            # re-stage existing staged convoy
 gt convoy stage <epic-id> --json     # machine-readable output
 gt convoy stage <epic-id> --launch   # stage + immediately launch if no errors
 gt convoy launch hq-cv-abc           # transition staged → open, dispatch Wave 1
-gt convoy launch hq-cv-abc --force   # launch even with warnings
 gt convoy launch <epic-id>           # stage + launch in one step (delegates to stage --launch)
 ```
 
@@ -242,7 +241,7 @@ Four statuses with defined transitions:
 | Status | Meaning |
 |--------|---------|
 | `staged:ready` | Validated, no errors or warnings, ready to launch |
-| `staged:warnings` | Validated, no errors but has warnings (needs `--force` to launch) |
+| `staged:warnings` | Validated, no errors but has warnings. Fix and re-stage, or launch anyway. |
 | `open` | Active — daemon feeds work as beads close |
 | `closed` | Complete or cancelled |
 
@@ -251,7 +250,7 @@ Valid transitions:
 | From → To | Allowed? |
 |-----------|----------|
 | `staged:ready` → `open` | Yes (launch) |
-| `staged:warnings` → `open` | Yes (launch `--force`) |
+| `staged:warnings` → `open` | Yes (launch) |
 | `staged:*` → `closed` | Yes (cancel) |
 | `staged:ready` ↔ `staged:warnings` | Yes (re-stage) |
 | `open` → `closed` | Yes |
@@ -283,9 +282,8 @@ Valid transitions:
 `gt convoy launch <convoy-id>` transitions a staged convoy to open and dispatches Wave 1:
 
 1. Validate convoy exists and is staged
-2. `staged:ready` → transitions to `open` immediately
-3. `staged:warnings` → requires `--force`, otherwise errors
-4. Re-read tracked beads, rebuild DAG, recompute waves
+2. Transition status to `open`
+3. Re-read tracked beads, rebuild DAG, recompute waves
 5. Dispatch every task in Wave 1 via `gt sling <beadID> <rig>`
 6. Individual sling failures do NOT abort remaining dispatches
 7. Print dispatch results (checkmark/X per task)
@@ -352,7 +350,7 @@ go test ./internal/cmd/... -v -count=1 -run TestBuildConvoyDAG  # DAG constructi
 - Wave 1 contains ONLY tasks with zero unsatisfied blocking deps among slingable nodes
 - Epics and non-slingable types are NEVER placed in waves
 - Daemon does NOT feed issues from `staged:*` convoys (both feed paths skip)
-- `--launch` on `staged:warnings` requires `--force`
+- `staged:warnings` convoys can still be launched (warnings are informational)
 - Re-staging a convoy does NOT create duplicates (updates in place)
 - Launch dispatches ONLY Wave 1, not subsequent waves
 - Wave computation is deterministic (same input → same output, alphabetical sort within waves)
@@ -372,7 +370,7 @@ See `docs/design/convoy/testing.md` for the general convoy test plan covering fa
 - **`isIssueBlocked` is fail-open.** Store errors assume not blocked. A transient Dolt error should not permanently stall a convoy -- the next feed cycle retries with fresh state.
 - **Explicit rig in batch sling is deprecated.** `gt sling beads... rig` still works but prints a warning. Prefer `gt sling beads...` with auto-resolution.
 - **Staged convoys are inert.** The daemon ignores them completely. Don't expect auto-feeding until you `gt convoy launch`.
-- **`staged:warnings` requires `--force` to launch.** This is intentional — warnings should be reviewed before dispatch. Fix warnings and re-stage, or use `--force` if they're acceptable.
+- **Review `staged:warnings` before launching.** Warnings are informational — fix and re-stage if possible, or launch anyway if they're acceptable.
 - **`gt convoy launch` on a non-staged input delegates to stage.** If you pass an epic or task list to `launch`, it runs `stage --launch` internally. Only an already-staged convoy gets the fast path.
 - **Wave computation is informational.** Waves are computed at stage time for display. Runtime dispatch uses the daemon's per-cycle `isIssueBlocked` checks, which are more dynamic.
 - **You cannot un-stage an open convoy.** Once launched, a convoy cannot return to staged status. The `open → staged:*` transition is rejected.
