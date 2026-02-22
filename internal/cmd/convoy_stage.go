@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ func init() {
 type StageResult struct {
 	Status   string         `json:"status"`    // "staged_ready", "staged_warnings", or "error"
 	ConvoyID string         `json:"convoy_id"` // empty if errors prevented creation
+	Restaged bool           `json:"restaged"`  // true if an existing convoy was updated in place
 	Errors   []FindingJSON  `json:"errors"`
 	Warnings []FindingJSON  `json:"warnings"`
 	Waves    []WaveJSON     `json:"waves"`
@@ -239,6 +241,28 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 	// Step 5: Build the DAG.
 	dag := buildConvoyDAG(beads, deps)
 
+	// Step 5b: Detect overlapping convoys (epic or task-list input only).
+	// When the user stages from an epic (or task list), check if an existing
+	// convoy already tracks these beads. This prevents duplicate convoys.
+	if !isRestage && input.Kind != StageInputConvoy {
+		slingableIDs := dagSlingableIDs(dag)
+		overlaps, err := findOverlappingConvoys(slingableIDs)
+		if err != nil {
+			return fmt.Errorf("checking for overlapping convoys: %w", err)
+		}
+		autoRestage, autoConvoyID, err := handleOverlappingConvoys(overlaps, len(slingableIDs))
+		if err != nil {
+			return err
+		}
+		if autoRestage {
+			isRestage = true
+			restageConvoyID = autoConvoyID
+			if !convoyStageJSON {
+				fmt.Printf("Re-staging existing convoy %s\n", autoConvoyID)
+			}
+		}
+	}
+
 	// Step 6: Detect errors.
 	errFindings := detectErrors(dag)
 
@@ -350,6 +374,7 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 			return err
 		}
 		result.ConvoyID = restageConvoyID
+		result.Restaged = true
 	} else {
 		convoyID, err := createStagedConvoy(dag, waves, status)
 		if err != nil {
@@ -364,6 +389,169 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 	}
 	fmt.Print(out)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Overlapping convoy detection (prevent duplicate convoy creation)
+// ---------------------------------------------------------------------------
+
+// overlappingConvoy describes a convoy that tracks beads overlapping with a
+// staging request.
+type overlappingConvoy struct {
+	ID           string // convoy bead ID (e.g., "hq-cv-abc")
+	Status       string // convoy status (e.g., "staged_ready", "open")
+	OverlapCount int    // number of slingable IDs also tracked by this convoy
+}
+
+// dagSlingableIDs returns sorted slingable bead IDs from a DAG.
+func dagSlingableIDs(dag *ConvoyDAG) []string {
+	var ids []string
+	for _, node := range dag.Nodes {
+		if isSlingableType(node.Type) {
+			ids = append(ids, node.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// convoyTrackedBeadIDs returns the set of bead IDs tracked by a convoy.
+// It calls `bd dep list <convoyID> --direction=down --type=tracks --json`
+// against the town beads directory and unwraps external:prefix:id references.
+func convoyTrackedBeadIDs(townBeads, convoyID string) (map[string]bool, error) {
+	townRoot := filepath.Dir(townBeads)
+	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
+	out, err := depCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bd dep list %s --direction=down --type=tracks: %w", convoyID, err)
+	}
+
+	var tracked []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &tracked); err != nil {
+		return nil, fmt.Errorf("parsing tracked deps for %s: %w", convoyID, err)
+	}
+
+	ids := make(map[string]bool, len(tracked))
+	for _, t := range tracked {
+		ids[beads.ExtractIssueID(t.ID)] = true
+	}
+	return ids, nil
+}
+
+// findOverlappingConvoys lists all staged and open convoys and checks which
+// ones track beads that overlap with the given slingable IDs.
+// Only staged_* and open convoys are considered; closed convoys are skipped.
+func findOverlappingConvoys(slingableIDs []string) ([]overlappingConvoy, error) {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return nil, err
+	}
+
+	// List all convoys (--all includes every status).
+	listCmd := exec.Command("bd", "list", "--type=convoy", "--all", "--json")
+	listCmd.Dir = townBeads
+	out, err := listCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing convoys: %w", err)
+	}
+
+	var convoys []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(out, &convoys); err != nil {
+		return nil, fmt.Errorf("parsing convoy list: %w", err)
+	}
+
+	// Build set of slingable IDs for fast lookup.
+	slingSet := make(map[string]bool, len(slingableIDs))
+	for _, id := range slingableIDs {
+		slingSet[id] = true
+	}
+
+	var overlaps []overlappingConvoy
+	for _, c := range convoys {
+		status := normalizeConvoyStatus(c.Status)
+		// Only consider staged and open convoys.
+		if !isStagedStatus(status) && status != convoyStatusOpen {
+			continue
+		}
+
+		trackedIDs, err := convoyTrackedBeadIDs(townBeads, c.ID)
+		if err != nil {
+			// Skip convoys whose tracked beads can't be resolved.
+			continue
+		}
+
+		// Compute intersection.
+		overlapCount := 0
+		for id := range trackedIDs {
+			if slingSet[id] {
+				overlapCount++
+			}
+		}
+		if overlapCount > 0 {
+			overlaps = append(overlaps, overlappingConvoy{
+				ID:           c.ID,
+				Status:       status,
+				OverlapCount: overlapCount,
+			})
+		}
+	}
+
+	return overlaps, nil
+}
+
+// handleOverlappingConvoys decides what to do when existing convoys overlap
+// with the beads being staged.
+//
+// Returns:
+//   - (true, convoyID, nil): auto re-stage the given convoy
+//   - (false, "", nil): no overlaps, proceed with fresh creation
+//   - (false, "", error): cannot proceed (open convoy or ambiguous)
+func handleOverlappingConvoys(overlaps []overlappingConvoy, slingableCount int) (bool, string, error) {
+	if len(overlaps) == 0 {
+		return false, "", nil
+	}
+
+	// Separate by status.
+	var staged []overlappingConvoy
+	var open []overlappingConvoy
+	for _, o := range overlaps {
+		if isStagedStatus(o.Status) {
+			staged = append(staged, o)
+		} else if o.Status == convoyStatusOpen {
+			open = append(open, o)
+		}
+	}
+
+	// Open convoy overlap → error.
+	if len(open) > 0 {
+		o := open[0]
+		return false, "", fmt.Errorf(
+			"cannot stage: open convoy %s already tracks %d of these beads — close it first or wait for completion\n"+
+				"  gt convoy close %s --reason \"re-staging\"",
+			o.ID, o.OverlapCount, o.ID)
+	}
+
+	// Multiple staged overlaps → ambiguous.
+	if len(staged) > 1 {
+		ids := make([]string, len(staged))
+		for i, s := range staged {
+			ids[i] = s.ID
+		}
+		sort.Strings(ids)
+		return false, "", fmt.Errorf(
+			"ambiguous: %d staged convoys overlap with these beads (%s)\n"+
+				"  Specify which convoy to re-stage: gt convoy stage <convoy-id>",
+			len(staged), strings.Join(ids, ", "))
+	}
+
+	// Exactly one staged overlap → auto re-stage.
+	return true, staged[0].ID, nil
 }
 
 // createStagedConvoy creates a convoy with the given staged status.
@@ -446,9 +634,10 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 
 // updateStagedConvoy updates an existing staged convoy in place.
 // It updates the status and description via `bd update` commands.
+// It also reconciles tracked beads: adds new slingable beads and removes
+// stale ones that are no longer in the DAG (e.g., tasks removed from the epic).
 // Convoy beads live in the town HQ beads database, so all bd commands
 // run against getTownBeadsDir().
-// It does NOT create a new convoy or re-add tracking deps.
 func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, status string) error {
 	// Convoys live in the town HQ beads database.
 	townBeads, err := getTownBeadsDir()
@@ -456,11 +645,37 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 		return err
 	}
 
-	// Count slingable tasks for the description.
-	taskCount := 0
-	for _, node := range dag.Nodes {
-		if isSlingableType(node.Type) {
-			taskCount++
+	// Reconcile tracked beads: compare current tracking with desired slingable set.
+	desiredIDs := dagSlingableIDs(dag)
+	desiredSet := make(map[string]bool, len(desiredIDs))
+	for _, id := range desiredIDs {
+		desiredSet[id] = true
+	}
+
+	currentIDs, err := convoyTrackedBeadIDs(townBeads, existingConvoyID)
+	if err != nil {
+		return fmt.Errorf("reading tracked beads for %s: %w", existingConvoyID, err)
+	}
+
+	// Add new beads not currently tracked.
+	for _, id := range desiredIDs {
+		if !currentIDs[id] {
+			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
+				Dir(townBeads).WithAutoCommit().
+				CombinedOutput(); err != nil {
+				return fmt.Errorf("bd dep add %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+			}
+		}
+	}
+
+	// Remove stale beads no longer in the DAG.
+	for id := range currentIDs {
+		if !desiredSet[id] {
+			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
+				Dir(townBeads).WithAutoCommit().
+				CombinedOutput(); err != nil {
+				return fmt.Errorf("bd dep remove %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+			}
 		}
 	}
 
@@ -473,7 +688,7 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 
 	// Update description with new wave count + timestamp.
 	description := fmt.Sprintf("Staged convoy: %d tasks, %d waves. Re-staged at %s",
-		taskCount, len(waves), time.Now().UTC().Format(time.RFC3339))
+		len(desiredIDs), len(waves), time.Now().UTC().Format(time.RFC3339))
 	if out, err := BdCmd("update", existingConvoyID, "--description="+description).
 		Dir(townBeads).WithAutoCommit().
 		CombinedOutput(); err != nil {

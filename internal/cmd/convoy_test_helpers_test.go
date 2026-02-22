@@ -226,6 +226,25 @@ func (d *testDAG) BdStubScript() string {
 		sb.WriteString("    ;;\n")
 	}
 
+	// --- handle: dep list --direction=down (tracked beads for convoys) ---
+	// Must come before generic dep list handler.
+	sb.WriteString("  dep\\ list\\ *--direction=down*)\n")
+	sb.WriteString("    # Return tracked bead IDs in {\"id\":\"...\"} format\n")
+	for id, b := range d.beads {
+		if b.Type == "convoy" {
+			trackedJSON := d.trackedBeadsJSONFor(id)
+			sb.WriteString(`    case "$ALL_ARGS" in` + "\n")
+			sb.WriteString(fmt.Sprintf("      *%s*)\n", id))
+			sb.WriteString(fmt.Sprintf("        echo '%s'\n", trackedJSON))
+			sb.WriteString("        exit 0\n")
+			sb.WriteString("        ;;\n")
+			sb.WriteString("    esac\n")
+		}
+	}
+	sb.WriteString("    echo '[]'\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("    ;;\n")
+
 	// --- handle: dep list <id> --json | dep list --json <id> ---
 	sb.WriteString("  dep\\ list\\ *)\n")
 	sb.WriteString("    # Find the bead ID in the args\n")
@@ -240,6 +259,13 @@ func (d *testDAG) BdStubScript() string {
 		sb.WriteString("    esac\n")
 	}
 	sb.WriteString("    echo '[]'\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("    ;;\n")
+
+	// --- handle: list --type=convoy --all --json (overlapping convoy detection) ---
+	convoyListJSON := d.convoyListJSON()
+	sb.WriteString("  list\\ *--type=convoy*)\n")
+	sb.WriteString(fmt.Sprintf("    echo '%s'\n", convoyListJSON))
 	sb.WriteString("    exit 0\n")
 	sb.WriteString("    ;;\n")
 
@@ -444,6 +470,53 @@ func (d *testDAG) childrenJSONFor(parentID string) string {
 				Status:    b.Status,
 				IssueType: b.Type,
 			})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// trackedBeadsJSONFor returns the JSON array for `bd dep list <convoyID>
+// --direction=down --type=tracks --json`. This returns the simplified format
+// with just {"id":"..."} for each tracked bead, matching production bd behavior.
+func (d *testDAG) trackedBeadsJSONFor(convoyID string) string {
+	type idOnly struct {
+		ID string `json:"id"`
+	}
+
+	var out []idOnly
+	for _, dep := range d.deps {
+		// tracks deps: IssueID is the tracked bead, DependsOnID is the convoy.
+		if dep.Type == "tracks" && dep.DependsOnID == convoyID {
+			out = append(out, idOnly{ID: dep.IssueID})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// convoyListJSON returns the JSON array for `bd list --type=convoy --all --json`.
+// Returns all convoy-type beads with their ID and status.
+func (d *testDAG) convoyListJSON() string {
+	type convoyEntry struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+
+	var out []convoyEntry
+	for _, b := range d.beads {
+		if b.Type == "convoy" {
+			status := b.Status
+			if status == "" {
+				status = "open"
+			}
+			out = append(out, convoyEntry{ID: b.ID, Status: status})
 		}
 	}
 	if out == nil {
