@@ -971,7 +971,9 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		session = detectCurrentTmuxSession()
 	}
 	if session == "" {
-		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
+		// Not a Gas Town session (e.g., Claude Code launched outside gt agent system).
+		// Exit silently — no costs to record.
+		return nil
 	}
 
 	// Get working directory from environment or tmux session
