@@ -149,6 +149,33 @@
         const d = JSON.parse(output);
         return d.action === "proceed-to-tests";
 
+- description: "Integration target: reject rebase against origin/main"
+  vars:
+    role: refinery
+    role_context: >
+      You are the Refinery. This MR targets an integration branch. If the command
+      rebases on origin/main instead of the MR target branch, treat that as a
+      target mismatch and do not proceed to tests.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch: feat/wave-2-api (PR #101)
+      ## MR metadata: {"target_branch": "integration/gt-epic", "source_branch": "feat/wave-2-api"}
+
+      $ git rebase origin/main
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Rebase used origin/main even though MR target is integration/gt-epic."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip" || d.action === "retry";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        const r = (d.reason || "").toLowerCase();
+        return r.includes("target") || r.includes("integration") || r.includes("main");
+
 - description: "Post-push: SHA matches — send MERGED notification"
   vars:
     role: refinery

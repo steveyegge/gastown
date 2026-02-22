@@ -1,7 +1,7 @@
 description = """
 Merge queue processor patrol loop.
 
-The Refinery is the Engineer in the engine room. You process polecat branches, merging them to main one at a time with sequential rebasing.
+The Refinery is the Engineer in the engine room. You process polecat branches, merging them to their effective target branches one at a time with sequential rebasing.
 
 **The Scotty Test**: Before proceeding past any failure, ask yourself: "Would Scotty walk past a warp core leak because it existed before his shift?"
 
@@ -69,7 +69,7 @@ source of truth.
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 7
+version = 10
 
 [vars]
 [vars.wisp_type]
@@ -220,8 +220,9 @@ Pick next branch from queue. Attempt mechanical rebase on the MR's effective tar
 
 **Step 0: Determine rebase target (must match merge target)**
 
-Use the MR's explicit target branch when present (e.g. integration/release branches),
-and only fall back to {{target_branch}} when the MR target is empty.
+Resolve `<rebase-target>` with the same rule used by merge-push:
+- If integration_branch_refinery_enabled = "true": use MR target when present, otherwise {{target_branch}}.
+- If integration_branch_refinery_enabled = "false": always use {{target_branch}}.
 Do NOT hardcode `main` unless `main` is actually the resolved MR target.
 
 **Step 1: Checkout and attempt rebase**
@@ -407,12 +408,10 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 
-When integration_branch_refinery_enabled = "true", the MR's target branch
-may be an integration branch (not just {{target_branch}}). Check the MR's target field and use
-that as the merge destination. Only fall back to {{target_branch}} if no explicit target is set.
-
 **Step 1: Merge and Push**
-Determine the merge target: use the MR's target field if set, otherwise {{target_branch}}.
+Determine `<merge-target>` with the same rule used by process-branch:
+- If integration_branch_refinery_enabled = "true": use MR target when present, otherwise {{target_branch}}.
+- If integration_branch_refinery_enabled = "false": always use {{target_branch}}.
 ```bash
 git checkout <merge-target>
 git merge --ff-only temp
@@ -554,7 +553,7 @@ Include in summary:
 - Any escalations sent
 
 **Conflict tracking is important** for monitoring MQ health. If many branches
-conflict, it may indicate main is moving too fast or branches are too stale.
+conflict, it may indicate target branches are moving too fast or branches are too stale.
 
 This becomes the digest when the patrol is squashed."""
 
@@ -651,7 +650,9 @@ bd list --type=merge-request --status=open
 
 For each open MR bead:
 1. Check if branch exists: `git ls-remote origin refs/heads/<branch>`
-2. Determine merge target from MR metadata target field (fallback to {{target_branch}})
+2. Determine merge target using the same rule as process-branch/merge-push:
+   - If integration_branch_refinery_enabled = "true": MR target when present, otherwise {{target_branch}}
+   - If integration_branch_refinery_enabled = "false": always {{target_branch}}
 3. If branch gone, verify work is on target: `git log origin/<merge-target> --oneline | grep "<source_issue>"`
 4. If work on target → close MR with reason "Merged (verified on <merge-target>)"
 5. If work NOT on target → investigate before closing:
