@@ -73,6 +73,7 @@ const (
 	TypeSchedulerEnqueue        = "scheduler_enqueue"         // Bead scheduled for deferred dispatch
 	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler
 	TypeSchedulerDispatchFailed = "scheduler_dispatch_failed" // Bead dispatch failed (requeued)
+	TypeSchedulerCloseRetry     = "scheduler_close_retry"     // Context close needed last-resort attempt
 )
 
 // EventsFile is the name of the raw events log.

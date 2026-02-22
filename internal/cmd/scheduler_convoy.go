@@ -52,6 +52,13 @@ func runConvoyScheduleByID(convoyID string, opts convoyScheduleOpts) error {
 	skippedScheduled := 0
 	skippedNoRig := 0
 
+	// Batch-check scheduling status for all tracked issues (single DB query).
+	var beadIDs []string
+	for _, t := range tracked {
+		beadIDs = append(beadIDs, t.ID)
+	}
+	scheduledSet := areScheduled(beadIDs)
+
 	for _, t := range tracked {
 		if t.Status == "closed" || t.Status == "tombstone" {
 			skippedClosed++
@@ -63,12 +70,7 @@ func runConvoyScheduleByID(convoyID string, opts convoyScheduleOpts) error {
 			continue
 		}
 
-		info, err := getBeadInfo(t.ID)
-		if err != nil {
-			fmt.Printf("  %s Could not check %s: %v\n", style.Dim.Render("Warning:"), t.ID, err)
-			continue
-		}
-		if hasScheduledLabel(info.Labels) {
+		if scheduledSet[t.ID] {
 			skippedScheduled++
 			continue
 		}

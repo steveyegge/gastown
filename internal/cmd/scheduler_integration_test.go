@@ -164,6 +164,40 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 }
 
 // --------------------------------------------------------------------------
+// Sling context helpers for integration tests
+// --------------------------------------------------------------------------
+
+// createSlingContext creates a sling context bead directly in the HQ beads DB.
+// Used for tests that need to set up specific context state (e.g., circuit-broken).
+func createSlingContext(t *testing.T, hqPath string, fields *capacity.SlingContextFields) string {
+	t.Helper()
+	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
+	ctxBead, err := townBeads.CreateSlingContext("test: "+fields.WorkBeadID, fields.WorkBeadID, fields)
+	if err != nil {
+		t.Fatalf("CreateSlingContext for %s failed: %v", fields.WorkBeadID, err)
+	}
+	return ctxBead.ID
+}
+
+// findSlingContext finds an open sling context for a work bead in the HQ beads DB.
+// Returns nil if none found.
+func findSlingContext(t *testing.T, hqPath, workBeadID string) *capacity.SlingContextFields {
+	t.Helper()
+	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
+	_, fields, err := townBeads.FindOpenSlingContext(workBeadID)
+	if err != nil {
+		t.Fatalf("FindOpenSlingContext(%s) failed: %v", workBeadID, err)
+	}
+	return fields
+}
+
+// hasSlingContext checks if a work bead has an open sling context in HQ.
+func hasSlingContext(t *testing.T, hqPath, workBeadID string) bool {
+	t.Helper()
+	return findSlingContext(t, hqPath, workBeadID) != nil
+}
+
+// --------------------------------------------------------------------------
 // Tests
 // --------------------------------------------------------------------------
 
@@ -172,18 +206,18 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 func TestSchedulerCircuitBreakerExclusion(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	// Create a bead and manually set it up as circuit-broken.
+	// Create a bead and manually set up a circuit-broken sling context.
 	beadID := createTestBead(t, rigPath, "Circuit breaker test")
 
-	// Add gt:queued label
-	addBeadLabel(t, beadID, capacity.LabelScheduled, rigPath)
-
-	// Write scheduler metadata with dispatch_failures=3 (circuit-broken)
-	meta := capacity.NewMetadata("testrig")
-	meta.DispatchFailures = maxDispatchFailures // 3
-	meta.LastFailure = "simulated failure"
-	desc := capacity.FormatMetadata(meta)
-	updateBeadDescription(t, beadID, desc, rigPath)
+	// Create a sling context with dispatch_failures >= maxDispatchFailures (circuit-broken).
+	createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:          1,
+		WorkBeadID:       beadID,
+		TargetRig:        "testrig",
+		EnqueuedAt:       "2025-01-01T00:00:00Z",
+		DispatchFailures: maxDispatchFailures, // 3
+		LastFailure:      "simulated failure",
+	})
 
 	// Verify: scheduler list should exclude this bead
 	listed := getSchedulerList(t, gtBinary, hqPath, env)
@@ -207,28 +241,8 @@ func TestSchedulerCircuitBreakerExclusion(t *testing.T) {
 	}
 }
 
-// TestSchedulerMissingMetadataQuarantine verifies that a bead with gt:queued
-// but no scheduler metadata gets gt:dispatch-failed on dispatch attempt.
-func TestSchedulerMissingMetadataQuarantine(t *testing.T) {
-	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
-
-	// Create a bead with gt:queued but NO scheduler metadata (simulating a
-	// manually-labeled bead that bypassed gt sling deferred dispatch (max_polecats > 0)).
-	beadID := createTestBead(t, rigPath, "Missing metadata test")
-	addBeadLabel(t, beadID, capacity.LabelScheduled, rigPath)
-
-	// Run dispatch (non-dry-run). The bead has no metadata so dispatch
-	// should quarantine it with gt:dispatch-failed.
-	runGTCmdMayFail(t, gtBinary, hqPath, env, "scheduler", "run", "--batch", "1")
-
-	// Verify: bead should now have gt:dispatch-failed label
-	if !beadHasLabel(t, beadID, "gt:dispatch-failed", rigPath) {
-		t.Errorf("bead %s should have gt:dispatch-failed label after metadata-less dispatch", beadID)
-	}
-}
-
 // TestSchedulerAutoConvoyCreation verifies that gt sling deferred dispatch (max_polecats > 0)
-// creates an auto-convoy, stores the convoy ID in scheduler metadata, and the
+// creates an auto-convoy, stores the convoy ID in the sling context, and the
 // convoy is resolvable via bd show.
 func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
@@ -238,30 +252,24 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	// Schedule via gt sling deferred dispatch (max_polecats > 0)
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
 
-	// Verify: bead should have gt:queued label
-	if !beadHasLabel(t, beadID, capacity.LabelScheduled, rigPath) {
-		t.Errorf("bead %s should have gt:queued label after sling deferred dispatch (max_polecats > 0)", beadID)
+	// Verify: bead should have a sling context
+	fields := findSlingContext(t, hqPath, beadID)
+	if fields == nil {
+		t.Fatalf("bead %s has no sling context after scheduling", beadID)
 	}
-
-	// Verify: description should contain scheduler metadata with convoy ID
-	desc := getBeadDescription(t, beadID, rigPath)
-	meta := capacity.ParseMetadata(desc)
-	if meta == nil {
-		t.Fatalf("bead %s has no scheduler metadata after sling deferred dispatch (max_polecats > 0)", beadID)
+	if fields.TargetRig != "testrig" {
+		t.Errorf("target_rig = %q, want %q", fields.TargetRig, "testrig")
 	}
-	if meta.TargetRig != "testrig" {
-		t.Errorf("target_rig = %q, want %q", meta.TargetRig, "testrig")
-	}
-	if meta.Convoy == "" {
-		t.Fatalf("convoy ID not stored in scheduler metadata")
+	if fields.Convoy == "" {
+		t.Fatalf("convoy ID not stored in sling context")
 	}
 
 	// Verify: convoy is resolvable via bd show from hq
-	cmd := exec.Command("bd", "show", meta.Convoy, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", fields.Convoy, "--json", "--allow-stale")
 	cmd.Dir = hqPath
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("bd show convoy %s failed: %v", meta.Convoy, err)
+		t.Fatalf("bd show convoy %s failed: %v", fields.Convoy, err)
 	}
 	var convoys []struct {
 		ID        string `json:"id"`
@@ -271,7 +279,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 		t.Fatalf("parse convoy show: %v", err)
 	}
 	if len(convoys) == 0 {
-		t.Fatalf("convoy %s not found via bd show", meta.Convoy)
+		t.Fatalf("convoy %s not found via bd show", fields.Convoy)
 	}
 	if convoys[0].IssueType != "convoy" {
 		t.Errorf("convoy issue_type = %q, want %q", convoys[0].IssueType, "convoy")
@@ -279,11 +287,11 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 
 	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
 	// This is the core cross-rig link: convoy lives in HQ DB, bead in rig DB.
-	depCmd := exec.Command("bd", "dep", "list", meta.Convoy, "--direction=down", "--type=tracks", "--json")
+	depCmd := exec.Command("bd", "dep", "list", fields.Convoy, "--direction=down", "--type=tracks", "--json")
 	depCmd.Dir = hqPath
 	depOut, err := depCmd.Output()
 	if err != nil {
-		t.Fatalf("bd dep list %s --type=tracks failed: %v", meta.Convoy, err)
+		t.Fatalf("bd dep list %s --type=tracks failed: %v", fields.Convoy, err)
 	}
 	var deps []struct {
 		ID string `json:"id"`
@@ -299,7 +307,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 		}
 	}
 	if !foundTracked {
-		t.Errorf("convoy %s should track bead %s via tracks dep, got deps: %s", meta.Convoy, beadID, depOut)
+		t.Errorf("convoy %s should track bead %s via tracks dep, got deps: %s", fields.Convoy, beadID, depOut)
 	}
 }
 
@@ -364,7 +372,7 @@ func TestSchedulerBlockedStatusReporting(t *testing.T) {
 }
 
 // TestSchedulerSlingDryRun verifies that gt sling deferred dispatch (max_polecats > 0) --dry-run
-// has no side effects: no label added, no metadata written, no convoy created.
+// has no side effects: no sling context created, no convoy created.
 func TestSchedulerSlingDryRun(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
@@ -376,12 +384,12 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	// Run sling deferred dispatch (max_polecats > 0) --dry-run
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig", "--dry-run")
 
-	// Verify: no gt:queued label
-	if beadHasLabel(t, beadID, capacity.LabelScheduled, rigPath) {
-		t.Errorf("dry-run should NOT add gt:queued label")
+	// Verify: no sling context created
+	if hasSlingContext(t, hqPath, beadID) {
+		t.Errorf("dry-run should NOT create a sling context")
 	}
 
-	// Verify: description unchanged
+	// Verify: work bead description unchanged
 	descAfter := getBeadDescription(t, beadID, rigPath)
 	if descAfter != descBefore {
 		t.Errorf("dry-run should NOT modify description\nbefore: %q\nafter:  %q", descBefore, descAfter)
@@ -402,6 +410,60 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	}
 	if len(convoys) != 0 {
 		t.Errorf("dry-run should NOT create convoys, found %d", len(convoys))
+	}
+}
+
+// TestSchedulerSlingContextIdempotency verifies that scheduling a bead twice
+// produces only a single sling context (idempotency).
+func TestSchedulerSlingContextIdempotency(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	beadID := createTestBead(t, rigPath, "Idempotency test")
+
+	// Schedule twice
+	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+
+	// Verify: only one sling context exists
+	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
+	contexts, err := townBeads.ListOpenSlingContexts()
+	if err != nil {
+		t.Fatalf("ListOpenSlingContexts failed: %v", err)
+	}
+	count := 0
+	for _, ctx := range contexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil && fields.WorkBeadID == beadID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 sling context for %s, got %d", beadID, count)
+	}
+}
+
+// TestSchedulerSlingContextWorkBeadPristine verifies that scheduling a bead
+// does NOT modify the work bead's description or labels.
+func TestSchedulerSlingContextWorkBeadPristine(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	beadID := createTestBead(t, rigPath, "Pristine test")
+
+	// Capture state before scheduling
+	descBefore := getBeadDescription(t, beadID, rigPath)
+
+	// Schedule the bead
+	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+
+	// Verify: description unchanged
+	descAfter := getBeadDescription(t, beadID, rigPath)
+	if descAfter != descBefore {
+		t.Errorf("scheduling should NOT modify work bead description\nbefore: %q\nafter:  %q", descBefore, descAfter)
+	}
+
+	// Verify: no scheduler-related labels on work bead
+	if beadHasLabel(t, beadID, capacity.LabelSlingContext, rigPath) {
+		t.Errorf("work bead should NOT have %s label", capacity.LabelSlingContext)
 	}
 }
 
@@ -633,24 +695,21 @@ func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
 	slingToScheduler(t, gtBinary, hqPath, env, child1, "rig1")
 	slingToScheduler(t, gtBinary, hqPath, env, child2, "rig2")
 
-	// Verify: both children should have gt:queued label
-	if !beadHasLabel(t, child1, capacity.LabelScheduled, rig1Path) {
-		t.Errorf("child1 %s should have gt:queued label", child1)
+	// Verify: both children should have sling contexts with correct target rigs
+	fields1 := findSlingContext(t, hqPath, child1)
+	if fields1 == nil {
+		t.Fatalf("child1 %s should have a sling context", child1)
 	}
-	if !beadHasLabel(t, child2, capacity.LabelScheduled, rig2Path) {
-		t.Errorf("child2 %s should have gt:queued label", child2)
+	if fields1.TargetRig != "rig1" {
+		t.Errorf("child1 target_rig = %q, want rig1", fields1.TargetRig)
 	}
 
-	// Verify: scheduler metadata should show correct target rigs
-	desc1 := getBeadDescription(t, child1, rig1Path)
-	meta1 := capacity.ParseMetadata(desc1)
-	if meta1 == nil || meta1.TargetRig != "rig1" {
-		t.Errorf("child1 target_rig = %v, want rig1", meta1)
+	fields2 := findSlingContext(t, hqPath, child2)
+	if fields2 == nil {
+		t.Fatalf("child2 %s should have a sling context", child2)
 	}
-	desc2 := getBeadDescription(t, child2, rig2Path)
-	meta2 := capacity.ParseMetadata(desc2)
-	if meta2 == nil || meta2.TargetRig != "rig2" {
-		t.Errorf("child2 target_rig = %v, want rig2", meta2)
+	if fields2.TargetRig != "rig2" {
+		t.Errorf("child2 target_rig = %q, want rig2", fields2.TargetRig)
 	}
 
 	// Verify: scheduler status should find both children
@@ -789,24 +848,21 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 	slingToScheduler(t, gtBinary, hqPath, env, bead1, "rig1")
 	slingToScheduler(t, gtBinary, hqPath, env, bead2, "rig2")
 
-	// Verify: both beads should have gt:queued label
-	if !beadHasLabel(t, bead1, capacity.LabelScheduled, rig1Path) {
-		t.Errorf("bead1 %s should have gt:queued label", bead1)
+	// Verify: both beads should have sling contexts with correct target rigs
+	fields1 := findSlingContext(t, hqPath, bead1)
+	if fields1 == nil {
+		t.Fatalf("bead1 %s should have a sling context", bead1)
 	}
-	if !beadHasLabel(t, bead2, capacity.LabelScheduled, rig2Path) {
-		t.Errorf("bead2 %s should have gt:queued label", bead2)
+	if fields1.TargetRig != "rig1" {
+		t.Errorf("bead1 target_rig = %q, want rig1", fields1.TargetRig)
 	}
 
-	// Verify: scheduler metadata should show correct target rigs
-	desc1 := getBeadDescription(t, bead1, rig1Path)
-	meta1 := capacity.ParseMetadata(desc1)
-	if meta1 == nil || meta1.TargetRig != "rig1" {
-		t.Errorf("bead1 target_rig = %v, want rig1", meta1)
+	fields2 := findSlingContext(t, hqPath, bead2)
+	if fields2 == nil {
+		t.Fatalf("bead2 %s should have a sling context", bead2)
 	}
-	desc2 := getBeadDescription(t, bead2, rig2Path)
-	meta2 := capacity.ParseMetadata(desc2)
-	if meta2 == nil || meta2.TargetRig != "rig2" {
-		t.Errorf("bead2 target_rig = %v, want rig2", meta2)
+	if fields2.TargetRig != "rig2" {
+		t.Errorf("bead2 target_rig = %q, want rig2", fields2.TargetRig)
 	}
 
 	// Verify: scheduler status should find both beads
@@ -840,9 +896,9 @@ func TestSchedulerDisabledMode(t *testing.T) {
 		t.Errorf("max_polecats=0 should NOT schedule (deferred), got:\n%s", out)
 	}
 
-	// Bead should NOT have gt:queued label
-	if beadHasLabel(t, beadID, capacity.LabelScheduled, rigPath) {
-		t.Errorf("disabled mode should NOT add gt:queued label")
+	// Bead should NOT have a sling context
+	if hasSlingContext(t, hqPath, beadID) {
+		t.Errorf("disabled mode should NOT create a sling context")
 	}
 }
 
@@ -977,6 +1033,45 @@ func TestSchedulerBatchEpicRejection(t *testing.T) {
 	}
 	if !strings.Contains(out, "cannot be batch-scheduled") {
 		t.Errorf("expected 'cannot be batch-scheduled' error, got:\n%s", out)
+	}
+}
+
+// TestSchedulerInvalidJSONContextCleanup verifies that sling context beads with
+// invalid JSON descriptions get closed as "invalid-context" during stale cleanup.
+func TestSchedulerInvalidJSONContextCleanup(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	// Create a bead and a valid sling context for it.
+	beadID := createTestBead(t, rigPath, "Invalid JSON cleanup test")
+	ctxID := createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: beadID,
+		TargetRig:  "rig1",
+		EnqueuedAt: "2026-01-01T00:00:00Z",
+	})
+
+	// Corrupt the context bead description with invalid JSON.
+	corruptCmd := exec.Command("bd", "update", ctxID, "--description=not valid json {{{")
+	corruptCmd.Dir = hqPath
+	if out, err := corruptCmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd update to corrupt description failed: %v\n%s", err, out)
+	}
+
+	// Run scheduler dispatch (non-dry-run triggers cleanup before dispatch).
+	// cleanupStaleContexts is called before the dispatch cycle.
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "run")
+	t.Logf("scheduler run output:\n%s", out)
+
+	// Verify the invalid context is no longer listed.
+	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
+	contexts, err := townBeads.ListOpenSlingContexts()
+	if err != nil {
+		t.Fatalf("ListOpenSlingContexts failed: %v", err)
+	}
+	for _, ctx := range contexts {
+		if ctx.ID == ctxID {
+			t.Errorf("Invalid context %s should have been closed, but is still open", ctxID)
+		}
 	}
 }
 

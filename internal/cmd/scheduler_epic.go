@@ -55,6 +55,13 @@ func runEpicScheduleByID(epicID string, opts epicScheduleOpts) error {
 	skippedScheduled := 0
 	skippedNoRig := 0
 
+	// Batch-check scheduling status for all children (single DB query).
+	var childIDs []string
+	for _, c := range children {
+		childIDs = append(childIDs, c.ID)
+	}
+	scheduledSet := areScheduled(childIDs)
+
 	for _, c := range children {
 		if c.Status == "closed" || c.Status == "tombstone" {
 			skippedClosed++
@@ -66,7 +73,7 @@ func runEpicScheduleByID(epicID string, opts epicScheduleOpts) error {
 			continue
 		}
 
-		if hasScheduledLabel(c.Labels) {
+		if scheduledSet[c.ID] {
 			skippedScheduled++
 			continue
 		}

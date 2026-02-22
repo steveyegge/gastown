@@ -1,10 +1,11 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
-	"os/exec"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -61,6 +62,7 @@ type ScheduleOptions struct {
 }
 
 // scheduleBead schedules a bead for deferred dispatch via the capacity scheduler.
+// Creates a sling context bead to hold scheduling state. The work bead is never modified.
 func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -86,16 +88,16 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		return fmt.Errorf("checking bead status: %w", err)
 	}
 
-	// Idempotency: skip if bead is actively scheduled (open + gt:queued label).
-	isScheduled := false
-	for _, label := range info.Labels {
-		if label == capacity.LabelScheduled {
-			isScheduled = true
-			break
-		}
+	// Idempotency: check for existing open sling context for this work bead.
+	// Fail fast on errors to avoid creating duplicate contexts on transient DB failures.
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	existingCtx, _, findErr := townBeads.FindOpenSlingContext(beadID)
+	if findErr != nil {
+		return fmt.Errorf("checking for existing sling context: %w", findErr)
 	}
-	if isScheduled && info.Status == "open" {
-		fmt.Printf("%s Bead %s is already scheduled, no-op\n", style.Dim.Render("○"), beadID)
+	if existingCtx != nil {
+		fmt.Printf("%s Bead %s is already scheduled (context: %s), no-op\n",
+			style.Dim.Render("○"), beadID, existingCtx.ID)
 		return nil
 	}
 
@@ -111,8 +113,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 
 	if opts.DryRun {
 		fmt.Printf("Would schedule %s → %s\n", beadID, rigName)
-		fmt.Printf("  Would add label: %s\n", capacity.LabelScheduled)
-		fmt.Printf("  Would append scheduler metadata to description\n")
+		fmt.Printf("  Would create sling context bead\n")
 		if !opts.NoConvoy {
 			fmt.Printf("  Would create auto-convoy\n")
 		}
@@ -127,69 +128,45 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		}
 	}
 
-	// Build scheduler metadata
-	meta := capacity.NewMetadata(rigName)
+	// Build sling context fields
+	fields := &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: beadID,
+		TargetRig:  rigName,
+		EnqueuedAt: time.Now().UTC().Format(time.RFC3339),
+	}
 	if opts.Formula != "" {
-		meta.Formula = opts.Formula
+		fields.Formula = opts.Formula
 	}
 	if opts.Args != "" {
-		meta.Args = opts.Args
+		fields.Args = opts.Args
 	}
 	if len(opts.Vars) > 0 {
-		meta.Vars = strings.Join(opts.Vars, "\n")
+		fields.Vars = strings.Join(opts.Vars, "\n")
 	}
 	if opts.Merge != "" {
-		meta.Merge = opts.Merge
+		fields.Merge = opts.Merge
 	}
 	if opts.BaseBranch != "" {
-		meta.BaseBranch = opts.BaseBranch
+		fields.BaseBranch = opts.BaseBranch
 	}
-	meta.NoMerge = opts.NoMerge
+	fields.NoMerge = opts.NoMerge
 	if opts.Account != "" {
-		meta.Account = opts.Account
+		fields.Account = opts.Account
 	}
 	if opts.Agent != "" {
-		meta.Agent = opts.Agent
+		fields.Agent = opts.Agent
 	}
-	meta.HookRawBead = opts.HookRawBead
+	fields.HookRawBead = opts.HookRawBead
 	if opts.Ralph {
-		meta.Mode = "ralph"
+		fields.Mode = "ralph"
 	}
-	meta.Owned = opts.Owned
+	fields.Owned = opts.Owned
 
-	// Strip any existing metadata before appending new metadata
-	baseDesc := capacity.StripMetadata(info.Description)
-
-	metaBlock := capacity.FormatMetadata(meta)
-	newDesc := baseDesc
-	if newDesc != "" {
-		newDesc += "\n"
-	}
-	newDesc += metaBlock
-
-	// Write metadata FIRST, then add label (atomic activation)
-	beadDir := resolveBeadDir(beadID)
-	descCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
-	descCmd.Dir = beadDir
-	if err := descCmd.Run(); err != nil {
-		return fmt.Errorf("writing scheduler metadata: %w", err)
-	}
-
-	labelCmd := exec.Command("bd", "update", beadID,
-		"--add-label="+capacity.LabelScheduled)
-	labelCmd.Dir = beadDir
-	var labelStderr bytes.Buffer
-	labelCmd.Stderr = &labelStderr
-	if err := labelCmd.Run(); err != nil {
-		// Roll back metadata
-		rollbackCmd := exec.Command("bd", "update", beadID, "--description="+baseDesc)
-		rollbackCmd.Dir = beadDir
-		_ = rollbackCmd.Run()
-		errMsg := strings.TrimSpace(labelStderr.String())
-		if errMsg != "" {
-			return fmt.Errorf("adding scheduled label: %s", errMsg)
-		}
-		return fmt.Errorf("adding scheduled label: %w", err)
+	// Create sling context bead — single atomic operation. No two-step write.
+	ctxBead, err := townBeads.CreateSlingContext(info.Title, beadID, fields)
+	if err != nil {
+		return fmt.Errorf("creating sling context: %w", err)
 	}
 
 	// Auto-convoy (unless --no-convoy)
@@ -201,24 +178,10 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 				fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {
 				fmt.Printf("%s Created convoy %s\n", style.Bold.Render("→"), convoyID)
-				meta.Convoy = convoyID
-				// Re-read the current description to avoid clobbering concurrent updates
-				// that may have occurred between label activation and now.
-				freshInfo, freshErr := getBeadInfo(beadID)
-				currentBase := baseDesc
-				if freshErr == nil {
-					currentBase = capacity.StripMetadata(freshInfo.Description)
-				}
-				updatedBlock := capacity.FormatMetadata(meta)
-				updatedDesc := currentBase
-				if updatedDesc != "" {
-					updatedDesc += "\n"
-				}
-				updatedDesc += updatedBlock
-				convoyDescCmd := exec.Command("bd", "update", beadID, "--description="+updatedDesc)
-				convoyDescCmd.Dir = beadDir
-				if err := convoyDescCmd.Run(); err != nil {
-					fmt.Printf("%s Could not update metadata with convoy: %v\n", style.Dim.Render("Warning:"), err)
+				// Update the context bead fields with convoy ID
+				fields.Convoy = convoyID
+				if updateErr := townBeads.UpdateSlingContextFields(ctxBead.ID, fields); updateErr != nil {
+					fmt.Printf("%s Could not update context with convoy: %v\n", style.Dim.Render("Warning:"), updateErr)
 				}
 			}
 		} else {
@@ -229,7 +192,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	actor := detectActor()
 	_ = events.LogFeed(events.TypeSchedulerEnqueue, actor, events.SchedulerEnqueuePayload(beadID, rigName))
 
-	fmt.Printf("%s Scheduled %s → %s\n", style.Bold.Render("✓"), beadID, rigName)
+	fmt.Printf("%s Scheduled %s → %s (context: %s)\n", style.Bold.Render("✓"), beadID, rigName, ctxBead.ID)
 	return nil
 }
 
@@ -279,27 +242,6 @@ func runBatchSchedule(beadIDs []string, rigName string) error {
 	return nil
 }
 
-// unscheduleBeadLabels removes the gt:queued label and strips scheduler metadata.
-func unscheduleBeadLabels(beadID string) error {
-	beadDir := resolveBeadDir(beadID)
-
-	info, err := getBeadInfo(beadID)
-	if err == nil {
-		stripped := capacity.StripMetadata(info.Description)
-		if stripped != info.Description {
-			cmd := exec.Command("bd", "update", beadID,
-				"--description="+stripped,
-				"--remove-label="+capacity.LabelScheduled)
-			cmd.Dir = beadDir
-			return cmd.Run()
-		}
-	}
-
-	cmd := exec.Command("bd", "update", beadID, "--remove-label="+capacity.LabelScheduled)
-	cmd.Dir = beadDir
-	return cmd.Run()
-}
-
 // resolveRigForBead determines the rig that owns a bead from its ID prefix.
 func resolveRigForBead(townRoot, beadID string) string {
 	prefix := beads.ExtractPrefix(beadID)
@@ -320,14 +262,62 @@ func resolveFormula(explicit string, hookRawBead bool) string {
 	return "mol-polecat-work"
 }
 
-// hasScheduledLabel checks if a bead has the gt:queued label.
-func hasScheduledLabel(labels []string) bool {
-	for _, l := range labels {
-		if l == capacity.LabelScheduled {
-			return true
+// areScheduled returns a set of bead IDs that have open sling contexts.
+// Queries HQ only — sling contexts are always created in the town-root DB,
+// so HQ is authoritative. This avoids partial-failure scenarios where a rig
+// dir succeeds but HQ fails, which would silently return incomplete results.
+// On error, fails closed: treats ALL requested beads as scheduled to prevent
+// false stranded detection and duplicate scheduling attempts.
+func areScheduled(beadIDs []string) map[string]bool {
+	result := make(map[string]bool)
+	if len(beadIDs) == 0 {
+		return result
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		// Can't determine town root — fail closed (treat all as scheduled)
+		for _, id := range beadIDs {
+			result[id] = true
+		}
+		return result
+	}
+
+	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	contexts, err := townBeads.ListOpenSlingContexts()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s Warning: could not list sling contexts: %v (treating all as scheduled)\n",
+			style.Dim.Render("⚠"), err)
+		// Fail closed: treat all as scheduled to avoid duplicate scheduling
+		for _, id := range beadIDs {
+			result[id] = true
+		}
+		return result
+	}
+
+	// Build lookup of work bead IDs from open contexts
+	scheduledWorkBeads := make(map[string]bool)
+	for _, ctx := range contexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil {
+			scheduledWorkBeads[fields.WorkBeadID] = true
 		}
 	}
-	return false
+
+	// Filter to just the requested IDs
+	for _, id := range beadIDs {
+		if scheduledWorkBeads[id] {
+			result[id] = true
+		}
+	}
+	return result
+}
+
+// isScheduled checks if a single bead has an open sling context.
+// For batch checks in loops, use areScheduled() instead.
+func isScheduled(beadID string) bool {
+	scheduled := areScheduled([]string{beadID})
+	return scheduled[beadID]
 }
 
 // detectSchedulerIDType determines what kind of ID was passed for scheduling.

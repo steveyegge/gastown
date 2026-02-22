@@ -14,31 +14,30 @@ func TestPlanDispatch(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		maxPol         int
-		batchSize      int
-		activePolecats int
-		readyCount     int
-		wantCount      int
-		wantSkipped    int
-		wantReason     string
+		name              string
+		availableCapacity int
+		batchSize         int
+		readyCount        int
+		wantCount         int
+		wantSkipped       int
+		wantReason        string
 	}{
-		{"no ready beads", 10, 3, 0, 0, 0, 0, "none"},
-		{"at capacity", 5, 3, 5, 10, 0, 10, "capacity"},
-		{"over capacity", 5, 3, 8, 10, 0, 10, "capacity"},
-		{"capacity constrains", 5, 3, 3, 10, 2, 8, "capacity"},
-		{"batch constrains", 10, 3, 0, 10, 3, 7, "batch"},
-		{"ready constrains", 10, 5, 0, 2, 2, 0, "ready"},
-		{"unlimited capacity, batch constrains", 0, 3, 5, 10, 3, 7, "batch"},
-		{"unlimited capacity, ready constrains", 0, 5, 5, 2, 2, 0, "ready"},
-		{"all equal", 3, 3, 0, 3, 3, 0, "batch"},
-		{"single bead", 10, 3, 0, 1, 1, 0, "ready"},
-		{"capacity 1", 5, 3, 4, 10, 1, 9, "capacity"},
+		{"no ready beads", 5, 3, 0, 0, 0, "none"},
+		{"no capacity (negative)", -1, 3, 10, 0, 10, "capacity"},
+		{"no capacity (zero)", 0, 3, 10, 0, 10, "capacity"},
+		{"capacity constrains", 2, 3, 10, 2, 8, "capacity"},
+		{"batch constrains", 10, 3, 10, 3, 7, "batch"},
+		{"ready constrains", 10, 5, 2, 2, 0, "ready"},
+		{"large capacity, batch constrains", 100, 3, 10, 3, 7, "batch"},
+		{"large capacity, ready constrains", 100, 5, 2, 2, 0, "ready"},
+		{"all equal", 3, 3, 3, 3, 0, "batch"},
+		{"single bead", 10, 3, 1, 1, 0, "ready"},
+		{"capacity 1", 1, 3, 10, 1, 9, "capacity"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ready := beads(tt.readyCount)
-			plan := PlanDispatch(tt.maxPol, tt.batchSize, tt.activePolecats, ready)
+			plan := PlanDispatch(tt.availableCapacity, tt.batchSize, ready)
 
 			if len(plan.ToDispatch) != tt.wantCount {
 				t.Errorf("ToDispatch count: got %d, want %d", len(plan.ToDispatch), tt.wantCount)
@@ -56,7 +55,7 @@ func TestPlanDispatch(t *testing.T) {
 func TestFilterCircuitBroken(t *testing.T) {
 	tests := []struct {
 		name        string
-		failures    []int // dispatch_failures per bead
+		failures    []int // dispatch_failures per bead (-1 = nil context)
 		maxFailures int
 		wantKept    int
 		wantRemoved int
@@ -65,7 +64,7 @@ func TestFilterCircuitBroken(t *testing.T) {
 		{"one at threshold", []int{0, 3, 1}, 3, 2, 1},
 		{"one above threshold", []int{0, 5, 1}, 3, 2, 1},
 		{"all broken", []int{3, 4, 5}, 3, 0, 3},
-		{"nil meta passes through", []int{-1, 0, 2}, 3, 3, 0}, // -1 = nil meta
+		{"nil context passes through", []int{-1, 0, 2}, 3, 3, 0},
 		{"empty list", []int{}, 3, 0, 0},
 	}
 	for _, tt := range tests {
@@ -74,7 +73,7 @@ func TestFilterCircuitBroken(t *testing.T) {
 			for i, f := range tt.failures {
 				b := PendingBead{ID: string(rune('a' + i))}
 				if f >= 0 {
-					b.Meta = &SchedulerMetadata{DispatchFailures: f}
+					b.Context = &SlingContextFields{DispatchFailures: f}
 				}
 				beads = append(beads, b)
 			}
@@ -104,10 +103,10 @@ func TestAllReady(t *testing.T) {
 
 func TestBlockerAware(t *testing.T) {
 	beads := []PendingBead{
-		{ID: "a"},
-		{ID: "b"},
-		{ID: "c"},
-		{ID: "d"},
+		{ID: "ctx-a", WorkBeadID: "a"},
+		{ID: "ctx-b", WorkBeadID: "b"},
+		{ID: "ctx-c", WorkBeadID: "c"},
+		{ID: "ctx-d", WorkBeadID: "d"},
 	}
 
 	readyIDs := map[string]bool{"a": true, "c": true}
@@ -117,13 +116,13 @@ func TestBlockerAware(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("BlockerAware should return 2 beads, got %d", len(result))
 	}
-	if result[0].ID != "a" || result[1].ID != "c" {
-		t.Errorf("BlockerAware returned wrong beads: %v, %v", result[0].ID, result[1].ID)
+	if result[0].WorkBeadID != "a" || result[1].WorkBeadID != "c" {
+		t.Errorf("BlockerAware returned wrong beads: %v, %v", result[0].WorkBeadID, result[1].WorkBeadID)
 	}
 }
 
 func TestBlockerAware_EmptySet(t *testing.T) {
-	beads := []PendingBead{{ID: "a"}, {ID: "b"}}
+	beads := []PendingBead{{ID: "a", WorkBeadID: "wa"}, {ID: "b", WorkBeadID: "wb"}}
 	readyIDs := map[string]bool{}
 	filter := BlockerAware(readyIDs)
 	result := filter(beads)
@@ -162,8 +161,9 @@ func TestNoRetryPolicy(t *testing.T) {
 	}
 }
 
-func TestReconstructDispatchParams(t *testing.T) {
-	meta := &SchedulerMetadata{
+func TestReconstructFromContext(t *testing.T) {
+	ctx := &SlingContextFields{
+		WorkBeadID:  "bead-123",
 		TargetRig:   "prod-rig",
 		Formula:     "mol-polecat-work",
 		Args:        "do stuff",
@@ -177,7 +177,7 @@ func TestReconstructDispatchParams(t *testing.T) {
 		HookRawBead: true,
 	}
 
-	params := ReconstructDispatchParams(meta, "bead-123")
+	params := ReconstructFromContext(ctx)
 
 	if params.BeadID != "bead-123" {
 		t.Errorf("BeadID: got %q, want %q", params.BeadID, "bead-123")
@@ -217,13 +217,14 @@ func TestReconstructDispatchParams(t *testing.T) {
 	}
 }
 
-func TestReconstructDispatchParams_EmptyVars(t *testing.T) {
-	meta := &SchedulerMetadata{
-		TargetRig: "rig1",
+func TestReconstructFromContext_EmptyVars(t *testing.T) {
+	ctx := &SlingContextFields{
+		WorkBeadID: "bead-1",
+		TargetRig:  "rig1",
 	}
-	params := ReconstructDispatchParams(meta, "bead-1")
+	params := ReconstructFromContext(ctx)
 	if params.Vars != nil {
-		t.Errorf("Vars should be nil when meta.Vars is empty, got %v", params.Vars)
+		t.Errorf("Vars should be nil when ctx.Vars is empty, got %v", params.Vars)
 	}
 }
 

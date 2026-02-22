@@ -33,7 +33,7 @@ The `scheduler.max_polecats` config value controls dispatch behavior:
 |-------|------|----------|
 | `-1` (default) | Direct dispatch | `gt sling` dispatches immediately, near-zero overhead |
 | `0` | Direct dispatch | Same as `-1` — `gt sling` dispatches immediately |
-| `N > 0` | Deferred dispatch | `gt sling` labels/metadata only, daemon dispatches |
+| `N > 0` | Deferred dispatch | `gt sling` creates sling context bead, daemon dispatches |
 
 No per-invocation flag needed. The same `gt sling` command adapts automatically.
 
@@ -56,9 +56,9 @@ No per-invocation flag needed. The same `gt sling` command adapts automatically.
 
 ```bash
 gt config set scheduler.max_polecats 5
-gt sling gt-abc gastown              # Defers: adds gt:queued label + metadata
+gt sling gt-abc gastown              # Defers: creates sling context bead
 gt scheduler status                  # "Queued: 1 total, 1 ready"
-gt scheduler run                     # Dispatches -> spawns polecat -> strips metadata
+gt scheduler run                     # Dispatches -> spawns polecat -> closes context
 ```
 
 ---
@@ -82,53 +82,92 @@ Daemon heartbeat (every 3 min)
          +- Check paused state
          +- Load config (max_polecats, batch_size)
          +- Count active polecats (tmux)
-         +- Query ready scheduled beads (bd ready --label gt:queued)
-         +- Dispatch loop (up to min(capacity, batch, ready))
-         |    +- dispatchSingleBead -> executeSling
+         +- Query sling contexts (bd list --label=gt:sling-context)
+         +- Join with bd ready to determine unblocked beads
+         +- DispatchCycle.Run() — plan + execute + report
+         |    +- PlanDispatch(availableCapacity, batchSize, ready)
+         |    +- For each planned bead: Execute → OnSuccess/OnFailure
          +- Wake rig agents (witness, refinery)
          +- Save dispatch state
 ```
 
 ---
 
+## Sling Context Beads
+
+Scheduling state is stored on **separate ephemeral beads** called sling contexts. The work bead is never modified by the scheduler.
+
+Each sling context bead:
+- Is created via `bd create --ephemeral` with label `gt:sling-context`
+- Has a `tracks` dependency pointing to the work bead
+- Stores all scheduling parameters as JSON in its description
+- Is closed when dispatch succeeds, the bead is cleared, or the circuit breaker trips
+
+### Why Separate Beads?
+
+The previous approach stored scheduling metadata on the work bead's description (delimited block) and used labels (`gt:queued`) as state signals. This required:
+- Two-step writes with rollback (metadata then label)
+- Description sanitization to avoid delimiter collision
+- Three-step dispatch cleanup (strip metadata + swap labels + retry)
+- Custom key-value format/parse/strip functions (~250 lines)
+
+Sling context beads eliminate all of this:
+- **Single atomic create** — `bd create --ephemeral` is one operation
+- **JSON format** — `json.Marshal`/`json.Unmarshal` replaces custom parsers
+- **Work bead pristine** — no description mutation, no label manipulation
+- **Clean lifecycle** — open context = scheduled, closed context = done
+
+### Context Fields (JSON)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | int | Schema version (currently 1) |
+| `work_bead_id` | string | The actual work bead being scheduled |
+| `target_rig` | string | Destination rig name |
+| `formula` | string | Formula to apply at dispatch (e.g., `mol-polecat-work`) |
+| `args` | string | Natural language instructions for executor |
+| `vars` | string | Newline-separated formula variables (`key=value`) |
+| `enqueued_at` | RFC3339 | Timestamp of schedule |
+| `merge` | string | Merge strategy: `direct`, `mr`, `local` |
+| `convoy` | string | Convoy bead ID (set after auto-convoy creation) |
+| `base_branch` | string | Override base branch for polecat worktree |
+| `no_merge` | bool | Skip merge queue on completion |
+| `account` | string | Claude Code account handle |
+| `agent` | string | Agent/runtime override |
+| `hook_raw_bead` | bool | Hook without default formula |
+| `owned` | bool | Caller-managed convoy lifecycle |
+| `mode` | string | Execution mode: `ralph` (fresh context per step) |
+| `dispatch_failures` | int | Consecutive failure count (circuit breaker) |
+| `last_failure` | string | Most recent dispatch error message |
+
+---
+
 ## Bead State Machine
 
-A scheduled bead transitions through these states, tracked by labels and metadata:
+A sling context transitions through these states:
 
 ```
-                +----------------------------------------------+
-                |                                              |
-                v                                              |
-          +----------+    dispatch ok     +--------------+    |
- schedule |          | -----------------> |              |    |
---------> |  QUEUED  |                    |  DISPATCHED  |    |
-          |          |                    |              |    |
-          +----------+                    +--------------+    |
-                |                                              |
-                +-- 3 failures --> +----------------+          |
-                |                  | CIRCUIT-BROKEN |          |
-                |                  +----------------+          |
-                |                                              |
-                +-- no metadata -> +--------------+            |
-                |                  |  QUARANTINED |            |
-                |                  +--------------+            |
-                |                                              |
-                +-- gt scheduler clear -> +-----------+        |
-                                          | UNQUEUED  | ------+
-                                          +-----------+  (re-schedulable)
+                                  +------------------+
+                                  |                  |
+                                  v                  |
+          +----------+    dispatch ok     +--------+ |
+ schedule |  CONTEXT  | ----------------> | CLOSED | |
+--------> |   OPEN    |                   | (done) | |
+          +----------+                    +--------+ |
+                |                                    |
+                +-- 3 failures --> CLOSED (circuit-broken)
+                |
+                +-- gt scheduler clear --> CLOSED (cleared)
 ```
 
-### Label Transitions
+| State | Representation | Trigger |
+|-------|---------------|---------|
+| **SCHEDULED** | Open sling context bead | `scheduleBead()` |
+| **DISPATCHED** | Closed sling context (reason: "dispatched") | `dispatchSingleBead()` success |
+| **CIRCUIT-BROKEN** | Closed sling context (reason: "circuit-broken") | `dispatch_failures >= 3` |
+| **CLEARED** | Closed sling context (reason: "cleared") | `gt scheduler clear` |
 
-| State | Label(s) | Metadata | Trigger |
-|-------|----------|----------|---------|
-| **QUEUED** | `gt:queued` | Present (delimiter block) | `scheduleBead()` |
-| **DISPATCHED** | `gt:queue-dispatched` | Stripped | `dispatchSingleBead()` success |
-| **CIRCUIT-BROKEN** | `gt:dispatch-failed` | Retained (failure count) | `dispatch_failures >= 3` |
-| **QUARANTINED** | `gt:dispatch-failed` | Missing | Missing metadata at dispatch |
-| **UNQUEUED** | (label removed) | Stripped | `gt scheduler clear` |
-
-Key invariant: `gt:queued` is always removed on terminal transitions. Dispatched beads get `gt:queue-dispatched` as an audit trail so reopened beads aren't mistaken for actively scheduled ones.
+Key invariant: the work bead is **never modified** by the scheduler. All state lives on the sling context bead.
 
 ---
 
@@ -184,119 +223,73 @@ func (d *Daemon) dispatchScheduledWork() {
 
 1. **Validate** bead exists, rig exists
 2. **Cross-rig guard** — reject if bead prefix doesn't match target rig (unless `--force`)
-3. **Idempotency** — skip if bead is already open with `gt:queued` label
+3. **Idempotency** — skip if an open sling context already exists for this work bead
 4. **Status guard** — reject if bead is hooked/in_progress (unless `--force`)
 5. **Validate formula** — verify formula exists (lightweight, no side effects)
 6. **Cook formula** — `bd cook` to catch bad protos before daemon dispatch
-7. **Build metadata** — `NewMetadata(rigName)` with all sling params
-8. **Strip existing metadata** — ensure idempotent re-schedule (no duplicates)
-9. **Write metadata** — `bd update --description=...` (inert without label)
-10. **Add label** — `bd update --add-label=gt:queued` (atomic activation)
-11. **Auto-convoy** — create convoy if not already tracked (unless `--no-convoy`)
-12. **Log event** — feed event for dashboard visibility
+7. **Build context fields** — `SlingContextFields` struct with all sling params
+8. **Create sling context** — `bd create --ephemeral` + `bd dep add --type=tracks` (atomic)
+9. **Auto-convoy** — create convoy if not already tracked, store convoy ID in context fields
+10. **Log event** — feed event for dashboard visibility
 
-**Metadata-before-label ordering** is critical: metadata without the label is inert (dispatch queries `bd ready --label gt:queued`, so unlabeled beads are invisible). The label is the atomic "commit." This prevents a race where dispatch fires between label-add and metadata-write, sees `meta==nil`, and irreversibly quarantines the bead.
-
-**Rollback on failure**: if the label-add fails, the metadata write is rolled back to the original description.
+The create is a **single atomic operation** — no two-step write, no rollback needed.
 
 ---
 
 ## Dispatch Engine
 
-`dispatchScheduledWork()` is the main dispatch loop:
+### DispatchCycle
+
+The dispatch loop is a generic orchestrator with injected callbacks:
+
+```go
+type DispatchCycle struct {
+    AvailableCapacity func() (int, error)        // Free dispatch slots (0=unlimited)
+    QueryPending      func() ([]PendingBead, error) // Work items eligible for dispatch
+    Execute           func(PendingBead) error     // Dispatch a single item
+    OnSuccess         func(PendingBead) error     // Post-dispatch cleanup
+    OnFailure         func(PendingBead, error)    // Failure handling
+    BatchSize         int
+    SpawnDelay        time.Duration
+}
+```
+
+`Run()` internally calls `PlanDispatch(availableCapacity, batchSize, ready)` to determine what to dispatch, then executes each planned item with callbacks.
+
+### Dispatch Flow
 
 ```
-flock(scheduler-dispatch.lock)
+DispatchCycle.Run()
     |
-    +- Load SchedulerState -> check paused?
+    +- AvailableCapacity() → capacity = maxPolecats - activePolecats
     |
-    +- Load SchedulerConfig (or defaults)
+    +- QueryPending() → getReadySlingContexts():
+    |    +- bd list --label=gt:sling-context --status=open (all rig DBs)
+    |    +- Parse SlingContextFields from each context bead description
+    |    +- bd ready --json --limit=0 (all rig DBs) → readyWorkIDs set
+    |    +- Filter: context beads whose WorkBeadID is in readyWorkIDs
+    |    +- Skip circuit-broken (dispatch_failures >= threshold)
     |
-    +- Check max_polecats > 0 (deferred mode only)
+    +- PlanDispatch(capacity, batchSize, ready)
+    |    +- Returns DispatchPlan{ToDispatch, Skipped, Reason}
     |
-    +- Determine limits:
-    |    maxPolecats = config (or override)
-    |    batchSize   = config (or override)
-    |    spawnDelay  = config
-    |
-    +- Count active polecats (tmux session scan)
-    |
-    +- Compute capacity = maxPolecats - activePolecats
-    |
-    +- Query ready beads:
-    |    bd ready --label gt:queued --json --limit=0
-    |    (scans all rig DBs, deduplicates, skips circuit-broken)
-    |
-    +- PlanDispatch(maxPolecats, batchSize, activePolecats, readyBeads)
-    |
-    +- Dispatch loop:
-    |    for each planned bead {
-    |        dispatchSingleBead(bead, townRoot, actor)
-    |        sleep(spawnDelay)   // between spawns
-    |    }
-    |
-    +- Wake rig agents (witness, refinery) for each rig with dispatches
-    |
-    +- Save dispatch state (fresh read to avoid clobbering concurrent pause)
+    +- For each planned bead:
+         +- Execute: ReconstructFromContext(fields) → executeSling(params)
+         +- OnSuccess: CloseSlingContext(contextID, "dispatched")
+         +- OnFailure: increment dispatch_failures, update context, maybe close
+         +- sleep(SpawnDelay)
 ```
 
 ### dispatchSingleBead
 
-Each bead dispatch:
+Dramatically simplified — context fields are already parsed:
 
-1. **Parse metadata** from bead description
-2. **Validate metadata** — quarantine immediately if missing (no circuit breaker waste)
-3. **Reconstruct SlingParams** from metadata fields:
-   - `FormulaName`, `Args`, `Vars`, `Merge`, `BaseBranch`, `Account`, `Agent`, etc.
-   - `FormulaFailFatal=true` (rollback + requeue on failure)
-   - `NoConvoy=true` (convoy already created at schedule time)
-   - `NoBoot=true` (avoid lock contention in daemon dispatch loop)
-   - `CallerContext="scheduler-dispatch"`
-4. **Call `executeSling(params)`** — unified sling path (same as batch sling)
-5. **On failure**: record failure in metadata, increment `dispatch_failures` counter
-6. **On success**: strip scheduler metadata, swap `gt:queued` -> `gt:queue-dispatched`
-7. **Log event** — feed event with polecat name
+1. `ReconstructFromContext(b.Context)` → `DispatchParams` with `BeadID = b.WorkBeadID`
+2. Call `executeSling(params)` — that's it
 
----
-
-## Scheduler Metadata Format
-
-Scheduler parameters are stored in the bead's description, delimited by a namespaced marker to avoid collision with user content.
-
-### Delimiter
-
-```
----gt:scheduler:v1---
-```
-
-Everything after the delimiter until the next delimiter (or end of description) is parsed as `key: value` lines.
-
-### Field Reference
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `target_rig` | string | Destination rig name |
-| `formula` | string | Formula to apply at dispatch (e.g., `mol-polecat-work`) |
-| `args` | string | Natural language instructions for executor |
-| `var` | repeated | Formula variables, one `var: key=value` per line |
-| `enqueued_at` | RFC3339 | Timestamp of schedule |
-| `merge` | string | Merge strategy: `direct`, `mr`, `local` |
-| `convoy` | string | Convoy bead ID (set after auto-convoy creation) |
-| `base_branch` | string | Override base branch for polecat worktree |
-| `no_merge` | bool | Skip merge queue on completion |
-| `account` | string | Claude Code account handle |
-| `agent` | string | Agent/runtime override |
-| `hook_raw_bead` | bool | Hook without default formula |
-| `owned` | bool | Caller-managed convoy lifecycle |
-| `mode` | string | Execution mode: `ralph` (fresh context per step) |
-| `dispatch_failures` | int | Consecutive failure count (circuit breaker) |
-| `last_failure` | string | Most recent dispatch error message |
-
-### Lifecycle
-
-1. **Write** at schedule — `FormatMetadata()` appends block to description
-2. **Read** at dispatch — `ParseMetadata()` extracts fields for `SlingParams`
-3. **Strip** after dispatch — `StripMetadata()` removes the block on success
+Post-dispatch cleanup is handled by callbacks:
+- **OnSuccess**: `CloseSlingContext(b.ID, "dispatched")`
+- **OnFailure**: increment `dispatch_failures`, update context bead, close if circuit-broken
 
 ---
 
@@ -325,9 +318,9 @@ gt config set scheduler.spawn_delay 3s
 toDispatch = min(capacity, batchSize, readyCount)
 
 where:
-  capacity   = maxPolecats - activePolecats
+  capacity   = maxPolecats - activePolecats (positive = that many slots, 0 or negative = no capacity)
   batchSize  = scheduler.batch_size (default 1)
-  readyCount = number of beads from bd ready --label gt:queued
+  readyCount = sling contexts whose work bead appears in bd ready
 ```
 
 ### Active Polecat Counting
@@ -343,8 +336,8 @@ The circuit breaker prevents permanently-failing beads from causing infinite ret
 | Property | Value |
 |----------|-------|
 | Threshold | `maxDispatchFailures = 3` |
-| Counter | `dispatch_failures` field in scheduler metadata |
-| Break action | Add `gt:dispatch-failed` label, remove `gt:queued` |
+| Counter | `dispatch_failures` field in sling context JSON |
+| Break action | Close sling context (reason: "circuit-broken") |
 | Reset | No automatic reset (manual intervention required) |
 
 ### Flow
@@ -352,20 +345,13 @@ The circuit breaker prevents permanently-failing beads from causing infinite ret
 ```
 Dispatch attempt fails
     |
-    +- Increment dispatch_failures in metadata
+    +- Increment dispatch_failures in context bead
     +- Store last_failure error message
     |
     +- dispatch_failures >= 3?
-         +- Yes -> add gt:dispatch-failed, remove gt:queued
-         |         (bead exits scheduler permanently)
+         +- Yes -> CloseSlingContext(contextID, "circuit-broken")
+         |         (context bead closed, work bead untouched)
          +- No  -> bead stays scheduled, retried next cycle
-```
-
-Beads without metadata are **quarantined immediately** (no circuit breaker retries) since they can never succeed:
-
-```
-dispatchSingleBead: meta == nil || meta.TargetRig == ""
-    +- add gt:dispatch-failed, remove gt:queued (instant quarantine)
 ```
 
 ---
@@ -385,11 +371,11 @@ Write is atomic (temp file + rename) to prevent corruption from concurrent write
 
 ### Clear
 
-Removes beads from the scheduler by stripping the `gt:queued` label:
+Closes sling context beads, removing beads from the scheduler:
 
 ```bash
-gt scheduler clear              # Remove ALL beads from scheduler
-gt scheduler clear --bead gt-abc  # Remove specific bead
+gt scheduler clear              # Close ALL sling contexts
+gt scheduler clear --bead gt-abc  # Close context for specific bead
 ```
 
 ### Status / List
@@ -402,7 +388,7 @@ gt scheduler list           # Beads grouped by target rig, with blocked indicato
 gt scheduler list --json    # JSON output
 ```
 
-`list` reconciles `bd list --label=gt:queued` (all queued) with `bd ready --label=gt:queued` (unblocked) to mark blocked beads.
+`list` reconciles sling contexts (all scheduled) with `bd ready` (unblocked work beads) to mark blocked beads.
 
 ---
 
@@ -419,7 +405,7 @@ Convoys and the scheduler are complementary but distinct mechanisms. Convoys tra
 
 **Direct dispatch** (max_polecats=-1): `gt sling <convoy-id>` calls `runConvoySlingByID()` which dispatches all open tracked issues immediately via `executeSling()`. Each issue's rig is auto-resolved from its bead ID prefix. No capacity control — all issues dispatch at once.
 
-**Deferred dispatch** (max_polecats>0): `gt sling <convoy-id>` calls `runConvoyScheduleByID()` which schedules all open tracked issues. The daemon dispatches incrementally via `gt scheduler run`, respecting `max_polecats` and `batch_size`. Use this for large batches where simultaneous dispatch would exhaust resources.
+**Deferred dispatch** (max_polecats>0): `gt sling <convoy-id>` calls `runConvoyScheduleByID()` which schedules all open tracked issues (creating sling context beads). The daemon dispatches incrementally via `gt scheduler run`, respecting `max_polecats` and `batch_size`. Use this for large batches where simultaneous dispatch would exhaust resources.
 
 ### When to Use Which
 
@@ -437,13 +423,12 @@ Convoys and the scheduler are complementary but distinct mechanisms. Convoys tra
 
 | Property | Mechanism |
 |----------|-----------|
-| **Schedule idempotency** | Skip if bead is open with `gt:queued` label |
+| **Schedule idempotency** | Skip if open sling context already exists for work bead |
+| **Work bead pristine** | Scheduler never modifies work bead description or labels |
 | **Cross-rig guard** | Reject if bead prefix doesn't match target rig (unless `--force`) |
 | **Dispatch serialization** | `flock(scheduler-dispatch.lock)` prevents double-dispatch |
-| **Metadata-before-label** | Metadata is inert without label; label is atomic activation |
-| **Post-dispatch label swap** | `gt:queued` -> `gt:queue-dispatched` prevents reopened beads from re-entering scheduler |
+| **Atomic scheduling** | Single `bd create --ephemeral` — no two-step write, no rollback |
 | **Formula pre-cooking** | `bd cook` at schedule time catches bad protos before daemon dispatch loop |
-| **Rollback on label failure** | Metadata stripped if label-add fails (no orphaned metadata) |
 | **Fresh state on save** | Dispatch re-reads state before saving to avoid clobbering concurrent pause |
 
 ---
@@ -453,14 +438,16 @@ Convoys and the scheduler are complementary but distinct mechanisms. Convoys tra
 | Path | Purpose |
 |------|---------|
 | `internal/scheduler/capacity/config.go` | `SchedulerConfig` type, defaults, `IsDeferred()` |
-| `internal/scheduler/capacity/metadata.go` | Metadata format/parse/strip |
-| `internal/scheduler/capacity/pipeline.go` | `PlanDispatch()` pure function |
+| `internal/scheduler/capacity/pipeline.go` | `PendingBead`, `SlingContextFields`, `PlanDispatch()`, `ReconstructFromContext()` |
+| `internal/scheduler/capacity/dispatch.go` | `DispatchCycle` type — generic dispatch orchestrator |
+| `internal/scheduler/capacity/state.go` | `SchedulerState` persistence |
+| `internal/beads/beads_sling_context.go` | Sling context CRUD (create, find, list, close, update) |
 | `internal/cmd/sling.go` | CLI entry, config-driven routing |
-| `internal/cmd/sling_schedule.go` | `scheduleBead()`, `shouldDeferDispatch()` |
+| `internal/cmd/sling_schedule.go` | `scheduleBead()`, `shouldDeferDispatch()`, `isScheduled()` |
 | `internal/cmd/scheduler.go` | `gt scheduler` command tree |
 | `internal/cmd/scheduler_epic.go` | Epic schedule/sling handlers |
 | `internal/cmd/scheduler_convoy.go` | Convoy schedule/sling handlers |
-| `internal/cmd/capacity_dispatch.go` | `dispatchScheduledWork()`, dispatch loop |
+| `internal/cmd/capacity_dispatch.go` | `dispatchScheduledWork()`, dispatch callback wiring |
 | `internal/daemon/daemon.go` | Heartbeat integration (`gt scheduler run`) |
 
 ---
