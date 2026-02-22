@@ -108,8 +108,17 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	}
 
 	if (info.Status == "pinned" || info.Status == "hooked") && !params.Force {
-		result.ErrMsg = "already " + info.Status
-		return result, fmt.Errorf("already %s (use --force to re-sling)", info.Status)
+		// Auto-force when hooked agent's session is confirmed dead (gt-npzy).
+		// Mirrors the dead-agent detection in runSling (sling.go) so that
+		// programmatic dispatch also handles stale hooks from nuked polecats.
+		if info.Status == "hooked" && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
+			fmt.Printf("  %s Hooked agent %s has no active session, auto-forcing dispatch...\n",
+				style.Warning.Render("⚠"), info.Assignee)
+			params.Force = true
+		} else {
+			result.ErrMsg = "already " + info.Status
+			return result, fmt.Errorf("already %s (use --force to re-sling)", info.Status)
+		}
 	}
 
 	// Guard against slinging deferred beads (gt-1326mw).

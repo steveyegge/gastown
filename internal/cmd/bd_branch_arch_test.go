@@ -441,7 +441,7 @@ var expectedBeadsNewCounts = map[string]int{
 	"mq_submit.go":                 1,
 	"notify.go":                    1,
 	"nudge.go":                     1,
-	"polecat.go":                   2,
+	"polecat.go":                   3,
 	"polecat_helpers.go":           2,
 	"polecat_identity.go":          6,
 	"polecat_spawn.go":             2,
