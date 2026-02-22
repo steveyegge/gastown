@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -224,6 +225,9 @@ func TestReapIdleDogs_SkipsRecentlyActiveDogs(t *testing.T) {
 }
 
 func TestReapIdleDogs_RemovesLongIdleDogsWhenPoolOversized(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires tmux")
+	}
 	townRoot := t.TempDir()
 	d := testHandlerDaemon(t, townRoot)
 
@@ -290,6 +294,9 @@ func TestReapIdleDogs_DoesNotRemoveWhenPoolAtMaxSize(t *testing.T) {
 }
 
 func TestReapIdleDogs_StopsRemovingAtMaxPoolSize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires tmux")
+	}
 	townRoot := t.TempDir()
 	d := testHandlerDaemon(t, townRoot)
 
@@ -317,6 +324,9 @@ func TestReapIdleDogs_StopsRemovingAtMaxPoolSize(t *testing.T) {
 }
 
 func TestReapIdleDogs_MixedStates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires tmux")
+	}
 	townRoot := t.TempDir()
 	d := testHandlerDaemon(t, townRoot)
 

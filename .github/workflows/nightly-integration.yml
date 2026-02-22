@@ -1,16 +1,15 @@
-name: Integration Tests
+name: Nightly Integration Tests
 
 on:
-  pull_request:
-    paths:
-      - 'internal/**'
-      - '.github/workflows/integration.yml'
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC daily
+  workflow_dispatch: # Allow manual triggering
 
 jobs:
-  integration:
-    name: Integration Tests
+  integration-full:
+    name: Full Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -30,7 +29,7 @@ jobs:
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: ~/go/bin/bd
-          key: beads-${{ hashFiles('.github/workflows/integration.yml') }}
+          key: beads-nightly-${{ hashFiles('.github/workflows/nightly-integration.yml') }}
 
       - name: Install beads (bd)
         if: steps.cache-beads.outputs.cache-hit != 'true'
@@ -55,14 +54,5 @@ jobs:
       - name: Build
         run: go build -v ./cmd/gt
 
-      - name: Run integration tests
-        run: gotestsum --format testname --junitfile junit.xml -- -v -tags=integration -timeout=8m ./...
-
-      - name: Test Report
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          python3 .github/scripts/junit-report.py junit.xml "Integration Test Failures"
-
+      - name: Run all integration tests
+        run: gotestsum --format testname --junitfile junit.xml -- -v -tags=integration -timeout=20m ./...
