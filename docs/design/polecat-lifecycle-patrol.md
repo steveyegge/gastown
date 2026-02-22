@@ -550,7 +550,7 @@ Daemon heartbeat tick
 SessionManager.Start()
     │
     ├── Creates new tmux session in existing worktree
-    ├── Injects env vars (GT_POLECAT, GT_RIG, BD_BRANCH)
+    ├── Injects env vars (GT_POLECAT, GT_RIG)
     ├── SessionStart hook fires: gt prime --hook
     └── New session discovers next step via bd mol current
 ```
