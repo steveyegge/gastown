@@ -20,6 +20,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	convoyops "github.com/steveyegge/gastown/internal/convoy"
+	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
@@ -1326,6 +1327,21 @@ func isReadyIssue(t trackedIssueInfo) bool {
 		return false
 	}
 
+	// Queued beads are not stranded — they're waiting for dispatch capacity.
+	// Dispatched beads are suppressed unconditionally. There is a timing window
+	// between dispatch (label swap) and assignee being set (polecat session start)
+	// where the bead has gt:queue-dispatched but no assignee. Filtering only when
+	// Assignee != "" would cause false stranded alerts during this window.
+	// If a dispatched bead needs to be re-queued, use `gt scheduler clear`.
+	for _, l := range t.Labels {
+		if l == capacity.LabelScheduled {
+			return false
+		}
+		if l == "gt:queue-dispatched" {
+			return false
+		}
+	}
+
 	// Open issues with no assignee are trivially ready
 	if t.Status == "open" && t.Assignee == "" {
 		return true
@@ -1941,10 +1957,11 @@ type trackedIssueInfo struct {
 	Status    string `json:"status"`
 	Type      string `json:"dependency_type"`
 	IssueType string `json:"issue_type"`
-	Blocked   bool   `json:"blocked,omitempty"`    // True if issue currently has blockers
-	Assignee  string `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
-	Worker    string `json:"worker,omitempty"`     // Worker currently assigned (e.g., gastown/nux)
-	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
+	Blocked   bool     `json:"blocked,omitempty"`    // True if issue currently has blockers
+	Assignee  string   `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
+	Labels    []string `json:"labels,omitempty"`     // Bead labels (propagated from trackedDependency)
+	Worker    string   `json:"worker,omitempty"`     // Worker currently assigned (e.g., gastown/nux)
+	WorkerAge string   `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
 // trackedDependency is dep-list data enriched with fresh issue details.
@@ -1971,6 +1988,13 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 	if dep.IssueType == "" {
 		dep.IssueType = details.IssueType
 	}
+	// Always refresh labels unconditionally — bd dep list may return stale
+	// labels from dependency records, but bd show returns current bead labels.
+	// This ensures isReadyIssue sees accurate queue labels (gt:queued,
+	// gt:queue-dispatched) for cross-rig beads. Assigning even when fresh
+	// labels are empty clears stale queue labels that would otherwise
+	// suppress stranded issue detection.
+	dep.Labels = details.Labels
 }
 
 // getTrackedIssues uses bd dep list to get issues tracked by a convoy.
@@ -2033,6 +2057,7 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 			IssueType: dep.IssueType,
 			Blocked:   dep.Blocked,
 			Assignee:  dep.Assignee,
+			Labels:    dep.Labels,
 		}
 
 		// Add worker info if available
@@ -2058,6 +2083,7 @@ type issueDetailsJSON struct {
 	Status         string            `json:"status"`
 	IssueType      string            `json:"issue_type"`
 	Assignee       string            `json:"assignee"`
+	Labels         []string          `json:"labels"`
 	BlockedBy      []string          `json:"blocked_by"`
 	BlockedByCount int               `json:"blocked_by_count"`
 	Dependencies   []issueDependency `json:"dependencies"`
@@ -2070,6 +2096,7 @@ func (issue issueDetailsJSON) toIssueDetails() *issueDetails {
 		Status:         issue.Status,
 		IssueType:      issue.IssueType,
 		Assignee:       issue.Assignee,
+		Labels:         issue.Labels,
 		BlockedBy:      issue.BlockedBy,
 		BlockedByCount: issue.BlockedByCount,
 		Dependencies:   issue.Dependencies,
@@ -2122,6 +2149,7 @@ type issueDetails struct {
 	Status         string
 	IssueType      string
 	Assignee       string
+	Labels         []string
 	BlockedBy      []string
 	BlockedByCount int
 	Dependencies   []issueDependency

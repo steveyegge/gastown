@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -603,11 +606,16 @@ Supported keys:
                               completion (true/false, default: false)
   cli_theme                   CLI color scheme ("dark", "light", "auto")
   default_agent               Default agent preset name
+  scheduler.max_polecats      Dispatch mode: -1 = direct (default), N > 0 = deferred
+  scheduler.batch_size        Beads per heartbeat (default: 1)
+  scheduler.spawn_delay       Delay between spawns (default: 0s)
 
 Examples:
   gt config set convoy.notify_on_complete true
   gt config set cli_theme dark
-  gt config set default_agent claude`,
+  gt config set default_agent claude
+  gt config set scheduler.max_polecats 5
+  gt config set scheduler.max_polecats -1`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -623,10 +631,14 @@ Supported keys:
                               completion (true/false, default: false)
   cli_theme                   CLI color scheme
   default_agent               Default agent preset name
+  scheduler.max_polecats      Dispatch mode (-1 = direct, N > 0 = deferred)
+  scheduler.batch_size        Beads per heartbeat
+  scheduler.spawn_delay       Delay between spawns
 
 Examples:
   gt config get convoy.notify_on_complete
-  gt config get cli_theme`,
+  gt config get cli_theme
+  gt config get scheduler.max_polecats`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConfigGet,
 }
@@ -668,8 +680,42 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	case "default_agent":
 		townSettings.DefaultAgent = value
 
+	case "scheduler.max_polecats":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w (expected integer)", key, err)
+		}
+		if n < -1 {
+			return fmt.Errorf("invalid value for %s: must be >= -1 (-1 = direct dispatch, 0 = direct dispatch, N > 0 = deferred)", key)
+		}
+		if townSettings.Scheduler == nil {
+			townSettings.Scheduler = capacity.DefaultSchedulerConfig()
+		}
+		townSettings.Scheduler.MaxPolecats = &n
+
+	case "scheduler.batch_size":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return fmt.Errorf("invalid value for %s: expected positive integer", key)
+		}
+		if townSettings.Scheduler == nil {
+			townSettings.Scheduler = capacity.DefaultSchedulerConfig()
+		}
+		townSettings.Scheduler.BatchSize = &n
+
+	case "scheduler.spawn_delay":
+		// Validate it parses as a duration
+		_, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w (expected Go duration, e.g. 2s, 500ms)", key, err)
+		}
+		if townSettings.Scheduler == nil {
+			townSettings.Scheduler = capacity.DefaultSchedulerConfig()
+		}
+		townSettings.Scheduler.SpawnDelay = value
+
 	default:
-		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent", key)
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay", key)
 	}
 
 	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
@@ -715,8 +761,29 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 			value = "claude"
 		}
 
+	case "scheduler.max_polecats":
+		scfg := townSettings.Scheduler
+		if scfg == nil {
+			scfg = capacity.DefaultSchedulerConfig()
+		}
+		value = strconv.Itoa(scfg.GetMaxPolecats())
+
+	case "scheduler.batch_size":
+		scfg := townSettings.Scheduler
+		if scfg == nil {
+			scfg = capacity.DefaultSchedulerConfig()
+		}
+		value = strconv.Itoa(scfg.GetBatchSize())
+
+	case "scheduler.spawn_delay":
+		scfg := townSettings.Scheduler
+		if scfg == nil {
+			scfg = capacity.DefaultSchedulerConfig()
+		}
+		value = scfg.GetSpawnDelay().String()
+
 	default:
-		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent", key)
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay", key)
 	}
 
 	fmt.Println(value)

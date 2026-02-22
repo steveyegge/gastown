@@ -68,6 +68,11 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Scheduler events
+	TypeSchedulerEnqueue        = "scheduler_enqueue"         // Bead scheduled for deferred dispatch
+	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler
+	TypeSchedulerDispatchFailed = "scheduler_dispatch_failed" // Bead dispatch failed (requeued)
 )
 
 // EventsFile is the name of the raw events log.
@@ -335,4 +340,30 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 		p["cwd"] = cwd
 	}
 	return p
+}
+
+// SchedulerEnqueuePayload creates a payload for scheduler enqueue events.
+func SchedulerEnqueuePayload(beadID, rig string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead": beadID,
+		"rig":  rig,
+	}
+}
+
+// SchedulerDispatchPayload creates a payload for scheduler dispatch events.
+func SchedulerDispatchPayload(beadID, rig, polecat string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead":    beadID,
+		"rig":     rig,
+		"polecat": polecat,
+	}
+}
+
+// SchedulerDispatchFailedPayload creates a payload for scheduler dispatch failure events.
+func SchedulerDispatchFailedPayload(beadID, rig, errMsg string) map[string]interface{} {
+	return map[string]interface{}{
+		"bead":  beadID,
+		"rig":   rig,
+		"error": errMsg,
+	}
 }
