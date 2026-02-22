@@ -138,7 +138,6 @@ func runSlingFormula(args []string) error {
 	if err := BdCmd("cook", formulaName).
 		Dir(formulaWorkDir).
 		WithGTRoot(townRoot).
-		OnMain().
 		Run(); err != nil {
 		rollbackSpawned("")
 		return fmt.Errorf("cooking formula: %w", err)
@@ -156,7 +155,6 @@ func runSlingFormula(args []string) error {
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		OnMain().
 		Output()
 	if err != nil {
 		rollbackSpawned("")

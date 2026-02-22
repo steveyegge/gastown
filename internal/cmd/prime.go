@@ -341,7 +341,7 @@ func runPrimeExternalTools(cwd string) {
 func runBdPrime(workDir string) {
 	cmd := exec.Command("bd", "prime")
 	cmd.Dir = workDir
-	cmd.Env = beads.StripBdBranch(os.Environ())
+	cmd.Env = os.Environ()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -422,16 +422,15 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 		return nil
 	}
 
-	b := beads.New(ctx.WorkDir).OnMain()
-
+	b := beads.New(ctx.WorkDir)
 	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 	agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
 	if agentBeadID != "" {
 		agentBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBeadID, ctx.WorkDir)
-		ab := beads.New(agentBeadDir).OnMain()
+		ab := beads.New(agentBeadDir)
 		if agentBead, err := ab.Show(agentBeadID); err == nil && agentBead != nil && agentBead.HookBead != "" {
 			hookBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBead.HookBead, ctx.WorkDir)
-			hb := beads.New(hookBeadDir).OnMain()
+			hb := beads.New(hookBeadDir)
 			if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
 				(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
 				return hookBead
@@ -587,7 +586,7 @@ func buildRalphPromptFromMolecule(attachment *beads.AttachmentFields) string {
 func outputBeadPreview(hookedBead *beads.Issue) {
 	fmt.Println("**Bead details:**")
 	cmd := exec.Command("bd", "show", hookedBead.ID)
-	cmd.Env = beads.StripBdBranch(os.Environ())
+	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -782,7 +781,7 @@ func checkPendingEscalations(ctx RoleContext) {
 	// Query for open escalations using bd list with tag filter
 	cmd := exec.Command("bd", "list", "--status=open", "--tag=escalation", "--json")
 	cmd.Dir = ctx.WorkDir
-	cmd.Env = beads.StripBdBranch(os.Environ())
+	cmd.Env = os.Environ()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

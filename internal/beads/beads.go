@@ -172,8 +172,7 @@ type SyncStatus struct {
 type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
-	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
-	onMain   bool   // If true, strip BD_BRANCH so reads target main (not polecat branch)
+	isolated bool // If true, suppress inherited beads env vars (for test isolation)
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -197,39 +196,6 @@ func NewIsolated(workDir string) *Beads {
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
-}
-
-// OnMain returns a shallow copy of the Beads wrapper with onMain set to true.
-// When onMain is true, BD_BRANCH is stripped from the environment so that
-// bd read operations target the main branch instead of a polecat's write-isolation
-// branch. This fixes #1796: polecats couldn't find hooked work because
-// findAgentWork() was reading from the polecat's empty branch instead of main.
-//
-// Use OnMain() for READ operations that need main-branch data (work discovery,
-// hook lookups). Do NOT use it for write operations that need branch isolation.
-func (b *Beads) OnMain() *Beads {
-	return &Beads{
-		workDir:  b.workDir,
-		beadsDir: b.beadsDir,
-		isolated: b.isolated,
-		onMain:   true,
-		// townRoot and townRootOnce are not copied (sync.Once is not copyable).
-		// The new instance will re-derive townRoot lazily on first call if needed.
-	}
-}
-
-// StripBdBranch removes BD_BRANCH from an environment variable slice.
-// Use this for direct exec.Command("bd", ...) calls that need to read from
-// the main branch instead of a polecat's write-isolation branch.
-// This is the exec.Command counterpart to OnMain() (which is for Beads wrapper paths).
-func StripBdBranch(environ []string) []string {
-	filtered := make([]string, 0, len(environ))
-	for _, env := range environ {
-		if !strings.HasPrefix(env, "BD_BRANCH=") {
-			filtered = append(filtered, env)
-		}
-	}
-	return filtered
 }
 
 // getActor returns the BD_ACTOR value for this context.
@@ -390,28 +356,20 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 
 // buildRunEnv builds the environment for run() calls.
 // In isolated mode: strips all beads-related env vars for test isolation.
-// In onMain mode: strips BD_BRANCH so reads target main branch.
 // Otherwise: passes through the current environment.
 func (b *Beads) buildRunEnv() []string {
 	if b.isolated {
 		return filterBeadsEnv(os.Environ())
-	}
-	if b.onMain {
-		return StripBdBranch(os.Environ())
 	}
 	return os.Environ()
 }
 
 // buildRoutingEnv builds the environment for runWithRouting() calls.
 // Always strips BEADS_DIR so bd uses native routing.
-// In isolated mode: also strips BD_ACTOR, BD_BRANCH, BEADS_*, GT_ROOT, HOME.
-// In onMain mode: also strips BD_BRANCH for main-branch reads.
+// In isolated mode: also strips BD_ACTOR, BEADS_*, GT_ROOT, HOME.
 func (b *Beads) buildRoutingEnv() []string {
 	if b.isolated {
 		return filterBeadsEnv(os.Environ())
-	}
-	if b.onMain {
-		return stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
 	}
 	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
@@ -439,8 +397,7 @@ func filterBeadsEnv(environ []string) []string {
 }
 
 // stripEnvPrefixes removes entries matching any of the given prefixes from an
-// environment variable slice. Used by runWithRouting to strip BEADS_DIR and
-// optionally BD_BRANCH without duplicating the StripBdBranch filtering logic.
+// environment variable slice. Used by runWithRouting to strip BEADS_DIR.
 func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {

@@ -5,8 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // bdCmd is a builder for constructing bd exec.Command calls.
@@ -17,7 +15,6 @@ type bdCmd struct {
 	dir        string
 	env        []string
 	stderr     io.Writer
-	onMain     bool
 	autoCommit bool
 	gtRoot     string
 }
@@ -28,7 +25,6 @@ type bdCmd struct {
 // Example:
 //
 //	err := cmd.BdCmd("show", beadID, "--json").
-//	    OnMain().
 //	    Dir(workDir).
 //	    Run()
 func BdCmd(args ...string) *bdCmd {
@@ -44,14 +40,6 @@ func BdCmd(args ...string) *bdCmd {
 // needs to see the changes from previous calls.
 func (b *bdCmd) WithAutoCommit() *bdCmd {
 	b.autoCommit = true
-	return b
-}
-
-// OnMain removes BD_BRANCH from the environment so the command
-// targets the main branch instead of a polecat's write-isolation branch.
-// This aligns with the beads.Beads.OnMain() API for the same operation.
-func (b *bdCmd) OnMain() *bdCmd {
-	b.onMain = true
 	return b
 }
 
@@ -92,11 +80,6 @@ func filterEnvKey(env []string, key string) []string {
 // buildEnv constructs the final environment slice based on configured options.
 func (b *bdCmd) buildEnv() []string {
 	env := b.env
-
-	// Strip BD_BRANCH if requested (for reading from main branch)
-	if b.onMain {
-		env = beads.StripBdBranch(env)
-	}
 
 	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls.
 	// Filter existing entries first — glibc getenv() returns the first match,

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func TestBdCmd_Build(t *testing.T) {
@@ -58,16 +56,6 @@ func TestBdCmd_Build(t *testing.T) {
 			},
 		},
 		{
-			name: "with OnMain",
-			setup: func() *bdCmd {
-				return BdCmd("show", "id").OnMain()
-			},
-			wantArgs: []string{"bd", "show", "id"},
-			wantEnv: map[string]string{
-				"BD_BRANCH": "", // Should be stripped
-			},
-		},
-		{
 			name: "chained configuration",
 			setup: func() *bdCmd {
 				return BdCmd("mol", "wisp", "formula").
@@ -107,13 +95,6 @@ func TestBdCmd_Build(t *testing.T) {
 			// Verify environment variables
 			envMap := parseEnv(cmd.Env)
 			for key, wantVal := range tt.wantEnv {
-				if key == "BD_BRANCH" {
-					// Special case: BD_BRANCH should be absent when stripped
-					if _, exists := envMap[key]; exists && tt.wantEnv[key] == "" {
-						t.Errorf("BD_BRANCH should be stripped from env but found: %s", envMap[key])
-					}
-					continue
-				}
 				if gotVal, ok := envMap[key]; !ok {
 					t.Errorf("Env %q not found, want %q", key, wantVal)
 				} else if gotVal != wantVal {
@@ -124,43 +105,10 @@ func TestBdCmd_Build(t *testing.T) {
 	}
 }
 
-func TestBdCmd_OnMain(t *testing.T) {
-	// Create an environment with BD_BRANCH set
-	baseEnv := append(os.Environ(), "BD_BRANCH=test-branch", "OTHER_VAR=value")
-
-	bdc := &bdCmd{
-		args:   []string{"show", "id"},
-		env:    baseEnv,
-		stderr: os.Stderr,
-	}
-
-	// Verify BD_BRANCH is present initially
-	envBefore := parseEnv(bdc.env)
-	if _, ok := envBefore["BD_BRANCH"]; !ok {
-		t.Fatal("BD_BRANCH should be in base environment for test setup")
-	}
-
-	// Apply OnMain
-	bdc.OnMain()
-	cmd := bdc.Build()
-	envAfter := parseEnv(cmd.Env)
-
-	// Verify BD_BRANCH is removed
-	if _, ok := envAfter["BD_BRANCH"]; ok {
-		t.Error("BD_BRANCH should be stripped from environment")
-	}
-
-	// Verify OTHER_VAR is preserved
-	if envAfter["OTHER_VAR"] != "value" {
-		t.Error("OTHER_VAR should be preserved")
-	}
-}
-
 func TestBdCmd_Stderr(t *testing.T) {
 	var stderrBuf bytes.Buffer
 
 	bdc := BdCmd("show", "nonexistent-id").
-		OnMain().
 		Stderr(&stderrBuf)
 
 	cmd := bdc.Build()
@@ -224,9 +172,6 @@ func TestBdCmd_Chaining(t *testing.T) {
 	if bdc.WithAutoCommit() != bdc {
 		t.Error("WithAutoCommit() should return receiver for chaining")
 	}
-	if bdc.OnMain() != bdc {
-		t.Error("OnMain() should return receiver for chaining")
-	}
 	if bdc.WithGTRoot("/test") != bdc {
 		t.Error("WithGTRoot() should return receiver for chaining")
 	}
@@ -251,9 +196,6 @@ func parseEnv(env []string) map[string]string {
 	}
 	return m
 }
-
-// Ensure beads.StripBdBranch is used correctly (compile-time check)
-var _ = beads.StripBdBranch
 
 // ===================================================================
 // Corner case tests for bdCmd environment handling
@@ -289,107 +231,6 @@ func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("found %d BD_DOLT_AUTO_COMMIT entries, want exactly 1 (dedup must remove old entry)", count)
-	}
-}
-
-func TestBdCmd_OnMain_LeavesAutoCommit(t *testing.T) {
-	// Test that OnMain() only strips BD_BRANCH, leaves BD_DOLT_AUTO_COMMIT intact
-	baseEnv := []string{"BD_BRANCH=test-branch", "BD_DOLT_AUTO_COMMIT=on", "OTHER=value"}
-
-	bdc := &bdCmd{
-		args:   []string{"show", "id"},
-		env:    baseEnv,
-		stderr: os.Stderr,
-	}
-	bdc.OnMain()
-	cmd := bdc.Build()
-	envMap := parseEnv(cmd.Env)
-
-	// BD_BRANCH should be gone
-	if _, exists := envMap["BD_BRANCH"]; exists {
-		t.Error("BD_BRANCH should be stripped from environment")
-	}
-
-	// BD_DOLT_AUTO_COMMIT should still be there
-	if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
-		t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'on' (should not be stripped)", envMap["BD_DOLT_AUTO_COMMIT"])
-	}
-
-	// OTHER should still be there
-	if envMap["OTHER"] != "value" {
-		t.Error("OTHER should be preserved")
-	}
-}
-
-func TestBdCmd_Chain_AutoCommitThenOnMain(t *testing.T) {
-	// Test chaining: WithAutoCommit().OnMain()
-	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
-
-	bdc := BdCmd("show", "id").
-		WithAutoCommit().
-		OnMain()
-
-	// Override env for this test
-	bdc.env = baseEnv
-	cmd := bdc.Build()
-	envMap := parseEnv(cmd.Env)
-
-	// BD_BRANCH should be stripped
-	if _, exists := envMap["BD_BRANCH"]; exists {
-		t.Error("BD_BRANCH should be stripped")
-	}
-
-	// BD_DOLT_AUTO_COMMIT should be present
-	if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
-		t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'on'", envMap["BD_DOLT_AUTO_COMMIT"])
-	}
-}
-
-func TestBdCmd_Chain_OnMainThenAutoCommit(t *testing.T) {
-	// Test chaining: OnMain().WithAutoCommit() (order shouldn't matter for result)
-	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
-
-	bdc := BdCmd("show", "id").
-		OnMain().
-		WithAutoCommit()
-
-	// Override env for this test
-	bdc.env = baseEnv
-	cmd := bdc.Build()
-	envMap := parseEnv(cmd.Env)
-
-	// BD_BRANCH should be stripped
-	if _, exists := envMap["BD_BRANCH"]; exists {
-		t.Error("BD_BRANCH should be stripped")
-	}
-
-	// BD_DOLT_AUTO_COMMIT should be present
-	if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
-		t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'on'", envMap["BD_DOLT_AUTO_COMMIT"])
-	}
-}
-
-func TestBdCmd_OnMain_NoBdBranch(t *testing.T) {
-	// Test OnMain when BD_BRANCH is not in env - should be no-op
-	baseEnv := []string{"PATH=/usr/bin", "OTHER=value"}
-
-	bdc := &bdCmd{
-		args:   []string{"show", "id"},
-		env:    baseEnv,
-		stderr: os.Stderr,
-	}
-	bdc.OnMain()
-	cmd := bdc.Build()
-	envMap := parseEnv(cmd.Env)
-
-	// OTHER should still be there
-	if envMap["OTHER"] != "value" {
-		t.Error("OTHER should be preserved when BD_BRANCH not present")
-	}
-
-	// PATH should still be there
-	if envMap["PATH"] != "/usr/bin" {
-		t.Error("PATH should be preserved when BD_BRANCH not present")
 	}
 }
 
@@ -450,89 +291,21 @@ func TestBdCmd_EmptyGTRoot_Skipped(t *testing.T) {
 	}
 }
 
-func TestBdCmd_ReadOperations_OnMain(t *testing.T) {
-	// Verify that read operations (show, list, etc.) strip BD_BRANCH
-	testCases := []struct {
-		name     string
-		bdc      *bdCmd
-		expected bool // true if BD_BRANCH should be stripped
-	}{
-		{
-			name:     "show with OnMain",
-			bdc:      BdCmd("show", "id").OnMain(),
-			expected: true,
-		},
-		{
-			name:     "list without OnMain",
-			bdc:      BdCmd("list"),
-			expected: false,
-		},
-		{
-			name:     "update without OnMain (write op)",
-			bdc:      BdCmd("update", "id", "--status=open"),
-			expected: false,
-		},
-	}
-
-	baseEnv := []string{"BD_BRANCH=test-branch"}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Inject test env
-			testBdc := tc.bdc
-			testBdc.env = baseEnv
-
-			cmd := testBdc.Build()
-			envMap := parseEnv(cmd.Env)
-
-			_, hasBranch := envMap["BD_BRANCH"]
-			if tc.expected && hasBranch {
-				t.Error("BD_BRANCH should be stripped for this operation")
-			}
-			if !tc.expected && !hasBranch {
-				t.Error("BD_BRANCH should be preserved for this operation")
-			}
-		})
-	}
-}
-
-func TestBdCmd_WriteOperations_KeepBdBranch(t *testing.T) {
-	// Verify that write operations do NOT strip BD_BRANCH (they need branch isolation)
-	bdc := BdCmd("update", "id", "--status=hooked")
-
-	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
-	bdc.env = baseEnv
-
-	cmd := bdc.Build()
-	envMap := parseEnv(cmd.Env)
-
-	// BD_BRANCH should be preserved for write operations
-	if envMap["BD_BRANCH"] != "test-branch" {
-		t.Errorf("BD_BRANCH = %q, want 'test-branch' (should be preserved for writes)", envMap["BD_BRANCH"])
-	}
-}
-
 func TestBdCmd_AllCombinations(t *testing.T) {
 	// Test all possible option combinations
-	baseEnv := []string{"BD_BRANCH=test-branch", "BD_DOLT_AUTO_COMMIT=off", "PATH=/usr/bin"}
+	baseEnv := []string{"BD_DOLT_AUTO_COMMIT=off", "PATH=/usr/bin"}
 
 	tests := []struct {
 		name             string
-		onMain           bool
 		autoCommit       bool
 		gtRoot           string
-		wantBdBranch     bool // true = should exist
 		wantAutoCommitOn bool
 		wantGTRoot       bool
 	}{
-		{"none", false, false, "", true, false, false},
-		{"onmain only", true, false, "", false, false, false},
-		{"autocommit only", false, true, "", true, true, false},
-		{"gtroot only", false, false, "/town", true, false, true},
-		{"onmain+autocommit", true, true, "", false, true, false},
-		{"onmain+gtroot", true, false, "/town", false, false, true},
-		{"autocommit+gtroot", false, true, "/town", true, true, true},
-		{"all three", true, true, "/town", false, true, true},
+		{"none", false, "", false, false},
+		{"autocommit only", true, "", true, false},
+		{"gtroot only", false, "/town", false, true},
+		{"autocommit+gtroot", true, "/town", true, true},
 	}
 
 	for _, tt := range tests {
@@ -543,9 +316,6 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 				stderr: os.Stderr,
 			}
 
-			if tt.onMain {
-				bdc.onMain = true
-			}
 			if tt.autoCommit {
 				bdc.autoCommit = true
 			}
@@ -553,15 +323,6 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 
 			cmd := bdc.Build()
 			envMap := parseEnv(cmd.Env)
-
-			// Check BD_BRANCH
-			_, hasBdBranch := envMap["BD_BRANCH"]
-			if tt.wantBdBranch && !hasBdBranch {
-				t.Error("BD_BRANCH should be present")
-			}
-			if !tt.wantBdBranch && hasBdBranch {
-				t.Error("BD_BRANCH should be stripped")
-			}
 
 			// Check BD_DOLT_AUTO_COMMIT
 			if tt.wantAutoCommitOn {
@@ -619,7 +380,7 @@ func TestBdCmd_ConcurrentBuild(t *testing.T) {
 
 func TestBdCmd_EnvImmutability(t *testing.T) {
 	// Test that buildEnv doesn't mutate the original b.env
-	baseEnv := []string{"BD_BRANCH=test-branch", "PATH=/usr/bin"}
+	baseEnv := []string{"PATH=/usr/bin", "HOME=/home/user"}
 	originalLen := len(baseEnv)
 
 	bdc := &bdCmd{
@@ -627,7 +388,7 @@ func TestBdCmd_EnvImmutability(t *testing.T) {
 		env:    baseEnv,
 		stderr: os.Stderr,
 	}
-	bdc.WithAutoCommit().WithGTRoot("/town").OnMain()
+	bdc.WithAutoCommit().WithGTRoot("/town")
 
 	// Call buildEnv multiple times
 	_ = bdc.buildEnv()
@@ -636,18 +397,6 @@ func TestBdCmd_EnvImmutability(t *testing.T) {
 	// Original env should be unchanged
 	if len(baseEnv) != originalLen {
 		t.Errorf("Original env was mutated: length %d, expected %d", len(baseEnv), originalLen)
-	}
-
-	// BD_BRANCH should still be in baseEnv
-	found := false
-	for _, e := range baseEnv {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("BD_BRANCH was removed from original env (should be immutable)")
 	}
 }
 

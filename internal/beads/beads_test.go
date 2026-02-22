@@ -2461,117 +2461,6 @@ func TestIsAgentBead(t *testing.T) {
 	}
 }
 
-// TestStripBdBranch verifies BD_BRANCH stripping with table-driven cases.
-func TestStripBdBranch(t *testing.T) {
-	tests := []struct {
-		name    string
-		environ []string
-		want    []string
-	}{
-		{
-			name:    "strips BD_BRANCH",
-			environ: []string{"PATH=/usr/bin", "BD_BRANCH=polecat-Toast-12345", "HOME=/home/user"},
-			want:    []string{"PATH=/usr/bin", "HOME=/home/user"},
-		},
-		{
-			name:    "preserves other BD_ vars",
-			environ: []string{"BD_ACTOR=gastown/polecats/Toast", "BD_BRANCH=polecat-Nux-99999", "BEADS_DIR=/tmp"},
-			want:    []string{"BD_ACTOR=gastown/polecats/Toast", "BEADS_DIR=/tmp"},
-		},
-		{
-			name:    "no BD_BRANCH present",
-			environ: []string{"PATH=/usr/bin", "HOME=/home/user", "BD_ACTOR=mayor"},
-			want:    []string{"PATH=/usr/bin", "HOME=/home/user", "BD_ACTOR=mayor"},
-		},
-		{
-			name:    "empty environ",
-			environ: []string{},
-			want:    []string{},
-		},
-		{
-			name:    "only BD_BRANCH",
-			environ: []string{"BD_BRANCH=some-branch"},
-			want:    []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := StripBdBranch(tt.environ)
-			if len(got) != len(tt.want) {
-				t.Fatalf("StripBdBranch() returned %d items, want %d\n  got:  %v\n  want: %v", len(got), len(tt.want), got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("StripBdBranch()[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
-
-// TestStripBdBranch_PreservesOrder verifies output preserves input ordering.
-func TestStripBdBranch_PreservesOrder(t *testing.T) {
-	environ := []string{
-		"A=1",
-		"BD_BRANCH=polecat-x-123",
-		"B=2",
-		"C=3",
-	}
-	got := StripBdBranch(environ)
-	want := []string{"A=1", "B=2", "C=3"}
-	if len(got) != len(want) {
-		t.Fatalf("len = %d, want %d", len(got), len(want))
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-// TestOnMain_SetsFlag verifies OnMain() returns a copy with onMain=true.
-func TestOnMain_SetsFlag(t *testing.T) {
-	original := New("/some/path")
-	derived := original.OnMain()
-
-	// Derived should have onMain set
-	if !derived.onMain {
-		t.Error("OnMain() copy has onMain=false, want true")
-	}
-	// Original should be unchanged
-	if original.onMain {
-		t.Error("original.onMain was mutated to true")
-	}
-	// Should be different pointers
-	if original == derived {
-		t.Error("OnMain() returned same pointer, want copy")
-	}
-}
-
-// TestOnMain_PreservesFields verifies OnMain() preserves all other fields.
-func TestOnMain_PreservesFields(t *testing.T) {
-	original := &Beads{
-		workDir:  "/work",
-		beadsDir: "/beads",
-		isolated: true,
-	}
-	derived := original.OnMain()
-
-	if derived.workDir != "/work" {
-		t.Errorf("workDir = %q, want /work", derived.workDir)
-	}
-	if derived.beadsDir != "/beads" {
-		t.Errorf("beadsDir = %q, want /beads", derived.beadsDir)
-	}
-	if !derived.isolated {
-		t.Error("isolated = false, want true")
-	}
-	if !derived.onMain {
-		t.Error("onMain = false, want true")
-	}
-}
-
 // TestFilterBeadsEnv_StripsBdBranch verifies BD_BRANCH is now filtered
 // alongside BD_ACTOR, BEADS_*, etc. in isolated/test mode.
 func TestFilterBeadsEnv_StripsBdBranch(t *testing.T) {
@@ -2610,229 +2499,6 @@ func TestFilterBeadsEnv_StripsBdBranch(t *testing.T) {
 	}
 }
 
-// TestOnMain_EnvIntegration verifies that StripBdBranch works with os.Environ().
-func TestOnMain_EnvIntegration(t *testing.T) {
-	t.Setenv("BD_BRANCH", "polecat-integration-test-99999")
-
-	env := StripBdBranch(os.Environ())
-
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Errorf("StripBdBranch(os.Environ()) still contains BD_BRANCH: %s", e)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Negative tests (30% target per Jerry testing-standards.md scenario distribution)
-// ---------------------------------------------------------------------------
-
-// TestStripBdBranch_NilInput verifies StripBdBranch does not panic on nil input.
-func TestStripBdBranch_NilInput(t *testing.T) {
-	got := StripBdBranch(nil)
-	if got == nil {
-		t.Fatal("StripBdBranch(nil) returned nil, want empty slice")
-	}
-	if len(got) != 0 {
-		t.Errorf("StripBdBranch(nil) returned %d items, want 0", len(got))
-	}
-}
-
-// TestDefaultBeads_RetainsBdBranch verifies that a default Beads (no OnMain)
-// does NOT strip BD_BRANCH from the environment. This is the critical regression
-// guard: writes NEED BD_BRANCH for polecat branch isolation.
-func TestDefaultBeads_RetainsBdBranch(t *testing.T) {
-	t.Setenv("BD_BRANCH", "polecat-regression-guard-12345")
-
-	b := New("/some/path")
-	if b.onMain {
-		t.Fatal("New() should have onMain=false by default")
-	}
-	if b.isolated {
-		t.Fatal("New() should have isolated=false by default")
-	}
-
-	// Verify the default Beads would use os.Environ() unmodified (line 303-304 of beads.go).
-	// We can't call run() without bd installed, but we can verify the flags
-	// that control environment selection are both false.
-	env := os.Environ()
-	hasBdBranch := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			hasBdBranch = true
-			break
-		}
-	}
-	if !hasBdBranch {
-		t.Fatal("t.Setenv did not set BD_BRANCH in os.Environ()")
-	}
-}
-
-// TestOnMain_DoesNotMutateOriginal verifies calling OnMain() leaves the
-// original Beads completely unchanged — no side effects on the source.
-func TestOnMain_DoesNotMutateOriginal(t *testing.T) {
-	original := New("/work")
-	if original.onMain {
-		t.Fatal("precondition: original.onMain should be false")
-	}
-
-	_ = original.OnMain()
-
-	if original.onMain {
-		t.Error("OnMain() mutated the original Beads struct")
-	}
-	if original.isolated {
-		t.Error("OnMain() set isolated on the original")
-	}
-}
-
-// TestOnMain_Idempotent verifies calling OnMain() on an already-onMain Beads
-// works correctly and doesn't introduce inconsistent state.
-func TestOnMain_Idempotent(t *testing.T) {
-	first := New("/work").OnMain()
-	second := first.OnMain()
-
-	if !second.onMain {
-		t.Error("double OnMain() should still have onMain=true")
-	}
-	if first == second {
-		t.Error("OnMain() should return a new pointer, not the same one")
-	}
-	if second.workDir != "/work" {
-		t.Errorf("double OnMain() workDir = %q, want /work", second.workDir)
-	}
-}
-
-// TestNewIsolated_OnMain_IsolatedTakesPrecedence verifies that when both
-// isolated and onMain are set, isolated wins (filterBeadsEnv is a superset
-// that strips BD_BRANCH alongside BD_ACTOR, BEADS_*, etc.).
-func TestNewIsolated_OnMain_IsolatedTakesPrecedence(t *testing.T) {
-	b := NewIsolated("/work").OnMain()
-
-	if !b.isolated {
-		t.Error("isolated should be true")
-	}
-	if !b.onMain {
-		t.Error("onMain should be true")
-	}
-
-	// When both are set, isolated path runs (line 299 of beads.go).
-	// filterBeadsEnv strips BD_BRANCH as a superset. Verify this.
-	t.Setenv("BD_BRANCH", "polecat-both-flags-99999")
-	env := filterBeadsEnv(os.Environ())
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Error("filterBeadsEnv should strip BD_BRANCH (isolated superset of onMain)")
-		}
-	}
-}
-
-// TestOnMain_TownRootReDerivation verifies that OnMain() copies don't share
-// the sync.Once state — the derived copy will lazily re-derive townRoot.
-func TestOnMain_TownRootReDerivation(t *testing.T) {
-	original := &Beads{
-		workDir:  "/work",
-		townRoot: "/cached/town/root",
-	}
-	// Simulate that townRootOnce has already fired on the original.
-	original.townRootOnce.Do(func() {})
-
-	derived := original.OnMain()
-
-	// derived should NOT have the cached townRoot (it was not copied).
-	if derived.townRoot != "" {
-		t.Errorf("OnMain() copy should not inherit townRoot, got %q", derived.townRoot)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Edge case tests (10% target per Jerry testing-standards.md)
-// ---------------------------------------------------------------------------
-
-// TestStripBdBranch_EmptyValue verifies BD_BRANCH= (empty value) is still stripped.
-func TestStripBdBranch_EmptyValue(t *testing.T) {
-	environ := []string{"PATH=/usr/bin", "BD_BRANCH=", "HOME=/home/user"}
-	got := StripBdBranch(environ)
-	want := []string{"PATH=/usr/bin", "HOME=/home/user"}
-
-	if len(got) != len(want) {
-		t.Fatalf("StripBdBranch returned %d items, want %d: %v", len(got), len(want), got)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-// TestStripBdBranch_MultipleBdBranch verifies all BD_BRANCH entries are stripped
-// when duplicates exist (shouldn't happen in practice but tests robustness).
-func TestStripBdBranch_MultipleBdBranch(t *testing.T) {
-	environ := []string{
-		"BD_BRANCH=polecat-first-111",
-		"PATH=/usr/bin",
-		"BD_BRANCH=polecat-second-222",
-	}
-	got := StripBdBranch(environ)
-
-	if len(got) != 1 {
-		t.Fatalf("StripBdBranch returned %d items, want 1: %v", len(got), got)
-	}
-	if got[0] != "PATH=/usr/bin" {
-		t.Errorf("got %q, want PATH=/usr/bin", got[0])
-	}
-}
-
-// TestStripBdBranch_PrefixBoundary verifies BD_BRANCH_SUFFIX and BD_BRANCHX
-// are NOT stripped — only exact BD_BRANCH= prefix matches.
-func TestStripBdBranch_PrefixBoundary(t *testing.T) {
-	environ := []string{
-		"BD_BRANCH=polecat-strip-me",
-		"BD_BRANCH_SUFFIX=keep-me",
-		"BD_BRANCHX=also-keep",
-	}
-	got := StripBdBranch(environ)
-
-	if len(got) != 2 {
-		t.Fatalf("StripBdBranch returned %d items, want 2: %v", len(got), got)
-	}
-	if got[0] != "BD_BRANCH_SUFFIX=keep-me" {
-		t.Errorf("[0] = %q, want BD_BRANCH_SUFFIX=keep-me", got[0])
-	}
-	if got[1] != "BD_BRANCHX=also-keep" {
-		t.Errorf("[1] = %q, want BD_BRANCHX=also-keep", got[1])
-	}
-}
-
-// TestStripBdBranch_SpecialCharactersInValue verifies BD_BRANCH with special
-// characters (=, spaces, unicode) in the value is still stripped correctly.
-func TestStripBdBranch_SpecialCharactersInValue(t *testing.T) {
-	tests := []struct {
-		name  string
-		value string
-	}{
-		{"equals in value", "BD_BRANCH=polecat-name=v2-12345"},
-		{"spaces in value", "BD_BRANCH=polecat name with spaces"},
-		{"unicode in value", "BD_BRANCH=polecat-🦡-12345"},
-		{"very long value", "BD_BRANCH=" + strings.Repeat("a", 1000)},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			environ := []string{"PATH=/usr/bin", tt.value, "HOME=/home"}
-			got := StripBdBranch(environ)
-			if len(got) != 2 {
-				t.Fatalf("StripBdBranch returned %d items, want 2: %v", len(got), got)
-			}
-			for _, e := range got {
-				if strings.HasPrefix(e, "BD_BRANCH=") {
-					t.Errorf("BD_BRANCH not stripped: %s", e)
-				}
-			}
-		})
-	}
-}
-
 // TestFilterBeadsEnv_PreservesBdBranchSuffix verifies filterBeadsEnv strips
 // BD_BRANCH= but NOT BD_BRANCH_SUFFIX= — the trailing = in the prefix match
 // prevents false positives on similarly-named vars.
@@ -2855,19 +2521,6 @@ func TestFilterBeadsEnv_PreservesBdBranchSuffix(t *testing.T) {
 	}
 	if !hasSuffix {
 		t.Error("filterBeadsEnv incorrectly stripped BD_BRANCH_SUFFIX")
-	}
-}
-
-// TestOnMain_WithBeadsDir verifies OnMain preserves a custom beadsDir.
-func TestOnMain_WithBeadsDir(t *testing.T) {
-	original := NewWithBeadsDir("/work", "/custom/beads")
-	derived := original.OnMain()
-
-	if derived.beadsDir != "/custom/beads" {
-		t.Errorf("beadsDir = %q, want /custom/beads", derived.beadsDir)
-	}
-	if !derived.onMain {
-		t.Error("onMain should be true on derived")
 	}
 }
 
@@ -2972,65 +2625,9 @@ func TestStripEnvPrefixes_PreservesOrder(t *testing.T) {
 	}
 }
 
-// TestStripEnvPrefixes_MatchesStripBdBranch verifies stripEnvPrefixes("BD_BRANCH=")
-// produces the same result as StripBdBranch — confirming the refactored
-// runWithRouting logic is semantically equivalent.
-func TestStripEnvPrefixes_MatchesStripBdBranch(t *testing.T) {
-	environ := []string{
-		"PATH=/usr/bin",
-		"BD_BRANCH=polecat-equiv-test-123",
-		"BD_ACTOR=gastown/polecats/Test",
-		"HOME=/home/user",
-	}
-
-	fromStrip := StripBdBranch(environ)
-	fromPrefixes := stripEnvPrefixes(environ, "BD_BRANCH=")
-
-	if len(fromStrip) != len(fromPrefixes) {
-		t.Fatalf("length mismatch: StripBdBranch=%d, stripEnvPrefixes=%d",
-			len(fromStrip), len(fromPrefixes))
-	}
-	for i := range fromStrip {
-		if fromStrip[i] != fromPrefixes[i] {
-			t.Errorf("[%d] StripBdBranch=%q, stripEnvPrefixes=%q",
-				i, fromStrip[i], fromPrefixes[i])
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Integration tests — verify env behavior with real os.Environ()
 // ---------------------------------------------------------------------------
-
-// TestOnMain_EnvIntegration_BdBranchAbsent verifies StripBdBranch is a no-op
-// when BD_BRANCH is not set — the returned env should match os.Environ().
-func TestOnMain_EnvIntegration_BdBranchAbsent(t *testing.T) {
-	// Ensure BD_BRANCH is NOT set (t.Setenv with empty unsets it after test).
-	// os.Unsetenv is not needed — just don't set it.
-	origEnv := os.Environ()
-	stripped := StripBdBranch(origEnv)
-
-	// Should be identical length (no BD_BRANCH to strip in CI/local).
-	// However, BD_BRANCH might be set in the parent env, so we just
-	// verify no BD_BRANCH is present in the output.
-	for _, e := range stripped {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Errorf("StripBdBranch output still contains BD_BRANCH: %s", e)
-		}
-	}
-
-	// Length should be origEnv length minus any BD_BRANCH entries.
-	bdBranchCount := 0
-	for _, e := range origEnv {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			bdBranchCount++
-		}
-	}
-	if len(stripped) != len(origEnv)-bdBranchCount {
-		t.Errorf("length mismatch: stripped=%d, orig=%d, bdBranchEntries=%d",
-			len(stripped), len(origEnv), bdBranchCount)
-	}
-}
 
 // TestFilterBeadsEnv_Integration verifies filterBeadsEnv strips all expected
 // vars from a real os.Environ() with multiple beads vars set.
@@ -3049,96 +2646,6 @@ func TestFilterBeadsEnv_Integration(t *testing.T) {
 				t.Errorf("filterBeadsEnv did not strip %s (found: %s)", prefix, e)
 			}
 		}
-	}
-}
-
-// TestStripBdBranch_PreservesAllOtherVars verifies that StripBdBranch does not
-// accidentally remove any non-BD_BRANCH variables from os.Environ().
-func TestStripBdBranch_PreservesAllOtherVars(t *testing.T) {
-	t.Setenv("BD_BRANCH", "polecat-preserve-test-12345")
-	t.Setenv("BD_ACTOR", "gastown/polecats/PreserveTest")
-	t.Setenv("BEADS_DIR", "/tmp/test-beads")
-	t.Setenv("CUSTOM_VAR", "should-survive")
-
-	env := StripBdBranch(os.Environ())
-
-	// BD_BRANCH must be gone
-	for _, e := range env {
-		if strings.HasPrefix(e, "BD_BRANCH=") {
-			t.Errorf("BD_BRANCH not stripped: %s", e)
-		}
-	}
-
-	// All other vars must survive
-	mustSurvive := map[string]bool{
-		"BD_ACTOR":   false,
-		"BEADS_DIR":  false,
-		"CUSTOM_VAR": false,
-	}
-	for _, e := range env {
-		for key := range mustSurvive {
-			if strings.HasPrefix(e, key+"=") {
-				mustSurvive[key] = true
-			}
-		}
-	}
-	for key, found := range mustSurvive {
-		if !found {
-			t.Errorf("StripBdBranch incorrectly removed %s", key)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// System-level test — verify the actual bug scenario end-to-end
-// ---------------------------------------------------------------------------
-
-// TestBdBranch_SystemScenario_EnvIsolation simulates the actual #1796 bug
-// scenario: a polecat has BD_BRANCH set, and we verify that OnMain/StripBdBranch
-// correctly isolate the subprocess environment. Uses a shell echo helper
-// instead of actual bd to verify env propagation.
-func TestBdBranch_SystemScenario_EnvIsolation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping system test in short mode")
-	}
-
-	t.Setenv("BD_BRANCH", "polecat-system-test-12345")
-
-	// Scenario 1: Default exec.Command inherits BD_BRANCH (the bug).
-	cmd := exec.Command("env")
-	cmd.Env = os.Environ()
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("env command failed: %v", err)
-	}
-	if !strings.Contains(string(out), "BD_BRANCH=polecat-system-test-12345") {
-		t.Fatal("precondition failed: default env should contain BD_BRANCH")
-	}
-
-	// Scenario 2: StripBdBranch removes BD_BRANCH from subprocess env (the fix).
-	cmd2 := exec.Command("env")
-	cmd2.Env = StripBdBranch(os.Environ())
-	out2, err := cmd2.Output()
-	if err != nil {
-		t.Fatalf("env command with StripBdBranch failed: %v", err)
-	}
-	if strings.Contains(string(out2), "BD_BRANCH=") {
-		t.Error("StripBdBranch env still contains BD_BRANCH in subprocess")
-	}
-
-	// Scenario 3: StripBdBranch preserves other BD_* vars.
-	t.Setenv("BD_ACTOR", "gastown/polecats/SystemTest")
-	cmd3 := exec.Command("env")
-	cmd3.Env = StripBdBranch(os.Environ())
-	out3, err := cmd3.Output()
-	if err != nil {
-		t.Fatalf("env command failed: %v", err)
-	}
-	if !strings.Contains(string(out3), "BD_ACTOR=gastown/polecats/SystemTest") {
-		t.Error("StripBdBranch incorrectly removed BD_ACTOR from subprocess env")
-	}
-	if strings.Contains(string(out3), "BD_BRANCH=") {
-		t.Error("StripBdBranch did not remove BD_BRANCH from subprocess env")
 	}
 }
 
@@ -3173,18 +2680,11 @@ func TestBdBranch_SystemScenario_FilterBeadsEnvIsolation(t *testing.T) {
 }
 
 // TestBuildRunEnv verifies buildRunEnv() returns the correct environment
-// for each mode: default (passthrough), onMain (strip BD_BRANCH), and
-// isolated (strip all beads vars). Also verifies isolated takes precedence
-// over onMain when both are set.
-//
-// Note: run() calls buildRunEnv() at beads.go:295. This was verified
-// via diff review (commit d1bc6f30) — the inline if/else was replaced
-// with the helper call, preserving identical branching semantics.
+// for each mode: default (passthrough) and isolated (strip all beads vars).
 func TestBuildRunEnv(t *testing.T) {
 	tests := []struct {
 		name     string
 		isolated bool
-		onMain   bool
 		// envVars to inject via t.Setenv
 		envVars map[string]string
 		// mustContain: prefixes that MUST be present in the result
@@ -3193,30 +2693,16 @@ func TestBuildRunEnv(t *testing.T) {
 		mustNotContain []string
 	}{
 		{
-			name:           "default preserves BD_BRANCH",
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123"},
-			mustContain:    []string{"BD_BRANCH="},
-			mustNotContain: nil,
-		},
-		{
-			name:           "onMain strips BD_BRANCH, preserves PATH",
-			onMain:         true,
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "PATH": "/usr/bin"},
+			name:           "default preserves all vars",
+			envVars:        map[string]string{"PATH": "/usr/bin"},
 			mustContain:    []string{"PATH="},
-			mustNotContain: []string{"BD_BRANCH="},
+			mustNotContain: nil,
 		},
 		{
 			name:           "isolated strips all beads vars",
 			isolated:       true,
 			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BD_ACTOR": "test-actor", "BEADS_DIR": "/tmp/beads"},
 			mustNotContain: []string{"BD_BRANCH=", "BD_ACTOR=", "BEADS_DIR="},
-		},
-		{
-			name:           "isolated takes precedence over onMain",
-			isolated:       true,
-			onMain:         true,
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "GT_ROOT": "/tmp/gt"},
-			mustNotContain: []string{"GT_ROOT=", "BD_BRANCH="},
 		},
 	}
 
@@ -3225,7 +2711,7 @@ func TestBuildRunEnv(t *testing.T) {
 			for k, v := range tt.envVars {
 				t.Setenv(k, v)
 			}
-			b := &Beads{workDir: "/tmp", isolated: tt.isolated, onMain: tt.onMain}
+			b := &Beads{workDir: "/tmp", isolated: tt.isolated}
 			env := b.buildRunEnv()
 
 			for _, prefix := range tt.mustContain {
@@ -3252,45 +2738,26 @@ func TestBuildRunEnv(t *testing.T) {
 }
 
 // TestBuildRoutingEnv verifies buildRoutingEnv() returns the correct environment
-// for each mode: default (strip BEADS_DIR only), onMain (strip BEADS_DIR + BD_BRANCH),
-// and isolated (strip all beads vars). Also verifies isolated takes precedence.
-//
-// Note: runWithRouting() calls buildRoutingEnv() at beads.go:327. This was verified
-// via diff review (commit d1bc6f30) — the inline if/else was replaced
-// with the helper call, preserving identical branching semantics.
+// for each mode: default (strip BEADS_DIR only) and isolated (strip all beads vars).
 func TestBuildRoutingEnv(t *testing.T) {
 	tests := []struct {
 		name           string
 		isolated       bool
-		onMain         bool
 		envVars        map[string]string
 		mustContain    []string
 		mustNotContain []string
 	}{
 		{
-			name:           "default strips BEADS_DIR, preserves BD_BRANCH",
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BEADS_DIR": "/tmp/beads"},
-			mustContain:    []string{"BD_BRANCH="},
+			name:           "default strips BEADS_DIR only",
+			envVars:        map[string]string{"BEADS_DIR": "/tmp/beads", "PATH": "/usr/bin"},
+			mustContain:    []string{"PATH="},
 			mustNotContain: []string{"BEADS_DIR="},
-		},
-		{
-			name:           "onMain strips BEADS_DIR and BD_BRANCH",
-			onMain:         true,
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BEADS_DIR": "/tmp/beads", "PATH": "/usr/bin"},
-			mustNotContain: []string{"BEADS_DIR=", "BD_BRANCH="},
 		},
 		{
 			name:           "isolated strips all beads vars",
 			isolated:       true,
 			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "BD_ACTOR": "test-actor", "BEADS_DIR": "/tmp/beads"},
 			mustNotContain: []string{"BD_BRANCH=", "BD_ACTOR=", "BEADS_DIR="},
-		},
-		{
-			name:           "isolated takes precedence over onMain",
-			isolated:       true,
-			onMain:         true,
-			envVars:        map[string]string{"BD_BRANCH": "polecat-test-123", "GT_ROOT": "/tmp/gt"},
-			mustNotContain: []string{"GT_ROOT=", "BD_BRANCH="},
 		},
 	}
 
@@ -3299,7 +2766,7 @@ func TestBuildRoutingEnv(t *testing.T) {
 			for k, v := range tt.envVars {
 				t.Setenv(k, v)
 			}
-			b := &Beads{workDir: "/tmp", isolated: tt.isolated, onMain: tt.onMain}
+			b := &Beads{workDir: "/tmp", isolated: tt.isolated}
 			env := b.buildRoutingEnv()
 
 			for _, prefix := range tt.mustContain {

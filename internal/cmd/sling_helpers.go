@@ -183,7 +183,6 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 func verifyBeadExists(beadID string) error {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
-		OnMain().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -200,7 +199,6 @@ func verifyBeadExists(beadID string) error {
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
-		OnMain().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -243,11 +241,10 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 
 	issue := &beads.Issue{}
 	if logPath == "" {
-		// Read the bead once (strip BD_BRANCH so we read from main)
+		// Read the bead once
 		out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 			Dir(resolveBeadDir(beadID)).
-			OnMain().
-			Stderr(io.Discard).
+				Stderr(io.Discard).
 			Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -668,13 +665,11 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
 	// Step 1: Cook the formula (ensures proto exists)
-	// OnMain: cook reads from main (proto lives there, not on polecat branches).
 	if !skipCook {
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-			OnMain().
-			Run(); err != nil {
+				Run(); err != nil {
 			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
 		}
 	}
@@ -688,10 +683,6 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	formulaVars = ensureFormulaRequiredVars(formulaName, formulaVars)
 
 	// Step 2: Create wisp with feature and issue variables from bead
-	// OnMain: wisp is operational scaffolding that must be written to main,
-	// not a polecat's isolated branch. Without this, step 3 (bond) reads from main
-	// via OnMain but can't find the wisp that was written to a different branch,
-	// causing "not found" errors. Both steps must target the same branch.
 	wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
@@ -701,7 +692,6 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		OnMain().
 		Output()
 	if err != nil {
 		return nil, fmt.Errorf("creating wisp for formula %s: %w", formulaName, err)
@@ -724,7 +714,6 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		OnMain().
 		Output()
 	if err != nil {
 		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
@@ -773,7 +762,6 @@ func bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot string, var
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		OnMain().
 		Output()
 	if err != nil {
 		return "", fmt.Errorf("%w (args: %s)", err, strings.Join(bondArgs, " "))
@@ -864,7 +852,6 @@ func CookFormula(formulaName, workDir, townRoot string) error {
 	return BdCmd("cook", formulaName).
 		Dir(workDir).
 		WithGTRoot(townRoot).
-		OnMain().
 		Run()
 }
 
