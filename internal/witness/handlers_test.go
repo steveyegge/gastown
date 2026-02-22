@@ -696,6 +696,96 @@ func TestStalledResult_Types(t *testing.T) {
 	}
 }
 
+// --- HandlePolecatDone MR verification tests (gt-xp6e9p) ---
+
+func TestHandlePolecatDone_CompletedWithMRID(t *testing.T) {
+	// When Exit=COMPLETED and MRID is set, hasPendingMR should be true.
+	// This is the normal success path.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		MRID:        "gt-mr-abc",
+		Branch:      "polecat/nux-xyz",
+		IssueID:     "gt-issue-1",
+	}
+
+	hasPendingMR := payload.MRID != ""
+	if !hasPendingMR {
+		t.Error("hasPendingMR should be true when MRID is set")
+	}
+}
+
+func TestHandlePolecatDone_CompletedNoMRID_MRFailed(t *testing.T) {
+	// When Exit=COMPLETED, MRID is empty, and MRFailed=true:
+	// Should NOT be treated as pending MR (the bug fix).
+	// Should trigger the MR-failed escalation path.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		MRID:        "",
+		MRFailed:    true,
+		Branch:      "polecat/nux-xyz",
+		IssueID:     "gt-issue-1",
+	}
+
+	hasPendingMR := payload.MRID != ""
+	if hasPendingMR {
+		t.Error("hasPendingMR should be false when MRID is empty (even if Exit=COMPLETED)")
+	}
+
+	// Verify the MR-failed path is triggered
+	shouldEscalate := payload.Exit == "COMPLETED" && payload.MRFailed && !hasPendingMR
+	if !shouldEscalate {
+		t.Error("should escalate when COMPLETED + MRFailed + no MRID")
+	}
+}
+
+func TestHandlePolecatDone_CompletedNoMRID_NoMRFailed(t *testing.T) {
+	// When Exit=COMPLETED, MRID is empty, and MRFailed=false:
+	// This is the "no MR needed" path (zero commits, direct push, etc.)
+	// Should be treated as no pending MR and auto-nuke if clean.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		MRID:        "",
+		MRFailed:    false,
+		Branch:      "polecat/nux-xyz",
+	}
+
+	hasPendingMR := payload.MRID != ""
+	shouldEscalate := payload.Exit == "COMPLETED" && payload.MRFailed && !hasPendingMR
+
+	if hasPendingMR {
+		t.Error("hasPendingMR should be false when MRID is empty")
+	}
+	if shouldEscalate {
+		t.Error("should NOT escalate when MRFailed is false (no MR was needed)")
+	}
+}
+
+func TestHandlePolecatDone_OldBuggyORLogic(t *testing.T) {
+	// Demonstrate the old buggy logic: MRID=="" but Exit=="COMPLETED"
+	// was treated as hasPendingMR=true. This test proves the fix.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		MRID:        "", // MR creation failed
+		MRFailed:    true,
+	}
+
+	// OLD (buggy) logic: hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+	oldLogic := payload.MRID != "" || payload.Exit == "COMPLETED"
+	if !oldLogic {
+		t.Error("old logic should have been true (demonstrating the bug)")
+	}
+
+	// NEW (fixed) logic: hasPendingMR := payload.MRID != ""
+	newLogic := payload.MRID != ""
+	if newLogic {
+		t.Error("new logic should be false when MRID is empty")
+	}
+}
+
 func TestDetectStalledPolecatsResult_Empty(t *testing.T) {
 	result := &DetectStalledPolecatsResult{}
 

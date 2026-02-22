@@ -86,6 +86,51 @@ func TestParsePolecatDone_MinimalBody(t *testing.T) {
 	}
 }
 
+func TestParsePolecatDone_MRFailed(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+Branch: polecat/nux-abcd1234
+MRFailed: true
+Errors: MR bead creation failed: dolt lock timeout`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.Exit != "COMPLETED" {
+		t.Errorf("Exit = %q, want %q", payload.Exit, "COMPLETED")
+	}
+	if payload.MRID != "" {
+		t.Errorf("MRID = %q, want empty", payload.MRID)
+	}
+	if !payload.MRFailed {
+		t.Error("MRFailed = false, want true")
+	}
+}
+
+func TestParsePolecatDone_MRFailedNotSet(t *testing.T) {
+	// When MRFailed is not in the body, it should default to false
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+MR: gt-mr-xyz
+Branch: feature-branch`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.MRFailed {
+		t.Error("MRFailed = true, want false when not set in body")
+	}
+}
+
 func TestParsePolecatDone_InvalidSubject(t *testing.T) {
 	_, err := ParsePolecatDone("Invalid subject", "body")
 	if err == nil {

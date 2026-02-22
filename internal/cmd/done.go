@@ -360,6 +360,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
+	var mrFailed bool // True when MR bead creation was attempted but failed
 	var pushFailed bool
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
@@ -771,6 +772,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.
 				// Push succeeded so branch is on remote, but MR bead failed.
+				// Set mrFailed flag so the witness knows MR creation was attempted
+				// but failed (vs cases where no MR was needed at all).
+				mrFailed = true
 				errMsg := fmt.Sprintf("MR bead creation failed: %v", err)
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nBranch is pushed but MR bead not created. Witness will be notified.", errMsg)
@@ -886,6 +890,9 @@ afterDoltMerge:
 		if convoyInfo.MergeStrategy != "" {
 			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
 		}
+	}
+	if mrFailed {
+		bodyLines = append(bodyLines, "MRFailed: true")
 	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))

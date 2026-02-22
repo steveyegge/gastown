@@ -58,6 +58,7 @@ type PolecatDonePayload struct {
 	MRID        string
 	Branch      string
 	Gate        string // Gate ID when Exit is PHASE_COMPLETE
+	MRFailed    bool   // True when MR bead creation was attempted but failed
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -162,6 +163,8 @@ func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 			payload.Gate = strings.TrimSpace(strings.TrimPrefix(line, "Gate:"))
 		} else if strings.HasPrefix(line, "Branch:") {
 			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		} else if strings.HasPrefix(line, "MRFailed:") {
+			payload.MRFailed = strings.TrimSpace(strings.TrimPrefix(line, "MRFailed:")) == "true"
 		}
 	}
 

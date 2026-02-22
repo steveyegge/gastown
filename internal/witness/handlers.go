@@ -96,10 +96,21 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+	// FIX (gt-xp6e9p): Only treat as pending MR when MRID is explicitly set.
+	// Previously this used OR logic: MRID != "" || Exit == "COMPLETED", which
+	// caused the witness to send MERGE_READY even when MR bead creation failed
+	// silently in done.go. The refinery would find no MR bead and the branch
+	// would be orphaned on origin.
+	hasPendingMR := payload.MRID != ""
 	if hasPendingMR {
 		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
 	}
+
+	// Exit is COMPLETED but no MRID — check if MR creation was attempted but failed
+	if payload.Exit == "COMPLETED" && payload.MRFailed {
+		return handlePolecatDoneMRFailed(workDir, rigName, payload, router, result)
+	}
+
 	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
 }
 
@@ -123,6 +134,69 @@ func handlePolecatDonePendingMR(workDir, rigName string, payload *PolecatDonePay
 	result.Handled = true
 	result.WispCreated = wispID
 	result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, MERGE_READY sent to refinery)", payload.PolecatName, payload.MRID)
+	return result
+}
+
+// handlePolecatDoneMRFailed handles a POLECAT_DONE where Exit is COMPLETED but
+// MR bead creation failed. The branch is pushed to origin but no MR bead exists,
+// so the refinery has nothing to process. This function creates a cleanup wisp
+// and escalates to the deacon for recovery (create MR bead or manually merge).
+// Critically, it does NOT send MERGE_READY — that was the bug this fixes (gt-xp6e9p).
+func handlePolecatDoneMRFailed(workDir, rigName string, payload *PolecatDonePayload, router *mail.Router, result *HandlerResult) *HandlerResult {
+	wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
+	if err != nil {
+		result.Error = fmt.Errorf("creating cleanup wisp for MR-failed polecat: %w", err)
+		return result
+	}
+
+	if err := UpdateCleanupWispState(workDir, wispID, "mr-failed"); err != nil {
+		result.Error = fmt.Errorf("updating wisp state: %w", err)
+	}
+
+	// Escalate to deacon — branch is pushed but MR bead is missing.
+	// Deacon should either create the MR bead and trigger refinery,
+	// or manually merge the branch.
+	if router != nil {
+		escalationMsg := &mail.Message{
+			From:     fmt.Sprintf("%s/witness", rigName),
+			To:       "deacon/",
+			Subject:  fmt.Sprintf("MR_BEAD_MISSING %s", payload.PolecatName),
+			Priority: mail.PriorityUrgent,
+			Body: fmt.Sprintf(`Polecat %s completed work but MR bead creation failed.
+Branch is pushed to origin but no MR bead exists for refinery to process.
+
+Polecat: %s
+Branch: %s
+Issue: %s
+Cleanup Wisp: %s
+
+Recovery options:
+1. Create MR bead manually: bd create --type merge-request --title "Merge: %s" --description "branch: %s\ntarget: main\nsource_issue: %s\nrig: %s"
+2. Merge the branch manually
+3. Delete the branch if work is invalid`,
+				payload.PolecatName,
+				payload.PolecatName,
+				payload.Branch,
+				payload.IssueID,
+				wispID,
+				payload.IssueID,
+				payload.Branch,
+				payload.IssueID,
+				rigName,
+			),
+		}
+		if sendErr := router.Send(escalationMsg); sendErr != nil {
+			if result.Error != nil {
+				result.Error = fmt.Errorf("escalating MR_BEAD_MISSING: %w (also: %v)", sendErr, result.Error)
+			} else {
+				result.Error = fmt.Errorf("escalating MR_BEAD_MISSING: %w", sendErr)
+			}
+		}
+	}
+
+	result.Handled = true
+	result.WispCreated = wispID
+	result.Action = fmt.Sprintf("MR bead creation failed for %s (branch=%s) — escalated to deacon, NO MERGE_READY sent", payload.PolecatName, payload.Branch)
 	return result
 }
 
