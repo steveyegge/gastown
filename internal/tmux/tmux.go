@@ -2279,6 +2279,72 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	return err
 }
 
+// prefixPatternRe matches the rig-prefix grep guard inside a tmux binding.
+// Example fragment: grep -Eq '^(bd|gt|hq)-'
+var prefixPatternRe = regexp.MustCompile(`grep -Eq '\^\([a-zA-Z0-9|_-]+\)-'`)
+
+// RefreshKeyBindings updates the rig-prefix pattern in all Gas Town key bindings.
+// Call this when the set of registered rigs changes (e.g., after a new rig is added)
+// so the if-shell guards recognise the new session names.
+//
+// Approach: list-keys output is a valid tmux command. We regex-replace the old
+// prefix pattern with the current one and source the modified commands back.
+func (t *Tmux) RefreshKeyBindings() error {
+	newPattern := sessionPrefixPattern()
+	newGrep := fmt.Sprintf("grep -Eq '%s'", newPattern)
+
+	type binding struct {
+		table string
+		key   string
+	}
+	keys := []binding{
+		{"prefix", "n"},
+		{"prefix", "p"},
+		{"prefix", "a"},
+		{"prefix", "g"},
+		{"root", "MouseDown1StatusRight"},
+	}
+
+	var commands []string
+	for _, b := range keys {
+		if !t.isGTBinding(b.table, b.key) {
+			continue
+		}
+		output, err := t.run("list-keys", "-T", b.table, b.key)
+		if err != nil || output == "" {
+			continue
+		}
+		if !prefixPatternRe.MatchString(output) {
+			continue
+		}
+		updated := prefixPatternRe.ReplaceAllString(output, newGrep)
+		if updated == output {
+			continue // pattern already current
+		}
+		commands = append(commands, strings.TrimSpace(updated))
+	}
+
+	if len(commands) == 0 {
+		return nil
+	}
+
+	// Write modified bindings to a temp file and source them.
+	// This lets tmux handle the quoting/parsing of the if-shell commands correctly.
+	tmpFile, err := os.CreateTemp("", "gt-keybindings-*.conf")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	for _, cmd := range commands {
+		fmt.Fprintln(tmpFile, cmd)
+	}
+	tmpFile.Close()
+
+	_, err = t.run("source-file", tmpFile.Name())
+	return err
+}
+
 // GetSessionCreatedUnix returns the Unix timestamp when a session was created.
 // Returns 0 if the session doesn't exist or can't be queried.
 func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {
