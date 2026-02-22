@@ -1371,12 +1371,12 @@ func collectConvoyBeads(convoyID string) ([]BeadInfo, []DepInfo, error) {
 		return nil, nil, fmt.Errorf("deps for convoy %s: %w", convoyID, err)
 	}
 
-	// Extract tracked bead IDs. In a tracks dep, the tracked bead is the
-	// IssueID and the convoy is the DependsOnID.
+	// Extract tracked bead IDs. bdDepList sets IssueID to the queried bead
+	// (the convoy) and DependsOnID to the JSON "id" field (the tracked bead).
 	var trackedIDs []string
 	for _, d := range deps {
-		if d.Type == "tracks" && d.DependsOnID == convoyID {
-			trackedIDs = append(trackedIDs, d.IssueID)
+		if d.Type == "tracks" {
+			trackedIDs = append(trackedIDs, d.DependsOnID)
 		}
 	}
 
