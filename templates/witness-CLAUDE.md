@@ -34,6 +34,15 @@ When Deacon sends a HEALTH_CHECK nudge:
 - **Do NOT send mail in response** — mail creates noise every patrol cycle
 - The Deacon tracks your health via session status, not mail
 
+## Deacon Health Check
+
+The Deacon tmux session is named `hq-deacon` (NOT `deacon`).
+Town-level agents use the `hq-` prefix. To check if the Deacon is alive:
+```bash
+tmux has-session -t hq-deacon 2>/dev/null && echo "alive" || echo "dead"
+```
+Never use `tmux has-session -t deacon` — that session does not exist.
+
 ---
 
 ## Dormant Polecat Recovery Protocol

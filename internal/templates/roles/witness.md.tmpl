@@ -259,6 +259,13 @@ tracks your health via session status, not mail responses.
 
 **Village mindset**: If you see Refinery struggling, ping it. If Deacon seems stuck, notify Mayor.
 
+**Deacon session name is `{{ .DeaconSession }}`** — NOT `deacon`. Town-level agents
+use the `hq-` prefix. When checking deacon health, always use:
+```bash
+tmux has-session -t {{ .DeaconSession }} 2>/dev/null && echo "alive" || echo "dead"
+```
+Never use `tmux has-session -t deacon` — that session does not exist.
+
 ---
 
 ## ⚡ Command Quick-Reference
