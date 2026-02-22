@@ -769,11 +769,31 @@ func ensureBeadsRedirect(ctx RoleContext) {
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
 	if _, err := os.Stat(redirectPath); err == nil {
-		return // Redirect exists, nothing to do
+		// Redirect exists — still ensure beads.role is set (gt-09et).
+		// This backfills worktrees created before the role config fix.
+		ensureBeadsRole(ctx.WorkDir)
+		return
 	}
 
 	// Use shared helper - silently ignore errors during prime
 	_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
+
+	// Also set beads.role for the new redirect (gt-09et)
+	ensureBeadsRole(ctx.WorkDir)
+}
+
+// ensureBeadsRole sets beads.role=maintainer in git config if not already set.
+// Suppresses the "beads.role not configured" warning from bd CLI (gt-09et).
+func ensureBeadsRole(workDir string) {
+	// Check if already set
+	checkCmd := exec.Command("git", "-C", workDir, "config", "--get", "beads.role")
+	if err := checkCmd.Run(); err == nil {
+		return // Already configured
+	}
+
+	// Set it — silently ignore errors during prime
+	setCmd := exec.Command("git", "-C", workDir, "config", "beads.role", "maintainer")
+	_ = setCmd.Run()
 }
 
 // checkPendingEscalations queries for open escalation beads and displays them prominently.

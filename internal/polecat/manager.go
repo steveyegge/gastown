@@ -1707,7 +1707,19 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, clonePath)
+	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {
+		return err
+	}
+
+	// Set beads.role=maintainer in git config to suppress the
+	// "beads.role not configured" warning from bd CLI (gt-09et).
+	// Polecats always have push access to their rig's repo.
+	cmd := exec.Command("git", "-C", clonePath, "config", "beads.role", "maintainer")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("setting beads.role in git config: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.

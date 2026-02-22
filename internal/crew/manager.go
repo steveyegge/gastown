@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -642,7 +643,19 @@ type PristineResult struct {
 // This eliminates the need for git sync between crew clones - all crew members share one database.
 func (m *Manager) setupSharedBeads(crewPath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, crewPath)
+	if err := beads.SetupRedirect(townRoot, crewPath); err != nil {
+		return err
+	}
+
+	// Set beads.role=maintainer in git config to suppress the
+	// "beads.role not configured" warning from bd CLI (gt-09et).
+	// Crew workers always have push access to their rig's repo.
+	cmd := exec.Command("git", "-C", crewPath, "config", "beads.role", "maintainer")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("setting beads.role in git config: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
 }
 
 // SessionName returns the tmux session name for a crew member.
