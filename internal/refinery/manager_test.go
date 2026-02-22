@@ -12,8 +12,12 @@ import (
 
 func setupTestRegistry(t *testing.T) {
 	t.Helper()
+	// Use a prefix that won't collide with real gastown sessions.
+	// The "tr" prefix conflicts with actual rigs running on the host
+	// (e.g., tr-refinery, tr-witness), causing tests that assert
+	// "no session exists" to fail in gastown workspaces.
 	reg := session.NewPrefixRegistry()
-	reg.Register("tr", "testrig")
+	reg.Register("xut", "testrig")
 	old := session.DefaultRegistry()
 	session.SetDefaultRegistry(reg)
 	t.Cleanup(func() { session.SetDefaultRegistry(old) })
@@ -41,7 +45,7 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 func TestManager_SessionName(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 
-	want := "tr-refinery"
+	want := "xut-refinery"
 	got := mgr.SessionName()
 	if got != want {
 		t.Errorf("SessionName() = %s, want %s", got, want)

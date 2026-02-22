@@ -390,11 +390,26 @@ func TestIsAgentRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tm.IsAgentRunning(sessionName, tt.processNames...)
-			if got != tt.wantRunning {
-				t.Errorf("IsAgentRunning(%q, %v) = %v, want %v (current cmd: %q)",
-					sessionName, tt.processNames, got, tt.wantRunning, cmd)
+			// Re-check the pane command immediately before assertion.
+			// The pane command can transiently change between the initial
+			// GetPaneCommand call and subtest execution (e.g., shell profile
+			// commands), causing false failures. Retry up to 5 times with
+			// a short sleep to tolerate transient pane command changes.
+			var got bool
+			var currentCmd string
+			for attempt := 0; attempt < 5; attempt++ {
+				if attempt > 0 {
+					time.Sleep(200 * time.Millisecond)
+				}
+				got = tm.IsAgentRunning(sessionName, tt.processNames...)
+				if got == tt.wantRunning {
+					return // success
+				}
+				// Re-read pane command for diagnostics
+				currentCmd, _ = tm.GetPaneCommand(sessionName)
 			}
+			t.Errorf("IsAgentRunning(%q, %v) = %v, want %v (current cmd: %q, setup cmd: %q)",
+				sessionName, tt.processNames, got, tt.wantRunning, currentCmd, cmd)
 		})
 	}
 }
