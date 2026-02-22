@@ -638,8 +638,24 @@ func loadConfig(path string) (*HooksConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	if err := validateUniqueMatchers(&cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
 
 	return &cfg, nil
+}
+
+func validateUniqueMatchers(cfg *HooksConfig) error {
+	for _, eventType := range EventTypes {
+		seen := make(map[string]struct{})
+		for _, entry := range cfg.GetEntries(eventType) {
+			if _, exists := seen[entry.Matcher]; exists {
+				return fmt.Errorf("duplicate matcher %q in %s", entry.Matcher, eventType)
+			}
+			seen[entry.Matcher] = struct{}{}
+		}
+	}
+	return nil
 }
 
 // saveConfig writes a HooksConfig to a JSON file, creating directories as needed.
