@@ -69,7 +69,7 @@ source of truth.
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 10
+version = 7
 
 [vars]
 [vars.wisp_type]

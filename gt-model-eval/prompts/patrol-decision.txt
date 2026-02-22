@@ -24,6 +24,12 @@ You must respond with a single JSON object. No other text, no markdown, no expla
 ## Current Step: {{formula_step}}
 
 **Allowed actions for this step:** {{allowed_actions}}
+{% if integration_branch_refinery_enabled is defined %}
+**Config: integration_branch_refinery_enabled:** {{integration_branch_refinery_enabled}}
+{% endif %}
+{% if target_branch is defined %}
+**Config: target_branch:** {{target_branch}}
+{% endif %}
 
 ## Shell Output
 
