@@ -260,12 +260,6 @@ func (d *Daemon) Run() error {
 
 	d.logger.Printf("Daemon running, recovery heartbeat interval %v", recoveryHeartbeatInterval)
 
-	// Ensure tmux keybindings have the current rig-prefix pattern.
-	// This auto-corrects stale bindings when new rigs are registered.
-	if err := d.tmux.RefreshKeyBindings(); err != nil {
-		d.logger.Printf("Warning: failed to refresh key bindings: %v", err)
-	}
-
 	// Start feed curator goroutine
 	d.curator = feed.NewCurator(d.config.TownRoot)
 	if err := d.curator.Start(); err != nil {
