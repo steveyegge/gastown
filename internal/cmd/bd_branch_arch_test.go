@@ -631,7 +631,7 @@ func TestBdBranchProtectionCoverage(t *testing.T) {
 		{"hook.go", 2, 0},
 		{"statusline.go", 1, 0},
 		{"molecule_status.go", 1, 0},
-		{"sling_helpers.go", 0, 4},
+		{"sling_helpers.go", 0, 7},
 		{"show.go", 0, 1},
 	}
 

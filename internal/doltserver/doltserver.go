@@ -2602,7 +2602,7 @@ func doltSQLScriptWithRetry(townRoot, script string) error {
 }
 
 // DeletePolecatBranch deletes a polecat's Dolt branch (cleanup/nuke).
-// Best-effort: logs warning if branch doesn't exist or deletion fails.
+// Best-effort: silently ignores "branch not found", warns on other failures.
 func DeletePolecatBranch(townRoot, rigDB, branchName string) {
 	if err := validateBranchName(branchName); err != nil {
 		style.PrintWarning("invalid Dolt branch name %q: %v", branchName, err)
@@ -2610,7 +2610,10 @@ func DeletePolecatBranch(townRoot, rigDB, branchName string) {
 	}
 	query := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", branchName)
 	if err := doltSQL(townRoot, rigDB, query); err != nil {
-		// Non-fatal: branch may not exist (already merged/deleted)
+		// Non-fatal: branch may not exist (already merged/deleted or never created).
+		if strings.Contains(strings.ToLower(err.Error()), "branch not found") {
+			return
+		}
 		style.PrintWarning("could not delete Dolt branch %s: %v", branchName, err)
 	}
 }
