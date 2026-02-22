@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -62,6 +65,20 @@ func outputPrimeContext(ctx RoleContext) error {
 		}
 	}
 
+	// Load rig settings for fork workflow configuration
+	var forkWorkflow bool
+	var upstreamURL, upstreamRepo string
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
+		if settings, err := config.LoadRigSettings(rigPath); err == nil && settings.MergeQueue != nil {
+			forkWorkflow = settings.MergeQueue.IsForkWorkflowEnabled()
+		}
+		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil {
+			upstreamURL = rigCfg.UpstreamURL
+			upstreamRepo = parseUpstreamRepo(upstreamURL)
+		}
+	}
+
 	data := templates.RoleData{
 		Role:          roleName,
 		RigName:       ctx.Rig,
@@ -72,6 +89,9 @@ func outputPrimeContext(ctx RoleContext) error {
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
+		ForkWorkflow:  forkWorkflow,
+		UpstreamURL:   upstreamURL,
+		UpstreamRepo:  upstreamRepo,
 	}
 
 	// Render and output
@@ -677,4 +697,34 @@ func explain(condition bool, reason string) {
 	if primeExplain && condition {
 		fmt.Printf("\n[EXPLAIN] %s\n", reason)
 	}
+}
+
+// parseUpstreamRepo extracts "owner/repo" from a git URL.
+// Supports https://github.com/owner/repo.git and git@github.com:owner/repo.git formats.
+func parseUpstreamRepo(url string) string {
+	if url == "" {
+		return ""
+	}
+	
+	// Remove trailing .git if present
+	url = strings.TrimSuffix(url, ".git")
+	
+	// Handle HTTPS format: https://github.com/owner/repo
+	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
+		parts := strings.Split(url, "/")
+		if len(parts) >= 2 {
+			return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+		}
+	}
+	
+	// Handle SSH format: git@github.com:owner/repo
+	if strings.Contains(url, "@") {
+		// Extract part after colon
+		re := regexp.MustCompile(`:([^/]+/[^/]+)$`)
+		if matches := re.FindStringSubmatch(url); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+	
+	return ""
 }

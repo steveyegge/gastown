@@ -390,6 +390,44 @@ func (g *Git) PushWithEnv(remote, branch string, force bool, env []string) error
 	return err
 }
 
+// AddUpstreamRemote adds an upstream remote for fork workflows.
+// This is idempotent - if the remote already exists with the same URL, it's a no-op.
+// If the remote exists with a different URL, it's updated.
+func (g *Git) AddUpstreamRemote(upstreamURL string) error {
+	// Check if upstream remote already exists
+	_, err := g.run("remote", "get-url", "upstream")
+	if err == nil {
+		// Remote exists, update it
+		_, err = g.run("remote", "set-url", "upstream", upstreamURL)
+		return err
+	}
+	// Remote doesn't exist, add it
+	_, err = g.run("remote", "add", "upstream", upstreamURL)
+	return err
+}
+
+// GetUpstreamURL returns the URL of the upstream remote.
+// Returns empty string if upstream remote doesn't exist.
+func (g *Git) GetUpstreamURL() (string, error) {
+	out, err := g.run("remote", "get-url", "upstream")
+	if err != nil {
+		return "", nil // upstream remote doesn't exist
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HasUpstreamRemote returns true if an upstream remote is configured.
+func (g *Git) HasUpstreamRemote() bool {
+	_, err := g.run("remote", "get-url", "upstream")
+	return err == nil
+}
+
+// FetchUpstream fetches from the upstream remote.
+func (g *Git) FetchUpstream() error {
+	_, err := g.run("fetch", "upstream")
+	return err
+}
+
 // Add stages files for commit.
 func (g *Git) Add(paths ...string) error {
 	args := append([]string{"add"}, paths...)

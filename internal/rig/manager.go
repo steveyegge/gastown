@@ -85,6 +85,7 @@ type RigConfig struct {
 	Name          string       `json:"name"`                     // rig name
 	GitURL        string       `json:"git_url"`                  // repository URL (fetch/pull)
 	PushURL       string       `json:"push_url,omitempty"`       // optional push URL (fork for read-only upstreams)
+	UpstreamURL   string       `json:"upstream_url,omitempty"`   // optional upstream URL (source of truth for fork workflow)
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
@@ -221,6 +222,7 @@ type AddRigOptions struct {
 	Name          string // Rig name (directory name)
 	GitURL        string // Repository URL (fetch/pull)
 	PushURL       string // Optional push URL (fork for read-only upstreams)
+	UpstreamURL   string // Optional upstream URL (source of truth for fork workflow)
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
