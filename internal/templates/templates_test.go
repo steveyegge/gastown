@@ -145,15 +145,23 @@ func TestRenderRole_Refinery_DefaultBranch(t *testing.T) {
 		t.Fatalf("RenderRole() error = %v", err)
 	}
 
-	// Check that the custom default branch is used in git commands
-	if !strings.Contains(output, "origin/develop") {
-		t.Error("output missing 'origin/develop' - DefaultBranch not being used for rebase")
+	// Check that the custom default branch is used in target-resolution guidance.
+	// The refinery template now uses placeholders (<rebase-target>/<merge-target>)
+	// instead of hardcoding literal branch commands.
+	if !strings.Contains(output, "fallback develop") {
+		t.Error("output missing 'fallback develop' - DefaultBranch not being used in target fallback guidance")
 	}
-	if !strings.Contains(output, "git checkout develop") {
-		t.Error("output missing 'git checkout develop' - DefaultBranch not being used for checkout")
+	if !strings.Contains(output, "always use develop") {
+		t.Error("output missing 'always use develop' - DefaultBranch not being used in integration-disabled guidance")
 	}
-	if !strings.Contains(output, "git push origin develop") {
-		t.Error("output missing 'git push origin develop' - DefaultBranch not being used for push")
+	if !strings.Contains(output, "git rebase origin/<rebase-target>") {
+		t.Error("output missing placeholder rebase command")
+	}
+	if !strings.Contains(output, "git checkout <merge-target>") {
+		t.Error("output missing placeholder checkout command")
+	}
+	if !strings.Contains(output, "git push origin <merge-target>") {
+		t.Error("output missing placeholder push command")
 	}
 
 	// Verify it does NOT contain hardcoded "main" in git commands
@@ -247,4 +255,3 @@ func TestRoleNames(t *testing.T) {
 		}
 	}
 }
-
