@@ -120,9 +120,10 @@ default = "true"
 id = "inbox-check"
 title = "Check refinery mail"
 description = """
-First, clean up any stale patrol wisps from abnormal exits in previous cycles:
+First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
-bd mol wisp gc --age 1h
+bd mol wisp gc --closed --force
+bd mol wisp gc --age 1h --force
 ```
 
 Then check mail for MERGE_READY submissions, escalations, and messages.
