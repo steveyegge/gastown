@@ -267,7 +267,6 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	fmt.Printf("Starting session for %s/%s...\n", s.RigName, s.PolecatName)
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
-		DoltBranch:       s.DoltBranch,
 		Agent:            s.agent,
 	}
 	if s.agent != "" {

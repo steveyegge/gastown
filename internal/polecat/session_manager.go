@@ -70,10 +70,6 @@ type SessionStartOptions struct {
 	// If set, this is injected as an environment variable.
 	RuntimeConfigDir string
 
-	// DoltBranch is the polecat-specific Dolt branch for write isolation.
-	// If set, BD_BRANCH env var is injected into the polecat session.
-	DoltBranch string
-
 	// Agent is the agent override for this polecat session (e.g., "codex", "gemini").
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
@@ -291,11 +287,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
 	}
 
-	// Branch-per-polecat: inject BD_BRANCH into startup command
-	if opts.DoltBranch != "" {
-		command = config.PrependEnv(command, map[string]string{"BD_BRANCH": opts.DoltBranch})
-	}
-
 	// Disable Dolt auto-commit for polecats to prevent manifest contention
 	// under concurrent load (gt-5cc2p). Changes merge at gt done time.
 	command = config.PrependEnv(command, map[string]string{"BD_DOLT_AUTO_COMMIT": "off"})
@@ -364,12 +355,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
 	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
-
-	// Branch-per-polecat: set BD_BRANCH in tmux session environment
-	// This ensures respawned processes also inherit the branch setting.
-	if opts.DoltBranch != "" {
-		debugSession("SetEnvironment BD_BRANCH", m.tmux.SetEnvironment(sessionID, "BD_BRANCH", opts.DoltBranch))
-	}
 
 	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
 	// This ensures respawned processes also inherit the setting.
