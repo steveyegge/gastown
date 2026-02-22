@@ -624,7 +624,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
+		// Read source issue from main (not polecat branch) — it was created there.
+		restore := onMainBranch()
 		sourceIssueForNoMerge, err := bd.Show(issueID)
+		restore()
 		if err == nil {
 			attachmentFields := beads.ParseAttachmentFields(sourceIssueForNoMerge)
 			if attachmentFields != nil && attachmentFields.NoMerge {
@@ -711,7 +714,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
 		}
 		if refineryEnabled {
+			restore = onMainBranch()
 			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+			restore()
 			if err == nil && autoTarget != "" {
 				target = autoTarget
 			}
@@ -722,8 +727,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if donePriority >= 0 {
 			priority = donePriority
 		} else {
-			// Try to inherit from source issue
+			// Read source issue from main where it was created (not polecat branch)
+			restore := onMainBranch()
 			sourceIssue, err := bd.Show(issueID)
+			restore()
 			if err != nil {
 				priority = 2 // Default
 			} else {
@@ -732,7 +739,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Check if MR bead already exists for this branch (idempotency)
+		// MR beads live on main, not polecat branch.
+		restore = onMainBranch()
 		existingMR, err := bd.FindMRForBranch(branch)
+		restore()
 		if err != nil {
 			style.PrintWarning("could not check for existing MR: %v", err)
 			// Continue with creation attempt - Create will fail if duplicate
@@ -760,7 +770,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			description += "\nlast_conflict_sha: null"
 			description += "\nconflict_task_id: null"
 
-			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+			// Create MR bead directly on main (not polecat branch).
+			// MR bead is a new unique INSERT — no contention risk —
+			// and must be visible to refinery immediately.
+			restore := onMainBranch()
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
 				Type:        "merge-request",
@@ -768,6 +781,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				Description: description,
 				Ephemeral:   true,
 			})
+			restore()
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.
 				// Push succeeded so branch is on remote, but MR bead failed.
@@ -1367,6 +1381,23 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 func isPolecatActor(actor string) bool {
 	parts := strings.Split(actor, "/")
 	return len(parts) >= 2 && parts[1] == "polecats"
+}
+
+// onMainBranch temporarily clears BD_BRANCH so beads operations target
+// Dolt's main branch instead of the polecat's working branch.
+// Returns a restore function that must be called after the operation.
+//
+// Use this for operations that need to read/write beads visible to all agents
+// (e.g., source issue lookup, MR bead creation) rather than the polecat's
+// isolated Dolt branch.
+func onMainBranch() func() {
+	saved := os.Getenv("BD_BRANCH")
+	os.Unsetenv("BD_BRANCH")
+	return func() {
+		if saved != "" {
+			os.Setenv("BD_BRANCH", saved)
+		}
+	}
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.
