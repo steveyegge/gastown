@@ -3623,3 +3623,75 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 		t.Errorf("WaitForReady took too long (%v), should succeed shortly after server starts", elapsed)
 	}
 }
+
+// =============================================================================
+// Orphaned Dolt branch tests
+// =============================================================================
+
+func TestListDoltBranches_NoServer(t *testing.T) {
+	// Without a running Dolt server, ListDoltBranches should fail gracefully.
+	_, err := ListDoltBranches(t.TempDir(), "nonexistent")
+	if err == nil {
+		t.Skip("dolt server available — ListDoltBranches unexpectedly succeeded")
+	}
+	// Should return an error (not panic)
+}
+
+func TestDoltBranchHasDiff_InvalidBranch(t *testing.T) {
+	// SQL injection branch name should be caught by validation.
+	_, err := DoltBranchHasDiff(t.TempDir(), "testdb", "'; DROP TABLE --")
+	if err == nil {
+		t.Error("expected error for SQL injection branch name")
+	}
+}
+
+func TestDoltBranchHasDiff_ValidBranch(t *testing.T) {
+	// Valid branch name passes validation but fails at dolt execution.
+	// Should still return true (conservative) when dolt isn't available.
+	hasDiff, err := DoltBranchHasDiff(t.TempDir(), "testdb", "polecat-test-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When dolt is not available, we conservatively return true
+	if !hasDiff {
+		t.Error("expected hasDiff=true when dolt is unavailable (conservative)")
+	}
+}
+
+func TestFindOrphanedDoltBranches_NoDatabases(t *testing.T) {
+	// With no .dolt-data directory, should return empty.
+	tmpDir := t.TempDir()
+	orphans, err := FindOrphanedDoltBranches(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans, got %d", len(orphans))
+	}
+}
+
+func TestCleanupOrphanedDoltBranches_Empty(t *testing.T) {
+	// Cleanup with no orphans should be a no-op.
+	merged, deleted, errs := CleanupOrphanedDoltBranches(t.TempDir(), nil)
+	if merged != 0 || deleted != 0 || len(errs) != 0 {
+		t.Errorf("expected all zeros, got merged=%d deleted=%d errs=%d", merged, deleted, len(errs))
+	}
+}
+
+func TestOrphanedDoltBranch_Struct(t *testing.T) {
+	// Verify the struct holds the expected fields.
+	o := OrphanedDoltBranch{
+		Database: "gastown",
+		Branch:   "polecat-valkyrie-1707648000",
+		HasDiff:  true,
+	}
+	if o.Database != "gastown" {
+		t.Errorf("Database = %q, want %q", o.Database, "gastown")
+	}
+	if o.Branch != "polecat-valkyrie-1707648000" {
+		t.Errorf("Branch = %q, want %q", o.Branch, "polecat-valkyrie-1707648000")
+	}
+	if !o.HasDiff {
+		t.Error("expected HasDiff=true")
+	}
+}

@@ -429,6 +429,79 @@ func (c *DoltOrphanedDatabaseCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
+// DoltOrphanedBranchCheck detects orphaned polecat-* branches in Dolt databases.
+// These are left behind when polecat sessions crash before MergePolecatBranch runs.
+type DoltOrphanedBranchCheck struct {
+	FixableCheck
+	orphans []doltserver.OrphanedDoltBranch // Cached during Run for use in Fix
+}
+
+// NewDoltOrphanedBranchCheck creates a new orphaned branch check.
+func NewDoltOrphanedBranchCheck() *DoltOrphanedBranchCheck {
+	return &DoltOrphanedBranchCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "dolt-orphaned-branches",
+				CheckDescription: "Detect orphaned polecat branches in Dolt databases",
+				CheckCategory:    CategoryCleanup,
+			},
+		},
+	}
+}
+
+// Run checks for orphaned polecat Dolt branches.
+func (c *DoltOrphanedBranchCheck) Run(ctx *CheckContext) *CheckResult {
+	c.orphans = nil
+
+	orphans, err := doltserver.FindOrphanedDoltBranches(ctx.TownRoot)
+	if err != nil {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusWarning,
+			Message:  fmt.Sprintf("Could not check for orphaned Dolt branches: %v", err),
+			Category: c.CheckCategory,
+		}
+	}
+
+	if len(orphans) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No orphaned polecat branches in Dolt databases",
+			Category: c.CheckCategory,
+		}
+	}
+
+	c.orphans = orphans
+	details := make([]string, len(orphans))
+	for i, o := range orphans {
+		diffNote := "no diff"
+		if o.HasDiff {
+			diffNote = "has unmerged changes"
+		}
+		details[i] = fmt.Sprintf("Orphaned: %s/%s (%s)", o.Database, o.Branch, diffNote)
+	}
+
+	return &CheckResult{
+		Name:     c.Name(),
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("%d orphaned polecat branch(es) in Dolt databases", len(orphans)),
+		Details:  details,
+		FixHint:  "Run 'gt dolt branch-cleanup' to merge/remove orphaned branches",
+		Category: c.CheckCategory,
+	}
+}
+
+// Fix merges and removes orphaned polecat branches.
+func (c *DoltOrphanedBranchCheck) Fix(ctx *CheckContext) error {
+	merged, deleted, errs := doltserver.CleanupOrphanedDoltBranches(ctx.TownRoot, c.orphans)
+	if len(errs) > 0 {
+		return fmt.Errorf("cleaned %d (merged: %d, deleted: %d) but %d failed: %v",
+			merged+deleted, merged, deleted, len(errs), errs[0])
+	}
+	return nil
+}
+
 // formatBytes returns a human-readable size string.
 func formatBytes(b int64) string {
 	const unit = 1024

@@ -297,3 +297,40 @@ func TestDoltOrphanedDatabaseCheck_Name(t *testing.T) {
 		t.Errorf("expected name 'dolt-orphaned-databases', got %q", check.Name())
 	}
 }
+
+// =============================================================================
+// DoltOrphanedBranchCheck tests
+// =============================================================================
+
+func TestDoltOrphanedBranchCheck_NoDoltData(t *testing.T) {
+	// No .dolt-data directory means no databases to scan.
+	townRoot := t.TempDir()
+	check := NewDoltOrphanedBranchCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+
+	result := check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for missing .dolt-data/, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestDoltOrphanedBranchCheck_Name(t *testing.T) {
+	check := NewDoltOrphanedBranchCheck()
+	if check.Name() != "dolt-orphaned-branches" {
+		t.Errorf("expected name 'dolt-orphaned-branches', got %q", check.Name())
+	}
+}
+
+func TestDoltOrphanedBranchCheck_CanFix(t *testing.T) {
+	check := NewDoltOrphanedBranchCheck()
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestDoltOrphanedBranchCheck_Category(t *testing.T) {
+	check := NewDoltOrphanedBranchCheck()
+	if check.Category() != CategoryCleanup {
+		t.Errorf("expected category %q, got %q", CategoryCleanup, check.Category())
+	}
+}

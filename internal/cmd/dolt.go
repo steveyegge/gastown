@@ -249,17 +249,38 @@ formula's backup step (migration-backup-YYYYMMDD-HHMMSS/).`,
 	RunE: runDoltRollback,
 }
 
+var doltBranchCleanupCmd = &cobra.Command{
+	Use:   "branch-cleanup",
+	Short: "Remove orphaned polecat branches from Dolt databases",
+	Long: `Detect and remove orphaned polecat-* branches from Dolt databases.
+
+An orphaned polecat branch is one left behind when a polecat session crashes
+or is killed before MergePolecatBranch runs. These branches consume resources
+and are served unnecessarily by the Dolt server.
+
+Branches with unmerged changes are merged to main before deletion to prevent
+data loss. Branches with no diff from main are deleted directly.
+
+Use --dry-run to preview what would be cleaned up without making changes.
+
+Examples:
+  gt dolt branch-cleanup             # Merge/remove all orphaned branches
+  gt dolt branch-cleanup --dry-run   # Preview what would be cleaned up`,
+	RunE: runDoltBranchCleanup,
+}
+
 var (
-	doltLogLines     int
-	doltLogFollow    bool
-	doltMigrateDry   bool
-	doltCleanupDry   bool
-	doltRollbackDry  bool
-	doltRollbackList bool
-	doltSyncDry      bool
-	doltSyncForce    bool
-	doltSyncDB       string
-	doltSyncGC       bool
+	doltLogLines          int
+	doltLogFollow         bool
+	doltMigrateDry        bool
+	doltCleanupDry        bool
+	doltBranchCleanupDry  bool
+	doltRollbackDry       bool
+	doltRollbackList      bool
+	doltSyncDry           bool
+	doltSyncForce         bool
+	doltSyncDB            string
+	doltSyncGC            bool
 )
 
 func init() {
@@ -276,10 +297,12 @@ func init() {
 	doltCmd.AddCommand(doltFixMetadataCmd)
 	doltCmd.AddCommand(doltRecoverCmd)
 	doltCmd.AddCommand(doltCleanupCmd)
+	doltCmd.AddCommand(doltBranchCleanupCmd)
 	doltCmd.AddCommand(doltRollbackCmd)
 	doltCmd.AddCommand(doltSyncCmd)
 
 	doltCleanupCmd.Flags().BoolVar(&doltCleanupDry, "dry-run", false, "Preview what would be removed without making changes")
+	doltBranchCleanupCmd.Flags().BoolVar(&doltBranchCleanupDry, "dry-run", false, "Preview what would be cleaned up without making changes")
 
 	doltLogsCmd.Flags().IntVarP(&doltLogLines, "lines", "n", 50, "Number of lines to show")
 	doltLogsCmd.Flags().BoolVarP(&doltLogFollow, "follow", "f", false, "Follow log output")
@@ -800,6 +823,49 @@ func runDoltCleanup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s Removed %d/%d orphaned database(s)\n",
 		style.Bold.Render("✓"), removed, len(orphans))
+
+	return nil
+}
+
+func runDoltBranchCleanup(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	orphans, err := doltserver.FindOrphanedDoltBranches(townRoot)
+	if err != nil {
+		return fmt.Errorf("finding orphaned branches: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned polecat branches found\n", style.Bold.Render("✓"))
+		return nil
+	}
+
+	fmt.Printf("Found %d orphaned polecat branch(es):\n\n", len(orphans))
+	for _, o := range orphans {
+		diffNote := "no diff from main"
+		if o.HasDiff {
+			diffNote = "has unmerged changes — will merge first"
+		}
+		fmt.Printf("  %s %s/%s (%s)\n", style.Bold.Render("!"), o.Database, o.Branch, diffNote)
+	}
+
+	if doltBranchCleanupDry {
+		fmt.Println("\nDry run: no changes made.")
+		return nil
+	}
+
+	fmt.Println()
+	merged, deleted, errs := doltserver.CleanupOrphanedDoltBranches(townRoot, orphans)
+	for _, e := range errs {
+		fmt.Printf("  %s %v\n", style.Bold.Render("✗"), e)
+	}
+
+	total := merged + deleted
+	fmt.Printf("\n%s Cleaned up %d/%d orphaned branch(es) (merged: %d, deleted: %d)\n",
+		style.Bold.Render("✓"), total, len(orphans), merged, deleted)
 
 	return nil
 }
