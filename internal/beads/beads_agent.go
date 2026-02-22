@@ -185,6 +185,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
+		"--ephemeral",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
@@ -303,6 +304,12 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Fix type separately — UpdateOptions doesn't support type changes
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
+	}
+	// Ensure agent bead is ephemeral (wisp) — agent operational state has
+	// zero git history consumers (gt-bewatn.9)
+	if _, err := target.run("update", id, "--ephemeral"); err != nil {
+		// Non-fatal: the bead is functional without ephemeral flag
+		style.PrintWarning("could not mark agent bead as ephemeral: %v", err)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
