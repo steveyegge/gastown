@@ -88,7 +88,7 @@ Session hook checks:
   - stale-task-dispatch      Detect stale task-dispatch guard in settings.json (fixable)
 
 Dolt checks:
-  - dolt-binary              Check that dolt is installed and in PATH
+  - dolt-binary              Check that dolt is installed and meets minimum version
   - dolt-metadata            Check dolt metadata tables exist
   - dolt-server-reachable    Check dolt sql-server is reachable
   - dolt-orphaned-databases  Detect orphaned dolt databases

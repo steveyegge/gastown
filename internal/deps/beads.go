@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -55,7 +53,7 @@ func CheckBeads() (BeadsStatus, string) {
 	}
 
 	// Compare versions
-	if compareVersions(version, MinBeadsVersion) < 0 {
+	if CompareVersions(version, MinBeadsVersion) < 0 {
 		return BeadsTooOld, version
 	}
 
@@ -124,29 +122,3 @@ func parseBeadsVersion(output string) string {
 	return ""
 }
 
-// compareVersions compares two semver strings.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-func compareVersions(a, b string) int {
-	aParts := parseVersion(a)
-	bParts := parseVersion(b)
-
-	for i := 0; i < 3; i++ {
-		if aParts[i] < bParts[i] {
-			return -1
-		}
-		if aParts[i] > bParts[i] {
-			return 1
-		}
-	}
-	return 0
-}
-
-// parseVersion parses "X.Y.Z" into [3]int.
-func parseVersion(v string) [3]int {
-	var parts [3]int
-	split := strings.Split(v, ".")
-	for i := 0; i < 3 && i < len(split); i++ {
-		parts[i], _ = strconv.Atoi(split[i])
-	}
-	return parts
-}
