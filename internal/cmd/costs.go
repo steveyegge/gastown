@@ -973,6 +973,9 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	if session == "" {
 		// Not a Gas Town session (e.g., Claude Code launched outside gt agent system).
 		// Exit silently — no costs to record.
+		if costsVerbose {
+			fmt.Fprintf(os.Stderr, "[costs] no session context found, skipping costs record\n")
+		}
 		return nil
 	}
 
