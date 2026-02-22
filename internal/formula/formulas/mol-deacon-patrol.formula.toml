@@ -35,9 +35,10 @@ default = "patrol"
 id = "inbox-check"
 title = "Handle callbacks from agents"
 description = """
-First, clean up any stale patrol wisps from abnormal exits in previous cycles:
+First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
-bd mol wisp gc --age 1h
+bd mol wisp gc --closed --force
+bd mol wisp gc --age 1h --force
 ```
 
 Then handle callbacks from agents.
