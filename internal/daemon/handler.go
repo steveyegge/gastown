@@ -12,7 +12,22 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// handleDogs manages Dog lifecycle: cleanup stuck dogs then dispatch plugins.
+// Constants for idle dog reaping.
+const (
+	// dogIdleSessionTimeout is how long a dog can be idle with a live tmux
+	// session before the session is killed.
+	dogIdleSessionTimeout = 1 * time.Hour
+
+	// dogIdleRemoveTimeout is how long a dog can be idle before it is removed
+	// from the kennel entirely (only when pool is oversized).
+	dogIdleRemoveTimeout = 4 * time.Hour
+
+	// maxDogPoolSize is the target pool size. Dogs idle beyond
+	// dogIdleRemoveTimeout are removed when the pool exceeds this count.
+	maxDogPoolSize = 4
+)
+
+// handleDogs manages Dog lifecycle: cleanup stuck dogs, reap idle dogs, then dispatch plugins.
 // This is the main entry point called from heartbeat.
 func (d *Daemon) handleDogs() {
 	rigsConfig, err := d.loadRigsConfig()
@@ -26,6 +41,7 @@ func (d *Daemon) handleDogs() {
 	sm := dog.NewSessionManager(t, d.config.TownRoot, mgr)
 
 	d.cleanupStuckDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm)
 	d.dispatchPlugins(mgr, sm, rigsConfig)
 }
 
@@ -57,6 +73,60 @@ func (d *Daemon) cleanupStuckDogs(mgr *dog.Manager, sm *dog.SessionManager) {
 		d.logger.Printf("Handler: dog %s is working but session is dead, clearing work", dg.Name)
 		if err := mgr.ClearWork(dg.Name); err != nil {
 			d.logger.Printf("Handler: failed to clear work for dog %s: %v", dg.Name, err)
+		}
+	}
+}
+
+// reapIdleDogs kills tmux sessions for dogs that have been idle too long, and
+// removes long-idle dogs from the kennel when the pool is oversized.
+func (d *Daemon) reapIdleDogs(mgr *dog.Manager, sm *dog.SessionManager) {
+	dogs, err := mgr.List()
+	if err != nil {
+		d.logger.Printf("Handler: failed to list dogs for reaping: %v", err)
+		return
+	}
+
+	now := time.Now()
+	poolSize := len(dogs)
+
+	for _, dg := range dogs {
+		if dg.State != dog.StateIdle {
+			continue
+		}
+
+		idleDuration := now.Sub(dg.LastActive)
+
+		// Phase 1: kill stale tmux sessions for idle dogs.
+		if idleDuration >= dogIdleSessionTimeout {
+			running, err := sm.IsRunning(dg.Name)
+			if err != nil {
+				d.logger.Printf("Handler: error checking session for idle dog %s: %v", dg.Name, err)
+				continue
+			}
+			if running {
+				d.logger.Printf("Handler: reaping idle dog %s session (idle %v)", dg.Name, idleDuration.Truncate(time.Minute))
+				if err := sm.Stop(dg.Name, true); err != nil {
+					d.logger.Printf("Handler: failed to stop session for idle dog %s: %v", dg.Name, err)
+				}
+			}
+		}
+
+		// Phase 2: remove long-idle dogs when pool is oversized.
+		if poolSize > maxDogPoolSize && idleDuration >= dogIdleRemoveTimeout {
+			d.logger.Printf("Handler: removing long-idle dog %s from kennel (idle %v, pool %d/%d)",
+				dg.Name, idleDuration.Truncate(time.Minute), poolSize, maxDogPoolSize)
+
+			// Ensure session is dead before removing.
+			running, _ := sm.IsRunning(dg.Name)
+			if running {
+				_ = sm.Stop(dg.Name, true)
+			}
+
+			if err := mgr.Remove(dg.Name); err != nil {
+				d.logger.Printf("Handler: failed to remove idle dog %s: %v", dg.Name, err)
+				continue
+			}
+			poolSize--
 		}
 	}
 }
