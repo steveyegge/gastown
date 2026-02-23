@@ -900,9 +900,10 @@ type RecoveryStatus struct {
 	Polecat       string                `json:"polecat"`
 	CleanupStatus polecat.CleanupStatus `json:"cleanup_status"`
 	NeedsRecovery bool                  `json:"needs_recovery"`
-	Verdict       string                `json:"verdict"` // SAFE_TO_NUKE or NEEDS_RECOVERY
+	Verdict       string                `json:"verdict"` // SAFE_TO_NUKE, NEEDS_RECOVERY, or NEEDS_MQ_SUBMIT
 	Branch        string                `json:"branch,omitempty"`
 	Issue         string                `json:"issue,omitempty"`
+	MRExists      bool                  `json:"mr_exists"`
 }
 
 func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
@@ -975,6 +976,21 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Check merge queue for this polecat's branch (#1035).
+	// A polecat with clean git state but no MR in the queue has work that
+	// never entered the merge pipeline — nuking would orphan the branch.
+	if p.Branch != "" {
+		mr, mrErr := bd.FindMRForBranchAny(p.Branch)
+		if mrErr == nil && mr != nil {
+			status.MRExists = true
+		} else if mrErr == nil && mr == nil && status.Verdict == "SAFE_TO_NUKE" {
+			// Clean git state but no MR — work pushed but never submitted.
+			// Downgrade verdict to prevent data loss.
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_MQ_SUBMIT"
+		}
+	}
+
 	// JSON output
 	if polecatCheckRecoveryJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -993,12 +1009,18 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	if status.NeedsRecovery {
+	switch status.Verdict {
+	case "NEEDS_MQ_SUBMIT":
+		fmt.Printf("  Verdict:         %s\n", style.Warning.Render("NEEDS_MQ_SUBMIT"))
+		fmt.Println()
+		fmt.Printf("  %s Git state is clean but work was never submitted to the merge queue.\n", style.Warning.Render("⚠"))
+		fmt.Println("  Run `gt mq submit` for this branch before nuking, or escalate to Mayor.")
+	case "NEEDS_RECOVERY":
 		fmt.Printf("  Verdict:         %s\n", style.Error.Render("NEEDS_RECOVERY"))
 		fmt.Println()
 		fmt.Printf("  %s This polecat has unpushed/uncommitted work.\n", style.Warning.Render("⚠"))
 		fmt.Println("  Escalate to Mayor for recovery before cleanup.")
-	} else {
+	default:
 		fmt.Printf("  Verdict:         %s\n", style.Success.Render("SAFE_TO_NUKE"))
 		fmt.Println()
 		fmt.Printf("  %s Safe to nuke - no work at risk.\n", style.Success.Render("✓"))
