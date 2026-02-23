@@ -144,14 +144,21 @@ func TestValidateAgentID(t *testing.T) {
 		{"mayor with rig suffix", "gt-gastown-mayor", true, "cannot have rig/name suffixes"},
 		{"deacon with rig suffix", "gt-beads-deacon", true, "cannot have rig/name suffixes"},
 
-		// Invalid: per-rig role without rig
-		{"witness alone", "gt-witness", true, "requires rig"},
-		{"refinery alone", "gt-refinery", true, "requires rig"},
+		// Valid: collapsed prefix rig-level singletons (prefix==rig, GH #1877)
+		// When deriveBeadsPrefix returns the rig name itself (e.g., "ff"),
+		// AgentBeadIDWithPrefix collapses "ff-ff-witness" to "ff-witness".
+		{"collapsed prefix witness", "ff-witness", false, ""},
+		{"collapsed prefix refinery", "ff-refinery", false, ""},
+		{"collapsed prefix crew", "ff-crew-bob", false, ""},
+		{"collapsed prefix polecat", "ff-polecat-nux", false, ""},
 
 		// Invalid: named agent without name
 		{"crew no name", "gt-beads-crew", true, "requires name"},
 		{"polecat no name", "gt-gastown-polecat", true, "requires name"},
 		{"dog no name", "gt-dog", true, "requires name"},
+		// Collapsed prefix named roles without name
+		{"collapsed crew no name", "ff-crew", true, "requires name"},
+		{"collapsed polecat no name", "ff-polecat", true, "requires name"},
 
 		// Valid: worker name collides with role keyword
 		{"polecat named witness", "gt-gastown-polecat-witness", false, ""},
@@ -225,6 +232,77 @@ func TestExtractAgentPrefix(t *testing.T) {
 			got := ExtractAgentPrefix(tt.id)
 			if got != tt.wantPrefix {
 				t.Errorf("ExtractAgentPrefix(%q) = %q, want %q", tt.id, got, tt.wantPrefix)
+			}
+		})
+	}
+}
+
+// TestAgentBeadIDWithPrefix_CollapsedPrefix verifies that when prefix==rig,
+// the rig component is omitted to avoid double-prefixed IDs (GH #1877).
+func TestAgentBeadIDWithPrefix_CollapsedPrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		role   string
+		wName  string
+		want   string
+	}{
+		// Normal cases (prefix != rig)
+		{"normal witness", "gt", "gastown", "witness", "", "gt-gastown-witness"},
+		{"normal refinery", "bd", "beads", "refinery", "", "bd-beads-refinery"},
+		{"normal crew", "gt", "gastown", "crew", "bob", "gt-gastown-crew-bob"},
+		{"normal polecat", "gt", "gastown", "polecat", "nux", "gt-gastown-polecat-nux"},
+		// Town-level (no rig)
+		{"town mayor", "hq", "", "mayor", "", "hq-mayor"},
+		{"town deacon", "hq", "", "deacon", "", "hq-deacon"},
+		// Collapsed prefix cases (prefix == rig, GH #1877)
+		{"collapsed witness", "ff", "ff", "witness", "", "ff-witness"},
+		{"collapsed refinery", "ff", "ff", "refinery", "", "ff-refinery"},
+		{"collapsed crew", "ff", "ff", "crew", "bob", "ff-crew-bob"},
+		{"collapsed polecat", "ff", "ff", "polecat", "nux", "ff-polecat-nux"},
+		{"collapsed 3char", "foo", "foo", "witness", "", "foo-witness"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AgentBeadIDWithPrefix(tt.prefix, tt.rig, tt.role, tt.wName)
+			if got != tt.want {
+				t.Errorf("AgentBeadIDWithPrefix(%q, %q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.role, tt.wName, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseAgentBeadID_CollapsedPrefix verifies parsing of collapsed-prefix IDs (GH #1877).
+func TestParseAgentBeadID_CollapsedPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		wantRig  string
+		wantRole string
+		wantName string
+		wantOK   bool
+	}{
+		// Collapsed singleton: ff-witness → rig="" (prefix IS the rig)
+		{"collapsed witness", "ff-witness", "", "witness", "", true},
+		{"collapsed refinery", "ff-refinery", "", "refinery", "", true},
+		// Collapsed named: ff-crew-bob → rig="" (prefix IS the rig)
+		{"collapsed crew", "ff-crew-bob", "", "crew", "bob", true},
+		{"collapsed polecat", "ff-polecat-nux", "", "polecat", "nux", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig, role, name, ok := ParseAgentBeadID(tt.id)
+			if ok != tt.wantOK {
+				t.Errorf("ParseAgentBeadID(%q) ok = %v, want %v", tt.id, ok, tt.wantOK)
+				return
+			}
+			if rig != tt.wantRig || role != tt.wantRole || name != tt.wantName {
+				t.Errorf("ParseAgentBeadID(%q) = (%q, %q, %q), want (%q, %q, %q)",
+					tt.id, rig, role, name, tt.wantRig, tt.wantRole, tt.wantName)
 			}
 		})
 	}

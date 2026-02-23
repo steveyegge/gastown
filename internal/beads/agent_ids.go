@@ -199,13 +199,23 @@ func ValidateAgentID(id string) error {
 		return fmt.Errorf("agent ID must include content after prefix (got %q)", id)
 	}
 
-	// Case 1: Single part after prefix - must be town-level role
+	// Case 1: Single part after prefix - town-level role, or collapsed prefix
+	// rig-level singleton (when prefix==rig, e.g., "ff-witness"). See GH #1877.
 	if len(parts) == 1 {
 		role := parts[0]
 		if isTownLevelRole(role) {
 			return nil // Valid town-level agent
 		}
+		// Rig-level singleton roles are also valid here because
+		// AgentBeadIDWithPrefix collapses the rig when prefix==rig,
+		// producing IDs like "ff-witness" instead of "ff-ff-witness".
+		if isRigLevelRole(role) {
+			return nil // Valid collapsed-prefix rig-level singleton
+		}
 		if isTownLevelNamedRole(role) {
+			return fmt.Errorf("agent role %q requires name: <prefix>-%s-<name> (got %q)", role, role, id)
+		}
+		if isNamedRole(role) {
 			return fmt.Errorf("agent role %q requires name: <prefix>-%s-<name> (got %q)", role, role, id)
 		}
 		if isValidRole(role) {
@@ -214,11 +224,17 @@ func ValidateAgentID(id string) error {
 		return fmt.Errorf("invalid agent role %q (valid: %s)", role, strings.Join(ValidAgentRoles, ", "))
 	}
 
-	// Case 2: Two parts - could be town-level named (dog-alpha) or needs to scan for role
+	// Case 2: Two parts - could be town-level named (dog-alpha), collapsed prefix
+	// named role (ff-crew-bob when prefix==rig), or needs to scan for role
 	if len(parts) == 2 {
 		// Check if first part is a town-level named role
 		if isTownLevelNamedRole(parts[0]) {
 			return nil // Valid town-level named agent: gt-dog-alpha
+		}
+		// Check if first part is a named role with name following (collapsed prefix
+		// form where prefix==rig, e.g., ff-crew-bob). See GH #1877.
+		if isNamedRole(parts[0]) {
+			return nil // Valid collapsed-prefix named agent: ff-crew-bob
 		}
 		// Check if second part is a rig-level singleton role
 		if isRigLevelRole(parts[1]) {
@@ -324,10 +340,18 @@ func ValidateAgentID(id string) error {
 // For town-level agents (mayor, deacon), pass empty rig and name.
 // For rig-level singletons (witness, refinery), pass empty name.
 // For named agents (crew, polecat), pass all three.
+//
+// When prefix == rig (which happens for short rig names where deriveBeadsPrefix
+// returns the rig name itself, e.g., "ff"), the rig component is omitted to
+// avoid stuttered IDs like "ff-ff-witness". See GH #1877.
 func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
-	if rig == "" {
-		// Town-level agent: prefix-mayor, prefix-deacon
-		return prefix + "-" + role
+	if rig == "" || rig == prefix {
+		// Town-level agent (rig=="") or deduplicated (rig==prefix):
+		//   prefix-role or prefix-role-name
+		if name == "" {
+			return prefix + "-" + role
+		}
+		return prefix + "-" + role + "-" + name
 	}
 	if name == "" {
 		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
@@ -420,7 +444,10 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	// "witness"), we prefer the named-role interpretation. A named role like
 	// "polecat" at position i-1 consuming the keyword at position i as its
 	// name is more specific than treating the keyword as a singleton role.
-	for i := len(parts) - 1; i >= 1; i-- {
+	// Start at i=0 (not i=1) to handle collapsed-prefix IDs where the role
+	// keyword appears immediately after the prefix (e.g., "ff-crew-bob"
+	// when prefix==rig). See GH #1877.
+	for i := len(parts) - 1; i >= 0; i-- {
 		p := parts[i]
 		if isNamedRole(p) && i < len(parts)-1 {
 			// Named roles with a name following: crew, polecat
