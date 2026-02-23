@@ -2478,6 +2478,48 @@ func TestFilterBeadsEnv_EmptyInput(t *testing.T) {
 	}
 }
 
+// TestFilterBeadsEnv_PreservesDoltPortVars verifies that GT_DOLT_PORT and
+// BEADS_DOLT_PORT are preserved by filterBeadsEnv even though BEADS_* vars
+// are otherwise stripped. Tests need these to reach test Dolt servers.
+func TestFilterBeadsEnv_PreservesDoltPortVars(t *testing.T) {
+	environ := []string{
+		"BD_ACTOR=test-actor",
+		"BEADS_DIR=/tmp/beads",
+		"BEADS_DB=/tmp/beads.db",
+		"BEADS_DOLT_PORT=13306",
+		"GT_DOLT_PORT=13307",
+		"GT_ROOT=/tmp/gt",
+		"HOME=/home/test",
+		"PATH=/usr/bin",
+	}
+	got := filterBeadsEnv(environ)
+	want := []string{
+		"BEADS_DOLT_PORT=13306",
+		"GT_DOLT_PORT=13307",
+		"PATH=/usr/bin",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("filterBeadsEnv returned %d items, want %d\n  got:  %v\n  want: %v",
+			len(got), len(want), got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestNewIsolatedWithPort verifies the constructor sets serverPort.
+func TestNewIsolatedWithPort(t *testing.T) {
+	b := NewIsolatedWithPort("/tmp/test", 13307)
+	if !b.isolated {
+		t.Error("expected isolated=true")
+	}
+	if b.serverPort != 13307 {
+		t.Errorf("serverPort = %d, want 13307", b.serverPort)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // stripEnvPrefixes tests (refactored from runWithRouting inline logic)
 // ---------------------------------------------------------------------------
@@ -2573,7 +2615,9 @@ func TestFilterBeadsEnv_Integration(t *testing.T) {
 
 	env := filterBeadsEnv(os.Environ())
 
-	forbidden := []string{"BD_ACTOR=", "BEADS_", "GT_ROOT=", "HOME="}
+	// BEADS_DOLT_PORT and GT_DOLT_PORT are explicitly preserved (test server access).
+	// Check that other BEADS_* vars are still stripped.
+	forbidden := []string{"BD_ACTOR=", "BEADS_DIR=", "BEADS_DB=", "GT_ROOT=", "HOME="}
 	for _, e := range env {
 		for _, prefix := range forbidden {
 			if strings.HasPrefix(e, prefix) {

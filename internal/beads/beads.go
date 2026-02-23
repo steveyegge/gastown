@@ -170,9 +170,10 @@ type SyncStatus struct {
 
 // Beads wraps bd CLI operations for a working directory.
 type Beads struct {
-	workDir  string
-	beadsDir string // Optional BEADS_DIR override for cross-database access
-	isolated bool // If true, suppress inherited beads env vars (for test isolation)
+	workDir    string
+	beadsDir   string // Optional BEADS_DIR override for cross-database access
+	isolated   bool   // If true, suppress inherited beads env vars (for test isolation)
+	serverPort int    // If set, pass --server-port to bd init (for test Dolt servers)
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -190,6 +191,14 @@ func New(workDir string) *Beads {
 // tests from accidentally routing to production databases.
 func NewIsolated(workDir string) *Beads {
 	return &Beads{workDir: workDir, isolated: true}
+}
+
+// NewIsolatedWithPort creates a Beads wrapper for test isolation that targets
+// a specific Dolt server port. When Init() is called, --server-port <port> is
+// passed to bd init so it creates the database on the test server instead of
+// the default port 3307.
+func NewIsolatedWithPort(workDir string, serverPort int) *Beads {
+	return &Beads{workDir: workDir, isolated: true, serverPort: serverPort}
 }
 
 // NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
@@ -230,8 +239,14 @@ func (b *Beads) getResolvedBeadsDir() string {
 
 // Init initializes a new beads database in the working directory.
 // This uses the same environment isolation as other commands.
+// If ServerPort is set (via NewIsolatedWithPort), passes --server-port to bd init
+// so the database is created on the test Dolt server.
 func (b *Beads) Init(prefix string) error {
-	_, err := b.run("init", "--prefix", prefix, "--quiet")
+	args := []string{"init", "--prefix", prefix, "--quiet"}
+	if b.serverPort > 0 {
+		args = append(args, "--server-port", fmt.Sprintf("%d", b.serverPort))
+	}
+	_, err := b.run(args...)
 	return err
 }
 
@@ -380,9 +395,19 @@ func (b *Beads) buildRoutingEnv() []string {
 // filterBeadsEnv removes beads-related environment variables from the given
 // environment slice. This ensures test isolation by preventing inherited
 // BD_ACTOR, BEADS_DB, GT_ROOT, HOME etc. from routing commands to production databases.
+//
+// Preserves GT_DOLT_PORT and BEADS_DOLT_PORT so that isolated-mode tests can
+// reach a test Dolt server on a non-default port.
 func filterBeadsEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {
+		// Preserve port env vars needed to reach test Dolt servers.
+		// These must be checked before the broad BEADS_ prefix strip below.
+		if strings.HasPrefix(env, "BEADS_DOLT_PORT=") ||
+			strings.HasPrefix(env, "GT_DOLT_PORT=") {
+			filtered = append(filtered, env)
+			continue
+		}
 		// Skip beads-related env vars that could interfere with test isolation
 		// BD_ACTOR, BEADS_* - direct beads config
 		// GT_ROOT - causes bd to find global routes file
