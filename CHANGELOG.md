@@ -7,6 +7,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-23
+
+### Added
+
+#### Work Queue & Dispatch Engine
+- **`gt queue` CLI and dispatch engine** — Enqueue work items for daemon-driven dispatch
+- **`gt queue epic`** — Bulk enqueue of epic children
+- **`gt convoy queue`** — Bulk enqueue of convoy-tracked issues
+- **`gt sling --queue`** — Enqueue path for asynchronous dispatch
+- **Queue daemon heartbeat step** for reliable dispatch processing
+- **Enqueue-time validation** and enhanced metadata on queued items
+- **Config-driven capacity scheduler** with sling context beads
+
+#### Telemetry & Observability (OTEL)
+- **Full OpenTelemetry instrumentation** across gt, bd, and Claude Code
+- **VictoriaMetrics and VictoriaLogs integration** for metrics and log export
+- **Lifecycle events, duration histograms, and operation traces**
+- **Claude Code tool content and user prompt logging** via OTLP
+- **`gt.* OTEL` resource attributes**, prime context events, and session metadata
+- **Command usage telemetry** and `gt metrics` reader
+
+#### Dog Subsystem (Deacon Workers)
+- **Handler patrol** for Dog lifecycle and plugin dispatch
+- **Session-hygiene Dog plugin** for zombie tmux cleanup
+- **Idle dog reaping** — Kill stale tmux sessions and trim oversized pools
+- **Stale working dog detection** for dogs stuck with idle sessions
+- **Wisp compaction formula** for Dogs
+- **Shutdown dance molecule** — Death warrant execution state machine for Dogs
+
+#### Wisps & Ephemeral Storage
+- **Wisps table migration** for agent beads (ephemeral SQLite store)
+- **Agent bead readers updated** to query wisps table
+- **Closed wisp GC** added to patrol cycles to prevent accumulation
+
+#### Convoy & Sling Improvements
+- **`gt convoy stage` and `gt convoy launch`** commands
+- **Auto-resolve rig from bead prefixes** in batch mode
+- **Reject deferred/post-launch beads** at sling time
+- **Auto-check convoy completion** on `bd close`
+- **Deacon feed-stranded command** for auto-feeding stranded convoys
+- **Notify deacon of convoy-eligible merges** for immediate feeding
+
+#### Witness & Refinery
+- **Configurable quality gates** before merge in refinery
+- **MR queue nonempty tracking** in witness check-refinery step
+- **Bead respawn count tracking** for spawn storm detection
+- **Verify MR bead exists** before sending MERGE_READY
+- **Refinery nudges deacon** after merge to check stranded convoys
+- **Auto-close completed convoys** after merge
+
+#### Agent Providers & Runtime
+- **Pi agent provider** with unit tests
+- **Promptfoo model comparison framework** for patrol agents
+- **Cost-tier presets** for model selection
+- **Ralphcat opt-in loop mode** for multi-step workflows
+
+#### Dashboard & UX
+- **Rename Workers panel to Polecats** in dashboard
+- **Session terminal preview** in dashboard Sessions panel
+- **Mail threading** in dashboard inbox
+- **Convoy drill-down** — Expand rows to show tracked issues
+- **Date+time timestamps** instead of relative ago format
+
+#### CLI & Workflow
+- **`gt handoff --cycle`** — Full session replacement flag
+- **`gt handoff --agent`** — Explicit runtime selection
+- **`gt crew start --resume`** — Resume flag for crew sessions
+- **`gt crew at --reset`** — Branch switch opt-in with reset flag
+- **`gt deacon pending`** — AI-based spawn observation command
+- **`gt patrol step-drift`** subcommand
+- **`gt up --json`** output flag
+- **`gt migrate-bead-labels`** command
+- **Desire-path fixes** for rig settings, crew list, mail directory
+- **Idle-aware notification** in mail router with auto-nudge on send
+
+#### Infrastructure
+- **WorktreeCreate/WorktreeRemove hook event support**
+- **Remote Dolt server support** (`gt dolt`)
+- **Dolt server identity verification and restart command**
+- **Orphaned Dolt branch cleanup**
+- **Nix flake** and integration with bump-version script
+- **Boot block scraper VM deployment script**
+- **Beads-redirect-target doctor check**
+- **Unified zombie session detection** with 3-level health check
+- **Emit-event command** and nudgeRefinery event wiring
+- **`gt mol step await-event`** for channel-based event subscription
+- **Doctor check** for in_progress beads with NULL assignee
+- **PR creation guard** blocking direct pushes to steveyegge/gastown
+- **Orphan scan** for polecat worktrees with unmerged branches
+- **Wasteland CLI command suite** (`gt wl`)
+- **GitHub Sheriff Deacon plugin** for CI failure monitoring
+
+### Changed
+
+- **Removed Dolt branch-per-polecat infrastructure** — Dead code from pre-server-mode era
+- **Removed BD_BRANCH from session manager and polecat spawn** — Server mode eliminates branch isolation
+- **Removed JSONL fallback code** — Dolt is now the sole backend
+- **Removed deprecated role bead TTL layer** from compact
+- **Removed deprecated role bead lookups** that blocked witness startup
+- **Stale JSONL references** cleaned from documentation and comments
+- **Molecule squash `--no-digest`** flag to skip digest creation
+- **Dog startup honors role_agents config**
+- **Handoff restart honors role_agents config**
+
+### Fixed
+
+#### Dolt & Storage Stability
+- **Replace dolthub/dolt with nil-check fork** to fix SEGVs
+- **Prevent polecat spawns from creating orphan databases**
+- **Drop orphaned `beads_<prefix>` databases** after `bd init`
+- **Isolate Dolt integration tests** from production server
+- **Dynamic port for test Dolt server** to avoid production collision
+- **Restore BEADS_DIR stripping** in `buildRunEnv()` lost in merge
+- **Strip BD_BRANCH from wisp creation and cook steps**
+
+#### Agent & Session Management
+- **LookupEnv for GT_AGENT** to prevent tmux env contamination
+- **KillSession idempotent** + ensureMayorInfra on attach
+- **Detect non-polecat CWD** when Claude Code resets shell to mayor/rig
+- **Filter getCurrentWork by assignee** to prevent shared rig beads leaking across sessions
+- **Clean up stale molecules during polecat nuke** to unblock re-sling
+- **Set GT_PROCESS_NAMES in tmux env** for all session types
+- **Resolve agent config from --agent override** for Codex polecat startup
+- **Tell polecats to close bead explicitly** when nothing to commit
+- **Silent costs-record skip** for non-GT sessions
+
+#### Test Infrastructure
+- **Flaky TestFindActivePatrol tests** caused by bd daemon contamination
+- **Isolated patrol tests** from shared Dolt database
+- **Convoy/epic test failures** and TestValidateRecipient resolved
+- **Extract requireDoltServer** into shared testutil package
+- **gotestsum + JUnit test failure reporting** in CI
+
+#### Patrol & Boot
+- **Remove redundant Status.Running field** (ZFC compliance)
+- **Prefer gastown repo over crew rigs** in stale binary check
+- **Session-name-format doctor check** for outdated session names
+- **Handoff warn on uncommitted/unpushed work** before session cycling
+- **Helpful error for `gt mail read` with no args** instead of cobra usage
+
 ## [0.7.0] - 2026-02-15
 
 ### Added
