@@ -250,7 +250,7 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("checking for overlapping convoys: %w", err)
 		}
-		autoRestage, autoConvoyID, err := handleOverlappingConvoys(overlaps, len(slingableIDs))
+		autoRestage, autoConvoyID, err := handleOverlappingConvoys(overlaps)
 		if err != nil {
 			return err
 		}
@@ -512,7 +512,7 @@ func findOverlappingConvoys(slingableIDs []string) ([]overlappingConvoy, error) 
 //   - (true, convoyID, nil): auto re-stage the given convoy
 //   - (false, "", nil): no overlaps, proceed with fresh creation
 //   - (false, "", error): cannot proceed (open convoy or ambiguous)
-func handleOverlappingConvoys(overlaps []overlappingConvoy, slingableCount int) (bool, string, error) {
+func handleOverlappingConvoys(overlaps []overlappingConvoy) (bool, string, error) {
 	if len(overlaps) == 0 {
 		return false, "", nil
 	}

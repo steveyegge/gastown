@@ -1,12 +1,15 @@
 package mail
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -973,6 +976,10 @@ func TestValidateRecipient(t *testing.T) {
 	if out, err := exec.Command("bd", "version").CombinedOutput(); err != nil {
 		t.Skipf("bd CLI not functional, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
+	// Skip if Dolt server is not running (bd init requires it)
+	if out, err := exec.Command("bd", "dolt", "test").CombinedOutput(); err != nil {
+		t.Skipf("Dolt server not available, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 
 	// Create isolated beads environment for testing
 	tmpDir := t.TempDir()
@@ -984,41 +991,40 @@ func TestValidateRecipient(t *testing.T) {
 		t.Fatalf("creating beads dir: %v", err)
 	}
 
-	// Initialize beads database with "gt" prefix (matches agent bead IDs)
-	cmd := exec.Command("bd", "init", "gt")
-	cmd.Dir = townRoot
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd init failed: %v\n%s", err, out)
+	// Use beads.NewIsolated with a unique random prefix to avoid Dolt
+	// primary key collisions with production beads (e.g., gt-mayor).
+	// NewIsolated uses --db flag for its own commands (bypassing Dolt),
+	// and we set BEADS_DB so that the Router's external bd calls also
+	// use the same isolated SQLite database.
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	prefix := "vr" + hex.EncodeToString(buf[:])
+	b := beads.NewIsolated(townRoot)
+	if err := b.Init(prefix); err != nil {
+		t.Fatalf("bd init: %v", err)
 	}
 
-	// Set issue prefix to "gt" (matches agent bead ID pattern)
-	cmd = exec.Command("bd", "config", "set", "issue_prefix", "gt")
-	cmd.Dir = townRoot
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd config set issue_prefix failed: %v\n%s", err, out)
+	// Point BEADS_DB at the isolated SQLite file so the Router's
+	// runBdCommand (which inherits process env) uses it too.
+	beadsDB := filepath.Join(beadsDir, "beads.db")
+	t.Setenv("BEADS_DB", beadsDB)
+
+	// Register custom types required for agent beads.
+	if _, err := b.Run("config", "set", "types.custom", "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"); err != nil {
+		t.Fatalf("config set types.custom: %v", err)
 	}
 
-	// Register custom types (agent, message, etc.) - required before creating agents
-	cmd = exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request")
-	cmd.Dir = townRoot
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd config set types.custom failed: %v\n%s", err, out)
-	}
-
-	// Create test agent beads using gt:agent label
+	// Create test agent beads with gt:agent label.
+	// Safe to use "gt-" prefixed IDs since both NewIsolated (--db) and the
+	// Router (BEADS_DB env) point to the same local SQLite database.
 	createAgent := func(id, title string) {
-		cmd := exec.Command("bd", "create", title, "--labels=gt:agent", "--id="+id, "--force")
-		cmd.Dir = townRoot
-		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("creating agent %s: %v\n%s", id, err, out)
+		if _, err := b.Run("create", title, "--labels=gt:agent", "--id="+id, "--force"); err != nil {
+			t.Fatalf("creating agent %s: %v", id, err)
 		}
 	}
 
-	// Create agents that match expected bead ID patterns
 	createAgent("gt-mayor", "Mayor agent")
 	createAgent("gt-deacon", "Deacon agent")
 	createAgent("gt-testrig-witness", "Test witness")
