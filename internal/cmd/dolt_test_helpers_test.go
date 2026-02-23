@@ -18,7 +18,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-const doltTestPort = "3307"
+// doltTestPort is the port for the shared test Dolt server. Set dynamically
+// by startDoltServer: either from GT_DOLT_PORT (external/pre-started server)
+// or via findFreePort() to avoid colliding with production on 3307.
+var doltTestPort string
 
 // configureTestGitIdentity sets git global config in an isolated HOME directory
 // so that EnsureDoltIdentity (called during gt install preflight) can copy
@@ -49,35 +52,37 @@ var (
 	doltLockFile *os.File
 	// doltWeStarted tracks whether this process started the server (vs reusing).
 	doltWeStarted bool
+	// doltPortSetByUs tracks whether we set GT_DOLT_PORT (vs it being set externally).
+	doltPortSetByUs bool
 )
 
-// requireDoltServer ensures a dolt sql-server is running on port 3307 for
-// integration tests that need it. The server is shared across all tests in
-// the same test binary invocation.
+// requireDoltServer ensures a dolt sql-server is running on a dynamically
+// chosen port for integration tests. The server is shared across all tests
+// in the same test binary invocation.
+//
+// Port selection:
+//   - If GT_DOLT_PORT is set externally, that port is used (allows reusing
+//     a pre-started server).
+//   - Otherwise, findFreePort() picks an ephemeral port and sets GT_DOLT_PORT
+//     so the gt/bd stack (via doltserver.DefaultConfig) connects to it.
 //
 // Port contention strategy:
 //
 //  1. In-process: sync.Once ensures only one goroutine attempts startup.
 //
-//  2. Cross-process: a file lock (/tmp/dolt-test-server.lock) serializes
-//     startup across concurrent test binaries. The first process to acquire
-//     LOCK_EX starts the server and writes its PID + data dir to
-//     /tmp/dolt-test-server.pid. After startup, the lock is downgraded to
-//     LOCK_SH (shared) and held for the lifetime of the test binary.
+//  2. Cross-process: a file lock (/tmp/dolt-test-server-<port>.lock) serializes
+//     startup across concurrent test binaries using the same port. The first
+//     process to acquire LOCK_EX starts the server and writes its PID + data
+//     dir to /tmp/dolt-test-server-<port>.pid. After startup, the lock is
+//     downgraded to LOCK_SH (shared) and held for the lifetime of the test binary.
 //
 //  3. Safe shutdown: cleanupDoltServer tries to upgrade from LOCK_SH to
 //     LOCK_EX (non-blocking). If it succeeds, no other test processes hold
-//     the shared lock, so it's safe to kill the server. The server PID is
-//     read from the PID file, so ANY last-exiting process can clean up —
-//     not just the one that started the server.
+//     the shared lock, so it's safe to kill the server.
 //
-//  4. External server: if port 3307 is already listening before any test
+//  4. External server: if the port is already listening before any test
 //     process acquires the lock, we reuse it. No PID file is written, and
 //     cleanup never kills an external server.
-//
-// Why port 3307 is fixed: the entire gt/bd stack (doltserver.DefaultPort,
-// gt install, gt dolt start, bd init) assumes port 3307.
-// A random port would require threading an override through all layers.
 func requireDoltServer(t *testing.T) {
 	t.Helper()
 
@@ -98,18 +103,50 @@ func doltTestAddr() string {
 	return "127.0.0.1:" + doltTestPort
 }
 
-const (
-	// lockFilePath serializes server startup/shutdown across test processes.
-	lockFilePath = "/tmp/dolt-test-server.lock"
-	// pidFilePath stores the server PID and data dir for cross-process cleanup.
-	pidFilePath = "/tmp/dolt-test-server.pid"
-)
+// lockFilePathForPort returns the lock file path for a given port.
+// Port-specific paths prevent contention between test binaries using different ports.
+func lockFilePathForPort(port string) string {
+	return fmt.Sprintf("/tmp/dolt-test-server-%s.lock", port)
+}
+
+// pidFilePathForPort returns the PID file path for a given port.
+func pidFilePathForPort(port string) string {
+	return fmt.Sprintf("/tmp/dolt-test-server-%s.pid", port)
+}
+
+// findFreePort binds to port 0 to let the OS assign an ephemeral port,
+// then closes the listener and returns the port number.
+func findFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("finding free port: %w", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	return port, nil
+}
 
 func startDoltServer() error {
+	// Determine port: use GT_DOLT_PORT if set externally, otherwise find a free one.
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		doltTestPort = p
+	} else {
+		port, err := findFreePort()
+		if err != nil {
+			return err
+		}
+		doltTestPort = strconv.Itoa(port)
+		os.Setenv("GT_DOLT_PORT", doltTestPort)
+		doltPortSetByUs = true
+	}
+
+	lockPath := lockFilePathForPort(doltTestPort)
+	pidPath := pidFilePathForPort(doltTestPort)
+
 	// Open the lock file (kept open for the lifetime of the test binary).
-	lockFile, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0666)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
-		return fmt.Errorf("opening lock file %s: %w", lockFilePath, err)
+		return fmt.Errorf("opening lock file %s: %w", lockPath, err)
 	}
 
 	// Acquire exclusive lock for the startup phase.
@@ -155,7 +192,7 @@ func startDoltServer() error {
 	// Write PID file so any last-exiting process can clean up.
 	// Format: "PID\nDATA_DIR\n"
 	pidContent := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, dataDir)
-	if err := os.WriteFile(pidFilePath, []byte(pidContent), 0666); err != nil {
+	if err := os.WriteFile(pidPath, []byte(pidContent), 0666); err != nil {
 		cmd.Process.Kill()
 		os.RemoveAll(dataDir)
 		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
@@ -187,7 +224,7 @@ func startDoltServer() error {
 		select {
 		case <-exited:
 			os.RemoveAll(dataDir)
-			os.Remove(pidFilePath)
+			os.Remove(pidPath)
 			syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 			lockFile.Close()
 			return fmt.Errorf("dolt sql-server exited prematurely")
@@ -200,7 +237,7 @@ func startDoltServer() error {
 	cmd.Process.Kill()
 	<-exited
 	os.RemoveAll(dataDir)
-	os.Remove(pidFilePath)
+	os.Remove(pidPath)
 	syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 	lockFile.Close()
 	return fmt.Errorf("dolt sql-server did not become ready within 30s")
@@ -236,11 +273,18 @@ func cleanupDoltServer() {
 			doltLockFile.Close()
 			doltLockFile = nil
 		}
+		// Clear GT_DOLT_PORT if we set it, so subsequent processes
+		// don't inherit a stale port.
+		if doltPortSetByUs {
+			os.Unsetenv("GT_DOLT_PORT")
+		}
 	}()
 
-	if doltLockFile == nil {
+	if doltLockFile == nil || doltTestPort == "" {
 		return
 	}
+
+	pidPath := pidFilePathForPort(doltTestPort)
 
 	// Try to acquire exclusive lock (non-blocking). If another process
 	// holds LOCK_SH, this fails with EWOULDBLOCK — the server is still in use.
@@ -251,7 +295,7 @@ func cleanupDoltServer() {
 	}
 	// We got LOCK_EX — we're the last process. Kill from PID file.
 
-	data, err := os.ReadFile(pidFilePath)
+	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		// No PID file — either external server or already cleaned up.
 		return
@@ -275,11 +319,12 @@ func cleanupDoltServer() {
 		proc.Wait()
 	}
 
-	// Clean up data dir and PID file.
+	// Clean up data dir, PID file, and lock file.
 	if dataDir != "" {
 		os.RemoveAll(dataDir)
 	}
-	os.Remove(pidFilePath)
+	os.Remove(pidPath)
+	os.Remove(lockFilePathForPort(doltTestPort))
 }
 
 // doltCleanupOnce ensures database cleanup happens at most once per binary.
@@ -385,7 +430,8 @@ func dropStaleBeadsDatabases() error {
 
 	// Strategy 4: Remove beads_* and known test database directories from the
 	// server's data-dir. Scoped to avoid removing unrelated databases.
-	pidData, _ := os.ReadFile(pidFilePath)
+	pidPath := pidFilePathForPort(doltTestPort)
+	pidData, _ := os.ReadFile(pidPath)
 	if pidData != nil {
 		lines := strings.SplitN(string(pidData), "\n", 3)
 		if len(lines) >= 2 {
