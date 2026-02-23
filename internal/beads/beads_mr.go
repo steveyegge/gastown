@@ -30,3 +30,36 @@ func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
 	return nil, nil
 }
 
+// FindMRForBranchAny searches for a merge-request bead (open or closed) for the given branch.
+// Unlike FindMRForBranch which only checks open MRs, this also checks closed MRs
+// (already processed by the refinery). Used by check-recovery to verify work entered the
+// merge pipeline. See #1035.
+func (b *Beads) FindMRForBranchAny(branch string) (*Issue, error) {
+	// Check open MRs first
+	mr, err := b.FindMRForBranch(branch)
+	if err != nil {
+		return nil, err
+	}
+	if mr != nil {
+		return mr, nil
+	}
+
+	// Check closed MRs (already processed by refinery)
+	issues, err := b.List(ListOptions{
+		Status: "closed",
+		Label:  "gt:merge-request",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	branchPrefix := "branch: " + branch + "\n"
+	for _, issue := range issues {
+		if strings.HasPrefix(issue.Description, branchPrefix) {
+			return issue, nil
+		}
+	}
+
+	return nil, nil
+}
+

@@ -329,6 +329,15 @@ func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
 		// Town-level agent: prefix-mayor, prefix-deacon
 		return prefix + "-" + role
 	}
+	// When prefix == rig (short rig names where deriveBeadsPrefix returns
+	// the rig name itself), omit the rig component to avoid stuttered IDs
+	// like "ff-ff-refinery". See #1877.
+	if prefix == rig {
+		if name == "" {
+			return prefix + "-" + role
+		}
+		return prefix + "-" + role + "-" + name
+	}
 	if name == "" {
 		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
 		return prefix + "-" + rig + "-" + role

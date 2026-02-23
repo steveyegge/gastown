@@ -2267,3 +2267,82 @@ func TestCheckSessionHealth_ActivityCheck(t *testing.T) {
 	// (if the agent were actually running). This tests the activity threshold logic
 	// without needing a real Claude process.
 }
+
+func TestRefreshKeyBindings_UpdatesPattern(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	if !IsInsideTmux() {
+		t.Skip("not inside tmux — need server for bind-key")
+	}
+	tm := NewTmux()
+
+	// Set up a GT binding on F11 with a deliberately stale prefix pattern.
+	oldPattern := "^(xx|yy)-"
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", oldPattern)
+	_, _ = tm.run("bind-key", "-T", "prefix", "F11",
+		"if-shell", ifShell,
+		"run-shell 'gt feed --window'",
+		"display-message stale-fallback")
+
+	// Verify it's detected as a GT binding with the old pattern
+	raw, _ := tm.run("list-keys", "-T", "prefix", "F11")
+	if !strings.Contains(raw, "xx|yy") {
+		t.Fatalf("setup failed: binding doesn't contain old pattern: %q", raw)
+	}
+
+	// RefreshKeyBindings should update F11's pattern, but it only checks
+	// the known keys (n, p, a, g, MouseDown1StatusRight), not F11.
+	// This validates the regex replacement logic directly.
+	newPattern := sessionPrefixPattern()
+	newGrep := fmt.Sprintf("grep -Eq '%s'", newPattern)
+	if !prefixPatternRe.MatchString(raw) {
+		t.Fatalf("prefixPatternRe doesn't match binding: %q", raw)
+	}
+	updated := prefixPatternRe.ReplaceAllString(raw, newGrep)
+	if updated == raw {
+		t.Fatal("regex replacement had no effect")
+	}
+	if !strings.Contains(updated, newPattern) {
+		t.Errorf("updated binding doesn't contain new pattern %q: %q", newPattern, updated)
+	}
+	// Fallback should be preserved
+	if !strings.Contains(updated, "stale-fallback") {
+		t.Errorf("updated binding lost the fallback: %q", updated)
+	}
+
+	// Clean up
+	_, _ = tm.run("unbind-key", "-T", "prefix", "F11")
+}
+
+func TestRefreshKeyBindings_NoOpWhenCurrent(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+	tm := NewTmux()
+
+	// Should succeed even when no GT bindings exist (pure unit test, no tmux server needed)
+	err := tm.RefreshKeyBindings()
+	if err != nil {
+		t.Errorf("RefreshKeyBindings with no GT bindings should succeed, got: %v", err)
+	}
+}
+
+func TestPrefixPatternRe(t *testing.T) {
+	tests := []struct {
+		input string
+		match bool
+	}{
+		{"grep -Eq '^(gt|hq)-'", true},
+		{"grep -Eq '^(bd|cf|cm|gt|hq|tb)-'", true},
+		{"grep -Eq '^(a)-'", true},
+		{"grep -Eq 'something else'", false},
+		{"no match here", false},
+	}
+	for _, tc := range tests {
+		got := prefixPatternRe.MatchString(tc.input)
+		if got != tc.match {
+			t.Errorf("prefixPatternRe.MatchString(%q) = %v, want %v", tc.input, got, tc.match)
+		}
+	}
+}
