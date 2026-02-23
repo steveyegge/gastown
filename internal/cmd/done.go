@@ -921,11 +921,11 @@ notifyWitness:
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
 		selfCleanAttempted = true
 
-		// Step 1: Nuke the worktree (only for COMPLETED with successful push)
-		// If push failed, preserve the worktree so Witness/Refinery can still
-		// access the branch for recovery. selfNukePolecat also checks
-		// branch-on-remote, so this is defense-in-depth.
-		if exitType == ExitCompleted && !pushFailed {
+		// Step 1: Nuke the worktree (only for COMPLETED with successful push AND MR)
+		// If push or MR creation failed, preserve the worktree so
+		// Witness/Refinery can still access the branch for recovery.
+		// selfNukePolecat also checks branch-on-remote, so this is defense-in-depth.
+		if exitType == ExitCompleted && !pushFailed && !mrFailed {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
