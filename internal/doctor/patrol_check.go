@@ -205,24 +205,8 @@ func NewPatrolNotStuckCheck() *PatrolNotStuckCheck {
 	}
 }
 
-// loadStuckThreshold loads the stuck threshold from the Deacon's role bead.
-// Returns the default if no config exists.
-func loadStuckThreshold(townRoot string) time.Duration {
-	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
-	roleConfig, err := bd.GetRoleConfig(beads.RoleBeadIDTown("deacon"))
-	if err != nil || roleConfig == nil || roleConfig.StuckThreshold == "" {
-		return DefaultStuckThreshold
-	}
-	if d, err := time.ParseDuration(roleConfig.StuckThreshold); err == nil {
-		return d
-	}
-	return DefaultStuckThreshold
-}
-
 // Run checks for stuck patrol wisps.
 func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
-	// Load threshold from role bead (ZFC: agent-controlled)
-	c.stuckThreshold = loadStuckThreshold(ctx.TownRoot)
 
 	rigs, err := discoverRigs(ctx.TownRoot)
 	if err != nil {

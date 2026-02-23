@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // Default parameters for stuck-session detection.
@@ -37,35 +35,11 @@ func DefaultStuckConfig() *StuckConfig {
 	}
 }
 
-// LoadStuckConfig loads stuck detection config from the Deacon's role bead.
-// Returns defaults if no role bead exists or if fields aren't configured.
-// Per ZFC: agents control their own thresholds via their role beads.
-func LoadStuckConfig(townRoot string) *StuckConfig {
-	config := DefaultStuckConfig()
-
-	// Load from hq-deacon-role bead
-	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
-	roleConfig, err := bd.GetRoleConfig(beads.RoleBeadIDTown("deacon"))
-	if err != nil || roleConfig == nil {
-		return config
-	}
-
-	// Override defaults with role bead values
-	if roleConfig.PingTimeout != "" {
-		if d, err := time.ParseDuration(roleConfig.PingTimeout); err == nil {
-			config.PingTimeout = d
-		}
-	}
-	if roleConfig.ConsecutiveFailures > 0 {
-		config.ConsecutiveFailures = roleConfig.ConsecutiveFailures
-	}
-	if roleConfig.KillCooldown != "" {
-		if d, err := time.ParseDuration(roleConfig.KillCooldown); err == nil {
-			config.Cooldown = d
-		}
-	}
-
-	return config
+// LoadStuckConfig returns the default stuck detection config.
+// Role beads are deprecated as of Phase 2 (config-based roles); thresholds
+// are no longer loaded from hq-deacon-role. Tune via config instead.
+func LoadStuckConfig(_ string) *StuckConfig {
+	return DefaultStuckConfig()
 }
 
 // AgentHealthState tracks the health check state for a single agent.

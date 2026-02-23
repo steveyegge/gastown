@@ -151,7 +151,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	roleConfig, err := m.roleConfig()
 	if err != nil {
-		return err
+		// Non-fatal: role config is optional. Log and continue with defaults.
+		log.Printf("warning: could not load witness role config for %s: %v", m.rig.Name, err)
+		roleConfig = nil
 	}
 
 	// Build startup command first
