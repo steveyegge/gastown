@@ -230,3 +230,42 @@ func TestExtractAgentPrefix(t *testing.T) {
 	}
 }
 
+// TestAgentBeadIDWithPrefix_NoDuplicatePrefix verifies that when prefix == rig,
+// the rig component is collapsed to avoid stuttered IDs like "ff-ff-refinery".
+// Regression test for #1877.
+func TestAgentBeadIDWithPrefix_NoDuplicatePrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		role   string
+		worker string
+		want   string
+	}{
+		{"singleton same prefix/rig", "ff", "ff", "witness", "", "ff-witness"},
+		{"singleton different prefix/rig", "gt", "gastown", "witness", "", "gt-gastown-witness"},
+		{"named same prefix/rig", "ff", "ff", "crew", "joe", "ff-crew-joe"},
+		{"named different prefix/rig", "gt", "gastown", "crew", "joe", "gt-gastown-crew-joe"},
+		{"3-char rig same as prefix", "abc", "abc", "refinery", "", "abc-refinery"},
+		{"polecat same prefix/rig", "ff", "ff", "polecat", "nux", "ff-polecat-nux"},
+		{"town-level not affected", "hq", "", "mayor", "", "hq-mayor"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AgentBeadIDWithPrefix(tt.prefix, tt.rig, tt.role, tt.worker)
+			if got != tt.want {
+				t.Errorf("AgentBeadIDWithPrefix(%q, %q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.role, tt.worker, got, tt.want)
+			}
+			// Verify the generated ID round-trips through parse
+			if tt.rig != "" {
+				_, _, _, ok := ParseAgentBeadID(got)
+				if !ok {
+					t.Errorf("ParseAgentBeadID(%q) failed for generated ID", got)
+				}
+			}
+		})
+	}
+}
+
