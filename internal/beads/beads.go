@@ -73,7 +73,7 @@ type Issue struct {
 	Blocks      []string `json:"blocks,omitempty"`
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
+	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues, not synced to git
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
@@ -145,7 +145,7 @@ type CreateOptions struct {
 	Description string
 	Parent      string
 	Actor       string // Who is creating this issue (populates created_by)
-	Ephemeral   bool   // Create as ephemeral (wisp) - not exported to JSONL
+	Ephemeral   bool   // Create as ephemeral (wisp) - not synced to git
 }
 
 // UpdateOptions specifies options for updating an issue.
@@ -243,8 +243,8 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	defer func() {
 		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
 	}()
-	// Use --allow-stale to prevent failures when db is out of sync with JSONL
-	// (e.g., after daemon is killed during shutdown before syncing).
+	// Use --allow-stale to prevent failures when db is temporarily stale
+	// (e.g., after daemon is killed during shutdown).
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from

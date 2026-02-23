@@ -378,7 +378,7 @@ func filterFormulaScaffolds(issues []*beads.Issue, formulaNames map[string]bool)
 	return filtered
 }
 
-// getWispIDs reads the issues.jsonl and returns a set of IDs that are wisps.
+// getWispIDs reads issues.jsonl and returns a set of IDs that are wisps.
 // Wisps are ephemeral issues (wisp: true flag) that shouldn't appear in ready work.
 // This is a defense-in-depth exclusion - bd ready should already filter wisps,
 // but we double-check at the display layer to ensure operational work doesn't leak.

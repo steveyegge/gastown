@@ -778,8 +778,8 @@ exit /b 0
 }
 
 // TestVerifyBeadExistsAllowStale reproduces the bug in gtl-ncq where beads
-// visible via regular bd show fail due to database sync issues.
-// The fix uses --allow-stale to skip the sync check for existence verification.
+// visible via regular bd show fail due to database staleness.
+// The fix uses --allow-stale to skip the staleness check for existence verification.
 func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	townRoot := t.TempDir()
 
@@ -788,9 +788,9 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 
-	// Create a stub bd that simulates the sync issue:
-	// - without --allow-stale fails (database out of sync)
-	// - with --allow-stale succeeds (skips sync check)
+	// Create a stub bd that simulates a staleness issue:
+	// - without --allow-stale fails (database stale)
+	// - with --allow-stale succeeds (skips staleness check)
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
@@ -810,7 +810,7 @@ if [ "$allow_stale" = "true" ]; then
   exit 0
 else
   # Without --allow-stale, fails with sync error
-  echo '{"error":"Database out of sync with JSONL."}'
+  echo '{"error":"Database is stale."}'
   exit 1
 fi
 `
@@ -824,7 +824,7 @@ if "%allow%"=="true" (
   echo [{"title":"Test bead","status":"open","assignee":""}]
   exit /b 0
 )
-echo {"error":"Database out of sync with JSONL."}
+echo {"error":"Database is stale."}
 exit /b 1
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)

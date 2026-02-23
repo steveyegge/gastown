@@ -107,7 +107,7 @@ func (m *Mailbox) List() ([]*Message, error) {
 
 func (m *Mailbox) listBeads() ([]*Message, error) {
 	// Single query to beads - returns both persistent and wisp messages
-	// Wisps are stored in same DB with wisp=true flag, filtered from JSONL export
+	// Wisps are stored in same DB with wisp=true flag, not synced to git
 	messages, err := m.listFromDir(m.beadsDir)
 	if err != nil {
 		return nil, err

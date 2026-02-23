@@ -263,7 +263,7 @@ squashed_at: %s
 			}())
 		}
 
-		// Create the digest bead (ephemeral to avoid JSONL pollution)
+		// Create the digest bead (ephemeral to avoid git pollution)
 		// Per-cycle digests are aggregated daily by 'gt patrol digest'
 		digestIssue, err := b.Create(beads.CreateOptions{
 			Title:       digestTitle,
