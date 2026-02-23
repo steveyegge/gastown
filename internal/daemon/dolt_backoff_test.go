@@ -12,6 +12,16 @@ import (
 	"time"
 )
 
+const (
+	// testDeadlockTimeout is the maximum time to wait for a goroutine to
+	// complete before assuming a deadlock. Generous to avoid flakes on slow CI.
+	testDeadlockTimeout = 5 * time.Second
+
+	// testConcurrentHold is how long a test goroutine holds a lock or sleeps
+	// to give other goroutines a chance to contend.
+	testConcurrentHold = 200 * time.Millisecond
+)
+
 func TestAdvanceBackoff(t *testing.T) {
 	m := &DoltServerManager{
 		config: &DoltServerConfig{
@@ -418,7 +428,7 @@ func TestRestartWithBackoff_SkipsIfStartedDuringSleep(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected nil error when server started during backoff, got: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testDeadlockTimeout):
 		t.Fatal("restartWithBackoff never completed — possible deadlock")
 	}
 
@@ -529,6 +539,7 @@ func newTestManager(t *testing.T) *DoltServerManager {
 		logger:           func(format string, v ...interface{}) { t.Logf(format, v...) },
 		runningFn:        func() (int, bool) { return 0, false },
 		healthCheckFn:    func() error { return nil },
+		identityCheckFn:  func() error { return nil },
 		startFn:          func() error { return nil },
 		stopFn:           func() {},
 		unhealthyAlertFn: func(error) {},
@@ -548,7 +559,7 @@ func TestConcurrentEnsureRunning_OnlyOneRestart(t *testing.T) {
 		return nil
 	}
 	m.sleepFn = func(d time.Duration) {
-		time.Sleep(200 * time.Millisecond) // Hold to let other goroutines try
+		time.Sleep(testConcurrentHold) // Hold to let other goroutines try
 	}
 
 	const n = 10
@@ -606,7 +617,7 @@ func TestConcurrentEnsureRunning_BackoffSleepReleasesLock(t *testing.T) {
 		if err != nil {
 			t.Errorf("concurrent caller got error: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadlockTimeout):
 		t.Fatal("concurrent caller blocked while restart was sleeping")
 	}
 
@@ -618,7 +629,7 @@ func TestConcurrentEnsureRunning_BackoffSleepReleasesLock(t *testing.T) {
 		if err != nil {
 			t.Errorf("first caller got error: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadlockTimeout):
 		t.Fatal("first caller never completed")
 	}
 }

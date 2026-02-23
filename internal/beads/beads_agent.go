@@ -185,6 +185,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
+		"--ephemeral",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
@@ -303,6 +304,12 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Fix type separately — UpdateOptions doesn't support type changes
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
+	}
+	// Ensure agent bead is ephemeral (wisp) — agent operational state has
+	// zero git history consumers (gt-bewatn.9)
+	if _, err := target.run("update", id, "--ephemeral"); err != nil {
+		// Non-fatal: the bead is functional without ephemeral flag
+		style.PrintWarning("could not mark agent bead as ephemeral: %v", err)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -574,20 +581,58 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 
 // ListAgentBeads returns all agent beads in a single query.
 // Returns a map of agent bead ID to Issue.
+//
+// Queries both the wisps table (primary, for migrated agent beads) and
+// the issues table (backward compat during migration). Wisps take
+// precedence for duplicate IDs.
 func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
+	result := make(map[string]*Issue)
+
+	// Query wisps table first (primary source after agent bead migration).
+	// Gracefully ignore errors — wisps table may not exist yet.
+	if wispBeads, _ := b.ListAgentBeadsFromWisps(); len(wispBeads) > 0 {
+		for id, issue := range wispBeads {
+			result[id] = issue
+		}
+	}
+
+	// Also query issues table (backward compat during migration).
 	out, err := b.run("list", "--label=gt:agent", "--json")
-	if err != nil {
+	if err != nil && len(result) == 0 {
 		return nil, err
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	if err == nil {
+		var issues []*Issue
+		if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
+			for _, issue := range issues {
+				if _, exists := result[issue.ID]; !exists {
+					result[issue.ID] = issue
+				}
+			}
+		}
 	}
 
-	result := make(map[string]*Issue, len(issues))
-	for _, issue := range issues {
-		result[issue.ID] = issue
+	return result, nil
+}
+
+// ListAgentBeadsFromWisps queries the wisps table for agent beads.
+// Returns nil, nil if the wisps table doesn't exist yet or has no agent beads.
+func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
+	out, err := b.run("mol", "wisp", "list", "--json")
+	if err != nil {
+		return nil, nil // Wisps table may not exist yet
+	}
+
+	var wisps []*Issue
+	if err := json.Unmarshal(out, &wisps); err != nil {
+		return nil, nil
+	}
+
+	result := make(map[string]*Issue)
+	for _, w := range wisps {
+		if IsAgentBead(w) {
+			result[w.ID] = w
+		}
 	}
 
 	return result, nil

@@ -19,6 +19,10 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// deaconRestartThreshold is how long a Deacon heartbeat must be stale before
+// the boot command kills and restarts the session (vs. just nudging it).
+const deaconRestartThreshold = 30 * time.Minute
+
 var (
 	bootStatusJSON    bool
 	bootDegraded      bool
@@ -206,7 +210,6 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 
 	// Save starting status
 	status := &boot.Status{
-		Running:   true,
 		StartedAt: time.Now(),
 	}
 	if err := b.SaveStatus(status); err != nil {
@@ -217,7 +220,6 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	if err := b.Spawn(bootAgentOverride); err != nil {
 		status.Error = err.Error()
 		status.CompletedAt = time.Now()
-		status.Running = false
 		_ = b.SaveStatus(status)
 		return fmt.Errorf("spawning boot: %w", err)
 	}
@@ -245,7 +247,6 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 
 	startTime := time.Now()
 	status := &boot.Status{
-		Running:   true,
 		StartedAt: startTime,
 	}
 
@@ -255,7 +256,6 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 
 	status.LastAction = action
 	status.Target = target
-	status.Running = false
 	status.CompletedAt = time.Now()
 
 	if triageErr != nil {
@@ -330,7 +330,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			// Heartbeat is stale (>15 min) - Deacon is stuck
 			// Nudge the session to try to wake it up
 			age := hb.Age()
-			if age > 30*time.Minute {
+			if age > deaconRestartThreshold {
 				// Very stuck - restart the session.
 				// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))

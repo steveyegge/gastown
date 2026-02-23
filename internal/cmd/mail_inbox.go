@@ -134,7 +134,7 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 
 func runMailRead(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		return errors.New("message ID or index required")
+		return fmt.Errorf("message ID or index required\n\nRun 'gt mail inbox' to list messages and their IDs")
 	}
 	msgRef := args[0]
 

@@ -116,6 +116,21 @@ func TestAgentEnv_Boot(t *testing.T) {
 	assertNotSet(t, env, "GT_RIG")
 }
 
+func TestAgentEnv_Dog(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "dog",
+		AgentName: "alpha",
+		TownRoot:  "/town",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "dog")
+	assertEnv(t, env, "BD_ACTOR", "dog/alpha")
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "alpha")
+	assertEnv(t, env, "GT_ROOT", "/town")
+	assertNotSet(t, env, "GT_RIG")
+}
+
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
 	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
@@ -208,7 +223,7 @@ func TestAgentEnv_WithoutAgentOverride_RequiresFallback(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the default polecat dispatch path (no --agent flag).
-	// This is what session_manager.go calls when gt queue run / gt sling dispatches.
+	// This is what lifecycle.go calls when gt scheduler run / gt sling dispatches.
 	env := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       "myrig",

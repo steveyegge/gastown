@@ -158,9 +158,9 @@ error pointing to `gt dolt start`.
 Each rig database is a subdirectory under `.dolt-data/`. The daemon monitors
 the server on every heartbeat and auto-restarts on crash.
 
-For write concurrency, each polecat gets its own Dolt branch at sling time
-(`BD_BRANCH` env var). Branches are merged to main at completion. This
-eliminates optimistic lock contention at any concurrency level.
+For write concurrency, all agents write directly to `main` using transaction
+discipline (`BEGIN` / `DOLT_COMMIT` / `COMMIT` atomically). This eliminates
+branch proliferation and ensures immediate cross-agent visibility.
 
 See [dolt-storage.md](dolt-storage.md) for full details.
 

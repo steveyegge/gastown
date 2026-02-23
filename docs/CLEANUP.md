@@ -73,7 +73,7 @@ A comprehensive catalog of all cleanup-related commands in the gastown/beads eco
 | Command | What it does |
 |---------|-------------|
 | `gt compact` | TTL-based compaction: promotes/deletes wisps past their TTL |
-| `gt krc prune` | Prunes expired events from `.events.jsonl` and `.feed.jsonl` |
+| `gt krc prune` | Prunes expired events from the KRC event store |
 | `gt krc config reset` | Resets KRC TTL configuration to defaults |
 | `gt krc decay` | Shows forensic value decay report (pruning guidance) |
 

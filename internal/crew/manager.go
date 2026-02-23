@@ -696,6 +696,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		Agent:            opts.AgentOverride,
 	})
+	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 
 	// Build startup command (also includes env vars via 'exec env' for
 	// WaitForCommand detection — belt and suspenders with -e flags)

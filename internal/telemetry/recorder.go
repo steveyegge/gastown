@@ -26,11 +26,12 @@ const (
 // recorderInstruments holds all lazy-initialized OTel metric instruments.
 type recorderInstruments struct {
 	// Counters
-	bdTotal            metric.Int64Counter
-	sessionTotal       metric.Int64Counter
-	sessionStopTotal   metric.Int64Counter
-	promptTotal        metric.Int64Counter
-	paneReadTotal      metric.Int64Counter
+	bdTotal             metric.Int64Counter
+	sessionTotal        metric.Int64Counter
+	sessionStopTotal    metric.Int64Counter
+	promptTotal         metric.Int64Counter
+	paneReadTotal       metric.Int64Counter
+	paneOutputTotal     metric.Int64Counter
 	primeTotal         metric.Int64Counter
 	agentStateTotal    metric.Int64Counter
 	polecatTotal       metric.Int64Counter
@@ -74,6 +75,9 @@ func initInstruments() {
 		)
 		inst.paneReadTotal, _ = m.Int64Counter("gastown.pane.reads.total",
 			metric.WithDescription("Total tmux CapturePane calls"),
+		)
+		inst.paneOutputTotal, _ = m.Int64Counter("gastown.pane.output.total",
+			metric.WithDescription("Total pane output chunks emitted to VictoriaLogs"),
 		)
 		inst.primeTotal, _ = m.Int64Counter("gastown.prime.total",
 			metric.WithDescription("Total gt prime invocations"),
@@ -463,5 +467,20 @@ func RecordConvoyCreate(ctx context.Context, beadID string, err error) {
 		otellog.String("bead_id", beadID),
 		otellog.String("status", status),
 		errKV(err),
+	)
+}
+
+const maxPaneOutputLog = 8192
+
+// RecordPaneOutput emits a chunk of raw pane output (ANSI already stripped) to VictoriaLogs.
+// Opt-in: only called when GT_LOG_PANE_OUTPUT=true.
+func RecordPaneOutput(ctx context.Context, sessionID, content string) {
+	initInstruments()
+	inst.paneOutputTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("session", sessionID),
+	))
+	emit(ctx, "pane.output", otellog.SeverityInfo,
+		otellog.String("session", sessionID),
+		otellog.String("content", truncateOutput(content, maxPaneOutputLog)),
 	)
 }

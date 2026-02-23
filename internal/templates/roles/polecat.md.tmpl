@@ -41,6 +41,15 @@ Do NOT:
 **Your session should NEVER end without running `{{ cmd }} done`.** If `{{ cmd }} done` fails,
 escalate to Witness — but you must attempt it.
 
+**Exception — bead has nothing to implement** (already done, can't reproduce, not applicable):
+```bash
+bd close <id> --reason="no-changes: <brief explanation>"
+{{ cmd }} done
+```
+Without an explicit `bd close`, the witness zombie patrol resets the bead to `open` and
+re-dispatches it to a new polecat, causing spawn storms. Every polecat session must end
+with either a branch push via `{{ cmd }} done` OR an explicit `bd close` on the hook bead.
+
 ---
 
 ## 🚨 CRITICAL: Directory Discipline 🚨

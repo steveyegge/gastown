@@ -220,10 +220,14 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 	return err
 }
 
-// KillSession terminates a tmux session.
+// KillSession terminates a tmux session. Idempotent: returns nil if the
+// session is already gone or there is no tmux server.
 func (t *Tmux) KillSession(name string) (retErr error) {
 	defer func() { telemetry.RecordSessionStop(context.Background(), name, retErr) }()
 	_, retErr = t.run("kill-session", "-t", name)
+	if retErr == ErrSessionNotFound || retErr == ErrNoServer {
+		retErr = nil
+	}
 	return retErr
 }
 

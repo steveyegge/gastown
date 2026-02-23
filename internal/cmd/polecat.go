@@ -1193,11 +1193,19 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		fmt.Printf("  %s killed session\n", style.Success.Render("✓"))
 	}
 
-	// Step 2: Get polecat info before deletion (for branch name)
+	// Step 2: Get polecat info before deletion (for branch name + hooked work bead)
 	polecatInfo, getErr := mgr.Get(polecatName)
 	var branchToDelete string
 	if getErr == nil && polecatInfo != nil {
 		branchToDelete = polecatInfo.Branch
+	}
+
+	// Step 2.5: Burn any molecule attached to the polecat's hooked work bead.
+	// Without this, nuked polecats leave orphan molecule refs that block re-sling.
+	// The stale attached_molecule in the work bead's description causes sling to
+	// fail with "bead already has N attached molecule(s)" on re-dispatch (gt-npzy).
+	if getErr == nil && polecatInfo != nil && polecatInfo.Issue != "" {
+		nukeCleanupMolecules(polecatInfo.Issue, r)
 	}
 
 	// Step 3: Delete worktree (nuclear=true to bypass safety checks for stale polecats)
@@ -1264,6 +1272,52 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 	}
 
 	return nil
+}
+
+// nukeCleanupMolecules burns any molecule attached to a work bead during polecat nuke.
+// This prevents stale attached_molecule references from blocking re-dispatch (gt-npzy).
+// Best-effort: failures are logged but don't abort the nuke.
+func nukeCleanupMolecules(workBeadID string, r *rig.Rig) {
+	bd := beads.New(r.Path)
+
+	// Fetch the work bead to check for attached molecules
+	issue, err := bd.Show(workBeadID)
+	if err != nil {
+		fmt.Printf("  %s molecule cleanup: could not fetch work bead %s: %v\n",
+			style.Dim.Render("○"), workBeadID, err)
+		return
+	}
+
+	attachment := beads.ParseAttachmentFields(issue)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		return // No molecule attached — nothing to clean up
+	}
+
+	moleculeID := attachment.AttachedMolecule
+
+	// Force-close descendant steps before detaching (prevents orphaned step beads).
+	// Uses force variant since nuke is destructive — must succeed even for beads in
+	// invalid states.
+	forceCloseDescendants(bd, moleculeID)
+
+	// Detach the molecule with audit trail
+	if _, detachErr := bd.DetachMoleculeWithAudit(workBeadID, beads.DetachOptions{
+		Operation: "burn",
+		Reason:    "polecat nuked: cleaning stale molecule",
+	}); detachErr != nil {
+		fmt.Printf("  %s molecule detach failed for %s: %v\n",
+			style.Warning.Render("⚠"), moleculeID, detachErr)
+		return
+	}
+
+	// Force-close the orphaned wisp root so it doesn't linger
+	if closeErr := bd.ForceCloseWithReason("burned: polecat nuked", moleculeID); closeErr != nil {
+		fmt.Printf("  %s molecule root close failed for %s: %v\n",
+			style.Warning.Render("⚠"), moleculeID, closeErr)
+	} else {
+		fmt.Printf("  %s burned stale molecule %s from work bead %s\n",
+			style.Success.Render("✓"), moleculeID, workBeadID)
+	}
 }
 
 // cleanupOrphanedProcesses kills Claude processes that survived session termination.

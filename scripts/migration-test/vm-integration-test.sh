@@ -8,10 +8,9 @@
 #
 # Configurations tested:
 #   1. Clean v0.5.0 install (no beads at all)
-#   2. v0.5.0 with SQLite + JSONL beads (normal user)
-#   3. JSONL-only beads (pre-SQLite era)
-#   4. Partial migration interrupted, then resumed
-#   5. Idempotent re-run (already migrated, run again)
+#   2. v0.5.0 with SQLite beads (normal user)
+#   3. Partial migration interrupted, then resumed
+#   4. Idempotent re-run (already migrated, run again)
 
 set -euo pipefail
 
@@ -135,7 +134,6 @@ reset_to_v050() {
             sudo bash -c "cat > '$beads_dir/metadata.json'" <<METAEOF
 {
   "database": "beads.db",
-  "jsonl_export": "issues.jsonl",
   "backend": "sqlite"
 }
 METAEOF
@@ -183,8 +181,8 @@ strip_beads_from_rig() {
     sudo rm -f "$beads_dir"/beads.backup-pre-dolt-*.db
 }
 
-# Strip SQLite, keep only JSONL (for JSONL-only test)
-strip_sqlite_keep_jsonl() {
+# Strip SQLite (for migration testing from a clean state)
+strip_sqlite() {
     local rig_dir="$1"
     local beads_dir="$rig_dir/.beads"
     [[ -d "$beads_dir" ]] || return
@@ -192,18 +190,6 @@ strip_sqlite_keep_jsonl() {
     sudo rm -f "$beads_dir/beads.db" "$beads_dir/beads.db-wal" "$beads_dir/beads.db-shm"
     sudo rm -rf "$beads_dir/dolt"
     sudo rm -f "$beads_dir"/beads.backup-pre-dolt-*.db
-
-    # Update metadata to reflect JSONL-only state
-    if [[ -f "$beads_dir/issues.jsonl" ]]; then
-        sudo bash -c "cat > '$beads_dir/metadata.json'" <<METAEOF
-{
-  "database": "",
-  "jsonl_export": "issues.jsonl",
-  "backend": "jsonl"
-}
-METAEOF
-        sudo chown ubuntu:ubuntu "$beads_dir/metadata.json"
-    fi
 }
 
 # Run migration for all rigs (bd migrate dolt) then gt dolt migrate + gt dolt start
@@ -366,7 +352,7 @@ for rig_dir in "$TOWN_ROOT"/*/; do
     strip_beads_from_rig "$rig_dir"
 done
 
-log "State: both rigs have empty .beads/ (no SQLite, no JSONL, no metadata)"
+log "State: both rigs have empty .beads/ (no SQLite, no metadata)"
 
 # Run migration — should handle empty rigs gracefully
 run_full_migration
@@ -378,9 +364,9 @@ verify_bd_operations "Test1-clean" "false"
 log "Test 1 complete"
 
 # ============================================
-# TEST 2: v0.5.0 WITH SQLite + JSONL BEADS (NORMAL USER)
+# TEST 2: v0.5.0 WITH SQLite BEADS (NORMAL USER)
 # ============================================
-section "Test 2: v0.5.0 with SQLite + JSONL beads (normal user)"
+section "Test 2: v0.5.0 with SQLite beads (normal user)"
 TESTS_RUN=$((TESTS_RUN + 1))
 
 reset_to_v050
@@ -437,84 +423,9 @@ verify_bd_operations "Test2-sqlite-jsonl"
 log "Test 2 complete"
 
 # ============================================
-# TEST 3: JSONL-ONLY BEADS (PRE-SQLite ERA)
+# TEST 3: PARTIAL MIGRATION INTERRUPTED AND RESUMED
 # ============================================
-section "Test 3: JSONL-only beads (pre-SQLite era)"
-TESTS_RUN=$((TESTS_RUN + 1))
-
-reset_to_v050
-
-# Strip SQLite, keep only JSONL
-for rig_dir in "$TOWN_ROOT"/*/; do
-    [[ -d "$rig_dir/.beads" ]] || continue
-    strip_sqlite_keep_jsonl "$rig_dir"
-done
-
-# Verify pre-state
-for rig_dir in "$TOWN_ROOT"/*/; do
-    rig_name=$(basename "$rig_dir")
-    beads_dir="$rig_dir/.beads"
-    [[ -d "$beads_dir" ]] || continue
-    has_db=$(sudo test -f "$beads_dir/beads.db" && echo "yes" || echo "no")
-    has_jsonl=$(sudo test -f "$beads_dir/issues.jsonl" && echo "yes" || echo "no")
-    backend=$(sudo python3 -c "import json; print(json.load(open('$beads_dir/metadata.json')).get('backend','unknown'))" 2>/dev/null || echo "none")
-    log "Pre-state $rig_name: db=$has_db jsonl=$has_jsonl backend=$backend"
-done
-
-# Run migration — bd migrate dolt requires SQLite source, so JSONL-only
-# rigs cannot be directly migrated. This tests that the migration handles
-# the case gracefully (no crash, no corruption).
-log "Attempting migration on JSONL-only rigs (expected: graceful skip)..."
-JSONL_MIGRATION_CRASHED=false
-for rig_dir in "$TOWN_ROOT"/*/; do
-    rig_name=$(basename "$rig_dir")
-    metadata="$rig_dir/.beads/metadata.json"
-    [[ -f "$metadata" ]] || continue
-    cd "$rig_dir"
-    output=$(echo y | sudo -u ubuntu bd migrate dolt 2>&1) || true
-    if echo "$output" | grep -qi "fatal\|panic\|SIGSEGV\|segfault"; then
-        fail_check "Test3-jsonl-only: $rig_name crashed during JSONL-only migration attempt"
-        JSONL_MIGRATION_CRASHED=true
-    else
-        log "$rig_name: $(echo "$output" | head -1)"
-    fi
-done
-
-if [[ "$JSONL_MIGRATION_CRASHED" == "false" ]]; then
-    pass "Test3-jsonl-only: migration handles JSONL-only rigs gracefully (no crash)"
-fi
-
-# Verify that JSONL-only rigs are NOT migrated to Dolt (expected behavior —
-# bd migrate dolt requires SQLite source). This is a known limitation, not a bug.
-jsonl_still_jsonl=true
-for rig_dir in "$TOWN_ROOT"/*/; do
-    rig_name=$(basename "$rig_dir")
-    metadata="$rig_dir/.beads/metadata.json"
-    [[ -f "$metadata" ]] || continue
-    backend=$(sudo python3 -c "import json; print(json.load(open('$metadata')).get('backend','unknown'))" 2>/dev/null || echo "unknown")
-    if [[ "$backend" == "dolt" ]]; then
-        pass "Test3-jsonl-only: $rig_name was migrated to Dolt (migration supports JSONL source)"
-        jsonl_still_jsonl=false
-    else
-        log "$rig_name backend still '$backend' (JSONL-only migration not implemented — known limitation)"
-    fi
-done
-if [[ "$jsonl_still_jsonl" == "true" ]]; then
-    echo -e "  ${YELLOW}[KNOWN]${NC} Test3-jsonl-only: JSONL-only rigs cannot migrate to Dolt (no SQLite source)"
-    pass "Test3-jsonl-only: JSONL-only handling documented as known limitation"
-fi
-
-# Check no crash artifacts
-if ! pgrep -f "bd daemon" >/dev/null 2>&1; then
-    pass "Test3-jsonl-only: no bd daemons after JSONL migration attempt"
-fi
-
-log "Test 3 complete"
-
-# ============================================
-# TEST 4: PARTIAL MIGRATION INTERRUPTED AND RESUMED
-# ============================================
-section "Test 4: Partial migration interrupted and resumed"
+section "Test 3: Partial migration interrupted and resumed"
 TESTS_RUN=$((TESTS_RUN + 1))
 
 reset_to_v050
@@ -574,15 +485,15 @@ else
     warn "Need at least 2 rigs for partial migration test, found ${#RIGS[@]}"
 fi
 
-log "Test 4 complete"
+log "Test 3 complete"
 
 # ============================================
-# TEST 5: IDEMPOTENT RE-RUN (ALREADY MIGRATED)
+# TEST 4: IDEMPOTENT RE-RUN (ALREADY MIGRATED)
 # ============================================
-section "Test 5: Idempotent re-run"
+section "Test 4: Idempotent re-run"
 TESTS_RUN=$((TESTS_RUN + 1))
 
-# Don't reset — use the already-migrated state from Test 4
+# Don't reset — use the already-migrated state from Test 3
 
 # Record current state
 declare -A PASS1_COUNTS
@@ -652,7 +563,7 @@ if [[ "$IDEM_ERRORS" -eq 0 ]]; then
     pass "Test5-idempotent: no fatal errors on re-run"
 fi
 
-log "Test 5 complete"
+log "Test 4 complete"
 
 # ============================================
 # FINAL SUMMARY
@@ -700,10 +611,9 @@ fi
     fi
     echo "## Configurations"
     echo "1. Clean v0.5.0 (no beads)"
-    echo "2. SQLite + JSONL (normal user)"
-    echo "3. JSONL-only (pre-SQLite era)"
-    echo "4. Partial migration interrupted + resumed"
-    echo "5. Idempotent re-run"
+    echo "2. SQLite beads (normal user)"
+    echo "3. Partial migration interrupted + resumed"
+    echo "4. Idempotent re-run"
 } > "$REPORT_FILE"
 
 echo "  Report saved to: $REPORT_FILE"

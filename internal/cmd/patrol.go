@@ -28,8 +28,8 @@ var patrolCmd = &cobra.Command{
 	Short:   "Patrol digest management",
 	Long: `Manage patrol cycle digests.
 
-Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests
-to avoid JSONL pollution. This command aggregates them into daily summaries.
+Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests.
+This command aggregates them into permanent daily summaries.
 
 Examples:
   gt patrol digest --yesterday  # Aggregate yesterday's patrol digests
@@ -45,8 +45,8 @@ This command is intended to be run by Deacon patrol (daily) or manually.
 It queries patrol digests for a target date, creates a single aggregate
 "Patrol Report YYYY-MM-DD" bead, then deletes the source digests.
 
-The resulting digest bead is permanent (exported to JSONL, synced via git)
-and provides an audit trail without per-cycle pollution.
+The resulting digest bead is permanent (synced via git) and provides
+an audit trail without per-cycle ephemeral pollution.
 
 Examples:
   gt patrol digest --yesterday   # Digest yesterday's patrols (for daily patrol)

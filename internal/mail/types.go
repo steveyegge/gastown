@@ -99,7 +99,7 @@ type Message struct {
 	// Pinned marks the message as pinned (won't be auto-archived).
 	Pinned bool `json:"pinned,omitempty"`
 
-	// Wisp marks this as a transient message (stored in same DB but filtered from JSONL export).
+	// Wisp marks this as a transient message (stored in same DB but not synced to git).
 	// Wisp messages auto-cleanup on patrol squash.
 	Wisp bool `json:"wisp,omitempty"`
 
@@ -301,7 +301,7 @@ type BeadsMessage struct {
 	CreatedAt   time.Time `json:"created_at"`
 	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X, cc:X, queue:X, channel:X, claimed-by:X, claimed-at:X)
 	Pinned      bool      `json:"pinned,omitempty"`
-	Wisp        bool      `json:"wisp,omitempty"` // Ephemeral message (filtered from JSONL export)
+	Wisp        bool      `json:"wisp,omitempty"` // Ephemeral message (not synced to git)
 
 	// Cached parsed values (populated by ParseLabels)
 	sender    string

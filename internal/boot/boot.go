@@ -26,7 +26,6 @@ const StatusFileName = ".boot-status.json"
 
 // Status represents Boot's execution status.
 type Status struct {
-	Running     bool      `json:"running"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`
 	LastAction  string    `json:"last_action,omitempty"` // start/wake/nudge/nothing

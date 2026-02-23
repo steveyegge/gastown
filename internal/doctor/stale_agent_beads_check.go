@@ -102,6 +102,15 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
+		// Also check wisps table for migrated agent beads
+		if wispMap, _ := bd.ListAgentBeadsFromWisps(); len(wispMap) > 0 {
+			for _, w := range wispMap {
+				if w.Status == "open" || w.Status == "in_progress" || w.Status == "hooked" {
+					allBeads = append(allBeads, w)
+				}
+			}
+		}
+
 		for _, issue := range allBeads {
 			switch {
 			case strings.HasPrefix(issue.ID, crewPrefix):

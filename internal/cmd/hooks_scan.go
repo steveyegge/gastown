@@ -27,6 +27,8 @@ Hook types:
   PreToolUse       - Runs before tool execution
   PostToolUse      - Runs after tool execution
   Stop             - Runs when Claude session stops
+  WorktreeCreate   - Runs when agent worktree isolation creates a worktree
+  WorktreeRemove   - Runs when agent worktree isolation removes a worktree
 
 Examples:
   gt hooks scan              # List all hooks in workspace

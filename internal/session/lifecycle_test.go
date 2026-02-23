@@ -143,7 +143,7 @@ func TestMergeRuntimeLivenessEnv_SetsResolvedAgentAndProcessNames(t *testing.T) 
 		ResolvedAgent: "claude",
 	}
 
-	got := mergeRuntimeLivenessEnv(env, rc)
+	got := MergeRuntimeLivenessEnv(env, rc)
 
 	if got["GT_AGENT"] != "claude" {
 		t.Fatalf("GT_AGENT = %q, want %q", got["GT_AGENT"], "claude")
@@ -163,7 +163,7 @@ func TestMergeRuntimeLivenessEnv_RespectsExistingValues(t *testing.T) {
 		ResolvedAgent: "wen",
 	}
 
-	got := mergeRuntimeLivenessEnv(env, rc)
+	got := MergeRuntimeLivenessEnv(env, rc)
 
 	if got["GT_AGENT"] != "explicit-agent" {
 		t.Fatalf("GT_AGENT = %q, want %q", got["GT_AGENT"], "explicit-agent")
@@ -185,7 +185,7 @@ func TestMergeRuntimeLivenessEnv_UsesEffectiveAgentForProcessNames(t *testing.T)
 		ResolvedAgent: "claude", // workspace default, NOT the override
 	}
 
-	got := mergeRuntimeLivenessEnv(env, rc)
+	got := MergeRuntimeLivenessEnv(env, rc)
 
 	if got["GT_AGENT"] != "codex" {
 		t.Fatalf("GT_AGENT = %q, want %q", got["GT_AGENT"], "codex")

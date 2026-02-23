@@ -75,6 +75,38 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.8.0",
+		Date:    "2026-02-23",
+		Changes: []string{
+			"NEW: Work queue dispatch engine — gt queue, gt queue epic, gt convoy queue, gt sling --queue",
+			"NEW: Full OpenTelemetry observability — VictoriaMetrics, VictoriaLogs, OTLP log export",
+			"NEW: Dog subsystem — handler patrol, session-hygiene plugin, idle reaping, shutdown dance",
+			"NEW: Wisps table — ephemeral SQLite store for agent beads, wisp GC in patrol cycles",
+			"NEW: Convoy stage & launch commands, auto-resolve rig from bead prefixes",
+			"NEW: Refinery configurable quality gates, auto-close completed convoys after merge",
+			"NEW: Bead respawn count tracking for spawn storm detection",
+			"NEW: gt handoff --cycle (full session replacement) and --agent (runtime selection)",
+			"NEW: gt crew start --resume, gt crew at --reset, gt deacon pending",
+			"NEW: Pi agent provider, promptfoo model comparison, cost-tier presets",
+			"NEW: Dashboard convoy drill-down, session terminal preview, mail threading",
+			"NEW: Wasteland CLI command suite (gt wl)",
+			"NEW: GitHub Sheriff Deacon plugin for CI failure monitoring",
+			"NEW: gt mol step await-event for channel-based event subscription",
+			"NEW: Remote Dolt server support, server identity verification, restart command",
+			"NEW: Nix flake with bump-version integration",
+			"CHANGED: Removed Dolt branch-per-polecat infrastructure (server mode eliminates branch isolation)",
+			"CHANGED: Removed JSONL fallback code — Dolt is now the sole backend",
+			"CHANGED: Removed deprecated role bead TTL layer and role bead lookups",
+			"FIX: Replace dolthub/dolt with nil-check fork to fix SEGVs",
+			"FIX: Prevent orphan database creation on polecat spawn",
+			"FIX: LookupEnv for GT_AGENT prevents tmux env contamination",
+			"FIX: Isolate Dolt integration tests from production server",
+			"FIX: Filter getCurrentWork by assignee to prevent cross-session bead leaks",
+			"FIX: Clean stale molecules during polecat nuke to unblock re-sling",
+			"FIX: 300+ additional bug fixes across patrol, boot, convoy, and test infrastructure",
+		},
+	},
+	{
 		Version: "0.7.0",
 		Date:    "2026-02-15",
 		Changes: []string{

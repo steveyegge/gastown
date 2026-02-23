@@ -51,29 +51,26 @@ gt dolt list           # List all databases
 If the server isn't running, `bd` fails fast with a clear message
 pointing to `gt dolt start`.
 
-## Write Concurrency: Branch-Per-Polecat
+## Write Concurrency: All-on-Main
 
-Each polecat gets its own Dolt branch at sling time. Branches are
-independent root pointers — zero contention between concurrent writers.
-Merges happen sequentially at `gt done` time.
+All agents — polecats, crew, witness, refinery, deacon — write directly
+to `main`. Concurrency is managed through transaction discipline: every
+write wraps `BEGIN` / `DOLT_COMMIT` / `COMMIT` atomically.
 
 ```
-gt sling <bead> <rig>
-  → CALL DOLT_BRANCH('polecat-<name>-<timestamp>')
-  → Polecat env: BD_BRANCH=polecat-<name>-<timestamp>
-  → All bd writes go to the polecat's branch
-
-gt done
-  → DOLT_CHECKOUT('main')
-  → DOLT_MERGE('polecat-<name>-<timestamp>')
-  → DOLT_BRANCH('-D', 'polecat-<name>-<timestamp>')
+bd update <bead> --status=in_progress
+  → BEGIN
+  → UPDATE issues SET status='in_progress' ...
+  → CALL DOLT_COMMIT('-Am', 'update status')
+  → COMMIT
 ```
 
-**Tested**: 50 concurrent writers, 250 Dolt commits, 100% success rate.
-Sequential merge of 50 branches completes in ~300ms.
+This eliminates the former branch-per-worker strategy (BD_BRANCH,
+per-polecat Dolt branches, merge-at-done). All writes are immediately
+visible to all agents — no cross-agent visibility gaps.
 
-Crew, witness, refinery, and deacon write to `main` directly (low
-contention — few concurrent writers in those roles).
+Multi-statement `bd` commands batch their writes inside a single
+transaction to maintain atomicity.
 
 ## Schema
 
@@ -124,9 +121,9 @@ These are available to agents via SQL and used throughout Gas Town:
 | `AS OF` queries | Time-travel: "what did this look like yesterday?" |
 | `dolt_diff()` | "What changed between these two points?" |
 | `DOLT_COMMIT` | Explicit commit with message (auto-commit is the default) |
-| `DOLT_MERGE` | Merge branches (used by `gt done`) |
+| `DOLT_MERGE` | Merge branches (integration branches, federation) |
 | `dolt_conflicts` table | Programmatic conflict resolution after merge |
-| `DOLT_BRANCH` | Create/delete branches (used by `gt sling`, `gt polecat nuke`) |
+| `DOLT_BRANCH` | Create/delete branches (integration branches) |
 
 **Auto-commit** is on by default: every write gets a Dolt commit. Agents
 can batch writes by disabling auto-commit temporarily.

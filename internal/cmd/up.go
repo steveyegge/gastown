@@ -97,8 +97,14 @@ func emitUpJSON(w io.Writer, services []ServiceStatus) error {
 	return nil
 }
 
-// maxConcurrentAgentStarts limits parallel agent startups to avoid resource exhaustion.
+// maxConcurrentAgentStarts limits parallel agent startups to avoid resource
+// exhaustion. Each agent start spawns a tmux session and runs gt prime, so
+// more than ~10 concurrent starts can saturate CPU and cause timeouts.
 const maxConcurrentAgentStarts = 10
+
+// daemonStartupGrace is how long to wait after spawning the daemon process
+// before verifying it started. The daemon needs time to write its PID file.
+const daemonStartupGrace = 300 * time.Millisecond
 
 var upCmd = &cobra.Command{
 	Use:     "up",
@@ -421,7 +427,7 @@ func ensureDaemon(townRoot string) error {
 	}
 
 	// Wait for daemon to initialize
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(daemonStartupGrace)
 
 	// Verify it started
 	running, _, err = daemon.IsRunning(townRoot)

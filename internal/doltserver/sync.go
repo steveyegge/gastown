@@ -236,7 +236,7 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 	// Build bd purge command with safety-net timeout.
 	// bd purge v2 uses batched SQL (completes in seconds), but we keep a
 	// generous timeout as a circuit breaker against future regressions.
-	// --allow-stale prevents failures when database is out of sync with JSONL files,
+	// --allow-stale prevents failures when database is temporarily stale,
 	// consistent with all other bd invocations in the codebase.
 	args := []string{"--allow-stale", "purge", "--json"}
 	if dryRun {

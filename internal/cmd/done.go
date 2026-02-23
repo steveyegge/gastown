@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -51,7 +50,8 @@ Examples:
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
-	RunE: runDone,
+	RunE:         runDone,
+	SilenceUsage: true, // Don't print usage on operational errors (confuses agents)
 }
 
 var (
@@ -181,9 +181,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("cannot determine current rig (working directory may be deleted)")
 	}
 
-	// When gt is invoked via shell alias (cd ~/gt && gt), cwd is the town
-	// root, not the polecat's worktree. Detect and reconstruct actual path.
-	if cwdAvailable && cwd == townRoot {
+	// When gt is invoked via shell alias (cd ~/gt && gt), or when Claude Code
+	// resets the shell CWD to mayor/rig, cwd is NOT the polecat's worktree.
+	// Detect and reconstruct actual path.
+	//
+	// This triggers when cwd is:
+	// - The town root itself (cd ~/gt && gt)
+	// - The mayor rig path (Claude Code Bash tool CWD reset)
+	// - Any non-polecat path within the rig
+	cwdIsPolecatWorktree := strings.Contains(cwd, "/polecats/")
+	if cwdAvailable && !cwdIsPolecatWorktree {
 		if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" && rigName != "" {
 			polecatClone := filepath.Join(townRoot, rigName, "polecats", polecatName, rigName)
 			if _, err := os.Stat(polecatClone); err == nil {
@@ -361,6 +368,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	var pushFailed bool
+	var mrFailed bool
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
 	if exitType == ExitCompleted {
@@ -722,7 +730,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if donePriority >= 0 {
 			priority = donePriority
 		} else {
-			// Try to inherit from source issue
 			sourceIssue, err := bd.Show(issueID)
 			if err != nil {
 				priority = 2 // Default
@@ -760,7 +767,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			description += "\nlast_conflict_sha: null"
 			description += "\nconflict_task_id: null"
 
-			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
 				Type:        "merge-request",
@@ -771,6 +777,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.
 				// Push succeeded so branch is on remote, but MR bead failed.
+				// Set mrFailed so the witness knows not to send MERGE_READY.
+				mrFailed = true
 				errMsg := fmt.Sprintf("MR bead creation failed: %v", err)
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nBranch is pushed but MR bead not created. Witness will be notified.", errMsg)
@@ -820,44 +828,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
-	// Branch-per-polecat: merge polecat's Dolt branch to main.
-	// This makes all beads changes (MR bead, issue updates) visible on main
-	// before the refinery or witness try to read them.
-	var mergeFailed bool
-
-	// Resume: skip Dolt merge if already completed (gt-aufru checkpoint)
-	if checkpoints[CheckpointDoltMerged] != "" {
-		fmt.Printf("%s Dolt branch already merged (resumed from checkpoint)\n", style.Bold.Render("✓"))
-		goto afterDoltMerge
-	}
-
-	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
-		fmt.Printf("Merging Dolt branch %s to main...\n", bdBranch)
-		if err := doltserver.MergePolecatBranch(townRoot, rigName, bdBranch); err != nil {
-			mergeFailed = true
-			style.PrintWarning("could not merge Dolt branch: %v (data still on branch %s)", err, bdBranch)
-		} else {
-			fmt.Printf("%s Dolt branch merged to main\n", style.Bold.Render("✓"))
-		}
-		// Unset BD_BRANCH so subsequent bd operations (updateAgentStateOnDone)
-		// write directly to main instead of the now-deleted branch.
-		// Note: this is a lifecycle transition (branch deleted). The systematic fix
-		// for BD_BRANCH leaking into read operations is in beads.go (OnMain/StripBdBranch).
-		os.Unsetenv("BD_BRANCH")
-	}
-
-	// Write Dolt merge checkpoint for resume (gt-aufru)
-	if agentBeadID != "" {
-		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
-		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointDoltMerged, "ok")
-	}
-
-afterDoltMerge:
-	// Nudge refinery AFTER the Dolt merge so MR bead is visible on main.
-	// Skip nudge only if merge was attempted and failed — MR bead is stranded
-	// on the polecat branch and refinery won't find it on main.
-	// If no branch existed (crew worker), MR bead is already on main.
-	if mrID != "" && !mergeFailed {
+	// Nudge refinery — MR bead is already on main (transaction-based shared main).
+	if mrID != "" {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
@@ -886,6 +858,9 @@ afterDoltMerge:
 		if convoyInfo.MergeStrategy != "" {
 			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
 		}
+	}
+	if mrFailed {
+		bodyLines = append(bodyLines, "MRFailed: true")
 	}
 	if len(doneErrors) > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
@@ -1044,7 +1019,6 @@ type DoneCheckpoint string
 const (
 	CheckpointPushed          DoneCheckpoint = "pushed"
 	CheckpointMRCreated       DoneCheckpoint = "mr-created"
-	CheckpointDoltMerged      DoneCheckpoint = "dolt-merged"
 	CheckpointWitnessNotified DoneCheckpoint = "witness-notified"
 )
 

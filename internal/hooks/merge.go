@@ -81,6 +81,8 @@ func applyOverride(result, override *HooksConfig) *HooksConfig {
 	result.Stop = mergeEntries(result.Stop, override.Stop)
 	result.PreCompact = mergeEntries(result.PreCompact, override.PreCompact)
 	result.UserPromptSubmit = mergeEntries(result.UserPromptSubmit, override.UserPromptSubmit)
+	result.WorktreeCreate = mergeEntries(result.WorktreeCreate, override.WorktreeCreate)
+	result.WorktreeRemove = mergeEntries(result.WorktreeRemove, override.WorktreeRemove)
 	return result
 }
 
@@ -136,6 +138,8 @@ func cloneConfig(cfg *HooksConfig) *HooksConfig {
 		Stop:             cloneEntries(cfg.Stop),
 		PreCompact:       cloneEntries(cfg.PreCompact),
 		UserPromptSubmit: cloneEntries(cfg.UserPromptSubmit),
+		WorktreeCreate:   cloneEntries(cfg.WorktreeCreate),
+		WorktreeRemove:   cloneEntries(cfg.WorktreeRemove),
 	}
 }
 

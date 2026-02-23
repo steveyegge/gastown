@@ -902,6 +902,85 @@ func identityToBDActor(identity string) string {
 // Principle) violation. GUPP states: if you have work on your hook, you run it.
 const GUPPViolationTimeout = 30 * time.Minute
 
+// listAgentBeadsJSON queries both the issues and wisps tables for agent beads
+// and unmarshals the combined results into the provided slice pointer.
+// The wisps query is best-effort (gracefully ignored if table doesn't exist).
+func (d *Daemon) listAgentBeadsJSON(dest interface{}) error {
+	// Query issues table (backward compat during migration)
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+
+	issuesOutput, issuesErr := cmd.Output()
+
+	// Query wisps table (primary source after agent bead migration)
+	wispCmd := exec.Command(d.bdPath, "mol", "wisp", "list", "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	wispCmd.Dir = d.config.TownRoot
+	wispCmd.Env = os.Environ()
+
+	wispOutput, _ := wispCmd.Output() // Best-effort: wisps table may not exist
+
+	// Merge results: parse wisps first, then issues (wisps take precedence)
+	combined := mergeAgentBeadJSON(wispOutput, issuesOutput)
+	if combined == nil {
+		if issuesErr != nil {
+			return fmt.Errorf("bd list failed: %w", issuesErr)
+		}
+		return fmt.Errorf("no agent beads found")
+	}
+
+	return json.Unmarshal(combined, dest)
+}
+
+// mergeAgentBeadJSON merges JSON arrays from wisps and issues queries.
+// Returns a combined JSON array with wisps taking precedence for duplicate IDs.
+// Filters wisps to only include agent beads (type=agent or label gt:agent).
+func mergeAgentBeadJSON(wispJSON, issuesJSON []byte) []byte {
+	type agentEntry struct {
+		ID     string   `json:"id"`
+		Type   string   `json:"issue_type"`
+		Labels []string `json:"labels"`
+	}
+
+	// Track IDs from wisps to avoid duplicates
+	seenIDs := make(map[string]bool)
+	var result []json.RawMessage
+
+	// Parse wisps first (primary source)
+	if len(wispJSON) > 0 {
+		var wispEntries []json.RawMessage
+		if json.Unmarshal(wispJSON, &wispEntries) == nil {
+			for _, raw := range wispEntries {
+				var entry agentEntry
+				if json.Unmarshal(raw, &entry) == nil && beads.IsAgentBead(&beads.Issue{Type: entry.Type, Labels: entry.Labels}) {
+					seenIDs[entry.ID] = true
+					result = append(result, raw)
+				}
+			}
+		}
+	}
+
+	// Then issues (backward compat, skip duplicates)
+	if len(issuesJSON) > 0 {
+		var issueEntries []json.RawMessage
+		if json.Unmarshal(issuesJSON, &issueEntries) == nil {
+			for _, raw := range issueEntries {
+				var entry agentEntry
+				if json.Unmarshal(raw, &entry) == nil && !seenIDs[entry.ID] {
+					result = append(result, raw)
+				}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	combined, _ := json.Marshal(result)
+	return combined
+}
+
 // checkGUPPViolations looks for agents that have work-on-hook but aren't
 // progressing. This is a GUPP violation: agents with hooked work must execute.
 // The daemon detects these and notifies the relevant Witness for remediation.
@@ -915,27 +994,20 @@ func (d *Daemon) checkGUPPViolations() {
 
 // checkRigGUPPViolations checks polecats in a specific rig for GUPP violations.
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
-	// List polecat agent beads for this rig
+	// List polecat agent beads for this rig (issues + wisps tables)
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
-	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
-	cmd.Dir = d.config.TownRoot
-	cmd.Env = os.Environ() // Inherit PATH to find bd executable
-
-	output, err := cmd.Output()
-	if err != nil {
-		d.logger.Printf("Warning: bd list failed for GUPP check: %v", err)
-		return
-	}
-
 	var agents []struct {
 		ID          string `json:"id"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
 		HookBead    string `json:"hook_bead"` // Read from database column, not description
 		AgentState  string `json:"agent_state"`
+		Labels      []string `json:"labels"`
+		Type        string   `json:"issue_type"`
 	}
 
-	if err := json.Unmarshal(output, &agents); err != nil {
+	if err := d.listAgentBeadsJSON(&agents); err != nil {
+		d.logger.Printf("Warning: listing agent beads failed for GUPP check: %v", err)
 		return
 	}
 
@@ -1016,22 +1088,16 @@ func (d *Daemon) checkOrphanedWork() {
 
 // checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
-	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json")
-	cmd.Dir = d.config.TownRoot
-	cmd.Env = os.Environ() // Inherit PATH to find bd executable
-
-	output, err := cmd.Output()
-	if err != nil {
-		d.logger.Printf("Warning: bd list failed for orphaned work check: %v", err)
-		return
-	}
-
+	// List polecat agent beads (issues + wisps tables)
 	var agents []struct {
-		ID       string `json:"id"`
-		HookBead string `json:"hook_bead"`
+		ID       string   `json:"id"`
+		HookBead string   `json:"hook_bead"`
+		Labels   []string `json:"labels"`
+		Type     string   `json:"issue_type"`
 	}
 
-	if err := json.Unmarshal(output, &agents); err != nil {
+	if err := d.listAgentBeadsJSON(&agents); err != nil {
+		d.logger.Printf("Warning: listing agent beads failed for orphaned work check: %v", err)
 		return
 	}
 

@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +57,5 @@ func execBdShow(args []string) error {
 	// argv[0] must be the program name for exec
 	fullArgs := append([]string{"bd", "show"}, args...)
 
-	// Replace process with bd show — strip BD_BRANCH for read safety (#1796).
-	// gt show is a read operation; polecat write isolation is not needed.
-	return syscall.Exec(bdPath, fullArgs, beads.StripBdBranch(os.Environ()))
+	return syscall.Exec(bdPath, fullArgs, os.Environ())
 }

@@ -194,8 +194,8 @@ func TestLoadTTLConfigDefaults(t *testing.T) {
 }
 
 func TestLoadTTLConfigWithRoleDefaults(t *testing.T) {
-	// With empty town root and no role, should return hardcoded defaults
-	ttls := loadTTLConfigWithRole("", "", "")
+	// With empty town root, should return hardcoded defaults
+	ttls := loadTTLConfigWithRole("", "")
 
 	for k, want := range defaultTTLs {
 		if got := ttls[k]; got != want {
@@ -205,8 +205,8 @@ func TestLoadTTLConfigWithRoleDefaults(t *testing.T) {
 }
 
 func TestLoadTTLConfigWithRoleSkipsInvalidPaths(t *testing.T) {
-	// With nonexistent paths, role bead lookup should gracefully skip
-	ttls := loadTTLConfigWithRole("/nonexistent/town", "myrig", "deacon")
+	// With nonexistent paths, rig bead lookup should gracefully skip
+	ttls := loadTTLConfigWithRole("/nonexistent/town", "myrig")
 
 	// Should still have defaults even though lookups failed
 	if ttls["patrol"] != defaultTTLs["patrol"] {

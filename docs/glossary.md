@@ -52,7 +52,7 @@ Long-lived, named agents for persistent collaboration. Unlike ephemeral Polecats
 ## Work Units
 
 ### Bead
-Git-backed atomic work unit stored in JSONL format. Beads are the fundamental unit of work tracking in Gas Town. They can represent issues, tasks, epics, or any trackable work item.
+Git-backed atomic work unit stored in Dolt. Beads are the fundamental unit of work tracking in Gas Town. They can represent issues, tasks, epics, or any trackable work item.
 
 ### Formula
 TOML-based workflow source template. Formulas define reusable patterns for common operations like patrol cycles, code review, or deployment.

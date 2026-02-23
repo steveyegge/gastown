@@ -432,3 +432,244 @@ exit /b 0
 		t.Errorf("mol wisp missing issue variable:\n%s", wispLine)
 	}
 }
+
+func TestInstantiateFormulaOnBead_FallbackToDirectBond(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(`{"prefix":"gt-","path":"."}`), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+
+	// Legacy path behavior:
+	// - mol wisp succeeds and returns a root ID
+	// - mol bond <wisp-id> fails with "not found"
+	// Fallback behavior:
+	// - mol bond <formula> <bead> --ephemeral succeeds and returns id_mapping
+	bdScript := `#!/bin/sh
+set -e
+echo "CMD:$*" >> "${BD_LOG}"
+cmd="$1"; shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"; shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-missing"}'
+        exit 0
+        ;;
+      bond)
+        left="$1"; shift || true
+        if [ "$left" = "gt-wisp-missing" ]; then
+          echo "Error: 'gt-wisp-missing' not found (not an issue ID or formula name)" >&2
+          exit 1
+        fi
+        if [ "$left" = "mol-polecat-work" ]; then
+          echo '{"result_id":"gt-abc123","id_mapping":{"mol-polecat-work":"gt-mol-fallback"}}'
+          exit 0
+        fi
+        echo "Error: unexpected bond target: $left" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo CMD:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+set "left=%3"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-missing^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    if "%left%"=="gt-wisp-missing" (
+      echo Error: 'gt-wisp-missing' not found - not an issue ID or formula name 1>&2
+      exit /b 1
+    )
+    if "%left%"=="mol-polecat-work" (
+      echo {^"result_id^":^"gt-abc123^",^"id_mapping^":{^"mol-polecat-work^":^"gt-mol-fallback^"}}
+      exit /b 0
+    )
+    echo Error: unexpected bond target: %left% 1>&2
+    exit /b 1
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	_ = os.Chdir(townRoot)
+
+	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
+	if err != nil {
+		t.Fatalf("InstantiateFormulaOnBead: %v", err)
+	}
+	if result.WispRootID != "gt-mol-fallback" {
+		t.Fatalf("WispRootID = %q, want %q", result.WispRootID, "gt-mol-fallback")
+	}
+	if result.BeadToHook != "gt-abc123" {
+		t.Fatalf("BeadToHook = %q, want %q", result.BeadToHook, "gt-abc123")
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "mol bond gt-wisp-missing gt-abc123 --json") {
+		t.Fatalf("missing legacy bond attempt in log:\n%s", logContent)
+	}
+	var fallbackBondLine string
+	for _, line := range strings.Split(logContent, "\n") {
+		if strings.Contains(line, "mol bond mol-polecat-work gt-abc123 --json --ephemeral") {
+			fallbackBondLine = line
+			break
+		}
+	}
+	if fallbackBondLine == "" {
+		t.Fatalf("missing direct bond fallback in log:\n%s", logContent)
+	}
+	if !containsVarArg(fallbackBondLine, "feature", "My Cool Feature") {
+		t.Fatalf("fallback bond missing feature variable:\n%s", logContent)
+	}
+	if !containsVarArg(fallbackBondLine, "issue", "gt-abc123") {
+		t.Fatalf("fallback bond missing issue variable:\n%s", logContent)
+	}
+	for _, required := range []struct {
+		key   string
+		value string
+	}{
+		{"base_branch", "main"},
+		{"setup_command", ""},
+		{"typecheck_command", ""},
+		{"lint_command", ""},
+		{"test_command", "go test ./..."},
+		{"build_command", ""},
+	} {
+		if !containsVarArg(fallbackBondLine, required.key, required.value) {
+			t.Fatalf("fallback bond missing required variable %q:\n%s", required.key, logContent)
+		}
+	}
+}
+
+// TestInstantiateFormulaOnBead_ParseFailureFallbackFailure verifies that when
+// legacy bond exits 0 with non-JSON output AND the direct-bond fallback also
+// fails, InstantiateFormulaOnBead returns an error instead of silent success.
+func TestInstantiateFormulaOnBead_ParseFailureFallbackFailure(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(`{"prefix":"gt-","path":"."}`), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+
+	// Legacy bond exits 0 but returns non-JSON garbage.
+	// Direct-bond fallback also fails (all bond calls fail).
+	bdScript := `#!/bin/sh
+set -e
+echo "CMD:$*" >> "${BD_LOG}"
+cmd="$1"; shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"; shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-abc"}'
+        exit 0
+        ;;
+      bond)
+        left="$1"; shift || true
+        if [ "$left" = "gt-wisp-abc" ]; then
+          echo 'NOT-JSON-GARBAGE'
+          exit 0
+        fi
+        echo "Error: bond failed" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo CMD:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+set "left=%3"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-abc^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    if "%left%"=="gt-wisp-abc" (
+      echo NOT-JSON-GARBAGE
+      exit /b 0
+    )
+    echo Error: bond failed 1>&2
+    exit /b 1
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	_ = os.Chdir(townRoot)
+
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Feature", "", townRoot, false, nil)
+	if err == nil {
+		t.Fatal("expected error when bond returns non-JSON and fallback fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "not parseable") && !strings.Contains(err.Error(), "fallback failed") {
+		t.Fatalf("error message should mention parse failure and fallback: %v", err)
+	}
+}

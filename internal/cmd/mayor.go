@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -158,6 +161,9 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding workspace: %w", err)
 	}
 
+	// Ensure daemon and dolt are running before attaching.
+	ensureMayorInfra(townRoot)
+
 	t := tmux.NewTmux()
 	sessionID := mgr.SessionName()
 
@@ -269,4 +275,36 @@ func runMayorRestart(cmd *cobra.Command, args []string) error {
 
 	// Start fresh
 	return runMayorStart(cmd, args)
+}
+
+// ensureMayorInfra checks that daemon and dolt are running before attaching
+// to the Mayor session. Warns and auto-starts each if absent. Non-fatal:
+// failures are reported but do not block the attach.
+func ensureMayorInfra(townRoot string) {
+	// Daemon
+	daemonRunning, _, _ := daemon.IsRunning(townRoot)
+	if !daemonRunning {
+		style.PrintWarning("daemon is not running, starting...")
+		if err := ensureDaemon(townRoot); err != nil {
+			style.PrintWarning("daemon start failed: %v", err)
+		} else {
+			fmt.Printf("  %s Daemon started\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Dolt (skip if no local data dir or if server is remote)
+	doltCfg := doltserver.DefaultConfig(townRoot)
+	if !doltCfg.IsRemote() {
+		if _, err := os.Stat(doltCfg.DataDir); err == nil {
+			doltRunning, _, _ := doltserver.IsRunning(townRoot)
+			if !doltRunning {
+				style.PrintWarning("Dolt server is not running, starting...")
+				if err := doltserver.Start(townRoot); err != nil {
+					style.PrintWarning("Dolt server start failed: %v", err)
+				} else {
+					fmt.Printf("  %s Dolt server started (port %d)\n", style.Bold.Render("✓"), doltserver.DefaultPort)
+				}
+			}
+		}
+	}
 }

@@ -221,6 +221,11 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		return "merge-request type should be ephemeral"
 	}
 
+	// Check for agent type - agent operational state is ephemeral (gt-bewatn.9)
+	if issueType == "agent" {
+		return "agent type should be ephemeral"
+	}
+
 	// Check for patrol-related labels
 	for _, label := range labels {
 		if strings.Contains(label, "patrol") {
@@ -228,6 +233,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		}
 		if label == "gt:mail" || label == "gt:handoff" {
 			return "mail/handoff label indicates ephemeral message"
+		}
+		if label == "gt:agent" {
+			return "agent label indicates ephemeral operational state"
 		}
 	}
 

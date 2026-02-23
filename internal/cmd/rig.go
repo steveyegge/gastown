@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -957,9 +956,9 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		}
 		foundBeadsCandidate = true
 
-		// Detect prefix: try dolt backend first, fall back to metadata.json, then issues.jsonl.
-		// With dolt, metadata.json survives clone (dolt/ is gitignored since bd v0.50+).
-		// Try "bd config get issue_prefix", then extract from metadata.json dolt_database name.
+		// Detect prefix from Dolt metadata: try "bd config get issue_prefix" first,
+		// then extract from metadata.json dolt_database name as fallback.
+		// metadata.json survives clone (dolt/ is gitignored since bd v0.50+).
 		prefixDetected := false
 		metadataPath := filepath.Join(beadsDir, "metadata.json")
 		if metaBytes, readErr := os.ReadFile(metadataPath); readErr == nil {
@@ -1005,35 +1004,6 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			}
 		}
 
-		// Fall back to issues.jsonl for non-dolt backends or if dolt detection failed
-		if !prefixDetected {
-			jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-			if f, readErr := os.Open(jsonlPath); readErr == nil {
-				scanner := bufio.NewScanner(f)
-				if scanner.Scan() {
-					var issue struct {
-						ID string `json:"id"`
-					}
-					if json.Unmarshal(scanner.Bytes(), &issue) == nil && issue.ID != "" {
-						// Extract prefix: everything before the last "-" segment
-						if lastDash := strings.LastIndex(issue.ID, "-"); lastDash > 0 {
-							detected := issue.ID[:lastDash]
-							if detected != "" && rigAddPrefix != "" {
-								if strings.TrimSuffix(rigAddPrefix, "-") != detected {
-									f.Close()
-									return fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detected, rigAddPrefix)
-								}
-							}
-							if detected != "" && result.BeadsPrefix == "" {
-								result.BeadsPrefix = detected
-							}
-						}
-					}
-				}
-				f.Close()
-			}
-		}
-
 		// Re-init database if metadata.json is missing or dolt/ directory is missing.
 		// Since bd v0.50+, dolt/ is gitignored and won't exist after clone.
 		// Use mgr.InitBeads() for consistency with the non-adopt path — it handles
@@ -1059,7 +1029,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			if prefix == "" {
 				break
 			}
-			if err := mgr.InitBeads(rigPath, prefix); err != nil {
+			if err := mgr.InitBeads(rigPath, prefix, name); err != nil {
 				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
@@ -1071,7 +1041,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	// If no existing .beads/ candidate was found, initialize a fresh database
 	// to match the behavior of the normal (non-adopt) gt rig add path.
 	if !foundBeadsCandidate && result.BeadsPrefix != "" {
-		if err := mgr.InitBeads(rigPath, result.BeadsPrefix); err != nil {
+		if err := mgr.InitBeads(rigPath, result.BeadsPrefix, name); err != nil {
 			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
 		} else {
 			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))

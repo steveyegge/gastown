@@ -77,7 +77,7 @@ bd mol burn $WISP --force
 
 The demo uses wisps (ephemeral molecules) because:
 
-1. **No Git Pollution**: Wisps don't sync to JSONL, keeping git history clean
+1. **No Git Pollution**: Wisps are database-only, keeping git history clean
 2. **Auto-Cleanup**: Wisps can be burned without leaving tombstones
 3. **Speed**: No export overhead during rapid closes
 4. **Appropriate Semantics**: This is operational testing, not auditable work

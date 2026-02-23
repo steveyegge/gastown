@@ -68,6 +68,23 @@ var doltStopCmd = &cobra.Command{
 	RunE:  runDoltStop,
 }
 
+var doltRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the Dolt server (kills imposters)",
+	Long: `Stop the Dolt SQL server, kill any imposter servers on the configured port,
+and start the correct server from the configured data directory.
+
+This is the nuclear option for recovering from a hijacked port — when another
+process (e.g., bd's embedded Dolt server) has taken over the port with a
+different data directory, serving empty/wrong databases.
+
+Steps:
+  1. Stop the tracked server (via PID file)
+  2. Kill any other dolt sql-server on the configured port (imposters)
+  3. Start the correct server from .dolt-data/`,
+	RunE: runDoltRestart,
+}
+
 var doltStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Dolt server status",
@@ -232,23 +249,46 @@ formula's backup step (migration-backup-YYYYMMDD-HHMMSS/).`,
 	RunE: runDoltRollback,
 }
 
+var doltMigrateWispsCmd = &cobra.Command{
+	Use:   "migrate-wisps",
+	Short: "Migrate agent beads from issues to wisps table",
+	Long: `Create the wisps table infrastructure and migrate existing agent beads.
+
+This command:
+1. Creates the wisps table (dolt_ignored, same schema as issues)
+2. Creates auxiliary tables (wisp_labels, wisp_comments, wisp_events, wisp_dependencies)
+3. Copies agent beads (issue_type='agent') from issues to wisps
+4. Copies associated labels, comments, events, and dependencies
+5. Closes the originals in the issues table
+
+Idempotent — safe to run multiple times. Use --dry-run to preview.
+
+After migration, 'bd mol wisp list' will work and agent lifecycle
+(spawn, sling, work, done, nuke, respawn) uses the wisps table.`,
+	RunE: runDoltMigrateWisps,
+}
+
 var (
-	doltLogLines     int
-	doltLogFollow    bool
-	doltMigrateDry   bool
-	doltCleanupDry   bool
-	doltRollbackDry  bool
-	doltRollbackList bool
-	doltSyncDry      bool
-	doltSyncForce    bool
-	doltSyncDB       string
-	doltSyncGC       bool
+	doltLogLines          int
+	doltLogFollow         bool
+	doltMigrateDry        bool
+	doltCleanupDry        bool
+
+	doltMigrateWispsDry   bool
+	doltMigrateWispsDB    string
+	doltRollbackDry       bool
+	doltRollbackList      bool
+	doltSyncDry           bool
+	doltSyncForce         bool
+	doltSyncDB            string
+	doltSyncGC            bool
 )
 
 func init() {
 	doltCmd.AddCommand(doltInitCmd)
 	doltCmd.AddCommand(doltStartCmd)
 	doltCmd.AddCommand(doltStopCmd)
+	doltCmd.AddCommand(doltRestartCmd)
 	doltCmd.AddCommand(doltStatusCmd)
 	doltCmd.AddCommand(doltLogsCmd)
 	doltCmd.AddCommand(doltSQLCmd)
@@ -260,9 +300,9 @@ func init() {
 	doltCmd.AddCommand(doltCleanupCmd)
 	doltCmd.AddCommand(doltRollbackCmd)
 	doltCmd.AddCommand(doltSyncCmd)
+	doltCmd.AddCommand(doltMigrateWispsCmd)
 
 	doltCleanupCmd.Flags().BoolVar(&doltCleanupDry, "dry-run", false, "Preview what would be removed without making changes")
-
 	doltLogsCmd.Flags().IntVarP(&doltLogLines, "lines", "n", 50, "Number of lines to show")
 	doltLogsCmd.Flags().BoolVarP(&doltLogFollow, "follow", "f", false, "Follow log output")
 
@@ -275,6 +315,9 @@ func init() {
 	doltSyncCmd.Flags().BoolVar(&doltSyncForce, "force", false, "Force-push to remotes")
 	doltSyncCmd.Flags().StringVar(&doltSyncDB, "db", "", "Sync a single database instead of all")
 	doltSyncCmd.Flags().BoolVar(&doltSyncGC, "gc", false, "Purge closed ephemeral beads before push (requires bd purge)")
+
+	doltMigrateWispsCmd.Flags().BoolVar(&doltMigrateWispsDry, "dry-run", false, "Preview what would be migrated without making changes")
+	doltMigrateWispsCmd.Flags().StringVar(&doltMigrateWispsDB, "db", "", "Target database (default: auto-detect from rig)")
 
 	rootCmd.AddCommand(doltCmd)
 }
@@ -349,6 +392,75 @@ func runDoltStop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Dolt server stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
+	return nil
+}
+
+func runDoltRestart(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	config := doltserver.DefaultConfig(townRoot)
+	if config.IsRemote() {
+		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally", config.HostPort())
+	}
+
+	// Step 1: Stop tracked server (if running)
+	running, pid, _ := doltserver.IsRunning(townRoot)
+	if running {
+		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
+		if err := doltserver.Stop(townRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stop failed: %v (continuing with imposter kill)\n", err)
+		} else {
+			fmt.Printf("%s Stopped\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Step 2: Kill any imposters on the port
+	fmt.Println("Checking for imposter servers...")
+	if err := doltserver.KillImposters(townRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: imposter kill failed: %v\n", err)
+	}
+
+	// Brief pause to let port be released
+	time.Sleep(500 * time.Millisecond)
+
+	// Step 3: Check for databases before starting
+	databases, _ := doltserver.ListDatabases(townRoot)
+	if len(databases) == 0 {
+		return fmt.Errorf("no databases found in %s\nInitialize with: gt dolt init-rig <name>", config.DataDir)
+	}
+
+	// Step 4: Start the correct server
+	fmt.Println("Starting Dolt server...")
+	if err := doltserver.Start(townRoot); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
+	}
+
+	// Display status (same as gt dolt start)
+	state, _ := doltserver.LoadState(townRoot)
+
+	fmt.Printf("%s Dolt server restarted (PID %d, port %d)\n",
+		style.Bold.Render("✓"), state.PID, config.Port)
+	fmt.Printf("  Data dir: %s\n", state.DataDir)
+	fmt.Printf("  Databases: %s\n", style.Dim.Render(strings.Join(state.Databases, ", ")))
+	fmt.Printf("  Connection: %s\n", style.Dim.Render(doltserver.GetConnectionString(townRoot)))
+
+	// Verify databases
+	served, missing, verifyErr := doltserver.VerifyDatabasesWithRetry(townRoot, 5)
+	if verifyErr != nil {
+		fmt.Printf("  %s Could not verify databases: %v\n", style.Dim.Render("⚠"), verifyErr)
+	} else if len(missing) > 0 {
+		fmt.Printf("\n%s Some databases exist on disk but are NOT served:\n", style.Bold.Render("⚠"))
+		for _, db := range missing {
+			fmt.Printf("  - %s\n", db)
+		}
+		fmt.Printf("\n  Served: %v\n", served)
+	} else {
+		fmt.Printf("  %s All %d databases verified\n", style.Bold.Render("✓"), len(served))
+	}
+
 	return nil
 }
 
@@ -1258,6 +1370,85 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d database(s) failed to sync", failed)
 	}
 	return nil
+}
+
+func runDoltMigrateWisps(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Determine which rigs to migrate
+	if doltMigrateWispsDB != "" {
+		// Migrate a specific rig
+		rigDir := filepath.Join(townRoot, doltMigrateWispsDB)
+		if _, err := os.Stat(rigDir); os.IsNotExist(err) {
+			return fmt.Errorf("rig directory not found: %s", rigDir)
+		}
+		fmt.Printf("%s Migrating: %s\n", style.Bold.Render("→"), doltMigrateWispsDB)
+		result, err := doltserver.MigrateAgentBeadsToWisps(townRoot, rigDir, doltMigrateWispsDry)
+		if err != nil {
+			return err
+		}
+		printMigrateWispsResult(result)
+		return nil
+	}
+
+	// Auto-detect: migrate all rigs that have beads databases
+	databases, err := doltserver.ListDatabases(townRoot)
+	if err != nil {
+		return fmt.Errorf("listing databases: %w", err)
+	}
+
+	for _, db := range databases {
+		// Skip non-rig databases
+		if db == "wl_commons" || strings.HasPrefix(db, "testdb_") {
+			continue
+		}
+		// Find the rig directory for this database
+		rigDir := filepath.Join(townRoot, db)
+		if _, err := os.Stat(rigDir); os.IsNotExist(err) {
+			continue // Not a rig directory
+		}
+		fmt.Printf("\n%s Migrating: %s\n", style.Bold.Render("→"), db)
+		result, err := doltserver.MigrateAgentBeadsToWisps(townRoot, rigDir, doltMigrateWispsDry)
+		if err != nil {
+			fmt.Printf("  %s %s: %v\n", style.Bold.Render("✗"), db, err)
+			continue
+		}
+		printMigrateWispsResult(result)
+	}
+	return nil
+}
+
+func printMigrateWispsResult(result *doltserver.MigrateWispsResult) {
+	if result.WispsTableCreated {
+		fmt.Printf("  %s Created wisps table\n", style.Bold.Render("✓"))
+	}
+	for _, t := range result.AuxTablesCreated {
+		fmt.Printf("  %s Created %s\n", style.Bold.Render("✓"), t)
+	}
+	if result.AgentsCopied > 0 {
+		fmt.Printf("  %s Copied %d agent beads to wisps\n", style.Bold.Render("✓"), result.AgentsCopied)
+	}
+	if result.LabelsCopied > 0 {
+		fmt.Printf("  %s Copied %d labels\n", style.Bold.Render("✓"), result.LabelsCopied)
+	}
+	if result.CommentsCopied > 0 {
+		fmt.Printf("  %s Copied %d comments\n", style.Bold.Render("✓"), result.CommentsCopied)
+	}
+	if result.EventsCopied > 0 {
+		fmt.Printf("  %s Copied %d events\n", style.Bold.Render("✓"), result.EventsCopied)
+	}
+	if result.DepsCopied > 0 {
+		fmt.Printf("  %s Copied %d dependencies\n", style.Bold.Render("✓"), result.DepsCopied)
+	}
+	if result.AgentsClosed > 0 {
+		fmt.Printf("  %s Closed %d original agent beads\n", style.Bold.Render("✓"), result.AgentsClosed)
+	}
+	if result.AgentsCopied == 0 && len(result.AuxTablesCreated) == 0 && !result.WispsTableCreated {
+		fmt.Printf("  %s Already migrated (no changes needed)\n", style.Bold.Render("✓"))
+	}
 }
 
 

@@ -107,13 +107,20 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 }
 
 // GetRepoRoot returns the git repository root for the gt source code.
-// The gt source lives in the gastown rig at $GT_ROOT/gastown/mayor/rig.
+// The canonical source is the gastown repo itself ($GT_ROOT/gastown).
+// Crew rigs also contain cmd/gt/main.go but have different HEADs,
+// so we prefer the gastown repo over CWD-based git toplevel detection.
 func GetRepoRoot() (string, error) {
 	// Check if GT_ROOT environment variable is set (agents always have this)
 	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
-		rigPath := gtRoot + "/gastown/mayor/rig"
-		if hasGtSource(rigPath) {
-			return rigPath, nil
+		candidates := []string{
+			gtRoot + "/gastown",
+			gtRoot + "/gastown/mayor/rig",
+		}
+		for _, candidate := range candidates {
+			if hasGtSource(candidate) {
+				return candidate, nil
+			}
 		}
 	}
 
@@ -121,8 +128,11 @@ func GetRepoRoot() (string, error) {
 	home := os.Getenv("HOME")
 	if home != "" {
 		candidates := []string{
+			home + "/gt/gastown",
 			home + "/gt/gastown/mayor/rig",
+			home + "/gastown",
 			home + "/gastown/mayor/rig",
+			home + "/src/gastown",
 			home + "/src/gastown/mayor/rig",
 		}
 		for _, candidate := range candidates {
@@ -132,7 +142,7 @@ func GetRepoRoot() (string, error) {
 		}
 	}
 
-	// Check if current directory is in the gt source repo
+	// Fall back to current directory's git repo (may be a crew rig)
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	if output, err := cmd.Output(); err == nil {
 		root := strings.TrimSpace(string(output))

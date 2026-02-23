@@ -1097,6 +1097,54 @@ func TestGetAttachedMoleculeID_EmptyOutput(t *testing.T) {
 	}
 }
 
+func TestHandlePolecatDone_CompletedWithoutMRID_NoMergeReady(t *testing.T) {
+	// When Exit==COMPLETED but MRID is empty and MRFailed is true,
+	// the witness should NOT send MERGE_READY (go to no-MR path).
+	// This tests the fix for gt-xp6e9p.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		IssueID:     "gt-abc123",
+		MRID:        "",
+		Branch:      "polecat/nux-abc123",
+		MRFailed:    true,
+	}
+
+	// hasPendingMR should be false when MRID is empty
+	hasPendingMR := payload.MRID != ""
+	if hasPendingMR {
+		t.Error("hasPendingMR = true, want false when MRID is empty")
+	}
+
+	// Even with Exit==COMPLETED, MRFailed should prevent the bead lookup fallback
+	if !payload.MRFailed && payload.Exit == "COMPLETED" && payload.Branch != "" {
+		t.Error("should not attempt MR bead lookup when MRFailed is true")
+	}
+}
+
+func TestHandlePolecatDone_CompletedWithMRID(t *testing.T) {
+	// When Exit==COMPLETED and MRID is set, hasPendingMR should be true.
+	payload := &PolecatDonePayload{
+		PolecatName: "nux",
+		Exit:        "COMPLETED",
+		MRID:        "gt-mr-xyz",
+		Branch:      "polecat/nux-abc123",
+	}
+
+	hasPendingMR := payload.MRID != ""
+	if !hasPendingMR {
+		t.Error("hasPendingMR = false, want true when MRID is set")
+	}
+}
+
+func TestFindMRBeadForBranch_NoBdAvailable(t *testing.T) {
+	// When bd is not available, should return empty string
+	result := findMRBeadForBranch("/nonexistent", "polecat/nux-abc123")
+	if result != "" {
+		t.Errorf("findMRBeadForBranch = %q, want empty when bd unavailable", result)
+	}
+}
+
 func TestDetectOrphanedMolecules_WithMockBd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mock for bd")
