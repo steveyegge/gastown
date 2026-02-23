@@ -516,7 +516,7 @@ Commands run in this order (any can be empty = skip):
 
 ### Example Configurations
 
-**Go project** (recommended explicit commands):
+**Go project** (default — only test_command is set by default):
 ```json
 {
   "merge_queue": {
