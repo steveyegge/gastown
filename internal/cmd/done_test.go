@@ -794,7 +794,6 @@ func TestDoneCheckpointLabelFormat(t *testing.T) {
 	}{
 		{CheckpointPushed, "polecat/furiosa-abc", "done-cp:pushed:polecat/furiosa-abc:"},
 		{CheckpointMRCreated, "gt-xyz123", "done-cp:mr-created:gt-xyz123:"},
-		{CheckpointDoltMerged, "ok", "done-cp:dolt-merged:ok:"},
 		{CheckpointWitnessNotified, "ok", "done-cp:witness-notified:ok:"},
 	}
 
@@ -848,26 +847,22 @@ func TestReadDoneCheckpoints(t *testing.T) {
 				"gt:agent",
 				"done-cp:pushed:polecat/furiosa-abc:1738972800",
 				"done-cp:mr-created:gt-xyz123:1738972801",
-				"done-cp:dolt-merged:ok:1738972802",
 			},
 			want: map[DoneCheckpoint]string{
-				CheckpointPushed:     "polecat/furiosa-abc",
-				CheckpointMRCreated:  "gt-xyz123",
-				CheckpointDoltMerged: "ok",
+				CheckpointPushed:    "polecat/furiosa-abc",
+				CheckpointMRCreated: "gt-xyz123",
 			},
 		},
 		{
-			name:   "all checkpoints",
+			name: "all checkpoints",
 			labels: []string{
 				"done-cp:pushed:branch-name:1738972800",
 				"done-cp:mr-created:gt-mr1:1738972801",
-				"done-cp:dolt-merged:ok:1738972802",
 				"done-cp:witness-notified:ok:1738972803",
 			},
 			want: map[DoneCheckpoint]string{
 				CheckpointPushed:          "branch-name",
 				CheckpointMRCreated:       "gt-mr1",
-				CheckpointDoltMerged:      "ok",
 				CheckpointWitnessNotified: "ok",
 			},
 		},
@@ -919,7 +914,6 @@ func TestClearDoneCheckpoints(t *testing.T) {
 		"done-intent:COMPLETED:1738972800",
 		"done-cp:pushed:mybranch:1738972801",
 		"done-cp:mr-created:gt-xyz:1738972802",
-		"done-cp:dolt-merged:ok:1738972803",
 		"backoff-until:1738972900",
 	}
 
@@ -933,8 +927,8 @@ func TestClearDoneCheckpoints(t *testing.T) {
 		}
 	}
 
-	if len(removed) != 3 {
-		t.Errorf("expected 3 checkpoint labels removed, got %d: %v", len(removed), removed)
+	if len(removed) != 2 {
+		t.Errorf("expected 2 checkpoint labels removed, got %d: %v", len(removed), removed)
 	}
 	if len(kept) != 4 {
 		t.Errorf("expected 4 labels kept, got %d: %v", len(kept), kept)
@@ -993,39 +987,6 @@ func TestCheckpointResumeSkipsPush(t *testing.T) {
 			skipPush := tt.checkpoints[CheckpointPushed] != ""
 			if skipPush != tt.wantSkip {
 				t.Errorf("skipPush = %v, want %v", skipPush, tt.wantSkip)
-			}
-		})
-	}
-}
-
-// TestCheckpointResumeSkipsDoltMerge verifies that when a Dolt merge
-// checkpoint exists, the merge section is skipped on resume.
-func TestCheckpointResumeSkipsDoltMerge(t *testing.T) {
-	tests := []struct {
-		name        string
-		checkpoints map[DoneCheckpoint]string
-		wantSkip    bool
-	}{
-		{
-			name:        "no checkpoints - merge runs normally",
-			checkpoints: map[DoneCheckpoint]string{},
-			wantSkip:    false,
-		},
-		{
-			name: "dolt merge checkpoint - skip merge",
-			checkpoints: map[DoneCheckpoint]string{
-				CheckpointPushed:     "mybranch",
-				CheckpointDoltMerged: "ok",
-			},
-			wantSkip: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			skipMerge := tt.checkpoints[CheckpointDoltMerged] != ""
-			if skipMerge != tt.wantSkip {
-				t.Errorf("skipMerge = %v, want %v", skipMerge, tt.wantSkip)
 			}
 		})
 	}

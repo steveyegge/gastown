@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -842,42 +841,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
-	// Branch-per-polecat: merge polecat's Dolt branch to main.
-	// This makes all beads changes (MR bead, issue updates) visible on main
-	// before the refinery or witness try to read them.
-	var mergeFailed bool
-
-	// Resume: skip Dolt merge if already completed (gt-aufru checkpoint)
-	if checkpoints[CheckpointDoltMerged] != "" {
-		fmt.Printf("%s Dolt branch already merged (resumed from checkpoint)\n", style.Bold.Render("✓"))
-		goto afterDoltMerge
-	}
-
-	if bdBranch := os.Getenv("BD_BRANCH"); bdBranch != "" {
-		fmt.Printf("Merging Dolt branch %s to main...\n", bdBranch)
-		if err := doltserver.MergePolecatBranch(townRoot, rigName, bdBranch); err != nil {
-			mergeFailed = true
-			style.PrintWarning("could not merge Dolt branch: %v (data still on branch %s)", err, bdBranch)
-		} else {
-			fmt.Printf("%s Dolt branch merged to main\n", style.Bold.Render("✓"))
-		}
-		// Unset BD_BRANCH so subsequent bd operations (updateAgentStateOnDone)
-		// write directly to main instead of the now-deleted branch.
-		os.Unsetenv("BD_BRANCH")
-	}
-
-	// Write Dolt merge checkpoint for resume (gt-aufru)
-	if agentBeadID != "" {
-		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
-		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointDoltMerged, "ok")
-	}
-
-afterDoltMerge:
-	// Nudge refinery AFTER the Dolt merge so MR bead is visible on main.
-	// Skip nudge only if merge was attempted and failed — MR bead is stranded
-	// on the polecat branch and refinery won't find it on main.
-	// If no branch existed (crew worker), MR bead is already on main.
-	if mrID != "" && !mergeFailed {
+	// Nudge refinery so it picks up the MR bead.
+	// MR beads are created on main (transaction-based shared main),
+	// so they're immediately visible — no Dolt branch merge needed.
+	if mrID != "" {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
@@ -1064,7 +1031,6 @@ type DoneCheckpoint string
 const (
 	CheckpointPushed          DoneCheckpoint = "pushed"
 	CheckpointMRCreated       DoneCheckpoint = "mr-created"
-	CheckpointDoltMerged      DoneCheckpoint = "dolt-merged"
 	CheckpointWitnessNotified DoneCheckpoint = "witness-notified"
 )
 
