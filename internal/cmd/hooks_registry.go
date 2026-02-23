@@ -97,7 +97,7 @@ func runHooksRegistry(cmd *cobra.Command, args []string) error {
 		name string
 		def  HookDefinition
 	})
-	eventOrder := []string{"PreToolUse", "PostToolUse", "SessionStart", "PreCompact", "UserPromptSubmit", "Stop"}
+	eventOrder := []string{"PreToolUse", "PostToolUse", "SessionStart", "PreCompact", "UserPromptSubmit", "Stop", "WorktreeCreate", "WorktreeRemove"}
 
 	for name, def := range registry.Hooks {
 		if !hooksRegistryAll && !def.Enabled {
