@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
@@ -481,7 +482,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// to a new workspace), we still need to run bd init to create the server-side
 		// database and set issue_prefix. Always ensure issue_prefix is set afterward.
 		if !bdDatabaseExists(sourceBeadsDir) {
-			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix, "--server") // opts.BeadsPrefix validated earlier
+			initArgs := []string{"init"}
+			if opts.BeadsPrefix != "" {
+				initArgs = append(initArgs, "--prefix", opts.BeadsPrefix)
+			}
+			initArgs = append(initArgs, "--server")
+			cmd := exec.Command("bd", initArgs...)
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
@@ -806,7 +812,12 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).
 	// --server tells bd to set dolt_mode=server in metadata.json so bd
 	// connects to the centralized Dolt sql-server instead of embedded mode.
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
+	initArgs := []string{"init"}
+	if prefix != "" {
+		initArgs = append(initArgs, "--prefix", prefix)
+	}
+	initArgs = append(initArgs, "--server")
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, bdInitErr := cmd.CombinedOutput()
@@ -995,9 +1006,14 @@ func deriveBeadsPrefix(name string) string {
 		return r == '-' || r == '_'
 	})
 
-	// If single part, try to detect compound words (e.g., "gastown" -> "gas" + "town")
+	// If single part, try camelCase splitting first (e.g., "myProject" -> "my" + "Project"),
+	// then fall back to compound word detection (e.g., "gastown" -> "gas" + "town").
 	if len(parts) == 1 {
-		parts = splitCompoundWord(parts[0])
+		if camelParts := splitCamelCase(parts[0]); len(camelParts) >= 2 {
+			parts = camelParts
+		} else {
+			parts = splitCompoundWord(parts[0])
+		}
 	}
 
 	if len(parts) >= 2 {
@@ -1037,6 +1053,32 @@ func splitCompoundWord(word string) []string {
 	}
 
 	return []string{word}
+}
+
+// splitCamelCase splits a camelCase or PascalCase string into its word parts.
+// Examples: "myProject" -> ["my", "Project"], "gasStation" -> ["gas", "Station"],
+// "HTMLParser" -> ["HTML", "Parser"].
+func splitCamelCase(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var parts []string
+	start := 0
+	runes := []rune(s)
+	for i := 1; i < len(runes); i++ {
+		// Split when transitioning from lower to upper: "myProject" at 'P'
+		if unicode.IsLower(runes[i-1]) && unicode.IsUpper(runes[i]) {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
+		// Split when transitioning from upper run to upper+lower: "HTMLParser" at 'P'
+		if i >= 2 && unicode.IsUpper(runes[i-1]) && unicode.IsUpper(runes[i-2]) && unicode.IsLower(runes[i]) {
+			parts = append(parts, string(runes[start:i-1]))
+			start = i - 1
+		}
+	}
+	parts = append(parts, string(runes[start:]))
+	return parts
 }
 
 // detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.

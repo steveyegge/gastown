@@ -1020,7 +1020,12 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 
 		// Run bd init with the configured prefix (Dolt is the only backend since bd v0.51.0).
 		// Gas Town rigs use Dolt server mode via the shared town Dolt sql-server.
-		cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
+		initArgs := []string{"init"}
+		if prefix != "" {
+			initArgs = append(initArgs, "--prefix", prefix)
+		}
+		initArgs = append(initArgs, "--server")
+		cmd := exec.Command("bd", initArgs...)
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			// bd might not be installed — create config.yaml via shared helper.
