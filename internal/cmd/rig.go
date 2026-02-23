@@ -1029,7 +1029,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			if prefix == "" {
 				break
 			}
-			if err := mgr.InitBeads(rigPath, prefix); err != nil {
+			if err := mgr.InitBeads(rigPath, prefix, name); err != nil {
 				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
@@ -1041,7 +1041,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	// If no existing .beads/ candidate was found, initialize a fresh database
 	// to match the behavior of the normal (non-adopt) gt rig add path.
 	if !foundBeadsCandidate && result.BeadsPrefix != "" {
-		if err := mgr.InitBeads(rigPath, result.BeadsPrefix); err != nil {
+		if err := mgr.InitBeads(rigPath, result.BeadsPrefix, name); err != nil {
 			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
 		} else {
 			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))

@@ -486,6 +486,10 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
+			// Drop orphaned beads_<prefix> database if it differs from rigName (gt-sv1h).
+			if orphanDB := "beads_" + opts.BeadsPrefix; orphanDB != opts.Name {
+				_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
+			}
 		}
 
 		// Always ensure issue_prefix and custom types are configured, even when
@@ -519,7 +523,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Initialize beads at rig level BEFORE creating worktrees.
 	// This ensures rig/.beads exists so worktree redirects can point to it.
 	fmt.Printf("  Initializing beads database...\n")
-	if err := m.InitBeads(rigPath, opts.BeadsPrefix); err != nil {
+	if err := m.InitBeads(rigPath, opts.BeadsPrefix, opts.Name); err != nil {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
@@ -534,6 +538,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// or user can run gt doctor --fix to repair manually.
 		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
 		fmt.Printf("  Run 'gt doctor --fix' to repair, or it will self-heal on next daemon start.\n")
+	}
+
+	// Safety-net: drop orphaned beads_<prefix> database if it differs from rigName (gt-sv1h).
+	// InitBeads already does this, but repeat here in case EnsureMetadata path diverges.
+	if orphanDB := "beads_" + opts.BeadsPrefix; orphanDB != opts.Name {
+		_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
 	}
 
 	// Set issue_prefix on the correct server-side database.
@@ -750,7 +760,11 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
-func (m *Manager) InitBeads(rigPath, prefix string) error {
+//
+// rigName is the rig's database name (e.g. "gastown"). When non-empty and
+// different from the default "beads_<prefix>" database that bd init creates,
+// InitBeads drops the orphan database to prevent accumulation (gt-sv1h).
+func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	// Validate prefix format to prevent command injection from config files
 	if !isValidBeadsPrefix(prefix) {
 		return fmt.Errorf("invalid beads prefix %q: must be alphanumeric with optional hyphens, start with letter, max 20 chars", prefix)
@@ -826,6 +840,17 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 		syncModeCmd.Env = filteredEnv
 		if syncModeOutput, syncModeErr := syncModeCmd.CombinedOutput(); syncModeErr != nil {
 			fmt.Printf("   ⚠ Could not set sync.mode via bd: %s\n", strings.TrimSpace(string(syncModeOutput)))
+		}
+
+		// Drop the orphaned beads_<prefix> database created by bd init (gt-sv1h).
+		// bd init --prefix creates a database named beads_<prefix> on the Dolt server,
+		// but the rig uses <rigName> as its database (set by InitRig + EnsureMetadata).
+		// Without cleanup, orphans accumulate with every polecat spawn.
+		if rigName != "" {
+			orphanDB := "beads_" + prefix
+			if orphanDB != rigName {
+				_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
+			}
 		}
 	}
 
