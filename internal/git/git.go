@@ -387,6 +387,15 @@ func (g *Git) FetchBranch(remote, branch string) error {
 	return err
 }
 
+// FetchBranchShallow fetches a single branch with --depth 1 and creates the
+// remote tracking ref (e.g. origin/<branch>). Use this on shallow single-branch
+// clones to add a branch that wasn't included in the initial clone.
+func (g *Git) FetchBranchShallow(remote, branch string) error {
+	refspec := branch + ":refs/remotes/" + remote + "/" + branch
+	_, err := g.run("fetch", "--depth", "1", remote, refspec)
+	return err
+}
+
 // Pull pulls from the remote branch.
 func (g *Git) Pull(remote, branch string) error {
 	_, err := g.run("pull", remote, branch)
