@@ -867,10 +867,15 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 	return true, nil
 }
 
+// lfsSkipSmudgeEnv is set during worktree creation to avoid downloading
+// LFS objects over NFS, which can add 60-90s for large repos.
+// Tests or CI that need LFS content should run `git lfs pull` explicitly.
+var lfsSkipSmudgeEnv = []string{"GIT_LFS_SKIP_SMUDGE=1"}
+
 // WorktreeAdd creates a new worktree at the given path with a new branch.
 // The new branch is created from the current HEAD.
 func (g *Git) WorktreeAdd(path, branch string) error {
-	if _, err := g.run("worktree", "add", "-b", branch, path); err != nil {
+	if _, err := g.runWithEnv([]string{"worktree", "add", "-b", branch, path}, lfsSkipSmudgeEnv); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
@@ -879,7 +884,7 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
 // starting from the specified ref (e.g., "origin/main").
 func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
-	if _, err := g.run("worktree", "add", "-b", branch, path, startPoint); err != nil {
+	if _, err := g.runWithEnv([]string{"worktree", "add", "-b", branch, path, startPoint}, lfsSkipSmudgeEnv); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
@@ -887,7 +892,7 @@ func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
 func (g *Git) WorktreeAddDetached(path, ref string) error {
-	if _, err := g.run("worktree", "add", "--detach", path, ref); err != nil {
+	if _, err := g.runWithEnv([]string{"worktree", "add", "--detach", path, ref}, lfsSkipSmudgeEnv); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
@@ -895,7 +900,7 @@ func (g *Git) WorktreeAddDetached(path, ref string) error {
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
 func (g *Git) WorktreeAddExisting(path, branch string) error {
-	if _, err := g.run("worktree", "add", path, branch); err != nil {
+	if _, err := g.runWithEnv([]string{"worktree", "add", path, branch}, lfsSkipSmudgeEnv); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
@@ -904,7 +909,7 @@ func (g *Git) WorktreeAddExisting(path, branch string) error {
 // WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
 // This is useful for cross-rig worktrees where multiple clones need to be on main.
 func (g *Git) WorktreeAddExistingForce(path, branch string) error {
-	if _, err := g.run("worktree", "add", "--force", path, branch); err != nil {
+	if _, err := g.runWithEnv([]string{"worktree", "add", "--force", path, branch}, lfsSkipSmudgeEnv); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
