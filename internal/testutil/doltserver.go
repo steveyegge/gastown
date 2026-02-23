@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package testutil provides shared test infrastructure for integration tests.
 package testutil
 
