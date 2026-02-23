@@ -89,7 +89,8 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix switches all off-main directories to main branch.
+// Fix switches all off-main directories to their expected branch.
+// Uses the rig's default_branch if configured, otherwise "main".
 func (c *BranchCheck) Fix(ctx *CheckContext) error {
 	if len(c.offMainDirs) == 0 {
 		return nil
@@ -97,8 +98,9 @@ func (c *BranchCheck) Fix(ctx *CheckContext) error {
 
 	var lastErr error
 	for _, dir := range c.offMainDirs {
-		// git checkout main
-		cmd := exec.Command("git", "checkout", "main")
+		targetBranch := c.expectedBranch(ctx.TownRoot, dir)
+
+		cmd := exec.Command("git", "checkout", targetBranch) //nolint:gosec // G204: branch name from config
 		cmd.Dir = dir
 		if err := cmd.Run(); err != nil {
 			lastErr = fmt.Errorf("%s: %w", dir, err)
@@ -115,6 +117,25 @@ func (c *BranchCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return lastErr
+}
+
+// expectedBranch returns the branch a persistent role directory should be on.
+// Checks the rig's default_branch config, falling back to "main".
+func (c *BranchCheck) expectedBranch(townRoot, dir string) string {
+	rel, err := filepath.Rel(townRoot, dir)
+	if err != nil {
+		return "main"
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+	if len(parts) < 1 {
+		return "main"
+	}
+	rigPath := filepath.Join(townRoot, parts[0])
+	cfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil || cfg.DefaultBranch == "" {
+		return "main"
+	}
+	return cfg.DefaultBranch
 }
 
 // isExpectedBranch checks if a directory is on the expected branch.
