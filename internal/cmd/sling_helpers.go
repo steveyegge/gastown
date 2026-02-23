@@ -305,8 +305,6 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
-	// All writes target main — BD_BRANCH was removed when the transaction-based
-	// shared-main model replaced branch-per-polecat isolation.
 	if err := BdCmd("update", beadID, "--description="+newDesc).
 		Dir(resolveBeadDir(beadID)).
 		Run(); err != nil {
