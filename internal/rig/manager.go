@@ -392,13 +392,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			defaultBranch = bareGit.DefaultBranch()
 		}
 	}
-	// Validate user-provided branch exists on remote (auto-detected branches are inherently valid)
+	// When user specified --default-branch, the shallow single-branch clone may not
+	// have that branch (it only clones the remote HEAD). Fetch it explicitly.
 	if opts.DefaultBranch != "" {
 		ref := fmt.Sprintf("origin/%s", defaultBranch)
-		if exists, err := bareGit.RefExists(ref); err != nil {
-			return nil, fmt.Errorf("checking ref %s: %w", ref, err)
-		} else if !exists {
-			return nil, fmt.Errorf("branch %q does not exist on remote (ref %s not found in bare repo)", defaultBranch, ref)
+		if exists, _ := bareGit.RefExists(ref); !exists {
+			// Branch not in shallow clone — fetch just that branch
+			if err := bareGit.FetchBranchShallow("origin", defaultBranch); err != nil {
+				return nil, fmt.Errorf("branch %q does not exist on remote or could not be fetched: %w", defaultBranch, err)
+			}
 		}
 	}
 
