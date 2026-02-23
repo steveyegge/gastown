@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package testutil provides shared test infrastructure for integration tests.
 package testutil
 
@@ -106,7 +108,7 @@ func FindFreePort() (int, error) {
 		return 0, fmt.Errorf("finding free port: %w", err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 	return port, nil
 }
 
@@ -135,7 +137,7 @@ func startDoltServer() error {
 
 	// Acquire exclusive lock for the startup phase.
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		lockFile.Close()
+		_ = lockFile.Close()
 		return fmt.Errorf("acquiring startup lock: %w", err)
 	}
 
@@ -144,7 +146,7 @@ func startDoltServer() error {
 	if portReady(2 * time.Second) {
 		// Downgrade to shared lock — signals "I'm using the server".
 		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_SH); err != nil {
-			lockFile.Close()
+			_ = lockFile.Close()
 			return fmt.Errorf("downgrading to shared lock: %w", err)
 		}
 		doltLockFile = lockFile
@@ -154,8 +156,8 @@ func startDoltServer() error {
 	// No server running — start one.
 	dataDir, err := os.MkdirTemp("", "dolt-test-server-*")
 	if err != nil {
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
 		return fmt.Errorf("creating dolt data dir: %w", err)
 	}
 
@@ -168,8 +170,8 @@ func startDoltServer() error {
 
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(dataDir)
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
@@ -177,17 +179,17 @@ func startDoltServer() error {
 	// Format: "PID\nDATA_DIR\n"
 	pidContent := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, dataDir)
 	if err := os.WriteFile(pidPath, []byte(pidContent), 0666); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		os.RemoveAll(dataDir)
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
 		return fmt.Errorf("writing PID file: %w", err)
 	}
 
 	// Reap the process in the background so ProcessState is populated on exit.
 	exited := make(chan struct{})
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait()
 		close(exited)
 	}()
 
@@ -197,7 +199,7 @@ func startDoltServer() error {
 		if portReady(time.Second) {
 			// Server is ready. Downgrade to shared lock.
 			if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_SH); err != nil {
-				lockFile.Close()
+				_ = lockFile.Close()
 				return fmt.Errorf("downgrading to shared lock: %w", err)
 			}
 			doltLockFile = lockFile
@@ -209,8 +211,8 @@ func startDoltServer() error {
 		case <-exited:
 			os.RemoveAll(dataDir)
 			os.Remove(pidPath)
-			syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-			lockFile.Close()
+			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+			_ = lockFile.Close()
 			return fmt.Errorf("dolt sql-server exited prematurely")
 		default:
 		}
@@ -218,12 +220,12 @@ func startDoltServer() error {
 	}
 
 	// Timed out — kill and clean up.
-	cmd.Process.Kill()
+	_ = cmd.Process.Kill()
 	<-exited
 	os.RemoveAll(dataDir)
 	os.Remove(pidPath)
-	syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	lockFile.Close()
+	_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	_ = lockFile.Close()
 	return fmt.Errorf("dolt sql-server did not become ready within 30s")
 }
 
@@ -233,7 +235,7 @@ func portReady(timeout time.Duration) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }
 
@@ -253,8 +255,8 @@ func CleanupDoltServer() {
 	// Release our shared lock regardless.
 	defer func() {
 		if doltLockFile != nil {
-			syscall.Flock(int(doltLockFile.Fd()), syscall.LOCK_UN)
-			doltLockFile.Close()
+			_ = syscall.Flock(int(doltLockFile.Fd()), syscall.LOCK_UN)
+			_ = doltLockFile.Close()
 			doltLockFile = nil
 		}
 		// Clear GT_DOLT_PORT if we set it, so subsequent processes
@@ -299,8 +301,8 @@ func CleanupDoltServer() {
 	// Kill the server process.
 	proc, err := os.FindProcess(pid)
 	if err == nil {
-		proc.Kill()
-		proc.Wait()
+		_ = proc.Kill()
+		_, _ = proc.Wait()
 	}
 
 	// Clean up data dir, PID file, and lock file.
