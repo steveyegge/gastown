@@ -411,30 +411,28 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create mayor as regular clone (separate from bare repo).
 	// Mayor doesn't need to see polecat branches - that's refinery's job.
 	// This also allows mayor to stay on the default branch without conflicting with refinery.
+	// Uses --single-branch --depth 1 --branch to clone only the default branch efficiently.
 	fmt.Printf("  Creating mayor clone...\n")
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
 	if localRepo != "" {
-		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo); err != nil {
+		if err := m.git.CloneBranchWithReference(opts.GitURL, mayorRigPath, defaultBranch, localRepo); err != nil {
 			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
 			_ = os.RemoveAll(mayorRigPath)
-			if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+			if err := m.git.CloneBranch(opts.GitURL, mayorRigPath, defaultBranch); err != nil {
 				return nil, fmt.Errorf("cloning for mayor: %w", err)
 			}
 		}
 	} else {
-		if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+		if err := m.git.CloneBranch(opts.GitURL, mayorRigPath, defaultBranch); err != nil {
 			return nil, fmt.Errorf("cloning for mayor: %w", err)
 		}
 	}
 
-	// Checkout the default branch for mayor (clone defaults to remote's HEAD, not our configured branch)
+	// No explicit checkout needed - --branch already checked out the default branch
 	mayorGit := git.NewGitWithDir("", mayorRigPath)
-	if err := mayorGit.Checkout(defaultBranch); err != nil {
-		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
-	}
 	// Configure push URL on mayor clone (separate clone, doesn't inherit from bare repo)
 	if opts.PushURL != "" {
 		if err := mayorGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
