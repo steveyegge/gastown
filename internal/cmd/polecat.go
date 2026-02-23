@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -1257,16 +1256,19 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		}
 	}
 
-	// Step 5: Close agent bead (if exists)
+	// Step 5: Reset agent bead for reuse (if exists)
+	// Uses ResetAgentBeadForReuse instead of bd close because agent beads are
+	// ephemeral (wisps table). Shelling out to `bd close` operates on the issues
+	// table and silently fails to affect wisps, leaving stale rows that block
+	// re-sling with "duplicate primary key" errors. (gt--irj)
+	// ResetAgentBeadForReuse keeps the bead open with agent_state="nuked" so
+	// CreateOrReopenAgentBead can simply update it on re-spawn without needing
+	// a close/reopen cycle.
 	agentBeadID := polecatBeadIDForRig(r, rigName, polecatName)
-	closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
-	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
-		closeArgs = append(closeArgs, "--session="+sessionID)
-	}
-	closeCmd := exec.Command("bd", closeArgs...)
-	closeCmd.Dir = filepath.Join(r.Path, "mayor", "rig")
-	if err := closeCmd.Run(); err != nil {
-		fmt.Printf("  %s agent bead not found or already closed\n", style.Dim.Render("○"))
+	bd := beads.New(r.Path)
+	if err := bd.ResetAgentBeadForReuse(agentBeadID, "nuked"); err != nil {
+		// Bead may not exist (first spawn failed, or test environment)
+		fmt.Printf("  %s agent bead not found or already cleaned\n", style.Dim.Render("○"))
 	} else {
 		fmt.Printf("  %s closed agent bead %s\n", style.Success.Render("✓"), agentBeadID)
 	}
@@ -1278,7 +1280,11 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 // This prevents stale attached_molecule references from blocking re-dispatch (gt-npzy).
 // Best-effort: failures are logged but don't abort the nuke.
 func nukeCleanupMolecules(workBeadID string, r *rig.Rig) {
-	bd := beads.New(r.Path)
+	// Use mayor/rig as workDir so ResolveBeadsDir finds the Dolt-backed
+	// .beads/ directory, not the gitignored rig-root .beads/. Without this,
+	// detach/close operations route to the wrong database and the stale
+	// molecule attachment persists on the work bead. (gt--1up)
+	bd := beads.New(filepath.Join(r.Path, "mayor", "rig"))
 
 	// Fetch the work bead to check for attached molecules
 	issue, err := bd.Show(workBeadID)
