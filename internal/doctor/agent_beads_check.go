@@ -76,9 +76,19 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	var checked int
 
 	// checkAgentBead verifies an agent bead exists and has the gt:agent label.
-	checkAgentBead := func(bd *beads.Beads, id string) {
+	// Checks both the issues table and the wisps table (for migrated/ephemeral beads).
+	checkAgentBead := func(bd *beads.Beads, id string, wispMap map[string]*beads.Issue) {
 		issue, err := bd.Show(id)
 		if err != nil {
+			// Not in issues table — check wisps table for migrated agent beads
+			if wispMap != nil {
+				if _, ok := wispMap[id]; ok {
+					// Found in wisps table. Wisps JSON doesn't expose labels,
+					// so skip the gt:agent label check — existence is sufficient.
+					checked++
+					return
+				}
+			}
 			missing = append(missing, id)
 		} else if !beads.HasLabel(issue, "gt:agent") {
 			missingLabel = append(missingLabel, id)
@@ -90,12 +100,13 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	// These use hq- prefix and are stored in ~/gt/.beads/
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
 	townBd := beads.New(townBeadsPath)
+	townWisps, _ := townBd.ListAgentBeadsFromWisps()
 
 	deaconID := beads.DeaconBeadIDTown()
 	mayorID := beads.MayorBeadIDTown()
 
-	checkAgentBead(townBd, deaconID)
-	checkAgentBead(townBd, mayorID)
+	checkAgentBead(townBd, deaconID, townWisps)
+	checkAgentBead(townBd, mayorID, townWisps)
 
 	if len(prefixToRig) == 0 {
 		// No rigs to check, but we still checked global agents
@@ -123,18 +134,21 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		bd := beads.New(rigBeadsPath)
 		rigName := info.name
 
+		// Load wisps for this rig (agent beads may be ephemeral/migrated)
+		rigWisps, _ := bd.ListAgentBeadsFromWisps()
+
 		// Check rig-specific agents (using canonical naming: prefix-rig-role-name)
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 
-		checkAgentBead(bd, witnessID)
-		checkAgentBead(bd, refineryID)
+		checkAgentBead(bd, witnessID, rigWisps)
+		checkAgentBead(bd, refineryID, rigWisps)
 
 		// Check crew worker agents
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			checkAgentBead(bd, crewID)
+			checkAgentBead(bd, crewID, rigWisps)
 		}
 	}
 
@@ -168,10 +182,17 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 // Fix creates missing agent beads and adds gt:agent labels to beads missing them.
 func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// fixAgentBead creates the bead if missing, or adds gt:agent label if present but unlabeled.
-	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields) error {
+	// Checks both issues and wisps tables to avoid duplicate key errors from migrated beads.
+	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields, wispMap map[string]*beads.Issue) error {
 		issue, err := bd.Show(id)
 		if err != nil {
-			// Bead missing — create it (CreateAgentBead adds gt:agent label)
+			// Not in issues table — check wisps before creating
+			if wispMap != nil {
+				if _, ok := wispMap[id]; ok {
+					return nil // Exists in wisps table, nothing to fix
+				}
+			}
+			// Bead missing from both tables — create it (CreateAgentBead adds gt:agent label)
 			if _, err := bd.CreateAgentBead(id, desc, fields); err != nil {
 				return fmt.Errorf("creating %s: %w", id, err)
 			}
@@ -193,11 +214,12 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// Fix global agents (Mayor, Deacon) in town beads
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
 	townBd := beads.New(townBeadsPath)
+	townWisps, _ := townBd.ListAgentBeadsFromWisps()
 
 	deaconID := beads.DeaconBeadIDTown()
 	if err := fixAgentBead(townBd, deaconID,
 		"Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
-		&beads.AgentFields{RoleType: "deacon", AgentState: "idle"},
+		&beads.AgentFields{RoleType: "deacon", AgentState: "idle"}, townWisps,
 	); err != nil {
 		errs = append(errs, err)
 	}
@@ -205,7 +227,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	mayorID := beads.MayorBeadIDTown()
 	if err := fixAgentBead(townBd, mayorID,
 		"Mayor - global coordinator, handles cross-rig communication and escalations.",
-		&beads.AgentFields{RoleType: "mayor", AgentState: "idle"},
+		&beads.AgentFields{RoleType: "mayor", AgentState: "idle"}, townWisps,
 	); err != nil {
 		errs = append(errs, err)
 	}
@@ -240,11 +262,12 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
 		bd := beads.New(rigBeadsPath)
 		rigName := info.name
+		rigWisps, _ := bd.ListAgentBeadsFromWisps()
 
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 		if err := fixAgentBead(bd, witnessID,
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
-			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"},
+			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"}, rigWisps,
 		); err != nil {
 			errs = append(errs, err)
 		}
@@ -252,7 +275,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 		if err := fixAgentBead(bd, refineryID,
 			fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
-			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"},
+			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"}, rigWisps,
 		); err != nil {
 			errs = append(errs, err)
 		}
@@ -262,7 +285,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
 			if err := fixAgentBead(bd, crewID,
 				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
-				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
+				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"}, rigWisps,
 			); err != nil {
 				errs = append(errs, err)
 			}

@@ -623,17 +623,45 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 		return nil, nil // Wisps table may not exist yet
 	}
 
-	var wisps []*Issue
-	if err := json.Unmarshal(out, &wisps); err != nil {
+	// bd mol wisp list --json returns {"wisps": [...], "count": N, ...}
+	var wrapper struct {
+		Wisps []*Issue `json:"wisps"`
+	}
+	if err := json.Unmarshal(out, &wrapper); err != nil {
 		return nil, nil
 	}
 
 	result := make(map[string]*Issue)
-	for _, w := range wisps {
+	for _, w := range wrapper.Wisps {
+		// Check by type/label first (works when fields are present)
 		if IsAgentBead(w) {
+			result[w.ID] = w
+			continue
+		}
+		// Fallback: wisps JSON may omit issue_type/labels fields.
+		// Detect agent beads by ID pattern (prefix-rig-role format).
+		if isAgentBeadByID(w.ID) {
 			result[w.ID] = w
 		}
 	}
 
 	return result, nil
+}
+
+// isAgentBeadByID detects agent beads by their ID naming convention.
+// Agent bead IDs follow the pattern: prefix-rig-role[-name]
+// where role is one of: witness, refinery, crew, polecat, deacon, mayor.
+func isAgentBeadByID(id string) bool {
+	parts := strings.Split(id, "-")
+	if len(parts) < 3 {
+		return false
+	}
+	// Check if any part matches an agent role keyword
+	for _, part := range parts[2:] {
+		switch part {
+		case "witness", "refinery", "crew", "polecat", "deacon", "mayor":
+			return true
+		}
+	}
+	return false
 }
