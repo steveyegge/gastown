@@ -841,9 +841,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
-	// Nudge refinery so it picks up the MR bead.
-	// MR beads are created on main (transaction-based shared main),
-	// so they're immediately visible — no Dolt branch merge needed.
+	// Nudge refinery — MR bead is already on main (transaction-based shared main).
 	if mrID != "" {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
