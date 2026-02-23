@@ -356,12 +356,15 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 
 // buildRunEnv builds the environment for run() calls.
 // In isolated mode: strips all beads-related env vars for test isolation.
-// Otherwise: passes through the current environment.
+// Otherwise: strips inherited BEADS_DIR so the caller can append the correct value.
+// Without this, getenv() returns the first occurrence, so an inherited BEADS_DIR
+// (e.g., from a parent process or shell context) would shadow the explicit value
+// appended by run(). This was the root cause of gt-uygpe / GH #803.
 func (b *Beads) buildRunEnv() []string {
 	if b.isolated {
 		return filterBeadsEnv(os.Environ())
 	}
-	return os.Environ()
+	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
 
 // buildRoutingEnv builds the environment for runWithRouting() calls.

@@ -120,8 +120,9 @@ func EnsureCustomTypes(beadsDir string) error {
 	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
 	cmd := exec.Command("bd", "config", "set", "types.custom", typesList)
 	cmd.Dir = beadsDir
-	// Set BEADS_DIR explicitly to ensure bd operates on the correct database
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	// Set BEADS_DIR explicitly to ensure bd operates on the correct database.
+	// Strip inherited BEADS_DIR first — getenv() returns the first match (gt-uygpe).
+	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure custom types in %s: %s: %w",
 			beadsDir, strings.TrimSpace(string(output)), err)
@@ -198,7 +199,7 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	parentDir := filepath.Dir(beadsDir)
 	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
 	cmd.Dir = parentDir
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		// Handle "already initialized" gracefully, matching install.go behavior.
 		// This can happen due to race conditions or if detection heuristics miss
@@ -214,7 +215,7 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	// in newer versions (see rig/manager.go InitBeads).
 	pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
 	pfxCmd.Dir = parentDir
-	pfxCmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
 
 	return nil
