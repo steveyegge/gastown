@@ -242,7 +242,11 @@ func (b *Beads) getResolvedBeadsDir() string {
 // If ServerPort is set (via NewIsolatedWithPort), passes --server-port to bd init
 // so the database is created on the test Dolt server.
 func (b *Beads) Init(prefix string) error {
-	args := []string{"init", "--prefix", prefix, "--quiet"}
+	args := []string{"init"}
+	if prefix != "" {
+		args = append(args, "--prefix", prefix)
+	}
+	args = append(args, "--quiet")
 	if b.serverPort > 0 {
 		args = append(args, "--server-port", fmt.Sprintf("%d", b.serverPort))
 	}
