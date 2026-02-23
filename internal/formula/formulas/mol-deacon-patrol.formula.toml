@@ -84,21 +84,13 @@ Dogs return to idle automatically. The report is informational - no action neede
 unless the dog reports errors that require escalation.
 
 **CONVOY_NEEDS_FEEDING messages** (from Refinery):
-After merging a convoy-eligible MR, the Refinery sends this to trigger immediate
-convoy feeding. The convoy may have newly-ready issues after the merge.
-Subject format: `CONVOY_NEEDS_FEEDING <convoy-id>`
+The daemon's ConvoyManager handles convoy feeding (event-driven, 5s poll).
+Simply archive these messages — no deacon action needed.
 ```bash
 # For each CONVOY_NEEDS_FEEDING message:
 gt mail read <id>
-# Extract convoy ID from subject, then run stranded check for that convoy
-gt convoy stranded --json
-# If the convoy has ready work, dispatch a dog to feed it:
-gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
 gt mail archive <message-id>
 ```
-
-This is time-sensitive — the whole point is to avoid waiting for the next patrol
-cycle. Process CONVOY_NEEDS_FEEDING messages before lower-priority inbox items.
 
 **RECOVERED_BEAD messages** (from Witness):
 When a Witness detects a dead polecat with abandoned work, it resets the bead
@@ -266,66 +258,13 @@ This command:
 **Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues).
 The `gt convoy` commands handle cross-rig issue resolution automatically.
 
-Stranded convoy detection (ready work, no workers) is handled by the separate
-`feed-stranded-convoys` step."""
-
-[[steps]]
-id = "feed-stranded-convoys"
-title = "Feed stranded convoys"
-needs = ["check-convoy-completion"]
-description = """
-Detect stranded convoys and dispatch dogs to feed them, or auto-close empty convoys.
-
-A convoy is "stranded" when it is open AND either:
-- Has ready issues (open, unblocked, no assignee) but no workers, OR
-- Has 0 tracked issues (empty — needs auto-close via convoy check)
-
-This step ensures work doesn't stall and empty convoys get cleaned up.
-
-**Step 1: Check for stranded convoys**
-```bash
-gt convoy stranded --json
-```
-
-If no stranded convoys, skip to exit criteria.
-
-**Step 2: Handle each stranded convoy based on ready_count**
-
-For convoys with `ready_count > 0` (has ready work), dispatch a dog to feed:
-```bash
-gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
-```
-
-For convoys with `ready_count == 0` (empty, needs cleanup), auto-close directly:
-```bash
-gt convoy check <convoy-id>
-```
-
-The feed dog will:
-1. Load the convoy and find ready issues
-2. Check polecat capacity across rigs
-3. Dispatch ready issues using `gt sling`
-4. Return to kennel
-
-**Step 3: Log dispatches**
-Note which convoys were handled for observability:
-```bash
-# Convoy <convoy-id> dispatched to dog for feeding (<N> ready issues)
-# Convoy <convoy-id> auto-closed (empty, 0 tracked issues)
-```
-
-**If no idle dogs available (for feedable convoys only):**
-Pool dispatch auto-creates a dog when the pool is under capacity (max 4).
-If the pool is at capacity, log warning and continue - the convoy will be
-detected again next cycle when a dog becomes idle.
-Note: empty convoy cleanup (`gt convoy check`) does not require a dog — run it directly regardless of pool capacity.
-
-**Exit criteria:** All stranded convoys have been handled — feedable ones dispatched to dogs, empty ones auto-closed directly via `gt convoy check`."""
+Stranded convoy feeding is handled by the daemon's ConvoyManager (event-driven + 30s periodic scan).
+The deacon no longer feeds convoys directly — this avoids double-dispatch races between deacon dogs and daemon."""
 
 [[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["feed-stranded-convoys"]
+needs = ["check-convoy-completion"]
 description = """
 Resolve external dependencies across rigs.
 
