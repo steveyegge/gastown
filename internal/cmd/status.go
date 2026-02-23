@@ -96,6 +96,7 @@ type AgentRuntime struct {
 // RigStatus represents status of a single rig.
 type RigStatus struct {
 	Name         string          `json:"name"`
+	Parked       bool            `json:"parked"`
 	Polecats     []string        `json:"polecats"`
 	PolecatCount int             `json:"polecat_count"`
 	Crews        []string        `json:"crews"`
@@ -760,6 +761,7 @@ func gatherStatus() (TownStatus, error) {
 
 			rs := RigStatus{
 				Name:         r.Name,
+				Parked:       IsRigParked(townRoot, r.Name),
 				Polecats:     r.Polecats,
 				PolecatCount: len(r.Polecats),
 				HasWitness:   r.HasWitness,
@@ -901,8 +903,18 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		return nil
 	}
 
-	// Rigs
+	// Separate active and parked rigs
+	var activeRigs, parkedRigs []RigStatus
 	for _, r := range status.Rigs {
+		if r.Parked {
+			parkedRigs = append(parkedRigs, r)
+		} else {
+			activeRigs = append(activeRigs, r)
+		}
+	}
+
+	// Active rigs (full detail)
+	for _, r := range activeRigs {
 		// Rig header with separator
 		fmt.Fprintf(w, "─── %s ───────────────────────────────────────────\n\n", style.Bold.Render(r.Name+"/"))
 
@@ -1002,6 +1014,22 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		if len(witnesses) == 0 && len(refineries) == 0 && len(crews) == 0 && len(polecats) == 0 {
 			fmt.Fprintf(w, "   %s\n", style.Dim.Render("(no agents)"))
 		}
+		fmt.Fprintln(w)
+	}
+
+	// Parked rigs (collapsed)
+	if len(parkedRigs) > 0 {
+		var parkedNames []string
+		for _, r := range parkedRigs {
+			name := r.Name
+			// Show crew count if any exist
+			if r.CrewCount > 0 {
+				crewNames := strings.Join(r.Crews, ", ")
+				name += style.Dim.Render(fmt.Sprintf(" [crew: %s]", crewNames))
+			}
+			parkedNames = append(parkedNames, name)
+		}
+		fmt.Fprintf(w, "🅿️  %s %s\n", style.Dim.Render("Parked:"), strings.Join(parkedNames, ", "))
 		fmt.Fprintln(w)
 	}
 
