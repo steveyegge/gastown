@@ -12,7 +12,9 @@ import (
 
 const (
 	// bdReadTimeout is the timeout for bd read operations (list, show, query).
-	bdReadTimeout = 30 * time.Second
+	// 60s accommodates concurrent agent load where multiple bd processes compete
+	// for Dolt locks and memory (was 30s, caused signal:killed under contention).
+	bdReadTimeout = 60 * time.Second
 	// bdWriteTimeout is the timeout for bd write operations (create, close, label, reopen).
 	bdWriteTimeout = 60 * time.Second
 )
