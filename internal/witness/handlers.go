@@ -96,7 +96,19 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+	hasPendingMR := payload.MRID != ""
+
+	// When Exit==COMPLETED but MRID is empty and MR creation didn't explicitly
+	// fail, query beads to check if an MR bead exists for this branch.
+	// This handles the case where the MR was created but the ID wasn't included
+	// in the POLECAT_DONE message (e.g., message truncation, race condition).
+	if !hasPendingMR && payload.Exit == "COMPLETED" && !payload.MRFailed && payload.Branch != "" {
+		if mrID := findMRBeadForBranch(workDir, payload.Branch); mrID != "" {
+			payload.MRID = mrID
+			hasPendingMR = true
+		}
+	}
+
 	if hasPendingMR {
 		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
 	}
@@ -582,6 +594,33 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 		}
 	}
 
+	return ""
+}
+
+// findMRBeadForBranch queries beads for an open merge-request bead whose
+// description contains the given branch name. Returns the bead ID if found,
+// or empty string if no matching MR bead exists.
+func findMRBeadForBranch(workDir, branch string) string {
+	output, err := util.ExecWithOutput(workDir, "bd", "list",
+		"--type=merge-request", "--status=open", "--json", "--limit=0")
+	if err != nil || output == "" || output == "[]" || output == "null" {
+		return ""
+	}
+
+	var items []struct {
+		ID          string `json:"id"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil {
+		return ""
+	}
+
+	needle := "branch: " + branch
+	for _, item := range items {
+		if strings.Contains(item.Description, needle) {
+			return item.ID
+		}
+	}
 	return ""
 }
 
