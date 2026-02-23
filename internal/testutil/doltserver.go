@@ -29,7 +29,7 @@ var (
 	// still using it. See CleanupDoltServer for the shutdown protocol.
 	doltLockFile *os.File
 	// doltWeStarted tracks whether this process started the server (vs reusing).
-	doltWeStarted bool
+	doltWeStarted bool //nolint:unused // reserved for future cleanup logic
 	// doltPortSetByUs tracks whether we set GT_DOLT_PORT (vs it being set externally).
 	doltPortSetByUs bool
 )
@@ -106,7 +106,7 @@ func FindFreePort() (int, error) {
 		return 0, fmt.Errorf("finding free port: %w", err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 	return port, nil
 }
 
@@ -120,7 +120,7 @@ func startDoltServer() error {
 			return err
 		}
 		doltTestPort = strconv.Itoa(port)
-		os.Setenv("GT_DOLT_PORT", doltTestPort)
+		os.Setenv("GT_DOLT_PORT", doltTestPort) //nolint:tenv // intentional process-wide env
 		doltPortSetByUs = true
 	}
 
@@ -128,7 +128,7 @@ func startDoltServer() error {
 	pidPath := PidFilePathForPort(doltTestPort)
 
 	// Open the lock file (kept open for the lifetime of the test binary).
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0666)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0666) //nolint:gosec // test infrastructure
 	if err != nil {
 		return fmt.Errorf("opening lock file %s: %w", lockPath, err)
 	}
@@ -154,7 +154,7 @@ func startDoltServer() error {
 	// No server running — start one.
 	dataDir, err := os.MkdirTemp("", "dolt-test-server-*")
 	if err != nil {
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
 		return fmt.Errorf("creating dolt data dir: %w", err)
 	}
@@ -168,7 +168,7 @@ func startDoltServer() error {
 
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(dataDir)
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
@@ -176,10 +176,10 @@ func startDoltServer() error {
 	// Write PID file so any last-exiting process can clean up.
 	// Format: "PID\nDATA_DIR\n"
 	pidContent := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, dataDir)
-	if err := os.WriteFile(pidPath, []byte(pidContent), 0666); err != nil {
-		cmd.Process.Kill()
+	if err := os.WriteFile(pidPath, []byte(pidContent), 0666); err != nil { //nolint:gosec // test infrastructure
+		_ = cmd.Process.Kill()
 		os.RemoveAll(dataDir)
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
 		return fmt.Errorf("writing PID file: %w", err)
 	}
@@ -187,7 +187,7 @@ func startDoltServer() error {
 	// Reap the process in the background so ProcessState is populated on exit.
 	exited := make(chan struct{})
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait()
 		close(exited)
 	}()
 
@@ -209,7 +209,7 @@ func startDoltServer() error {
 		case <-exited:
 			os.RemoveAll(dataDir)
 			os.Remove(pidPath)
-			syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 			lockFile.Close()
 			return fmt.Errorf("dolt sql-server exited prematurely")
 		default:
@@ -218,11 +218,11 @@ func startDoltServer() error {
 	}
 
 	// Timed out — kill and clean up.
-	cmd.Process.Kill()
+	_ = cmd.Process.Kill()
 	<-exited
 	os.RemoveAll(dataDir)
 	os.Remove(pidPath)
-	syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 	lockFile.Close()
 	return fmt.Errorf("dolt sql-server did not become ready within 30s")
 }
@@ -233,7 +233,7 @@ func portReady(timeout time.Duration) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }
 
@@ -253,7 +253,7 @@ func CleanupDoltServer() {
 	// Release our shared lock regardless.
 	defer func() {
 		if doltLockFile != nil {
-			syscall.Flock(int(doltLockFile.Fd()), syscall.LOCK_UN)
+			_ = syscall.Flock(int(doltLockFile.Fd()), syscall.LOCK_UN)
 			doltLockFile.Close()
 			doltLockFile = nil
 		}
@@ -299,8 +299,8 @@ func CleanupDoltServer() {
 	// Kill the server process.
 	proc, err := os.FindProcess(pid)
 	if err == nil {
-		proc.Kill()
-		proc.Wait()
+		_ = proc.Kill()
+		_, _ = proc.Wait()
 	}
 
 	// Clean up data dir, PID file, and lock file.

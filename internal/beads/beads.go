@@ -173,7 +173,7 @@ type Beads struct {
 	workDir    string
 	beadsDir   string // Optional BEADS_DIR override for cross-database access
 	isolated   bool   // If true, suppress inherited beads env vars (for test isolation)
-	serverPort int    // If set, pass --server-port to bd init (for test Dolt servers)
+	serverPort int    // If set, pass --server-port to bd init and GT_DOLT_PORT to env
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -194,9 +194,9 @@ func NewIsolated(workDir string) *Beads {
 }
 
 // NewIsolatedWithPort creates a Beads wrapper for test isolation that targets
-// a specific Dolt server port. When Init() is called, --server-port <port> is
-// passed to bd init so it creates the database on the test server instead of
-// the default port 3307.
+// a specific Dolt server port. Init() passes --server-port to bd init, and all
+// commands get GT_DOLT_PORT in their environment. This prevents tests from
+// creating databases on the production Dolt server (port 3307).
 func NewIsolatedWithPort(workDir string, serverPort int) *Beads {
 	return &Beads{workDir: workDir, isolated: true, serverPort: serverPort}
 }
@@ -377,7 +377,11 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 // appended by run(). This was the root cause of gt-uygpe / GH #803.
 func (b *Beads) buildRunEnv() []string {
 	if b.isolated {
-		return filterBeadsEnv(os.Environ())
+		env := filterBeadsEnv(os.Environ())
+		if b.serverPort > 0 {
+			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+		}
+		return env
 	}
 	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
@@ -387,7 +391,11 @@ func (b *Beads) buildRunEnv() []string {
 // In isolated mode: also strips BD_ACTOR, BEADS_*, GT_ROOT, HOME.
 func (b *Beads) buildRoutingEnv() []string {
 	if b.isolated {
-		return filterBeadsEnv(os.Environ())
+		env := filterBeadsEnv(os.Environ())
+		if b.serverPort > 0 {
+			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+		}
+		return env
 	}
 	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
