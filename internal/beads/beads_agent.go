@@ -185,6 +185,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
+		"--ephemeral",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
@@ -663,4 +664,29 @@ func isAgentBeadByID(id string) bool {
 		}
 	}
 	return false
+}
+
+// ListWispIDs returns a set of all wisp IDs in the wisps table.
+// This is useful for existence checks where wisp metadata (type, labels)
+// may not be available in the list output.
+func (b *Beads) ListWispIDs() (map[string]bool, error) {
+	out, err := b.run("mol", "wisp", "list", "--json")
+	if err != nil {
+		return nil, nil
+	}
+
+	var wrapper struct {
+		Wisps []struct {
+			ID string `json:"id"`
+		} `json:"wisps"`
+	}
+	if err := json.Unmarshal(out, &wrapper); err != nil {
+		return nil, nil
+	}
+
+	result := make(map[string]bool, len(wrapper.Wisps))
+	for _, w := range wrapper.Wisps {
+		result[w.ID] = true
+	}
+	return result, nil
 }
