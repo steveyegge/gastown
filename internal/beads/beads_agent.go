@@ -185,6 +185,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
+		"--ephemeral",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
@@ -622,10 +623,14 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 		return nil, nil // Wisps table may not exist yet
 	}
 
-	var wisps []*Issue
-	if err := json.Unmarshal(out, &wisps); err != nil {
+	// bd mol wisp list --json returns {"wisps": [...]} envelope
+	var envelope struct {
+		Wisps []*Issue `json:"wisps"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
 		return nil, nil
 	}
+	wisps := envelope.Wisps
 
 	result := make(map[string]*Issue)
 	for _, w := range wisps {
@@ -634,5 +639,30 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 		}
 	}
 
+	return result, nil
+}
+
+// ListWispIDs returns a set of all wisp IDs in the wisps table.
+// This is useful for existence checks where wisp metadata (type, labels)
+// may not be available in the list output.
+func (b *Beads) ListWispIDs() (map[string]bool, error) {
+	out, err := b.run("mol", "wisp", "list", "--json")
+	if err != nil {
+		return nil, nil
+	}
+
+	var envelope struct {
+		Wisps []struct {
+			ID string `json:"id"`
+		} `json:"wisps"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		return nil, nil
+	}
+
+	result := make(map[string]bool, len(envelope.Wisps))
+	for _, w := range envelope.Wisps {
+		result[w.ID] = true
+	}
 	return result, nil
 }
