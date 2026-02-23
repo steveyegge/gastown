@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package testutil provides shared test infrastructure for integration tests.
 package testutil
 
@@ -135,7 +137,7 @@ func startDoltServer() error {
 
 	// Acquire exclusive lock for the startup phase.
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		lockFile.Close()
+		_ = lockFile.Close()
 		return fmt.Errorf("acquiring startup lock: %w", err)
 	}
 
@@ -144,7 +146,7 @@ func startDoltServer() error {
 	if portReady(2 * time.Second) {
 		// Downgrade to shared lock — signals "I'm using the server".
 		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_SH); err != nil {
-			lockFile.Close()
+			_ = lockFile.Close()
 			return fmt.Errorf("downgrading to shared lock: %w", err)
 		}
 		doltLockFile = lockFile
@@ -155,7 +157,7 @@ func startDoltServer() error {
 	dataDir, err := os.MkdirTemp("", "dolt-test-server-*")
 	if err != nil {
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = lockFile.Close()
 		return fmt.Errorf("creating dolt data dir: %w", err)
 	}
 
@@ -167,9 +169,9 @@ func startDoltServer() error {
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
-		os.RemoveAll(dataDir)
+		_ = os.RemoveAll(dataDir)
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = lockFile.Close()
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
@@ -178,9 +180,9 @@ func startDoltServer() error {
 	pidContent := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, dataDir)
 	if err := os.WriteFile(pidPath, []byte(pidContent), 0666); err != nil { //nolint:gosec // test infrastructure
 		_ = cmd.Process.Kill()
-		os.RemoveAll(dataDir)
+		_ = os.RemoveAll(dataDir)
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
+		_ = lockFile.Close()
 		return fmt.Errorf("writing PID file: %w", err)
 	}
 
@@ -197,7 +199,7 @@ func startDoltServer() error {
 		if portReady(time.Second) {
 			// Server is ready. Downgrade to shared lock.
 			if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_SH); err != nil {
-				lockFile.Close()
+				_ = lockFile.Close()
 				return fmt.Errorf("downgrading to shared lock: %w", err)
 			}
 			doltLockFile = lockFile
@@ -207,10 +209,10 @@ func startDoltServer() error {
 		// Check if process exited (port bind failure, etc).
 		select {
 		case <-exited:
-			os.RemoveAll(dataDir)
-			os.Remove(pidPath)
+			_ = os.RemoveAll(dataDir)
+			_ = os.Remove(pidPath)
 			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-			lockFile.Close()
+			_ = lockFile.Close()
 			return fmt.Errorf("dolt sql-server exited prematurely")
 		default:
 		}
@@ -220,10 +222,10 @@ func startDoltServer() error {
 	// Timed out — kill and clean up.
 	_ = cmd.Process.Kill()
 	<-exited
-	os.RemoveAll(dataDir)
-	os.Remove(pidPath)
+	_ = os.RemoveAll(dataDir)
+	_ = os.Remove(pidPath)
 	_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	lockFile.Close()
+	_ = lockFile.Close()
 	return fmt.Errorf("dolt sql-server did not become ready within 30s")
 }
 
@@ -254,13 +256,13 @@ func CleanupDoltServer() {
 	defer func() {
 		if doltLockFile != nil {
 			_ = syscall.Flock(int(doltLockFile.Fd()), syscall.LOCK_UN)
-			doltLockFile.Close()
+			_ = doltLockFile.Close()
 			doltLockFile = nil
 		}
 		// Clear GT_DOLT_PORT if we set it, so subsequent processes
 		// don't inherit a stale port.
 		if doltPortSetByUs {
-			os.Unsetenv("GT_DOLT_PORT")
+			_ = os.Unsetenv("GT_DOLT_PORT")
 		}
 	}()
 
@@ -305,8 +307,8 @@ func CleanupDoltServer() {
 
 	// Clean up data dir, PID file, and lock file.
 	if dataDir != "" {
-		os.RemoveAll(dataDir)
+		_ = os.RemoveAll(dataDir)
 	}
-	os.Remove(pidPath)
-	os.Remove(LockFilePathForPort(doltTestPort))
+	_ = os.Remove(pidPath)
+	_ = os.Remove(LockFilePathForPort(doltTestPort))
 }
