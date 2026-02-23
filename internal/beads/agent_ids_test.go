@@ -230,3 +230,81 @@ func TestExtractAgentPrefix(t *testing.T) {
 	}
 }
 
+// TestAgentBeadIDWithPrefix tests ID generation including the prefix==rig deduplication fix.
+func TestAgentBeadIDWithPrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		role   string
+		wname  string // worker name
+		want   string
+	}{
+		// Normal case: prefix != rig
+		{"normal witness", "gt", "gastown", "witness", "", "gt-gastown-witness"},
+		{"normal refinery", "gt", "gastown", "refinery", "", "gt-gastown-refinery"},
+		{"normal crew", "gt", "gastown", "crew", "dave", "gt-gastown-crew-dave"},
+		{"normal polecat", "gt", "gastown", "polecat", "nux", "gt-gastown-polecat-nux"},
+		{"bd prefix", "bd", "beads", "witness", "", "bd-beads-witness"},
+
+		// Town-level: empty rig
+		{"town mayor", "gt", "", "mayor", "", "gt-mayor"},
+		{"town deacon", "hq", "", "deacon", "", "hq-deacon"},
+
+		// Collapsed case: prefix == rig (issue #1877)
+		{"collapsed witness", "ff", "ff", "witness", "", "ff-witness"},
+		{"collapsed refinery", "ff", "ff", "refinery", "", "ff-refinery"},
+		{"collapsed crew", "ff", "ff", "crew", "joe", "ff-crew-joe"},
+		{"collapsed polecat", "ff", "ff", "polecat", "nux", "ff-polecat-nux"},
+		{"collapsed 3char rig", "foo", "foo", "witness", "", "foo-witness"},
+		{"collapsed 2char rig", "ab", "ab", "refinery", "", "ab-refinery"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AgentBeadIDWithPrefix(tt.prefix, tt.rig, tt.role, tt.wname)
+			if got != tt.want {
+				t.Errorf("AgentBeadIDWithPrefix(%q, %q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.role, tt.wname, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAgentBeadIDWithPrefix_NoStutter verifies the specific bug from issue #1877:
+// when deriveBeadsPrefix returns the same string as the rig name, IDs should NOT
+// contain a stuttered prefix (e.g., "ff-ff-refinery").
+func TestAgentBeadIDWithPrefix_NoStutter(t *testing.T) {
+	// Simulate: rig "ff", deriveBeadsPrefix("ff") returns "ff"
+	prefix := "ff"
+	rig := "ff"
+
+	witnessID := WitnessBeadIDWithPrefix(prefix, rig)
+	refineryID := RefineryBeadIDWithPrefix(prefix, rig)
+
+	if witnessID == "ff-ff-witness" {
+		t.Error("WitnessBeadIDWithPrefix produced stuttered ID ff-ff-witness")
+	}
+	if witnessID != "ff-witness" {
+		t.Errorf("WitnessBeadIDWithPrefix(%q, %q) = %q, want %q", prefix, rig, witnessID, "ff-witness")
+	}
+
+	if refineryID == "ff-ff-refinery" {
+		t.Error("RefineryBeadIDWithPrefix produced stuttered ID ff-ff-refinery")
+	}
+	if refineryID != "ff-refinery" {
+		t.Errorf("RefineryBeadIDWithPrefix(%q, %q) = %q, want %q", prefix, rig, refineryID, "ff-refinery")
+	}
+
+	// Crew and polecat
+	crewID := CrewBeadIDWithPrefix(prefix, rig, "joe")
+	if crewID != "ff-crew-joe" {
+		t.Errorf("CrewBeadIDWithPrefix(%q, %q, %q) = %q, want %q", prefix, rig, "joe", crewID, "ff-crew-joe")
+	}
+
+	polecatID := PolecatBeadIDWithPrefix(prefix, rig, "nux")
+	if polecatID != "ff-polecat-nux" {
+		t.Errorf("PolecatBeadIDWithPrefix(%q, %q, %q) = %q, want %q", prefix, rig, "nux", polecatID, "ff-polecat-nux")
+	}
+}
+
