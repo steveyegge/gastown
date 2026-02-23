@@ -1456,7 +1456,7 @@ func runDoltMigrateWisps(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		printMigrateWispsResult(doltMigrateWispsDB, result)
+		printMigrateWispsResult(result)
 		return nil
 	}
 
@@ -1482,12 +1482,12 @@ func runDoltMigrateWisps(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s %s: %v\n", style.Bold.Render("✗"), db, err)
 			continue
 		}
-		printMigrateWispsResult(db, result)
+		printMigrateWispsResult(result)
 	}
 	return nil
 }
 
-func printMigrateWispsResult(db string, result *doltserver.MigrateWispsResult) {
+func printMigrateWispsResult(result *doltserver.MigrateWispsResult) {
 	if result.WispsTableCreated {
 		fmt.Printf("  %s Created wisps table\n", style.Bold.Render("✓"))
 	}

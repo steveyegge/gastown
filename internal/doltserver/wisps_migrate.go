@@ -86,15 +86,15 @@ func MigrateAgentBeadsToWisps(townRoot, workDir string, dryRun bool) (*MigrateWi
 	return result, nil
 }
 
-// bdSQL executes a SQL query via `bd sql` and returns the output.
-func bdSQL(workDir, query string) (string, error) {
+// bdSQL executes a SQL query via `bd sql`.
+func bdSQL(workDir, query string) error {
 	cmd := exec.Command("bd", "sql", query)
 	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("bd sql: %s: %w", strings.TrimSpace(string(output)), err)
+		return fmt.Errorf("bd sql: %s: %w", strings.TrimSpace(string(output)), err)
 	}
-	return string(output), nil
+	return nil
 }
 
 // bdSQLCSV executes a SQL query via `bd sql --csv` and returns the output.
@@ -137,7 +137,7 @@ func bdSQLCount(workDir, query string) (int, error) {
 
 // bdTableExists checks if a table exists by attempting to query it.
 func bdTableExists(workDir, tableName string) bool {
-	_, err := bdSQL(workDir, fmt.Sprintf("SELECT 1 FROM `%s` LIMIT 1", tableName))
+	err := bdSQL(workDir, fmt.Sprintf("SELECT 1 FROM `%s` LIMIT 1", tableName))
 	return err == nil
 }
 
@@ -150,7 +150,7 @@ func ensureWispsTable(workDir string) (bool, error) {
 	// Create the wisps table with all columns the bd tool expects.
 	// We use individual column definitions instead of CREATE TABLE LIKE because
 	// LIKE can cause Dolt server crashes with dolt_ignored tables.
-	_, err := bdSQL(workDir, `CREATE TABLE wisps (
+	err := bdSQL(workDir, `CREATE TABLE wisps (
   id varchar(255) NOT NULL,
   content_hash varchar(64),
   title varchar(500) NOT NULL,
@@ -283,7 +283,7 @@ func ensureWispAuxTables(workDir string) ([]string, error) {
 		if bdTableExists(workDir, t.name) {
 			continue
 		}
-		if _, err := bdSQL(workDir, t.ddl); err != nil {
+		if err := bdSQL(workDir, t.ddl); err != nil {
 			return created, fmt.Errorf("creating %s: %w", t.name, err)
 		}
 		created = append(created, t.name)
@@ -296,7 +296,7 @@ func ensureWispAuxTables(workDir string) ([]string, error) {
 func copyAgentBeadsToWisps(workDir string, result *MigrateWispsResult) error {
 	// INSERT IGNORE skips rows where the primary key already exists in wisps.
 	// We use explicit column list to handle any schema differences.
-	_, err := bdSQL(workDir,
+	err := bdSQL(workDir,
 		"INSERT IGNORE INTO wisps (id, title, description, status, issue_type, agent_state, role_type, rig, hook_bead, role_bead, created_at, updated_at, created_by, owner, assignee, priority, ephemeral, wisp_type, mol_type, metadata) "+
 			"SELECT id, title, description, status, issue_type, agent_state, role_type, rig, hook_bead, role_bead, created_at, updated_at, created_by, owner, assignee, priority, 1, wisp_type, mol_type, metadata FROM issues WHERE issue_type = 'agent'")
 	if err != nil {
@@ -312,7 +312,7 @@ func copyAgentBeadsToWisps(workDir string, result *MigrateWispsResult) error {
 // copyAuxiliaryData copies labels, comments, events, and dependencies for agent beads.
 func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 	// Copy labels
-	if _, err := bdSQL(workDir,
+	if err := bdSQL(workDir,
 		"INSERT IGNORE INTO wisp_labels (issue_id, label) SELECT l.issue_id, l.label FROM labels l INNER JOIN wisps w ON l.issue_id = w.id"); err != nil {
 		// Non-fatal if no matching labels
 		if !strings.Contains(err.Error(), "nothing") {
@@ -323,7 +323,7 @@ func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 	result.LabelsCopied = cnt
 
 	// Copy comments
-	if _, err := bdSQL(workDir,
+	if err := bdSQL(workDir,
 		"INSERT IGNORE INTO wisp_comments (issue_id, author, text, created_at) SELECT c.issue_id, c.author, c.text, c.created_at FROM comments c INNER JOIN wisps w ON c.issue_id = w.id"); err != nil {
 		if !strings.Contains(err.Error(), "nothing") {
 			return fmt.Errorf("copying comments: %w", err)
@@ -333,7 +333,7 @@ func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 	result.CommentsCopied = cnt
 
 	// Copy events
-	if _, err := bdSQL(workDir,
+	if err := bdSQL(workDir,
 		"INSERT IGNORE INTO wisp_events (issue_id, event_type, actor, old_value, new_value, comment, created_at) SELECT e.issue_id, e.event_type, e.actor, e.old_value, e.new_value, e.comment, e.created_at FROM events e INNER JOIN wisps w ON e.issue_id = w.id"); err != nil {
 		if !strings.Contains(err.Error(), "nothing") {
 			return fmt.Errorf("copying events: %w", err)
@@ -343,7 +343,7 @@ func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 	result.EventsCopied = cnt
 
 	// Copy dependencies
-	if _, err := bdSQL(workDir,
+	if err := bdSQL(workDir,
 		"INSERT IGNORE INTO wisp_dependencies (issue_id, depends_on_id, type, created_at, created_by, metadata, thread_id) SELECT d.issue_id, d.depends_on_id, d.type, d.created_at, d.created_by, d.metadata, d.thread_id FROM dependencies d INNER JOIN wisps w ON d.issue_id = w.id"); err != nil {
 		if !strings.Contains(err.Error(), "nothing") {
 			return fmt.Errorf("copying dependencies: %w", err)
@@ -359,7 +359,7 @@ func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 func closeOriginalAgentBeads(workDir string, result *MigrateWispsResult) error {
 	// Close all open agent beads. We don't use a cross-table subquery because
 	// that can crash the Dolt server when mixing regular and dolt_ignored tables.
-	if _, err := bdSQL(workDir,
+	if err := bdSQL(workDir,
 		"UPDATE issues SET status = 'closed', closed_at = NOW() WHERE issue_type = 'agent' AND status = 'open'"); err != nil {
 		return err
 	}
