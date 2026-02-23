@@ -149,6 +149,13 @@ var prefixRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,19}$`)
 // Uses --server mode to match all production bd init callers (gastown uses a
 // centralized Dolt sql-server). JSONL auto-import is handled by bd init itself.
 func ensureDatabaseInitialized(beadsDir string) error {
+	// If this beads dir has a redirect, the database lives elsewhere.
+	// Never create a new database for a redirected location (polecats, crew, refinery).
+	redirectFile := filepath.Join(beadsDir, "redirect")
+	if _, err := os.Stat(redirectFile); err == nil {
+		return nil
+	}
+
 	// Check for Dolt database directory (embedded mode)
 	doltDir := filepath.Join(beadsDir, "dolt")
 	if _, err := os.Stat(doltDir); err == nil {
