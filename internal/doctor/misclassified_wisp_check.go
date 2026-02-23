@@ -197,6 +197,11 @@ func isIssueStillOpen(workDir, id string) (bool, error) {
 		if ee, ok := err.(*exec.ExitError); ok {
 			stderr = strings.TrimSpace(string(ee.Stderr))
 		}
+		// "not found" means the issue was deleted or migrated (e.g. to wisps).
+		// Treat as "not open" rather than a probe error.
+		if strings.Contains(stderr, "not found") || strings.Contains(string(output), "no issues found") {
+			return false, nil
+		}
 		return false, fmt.Errorf("bd show %s: %v (%s)", id, err, stderr)
 	}
 	var issues []struct {
