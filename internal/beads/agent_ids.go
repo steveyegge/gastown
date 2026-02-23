@@ -324,10 +324,17 @@ func ValidateAgentID(id string) error {
 // For town-level agents (mayor, deacon), pass empty rig and name.
 // For rig-level singletons (witness, refinery), pass empty name.
 // For named agents (crew, polecat), pass all three.
+//
+// When prefix == rig (happens for short rig names like "ff" where
+// deriveBeadsPrefix returns the name itself), the rig component is omitted
+// to avoid stuttered IDs like "ff-ff-refinery". Instead: "ff-refinery".
 func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
-	if rig == "" {
-		// Town-level agent: prefix-mayor, prefix-deacon
-		return prefix + "-" + role
+	if rig == "" || rig == prefix {
+		// Town-level agent or collapsed prefix==rig: prefix-role[-name]
+		if name == "" {
+			return prefix + "-" + role
+		}
+		return prefix + "-" + role + "-" + name
 	}
 	if name == "" {
 		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery

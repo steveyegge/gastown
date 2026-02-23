@@ -230,3 +230,41 @@ func TestExtractAgentPrefix(t *testing.T) {
 	}
 }
 
+// TestAgentBeadIDWithPrefix_CollapsesPrefixEqualRig verifies that when
+// prefix == rig (short rig names like "ff"), the rig component is omitted
+// to avoid stuttered IDs like "ff-ff-refinery".
+func TestAgentBeadIDWithPrefix_CollapsesPrefixEqualRig(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		role   string
+		worker string
+		want   string
+	}{
+		// prefix == rig: should collapse
+		{"singleton witness", "ff", "ff", "witness", "", "ff-witness"},
+		{"singleton refinery", "ff", "ff", "refinery", "", "ff-refinery"},
+		{"crew worker", "ff", "ff", "crew", "dave", "ff-crew-dave"},
+		{"polecat", "ff", "ff", "polecat", "nux", "ff-polecat-nux"},
+
+		// prefix != rig: normal behavior (no collapse)
+		{"normal witness", "gt", "gastown", "witness", "", "gt-gastown-witness"},
+		{"normal crew", "bd", "beads", "crew", "pearl", "bd-beads-crew-pearl"},
+
+		// town-level (empty rig): unaffected
+		{"town mayor", "hq", "", "mayor", "", "hq-mayor"},
+		{"town dog", "hq", "", "dog", "alpha", "hq-dog-alpha"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AgentBeadIDWithPrefix(tt.prefix, tt.rig, tt.role, tt.worker)
+			if got != tt.want {
+				t.Errorf("AgentBeadIDWithPrefix(%q, %q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.role, tt.worker, got, tt.want)
+			}
+		})
+	}
+}
+
