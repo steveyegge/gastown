@@ -305,10 +305,8 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
-	// Write retains BD_BRANCH intentionally — polecat writes need branch isolation.
-	// The read/write asymmetry is correct: read from main (source of truth for existing
-	// fields), write to polecat branch (for isolation). This function is called from sling
-	// (typically Mayor/Deacon context where BD_BRANCH is absent anyway).
+	// All writes target main — BD_BRANCH was removed when the transaction-based
+	// shared-main model replaced branch-per-polecat isolation.
 	if err := BdCmd("update", beadID, "--description="+newDesc).
 		Dir(resolveBeadDir(beadID)).
 		Run(); err != nil {

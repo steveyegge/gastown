@@ -632,7 +632,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
 		// Read source issue from main (not polecat branch) — it was created there.
-		restore := onMainBranch()
+		restore := func() {} // BD_BRANCH removed — all operations target main
 		sourceIssueForNoMerge, err := bd.Show(issueID)
 		restore()
 		if err == nil {
@@ -721,7 +721,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
 		}
 		if refineryEnabled {
-			restore = onMainBranch()
+			restore = func() {} // BD_BRANCH removed — all operations target main
 			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
 			restore()
 			if err == nil && autoTarget != "" {
@@ -735,7 +735,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			priority = donePriority
 		} else {
 			// Read source issue from main where it was created (not polecat branch)
-			restore := onMainBranch()
+			restore := func() {} // BD_BRANCH removed — all operations target main
 			sourceIssue, err := bd.Show(issueID)
 			restore()
 			if err != nil {
@@ -747,7 +747,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Check if MR bead already exists for this branch (idempotency)
 		// MR beads live on main, not polecat branch.
-		restore = onMainBranch()
+		restore = func() {} // BD_BRANCH removed — all operations target main
 		existingMR, err := bd.FindMRForBranch(branch)
 		restore()
 		if err != nil {
@@ -780,7 +780,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Create MR bead directly on main (not polecat branch).
 			// MR bead is a new unique INSERT — no contention risk —
 			// and must be visible to refinery immediately.
-			restore := onMainBranch()
+			restore := func() {} // BD_BRANCH removed — all operations target main
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
 				Type:        "merge-request",
@@ -1353,22 +1353,10 @@ func isPolecatActor(actor string) bool {
 	return len(parts) >= 2 && parts[1] == "polecats"
 }
 
-// onMainBranch temporarily clears BD_BRANCH so beads operations target
-// Dolt's main branch instead of the polecat's working branch.
-// Returns a restore function that must be called after the operation.
-//
-// Use this for operations that need to read/write beads visible to all agents
-// (e.g., source issue lookup, MR bead creation) rather than the polecat's
-// isolated Dolt branch.
-func onMainBranch() func() {
-	saved := os.Getenv("BD_BRANCH")
-	os.Unsetenv("BD_BRANCH")
-	return func() {
-		if saved != "" {
-			os.Setenv("BD_BRANCH", saved)
-		}
-	}
-}
+// onMainBranch is a no-op — BD_BRANCH was removed when all writers moved to
+// shared main with transaction isolation. Kept temporarily for grep-ability;
+// callers now use inline restore := func() {} stubs.
+// TODO: remove restore/restore() call sites in a follow-up cleanup.
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.
 // This completes the self-cleaning model: "done means gone" - both worktree and session.
