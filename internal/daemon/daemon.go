@@ -225,8 +225,7 @@ func (d *Daemon) Run() error {
 	}
 
 	// Repair metadata.json for all rigs on startup.
-	// This auto-fixes stale jsonl_export values (e.g., "beads.jsonl" → "issues.jsonl")
-	// left behind by historical migrations.
+	// This ensures all rigs have proper Dolt server configuration.
 	if _, errs := doltserver.EnsureAllMetadata(d.config.TownRoot); len(errs) > 0 {
 		for _, e := range errs {
 			d.logger.Printf("Warning: metadata repair: %v", e)

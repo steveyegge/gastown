@@ -400,9 +400,6 @@ func TestEnsureMetadata_Rig(t *testing.T) {
 	if metadata["dolt_database"] != "myrig" {
 		t.Errorf("dolt_database = %v, want myrig", metadata["dolt_database"])
 	}
-	if metadata["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl", metadata["jsonl_export"])
-	}
 }
 
 func TestEnsureMetadata_Idempotent(t *testing.T) {
@@ -1769,51 +1766,6 @@ func TestEnsureMetadata_CreatesBeadsDir(t *testing.T) {
 	}
 }
 
-func TestEnsureMetadata_CorrectsStaleJSONLExport(t *testing.T) {
-	townRoot := t.TempDir()
-
-	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Simulate a stale jsonl_export value left by a historical migration
-	existing := map[string]interface{}{"jsonl_export": "beads.jsonl"}
-	data, _ := json.Marshal(existing)
-	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := EnsureMetadata(townRoot, "hq"); err != nil {
-		t.Fatalf("EnsureMetadata failed: %v", err)
-	}
-
-	updated, _ := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
-	var meta map[string]interface{}
-	json.Unmarshal(updated, &meta)
-	if meta["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl (stale value should be corrected)", meta["jsonl_export"])
-	}
-}
-
-func TestEnsureMetadata_SetsDefaultJSONLExport(t *testing.T) {
-	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := EnsureMetadata(townRoot, "hq"); err != nil {
-		t.Fatalf("EnsureMetadata failed: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(townRoot, ".beads", "metadata.json"))
-	var meta map[string]interface{}
-	json.Unmarshal(data, &meta)
-	if meta["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl", meta["jsonl_export"])
-	}
-}
-
 // =============================================================================
 // InitRig validation tests
 // =============================================================================
@@ -2869,7 +2821,6 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 		"backend":       "dolt",
 		"dolt_mode":     "server",
 		"dolt_database": doltDatabase,
-		"jsonl_export":  "issues.jsonl",
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {

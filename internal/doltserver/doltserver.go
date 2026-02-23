@@ -1799,10 +1799,6 @@ func EnsureMetadata(townRoot, rigName string) error {
 		existing["dolt_database"] = rigName
 	}
 
-	// Always set jsonl_export to the canonical filename.
-	// Historical migrations may have left stale values (e.g., "beads.jsonl").
-	existing["jsonl_export"] = "issues.jsonl"
-
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling metadata: %w", err)
