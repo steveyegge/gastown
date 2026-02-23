@@ -1684,29 +1684,22 @@ func (c *BareRepoExistsCheck) Fix(ctx *CheckContext) error {
 			return fmt.Errorf("config.json has no git_url, cannot recreate .repo.git")
 		}
 
-		// Clone bare repo
-		cmd := exec.Command("git", "clone", "--bare", cfg.GitURL, bareRepoPath)
+		// Clone bare repo (shallow, single-branch for efficiency on repos with many branches)
+		cmd := exec.Command("git", "clone", "--bare", "--single-branch", "--depth", "1", cfg.GitURL, bareRepoPath)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("cloning bare repo: %s", strings.TrimSpace(stderr.String()))
 		}
 
-		// Configure refspec so worktrees can fetch origin/* refs
+		// Configure refspec so worktrees can fetch origin/* refs.
+		// Skip full fetch — the shallow single-branch clone already has the default branch.
 		stderr.Reset()
 		configCmd := exec.Command("git", "-C", bareRepoPath, "config",
 			"remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 		configCmd.Stderr = &stderr
 		if err := configCmd.Run(); err != nil {
 			return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
-		}
-
-		// Fetch to populate remote refs
-		stderr.Reset()
-		fetchCmd := exec.Command("git", "-C", bareRepoPath, "fetch", "origin")
-		fetchCmd.Stderr = &stderr
-		if err := fetchCmd.Run(); err != nil {
-			return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
 		}
 
 		// Restore push URL if configured (for read-only upstream repos)

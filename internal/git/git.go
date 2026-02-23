@@ -159,8 +159,11 @@ func (g *Git) wrapError(err error, stdout, stderr string, args []string) error {
 
 // cloneOptions configures a clone operation for cloneInternal.
 type cloneOptions struct {
-	bare      bool   // Pass --bare to git clone
-	reference string // Pass --reference-if-able <path> to git clone
+	bare         bool   // Pass --bare to git clone
+	reference    string // Pass --reference-if-able <path> to git clone
+	singleBranch bool   // Pass --single-branch to git clone (only fetch default branch)
+	depth        int    // Pass --depth N to git clone (shallow clone); 0 means full history
+	branch       string // Pass --branch <name> to git clone (checkout specific branch)
 }
 
 // cloneInternal runs `git clone` in an isolated temp directory, moves the result
@@ -191,6 +194,15 @@ func (g *Git) cloneInternal(url, dest string, opts cloneOptions) error {
 	if opts.bare {
 		args = append(args, "--bare")
 	}
+	if opts.singleBranch {
+		args = append(args, "--single-branch")
+	}
+	if opts.depth > 0 {
+		args = append(args, "--depth", fmt.Sprintf("%d", opts.depth))
+	}
+	if opts.branch != "" {
+		args = append(args, "--branch", opts.branch)
+	}
 	if opts.reference != "" {
 		args = append(args, "--reference-if-able", opts.reference)
 	}
@@ -213,8 +225,10 @@ func (g *Git) cloneInternal(url, dest string, opts cloneOptions) error {
 
 	// Post-clone configuration
 	if opts.bare {
-		// Configure refspec so worktrees can fetch and see origin/* refs
-		return configureRefspec(dest)
+		// Configure refspec so worktrees can fetch and see origin/* refs.
+		// For single-branch shallow clones, only set the config without
+		// fetching all branches (which would defeat the purpose of --single-branch).
+		return configureRefspec(dest, opts.singleBranch)
 	}
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
@@ -225,20 +239,33 @@ func (g *Git) cloneInternal(url, dest string, opts cloneOptions) error {
 }
 
 // Clone clones a repository to the destination.
+// Uses --single-branch --depth 1 for efficiency on repos with many branches.
 func (g *Git) Clone(url, dest string) error {
-	return g.cloneInternal(url, dest, cloneOptions{})
+	return g.cloneInternal(url, dest, cloneOptions{singleBranch: true, depth: 1})
 }
 
 // CloneWithReference clones a repository using a local repo as an object reference.
 // This saves disk by sharing objects without changing remotes.
+// Uses --single-branch --depth 1 for efficiency on repos with many branches.
 func (g *Git) CloneWithReference(url, dest, reference string) error {
-	return g.cloneInternal(url, dest, cloneOptions{reference: reference})
+	return g.cloneInternal(url, dest, cloneOptions{reference: reference, singleBranch: true, depth: 1})
+}
+
+// CloneBranch clones a specific branch with --single-branch --depth 1.
+// Use this when you know which branch you need (avoids fetching all branches).
+func (g *Git) CloneBranch(url, dest, branch string) error {
+	return g.cloneInternal(url, dest, cloneOptions{singleBranch: true, depth: 1, branch: branch})
+}
+
+// CloneBranchWithReference clones a specific branch using a local repo as reference.
+func (g *Git) CloneBranchWithReference(url, dest, branch, reference string) error {
+	return g.cloneInternal(url, dest, cloneOptions{singleBranch: true, depth: 1, branch: branch, reference: reference})
 }
 
 // CloneBare clones a repository as a bare repo (no working directory).
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
-	return g.cloneInternal(url, dest, cloneOptions{bare: true})
+	return g.cloneInternal(url, dest, cloneOptions{bare: true, singleBranch: true, depth: 1})
 }
 
 // configureHooksPath sets core.hooksPath to use the repo's .githooks directory
@@ -270,7 +297,11 @@ func (g *Git) ConfigureHooksPath() error {
 // fetch and see origin/* refs. Without this, `git fetch` only updates FETCH_HEAD
 // and origin/main never appears in refs/remotes/origin/main.
 // See: https://github.com/anthropics/gastown/issues/286
-func configureRefspec(repoPath string) error {
+//
+// When singleBranch is true, fetches only the default branch's ref instead of all
+// branches. This prevents failures on repos with many branches where a full fetch
+// would error with "some local refs could not be updated".
+func configureRefspec(repoPath string, singleBranch bool) error {
 	gitDir := repoPath
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err == nil {
 		gitDir = filepath.Join(repoPath, ".git")
@@ -284,6 +315,38 @@ func configureRefspec(repoPath string) error {
 		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
 	}
 
+	if singleBranch {
+		// For shallow single-branch clones, fetch only the HEAD branch to create
+		// the origin/<branch> ref that worktrees need. A full `git fetch origin`
+		// would try to fetch ALL remote branches (due to the refspec we just set),
+		// which fails on repos with many branches.
+		//
+		// Detect HEAD branch name, then fetch only that specific branch.
+		var headOut bytes.Buffer
+		headCmd := exec.Command("git", "--git-dir", gitDir, "symbolic-ref", "HEAD")
+		headCmd.Stdout = &headOut
+		headCmd.Stderr = &stderr
+		if err := headCmd.Run(); err != nil {
+			// Fallback: if HEAD is detached, try fetching all (shouldn't happen for clones)
+			fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "--depth", "1", "origin")
+			fetchCmd.Stderr = &stderr
+			if fetchErr := fetchCmd.Run(); fetchErr != nil {
+				return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
+			}
+			return nil
+		}
+		headRef := strings.TrimSpace(headOut.String())        // e.g. "refs/heads/main"
+		branch := strings.TrimPrefix(headRef, "refs/heads/")  // e.g. "main"
+		refspec := branch + ":refs/remotes/origin/" + branch   // e.g. "main:refs/remotes/origin/main"
+
+		fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "--depth", "1", "origin", refspec)
+		fetchCmd.Stderr = &stderr
+		if err := fetchCmd.Run(); err != nil {
+			return fmt.Errorf("fetching origin %s: %s", branch, strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	}
+
 	fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "origin")
 	fetchCmd.Stderr = &stderr
 	if err := fetchCmd.Run(); err != nil {
@@ -294,8 +357,9 @@ func configureRefspec(repoPath string) error {
 }
 
 // CloneBareWithReference clones a bare repository using a local repo as an object reference.
+// Uses --single-branch --depth 1 for efficiency on repos with many branches.
 func (g *Git) CloneBareWithReference(url, dest, reference string) error {
-	return g.cloneInternal(url, dest, cloneOptions{bare: true, reference: reference})
+	return g.cloneInternal(url, dest, cloneOptions{bare: true, reference: reference, singleBranch: true, depth: 1})
 }
 
 // Checkout checks out the given ref.
