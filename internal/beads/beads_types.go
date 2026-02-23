@@ -225,10 +225,12 @@ func ensureDatabaseInitialized(beadsDir string) error {
 
 	// Explicitly set issue_prefix — bd init --prefix may not persist it
 	// in newer versions (see rig/manager.go InitBeads).
-	pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-	pfxCmd.Dir = parentDir
-	pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
-	_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	if prefix != "" {
+		pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+		pfxCmd.Dir = parentDir
+		pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+		_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	}
 
 	return nil
 }

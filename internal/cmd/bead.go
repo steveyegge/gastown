@@ -153,7 +153,8 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build create command for target
+	// Build create command for target.
+	// Skip --prefix for empty or bare "-" (normalization above turns "" into "-").
 	createArgs := []string{"create"}
 	if targetPrefix != "" && targetPrefix != "-" {
 		createArgs = append(createArgs, "--prefix", targetPrefix)
