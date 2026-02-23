@@ -615,7 +615,6 @@ func (d *Daemon) ensureBootRunning() {
 func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 	startTime := time.Now()
 	status := &boot.Status{
-		Running:   true,
 		StartedAt: startTime,
 	}
 
@@ -634,7 +633,6 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 		status.LastAction = "nothing"
 	}
 
-	status.Running = false
 	status.CompletedAt = time.Now()
 
 	if err := b.SaveStatus(status); err != nil {

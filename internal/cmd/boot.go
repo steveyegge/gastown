@@ -210,7 +210,6 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 
 	// Save starting status
 	status := &boot.Status{
-		Running:   true,
 		StartedAt: time.Now(),
 	}
 	if err := b.SaveStatus(status); err != nil {
@@ -221,7 +220,6 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	if err := b.Spawn(bootAgentOverride); err != nil {
 		status.Error = err.Error()
 		status.CompletedAt = time.Now()
-		status.Running = false
 		_ = b.SaveStatus(status)
 		return fmt.Errorf("spawning boot: %w", err)
 	}
@@ -249,7 +247,6 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 
 	startTime := time.Now()
 	status := &boot.Status{
-		Running:   true,
 		StartedAt: startTime,
 	}
 
@@ -259,7 +256,6 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 
 	status.LastAction = action
 	status.Target = target
-	status.Running = false
 	status.CompletedAt = time.Now()
 
 	if triageErr != nil {
