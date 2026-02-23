@@ -102,6 +102,59 @@ func bdUpdateStatus(beadID, status string) error {
 	return nil
 }
 
+// collectParkedRigsInDAG returns a map of parked rig names to the bead IDs
+// that target them. Only considers slingable nodes. (gt-4owfd.1)
+func collectParkedRigsInDAG(dag *ConvoyDAG, townRoot string) map[string][]string {
+	parkedRigBeads := make(map[string][]string)
+	for _, node := range dag.Nodes {
+		if !isSlingableType(node.Type) {
+			continue
+		}
+		if node.Rig == "" {
+			continue
+		}
+		if IsRigParked(townRoot, node.Rig) {
+			parkedRigBeads[node.Rig] = append(parkedRigBeads[node.Rig], node.ID)
+		}
+	}
+	return parkedRigBeads
+}
+
+// checkParkedRigsForLaunch checks if any target rigs are parked.
+// Returns an error listing all parked rigs if any are found and force is false.
+// (gt-4owfd.1)
+func checkParkedRigsForLaunch(dag *ConvoyDAG, townRoot string, force bool) error {
+	parkedRigBeads := collectParkedRigsInDAG(dag, townRoot)
+	if len(parkedRigBeads) == 0 {
+		return nil
+	}
+
+	// Build sorted list of parked rigs for deterministic output
+	var rigs []string
+	for rig := range parkedRigBeads {
+		rigs = append(rigs, rig)
+	}
+	sort.Strings(rigs)
+
+	if force {
+		// Warn but proceed
+		fmt.Printf("Warning: %d parked rig(s) in convoy: %s\n", len(rigs), strings.Join(rigs, ", "))
+		fmt.Printf("  Proceeding with --force (tasks may fail)\n")
+		return nil
+	}
+
+	// Build detailed error message
+	var details []string
+	for _, rig := range rigs {
+		beadIDs := parkedRigBeads[rig]
+		sort.Strings(beadIDs)
+		details = append(details, fmt.Sprintf("  %s: %s", rig, strings.Join(beadIDs, ", ")))
+	}
+
+	return fmt.Errorf("cannot launch: %d target rig(s) are parked:\n%s\n\nUnpark with: gt rig unpark %s\nOr use --force to proceed anyway",
+		len(rigs), strings.Join(details, "\n"), strings.Join(rigs, " "))
+}
+
 // dispatchWave1 dispatches all tasks in Wave 1 of the computed waves.
 // Individual task failures do not abort remaining dispatches (I-14).
 // Returns a result for every Wave 1 task and a non-nil error only if waves
@@ -253,6 +306,11 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 			townRoot, err := workspace.FindFromCwdOrError()
 			if err != nil {
 				return fmt.Errorf("resolve town root for dispatch: %w", err)
+			}
+
+			// Check for parked rigs before dispatch (gt-4owfd.1)
+			if err := checkParkedRigsForLaunch(dag, townRoot, convoyLaunchForce); err != nil {
+				return err
 			}
 
 			results, err := dispatchWave1(convoyID, dag, waves, townRoot)

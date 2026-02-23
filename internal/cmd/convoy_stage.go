@@ -1609,11 +1609,23 @@ func detectOrphans(dag *ConvoyDAG, input *StageInput) []StagingFinding {
 	return findings
 }
 
-// detectParkedRigs warns about slingable nodes whose rig name suggests a
-// parked/archived rig. Checks for "parked" substring (case-insensitive) or
-// ".parked" suffix.
+// isRigParkedFn is a seam for tests. Production uses IsRigParked.
+var isRigParkedFn = func(townRoot, rigName string) bool {
+	return IsRigParked(townRoot, rigName)
+}
+
+// detectParkedRigs warns about slingable nodes whose target rig is parked
+// in the wisp layer (gt-4owfd.1). This uses the actual IsRigParked() check
+// rather than string matching on rig names.
 func detectParkedRigs(dag *ConvoyDAG) []StagingFinding {
-	var findings []StagingFinding
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		// Can't resolve town root — skip parked rig detection
+		return nil
+	}
+
+	// Group beads by parked rig to consolidate warnings
+	parkedRigBeads := make(map[string][]string)
 	for _, node := range dag.Nodes {
 		if !isSlingableType(node.Type) {
 			continue
@@ -1621,16 +1633,22 @@ func detectParkedRigs(dag *ConvoyDAG) []StagingFinding {
 		if node.Rig == "" {
 			continue // already caught by no-rig errors
 		}
-		lower := strings.ToLower(node.Rig)
-		if strings.Contains(lower, "parked") {
-			findings = append(findings, StagingFinding{
-				Severity:     "warning",
-				Category:     "parked-rig",
-				BeadIDs:      []string{node.ID},
-				Message:      fmt.Sprintf("task %s is assigned to parked rig %q", node.ID, node.Rig),
-				SuggestedFix: fmt.Sprintf("reassign %s to an active rig or unpark %s", node.ID, node.Rig),
-			})
+		if isRigParkedFn(townRoot, node.Rig) {
+			parkedRigBeads[node.Rig] = append(parkedRigBeads[node.Rig], node.ID)
 		}
+	}
+
+	var findings []StagingFinding
+	for rigName, beadIDs := range parkedRigBeads {
+		// Sort bead IDs for determinism
+		sort.Strings(beadIDs)
+		findings = append(findings, StagingFinding{
+			Severity:     "warning",
+			Category:     "parked-rig",
+			BeadIDs:      beadIDs,
+			Message:      fmt.Sprintf("%d bead(s) target parked rig %q: %s", len(beadIDs), rigName, strings.Join(beadIDs, ", ")),
+			SuggestedFix: fmt.Sprintf("unpark the rig: gt rig unpark %s", rigName),
+		})
 	}
 	return findings
 }

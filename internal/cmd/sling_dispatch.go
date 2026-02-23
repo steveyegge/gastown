@@ -100,6 +100,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		BeadID: params.BeadID,
 	}
 
+	// 0. Check if rig is parked before dispatching (gt-4owfd.1)
+	if params.RigName != "" && IsRigParked(townRoot, params.RigName) {
+		result.ErrMsg = "rig parked"
+		return result, fmt.Errorf("cannot sling to parked rig %q\nUnpark with: gt rig unpark %s", params.RigName, params.RigName)
+	}
+
 	// 1. Get bead info + status check
 	info, err := getBeadInfo(params.BeadID)
 	if err != nil {
