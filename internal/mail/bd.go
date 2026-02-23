@@ -7,12 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 const (
 	// bdReadTimeout is the timeout for bd read operations (list, show, query).
-	bdReadTimeout = 30 * time.Second
+	// 60s accommodates concurrent agent load where multiple bd processes compete
+	// for Dolt locks and memory (was 30s, caused signal:killed under contention).
+	bdReadTimeout = 60 * time.Second
 	// bdWriteTimeout is the timeout for bd write operations (create, close, label, reopen).
 	bdWriteTimeout = 60 * time.Second
 )
@@ -53,6 +56,12 @@ func (e *bdError) ContainsError(substr string) bool {
 // Returns stdout bytes on success, or a *bdError on failure.
 func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, extraEnv ...string) (_ []byte, retErr error) {
 	defer func() { telemetry.RecordMail(ctx, "bd."+firstArg(args), retErr) }()
+
+	// Remove stale dolt-server.pid before spawning bd. A stale PID file causes
+	// bd to connect to port 3307 which may be occupied by a different Dolt server
+	// serving different databases, resulting in hangs until the read timeout kills it.
+	beads.CleanStaleDoltServerPID(beadsDir)
+
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = workDir
 

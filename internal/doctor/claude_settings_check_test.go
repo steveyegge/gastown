@@ -1257,8 +1257,8 @@ func TestClaudeSettingsCheck_MissingFileOnlyMessage(t *testing.T) {
 	}
 
 	// Fix hint should mention restart for missing files
-	if !strings.Contains(result.FixHint, "gt up --restart") {
-		t.Errorf("expected fix hint to mention 'gt up --restart', got %q", result.FixHint)
+	if !strings.Contains(result.FixHint, "gt up --restore") {
+		t.Errorf("expected fix hint to mention 'gt up --restore', got %q", result.FixHint)
 	}
 }
 

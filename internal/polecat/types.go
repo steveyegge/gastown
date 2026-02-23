@@ -51,11 +51,6 @@ func (s State) IsWorking() bool {
 	return s == StateWorking
 }
 
-// IsActive returns true if the polecat session is actively working.
-func (s State) IsActive() bool {
-	return s == StateWorking
-}
-
 // Polecat represents a worker agent in a rig.
 type Polecat struct {
 	// Name is the polecat identifier.

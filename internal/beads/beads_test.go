@@ -2,6 +2,7 @@ package beads
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1197,6 +1198,12 @@ func TestParseAgentBeadID(t *testing.T) {
 		{"gt-gastown-crew-polecat", "gastown", "crew", "polecat", true},
 		// Worker name collides with role keyword + hyphenated rig
 		{"gt-my-rig-polecat-witness", "my-rig", "polecat", "witness", true},
+		// Collapsed form: prefix == rig (e.g., rig "ff" with prefix "ff")
+		{"ff-witness", "ff", "witness", "", true},            // collapsed rig-level singleton
+		{"ff-refinery", "ff", "refinery", "", true},          // collapsed rig-level singleton
+		{"ff-polecat-nux", "ff", "polecat", "nux", true},    // collapsed named agent
+		{"ff-crew-dave", "ff", "crew", "dave", true},         // collapsed named agent
+		{"ff-polecat-war-boy", "ff", "polecat", "war-boy", true}, // collapsed named with hyphen
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
 		// Other prefixes (bd-, hq-)
@@ -2767,4 +2774,110 @@ func TestBuildRoutingEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSubprocessCrash(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"normal error", fmt.Errorf("bd create: exit status 1"), false},
+		{"not found", fmt.Errorf("bd show: not found"), false},
+		{"signal segfault", fmt.Errorf("bd create: signal: segmentation fault"), true},
+		{"signal killed", fmt.Errorf("bd create: signal: killed"), true},
+		{"nil pointer in stderr", fmt.Errorf("bd create: nil pointer dereference"), true},
+		{"panic in stderr", fmt.Errorf("bd create: panic: runtime error"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSubprocessCrash(tt.err); got != tt.want {
+				t.Errorf("isSubprocessCrash(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCreateAgentBeadViaJSONL verifies the JSONL fallback creates valid entries (GH#1769).
+func TestCreateAgentBeadViaJSONL(t *testing.T) {
+	t.Run("creates valid JSONL entry", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		issue, err := createAgentBeadViaJSONL(beadsDir, "gt-testrig-witness", "Witness for testrig", "Witness description\n\nrole_type: witness")
+		if err != nil {
+			t.Fatalf("createAgentBeadViaJSONL failed: %v", err)
+		}
+
+		if issue.ID != "gt-testrig-witness" {
+			t.Errorf("ID = %q, want %q", issue.ID, "gt-testrig-witness")
+		}
+		if issue.Status != "open" {
+			t.Errorf("Status = %q, want %q", issue.Status, "open")
+		}
+		if issue.Type != "agent" {
+			t.Errorf("Type = %q, want %q", issue.Type, "agent")
+		}
+		if len(issue.Labels) != 1 || issue.Labels[0] != "gt:agent" {
+			t.Errorf("Labels = %v, want [gt:agent]", issue.Labels)
+		}
+
+		// Verify JSONL file was created with valid content
+		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+		data, err := os.ReadFile(jsonlPath)
+		if err != nil {
+			t.Fatalf("reading issues.jsonl: %v", err)
+		}
+
+		var parsed Issue
+		if err := json.Unmarshal(data[:len(data)-1], &parsed); err != nil { // trim trailing newline
+			t.Fatalf("parsing JSONL entry: %v", err)
+		}
+		if parsed.ID != "gt-testrig-witness" {
+			t.Errorf("parsed ID = %q, want %q", parsed.ID, "gt-testrig-witness")
+		}
+		if parsed.Type != "agent" {
+			t.Errorf("parsed Type = %q, want %q", parsed.Type, "agent")
+		}
+	})
+
+	t.Run("appends to existing JSONL file", func(t *testing.T) {
+		beadsDir := filepath.Join(t.TempDir(), ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create first entry
+		_, err := createAgentBeadViaJSONL(beadsDir, "gt-testrig-witness", "Witness", "desc1")
+		if err != nil {
+			t.Fatalf("first create failed: %v", err)
+		}
+
+		// Create second entry
+		_, err = createAgentBeadViaJSONL(beadsDir, "gt-testrig-refinery", "Refinery", "desc2")
+		if err != nil {
+			t.Fatalf("second create failed: %v", err)
+		}
+
+		// Verify both entries are present
+		data, err := os.ReadFile(filepath.Join(beadsDir, "issues.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if len(lines) != 2 {
+			t.Errorf("expected 2 JSONL lines, got %d", len(lines))
+		}
+	})
+
+	t.Run("fails gracefully on read-only directory", func(t *testing.T) {
+		// Use a non-existent path (can't write)
+		_, err := createAgentBeadViaJSONL("/nonexistent/.beads", "gt-test", "Test", "desc")
+		if err == nil {
+			t.Error("expected error for non-existent directory")
+		}
+	})
 }

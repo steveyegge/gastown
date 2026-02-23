@@ -17,8 +17,8 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -34,6 +34,11 @@ type Manager struct {
 	rig     *rig.Rig
 	workDir string
 	output  io.Writer // Output destination for user-facing messages
+}
+
+type scoredIssue struct {
+	issue *beads.Issue
+	score float64
 }
 
 // NewManager creates a new refinery manager for a rig.
@@ -247,10 +252,6 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 
 	// Score and sort issues by priority score (highest first)
 	now := time.Now()
-	type scoredIssue struct {
-		issue *beads.Issue
-		score float64
-	}
 	scored := make([]scoredIssue, 0, len(issues))
 	for _, issue := range issues {
 		// Defensive filter: bd status filters can drift; queue must only include open MRs.
@@ -262,7 +263,7 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 
 	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
+		return compareScoredIssues(scored[i], scored[j])
 	})
 
 	// Convert scored issues to queue items
@@ -281,6 +282,16 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	}
 
 	return items, nil
+}
+
+func compareScoredIssues(a, b scoredIssue) bool {
+	if a.score != b.score {
+		return a.score > b.score
+	}
+	if a.issue == nil || b.issue == nil {
+		return a.issue != nil
+	}
+	return a.issue.ID < b.issue.ID
 }
 
 // calculateIssueScore computes the priority score for an MR issue.

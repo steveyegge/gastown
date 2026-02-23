@@ -786,6 +786,18 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			mrID = mrIssue.ID
 
+			// GH#1945: Verify MR bead is readable before considering it confirmed.
+			// bd.Create() succeeds when the bead is written locally, but if the write
+			// didn't persist (Dolt failure, corrupt state), we'd nuke the worktree
+			// with no MR in the queue — losing the polecat's work permanently.
+			if verifiedMR, verifyErr := bd.Show(mrID); verifyErr != nil || verifiedMR == nil {
+				mrFailed = true
+				errMsg := fmt.Sprintf("MR bead created but verification read-back failed (id=%s): %v", mrID, verifyErr)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
+				goto notifyWitness
+			}
+
 			// Update agent bead with active_mr reference (for traceability)
 			if agentBeadID != "" {
 				if err := bd.UpdateAgentActiveMR(agentBeadID, mrID); err != nil {
@@ -794,7 +806,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 
 			// Success output
-			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
+			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
 
 			// NOTE: Refinery nudge is deferred to AFTER the Dolt branch merge
@@ -921,11 +933,11 @@ notifyWitness:
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
 		selfCleanAttempted = true
 
-		// Step 1: Nuke the worktree (only for COMPLETED with successful push)
-		// If push failed, preserve the worktree so Witness/Refinery can still
-		// access the branch for recovery. selfNukePolecat also checks
-		// branch-on-remote, so this is defense-in-depth.
-		if exitType == ExitCompleted && !pushFailed {
+		// Step 1: Nuke the worktree (only for COMPLETED with successful push AND MR)
+		// If push or MR creation failed, preserve the worktree so
+		// Witness/Refinery can still access the branch for recovery.
+		// selfNukePolecat also checks branch-on-remote, so this is defense-in-depth.
+		if exitType == ExitCompleted && !pushFailed && !mrFailed {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)

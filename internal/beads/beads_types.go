@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -204,7 +205,12 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	// bd init must run from the parent directory (not inside .beads/).
 	// Use --server to match all production callers (rig/manager.go, doctor/rig_check.go, cmd/install.go).
 	parentDir := filepath.Dir(beadsDir)
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
+	initArgs := []string{"init"}
+	if prefix != "" {
+		initArgs = append(initArgs, "--prefix", prefix)
+	}
+	initArgs = append(initArgs, "--server")
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = parentDir
 	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -220,10 +226,33 @@ func ensureDatabaseInitialized(beadsDir string) error {
 
 	// Explicitly set issue_prefix — bd init --prefix may not persist it
 	// in newer versions (see rig/manager.go InitBeads).
-	pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-	pfxCmd.Dir = parentDir
-	pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
-	_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	if prefix != "" {
+		pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+		pfxCmd.Dir = parentDir
+		pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+		_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	}
+
+	// Run bd migrate to ensure the wisps table and auxiliary tables exist.
+	// Without this, bd create --ephemeral crashes with a Dolt nil pointer
+	// dereference when the wisps table is missing (GH#1769).
+	//
+	// After bd init --server, the Dolt SQL server may need time to register
+	// the new database in its catalog. Retry once after a short delay if the
+	// first migrate attempt fails (GH#1769).
+	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	migrateCmd := exec.Command("bd", "migrate", "--yes")
+	migrateCmd.Dir = parentDir
+	migrateCmd.Env = migrateEnv
+	if _, err := migrateCmd.CombinedOutput(); err != nil {
+		// First attempt failed — server may not have registered the database yet.
+		// Wait briefly and retry once.
+		time.Sleep(500 * time.Millisecond)
+		retryCmd := exec.Command("bd", "migrate", "--yes")
+		retryCmd.Dir = parentDir
+		retryCmd.Env = migrateEnv
+		_, _ = retryCmd.CombinedOutput() // Best effort on retry — CreateAgentBead fallback handles failure
+	}
 
 	return nil
 }

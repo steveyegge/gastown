@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -181,5 +182,31 @@ func TestManager_Retry_Deprecated(t *testing.T) {
 	err := mgr.Retry("any-id", false)
 	if err != nil {
 		t.Errorf("Retry() unexpected error: %v", err)
+	}
+}
+
+func TestCompareScoredIssues_UsesDeterministicIDTieBreaker(t *testing.T) {
+	t.Helper()
+
+	first := scoredIssue{
+		issue: &beads.Issue{
+			ID:        "gt-1",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		score: 10,
+	}
+	second := scoredIssue{
+		issue: &beads.Issue{
+			ID:        "gt-2",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		score: 10,
+	}
+
+	if !compareScoredIssues(first, second) {
+		t.Fatalf("expected gt-1 to sort before gt-2 for equal scores")
+	}
+	if compareScoredIssues(second, first) {
+		t.Fatalf("expected gt-2 to sort after gt-1 for equal scores")
 	}
 }

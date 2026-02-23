@@ -190,12 +190,15 @@ func (m *ConvoyManager) runEventPoll() {
 // pollStoresSnapshot polls events from all non-parked stores in the snapshot.
 // The first call is a warm-up: it advances high-water marks without
 // processing events, preventing a burst of historical replay on restart.
+// A per-cycle seen set deduplicates close events across stores so each
+// issueID is processed at most once per poll cycle.
 func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) {
+	seen := make(map[string]bool)
 	for name, store := range stores {
 		if name != "hq" && m.isRigParked(name) {
 			continue
 		}
-		m.pollStore(name, store, stores)
+		m.pollStore(name, store, stores, seen)
 	}
 	m.seeded.CompareAndSwap(false, true)
 }
@@ -203,7 +206,8 @@ func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) {
 // pollStore fetches new events from a single store and processes close events.
 // Convoy lookups always use the hq store since convoys are hq-* prefixed.
 // The stores snapshot is passed to avoid accessing m.stores without the lock.
-func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage) {
+// The seen set deduplicates issueIDs across stores within a poll cycle.
+func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) {
 	// Load per-store high-water mark
 	var highWater int64
 	if v, ok := m.lastEventIDs.Load(name); ok {
@@ -253,7 +257,14 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 			continue
 		}
 
-		m.logger("Convoy: close detected: %s", issueID)
+		// Deduplicate: skip if already processed this issueID in this poll cycle
+		// (same close may appear in multiple stores or as multiple event types).
+		if seen[issueID] {
+			continue
+		}
+		seen[issueID] = true
+
+		m.logger("Convoy: close detected: %s (from %s)", issueID, name)
 		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)
 	}
 }

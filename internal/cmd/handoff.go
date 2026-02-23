@@ -1095,7 +1095,7 @@ func sendHandoffMail(subject, message string) (string, error) {
 		"create",
 		"--assignee", agentID,
 		"-d", message,
-		"--priority", "2",
+		"--priority", "1", // high — handoffs should float above normal mail
 		"--labels", labels + ",gt:message",
 		"--actor", agentID,
 		"--ephemeral", // Handoff mail is ephemeral

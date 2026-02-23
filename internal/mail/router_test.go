@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 func TestDetectTownRoot(t *testing.T) {
@@ -976,10 +978,11 @@ func TestValidateRecipient(t *testing.T) {
 	if out, err := exec.Command("bd", "version").CombinedOutput(); err != nil {
 		t.Skipf("bd CLI not functional, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
-	// Skip if Dolt server is not running (bd init requires it)
-	if out, err := exec.Command("bd", "dolt", "test").CombinedOutput(); err != nil {
-		t.Skipf("Dolt server not available, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
+
+	// Start an ephemeral Dolt server to prevent bd init from creating
+	// databases on the production server (port 3307).
+	testutil.RequireDoltServer(t)
+	doltPort, _ := strconv.Atoi(testutil.DoltTestPort())
 
 	// Create isolated beads environment for testing
 	tmpDir := t.TempDir()
@@ -991,17 +994,18 @@ func TestValidateRecipient(t *testing.T) {
 		t.Fatalf("creating beads dir: %v", err)
 	}
 
-	// Use beads.NewIsolated with a unique random prefix to avoid Dolt
+	// Use beads.NewIsolatedWithPort with a unique random prefix to avoid Dolt
 	// primary key collisions with production beads (e.g., gt-mayor).
-	// NewIsolated uses --db flag for its own commands (bypassing Dolt),
-	// and we set BEADS_DB so that the Router's external bd calls also
-	// use the same isolated SQLite database.
+	// NewIsolatedWithPort directs bd init to the ephemeral server via
+	// --server-port and GT_DOLT_PORT, and uses --db flag for subsequent
+	// commands (bypassing Dolt). We set BEADS_DB so that the Router's
+	// external bd calls also use the same isolated SQLite database.
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		t.Fatalf("rand: %v", err)
 	}
 	prefix := "vr" + hex.EncodeToString(buf[:])
-	b := beads.NewIsolated(townRoot)
+	b := beads.NewIsolatedWithPort(townRoot, doltPort)
 	if err := b.Init(prefix); err != nil {
 		t.Fatalf("bd init: %v", err)
 	}

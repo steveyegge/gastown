@@ -25,25 +25,6 @@ func TestState_IsWorking(t *testing.T) {
 	}
 }
 
-func TestState_IsActive(t *testing.T) {
-	tests := []struct {
-		state  State
-		expect bool
-	}{
-		{StateWorking, true},
-		{StateDone, false},
-		{StateStuck, false},
-		{StateZombie, false},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.state), func(t *testing.T) {
-			if got := tt.state.IsActive(); got != tt.expect {
-				t.Errorf("State(%q).IsActive() = %v, want %v", tt.state, got, tt.expect)
-			}
-		})
-	}
-}
-
 func TestPolecat_Summary(t *testing.T) {
 	now := time.Now()
 	p := &Polecat{

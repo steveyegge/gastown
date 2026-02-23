@@ -710,6 +710,11 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 		{"awesome", "aw"},
 		{"coolrig", "co"},
 
+		// camelCase names
+		{"myProject", "mp"},
+		{"gasStation", "gs"},
+		{"HTMLParser", "hp"},
+
 		// With language suffixes stripped
 		{"myproject-py", "my"},
 		{"myproject-go", "my"},
@@ -762,6 +767,49 @@ func TestSplitCompoundWord(t *testing.T) {
 			for i := range got {
 				if got[i] != tt.want[i] {
 					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitCamelCase(t *testing.T) {
+	tests := []struct {
+		word string
+		want []string
+	}{
+		// Basic camelCase
+		{"myProject", []string{"my", "Project"}},
+		{"gasStation", []string{"gas", "Station"}},
+
+		// PascalCase
+		{"MyProject", []string{"My", "Project"}},
+
+		// Uppercase runs
+		{"HTMLParser", []string{"HTML", "Parser"}},
+		{"parseJSON", []string{"parse", "JSON"}},
+
+		// No splits (single word, all lower)
+		{"gastown", []string{"gastown"}},
+		{"a", []string{"a"}},
+
+		// All uppercase (no lower transition)
+		{"AB", []string{"AB"}},
+
+		// Empty
+		{"", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.word, func(t *testing.T) {
+			got := splitCamelCase(tt.word)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitCamelCase(%q) = %v, want %v", tt.word, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitCamelCase(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
 				}
 			}
 		})

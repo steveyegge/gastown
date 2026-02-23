@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 func TestBuildRefineryPatrolVars_NilContext(t *testing.T) {
@@ -423,8 +425,10 @@ func requireBd(t *testing.T) {
 
 func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	t.Helper()
+	testutil.RequireDoltServer(t)
+	port, _ := strconv.Atoi(testutil.DoltTestPort())
 	tmpDir := t.TempDir()
-	b := beads.NewIsolated(tmpDir)
+	b := beads.NewIsolatedWithPort(tmpDir, port)
 	// Use a unique prefix per test run to avoid cross-run contamination
 	// in the shared Dolt database.
 	var buf [4]byte

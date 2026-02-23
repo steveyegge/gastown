@@ -1641,7 +1641,7 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 			displayState := p.State
 			if hasSession && displayState == polecat.StateDone {
 				displayState = polecat.StateWorking
-			} else if !hasSession && displayState.IsActive() {
+			} else if !hasSession && displayState == polecat.StateWorking {
 				displayState = polecat.StateDone
 			}
 
