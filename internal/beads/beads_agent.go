@@ -185,7 +185,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
-		"--ephemeral",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
