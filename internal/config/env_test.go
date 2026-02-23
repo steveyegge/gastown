@@ -116,6 +116,21 @@ func TestAgentEnv_Boot(t *testing.T) {
 	assertNotSet(t, env, "GT_RIG")
 }
 
+func TestAgentEnv_Dog(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "dog",
+		AgentName: "alpha",
+		TownRoot:  "/town",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "dog")
+	assertEnv(t, env, "BD_ACTOR", "dog/alpha")
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "alpha")
+	assertEnv(t, env, "GT_ROOT", "/town")
+	assertNotSet(t, env, "GT_RIG")
+}
+
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
 	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
