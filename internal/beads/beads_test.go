@@ -177,10 +177,8 @@ func TestIntegration(t *testing.T) {
 
 	b := New(dir)
 
-	// Sync database with JSONL before testing to avoid "Database out of sync" errors.
-	// This can happen when JSONL is updated (e.g., by git pull) but the database
-	// hasn't been imported yet. Running sync --import-only ensures we test against
-	// consistent data and prevents flaky test failures.
+	// Sync database before testing to ensure consistent data and prevent
+	// flaky test failures from stale state.
 	// We use --allow-stale to handle cases where the daemon is actively writing and
 	// the staleness check would otherwise fail spuriously.
 	syncCmd := exec.Command("bd", "--allow-stale", "sync", "--import-only")

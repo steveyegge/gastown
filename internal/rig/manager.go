@@ -842,12 +842,10 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
-	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
-	// Without issues.jsonl, bd's auto-export might write issues to other .jsonl files.
+	// Ensure issues.jsonl exists — bd expects this file for git-tracked issue data.
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
 	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
 		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
-			// Non-fatal but log it
 			fmt.Printf("   ⚠ Could not create issues.jsonl: %v\n", err)
 		}
 	}
