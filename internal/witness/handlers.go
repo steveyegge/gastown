@@ -1391,9 +1391,11 @@ func getBeadStatus(workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 1. Resets status to open
-// 2. Clears assignee
-// 3. Sends mail to deacon for re-dispatch
+// 1. Records the respawn in the witness spawn-count ledger
+// 2. Resets status to open
+// 3. Clears assignee
+// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//    prefix and Urgent priority when count exceeds defaultMaxBeadRespawns)
 // Returns true if the bead was recovered.
 func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
 	if hookBead == "" {
@@ -1404,6 +1406,9 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 		return false
 	}
 
+	// Track respawn count for audit and storm detection.
+	respawnCount := recordBeadRespawn(workDir, hookBead)
+
 	// Reset bead status to open and clear assignee
 	if err := util.ExecRun(workDir, "bd", "update", hookBead, "--status=open", "--assignee="); err != nil {
 		return false
@@ -1411,20 +1416,32 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 
 	// Send mail to deacon for re-dispatch
 	if router != nil {
+		subject := fmt.Sprintf("RECOVERED_BEAD %s", hookBead)
+		priority := mail.PriorityHigh
+		stormNote := ""
+		if respawnCount > defaultMaxBeadRespawns {
+			subject = fmt.Sprintf("SPAWN_STORM RECOVERED_BEAD %s (respawned %dx)", hookBead, respawnCount)
+			priority = mail.PriorityUrgent
+			stormNote = fmt.Sprintf("\n\n⚠️ SPAWN STORM: bead has been reset %d times. "+
+				"A polecat may be exiting without closing its hook bead. "+
+				"Check polecat completion protocol or close the bead manually if not applicable.",
+				respawnCount)
+		}
 		msg := &mail.Message{
 			From:     fmt.Sprintf("%s/witness", rigName),
 			To:       "deacon/",
-			Subject:  fmt.Sprintf("RECOVERED_BEAD %s", hookBead),
-			Priority: mail.PriorityHigh,
+			Subject:  subject,
+			Priority: priority,
 			Body: fmt.Sprintf(`Recovered abandoned bead from dead polecat.
 
 Bead: %s
 Polecat: %s/%s
 Previous Status: %s
+Respawn Count: %d%s
 
 The bead has been reset to open with no assignee.
 Please re-dispatch to an available polecat.`,
-				hookBead, rigName, polecatName, status),
+				hookBead, rigName, polecatName, status, respawnCount, stormNote),
 		}
 		_ = router.Send(msg) // Best-effort
 	}
