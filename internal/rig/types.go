@@ -21,7 +21,7 @@ type Rig struct {
 	PushURL string `json:"push_url,omitempty"`
 
 	// UpstreamURL is the source repository URL for fork workflows.
-	// When ForkWorkflow is enabled, this is where PRs are created.
+	// Used by fork workflow formulas (e.g., mol-refinery-patrol-fork) to create PRs.
 	UpstreamURL string `json:"upstream_url,omitempty"`
 
 	// LocalRepo is an optional local repository used for reference clones.

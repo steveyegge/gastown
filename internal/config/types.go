@@ -317,7 +317,7 @@ type RigConfig struct {
 	Name        string       `json:"name"`    // rig name
 	GitURL      string       `json:"git_url"` // git repository URL
 	PushURL     string       `json:"push_url,omitempty"`     // optional push URL (fork for read-only upstreams)
-	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (source of truth for fork workflow)
+	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for formulas that need it)
 	LocalRepo   string       `json:"local_repo,omitempty"`
 	CreatedAt   time.Time    `json:"created_at"` // when the rig was created
 	Beads       *BeadsConfig `json:"beads,omitempty"`
@@ -891,11 +891,6 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
-
-	// ForkWorkflow enables PR-based workflow for forked repositories.
-	// When true, refinery creates PRs against upstream instead of merging to main.
-	// Nil defaults to false (direct-push mode).
-	ForkWorkflow *bool `json:"fork_workflow,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -948,15 +943,6 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 		return true
 	}
 	return *c.DeleteMergedBranches
-}
-
-// IsForkWorkflowEnabled returns whether fork workflow (PR-based) is enabled.
-// Nil-safe, defaults to false (direct-push mode).
-func (c *MergeQueueConfig) IsForkWorkflowEnabled() bool {
-	if c.ForkWorkflow == nil {
-		return false
-	}
-	return *c.ForkWorkflow
 }
 
 // boolPtr returns a pointer to a bool value.

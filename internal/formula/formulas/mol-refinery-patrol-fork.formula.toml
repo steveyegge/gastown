@@ -1,0 +1,310 @@
+description = """
+Fork workflow variant of refinery patrol.
+
+Identical to standard mol-refinery-patrol, but for forked repositories where
+direct merge access is not available. Instead of merging directly to main,
+this formula creates PRs against the upstream repository.
+
+## Differences from Standard Patrol
+
+| Step | Standard | Fork Workflow |
+|------|----------|---------------|
+| process-branch | Rebase on origin/main | Rebase on upstream/main |
+| merge-push | Merge and push directly | Submit PR, poll for merge |
+
+## Requirements
+
+- gh CLI installed and authenticated
+- Upstream remote configured ({{upstream_repo}})
+- Write access to fork, PR access to upstream
+
+## Setup
+
+1. Add rig with upstream URL:
+   ```bash
+   gt rig add myfork https://github.com/you/fork.git \
+     --upstream-url https://github.com/upstream/original.git
+   ```
+
+2. Run patrol with fork formula:
+   ```bash
+   gt patrol new --formula mol-refinery-patrol-fork \
+     --vars upstream_repo=upstream/original
+   ```
+
+Or configure as default patrol formula in rig settings."""
+formula = "mol-refinery-patrol-fork"
+version = 1
+
+[vars]
+[vars.upstream_repo]
+description = "Upstream repository in owner/repo format (e.g., 'kubernetes/kubernetes')"
+required = true
+
+[vars.target_branch]
+description = "Default target branch for PRs"
+default = "main"
+
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
+
+[vars.integration_branch_refinery_enabled]
+description = "Whether the refinery merges to integration branches"
+default = "true"
+
+[vars.integration_branch_auto_land]
+description = "Whether to auto-land integration branches when epic children are all closed"
+default = "false"
+
+[vars.run_tests]
+description = "Whether to run tests before submitting PR"
+default = "true"
+
+[vars.setup_command]
+description = "Setup/install command (e.g., pnpm install). Empty = skip."
+default = ""
+
+[vars.typecheck_command]
+description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+default = ""
+
+[vars.lint_command]
+description = "Lint command (e.g., eslint .). Empty = skip."
+default = ""
+
+[vars.test_command]
+description = "Test command to run (if run_tests is true)"
+default = "go test ./..."
+
+[vars.build_command]
+description = "Build command (e.g., go build ./...). Empty = skip."
+default = ""
+
+[vars.delete_merged_branches]
+description = "Whether to delete source branches after PR is merged"
+default = "true"
+
+[[steps]]
+id = "inbox-check"
+title = "Check refinery mail"
+description = """
+Check mail for MERGE_READY submissions, escalations, and messages.
+
+```bash
+gt mail inbox
+```
+
+**MERGE_READY**: Track for processing (branch, issue, MR, polecat details).
+**Do NOT archive yet** - archive after merge/reject decision.
+
+Archive after handling: PATROL wake, HELP/Blocked, HANDOFF."""
+
+[[steps]]
+id = "queue-scan"
+title = "Scan merge queue"
+needs = ["inbox-check"]
+description = """
+Check beads merge queue (source of truth):
+
+```bash
+git fetch --prune origin
+gt mq list <rig>
+```
+
+If queue empty, skip to check-integration-branches.
+
+Verify branches still exist. Close MR beads for missing branches."""
+
+[[steps]]
+id = "process-branch"
+title = "Mechanical rebase on upstream"
+needs = ["queue-scan"]
+description = """
+Pick next branch, rebase on upstream main (NOT origin/main).
+
+**Config: target_branch = {{target_branch}}**
+
+```bash
+git fetch upstream
+git checkout -b temp origin/<polecat-branch>
+git rebase upstream/{{target_branch}}
+```
+
+If conflicts: abort, notify polecat, skip to loop-check.
+Track: rebase result (success/conflict)."""
+
+[[steps]]
+id = "run-tests"
+title = "Run quality checks and tests"
+needs = ["process-branch"]
+description = """
+**Config: run_tests = {{run_tests}}**
+**Config: test_command = {{test_command}}**
+
+Run quality checks (skip empty):
+{{setup_command}} → {{typecheck_command}} → {{lint_command}} → {{build_command}}
+
+If run_tests = "true":
+```bash
+{{test_command}}
+```
+
+Track results: pass count, fail count."""
+
+[[steps]]
+id = "handle-failures"
+title = "Handle quality check or test failures"
+needs = ["run-tests"]
+description = """
+**VERIFICATION GATE**
+
+If PASSED: Proceed to submit-pr.
+
+If FAILED:
+- Branch caused it? → Reopen issue, MERGE_FAILED to witness, close MR, delete branch
+- Pre-existing? → File bead, then proceed
+
+FORBIDDEN: Writing code to fix failures."""
+
+[[steps]]
+id = "submit-pr"
+title = "Push to fork and create PR"
+needs = ["handle-failures"]
+description = """
+Push rebased branch to fork and create PR against upstream.
+
+**Config: upstream_repo = {{upstream_repo}}**
+**Config: target_branch = {{target_branch}}**
+
+```bash
+# Push to fork
+git push origin temp:<polecat-branch>
+
+# Create PR against upstream
+gh pr create --repo {{upstream_repo}} \
+  --base {{target_branch}} \
+  --head <polecat-branch> \
+  --title "$(git log -1 --pretty=%B temp)" \
+  --body "Auto-PR from Gas Town refinery"
+
+# Capture PR number for poll-status
+PR_URL=$(gh pr view --repo {{upstream_repo}} --head <polecat-branch> --json url -q '.url')
+echo "Created PR: $PR_URL"
+```
+
+Store PR number/URL for poll-status step."""
+
+[[steps]]
+id = "poll-status"
+title = "Poll PR merge status"
+needs = ["submit-pr"]
+description = """
+Check if PR was merged or closed upstream.
+
+**Config: upstream_repo = {{upstream_repo}}**
+
+```bash
+PR_NUM=$(gh pr list --repo {{upstream_repo}} --head <polecat-branch> --json number -q '.[0].number')
+STATE=$(gh pr view $PR_NUM --repo {{upstream_repo}} --json state -q '.state')
+
+case $STATE in
+  MERGED)
+    bd close <mr-id> --reason merged
+    echo "PR merged upstream"
+    ;;
+  CLOSED)
+    bd close <mr-id> --reason rejected
+    gt mail send <rig>/<polecat> -s "PR rejected" -m "Upstream closed PR #$PR_NUM"
+    ;;
+  OPEN)
+    echo "PR still open"
+    # Continue to next branch; will poll again next cycle
+    ;;
+esac
+```
+
+Track: PR state (merged/closed/open)."""
+
+[[steps]]
+id = "loop-check"
+title = "Check for more work"
+needs = ["poll-status"]
+description = """
+More branches to process?
+
+If yes: Return to process-branch.
+If no: Continue to generate-summary.
+
+Track: branches_processed, prs_created, prs_merged."""
+
+[[steps]]
+id = "generate-summary"
+title = "Generate handoff summary"
+needs = ["loop-check"]
+description = """
+Summarize this patrol cycle.
+
+Include:
+- Branches processed (rebased, tested)
+- PRs created (count, URLs)
+- PRs merged upstream (count)
+- PRs still open (count)
+- Branches with conflicts (count)
+- Issues filed (if any)"""
+
+[[steps]]
+id = "check-integration-branches"
+title = "Check integration branches"
+needs = ["generate-summary"]
+description = """
+**Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
+**Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
+
+- If disabled: Say "Integration branches disabled."
+- If auto_land=false: Say "Auto-land disabled."
+- If both enabled: Check epics, land ready integration branches.
+
+FORBIDDEN: Landing via raw git. Only `gt mq integration land`."""
+
+[[steps]]
+id = "context-check"
+title = "Assess session health"
+needs = ["check-integration-branches"]
+description = """
+Check session health:
+
+```bash
+ps -o rss= -p $$   # Memory usage
+tmux display-message -p '#{session_created}'  # Session age
+```
+
+Decide: Continue patrolling or hand off?"""
+
+[[steps]]
+id = "patrol-cleanup"
+title = "End-of-cycle inbox hygiene"
+needs = ["context-check"]
+description = """
+Archive stale messages, check orphaned MR beads.
+
+Inbox should have ≤3 active messages."""
+
+[[steps]]
+id = "burn-or-loop"
+title = "Burn and respawn or loop"
+needs = ["patrol-cleanup"]
+description = """
+End of cycle decision.
+
+Continue patrolling:
+```bash
+gt mol step await-event --channel refinery --agent-bead <bead>
+gt mol squash --jitter 10s
+# Create new wisp and continue
+```
+
+Hand off:
+```bash
+gt handoff -s "Patrol complete" -m "Summary: ..."
+```"""

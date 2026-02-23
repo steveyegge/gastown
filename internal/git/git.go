@@ -390,7 +390,7 @@ func (g *Git) PushWithEnv(remote, branch string, force bool, env []string) error
 	return err
 }
 
-// AddUpstreamRemote adds an upstream remote for fork workflows.
+// AddUpstreamRemote adds or updates the 'upstream' git remote.
 // This is idempotent - if the remote already exists with the same URL, it's a no-op.
 // If the remote exists with a different URL, it's updated.
 func (g *Git) AddUpstreamRemote(upstreamURL string) error {

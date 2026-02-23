@@ -179,21 +179,6 @@ Example:
 	RunE: runMqStatus,
 }
 
-var mqMarkMergedCmd = &cobra.Command{
-	Use:   "mark-merged <rig> <mr-id>",
-	Short: "Mark an MR as merged (for fork workflows)",
-	Long: `Manually mark a merge request as merged.
-
-This is primarily for fork workflows where the upstream repository
-merged the PR outside of Gas Town's view. Use this to sync the MR
-status when you know the PR has been merged.
-
-Example:
-  gt mq mark-merged greenplace gp-mr-abc123`,
-	Args: cobra.ExactArgs(2),
-	RunE: runMqMarkMerged,
-}
-
 var mqIntegrationCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "Manage integration branches for epics",
@@ -328,7 +313,6 @@ func init() {
 	mqCmd.AddCommand(mqListCmd)
 	mqCmd.AddCommand(mqRejectCmd)
 	mqCmd.AddCommand(mqStatusCmd)
-	mqCmd.AddCommand(mqMarkMergedCmd)
 
 	// Integration branch subcommands
 	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateBranch, "branch", "", "Override branch name template (supports {title}, {epic}, {prefix}, {user})")
@@ -488,49 +472,3 @@ func runMQReject(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-
-func runMqMarkMerged(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
-	mrID := args[1]
-
-	// Find workspace
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return err
-	}
-
-	// Verify rig exists
-	rigPath := filepath.Join(townRoot, rigName)
-	if _, err := os.Stat(rigPath); os.IsNotExist(err) {
-		return fmt.Errorf("rig not found: %s", rigName)
-	}
-
-	// Load rig's refinery manager
-	r := &rig.Rig{
-		Name: rigName,
-		Path: rigPath,
-	}
-	mgr := refinery.NewManager(r)
-
-	// Find the MR
-	mr, err := mgr.FindMR(mrID)
-	if err != nil {
-		return fmt.Errorf("finding MR: %w", err)
-	}
-
-	if mr.IsClosed() {
-		return fmt.Errorf("MR %s is already closed", mrID)
-	}
-
-	// Close the MR with merged status
-	b := beads.New(r.BeadsPath())
-	if err := b.CloseWithReason("merged-via-upstream", mrID); err != nil {
-		return fmt.Errorf("marking MR as merged: %w", err)
-	}
-
-	fmt.Printf("%s Marked MR %s as merged\n", style.Success.Render("✓"), mrID)
-	fmt.Printf("  Branch: %s\n", mr.Branch)
-	fmt.Printf("  Worker: %s\n", mr.Worker)
-
-	return nil
-}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -68,14 +67,10 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		}
 	}
 
-	// Load rig settings for fork workflow configuration
-	var forkWorkflow bool
+	// Load rig config for upstream URL (used by fork workflow formulas)
 	var upstreamURL, upstreamRepo string
 	if ctx.Rig != "" && ctx.TownRoot != "" {
 		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
-		if settings, err := config.LoadRigSettings(rigPath); err == nil && settings.MergeQueue != nil {
-			forkWorkflow = settings.MergeQueue.IsForkWorkflowEnabled()
-		}
 		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil {
 			upstreamURL = rigCfg.UpstreamURL
 			upstreamRepo = parseUpstreamRepo(upstreamURL)
@@ -92,7 +87,6 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
-		ForkWorkflow:  forkWorkflow,
 		UpstreamURL:   upstreamURL,
 		UpstreamRepo:  upstreamRepo,
 	}

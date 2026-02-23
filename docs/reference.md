@@ -100,8 +100,7 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
     "integration_branch_polecat_enabled": true,
     "integration_branch_refinery_enabled": true,
     "integration_branch_template": "integration/{title}",
-    "integration_branch_auto_land": false,
-    "fork_workflow": false
+    "integration_branch_auto_land": false
   }
 }
 ```
@@ -126,7 +125,6 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 | `integration_branch_refinery_enabled` | `*bool` | `true` | `gt done` / `gt mq submit` auto-target integration branches |
 | `integration_branch_template` | `string` | `"integration/{title}"` | Branch name template (`{title}`, `{epic}`, `{prefix}`, `{user}`) |
 | `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol auto-lands when all children closed |
-| `fork_workflow` | `*bool` | `false` | Use PR-based fork workflow instead of direct merge. Requires `gh` CLI and upstream URL configuration. |
 
 See [Integration Branches](concepts/integration-branches.md) for integration branch details.
 
@@ -541,16 +539,15 @@ export OPENCODE_PERMISSION='{"*":"allow"}'
 ### Rig Management
 
 ```bash
-gt rig add <name> <url> [--fork-workflow] [--upstream-url <url>]
+gt rig add <name> <url> [--upstream-url <url>]
 gt rig list
 gt rig remove <name>
 ```
 
-**Fork Workflow Options:**
-- `--fork-workflow` - Enable PR-based workflow (creates PRs instead of merging directly)
-- `--upstream-url <url>` - Upstream repository URL (auto-detected for GitHub repos)
+**Options:**
+- `--upstream-url <url>` - Upstream repository URL (for fork workflow formulas)
 
-When fork workflow is enabled, the Refinery creates PRs against the upstream repository instead of merging directly to main. Requires the GitHub CLI (`gh`) to be installed.
+The upstream URL is used by fork workflow formulas (e.g., `mol-refinery-patrol-fork`) to create PRs against the upstream repository instead of merging directly.
 
 ### Convoy Management (Primary Dashboard)
 
@@ -653,7 +650,6 @@ gt mq submit                 # Submit current branch to merge queue
 gt mq status <id>            # Show detailed merge request status
 gt mq retry <id>             # Retry a failed merge request
 gt mq reject <id>            # Reject a merge request
-gt mq mark-merged <rig> <id> # Manually mark MR as merged (for fork workflow)
 ```
 
 #### Integration Branch Commands
