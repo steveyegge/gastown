@@ -869,8 +869,12 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 
 // WorktreeAdd creates a new worktree at the given path with a new branch.
 // The new branch is created from the current HEAD.
+// Skips LFS smudge filter during checkout (see WorktreeAddFromRef).
 func (g *Git) WorktreeAdd(path, branch string) error {
-	if _, err := g.run("worktree", "add", "-b", branch, path); err != nil {
+	if _, err := g.runWithEnv(
+		[]string{"worktree", "add", "-b", branch, path},
+		[]string{"GIT_LFS_SKIP_SMUDGE=1"},
+	); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
@@ -878,24 +882,38 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
 // starting from the specified ref (e.g., "origin/main").
+// Skips LFS smudge filter during checkout to avoid downloading large LFS objects
+// over NFS (~72s for 473MB). LFS files appear as pointer files initially;
+// callers can run "git lfs pull" later when LFS content is actually needed.
 func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
-	if _, err := g.run("worktree", "add", "-b", branch, path, startPoint); err != nil {
+	if _, err := g.runWithEnv(
+		[]string{"worktree", "add", "-b", branch, path, startPoint},
+		[]string{"GIT_LFS_SKIP_SMUDGE=1"},
+	); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
 }
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
+// Skips LFS smudge filter during checkout (see WorktreeAddFromRef).
 func (g *Git) WorktreeAddDetached(path, ref string) error {
-	if _, err := g.run("worktree", "add", "--detach", path, ref); err != nil {
+	if _, err := g.runWithEnv(
+		[]string{"worktree", "add", "--detach", path, ref},
+		[]string{"GIT_LFS_SKIP_SMUDGE=1"},
+	); err != nil {
 		return err
 	}
 	return InitSubmodules(path)
 }
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
+// Skips LFS smudge filter during checkout (see WorktreeAddFromRef).
 func (g *Git) WorktreeAddExisting(path, branch string) error {
-	if _, err := g.run("worktree", "add", path, branch); err != nil {
+	if _, err := g.runWithEnv(
+		[]string{"worktree", "add", path, branch},
+		[]string{"GIT_LFS_SKIP_SMUDGE=1"},
+	); err != nil {
 		return err
 	}
 	return InitSubmodules(path)

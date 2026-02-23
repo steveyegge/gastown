@@ -139,20 +139,20 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 
 	if hasMissingFiles && !hasStaleFiles {
 		message = fmt.Sprintf("Found %d agent(s) missing settings.json", len(c.staleSettings))
-		fixHint = "Run 'gt up --restart' to restart agents and create settings"
+		fixHint = "Run 'gt up --restore' to restart agents and create settings"
 	} else if hasStaleFiles && !hasMissingFiles {
 		message = fmt.Sprintf("Found %d stale Claude config file(s)", len(c.staleSettings))
 		if hasModifiedFiles {
 			fixHint = "Run 'gt doctor --fix' to fix safe issues. Files with local modifications require manual review."
 		} else {
-			fixHint = "Run 'gt doctor --fix' to delete stale files, then 'gt up --restart' to create new settings"
+			fixHint = "Run 'gt doctor --fix' to delete stale files, then 'gt up --restore' to create new settings"
 		}
 	} else {
 		message = fmt.Sprintf("Found %d Claude settings issue(s)", len(c.staleSettings))
 		if hasModifiedFiles {
-			fixHint = "Run 'gt doctor --fix' to fix safe issues, then 'gt up --restart'. Files with local modifications require manual review."
+			fixHint = "Run 'gt doctor --fix' to fix safe issues, then 'gt up --restore'. Files with local modifications require manual review."
 		} else {
-			fixHint = "Run 'gt doctor --fix' to delete stale files, then 'gt up --restart' to create new settings"
+			fixHint = "Run 'gt doctor --fix' to delete stale files, then 'gt up --restore' to create new settings"
 		}
 	}
 
@@ -708,7 +708,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			// Warn user to restart agents - don't auto-kill sessions as that's too disruptive,
 			// especially since deacon runs gt doctor automatically which would create a loop.
 			fmt.Printf("\n  %s Town-root settings were moved. Restart agents to pick up new config:\n", style.Warning.Render("⚠"))
-			fmt.Printf("      gt up --restart\n\n")
+			fmt.Printf("      gt up --restore\n\n")
 			continue
 		}
 
@@ -761,7 +761,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 	// Tell user to restart agents so they create correct settings
 	if needsRestart && !ctx.RestartSessions {
 		fmt.Printf("\n  %s Restart agents to create new settings:\n", style.Warning.Render("⚠"))
-		fmt.Printf("      gt up --restart\n")
+		fmt.Printf("      gt up --restore\n")
 		fmt.Printf("\n  If you had custom Claude settings edits, re-apply them via 'gt hooks override <role>'.\n\n")
 	}
 
