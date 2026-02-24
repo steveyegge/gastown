@@ -89,6 +89,78 @@ in git history — only a closed PR comment links them to the work.
 
 ---
 
+## The Workflow Pattern: Spec → Plan → Beads → Dispatch
+
+For ANY significant work (features, projects, integrations), use the GT Toolkit workflow formulas. This ensures dependencies are wired correctly, preventing CPU overload from uncontrolled parallelism.
+
+### The Full Pipeline
+
+```bash
+# 1. Spec: Idea → Reviewed design spec
+gt sling spec-workflow crew/<agent> \
+  --var feature="my-feature" \
+  --var brief="One sentence describing what to build"
+
+# 2. Plan: Spec → Phased implementation plan
+gt sling plan-workflow crew/<agent> \
+  --var feature="my-feature"
+
+# 3. Beads: Plan → Issue hierarchy with dependencies
+gt sling beads-workflow crew/<agent> \
+  --var feature="my-feature"
+
+# 4. Dispatch: Controlled by dependencies
+gt sling <bead-id> <rig>
+```
+
+### Why This Pattern
+
+| Step | CPU Control |
+|------|-------------|
+| **Spec** | Design decisions made upfront — no rework |
+| **Plan** | Phased delivery — natural serialization |
+| **Beads** | Dependencies wired — enforces ordering |
+| **Dispatch** | `bd dep` blocks prevent parallel expensive work |
+
+### For Projects (Multi-Rig)
+
+Use `spec-project-workflow` for cross-rig projects:
+
+```bash
+gt sling spec-project-workflow crew/<agent> \
+  --var feature="my-project" \
+  --var brief="One sentence" \
+  --var primary_rig="sfgastown" \
+  --var rigs="sfgastown,lora_forge"
+```
+
+This includes Step 9.5 (bv robot triage) — quality gate before dispatch.
+
+### One-Off Tasks: Use `gt block`
+
+For tasks outside the workflow (quick fixes, experiments):
+
+```bash
+bd create "Quick fix" --type=task
+gt sling <task-id> <rig>
+```
+
+If the task is expensive (tests, builds, training), make it exclusive:
+
+```bash
+gt block <task-id>  # Blocks all other ready work
+```
+
+### Anti-Patterns to Avoid
+
+| Pattern | Problem | Fix |
+|---------|---------|-----|
+| `bd create "Do the thing"` → `gt sling` | No dependencies, uncontrolled parallelism | Use workflow formulas |
+| Filing 10 tasks, slinging all at once | CPU overload | Wire deps: `bd dep add` |
+| Skipping spec/plan, going straight to beads | Missing design decisions, rework | Run spec-workflow first |
+
+---
+
 ## Your Role: MAYOR (Global Coordinator)
 
 You are the **Mayor** — the global coordinator of Gas Town. You sit above all rigs,
@@ -139,6 +211,7 @@ Routes defined in `~/gt/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers
 
 | Issue is about... | File in | Command |
 |-------------------|---------|---------|
+| `spec-workflow`, `plan-workflow`, `beads-workflow` | **sf_workflows** | `gt sling spec-workflow crew/...` |
 | `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
 | `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
 | Polecat/witness/refinery/convoy code | **gastown** | `bd create --rig gastown "..."` |
@@ -171,6 +244,24 @@ Routes defined in `~/gt/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers
 **Exception**: If refinery/witness is stuck, use `{{ cmd }} nudge refinery "Process MQ"`
 
 ## Key Commands
+
+### CPU Control
+
+```bash
+gt block <bead-id>              # Make task exclusive (blocks all other ready work)
+bd dep add <A> <B>              # A depends on B (B must complete first)
+bd dep add <A> <B> --type=blocks # A and B cannot run together
+```
+
+**When to use each:**
+
+| Pattern | Command | Use Case |
+|---------|---------|----------|
+| Workflow formulas | `gt sling spec-workflow ...` | Default for all significant work |
+| Dependency ordering | `bd dep add A B` | B must complete before A |
+| Mutual exclusion | `bd dep add A B --type=blocks` | A and B both expensive, don't run together |
+| One-off exclusive | `gt block <id>` | Single expensive task outside workflow |
+
 
 ### Communication
 - `{{ cmd }} mail inbox` — Check your messages
@@ -206,6 +297,60 @@ This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn
 - `bd ready` — Issues ready to work (no blockers)
 - `bd list --status=open` — All open issues
 
+
+## GT Toolkit Formulas
+
+Reusable workflow formulas in `sf_workflows/gt-toolkit/formulas/`:
+
+| Formula | Input | Output | Use When |
+|---------|-------|--------|----------|
+| `spec-workflow` | Feature brief | Reviewed spec (`02-spec/spec.md`) | Starting any new feature |
+| `plan-workflow` | Reviewed spec | Implementation plan (`03-plan/plan.md`) | After spec is complete |
+| `beads-workflow` | Reviewed plan | Beads hierarchy with deps | Ready to dispatch implementation |
+
+**Always use `gt sling`, not `gt formula run`:**
+
+```bash
+gt sling spec-workflow crew/neo --var feature="x" --var brief="..."
+```
+
+**Expansion formulas** (used internally by workflows):
+- `spec-multimodal-review-expansion` — 3-model spec review
+- `beads-creation-expansion` — Plan to beads conversion
+- `beads-review-to-plan-expansion` — 3-agent beads verification
+
+
+## Quality Gates
+
+Before dispatching implementation, ensure quality gates pass:
+
+### Beads Review (Built into beads-workflow)
+
+Step 2 of `beads-workflow` runs 3-agent review:
+- Forward: Every plan task has a matching bead
+- Reverse: Every bead traces to the plan
+- Dependencies: Graph integrity matches plan phasing
+
+**Output:** `plans/{{feature}}/04-beads/beads-review.md`
+
+### BV Robot Triage (Project-Level Only)
+
+`spec-project-workflow` Step 9.5 runs bv robot triage:
+
+```bash
+bv --robot-quality --robot-by-label sfgastown
+# All beads must score > 30
+```
+
+**Catches:**
+- Missing descriptions
+- Unlinked dependencies
+- Wrong issue types
+- Duplicate work
+
+**Prevents:** Polecats running bad work → CPU waste
+
+---
 ## Startup Protocol: Propulsion
 
 > **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
