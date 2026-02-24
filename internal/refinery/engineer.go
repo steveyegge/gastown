@@ -559,6 +559,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			Error:   fmt.Sprintf("failed to push to origin: %v", err),
 		}
 	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Successfully pushed to origin/%s\n", target)
 
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", mergeCommit[:8])
 	return ProcessResult{
