@@ -373,10 +373,18 @@ func listScheduledBeads(townRoot string) ([]scheduledBeadInfo, error) {
 		return nil, nil
 	}
 
-	// Build readyIDs set and batch-fetch work bead info in parallel-ish
-	// (both are independent queries)
+	// Collect work bead IDs from contexts for targeted fetch
+	var workBeadIDs []string
+	for _, ctx := range allContexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil && fields.WorkBeadID != "" {
+			workBeadIDs = append(workBeadIDs, fields.WorkBeadID)
+		}
+	}
+
+	// Build readyIDs set and batch-fetch work bead info for specific IDs
 	readyWorkIDs := listReadyWorkBeadIDs(townRoot)
-	workBeadInfo := batchFetchBeadInfo(townRoot)
+	workBeadInfo := batchFetchBeadInfoByIDs(townRoot, workBeadIDs)
 
 	seenWork := make(map[string]bool)
 	var result []scheduledBeadInfo
