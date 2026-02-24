@@ -886,7 +886,18 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 			}
 		}
 
-		// Close MR bead with reason 'merged'
+		// Close MR bead with reason 'merged', then delete it (MR beads are ephemeral)
+		if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed MR bead: %s\n", mr.ID)
+			// Delete the ephemeral MR bead - it's no longer needed after merge
+			if err := e.beads.Delete(mr.ID); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete MR %s: %v\n", mr.ID, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted MR bead: %s\n", mr.ID)
+			}
+		}
 		if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
 		} else {
@@ -895,6 +906,7 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 	}
 
 	// 1. Close source issue with reference to MR
+	// Note: We don't delete the source issue - it's a permanent record of the work
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
 		if err := e.beads.CloseWithReason(closeReason, mr.SourceIssue); err != nil {

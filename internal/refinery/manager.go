@@ -462,13 +462,17 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 		return nil, fmt.Errorf("%w: MR is already closed with reason: %s", ErrClosedImmutable, mr.CloseReason)
 	}
 
-	// Close the bead in storage with the rejection reason
+	// Close the bead in storage with the rejection reason, then delete it (MR beads are ephemeral)
 	b := beads.New(m.rig.BeadsPath())
 	if err := b.CloseWithReason("rejected: "+reason, mr.ID); err != nil {
 		return nil, fmt.Errorf("failed to close MR bead: %w", err)
 	}
+	// Delete the ephemeral MR bead - it's no longer needed after rejection
+	if err := b.Delete(mr.ID); err != nil {
+		_, _ = fmt.Fprintf(m.output, "Warning: failed to delete MR %s: %v\n", mr.ID, err)
+	}
 
-	// Update in-memory state for return value
+	// Update in-memory state for return value (note: bead is already deleted)
 	if err := mr.Close(CloseReasonRejected); err != nil {
 		// Non-fatal: bead is already closed, just log
 		_, _ = fmt.Fprintf(m.output, "Warning: failed to update MR state: %v\n", err)

@@ -890,6 +890,26 @@ func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
 	return err
 }
 
+// Delete permanently removes one or more issues from the beads database.
+// This is a destructive operation that also cleans up:
+//   - All dependency links involving the deleted issues
+//   - Text references to deleted issues (replaced with "[deleted:ID]")
+//
+// Use with caution - typically only for ephemeral beads like merge requests
+// that are no longer needed after being closed.
+func (b *Beads) Delete(ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	args := append([]string{"delete"}, ids...)
+	args = append(args, "--force")
+
+	_, err := b.run(args...)
+	return err
+}
+
+
 // Release moves an in_progress issue back to open status.
 // This is used to recover stuck steps when a worker dies mid-task.
 // It clears the assignee so the step can be claimed by another worker.

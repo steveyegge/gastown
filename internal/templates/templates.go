@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -137,15 +138,100 @@ func New() (*Templates, error) {
 }
 
 // RenderRole renders a role context template.
+// If a local override exists at ~/.gt/overrides/{role}.md.tmpl, it is used instead.
 func (t *Templates) RenderRole(role string, data RoleData) (string, error) {
 	templateName := role + ".md.tmpl"
 
+	// 1. Check for local override
+	overridePath := getOverridePath(templateName)
+	if content, err := os.ReadFile(overridePath); err == nil {
+		// Use override template
+		tmpl, err := template.New("").Funcs(templateFuncs).Parse(string(content))
+		if err != nil {
+			return "", fmt.Errorf("parsing override template %s: %w", overridePath, err)
+		}
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, data); err != nil {
+			return "", fmt.Errorf("executing override template %s: %w", overridePath, err)
+		}
+		return buf.String(), nil
+	}
+
+	// 2. Fall back to embedded template
 	var buf bytes.Buffer
 	if err := t.roleTemplates.ExecuteTemplate(&buf, templateName, data); err != nil {
 		return "", fmt.Errorf("rendering role template %s: %w", templateName, err)
 	}
-
 	return buf.String(), nil
+}
+
+// getOverridePath returns the path to a local override for a template.
+// Override path: ~/.gt/overrides/{templateName}
+func getOverridePath(templateName string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, ".gt", "overrides", templateName)
+}
+
+// HasOverride checks if a local override exists for a role template.
+func HasOverride(role string) bool {
+	templateName := role + ".md.tmpl"
+	overridePath := getOverridePath(templateName)
+	_, err := os.Stat(overridePath)
+	return err == nil
+}
+
+// ListOverrides returns the list of role templates that have local overrides.
+func ListOverrides() ([]string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	overrideDir := filepath.Join(homeDir, ".gt", "overrides")
+
+	entries, err := os.ReadDir(overrideDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+
+	var overrides []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md.tmpl") {
+			overrides = append(overrides, strings.TrimSuffix(entry.Name(), ".md.tmpl"))
+		}
+	}
+	return overrides, nil
+}
+
+// WriteOverride writes a role template override to the local override directory.
+func WriteOverride(role string, content string) error {
+	templateName := role + ".md.tmpl"
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	overrideDir := filepath.Join(homeDir, ".gt", "overrides")
+	if err := os.MkdirAll(overrideDir, 0755); err != nil {
+		return fmt.Errorf("creating override directory: %w", err)
+	}
+	overridePath := filepath.Join(overrideDir, templateName)
+	return os.WriteFile(overridePath, []byte(content), 0644)
+}
+
+// DeleteOverride removes a local override, reverting to the embedded template.
+func DeleteOverride(role string) error {
+	templateName := role + ".md.tmpl"
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	overridePath := filepath.Join(homeDir, ".gt", "overrides", templateName)
+	return os.Remove(overridePath)
 }
 
 // RenderMessage renders a message template.

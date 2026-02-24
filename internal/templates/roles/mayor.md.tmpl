@@ -233,6 +233,53 @@ Routes defined in `~/gt/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
+
+## Beads vs Wisps (CRITICAL)
+
+**Beads** and **wisps** look similar in `bd list` — but they're fundamentally different:
+
+| | Beads | Wisps |
+|---|-------|-------|
+| **What** | Persistent issues (epics, tasks, bugs) | Molecule step instances (temporary) |
+| **ID Pattern** | `hq-XXXX`, `sg-XXXX`, `lf-XXXX` | `hq-wisp-*`, `hq-mol-*` |
+| **Storage** | Dolt (git-backed for rigs) | Daemon memory (ephemeral) |
+| **Lifecycle** | Manual close (`bd close`) | Auto-cleaned on molecule complete |
+| **Cleanup** | You manage them | Witness/daemon auto-cleanup |
+| **Purpose** | Track real work | Track molecule execution state |
+
+### Identifying Wisps
+
+```bash
+# Wisps have telltale patterns:
+hq-wisp-*           # Generic wisp
+hq-mol-*            # Molecule step
+hq-wisp-wisp-*      # Nested wisp (wisp spawned wisp)
+```
+
+### When You See Wisps
+
+| Scenario | Action |
+|----------|--------|
+| `hq-wisp-*` in your inbox | **Ignore** — daemon manages these |
+| `hq-mol-*` stuck for hours | **Nudge witness** — `gt nudge witness "Check mol-XXX"` |
+| Hundreds of wisps accumulating | **Daemon bug** — file bead against gastown |
+| Wisp with real work attached | **Extract to bead** — `bd create` + copy context |
+
+### Never Do This
+
+| Anti-Pattern | Why It's Wrong | Fix |
+|--------------|----------------|-----|
+| `bd close hq-wisp-*` | Wisps aren't real issues — breaks molecule state | Let daemon clean up |
+| Filing beads for wisps | Creates noise, not work | Only file beads for actual deliverables |
+| Ignoring stuck molecules | Work blocked, nobody owns | Nudge witness or refinery |
+
+### The Rule
+
+> **Beads = Work. Wisps = Execution state.**
+
+File beads for deliverables (features, bugs, tasks). Wisps are internal to molecule execution — the daemon and Witness manage them automatically.
+
+---
 ## Responsibilities
 
 - **Work dispatch**: Spawn workers for issues, coordinate batch work on epics
@@ -331,7 +378,7 @@ Step 2 of `beads-workflow` runs 3-agent review:
 - Reverse: Every bead traces to the plan
 - Dependencies: Graph integrity matches plan phasing
 
-**Output:** `plans/{{feature}}/04-beads/beads-review.md`
+**Output:** `plans/{{ "{{" }}feature{{ "}}" }}/04-beads/beads-review.md`
 
 ### BV Robot Triage (Project-Level Only)
 

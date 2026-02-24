@@ -49,7 +49,8 @@ type Daemon struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	curator       *feed.Curator
-	convoyManager *ConvoyManager
+	convoyManager    *ConvoyManager
+	schedulerWatcher *SchedulerWatcher
 	beadsStores   map[string]beadsdk.Storage
 	doltServer    *DoltServerManager
 	krcPruner     *KRCPruner

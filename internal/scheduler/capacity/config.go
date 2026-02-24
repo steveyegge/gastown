@@ -1,9 +1,58 @@
-// Package capacity provides types and pure functions for the capacity-controlled
-// dispatch scheduler. The impure orchestration (dispatch loop, enqueue, epic/convoy
-// resolution) stays in cmd but uses types and pure functions from this package.
 package capacity
 
 import "time"
+// ResourceClass classifies a task by its CPU/resource cost.
+type ResourceClass string
+
+const (
+	// ClassExpensive: tests, builds, typecheck (high CPU, high memory)
+	ClassExpensive ResourceClass = "expensive"
+	// ClassModerate: lint, setup/npm install (medium CPU)
+	ClassModerate ResourceClass = "moderate"
+	// ClassCheap: edit files, review, commit (low CPU)
+	ClassCheap ResourceClass = "cheap"
+)
+
+// ResourceLimits defines per-class concurrent task limits.
+type ResourceLimits struct {
+	// Expensive is max concurrent expensive tasks (tests, builds).
+	// Default: 2
+	Expensive int `json:"expensive,omitempty"`
+	// Moderate is max concurrent moderate tasks (lint, setup).
+	// Default: 3
+	Moderate int `json:"moderate,omitempty"`
+	// Cheap is max concurrent cheap tasks (edit, review).
+	// Default: equals MaxPolecats (no separate limit)
+	Cheap int `json:"cheap,omitempty"`
+}
+
+// GetExpensive returns Expensive or default (2).
+func (r *ResourceLimits) GetExpensive() int {
+	if r == nil || r.Expensive == 0 {
+		return 2
+	}
+	return r.Expensive
+}
+
+// GetModerate returns Moderate or default (3).
+func (r *ResourceLimits) GetModerate() int {
+	if r == nil || r.Moderate == 0 {
+		return 3
+	}
+	return r.Moderate
+}
+
+// GetCheap returns Cheap or defaults to MaxPolecats (no separate limit).
+func (r *ResourceLimits) GetCheap(maxPolecats int) int {
+	if r == nil || r.Cheap == 0 {
+		return maxPolecats
+	}
+	if r.Cheap > maxPolecats {
+		return maxPolecats
+	}
+	return r.Cheap
+}
+
 
 // SchedulerConfig configures the capacity scheduler for polecat dispatch.
 // This is a town-wide setting (not per-rig) because capacity control is host-wide:
@@ -28,6 +77,9 @@ type SchedulerConfig struct {
 	// SpawnDelay is the delay between spawns to prevent Dolt lock contention.
 	// Default: "0s".
 	SpawnDelay string `json:"spawn_delay,omitempty"`
+
+	// ResourceLimits defines per-class concurrent task limits.
+	ResourceLimits *ResourceLimits `json:"resource_limits,omitempty"`
 }
 
 // DefaultSchedulerConfig returns a SchedulerConfig with sensible defaults.
