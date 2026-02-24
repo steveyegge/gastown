@@ -27,6 +27,7 @@ configured, and managed throughout their lifecycle in Gas Town.
 | [edge-cases.md](edge-cases.md) | Zombie classes, race conditions, failure modes |
 | [work-discovery.md](work-discovery.md) | gt prime --hook, work discovery, fallback nudges |
 | [cleanup-flow.md](cleanup-flow.md) | gt done, refinery processing, MERGED signal, nuke |
+| [orchestration.md](orchestration.md) | Formulas, hooks, daemons, patrols |
 
 ---
 
