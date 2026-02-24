@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
@@ -41,7 +42,7 @@ Examples:
 
 func init() {
 	pruneBranchesCmd.Flags().BoolVar(&pruneBranchesDryRun, "dry-run", false, "Show what would be deleted without deleting")
-	pruneBranchesCmd.Flags().StringVar(&pruneBranchesPattern, "pattern", "polecat/*", "Branch name pattern to match")
+	pruneBranchesCmd.Flags().StringVar(&pruneBranchesPattern, "pattern", "polecat/*", "Branch name pattern(s) to match (comma-separated, e.g. \"polecat/*,branch/*\")")
 
 	rootCmd.AddCommand(pruneBranchesCmd)
 }
@@ -58,9 +59,19 @@ func runPruneBranches(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Warning: git fetch --prune failed: %v\n", style.Warning.Render("⚠"), err)
 	}
 
-	pruned, err := g.PruneStaleBranches(pruneBranchesPattern, pruneBranchesDryRun)
-	if err != nil {
-		return fmt.Errorf("pruning branches: %w", err)
+	// Support comma-separated patterns (e.g. "polecat/*,branch/*,feature/*")
+	patterns := strings.Split(pruneBranchesPattern, ",")
+	var pruned []gitpkg.PrunedBranch
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		p, err := g.PruneStaleBranches(pattern, pruneBranchesDryRun)
+		if err != nil {
+			return fmt.Errorf("pruning branches matching %q: %w", pattern, err)
+		}
+		pruned = append(pruned, p...)
 	}
 
 	if len(pruned) == 0 {

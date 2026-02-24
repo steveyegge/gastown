@@ -486,6 +486,28 @@ type AddOptions struct {
 // Add creates a new polecat as a git worktree from the repo base.
 // Uses the shared bare repo (.repo.git) if available, otherwise mayor/rig.
 // This is much faster than a full clone and shares objects with all worktrees.
+
+// slugifyTitle converts a title string to a branch-name-safe slug.
+// Lowercase, alphanumeric and hyphens only, max 40 chars, no leading/trailing/consecutive hyphens.
+func slugifyTitle(title string) string {
+	slug := strings.ToLower(title)
+	slug = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, slug)
+	slug = strings.Trim(slug, "-")
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+	if len(slug) > 40 {
+		slug = slug[:40]
+		slug = strings.TrimRight(slug, "-")
+	}
+	return slug
+}
+
 // buildBranchName creates a branch name using the configured template or default format.
 // Supported template variables:
 // - {user}: git config user.name
@@ -496,15 +518,39 @@ type AddOptions struct {
 // - {description}: sanitized issue title
 // - {timestamp}: unique timestamp
 //
-// If no template is configured or template is empty, uses default format:
-// - polecat/{name}/{issue}@{timestamp} when issue is available
-// - polecat/{name}-{timestamp} otherwise
+// Config precedence (highest to lowest):
+//  1. polecat_branch_template: full template string — takes full control
+//  2. polecat_branch_prefix: namespace prefix (e.g. "branch/", "feature/")
+//     - polecat_branch_descriptive=true (default): {prefix}{slug-from-title}
+//     - polecat_branch_descriptive=false: {prefix}{issue}-{timestamp}
+//  3. Legacy default: polecat/{name}/{issue}@{timestamp}
 func (m *Manager) buildBranchName(name, issue string) string {
 	template := m.rig.GetStringConfig("polecat_branch_template")
 
-	// No template configured - use default behavior for backward compatibility
+	// No template — check for prefix config
 	if template == "" {
+		prefix := m.rig.GetStringConfig("polecat_branch_prefix")
 		timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
+
+		if prefix != "" {
+			// Prefix configured: new-style branch naming (no '@' chars)
+			descriptive := m.rig.GetBoolConfig("polecat_branch_descriptive")
+			if descriptive && issue != "" {
+				if issueData, err := m.beads.Show(issue); err == nil && issueData.Title != "" {
+					if slug := slugifyTitle(issueData.Title); slug != "" {
+						return prefix + slug
+					}
+				}
+				return prefix + issue
+			}
+			// Non-descriptive or no issue: use hash suffix
+			if issue != "" {
+				return fmt.Sprintf("%s%s-%s", prefix, issue, timestamp)
+			}
+			return fmt.Sprintf("%s%s-%s", prefix, name, timestamp)
+		}
+
+		// Legacy default: polecat/{name}/{issue}@{timestamp}
 		if issue != "" {
 			return fmt.Sprintf("polecat/%s/%s@%s", name, issue, timestamp)
 		}

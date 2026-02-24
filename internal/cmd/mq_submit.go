@@ -31,9 +31,14 @@ var issuePattern = regexp.MustCompile(`([a-z]+-[a-z0-9]+(?:\.[0-9]+)?)`)
 
 // parseBranchName extracts issue ID and worker from a branch name.
 // Supports formats:
-//   - polecat/<worker>/<issue>  → issue=<issue>, worker=<worker>
-//   - polecat/<worker>-<timestamp>  → issue="", worker=<worker> (modern polecat branches)
-//   - <issue>                   → issue=<issue>, worker=""
+//   - polecat/<worker>/<issue>[@<ts>] → issue=<issue>, worker=<worker>
+//   - polecat/<worker>-<timestamp>    → issue="", worker=<worker>
+//   - <any-prefix>/<name>             → issue from regex if found (hook_bead is authoritative)
+//   - <issue>                         → issue=<issue>, worker=""
+//
+// For non-polecat/ branches the regex may produce false positives on descriptive slugs
+// (e.g. "branch/fix-auth-bug" → "fix-auth"). This is harmless: if the extracted ID does
+// not resolve to a real bead, gt done falls back to hook_bead on the agent bead.
 func parseBranchName(branch string) branchInfo {
 	info := branchInfo{Branch: branch}
 

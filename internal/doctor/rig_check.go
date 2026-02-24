@@ -747,13 +747,14 @@ func (c *PolecatClonesValidCheck) Run(ctx *CheckContext) *CheckResult {
 			warnings = append(warnings, fmt.Sprintf("%s: has uncommitted changes", polecatName))
 		}
 
-		// Check if on a polecat branch
+		// Check if on a work branch (any namespaced branch is acceptable,
+		// e.g. polecat/, branch/, feature/ — configured via polecat_branch_prefix)
 		cmd = exec.Command("git", "-C", polecatPath, "branch", "--show-current")
 		branchOutput, err := cmd.Output()
 		if err == nil {
 			branch := strings.TrimSpace(string(branchOutput))
-			if !strings.HasPrefix(branch, constants.BranchPolecatPrefix) {
-				warnings = append(warnings, fmt.Sprintf("%s: on branch '%s' (expected %s*)", polecatName, branch, constants.BranchPolecatPrefix))
+			if !strings.Contains(branch, "/") {
+				warnings = append(warnings, fmt.Sprintf("%s: on non-namespaced branch '%s' (expected a work branch like '%s*')", polecatName, branch, constants.BranchPolecatPrefix))
 			}
 		}
 

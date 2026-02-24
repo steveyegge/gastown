@@ -142,18 +142,34 @@ Rigs support layered configuration through:
 
 #### Polecat Branch Naming
 
-Configure custom branch name templates for polecats:
+Three settings control how polecat work branches are named, in priority order:
+
+**1. `polecat_branch_prefix`** — namespace prefix (e.g. `"branch/"`, `"feature/"`). Empty = legacy format.
+
+**2. `polecat_branch_descriptive`** — when prefix is set: `true` (default) = slug from issue title; `false` = `{issue}-{timestamp}` hash.
+
+**3. `polecat_branch_template`** — full template string, overrides both settings above.
 
 ```bash
-# Set via wisp (transient - for testing)
-echo '{"polecat_branch_template": "adam/{year}/{month}/{description}"}' > \
-  ~/gt/.beads-wisp/config/myrig.json
+# Opt into new-style branches with descriptive slugs (recommended):
+gt rig settings set <rig> polecat_branch_prefix "branch/"
+# → branch/fix-auth-bug
 
-# Or set via rig identity bead labels (persistent)
-bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{description}"
+# Use hash-based names instead of slugs:
+gt rig settings set <rig> polecat_branch_prefix "branch/"
+gt rig settings set <rig> polecat_branch_descriptive false
+# → branch/gt-123-m1ks7a
+
+# Custom namespace:
+gt rig settings set <rig> polecat_branch_prefix "feature/"
+# → feature/fix-auth-bug
+
+# Full template (overrides prefix settings):
+gt rig settings set <rig> polecat_branch_template "adam/{year}/{month}/{description}"
+# → adam/26/01/fix-auth-bug
 ```
 
-**Template Variables:**
+**Template Variables (for `polecat_branch_template`):**
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -165,23 +181,16 @@ bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{de
 | `{description}` | Sanitized issue title | `fix-auth-bug` |
 | `{timestamp}` | Unique timestamp | `1ks7f9a` |
 
-**Default Behavior (backward compatible):**
+**Default Behavior (no settings configured):**
 
-When `polecat_branch_template` is empty or not set:
-- With issue: `polecat/{name}/{issue}@{timestamp}`
+- With issue: `polecat/{name}/{issue}@{timestamp}` (legacy, backward-compatible)
 - Without issue: `polecat/{name}-{timestamp}`
 
-**Example Configurations:**
+**Prune matching prefix:**
 
 ```bash
-# GitHub enterprise format
-"adam/{year}/{month}/{description}"
-
-# Simple feature branches
-"feature/{issue}"
-
-# Include polecat name for clarity
-"work/{name}/{issue}"
+# If using a custom prefix, tell prune-branches about it:
+gt prune-branches --pattern "polecat/*,branch/*"
 ```
 
 ## Formula Format

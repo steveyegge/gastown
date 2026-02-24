@@ -36,7 +36,9 @@ var SystemDefaults = map[string]interface{}{
 	"max_polecats":            10,
 	"priority_adjustment":     0,
 	"dnd":                     false,
-	"polecat_branch_template": "", // Empty = use default behavior (polecat/{name}/...)
+	"polecat_branch_template":    "", // Full template (takes precedence over prefix settings)
+	"polecat_branch_prefix":      "", // Prefix for work branches. Empty = legacy polecat/{name}/{issue}@{ts}
+	"polecat_branch_descriptive": true, // true = slug from issue title; false = {issue}-{timestamp} hash
 }
 
 // StackingKeys defines which keys use stacking semantics (values add up).
