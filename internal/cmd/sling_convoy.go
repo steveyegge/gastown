@@ -169,11 +169,23 @@ func getConvoyInfoForIssue(issueID string) *ConvoyInfo {
 	// Get convoy details (labels + description) for ownership and merge strategy
 	showCmd := exec.Command("bd", "show", convoyID, "--json")
 	showCmd.Dir = townBeads
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	showCmd.Stdout = &stdout
+	showCmd.Stderr = &stderr
 
 	if err := showCmd.Run(); err != nil {
-		return &ConvoyInfo{ID: convoyID} // Return basic info even if details fail
+		// Check if this is a "not found" error (phantom convoy) vs transient error.
+		// Phantom convoys occur when a convoy bead is deleted from HQ but tracking
+		// deps still exist in local beads DB (gt-9xum2). Return nil to treat as
+		// untracked, allowing normal MR flow to proceed.
+		stderrStr := stderr.String()
+		if strings.Contains(stderrStr, "not found") ||
+			strings.Contains(stderrStr, "Issue not found") ||
+			strings.Contains(stderrStr, "no issue found") {
+			return nil // Phantom convoy - proceed without convoy context
+		}
+		// Other error (transient) - return basic info as fallback
+		return &ConvoyInfo{ID: convoyID}
 	}
 
 	var convoys []struct {

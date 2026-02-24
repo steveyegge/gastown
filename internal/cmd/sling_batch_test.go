@@ -1733,3 +1733,96 @@ exit 1
 		t.Errorf("getConvoyInfoFromIssue(\"nonexistent-id\", ...) = %+v, want nil", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// getConvoyInfoForIssue tests (gt-9xum2: phantom convoy fix)
+// ---------------------------------------------------------------------------
+
+// TestGetConvoyInfoForIssue_PhantomConvoy verifies that when isTrackedByConvoy
+// returns a convoy ID but bd show fails with "not found", the function returns
+// nil instead of partial ConvoyInfo. This ensures phantom convoys (deleted from
+// HQ but still referenced in local deps) don't break gt done MR creation.
+func TestGetConvoyInfoForIssue_PhantomConvoy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	tmpDir := t.TempDir()
+	townRoot := tmpDir
+
+	// Create .beads directory structure
+	townBeads := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Install a bd stub that:
+	// - For "dep list": returns phantom convoy (simulating stale tracking dep)
+	// - For "show": returns "Issue not found" (convoy deleted from HQ)
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+
+	bdScript := `#!/bin/sh
+# Phantom convoy test stub
+case "$1" in
+	"--allow-stale")
+		shift  # Remove --allow-stale flag
+		;;
+esac
+case "$1" in
+	"dep")
+		# Simulate stale tracking dep returning phantom convoy
+		if echo "$*" | grep -q "direction=up"; then
+			echo '[{"id":"hq-cv-phantom","issue_type":"convoy","status":"open"}]'
+			exit 0
+		fi
+		exit 1
+		;;
+	"show")
+		# Simulate convoy not found in HQ
+		echo "Issue not found: hq-cv-phantom" >&2
+		exit 1
+		;;
+	"list")
+		# Return empty list for convoy fallback search
+		echo '[]'
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	// Temporarily override PATH and workspace finder
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+":"+origPath)
+
+	// We need to be in the tmpDir for workspace.FindFromCwd to work
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to tmpDir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(origDir)
+	}()
+
+	// Create mayor directory structure (needed for workspace detection)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+
+	// Call getConvoyInfoForIssue - should return nil for phantom convoy
+	got := getConvoyInfoForIssue("gt-test")
+	if got != nil {
+		t.Errorf("getConvoyInfoForIssue returned %+v, want nil for phantom convoy", got)
+	}
+}
