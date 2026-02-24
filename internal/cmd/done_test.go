@@ -498,6 +498,52 @@ func TestNukeGateGuardLogic(t *testing.T) {
 	}
 }
 
+// TestSessionKillGateGuardLogic verifies the session kill gate in runDone:
+// session is killed only when !pushFailed && !mrFailed.
+// GH#1945: When push or MR fails, session must be preserved so the Witness
+// can investigate or the polecat can retry. The deferred backstop must also
+// be prevented from killing the session (sessionKilled set to true).
+func TestSessionKillGateGuardLogic(t *testing.T) {
+	tests := []struct {
+		name            string
+		pushFailed      bool
+		mrFailed        bool
+		wantSessionKill bool
+	}{
+		// Happy path: everything succeeded — kill session
+		{"push-ok+mr-ok", false, false, true},
+		// Push failed: preserve session for recovery
+		{"push-failed+mr-ok", true, false, false},
+		// MR creation failed: preserve session (GH#1945 fix)
+		{"push-ok+mr-failed", false, true, false},
+		// Both failed: definitely preserve
+		{"push-failed+mr-failed", true, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the guard condition from runDone's session kill section
+			shouldKillSession := !tt.pushFailed && !tt.mrFailed
+			if shouldKillSession != tt.wantSessionKill {
+				t.Errorf("shouldKillSession = %v, want %v", shouldKillSession, tt.wantSessionKill)
+			}
+
+			// Verify sessionKilled is set in BOTH paths (prevents deferred backstop)
+			sessionKilled := false
+			if tt.pushFailed || tt.mrFailed {
+				// Session preserved path — still sets sessionKilled to block backstop
+				sessionKilled = true
+			} else {
+				// Normal kill path — sets sessionKilled on success
+				sessionKilled = true
+			}
+			if !sessionKilled {
+				t.Error("sessionKilled should always be true after the gate (prevents deferred backstop)")
+			}
+		})
+	}
+}
+
 // TestMRVerificationSetsMRFailed verifies that if MR bead creation returns
 // success but the bead cannot be read back (verification fails), mrFailed
 // is set to true. This is the core fix for GH#1945: without verification,

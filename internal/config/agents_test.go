@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentCopilot, AgentPi, AgentOmp}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -54,6 +54,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"copilot", AgentCopilot, false},   // Built-in GitHub Copilot CLI agent
 		{"pi", AgentPi, false},             // Pi Coding Agent
+		{"omp", AgentOmp, false},           // Oh My Pi
 		{"unknown", "", true},
 	}
 
@@ -136,6 +137,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"opencode", true},  // Built-in multi-model CLI agent
 		{"copilot", true},   // Built-in GitHub Copilot CLI agent
 		{"pi", true},        // Pi Coding Agent
+		{"omp", true},       // Oh My Pi
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -1062,8 +1064,9 @@ func TestPiAgentPreset(t *testing.T) {
 		t.Errorf("pi command = %q, want pi", info.Command)
 	}
 
-	if len(info.Args) != 0 {
-		t.Errorf("pi args = %v, want empty", info.Args)
+	// Pi preset includes -e flag to load gastown hooks extension
+	if len(info.Args) != 2 || info.Args[0] != "-e" {
+		t.Errorf("pi args = %v, want [-e .pi/extensions/gastown-hooks.js]", info.Args)
 	}
 
 	if len(info.ProcessNames) != 3 {

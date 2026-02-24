@@ -10,7 +10,9 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/copilot"
 	"github.com/steveyegge/gastown/internal/gemini"
+	"github.com/steveyegge/gastown/internal/omp"
 	"github.com/steveyegge/gastown/internal/opencode"
+	"github.com/steveyegge/gastown/internal/pi"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -33,6 +35,14 @@ func init() {
 	config.RegisterHookInstaller("copilot", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
 		// Copilot custom instructions stay in workDir — no --settings equivalent.
 		return copilot.EnsureSettingsAt(workDir, hooksDir, hooksFile)
+	})
+	config.RegisterHookInstaller("omp", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
+		// OMP hooks stay in workDir — loaded via --hook flag.
+		return omp.EnsureHookAt(workDir, hooksDir, hooksFile)
+	})
+	config.RegisterHookInstaller("pi", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
+		// Pi extensions stay in workDir — loaded via -e flag.
+		return pi.EnsureHookAt(workDir, hooksDir, hooksFile)
 	})
 }
 

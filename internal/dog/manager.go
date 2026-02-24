@@ -302,13 +302,14 @@ func (m *Manager) Get(name string) (*Dog, error) {
 	}
 
 	return &Dog{
-		Name:       name,
-		State:      state.State,
-		Path:       m.dogDir(name),
-		Worktrees:  state.Worktrees,
-		LastActive: state.LastActive,
-		Work:       state.Work,
-		CreatedAt:  state.CreatedAt,
+		Name:          name,
+		State:         state.State,
+		Path:          m.dogDir(name),
+		Worktrees:     state.Worktrees,
+		LastActive:    state.LastActive,
+		Work:          state.Work,
+		WorkStartedAt: state.WorkStartedAt,
+		CreatedAt:     state.CreatedAt,
 	}, nil
 }
 
@@ -363,6 +364,7 @@ func (m *Manager) AssignWork(name, work string) error {
 
 	state.State = StateWorking
 	state.Work = work
+	state.WorkStartedAt = time.Now()
 	state.LastActive = time.Now()
 	state.UpdatedAt = time.Now()
 
@@ -392,6 +394,7 @@ func (m *Manager) ClearWork(name string) error {
 
 	state.State = StateIdle
 	state.Work = ""
+	state.WorkStartedAt = time.Time{}
 	state.LastActive = time.Now()
 	state.UpdatedAt = time.Now()
 

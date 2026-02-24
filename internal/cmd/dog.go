@@ -34,6 +34,11 @@ var (
 	dogDispatchDog    string
 	dogDispatchJSON   bool
 	dogDispatchDryRun bool
+
+	// Health-check flags
+	dogHealthJSON          bool
+	dogHealthAutoClear     bool
+	dogHealthMaxInactivity time.Duration
 )
 
 var dogCmd = &cobra.Command{
@@ -219,6 +224,34 @@ Examples:
 	RunE: runDogDispatch,
 }
 
+var dogHealthCheckCmd = &cobra.Command{
+	Use:   "health-check [name]",
+	Short: "Check dog health (zombies, hung, orphans)",
+	Long: `Check dog health and detect problems.
+
+Detects:
+  - Zombies: state=working but tmux session or agent process is dead
+  - Hung: agent alive but no tmux activity for too long
+  - Orphans: dog idle but tmux session still exists
+
+With --auto-clear, zombies are automatically returned to idle state.
+Hung dogs are reported only (Deacon decides per ZFC principle).
+
+Exit codes:
+  0 = all healthy
+  1 = error
+  2 = needs attention
+
+Examples:
+  gt dog health-check
+  gt dog health-check alpha
+  gt dog health-check --json
+  gt dog health-check --auto-clear
+  gt dog health-check --max-inactivity 1h`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDogHealthCheck,
+}
+
 func init() {
 	// List flags
 	dogListCmd.Flags().BoolVar(&dogListJSON, "json", false, "Output as JSON")
@@ -245,6 +278,11 @@ func init() {
 	dogDispatchCmd.Flags().BoolVarP(&dogDispatchDryRun, "dry-run", "n", false, "Show what would be done without doing it")
 	_ = dogDispatchCmd.MarkFlagRequired("plugin")
 
+	// Health-check flags
+	dogHealthCheckCmd.Flags().BoolVar(&dogHealthJSON, "json", false, "Output as JSON")
+	dogHealthCheckCmd.Flags().BoolVar(&dogHealthAutoClear, "auto-clear", false, "Auto-clear zombie dogs")
+	dogHealthCheckCmd.Flags().DurationVar(&dogHealthMaxInactivity, "max-inactivity", 30*time.Minute, "Max inactivity before considering hung")
+
 	// Add subcommands
 	dogCmd.AddCommand(dogAddCmd)
 	dogCmd.AddCommand(dogRemoveCmd)
@@ -254,6 +292,7 @@ func init() {
 	dogCmd.AddCommand(dogDoneCmd)
 	dogCmd.AddCommand(dogStatusCmd)
 	dogCmd.AddCommand(dogDispatchCmd)
+	dogCmd.AddCommand(dogHealthCheckCmd)
 
 	rootCmd.AddCommand(dogCmd)
 }
@@ -420,22 +459,28 @@ func runDogList(cmd *cobra.Command, args []string) error {
 
 	if dogListJSON {
 		type DogListItem struct {
-			Name       string            `json:"name"`
-			State      dog.State         `json:"state"`
-			Work       string            `json:"work,omitempty"`
-			LastActive time.Time         `json:"last_active"`
-			Worktrees  map[string]string `json:"worktrees,omitempty"`
+			Name          string            `json:"name"`
+			State         dog.State         `json:"state"`
+			Work          string            `json:"work,omitempty"`
+			WorkStartedAt *time.Time        `json:"work_started_at,omitempty"`
+			LastActive    time.Time         `json:"last_active"`
+			Worktrees     map[string]string `json:"worktrees,omitempty"`
 		}
 
 		var items []DogListItem
 		for _, d := range dogs {
-			items = append(items, DogListItem{
+			item := DogListItem{
 				Name:       d.Name,
 				State:      d.State,
 				Work:       d.Work,
 				LastActive: d.LastActive,
 				Worktrees:  d.Worktrees,
-			})
+			}
+			if !d.WorkStartedAt.IsZero() {
+				t := d.WorkStartedAt
+				item.WorkStartedAt = &t
+			}
+			items = append(items, item)
 		}
 
 		enc := json.NewEncoder(os.Stdout)
@@ -800,6 +845,88 @@ func dogFormatTimeAgo(t time.Time) string {
 		}
 		return fmt.Sprintf("%d days ago", days)
 	}
+}
+
+func runDogHealthCheck(cmd *cobra.Command, args []string) error {
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	tm := tmux.NewTmux()
+	hc := dog.NewHealthChecker(mgr, tm)
+
+	var results []dog.DogHealthResult
+
+	if len(args) > 0 {
+		// Single dog
+		d, err := mgr.Get(args[0])
+		if err != nil {
+			return fmt.Errorf("getting dog %s: %w", args[0], err)
+		}
+		r := hc.Check(d, dogHealthMaxInactivity, dogHealthAutoClear)
+		results = []dog.DogHealthResult{r}
+	} else {
+		// All dogs
+		results, err = hc.CheckAll(dogHealthMaxInactivity, dogHealthAutoClear)
+		if err != nil {
+			return err
+		}
+	}
+
+	attention := dog.NeedsAttentionCount(results)
+
+	if dogHealthJSON {
+		type HealthReport struct {
+			Dogs           []dog.DogHealthResult `json:"dogs"`
+			NeedsAttention int                   `json:"needs_attention"`
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(HealthReport{Dogs: results, NeedsAttention: attention}); err != nil {
+			return err
+		}
+	} else {
+		if len(results) == 0 {
+			fmt.Println("No dogs in kennel")
+			return nil
+		}
+
+		fmt.Println(style.Bold.Render("Dog Health Check"))
+		fmt.Println()
+
+		for _, r := range results {
+			icon := "✓"
+			if r.NeedsAttention {
+				icon = "✗"
+			}
+			line := fmt.Sprintf("  %s %s [%s] session=%s", icon, r.Name, r.State, r.SessionStatus)
+			if r.WorkDuration > 0 {
+				line += fmt.Sprintf(" duration=%s", r.WorkDuration.Truncate(time.Second))
+			}
+			if r.AutoCleared {
+				line += " (auto-cleared)"
+			}
+			fmt.Println(line)
+			if r.Recommendation != "" && r.NeedsAttention {
+				fmt.Printf("    → %s\n", r.Recommendation)
+			}
+		}
+
+		fmt.Println()
+		if attention > 0 {
+			fmt.Printf("  %d dog(s) need attention\n", attention)
+		} else {
+			fmt.Println("  All dogs healthy")
+		}
+	}
+
+	// Exit code 2 for needs-attention
+	if attention > 0 {
+		os.Exit(2)
+	}
+
+	return nil
 }
 
 // runDogDispatch dispatches plugin execution to a dog worker.

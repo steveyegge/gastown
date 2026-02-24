@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -439,6 +442,23 @@ func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	if err := b.Init(prefix); err != nil {
 		t.Fatalf("bd init: %v", err)
 	}
+
+	// Clean up the test database after the test to avoid leaking
+	// beads_pt* databases on the shared Dolt server.
+	dbName := "beads_" + prefix
+	t.Cleanup(func() {
+		dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/", testutil.DoltTestPort())
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			t.Logf("cleanup: failed to connect to dolt server to drop %s: %v", dbName, err)
+			return
+		}
+		defer db.Close()
+		if _, err := db.Exec("DROP DATABASE IF EXISTS `" + dbName + "`"); err != nil {
+			t.Logf("cleanup: failed to drop %s: %v", dbName, err)
+		}
+	})
+
 	return tmpDir, b
 }
 

@@ -181,7 +181,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	description := FormatAgentDescription(title, fields)
 
-	buildArgs := func(ephemeral bool) []string {
+	buildArgs := func() []string {
 		a := []string{"create", "--json",
 			"--id=" + id,
 			"--title=" + title,
@@ -189,9 +189,10 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			"--type=agent",
 			"--labels=gt:agent",
 		}
-		if ephemeral {
-			a = append(a, "--ephemeral")
-		}
+		// Persistent polecats (gt-4ac): agent beads are non-ephemeral (issues table).
+		// They persist across polecat lifecycles and survive Dolt GC.
+		// Previously used --ephemeral (wisps table) but persistent polecats need
+		// durable agent state for idle detection and reuse.
 		if NeedsForceForID(id) {
 			a = append(a, "--force")
 		}
@@ -203,13 +204,11 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Try ephemeral first (writes to wisps table). On fresh rigs where the
-	// wisps table doesn't exist yet, Dolt can panic with a nil pointer
-	// dereference (GH#1769). Fall back to non-ephemeral (issues table) if
-	// the ephemeral create fails.
-	out, err := b.run(buildArgs(true)...)
+	// Create non-ephemeral agent bead (issues table). Persistent polecats (gt-4ac)
+	// need durable agent beads that survive across work assignments.
+	out, err := b.run(buildArgs()...)
 	if err != nil {
-		out, err = b.run(buildArgs(false)...)
+		out, err = b.run(buildArgs()...)
 		if err != nil {
 			// Both bd create attempts failed. If EnsureCustomTypes also failed,
 			// the database may be completely uninitialized. Fall back to writing
@@ -374,11 +373,13 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
 	}
-	// Ensure agent bead is ephemeral (wisp) — agent operational state has
-	// zero git history consumers (gt-bewatn.9)
-	if _, err := target.run("update", id, "--ephemeral"); err != nil {
-		// Non-fatal: the bead is functional without ephemeral flag
-		style.PrintWarning("could not mark agent bead as ephemeral: %v", err)
+	// Persistent polecats (gt-4ac): agent beads are non-ephemeral.
+	// Migrate any existing ephemeral (wisp) beads to the issues table
+	// by removing the ephemeral flag. This ensures agent state persists
+	// across polecat lifecycles for idle detection and reuse.
+	if _, err := target.run("update", id, "--no-ephemeral"); err != nil {
+		// Non-fatal: the bead is functional either way
+		// --no-ephemeral may not be supported in all bd versions
 	}
 
 	// Note: role slot no longer set - role definitions are config-based

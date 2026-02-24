@@ -452,7 +452,12 @@ func TestCurator_ReadRecentFeedEventsLargeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	feedPath := filepath.Join(tmpDir, FeedFile)
 
-	// Write a large feed file with events spanning hours
+	// Write a large feed file with events spanning hours.
+	// Events are spaced 1440ms apart over 2h (5000 * 1440ms = 7200s = 2h).
+	// We use a 2-minute window for the read to avoid flakiness on slow CI
+	// machines where writing 5000 events may take several seconds, shifting
+	// the cutoff (time.Now()-window inside readRecentFeedEvents) forward
+	// enough to exclude events near "now" captured before the writes.
 	f, err := os.OpenFile(feedPath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -474,13 +479,15 @@ func TestCurator_ReadRecentFeedEventsLargeFile(t *testing.T) {
 
 	curator := NewCurator(tmpDir)
 
-	result, err := curator.readRecentFeedEvents(10 * time.Second)
+	// Use a 2-minute window: ~83 events expected (120s / 1.44s per event),
+	// well under 5000, so filtering is still validated.
+	result, err := curator.readRecentFeedEvents(2 * time.Minute)
 	if err != nil {
 		t.Fatalf("readRecentFeedEvents error: %v", err)
 	}
 
-	if len(result) > 100 {
-		t.Errorf("readRecentFeedEvents returned %d events for 10s window, expected << 5000", len(result))
+	if len(result) > 500 {
+		t.Errorf("readRecentFeedEvents returned %d events for 2m window, expected << 5000", len(result))
 	}
 	if len(result) == 0 {
 		t.Error("readRecentFeedEvents returned 0 events, expected at least some recent ones")

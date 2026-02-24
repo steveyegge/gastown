@@ -1933,10 +1933,24 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := buildDoltSQLCmd(ctx, config,
+	// Always connect as a TCP client to the running server, even for local servers.
+	// Without explicit --host/--port, dolt sql runs in embedded mode which loads all
+	// databases into memory — causing OOM kills on large data dirs.
+	// Note: --host, --port, --user, --no-tls are dolt GLOBAL args and must come
+	// BEFORE the "sql" subcommand.
+	fullArgs := []string{
+		"--host", "127.0.0.1",
+		"--port", strconv.Itoa(config.Port),
+		"--user", config.User,
+		"--no-tls",
+		"sql",
 		"-r", "csv",
 		"-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
-	)
+	}
+	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
+	// Always set DOLT_CLI_PASSWORD to prevent interactive password prompt.
+	// When empty, dolt connects without a password (which is the default for local servers).
+	cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("querying connection count: %w (output: %s)", err, strings.TrimSpace(string(output)))

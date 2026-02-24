@@ -52,9 +52,10 @@ Step 1          Step 2          Step 3          Step N
                 Same sandbox (branch + worktree)
 ```
 
-**Key invariant:** The sandbox persists through all session cycles. Only `gt done`
-(on the final step) triggers sandbox cleanup. Intermediate session cycles are
-normal operation, not failure recovery.
+**Key invariant:** The sandbox persists through all session cycles AND across
+assignments (persistent polecat model, gt-4ac). `gt done` kills the session and
+sets the polecat to idle, but the sandbox is preserved for reuse. Intermediate
+session cycles are normal operation, not failure recovery.
 
 ### 2.2 Session Cycling vs Step Cycling
 
@@ -77,7 +78,7 @@ hard constraint.
 | Step completion | Polecat | `bd close <step>` then `gt handoff` for next step |
 | Context filling | Claude Code | Auto-compaction; PreCompact hook saves state |
 | Crash/timeout | Infrastructure | Witness detects, respawns session |
-| `gt done` | Polecat | Final step; submit to MQ, request nuke |
+| `gt done` | Polecat | Final step; submit to MQ, go idle (sandbox preserved) |
 
 ### 2.4 State Continuity
 
@@ -119,30 +120,29 @@ Triggered when a step completes but more steps remain in the molecule.
 - Witness respawns if crash (via `SessionManager.Start`)
 - Daemon triggers if session is dead (`LIFECYCLE:Shutdown` → witness)
 
-### 3.2 Molecule Cleanup (Everything Nuked)
+### 3.2 Molecule Cleanup (Polecat Goes Idle)
 
-Triggered when the molecule's final step completes and work is merged.
+Triggered when the molecule's final step completes and work is submitted.
 
 | Action | Result |
 |--------|--------|
 | Polecat runs `gt done` | Pushes branch, submits MR, sets `cleanup_status=clean` |
-| Witness receives `POLECAT_DONE` | Verifies clean state, sends `MERGE_READY` to Refinery |
+| Polecat sets agent state | `agent_state=idle`, `hook_bead` cleared |
+| Polecat kills session | Session terminated, sandbox preserved |
+| Witness receives `POLECAT_DONE` | Acknowledges idle transition |
 | Refinery merges | Squash-merge to main, closes MR and source issue |
-| Refinery sends `MERGED` | Witness receives, verifies commit on main |
-| Witness nukes sandbox | `NukePolecat()`: kills session, removes worktree, prunes refs |
-| Agent bead reset | `agent_state=nuked`, `hook_bead` cleared, name returned to pool |
-| Identity survives | Agent bead still exists; CV chain has new entry |
+| Identity survives | Agent bead still exists; CV chain has new entry; polecat ready for reuse |
 
 ```
 STEP CLEANUP (intermediate)          MOLECULE CLEANUP (final)
 ┌────────────────────┐               ┌────────────────────────────┐
 │ Step bead: closed  │               │ All step beads: closed     │
 │ Session: terminated│               │ Session: terminated        │
-│ Sandbox: ALIVE     │               │ Sandbox: NUKED             │
+│ Sandbox: ALIVE     │               │ Sandbox: PRESERVED (idle)  │
 │ Molecule: ACTIVE   │               │ Molecule: SQUASHED         │
 │ Hook: SET          │               │ Hook: CLEARED              │
 │ Agent bead: working│               │ Agent bead: nuked          │
-│ Branch: ALIVE      │               │ Branch: DELETED            │
+│ Branch: ALIVE      │               │ Branch: PUSHED (idle)      │
 └────────────────────┘               └────────────────────────────┘
 ```
 
@@ -183,12 +183,8 @@ Witness receives MERGED
     │
     ├── Verifies commit is on main (all remotes)
     ├── Checks cleanup_status
-    ├── If clean → NukePolecat()
-    │   ├── Kills tmux session
-    │   ├── Removes worktree
-    │   ├── Resets agent bead (agent_state=nuked, hook_bead cleared)
-    │   └── Returns name to pool
-    └── If dirty → escalates (shouldn't happen post-merge)
+    ├── Acknowledges merge (polecat already idle, sandbox preserved)
+    └── If dirty → warns (shouldn't happen post-merge)
 ```
 
 ### 3.4 Failure Recovery in the Cleanup Pipeline
@@ -197,7 +193,7 @@ Each stage can fail independently. Recovery is handled by the next patrol cycle:
 
 | Failure | Detection | Recovery |
 |---------|-----------|---------|
-| `gt done` fails mid-execution | Zombie state: session alive, done-intent label | Witness `DetectZombiePolecats()` finds stuck-in-done, nukes |
+| `gt done` fails mid-execution | Zombie state: session alive, done-intent label | Witness `DetectZombiePolecats()` finds stuck-in-done, recovers |
 | `POLECAT_DONE` mail lost | Witness patrol: finds dead session with `hook_bead` | `DetectZombiePolecats()` with agent-dead-in-session |
 | Merge conflict | Refinery `doMerge()` detects | Creates conflict resolution task, blocks MR |
 | `MERGED` mail lost | Refinery closed the bead; witness patrol finds closed bead with live session | `DetectZombiePolecats()` bead-closed-still-running |
@@ -478,7 +474,7 @@ safety net.
 
 ```
 AGENT-DRIVEN (preferred)              MECHANICAL (safety net)
-├── gt done (polecat self-cleans)     ├── Daemon detects dead session
+├── gt done (polecat goes idle)       ├── Daemon detects dead session
 ├── gt handoff (polecat self-cycles)  ├── Daemon detects GUPP violation
 ├── gt escalate (polecat asks help)   ├── Witness zombie sweep
 └── HELP mail (polecat signals)       └── Deacon restart on stale heartbeat
@@ -632,12 +628,12 @@ changes the transport layer but preserves the lifecycle model:
 | Spawning | `SessionManager.Start()` | `Teammate({ operation: "spawn" })` |
 | Health monitoring | tmux liveness + pane output | AT lifecycle hooks (SubagentStop) |
 | Messaging | `gt nudge` (tmux send-keys) | AT messaging |
-| Cleanup | `NukePolecat()` kills session + worktree | `Teammate({ operation: "requestShutdown" })` + worktree cleanup |
+| Cleanup | Session kill (sandbox preserved) | `Teammate({ operation: "requestShutdown" })` (sandbox preserved) |
 
 **What stays the same:**
 - Beads as the durable ledger
 - Molecules as workflow templates
-- `gt done` as the polecat self-clean signal
+- `gt done` as the polecat idle signal
 - Two-stage cleanup (step vs molecule)
 - Mail for cross-rig communication
 - The completion guarantee (GUPP + pinned work + respawn)
@@ -655,14 +651,15 @@ changes the transport layer but preserves the lifecycle model:
 The polecat lifecycle is a relay race on a persistent track:
 
 1. **Sessions are ephemeral.** They cycle frequently. This is normal.
-2. **Sandboxes persist.** They survive all session cycles and only die at molecule completion.
+2. **Sandboxes are persistent.** They survive all session cycles and across assignments. Repaired on reuse by `gt sling`.
 3. **Identity is permanent.** The agent bead, CV chain, and work history accumulate forever.
-4. **Cleanup has two stages.** Step cleanup (session dies, sandbox lives) and molecule cleanup (everything nuked after merge).
+4. **Cleanup has two stages.** Step cleanup (session dies, sandbox lives) and molecule cleanup (session dies, polecat goes idle, sandbox preserved for reuse).
 5. **The channel is mail.** Lifecycle requests flow through existing `gt mail` to the witness.
 6. **Patrol is redundant.** Daemon, deacon, witness, and refinery all observe overlapping state. This is resilience, not waste.
 7. **Completion is guaranteed.** GUPP + pinned work + witness respawn = eventual completion.
 8. **Self-recycling is preferred.** Polecats manage their own lifecycle. Mechanical intervention is the safety net, not the primary mechanism.
 
 The system optimizes for **completion**, not uptime. Individual sessions are cheap.
-Sandboxes are moderate. Only identity is expensive. The lifecycle model reflects
-this: sessions are disposable, sandboxes are reusable, identity is permanent.
+Sandboxes are persistent and reusable. Identity is permanent. The lifecycle model
+reflects this: sessions are disposable, sandboxes survive across assignments,
+identity accumulates forever.

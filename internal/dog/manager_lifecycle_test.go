@@ -996,6 +996,70 @@ func TestManager_StateTransition_WorkReassignment(t *testing.T) {
 }
 
 // =============================================================================
+// WorkStartedAt Tests
+// =============================================================================
+
+func TestManager_AssignWork_SetsWorkStartedAt(t *testing.T) {
+	m, _ := testManager(t)
+
+	now := time.Now()
+	state := &DogState{
+		Name:       "alpha",
+		State:      StateIdle,
+		LastActive: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	setupDogWithState(t, m, "alpha", state)
+
+	before := time.Now()
+	if err := m.AssignWork("alpha", "task-1"); err != nil {
+		t.Fatalf("AssignWork() error = %v", err)
+	}
+
+	dog, err := m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if dog.WorkStartedAt.IsZero() {
+		t.Error("WorkStartedAt should be set after AssignWork")
+	}
+	if dog.WorkStartedAt.Before(before) {
+		t.Error("WorkStartedAt should be >= time before AssignWork call")
+	}
+}
+
+func TestManager_ClearWork_ClearsWorkStartedAt(t *testing.T) {
+	m, _ := testManager(t)
+
+	now := time.Now()
+	state := &DogState{
+		Name:          "alpha",
+		State:         StateWorking,
+		Work:          "task-1",
+		WorkStartedAt: now.Add(-1 * time.Hour),
+		LastActive:    now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	setupDogWithState(t, m, "alpha", state)
+
+	if err := m.ClearWork("alpha"); err != nil {
+		t.Fatalf("ClearWork() error = %v", err)
+	}
+
+	dog, err := m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if !dog.WorkStartedAt.IsZero() {
+		t.Errorf("WorkStartedAt = %v, want zero after ClearWork", dog.WorkStartedAt)
+	}
+}
+
+// =============================================================================
 // Error Constant Tests
 // =============================================================================
 

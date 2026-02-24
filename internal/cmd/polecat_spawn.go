@@ -95,7 +95,81 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("admission control: %w", err)
 	}
 
-	// Allocate a new polecat name
+	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
+	// Idle polecats have completed their work but kept their sandbox (worktree).
+	// Reusing avoids the overhead of creating a new worktree.
+	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
+	if findErr == nil && idlePolecat != nil {
+		polecatName := idlePolecat.Name
+		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
+
+		// Determine base branch
+		baseBranch := opts.BaseBranch
+		if baseBranch == "" && opts.HookBead != "" {
+			settingsPath := filepath.Join(r.Path, "settings", "config.json")
+			polecatIntegrationEnabled := true
+			if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+				polecatIntegrationEnabled = settings.MergeQueue.IsPolecatIntegrationEnabled()
+			}
+			if polecatIntegrationEnabled {
+				repoGit, repoErr := getRigGit(r.Path)
+				if repoErr == nil {
+					bd := beads.New(r.Path)
+					detected, detectErr := beads.DetectIntegrationBranch(bd, repoGit, opts.HookBead)
+					if detectErr == nil && detected != "" {
+						baseBranch = "origin/" + detected
+						fmt.Printf("  Auto-detected integration branch: %s\n", detected)
+					}
+				}
+			}
+		}
+		if baseBranch != "" && !strings.HasPrefix(baseBranch, "origin/") {
+			baseBranch = "origin/" + baseBranch
+		}
+
+		// Repair the idle polecat's worktree for fresh work
+		addOpts := polecat.AddOptions{
+			HookBead:   opts.HookBead,
+			BaseBranch: baseBranch,
+		}
+		if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
+			// Repair failed — fall through to allocate a new polecat
+			fmt.Printf("  Repair failed for idle polecat %s: %v, allocating new...\n", polecatName, err)
+		} else {
+			// Reuse successful
+			polecatObj, err := polecatMgr.Get(polecatName)
+			if err != nil {
+				return nil, fmt.Errorf("getting idle polecat after repair: %w", err)
+			}
+			if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
+				return nil, fmt.Errorf("worktree verification failed for reused %s: %w", polecatName, err)
+			}
+
+			polecatSessMgr := polecat.NewSessionManager(t, r)
+			sessionName := polecatSessMgr.SessionName(polecatName)
+
+			fmt.Printf("%s Polecat %s reused (idle → working, session start deferred)\n", style.Bold.Render("✓"), polecatName)
+			_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
+
+			effectiveBranch := strings.TrimPrefix(baseBranch, "origin/")
+			if effectiveBranch == "" {
+				effectiveBranch = r.DefaultBranch()
+			}
+
+			return &SpawnedPolecatInfo{
+				RigName:     rigName,
+				PolecatName: polecatName,
+				ClonePath:   polecatObj.ClonePath,
+				SessionName: sessionName,
+				Pane:        "",
+				BaseBranch:  effectiveBranch,
+				account:     opts.Account,
+				agent:       opts.Agent,
+			}, nil
+		}
+	}
+
+	// No idle polecat available — allocate a new one.
 	polecatName, err := polecatMgr.AllocateName()
 	if err != nil {
 		return nil, fmt.Errorf("allocating polecat name: %w", err)

@@ -69,10 +69,9 @@ Labels use `<dimension>:<value>` format:
 - `mode:degraded` / `mode:normal`
 - `status:idle` / `status:working` (for persistent agents only - see note)
 
-**Note on polecats:** The `status:idle` label does NOT apply to polecats. Polecats
-have no idle state - they're either working, stalled (stopped unexpectedly), or
-zombie (`gt done` failed). This label is for persistent agents like Deacon, Witness,
-and Crew members who can legitimately be idle between tasks.
+**Note:** The `status:idle` label applies to all agent types including polecats.
+Polecats go idle after completing work (`gt done`), with their sandbox preserved
+for reuse. Persistent agents (Deacon, Witness, Crew) also use idle between tasks.
 
 ### State Change Flow
 

@@ -24,7 +24,7 @@ No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
 timestamp instead, and only send an alert to the Mayor if the Deacon appears
 unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
 formula = "mol-deacon-patrol"
-version = 11
+version = 12
 
 [vars]
 [vars.wisp_type]
@@ -153,6 +153,113 @@ This command:
 Log the error but continue patrol - this is best-effort cleanup.
 
 **Exit criteria:** Orphan cleanup attempted (success or logged failure)."""
+
+[[steps]]
+id = "test-pollution-cleanup"
+title = "Detect and clean runtime test pollution"
+needs = ["inbox-check"]
+description = """
+Detect and clean runtime pollution left by tests and dead processes.
+
+This step cleans up four categories of pollution. **Only clean items where the
+owning process is confirmed dead** — never kill or remove resources owned by
+live processes.
+
+**1. Rogue dolt servers**
+
+Any `dolt sql-server` process NOT on port 3307 (the shared server) is a leaked
+test server. Kill and log.
+
+```bash
+# Find all dolt sql-server processes
+ps aux | grep 'dolt sql-server' | grep -v grep | while read -r line; do
+  PID=$(echo "$line" | awk '{print $2}')
+  # Check if this is the shared server (port 3307)
+  if echo "$line" | grep -q -- '--port 3307'; then
+    continue  # Skip the shared server
+  fi
+  # Kill rogue server
+  kill "$PID" 2>/dev/null && echo "Killed rogue dolt server PID=$PID"
+done
+```
+
+**2. Stale test temp dirs**
+
+Glob `beads-test-dolt-*` and `beads-bd-tests-*` in TMPDIR. If the directory
+name contains a PID and that PID is dead, clean up.
+
+```bash
+TMPDIR="${TMPDIR:-/tmp}"
+for dir in "$TMPDIR"/beads-test-dolt-* "$TMPDIR"/beads-bd-tests-*; do
+  [ -d "$dir" ] || continue
+  # Extract PID from dir name if present, or check if any process has it open
+  # Use lsof to check if any process is using files in this dir
+  if ! lsof +D "$dir" >/dev/null 2>&1; then
+    chmod -R u+w "$dir" 2>/dev/null
+    rm -rf "$dir" && echo "Cleaned stale test dir: $(basename "$dir")"
+  fi
+done
+```
+
+**3. Stale PID/lock files**
+
+Scan for dead PID files in /tmp:
+
+```bash
+for pidfile in /tmp/dolt-test-server-*.pid /tmp/beads-test-dolt-*.pid; do
+  [ -f "$pidfile" ] || continue
+  PID=$(cat "$pidfile" 2>/dev/null)
+  if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+    rm -f "$pidfile" && echo "Removed stale PID file: $(basename "$pidfile") (PID=$PID dead)"
+  fi
+done
+```
+
+**4. Dead dog worktrees**
+
+If a dog's tmux session is dead but worktree dirs remain, prune them.
+
+```bash
+# For each dog directory
+for dogdir in ~/gt/deacon/dogs/*/; do
+  DOG=$(basename "$dogdir")
+  # Check if dog has a live tmux session
+  if ! tmux has-session -t "dog-$DOG" 2>/dev/null; then
+    # Dog session is dead - check for leftover worktree dirs
+    for rigrepo in "$dogdir"*/; do
+      [ -d "$rigrepo/.git" ] || continue
+      # Worktree exists but session is dead - prune it
+      git -C "$rigrepo" worktree list 2>/dev/null
+      echo "Dead dog worktree: $DOG/$(basename "$rigrepo") (session dead)"
+      # Use git worktree remove to clean up properly
+      MAIN_REPO=$(git -C "$rigrepo" rev-parse --git-common-dir 2>/dev/null)
+      if [ -n "$MAIN_REPO" ]; then
+        git worktree remove --force "$rigrepo" 2>/dev/null && \
+          echo "Pruned worktree: $rigrepo"
+      fi
+    done
+  fi
+done
+```
+
+**5. Report**
+
+Log counts of cleaned items. If any items were cleaned, include counts in a
+brief summary for the patrol digest:
+
+```
+Test pollution cleanup: rogue_dolt=N stale_dirs=N stale_pids=N dead_worktrees=N
+```
+
+If all counts are 0, log "Test pollution cleanup: clean" and move on.
+
+**Safety:**
+- NEVER kill the shared dolt server (port 3307)
+- NEVER remove dirs where lsof shows active file handles
+- NEVER remove PID files where the PID is still alive
+- NEVER prune worktrees for dogs with live tmux sessions
+
+**Exit criteria:** All dead-process pollution cleaned and counts logged."""
 
 [[steps]]
 id = "gate-evaluation"
@@ -337,7 +444,7 @@ Keep notifications brief and actionable. The recipient can run bd show for detai
 [[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["orphan-process-cleanup", "dispatch-gated-molecules", "fire-notifications"]
+needs = ["orphan-process-cleanup", "test-pollution-cleanup", "dispatch-gated-molecules", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 

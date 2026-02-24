@@ -19,22 +19,24 @@ const (
 
 // Dog represents a Deacon helper worker.
 type Dog struct {
-	Name       string            // Dog name (e.g., "alpha")
-	State      State             // Current state
-	Path       string            // Path to kennel dir (~/gt/deacon/dogs/<name>)
-	Worktrees  map[string]string // Rig name -> worktree path
-	LastActive time.Time         // Last activity timestamp
-	Work       string            // Current work assignment (bead ID or molecule)
-	CreatedAt  time.Time         // When dog was added to kennel
+	Name          string            // Dog name (e.g., "alpha")
+	State         State             // Current state
+	Path          string            // Path to kennel dir (~/gt/deacon/dogs/<name>)
+	Worktrees     map[string]string // Rig name -> worktree path
+	LastActive    time.Time         // Last activity timestamp
+	Work          string            // Current work assignment (bead ID or molecule)
+	WorkStartedAt time.Time         // When current work was assigned
+	CreatedAt     time.Time         // When dog was added to kennel
 }
 
 // DogState is the persistent state stored in .dog.json.
 type DogState struct {
-	Name       string            `json:"name"`
-	State      State             `json:"state"`
-	LastActive time.Time         `json:"last_active"`
-	Work       string            `json:"work,omitempty"`       // Current work assignment
-	Worktrees  map[string]string `json:"worktrees,omitempty"`  // Rig -> path (for verification)
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	Name          string            `json:"name"`
+	State         State             `json:"state"`
+	LastActive    time.Time         `json:"last_active"`
+	Work          string            `json:"work,omitempty"`            // Current work assignment
+	WorkStartedAt time.Time         `json:"work_started_at,omitempty"` // When work was assigned
+	Worktrees     map[string]string `json:"worktrees,omitempty"`       // Rig -> path (for verification)
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
