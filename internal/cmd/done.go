@@ -645,7 +645,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				// Mail dispatcher with READY_FOR_REVIEW
 				if dispatcher := attachmentFields.DispatchedBy; dispatcher != "" {
 					townRouter := mail.NewRouter(townRoot)
-					defer townRouter.WaitPendingNotifications()
+					// Wait explicitly - goto below would skip defer
 					reviewMsg := &mail.Message{
 						To:      dispatcher,
 						From:    detectSender(),
@@ -657,8 +657,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 					} else {
 						fmt.Printf("%s Dispatcher notified: READY_FOR_REVIEW\n", style.Bold.Render("✓"))
 					}
+					// Wait for READY_FOR_REVIEW notification before goto
+					townRouter.WaitPendingNotifications()
 				}
-
 				// Skip MR creation, go to witness notification
 				goto notifyWitness
 			}
@@ -848,7 +849,9 @@ notifyWitness:
 	// Notify Witness about completion
 	// Use town-level beads for cross-agent mail
 	townRouter := mail.NewRouter(townRoot)
-	defer townRouter.WaitPendingNotifications()
+	// Wait for all pending notifications to complete BEFORE killing the session.
+	// Using defer here would be too late - selfKillSession terminates the process
+	// immediately, skipping deferred functions. Call explicitly instead.
 	witnessAddr := fmt.Sprintf("%s/witness", rigName)
 
 	// Build notification body
@@ -928,6 +931,12 @@ notifyWitness:
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+
+	// CRITICAL: Wait for all async mail notifications to complete BEFORE killing
+	// the session. The selfKillSession call below terminates the process immediately,
+	// which would skip any deferred functions. This ensures POLECAT_DONE and WORK_DONE
+	// notifications are actually delivered to the witness.
+	townRouter.WaitPendingNotifications()
 
 	// Persistent polecat model (gt-4ac): polecats keep their sandbox after completion.
 	// Session is killed but worktree is preserved for reuse by future gt sling.
