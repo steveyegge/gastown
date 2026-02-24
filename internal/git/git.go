@@ -108,7 +108,7 @@ func (g *Git) run(args ...string) (string, error) {
 }
 
 // runWithEnv executes a git command with additional environment variables.
-func (g *Git) runWithEnv(args []string, extraEnv []string) (string, error) {
+func (g *Git) runWithEnv(args []string, extraEnv []string) (_ string, _ error) { //nolint:unparam // string return kept for consistency with Run()
 	if g.gitDir != "" {
 		args = append([]string{"--git-dir=" + g.gitDir}, args...)
 	}

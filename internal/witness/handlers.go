@@ -162,7 +162,7 @@ func notifyRefineryMergeReady(workDir, rigName string, payload *PolecatDonePaylo
 
 // handlePolecatDoneNoMR handles a POLECAT_DONE with no pending MR.
 // Tries auto-nuke; falls back to creating a cleanup wisp for manual intervention.
-func handlePolecatDoneNoMR(workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
+func handlePolecatDoneNoMR(_, _ string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
 	// Persistent polecat model (gt-4ac): polecats go idle after completion, no nuke.
 	// The polecat has already set its own state to "idle" in gt done.
 	// We just acknowledge the completion here.
@@ -301,7 +301,7 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 // Persistent model (gt-4ac): polecats go idle after merge, sandbox preserved.
 // ZFC #10: still warns about dirty state (uncommitted/stash/unpushed) since
 // that indicates the polecat may have started new work after the MR.
-func handleMergedCleanupStatus(workDir, rigName, polecatName, cleanupStatus, wispID string, result *HandlerResult) {
+func handleMergedCleanupStatus(_, _, polecatName, cleanupStatus, wispID string, result *HandlerResult) {
 	result.Handled = true
 	result.WispCreated = wispID
 
