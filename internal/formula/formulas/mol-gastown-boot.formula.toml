@@ -64,16 +64,6 @@ title = "Ensure deacon"
 
 [[steps]]
 description = """
-Parallel container: Start all rig witnesses.
-
-Children execute in parallel. Container completes when all children complete."""
-id = "ensure-witnesses"
-needs = ["ensure-deacon"]
-title = "Ensure witnesses"
-type = "parallel"
-
-[[steps.children]]
-description = """
 Start the gastown rig Witness.
 
 ## Action
@@ -84,11 +74,15 @@ gt witness start gastown
 ## Verify
 1. Session exists: `tmux has-session -t gastown-witness 2>/dev/null`
 2. Not stalled: `gt peek gastown/witness` does NOT show \"> Try\" prompt
-3. Heartbeat fresh: Last patrol cycle < 5 min ago"""
+3. Heartbeat fresh: Last patrol cycle < 5 min ago
+
+**Parallelism**: This step can run in parallel with ensure-beads-witness."""
 id = "ensure-gastown-witness"
+needs = ["ensure-deacon"]
+parallel = true
 title = "Ensure gastown witness"
 
-[[steps.children]]
+[[steps]]
 description = """
 Start the beads rig Witness.
 
@@ -100,21 +94,15 @@ gt witness start beads
 ## Verify
 1. Session exists: `tmux has-session -t beads-witness 2>/dev/null`
 2. Not stalled: `gt peek beads/witness` does NOT show \"> Try\" prompt
-3. Heartbeat fresh: Last patrol cycle < 5 min ago"""
+3. Heartbeat fresh: Last patrol cycle < 5 min ago
+
+**Parallelism**: This step can run in parallel with ensure-gastown-witness."""
 id = "ensure-beads-witness"
+needs = ["ensure-deacon"]
+parallel = true
 title = "Ensure beads witness"
 
 [[steps]]
-description = """
-Parallel container: Start all rig refineries.
-
-Children execute in parallel. Container completes when all children complete."""
-id = "ensure-refineries"
-needs = ["ensure-deacon"]
-title = "Ensure refineries"
-type = "parallel"
-
-[[steps.children]]
 description = """
 Start the gastown rig Refinery.
 
@@ -126,11 +114,15 @@ gt refinery start gastown
 ## Verify
 1. Session exists: `tmux has-session -t gastown-refinery 2>/dev/null`
 2. Not stalled: `gt peek gastown/refinery` does NOT show \"> Try\" prompt
-3. Queue processing: Refinery can receive merge requests"""
+3. Queue processing: Refinery can receive merge requests
+
+**Parallelism**: This step can run in parallel with ensure-beads-refinery."""
 id = "ensure-gastown-refinery"
+needs = ["ensure-deacon"]
+parallel = true
 title = "Ensure gastown refinery"
 
-[[steps.children]]
+[[steps]]
 description = """
 Start the beads rig Refinery.
 
@@ -142,8 +134,12 @@ gt refinery start beads
 ## Verify
 1. Session exists: `tmux has-session -t beads-refinery 2>/dev/null`
 2. Not stalled: `gt peek beads/refinery` does NOT show \"> Try\" prompt
-3. Queue processing: Refinery can receive merge requests"""
+3. Queue processing: Refinery can receive merge requests
+
+**Parallelism**: This step can run in parallel with ensure-gastown-refinery."""
 id = "ensure-beads-refinery"
+needs = ["ensure-deacon"]
+parallel = true
 title = "Ensure beads refinery"
 
 [[steps]]
@@ -165,5 +161,5 @@ gt status
 Log degraded state but consider boot complete. Some agents may need manual recovery.
 Run `gt doctor` for detailed diagnostics."""
 id = "verify-town-health"
-needs = ["ensure-witnesses", "ensure-refineries"]
+needs = ["ensure-gastown-witness", "ensure-beads-witness", "ensure-gastown-refinery", "ensure-beads-refinery"]
 title = "Verify town health"
