@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-e2e-container check-up-to-date
+.PHONY: build install clean test test-e2e-container check-up-to-date docs check-docs
 
 BINARY := gt
 BUILD_DIR := .
@@ -79,3 +79,21 @@ test:
 test-e2e-container:
 	docker build -f Dockerfile.e2e -t gastown-test .
 	docker run --rm gastown-test
+
+# Generate CLI documentation
+docs:
+	./gt docgen
+
+# Check that CLI docs are up-to-date
+check-docs: build
+	@TMP_DIR=$$(mktemp -d); \
+	./gt docgen -o "$$TMP_DIR"; \
+	if ! diff -r docs/cli "$$TMP_DIR" > /dev/null 2>&1; then \
+		echo "ERROR: CLI documentation is out of date"; \
+		echo "Run 'make docs' to regenerate"; \
+		diff -r docs/cli "$$TMP_DIR" | head -20; \
+		rm -rf "$$TMP_DIR"; \
+		exit 1; \
+	fi; \
+	rm -rf "$$TMP_DIR"; \
+	echo "CLI documentation is up to date"
