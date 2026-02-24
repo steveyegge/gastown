@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT LOG"
+title: "GT LOG"
 ---
 
 ## gt log

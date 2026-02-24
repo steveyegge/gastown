@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON STOP"
+title: "GT DEACON STOP"
 ---
 
 ## gt deacon stop

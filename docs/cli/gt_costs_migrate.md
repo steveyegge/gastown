@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT COSTS MIGRATE"
+title: "GT COSTS MIGRATE"
 ---
 
 ## gt costs migrate

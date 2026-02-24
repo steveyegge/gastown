@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG GET"
+title: "GT CONFIG GET"
 ---
 
 ## gt config get

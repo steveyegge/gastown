@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BOOT SPAWN"
+title: "GT BOOT SPAWN"
 ---
 
 ## gt boot spawn

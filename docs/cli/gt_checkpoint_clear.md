@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CHECKPOINT CLEAR"
+title: "GT CHECKPOINT CLEAR"
 ---
 
 ## gt checkpoint clear

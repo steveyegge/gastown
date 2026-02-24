@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WORKTREE REMOVE"
+title: "GT WORKTREE REMOVE"
 ---
 
 ## gt worktree remove

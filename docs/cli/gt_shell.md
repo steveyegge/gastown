@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHELL"
+title: "GT SHELL"
 ---
 
 ## gt shell

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON HEARTBEAT"
+title: "GT DEACON HEARTBEAT"
 ---
 
 ## gt deacon heartbeat

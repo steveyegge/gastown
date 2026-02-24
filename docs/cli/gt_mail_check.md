@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHECK"
+title: "GT MAIL CHECK"
 ---
 
 ## gt mail check

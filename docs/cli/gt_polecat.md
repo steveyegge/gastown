@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT"
+title: "GT POLECAT"
 ---
 
 ## gt polecat

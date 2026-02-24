@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON RESTART"
+title: "GT DEACON RESTART"
 ---
 
 ## gt deacon restart

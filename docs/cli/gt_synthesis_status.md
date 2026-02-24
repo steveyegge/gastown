@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SYNTHESIS STATUS"
+title: "GT SYNTHESIS STATUS"
 ---
 
 ## gt synthesis status

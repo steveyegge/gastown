@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY RELEASE"
+title: "GT REFINERY RELEASE"
 ---
 
 ## gt refinery release

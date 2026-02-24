@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BOOT STATUS"
+title: "GT BOOT STATUS"
 ---
 
 ## gt boot status

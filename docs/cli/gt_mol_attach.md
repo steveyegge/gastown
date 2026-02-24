@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL ATTACH"
+title: "GT MOL ATTACH"
 ---
 
 ## gt mol attach

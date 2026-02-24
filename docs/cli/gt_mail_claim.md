@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CLAIM"
+title: "GT MAIL CLAIM"
 ---
 
 ## gt mail claim

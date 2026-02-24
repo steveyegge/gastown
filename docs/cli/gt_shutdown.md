@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHUTDOWN"
+title: "GT SHUTDOWN"
 ---
 
 ## gt shutdown

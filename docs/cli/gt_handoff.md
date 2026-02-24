@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HANDOFF"
+title: "GT HANDOFF"
 ---
 
 ## gt handoff

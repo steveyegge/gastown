@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL SYNC"
+title: "GT WL SYNC"
 ---
 
 ## gt wl sync

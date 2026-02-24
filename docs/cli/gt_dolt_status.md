@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT STATUS"
+title: "GT DOLT STATUS"
 ---
 
 ## gt dolt status

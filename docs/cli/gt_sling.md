@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SLING"
+title: "GT SLING"
 ---
 
 ## gt sling
@@ -85,6 +85,15 @@ Batch Slinging:
   When multiple beads are provided with a rig target, each bead gets its own
   polecat. This parallelizes work dispatch without running gt sling N times.
   Use --max-concurrent to throttle spawn rate and prevent Dolt server overload.
+
+Examples:
+  gt sling gt-abc gastown                    # Sling to gastown rig
+  gt sling gt-abc crew                       # Sling to crew (current rig)
+  gt sling gt-abc mayor                      # Sling to mayor
+  gt sling gt-abc greenplace --create        # Auto-spawn polecat
+  gt sling mol-release mayor/                # Sling formula
+  gt sling gt-abc gt-def gastown             # Batch sling
+  gt sling gt-abc --args "security review"   # With instructions
 
 ```
 gt sling <bead-or-formula> [target] [flags]

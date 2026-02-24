@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL SEND"
+title: "GT MAIL SEND"
 ---
 
 ## gt mail send

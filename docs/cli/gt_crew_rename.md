@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW RENAME"
+title: "GT CREW RENAME"
 ---
 
 ## gt crew rename

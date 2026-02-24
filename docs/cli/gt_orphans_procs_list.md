@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ORPHANS PROCS LIST"
+title: "GT ORPHANS PROCS LIST"
 ---
 
 ## gt orphans procs list

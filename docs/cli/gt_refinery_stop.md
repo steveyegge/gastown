@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY STOP"
+title: "GT REFINERY STOP"
 ---
 
 ## gt refinery stop

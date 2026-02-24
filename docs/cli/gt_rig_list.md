@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG LIST"
+title: "GT RIG LIST"
 ---
 
 ## gt rig list

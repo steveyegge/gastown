@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY CREATE"
+title: "GT CONVOY CREATE"
 ---
 
 ## gt convoy create

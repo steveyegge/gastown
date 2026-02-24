@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL THREAD"
+title: "GT MAIL THREAD"
 ---
 
 ## gt mail thread

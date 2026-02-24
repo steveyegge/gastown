@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY STATUS"
+title: "GT REFINERY STATUS"
 ---
 
 ## gt refinery status

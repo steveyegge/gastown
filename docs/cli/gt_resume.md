@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RESUME"
+title: "GT RESUME"
 ---
 
 ## gt resume

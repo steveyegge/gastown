@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CLOSE"
+title: "GT CLOSE"
 ---
 
 ## gt close

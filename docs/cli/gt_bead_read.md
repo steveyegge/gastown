@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BEAD READ"
+title: "GT BEAD READ"
 ---
 
 ## gt bead read

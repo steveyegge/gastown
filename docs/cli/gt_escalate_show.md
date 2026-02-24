@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ESCALATE SHOW"
+title: "GT ESCALATE SHOW"
 ---
 
 ## gt escalate show

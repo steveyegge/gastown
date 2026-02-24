@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BROADCAST"
+title: "GT BROADCAST"
 ---
 
 ## gt broadcast

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT FIX-METADATA"
+title: "GT DOLT FIX-METADATA"
 ---
 
 ## gt dolt fix-metadata

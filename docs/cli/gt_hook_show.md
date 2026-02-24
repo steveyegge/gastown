@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOK SHOW"
+title: "GT HOOK SHOW"
 ---
 
 ## gt hook show

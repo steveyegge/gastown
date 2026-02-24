@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS OVERRIDE"
+title: "GT HOOKS OVERRIDE"
 ---
 
 ## gt hooks override

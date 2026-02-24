@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL BURN"
+title: "GT MOL BURN"
 ---
 
 ## gt mol burn

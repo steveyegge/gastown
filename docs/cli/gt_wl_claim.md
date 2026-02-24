@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL CLAIM"
+title: "GT WL CLAIM"
 ---
 
 ## gt wl claim

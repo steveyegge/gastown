@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BEAD MOVE"
+title: "GT BEAD MOVE"
 ---
 
 ## gt bead move

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON FEED-STRANDED"
+title: "GT DEACON FEED-STRANDED"
 ---
 
 ## gt deacon feed-stranded

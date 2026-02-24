@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT RECOVER"
+title: "GT DOLT RECOVER"
 ---
 
 ## gt dolt recover

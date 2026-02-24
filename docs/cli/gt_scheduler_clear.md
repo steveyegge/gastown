@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SCHEDULER CLEAR"
+title: "GT SCHEDULER CLEAR"
 ---
 
 ## gt scheduler clear
@@ -12,6 +12,10 @@ Remove beads from the scheduler by closing sling context beads.
 
 Without --bead, removes ALL beads from the scheduler.
 With --bead, removes only the specified bead.
+
+Examples:
+  gt scheduler clear              # Remove all beads from scheduler
+  gt scheduler clear --bead gt-abc  # Remove specific bead
 
 ```
 gt scheduler clear [flags]

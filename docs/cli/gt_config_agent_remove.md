@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG AGENT REMOVE"
+title: "GT CONFIG AGENT REMOVE"
 ---
 
 ## gt config agent remove

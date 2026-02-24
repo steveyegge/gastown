@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BOOT TRIAGE"
+title: "GT BOOT TRIAGE"
 ---
 
 ## gt boot triage

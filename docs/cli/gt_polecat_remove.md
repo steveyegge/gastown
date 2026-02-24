@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT REMOVE"
+title: "GT POLECAT REMOVE"
 ---
 
 ## gt polecat remove

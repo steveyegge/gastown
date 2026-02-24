@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ORPHANS"
+title: "GT ORPHANS"
 ---
 
 ## gt orphans

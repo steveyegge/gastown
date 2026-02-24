@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION CAPTURE"
+title: "GT SESSION CAPTURE"
 ---
 
 ## gt session capture

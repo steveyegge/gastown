@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DASHBOARD"
+title: "GT DASHBOARD"
 ---
 
 ## gt dashboard

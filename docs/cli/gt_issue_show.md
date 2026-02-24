@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ISSUE SHOW"
+title: "GT ISSUE SHOW"
 ---
 
 ## gt issue show

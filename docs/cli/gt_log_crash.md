@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT LOG CRASH"
+title: "GT LOG CRASH"
 ---
 
 ## gt log crash

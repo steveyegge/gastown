@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TAP"
+title: "GT TAP"
 ---
 
 ## gt tap

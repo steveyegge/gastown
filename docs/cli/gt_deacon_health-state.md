@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON HEALTH-STATE"
+title: "GT DEACON HEALTH-STATE"
 ---
 
 ## gt deacon health-state

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON CLEANUP-ORPHANS"
+title: "GT DEACON CLEANUP-ORPHANS"
 ---
 
 ## gt deacon cleanup-orphans

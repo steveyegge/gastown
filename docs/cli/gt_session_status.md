@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION STATUS"
+title: "GT SESSION STATUS"
 ---
 
 ## gt session status

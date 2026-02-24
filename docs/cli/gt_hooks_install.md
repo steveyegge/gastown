@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS INSTALL"
+title: "GT HOOKS INSTALL"
 ---
 
 ## gt hooks install

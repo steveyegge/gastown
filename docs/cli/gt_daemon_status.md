@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DAEMON STATUS"
+title: "GT DAEMON STATUS"
 ---
 
 ## gt daemon status

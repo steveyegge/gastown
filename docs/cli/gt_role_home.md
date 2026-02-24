@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ROLE HOME"
+title: "GT ROLE HOME"
 ---
 
 ## gt role home

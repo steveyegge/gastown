@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW LIST"
+title: "GT CREW LIST"
 ---
 
 ## gt crew list

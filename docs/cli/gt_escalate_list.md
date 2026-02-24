@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ESCALATE LIST"
+title: "GT ESCALATE LIST"
 ---
 
 ## gt escalate list

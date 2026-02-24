@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT"
+title: "GT"
 ---
 
 ## gt
@@ -35,6 +35,7 @@ across distributed teams of AI agents working on shared codebases.
 * [gt close](../cli/gt_close/)	 - Close one or more beads
 * [gt commit](../cli/gt_commit/)	 - Git commit with automatic agent identity
 * [gt compact](../cli/gt_compact/)	 - Compact expired wisps (TTL-based cleanup)
+* [gt completion](../cli/gt_completion/)	 - Generate the autocompletion script for the specified shell
 * [gt config](../cli/gt_config/)	 - Manage Gas Town configuration
 * [gt convoy](../cli/gt_convoy/)	 - Track batches of work across rigs
 * [gt costs](../cli/gt_costs/)	 - Show costs for running Claude sessions
@@ -45,6 +46,7 @@ across distributed teams of AI agents working on shared codebases.
 * [gt deacon](../cli/gt_deacon/)	 - Manage the Deacon (town-level watchdog)
 * [gt disable](../cli/gt_disable/)	 - Disable Gas Town system-wide
 * [gt dnd](../cli/gt_dnd/)	 - Toggle Do Not Disturb mode for notifications
+* [gt docgen](../cli/gt_docgen/)	 - Generate Markdown documentation for gt CLI commands
 * [gt doctor](../cli/gt_doctor/)	 - Run health checks on the workspace
 * [gt dog](../cli/gt_dog/)	 - Manage dogs (cross-rig infrastructure workers)
 * [gt dolt](../cli/gt_dolt/)	 - Manage the Dolt SQL server

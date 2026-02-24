@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT FORMULA SHOW"
+title: "GT FORMULA SHOW"
 ---
 
 ## gt formula show

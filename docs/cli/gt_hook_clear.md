@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOK CLEAR"
+title: "GT HOOK CLEAR"
 ---
 
 ## gt hook clear

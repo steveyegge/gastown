@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT LIST"
+title: "GT DOLT LIST"
 ---
 
 ## gt dolt list

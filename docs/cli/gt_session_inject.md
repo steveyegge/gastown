@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION INJECT"
+title: "GT SESSION INJECT"
 ---
 
 ## gt session inject

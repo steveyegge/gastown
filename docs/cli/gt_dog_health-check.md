@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG HEALTH-CHECK"
+title: "GT DOG HEALTH-CHECK"
 ---
 
 ## gt dog health-check

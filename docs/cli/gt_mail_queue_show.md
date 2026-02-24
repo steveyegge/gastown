@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL QUEUE SHOW"
+title: "GT MAIL QUEUE SHOW"
 ---
 
 ## gt mail queue show

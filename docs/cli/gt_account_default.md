@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACCOUNT DEFAULT"
+title: "GT ACCOUNT DEFAULT"
 ---
 
 ## gt account default

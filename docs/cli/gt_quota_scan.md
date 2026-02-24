@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT QUOTA SCAN"
+title: "GT QUOTA SCAN"
 ---
 
 ## gt quota scan

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON ATTACH"
+title: "GT DEACON ATTACH"
 ---
 
 ## gt deacon attach

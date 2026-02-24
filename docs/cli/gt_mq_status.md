@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ STATUS"
+title: "GT MQ STATUS"
 ---
 
 ## gt mq status

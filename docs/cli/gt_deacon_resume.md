@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON RESUME"
+title: "GT DEACON RESUME"
 ---
 
 ## gt deacon resume

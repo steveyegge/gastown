@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHANNEL SHOW"
+title: "GT MAIL CHANNEL SHOW"
 ---
 
 ## gt mail channel show

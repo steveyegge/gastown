@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHANNEL UNSUBSCRIBE"
+title: "GT MAIL CHANNEL UNSUBSCRIBE"
 ---
 
 ## gt mail channel unsubscribe

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG AGENT SET"
+title: "GT CONFIG AGENT SET"
 ---
 
 ## gt config agent set

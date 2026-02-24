@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW START"
+title: "GT CREW START"
 ---
 
 ## gt crew start

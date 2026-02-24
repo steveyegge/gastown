@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CHECKPOINT READ"
+title: "GT CHECKPOINT READ"
 ---
 
 ## gt checkpoint read

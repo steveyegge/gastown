@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SYNTHESIS START"
+title: "GT SYNTHESIS START"
 ---
 
 ## gt synthesis start

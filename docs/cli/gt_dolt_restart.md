@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT RESTART"
+title: "GT DOLT RESTART"
 ---
 
 ## gt dolt restart

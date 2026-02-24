@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG DOCK"
+title: "GT RIG DOCK"
 ---
 
 ## gt rig dock

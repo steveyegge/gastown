@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL READ"
+title: "GT MAIL READ"
 ---
 
 ## gt mail read

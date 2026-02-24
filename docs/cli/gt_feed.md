@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT FEED"
+title: "GT FEED"
 ---
 
 ## gt feed

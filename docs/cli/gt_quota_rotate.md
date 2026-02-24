@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT QUOTA ROTATE"
+title: "GT QUOTA ROTATE"
 ---
 
 ## gt quota rotate

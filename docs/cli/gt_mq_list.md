@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ LIST"
+title: "GT MQ LIST"
 ---
 
 ## gt mq list

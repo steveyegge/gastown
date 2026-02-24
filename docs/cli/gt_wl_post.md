@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL POST"
+title: "GT WL POST"
 ---
 
 ## gt wl post

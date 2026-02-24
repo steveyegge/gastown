@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL MARK-UNREAD"
+title: "GT MAIL MARK-UNREAD"
 ---
 
 ## gt mail mark-unread

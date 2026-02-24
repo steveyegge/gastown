@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC CONFIG RESET"
+title: "GT KRC CONFIG RESET"
 ---
 
 ## gt krc config reset

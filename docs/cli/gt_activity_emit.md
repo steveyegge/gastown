@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACTIVITY EMIT"
+title: "GT ACTIVITY EMIT"
 ---
 
 ## gt activity emit

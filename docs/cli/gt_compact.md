@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT COMPACT"
+title: "GT COMPACT"
 ---
 
 ## gt compact

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL"
+title: "GT WL"
 ---
 
 ## gt wl

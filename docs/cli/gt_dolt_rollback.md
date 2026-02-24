@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT ROLLBACK"
+title: "GT DOLT ROLLBACK"
 ---
 
 ## gt dolt rollback

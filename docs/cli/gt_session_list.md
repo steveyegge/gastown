@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION LIST"
+title: "GT SESSION LIST"
 ---
 
 ## gt session list

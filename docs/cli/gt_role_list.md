@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ROLE LIST"
+title: "GT ROLE LIST"
 ---
 
 ## gt role list

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOK DETACH"
+title: "GT HOOK DETACH"
 ---
 
 ## gt hook detach

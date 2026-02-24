@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG SETTINGS SHOW"
+title: "GT RIG SETTINGS SHOW"
 ---
 
 ## gt rig settings show

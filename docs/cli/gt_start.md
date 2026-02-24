@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT START"
+title: "GT START"
 ---
 
 ## gt start

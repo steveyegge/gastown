@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ REJECT"
+title: "GT MQ REJECT"
 ---
 
 ## gt mq reject

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TRAIL COMMITS"
+title: "GT TRAIL COMMITS"
 ---
 
 ## gt trail commits

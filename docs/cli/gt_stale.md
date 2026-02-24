@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT STALE"
+title: "GT STALE"
 ---
 
 ## gt stale

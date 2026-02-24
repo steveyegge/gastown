@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT IDENTITY REMOVE"
+title: "GT POLECAT IDENTITY REMOVE"
 ---
 
 ## gt polecat identity remove

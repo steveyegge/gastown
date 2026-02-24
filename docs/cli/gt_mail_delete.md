@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL DELETE"
+title: "GT MAIL DELETE"
 ---
 
 ## gt mail delete

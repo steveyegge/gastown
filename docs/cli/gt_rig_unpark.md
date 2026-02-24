@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG UNPARK"
+title: "GT RIG UNPARK"
 ---
 
 ## gt rig unpark

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOCTOR"
+title: "GT DOCTOR"
 ---
 
 ## gt doctor

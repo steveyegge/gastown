@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL GROUP SHOW"
+title: "GT MAIL GROUP SHOW"
 ---
 
 ## gt mail group show

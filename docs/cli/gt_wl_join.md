@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL JOIN"
+title: "GT WL JOIN"
 ---
 
 ## gt wl join

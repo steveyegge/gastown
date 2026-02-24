@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL PROGRESS"
+title: "GT MOL PROGRESS"
 ---
 
 ## gt mol progress

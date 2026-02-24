@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SIGNAL"
+title: "GT SIGNAL"
 ---
 
 ## gt signal

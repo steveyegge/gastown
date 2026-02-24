@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ NEXT"
+title: "GT MQ NEXT"
 ---
 
 ## gt mq next

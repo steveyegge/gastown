@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL CURRENT"
+title: "GT MOL CURRENT"
 ---
 
 ## gt mol current

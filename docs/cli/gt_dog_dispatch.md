@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG DISPATCH"
+title: "GT DOG DISPATCH"
 ---
 
 ## gt dog dispatch

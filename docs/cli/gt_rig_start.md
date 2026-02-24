@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG START"
+title: "GT RIG START"
 ---
 
 ## gt rig start

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION CHECK"
+title: "GT SESSION CHECK"
 ---
 
 ## gt session check

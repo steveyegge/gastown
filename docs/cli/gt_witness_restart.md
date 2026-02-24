@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WITNESS RESTART"
+title: "GT WITNESS RESTART"
 ---
 
 ## gt witness restart

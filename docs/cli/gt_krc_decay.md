@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC DECAY"
+title: "GT KRC DECAY"
 ---
 
 ## gt krc decay

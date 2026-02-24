@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG STATUS"
+title: "GT DOG STATUS"
 ---
 
 ## gt dog status

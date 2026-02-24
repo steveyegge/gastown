@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT COSTS RECORD"
+title: "GT COSTS RECORD"
 ---
 
 ## gt costs record

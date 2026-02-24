@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WITNESS START"
+title: "GT WITNESS START"
 ---
 
 ## gt witness start

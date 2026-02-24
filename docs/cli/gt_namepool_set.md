@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT NAMEPOOL SET"
+title: "GT NAMEPOOL SET"
 ---
 
 ## gt namepool set

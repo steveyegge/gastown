@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACCOUNT LIST"
+title: "GT ACCOUNT LIST"
 ---
 
 ## gt account list

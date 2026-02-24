@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL HOOK"
+title: "GT MAIL HOOK"
 ---
 
 ## gt mail hook

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY CLOSE"
+title: "GT CONVOY CLOSE"
 ---
 
 ## gt convoy close

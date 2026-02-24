@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY STAGE"
+title: "GT CONVOY STAGE"
 ---
 
 ## gt convoy stage
@@ -16,6 +16,11 @@ Three input forms:
   gt convoy stage <convoy-id>         Re-analyze an existing convoy's tracked beads
 
 The staged convoy can later be launched with 'gt convoy launch'.
+
+Examples:
+  gt convoy stage hq-epic-abc         # Stage from epic
+  gt convoy stage gt-task1 gt-task2   # Stage specific tasks
+  gt convoy stage hq-cv-staged        # Re-stage existing convoy
 
 ```
 gt convoy stage <epic-id | task-id... | convoy-id> [flags]

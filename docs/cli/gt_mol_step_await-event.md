@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL STEP AWAIT-EVENT"
+title: "GT MOL STEP AWAIT-EVENT"
 ---
 
 ## gt mol step await-event

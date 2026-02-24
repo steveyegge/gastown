@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL STEP EMIT-EVENT"
+title: "GT MOL STEP EMIT-EVENT"
 ---
 
 ## gt mol step emit-event

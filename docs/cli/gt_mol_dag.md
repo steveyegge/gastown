@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL DAG"
+title: "GT MOL DAG"
 ---
 
 ## gt mol dag

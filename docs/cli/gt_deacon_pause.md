@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON PAUSE"
+title: "GT DEACON PAUSE"
 ---
 
 ## gt deacon pause

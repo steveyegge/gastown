@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT READY"
+title: "GT READY"
 ---
 
 ## gt ready

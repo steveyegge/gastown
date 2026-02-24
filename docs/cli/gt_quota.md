@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT QUOTA"
+title: "GT QUOTA"
 ---
 
 ## gt quota

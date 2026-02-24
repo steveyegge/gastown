@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PATROL DIGEST"
+title: "GT PATROL DIGEST"
 ---
 
 ## gt patrol digest

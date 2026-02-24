@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHANNEL DELETE"
+title: "GT MAIL CHANNEL DELETE"
 ---
 
 ## gt mail channel delete

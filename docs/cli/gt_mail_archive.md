@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL ARCHIVE"
+title: "GT MAIL ARCHIVE"
 ---
 
 ## gt mail archive

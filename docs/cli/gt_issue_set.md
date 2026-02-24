@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ISSUE SET"
+title: "GT ISSUE SET"
 ---
 
 ## gt issue set

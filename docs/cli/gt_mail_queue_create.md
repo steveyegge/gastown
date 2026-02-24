@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL QUEUE CREATE"
+title: "GT MAIL QUEUE CREATE"
 ---
 
 ## gt mail queue create

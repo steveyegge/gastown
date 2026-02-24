@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL SQUASH"
+title: "GT MOL SQUASH"
 ---
 
 ## gt mol squash

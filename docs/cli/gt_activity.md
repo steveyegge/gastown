@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACTIVITY"
+title: "GT ACTIVITY"
 ---
 
 ## gt activity

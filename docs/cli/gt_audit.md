@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AUDIT"
+title: "GT AUDIT"
 ---
 
 ## gt audit

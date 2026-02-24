@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL STEP AWAIT-SIGNAL"
+title: "GT MOL STEP AWAIT-SIGNAL"
 ---
 
 ## gt mol step await-signal

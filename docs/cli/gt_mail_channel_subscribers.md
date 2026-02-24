@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHANNEL SUBSCRIBERS"
+title: "GT MAIL CHANNEL SUBSCRIBERS"
 ---
 
 ## gt mail channel subscribers

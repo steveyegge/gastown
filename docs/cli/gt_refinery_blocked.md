@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY BLOCKED"
+title: "GT REFINERY BLOCKED"
 ---
 
 ## gt refinery blocked

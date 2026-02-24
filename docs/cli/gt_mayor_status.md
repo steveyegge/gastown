@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAYOR STATUS"
+title: "GT MAYOR STATUS"
 ---
 
 ## gt mayor status

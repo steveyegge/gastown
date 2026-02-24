@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TAP GUARD"
+title: "GT TAP GUARD"
 ---
 
 ## gt tap guard

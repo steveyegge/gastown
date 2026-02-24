@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL REPLY"
+title: "GT MAIL REPLY"
 ---
 
 ## gt mail reply

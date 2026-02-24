@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG DEFAULT-AGENT"
+title: "GT CONFIG DEFAULT-AGENT"
 ---
 
 ## gt config default-agent

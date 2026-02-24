@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DAEMON START"
+title: "GT DAEMON START"
 ---
 
 ## gt daemon start

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG SET"
+title: "GT CONFIG SET"
 ---
 
 ## gt config set

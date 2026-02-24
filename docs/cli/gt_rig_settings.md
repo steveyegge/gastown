@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG SETTINGS"
+title: "GT RIG SETTINGS"
 ---
 
 ## gt rig settings

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CAT"
+title: "GT CAT"
 ---
 
 ## gt cat

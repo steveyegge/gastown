@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT GIT-STATE"
+title: "GT POLECAT GIT-STATE"
 ---
 
 ## gt polecat git-state

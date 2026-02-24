@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG UNDOCK"
+title: "GT RIG UNDOCK"
 ---
 
 ## gt rig undock

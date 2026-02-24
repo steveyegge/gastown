@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL SEARCH"
+title: "GT MAIL SEARCH"
 ---
 
 ## gt mail search

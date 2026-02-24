@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW REMOVE"
+title: "GT CREW REMOVE"
 ---
 
 ## gt crew remove

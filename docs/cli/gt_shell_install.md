@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHELL INSTALL"
+title: "GT SHELL INSTALL"
 ---
 
 ## gt shell install

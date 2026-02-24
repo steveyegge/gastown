@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL GROUP CREATE"
+title: "GT MAIL GROUP CREATE"
 ---
 
 ## gt mail group create

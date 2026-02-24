@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC STATS"
+title: "GT KRC STATS"
 ---
 
 ## gt krc stats

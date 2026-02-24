@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS REGISTRY"
+title: "GT HOOKS REGISTRY"
 ---
 
 ## gt hooks registry

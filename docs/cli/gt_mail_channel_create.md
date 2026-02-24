@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CHANNEL CREATE"
+title: "GT MAIL CHANNEL CREATE"
 ---
 
 ## gt mail channel create

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY CLAIM"
+title: "GT REFINERY CLAIM"
 ---
 
 ## gt refinery claim

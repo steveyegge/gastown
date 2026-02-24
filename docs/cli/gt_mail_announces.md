@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL ANNOUNCES"
+title: "GT MAIL ANNOUNCES"
 ---
 
 ## gt mail announces

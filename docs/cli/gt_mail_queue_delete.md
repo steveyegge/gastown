@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL QUEUE DELETE"
+title: "GT MAIL QUEUE DELETE"
 ---
 
 ## gt mail queue delete

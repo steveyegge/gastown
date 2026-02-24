@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PRIME"
+title: "GT PRIME"
 ---
 
 ## gt prime

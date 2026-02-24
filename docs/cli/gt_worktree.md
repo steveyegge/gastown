@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WORKTREE"
+title: "GT WORKTREE"
 ---
 
 ## gt worktree

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AGENTS LIST"
+title: "GT AGENTS LIST"
 ---
 
 ## gt agents list

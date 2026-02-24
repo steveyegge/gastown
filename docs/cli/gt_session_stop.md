@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION STOP"
+title: "GT SESSION STOP"
 ---
 
 ## gt session stop

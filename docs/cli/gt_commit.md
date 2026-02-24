@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT COMMIT"
+title: "GT COMMIT"
 ---
 
 ## gt commit

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW PRISTINE"
+title: "GT CREW PRISTINE"
 ---
 
 ## gt crew pristine

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PATROL NEW"
+title: "GT PATROL NEW"
 ---
 
 ## gt patrol new

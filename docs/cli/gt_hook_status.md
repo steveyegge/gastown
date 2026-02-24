@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOK STATUS"
+title: "GT HOOK STATUS"
 ---
 
 ## gt hook status

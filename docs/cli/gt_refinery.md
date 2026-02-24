@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY"
+title: "GT REFINERY"
 ---
 
 ## gt refinery

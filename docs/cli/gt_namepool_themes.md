@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT NAMEPOOL THEMES"
+title: "GT NAMEPOOL THEMES"
 ---
 
 ## gt namepool themes

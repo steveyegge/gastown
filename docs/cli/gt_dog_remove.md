@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG REMOVE"
+title: "GT DOG REMOVE"
 ---
 
 ## gt dog remove

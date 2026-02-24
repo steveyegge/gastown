@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PLUGIN RUN"
+title: "GT PLUGIN RUN"
 ---
 
 ## gt plugin run

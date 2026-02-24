@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON REDISPATCH-STATE"
+title: "GT DEACON REDISPATCH-STATE"
 ---
 
 ## gt deacon redispatch-state

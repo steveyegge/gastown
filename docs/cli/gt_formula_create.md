@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT FORMULA CREATE"
+title: "GT FORMULA CREATE"
 ---
 
 ## gt formula create

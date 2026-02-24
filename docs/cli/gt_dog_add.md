@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG ADD"
+title: "GT DOG ADD"
 ---
 
 ## gt dog add

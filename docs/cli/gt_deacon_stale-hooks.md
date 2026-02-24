@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON STALE-HOOKS"
+title: "GT DEACON STALE-HOOKS"
 ---
 
 ## gt deacon stale-hooks

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT CLEANUP"
+title: "GT DOLT CLEANUP"
 ---
 
 ## gt dolt cleanup

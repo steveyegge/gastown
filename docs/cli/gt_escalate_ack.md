@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ESCALATE ACK"
+title: "GT ESCALATE ACK"
 ---
 
 ## gt escalate ack

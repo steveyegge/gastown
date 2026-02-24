@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DAEMON ENABLE-SUPERVISOR"
+title: "GT DAEMON ENABLE-SUPERVISOR"
 ---
 
 ## gt daemon enable-supervisor

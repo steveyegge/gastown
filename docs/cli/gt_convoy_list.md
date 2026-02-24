@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY LIST"
+title: "GT CONVOY LIST"
 ---
 
 ## gt convoy list

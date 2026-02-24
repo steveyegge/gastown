@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ORPHANS PROCS KILL"
+title: "GT ORPHANS PROCS KILL"
 ---
 
 ## gt orphans procs kill

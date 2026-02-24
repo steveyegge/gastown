@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY UNCLAIMED"
+title: "GT REFINERY UNCLAIMED"
 ---
 
 ## gt refinery unclaimed

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL STATUS"
+title: "GT MOL STATUS"
 ---
 
 ## gt mol status

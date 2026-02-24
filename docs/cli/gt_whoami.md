@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WHOAMI"
+title: "GT WHOAMI"
 ---
 
 ## gt whoami

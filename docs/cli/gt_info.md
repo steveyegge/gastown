@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT INFO"
+title: "GT INFO"
 ---
 
 ## gt info

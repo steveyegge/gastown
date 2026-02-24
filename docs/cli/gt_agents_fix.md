@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AGENTS FIX"
+title: "GT AGENTS FIX"
 ---
 
 ## gt agents fix

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION START"
+title: "GT SESSION START"
 ---
 
 ## gt session start

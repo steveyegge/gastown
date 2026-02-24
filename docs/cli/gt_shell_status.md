@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHELL STATUS"
+title: "GT SHELL STATUS"
 ---
 
 ## gt shell status

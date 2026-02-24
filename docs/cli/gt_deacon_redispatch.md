@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON REDISPATCH"
+title: "GT DEACON REDISPATCH"
 ---
 
 ## gt deacon redispatch

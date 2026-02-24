@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAYOR ATTACH"
+title: "GT MAYOR ATTACH"
 ---
 
 ## gt mayor attach

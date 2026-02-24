@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT NAMEPOOL RESET"
+title: "GT NAMEPOOL RESET"
 ---
 
 ## gt namepool reset

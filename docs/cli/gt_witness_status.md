@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WITNESS STATUS"
+title: "GT WITNESS STATUS"
 ---
 
 ## gt witness status

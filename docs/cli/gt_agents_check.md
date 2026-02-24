@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AGENTS CHECK"
+title: "GT AGENTS CHECK"
 ---
 
 ## gt agents check

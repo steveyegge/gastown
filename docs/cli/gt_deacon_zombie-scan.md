@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON ZOMBIE-SCAN"
+title: "GT DEACON ZOMBIE-SCAN"
 ---
 
 ## gt deacon zombie-scan

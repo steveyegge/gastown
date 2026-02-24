@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT MIGRATE"
+title: "GT DOLT MIGRATE"
 ---
 
 ## gt dolt migrate

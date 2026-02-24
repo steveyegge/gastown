@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WARRANT EXECUTE"
+title: "GT WARRANT EXECUTE"
 ---
 
 ## gt warrant execute

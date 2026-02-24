@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT COSTS DIGEST"
+title: "GT COSTS DIGEST"
 ---
 
 ## gt costs digest

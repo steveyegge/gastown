@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL PEEK"
+title: "GT MAIL PEEK"
 ---
 
 ## gt mail peek

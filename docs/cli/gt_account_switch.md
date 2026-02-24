@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACCOUNT SWITCH"
+title: "GT ACCOUNT SWITCH"
 ---
 
 ## gt account switch

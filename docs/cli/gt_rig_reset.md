@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG RESET"
+title: "GT RIG RESET"
 ---
 
 ## gt rig reset

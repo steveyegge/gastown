@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHELL REMOVE"
+title: "GT SHELL REMOVE"
 ---
 
 ## gt shell remove

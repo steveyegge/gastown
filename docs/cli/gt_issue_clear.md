@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ISSUE CLEAR"
+title: "GT ISSUE CLEAR"
 ---
 
 ## gt issue clear

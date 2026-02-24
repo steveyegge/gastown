@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG CLEAR"
+title: "GT DOG CLEAR"
 ---
 
 ## gt dog clear

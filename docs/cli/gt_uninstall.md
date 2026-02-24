@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT UNINSTALL"
+title: "GT UNINSTALL"
 ---
 
 ## gt uninstall

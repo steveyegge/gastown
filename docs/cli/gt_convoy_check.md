@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY CHECK"
+title: "GT CONVOY CHECK"
 ---
 
 ## gt convoy check

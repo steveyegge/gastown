@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG CONFIG UNSET"
+title: "GT RIG CONFIG UNSET"
 ---
 
 ## gt rig config unset

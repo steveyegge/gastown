@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG REBOOT"
+title: "GT RIG REBOOT"
 ---
 
 ## gt rig reboot

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL CLEAR"
+title: "GT MAIL CLEAR"
 ---
 
 ## gt mail clear

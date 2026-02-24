@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY STRANDED"
+title: "GT CONVOY STRANDED"
 ---
 
 ## gt convoy stranded

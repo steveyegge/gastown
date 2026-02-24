@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW RESTART"
+title: "GT CREW RESTART"
 ---
 
 ## gt crew restart

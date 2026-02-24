@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOWN"
+title: "GT DOWN"
 ---
 
 ## gt down

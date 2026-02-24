@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TRAIL BEADS"
+title: "GT TRAIL BEADS"
 ---
 
 ## gt trail beads

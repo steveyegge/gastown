@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SYNTHESIS CLOSE"
+title: "GT SYNTHESIS CLOSE"
 ---
 
 ## gt synthesis close

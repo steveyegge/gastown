@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON FEED-STRANDED-STATE"
+title: "GT DEACON FEED-STRANDED-STATE"
 ---
 
 ## gt deacon feed-stranded-state

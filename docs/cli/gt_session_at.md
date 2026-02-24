@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION AT"
+title: "GT SESSION AT"
 ---
 
 ## gt session at

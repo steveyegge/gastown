@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT IDENTITY"
+title: "GT POLECAT IDENTITY"
 ---
 
 ## gt polecat identity

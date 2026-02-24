@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT STATUS"
+title: "GT POLECAT STATUS"
 ---
 
 ## gt polecat status

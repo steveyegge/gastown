@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RELEASE"
+title: "GT RELEASE"
 ---
 
 ## gt release

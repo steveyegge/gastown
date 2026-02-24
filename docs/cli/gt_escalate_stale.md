@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ESCALATE STALE"
+title: "GT ESCALATE STALE"
 ---
 
 ## gt escalate stale

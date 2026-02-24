@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CYCLE"
+title: "GT CYCLE"
 ---
 
 ## gt cycle

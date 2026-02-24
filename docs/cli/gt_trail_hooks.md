@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TRAIL HOOKS"
+title: "GT TRAIL HOOKS"
 ---
 
 ## gt trail hooks

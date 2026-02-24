@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG REMOVE"
+title: "GT RIG REMOVE"
 ---
 
 ## gt rig remove

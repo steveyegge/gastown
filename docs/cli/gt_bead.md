@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BEAD"
+title: "GT BEAD"
 ---
 
 ## gt bead

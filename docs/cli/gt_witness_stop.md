@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WITNESS STOP"
+title: "GT WITNESS STOP"
 ---
 
 ## gt witness stop

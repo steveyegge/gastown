@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TRAIL"
+title: "GT TRAIL"
 ---
 
 ## gt trail

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL ATTACH-FROM-MAIL"
+title: "GT MOL ATTACH-FROM-MAIL"
 ---
 
 ## gt mol attach-from-mail

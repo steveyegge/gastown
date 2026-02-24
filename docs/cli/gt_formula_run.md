@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT FORMULA RUN"
+title: "GT FORMULA RUN"
 ---
 
 ## gt formula run

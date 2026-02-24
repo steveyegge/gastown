@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ACCOUNT STATUS"
+title: "GT ACCOUNT STATUS"
 ---
 
 ## gt account status

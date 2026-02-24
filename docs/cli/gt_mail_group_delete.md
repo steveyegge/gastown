@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAIL GROUP DELETE"
+title: "GT MAIL GROUP DELETE"
 ---
 
 ## gt mail group delete

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAYOR STOP"
+title: "GT MAYOR STOP"
 ---
 
 ## gt mayor stop

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ SUBMIT"
+title: "GT MQ SUBMIT"
 ---
 
 ## gt mq submit

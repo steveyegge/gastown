@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT MIGRATE-WISPS"
+title: "GT DOLT MIGRATE-WISPS"
 ---
 
 ## gt dolt migrate-wisps

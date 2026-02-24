@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT INIT-RIG"
+title: "GT DOLT INIT-RIG"
 ---
 
 ## gt dolt init-rig

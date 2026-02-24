@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SEANCE"
+title: "GT SEANCE"
 ---
 
 ## gt seance

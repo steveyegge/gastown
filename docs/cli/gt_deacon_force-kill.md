@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON FORCE-KILL"
+title: "GT DEACON FORCE-KILL"
 ---
 
 ## gt deacon force-kill

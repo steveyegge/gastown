@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SESSION RESTART"
+title: "GT SESSION RESTART"
 ---
 
 ## gt session restart

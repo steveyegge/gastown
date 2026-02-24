@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON HEALTH-CHECK"
+title: "GT DEACON HEALTH-CHECK"
 ---
 
 ## gt deacon health-check

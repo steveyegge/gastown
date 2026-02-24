@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT BEAD SHOW"
+title: "GT BEAD SHOW"
 ---
 
 ## gt bead show

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT LOGS"
+title: "GT DOLT LOGS"
 ---
 
 ## gt dolt logs

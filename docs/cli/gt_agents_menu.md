@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AGENTS MENU"
+title: "GT AGENTS MENU"
 ---
 
 ## gt agents menu

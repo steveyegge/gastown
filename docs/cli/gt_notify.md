@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT NOTIFY"
+title: "GT NOTIFY"
 ---
 
 ## gt notify

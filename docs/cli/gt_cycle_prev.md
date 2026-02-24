@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CYCLE PREV"
+title: "GT CYCLE PREV"
 ---
 
 ## gt cycle prev

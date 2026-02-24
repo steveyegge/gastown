@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ROLE DETECT"
+title: "GT ROLE DETECT"
 ---
 
 ## gt role detect

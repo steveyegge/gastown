@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TOWN NEXT"
+title: "GT TOWN NEXT"
 ---
 
 ## gt town next

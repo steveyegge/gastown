@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ESCALATE CLOSE"
+title: "GT ESCALATE CLOSE"
 ---
 
 ## gt escalate close

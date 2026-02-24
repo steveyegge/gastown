@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL STEP DONE"
+title: "GT MOL STEP DONE"
 ---
 
 ## gt mol step done

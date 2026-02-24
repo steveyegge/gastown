@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TAP GUARD PR-WORKFLOW"
+title: "GT TAP GUARD PR-WORKFLOW"
 ---
 
 ## gt tap guard pr-workflow

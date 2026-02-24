@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ RETRY"
+title: "GT MQ RETRY"
 ---
 
 ## gt mq retry

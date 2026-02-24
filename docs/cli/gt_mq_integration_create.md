@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ INTEGRATION CREATE"
+title: "GT MQ INTEGRATION CREATE"
 ---
 
 ## gt mq integration create

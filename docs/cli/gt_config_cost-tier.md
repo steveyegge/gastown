@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG COST-TIER"
+title: "GT CONFIG COST-TIER"
 ---
 
 ## gt config cost-tier

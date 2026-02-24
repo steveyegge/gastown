@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT IDENTITY RENAME"
+title: "GT POLECAT IDENTITY RENAME"
 ---
 
 ## gt polecat identity rename

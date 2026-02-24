@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY QUEUE"
+title: "GT REFINERY QUEUE"
 ---
 
 ## gt refinery queue

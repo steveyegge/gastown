@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT AGENTS STATE"
+title: "GT AGENTS STATE"
 ---
 
 ## gt agents state

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC CONFIG SET"
+title: "GT KRC CONFIG SET"
 ---
 
 ## gt krc config set

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT METRICS"
+title: "GT METRICS"
 ---
 
 ## gt metrics

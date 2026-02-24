@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOLT SQL"
+title: "GT DOLT SQL"
 ---
 
 ## gt dolt sql

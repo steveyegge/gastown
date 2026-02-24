@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ INTEGRATION"
+title: "GT MQ INTEGRATION"
 ---
 
 ## gt mq integration

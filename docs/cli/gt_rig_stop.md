@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG STOP"
+title: "GT RIG STOP"
 ---
 
 ## gt rig stop

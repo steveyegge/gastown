@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT NUDGE"
+title: "GT NUDGE"
 ---
 
 ## gt nudge

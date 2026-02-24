@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY STATUS"
+title: "GT CONVOY STATUS"
 ---
 
 ## gt convoy status
@@ -12,6 +12,11 @@ Show detailed status for a convoy.
 
 Displays convoy metadata, tracked issues, and completion progress.
 Without an ID, shows status of all active convoys.
+
+Examples:
+  gt convoy status              # Show all active convoys
+  gt convoy status hq-cv-abc    # Show specific convoy
+  gt convoy status --json       # Machine-readable output
 
 ```
 gt convoy status [convoy-id] [flags]

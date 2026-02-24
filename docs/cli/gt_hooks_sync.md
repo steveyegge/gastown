@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS SYNC"
+title: "GT HOOKS SYNC"
 ---
 
 ## gt hooks sync

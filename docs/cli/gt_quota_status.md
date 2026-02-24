@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT QUOTA STATUS"
+title: "GT QUOTA STATUS"
 ---
 
 ## gt quota status

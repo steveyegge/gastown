@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SCHEDULER"
+title: "GT SCHEDULER"
 ---
 
 ## gt scheduler
@@ -35,10 +35,9 @@ gt scheduler [flags]
 ### SEE ALSO
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
+* [gt scheduler ](../cli/gt_scheduler_/)	 - List all scheduled beads with titles, rig, blocked status
+* [gt scheduler ](../cli/gt_scheduler_/)	 - Pause all scheduler dispatch (town-wide)
+* [gt scheduler ](../cli/gt_scheduler_/)	 - Resume scheduler dispatch
 * [gt scheduler clear](../cli/gt_scheduler_clear/)	 - Remove beads from the scheduler
-* [gt scheduler list](../cli/gt_scheduler_list/)	 - List all scheduled beads with titles, rig, blocked status
-* [gt scheduler pause](../cli/gt_scheduler_pause/)	 - Pause all scheduler dispatch (town-wide)
-* [gt scheduler resume](../cli/gt_scheduler_resume/)	 - Resume scheduler dispatch
 * [gt scheduler run](../cli/gt_scheduler_run/)	 - Manually trigger scheduler dispatch
-* [gt scheduler status](../cli/gt_scheduler_status/)	 - Show scheduler state: pending, capacity, active polecats
 

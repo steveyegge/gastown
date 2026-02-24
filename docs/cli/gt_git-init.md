@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT GIT-INIT"
+title: "GT GIT-INIT"
 ---
 
 ## gt git-init

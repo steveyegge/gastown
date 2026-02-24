@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS"
+title: "GT HOOKS"
 ---
 
 ## gt hooks

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MOL DETACH"
+title: "GT MOL DETACH"
 ---
 
 ## gt mol detach

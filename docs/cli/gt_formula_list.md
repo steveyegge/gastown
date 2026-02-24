@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT FORMULA LIST"
+title: "GT FORMULA LIST"
 ---
 
 ## gt formula list

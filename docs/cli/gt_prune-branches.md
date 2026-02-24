@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PRUNE-BRANCHES"
+title: "GT PRUNE-BRANCHES"
 ---
 
 ## gt prune-branches

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT SHOW"
+title: "GT SHOW"
 ---
 
 ## gt show

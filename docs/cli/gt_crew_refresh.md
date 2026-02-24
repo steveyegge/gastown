@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW REFRESH"
+title: "GT CREW REFRESH"
 ---
 
 ## gt crew refresh

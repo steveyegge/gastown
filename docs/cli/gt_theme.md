@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT THEME"
+title: "GT THEME"
 ---
 
 ## gt theme

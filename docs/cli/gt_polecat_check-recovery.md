@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT POLECAT CHECK-RECOVERY"
+title: "GT POLECAT CHECK-RECOVERY"
 ---
 
 ## gt polecat check-recovery

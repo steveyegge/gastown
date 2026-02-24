@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG BOOT"
+title: "GT RIG BOOT"
 ---
 
 ## gt rig boot

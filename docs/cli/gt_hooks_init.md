@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS INIT"
+title: "GT HOOKS INIT"
 ---
 
 ## gt hooks init

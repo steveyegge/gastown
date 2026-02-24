@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT HOOKS DIFF"
+title: "GT HOOKS DIFF"
 ---
 
 ## gt hooks diff

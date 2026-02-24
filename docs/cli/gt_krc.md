@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC"
+title: "GT KRC"
 ---
 
 ## gt krc

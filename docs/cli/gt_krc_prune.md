@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC PRUNE"
+title: "GT KRC PRUNE"
 ---
 
 ## gt krc prune

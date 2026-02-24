@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAYOR"
+title: "GT MAYOR"
 ---
 
 ## gt mayor

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ENABLE"
+title: "GT ENABLE"
 ---
 
 ## gt enable

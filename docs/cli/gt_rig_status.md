@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT RIG STATUS"
+title: "GT RIG STATUS"
 ---
 
 ## gt rig status

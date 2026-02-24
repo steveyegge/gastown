@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY ATTACH"
+title: "GT REFINERY ATTACH"
 ---
 
 ## gt refinery attach

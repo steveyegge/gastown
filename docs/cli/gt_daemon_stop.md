@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DAEMON STOP"
+title: "GT DAEMON STOP"
 ---
 
 ## gt daemon stop

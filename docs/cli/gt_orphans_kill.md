@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ORPHANS KILL"
+title: "GT ORPHANS KILL"
 ---
 
 ## gt orphans kill

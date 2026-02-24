@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONFIG AGENT-EMAIL-DOMAIN"
+title: "GT CONFIG AGENT-EMAIL-DOMAIN"
 ---
 
 ## gt config agent-email-domain

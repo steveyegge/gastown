@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PLUGIN"
+title: "GT PLUGIN"
 ---
 
 ## gt plugin

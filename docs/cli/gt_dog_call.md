@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DOG CALL"
+title: "GT DOG CALL"
 ---
 
 ## gt dog call

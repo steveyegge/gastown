@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT KRC AUTO-PRUNE-STATUS"
+title: "GT KRC AUTO-PRUNE-STATUS"
 ---
 
 ## gt krc auto-prune-status

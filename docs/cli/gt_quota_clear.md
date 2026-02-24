@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT QUOTA CLEAR"
+title: "GT QUOTA CLEAR"
 ---
 
 ## gt quota clear

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CALLBACKS PROCESS"
+title: "GT CALLBACKS PROCESS"
 ---
 
 ## gt callbacks process

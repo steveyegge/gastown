@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DND"
+title: "GT DND"
 ---
 
 ## gt dnd

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PLUGIN HISTORY"
+title: "GT PLUGIN HISTORY"
 ---
 
 ## gt plugin history

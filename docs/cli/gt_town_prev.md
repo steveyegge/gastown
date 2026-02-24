@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT TOWN PREV"
+title: "GT TOWN PREV"
 ---
 
 ## gt town prev

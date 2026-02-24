@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DAEMON LOGS"
+title: "GT DAEMON LOGS"
 ---
 
 ## gt daemon logs

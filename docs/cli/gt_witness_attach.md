@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WITNESS ATTACH"
+title: "GT WITNESS ATTACH"
 ---
 
 ## gt witness attach

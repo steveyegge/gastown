@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DISABLE"
+title: "GT DISABLE"
 ---
 
 ## gt disable

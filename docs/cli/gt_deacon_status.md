@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON STATUS"
+title: "GT DEACON STATUS"
 ---
 
 ## gt deacon status

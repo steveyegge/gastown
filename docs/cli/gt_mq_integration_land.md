@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MQ INTEGRATION LAND"
+title: "GT MQ INTEGRATION LAND"
 ---
 
 ## gt mq integration land

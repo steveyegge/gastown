@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WL BROWSE"
+title: "GT WL BROWSE"
 ---
 
 ## gt wl browse

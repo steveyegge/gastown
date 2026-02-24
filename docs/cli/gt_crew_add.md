@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW ADD"
+title: "GT CREW ADD"
 ---
 
 ## gt crew add

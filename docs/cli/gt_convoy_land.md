@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CONVOY LAND"
+title: "GT CONVOY LAND"
 ---
 
 ## gt convoy land

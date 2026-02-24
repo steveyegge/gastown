@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT REFINERY RESTART"
+title: "GT REFINERY RESTART"
 ---
 
 ## gt refinery restart

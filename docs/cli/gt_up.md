@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT UP"
+title: "GT UP"
 ---
 
 ## gt up

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT PEEK"
+title: "GT PEEK"
 ---
 
 ## gt peek

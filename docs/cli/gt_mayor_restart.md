@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT MAYOR RESTART"
+title: "GT MAYOR RESTART"
 ---
 
 ## gt mayor restart

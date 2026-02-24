@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT WARRANT"
+title: "GT WARRANT"
 ---
 
 ## gt warrant

@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT DEACON"
+title: "GT DEACON"
 ---
 
 ## gt deacon

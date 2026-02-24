@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT CREW STATUS"
+title: "GT CREW STATUS"
 ---
 
 ## gt crew status

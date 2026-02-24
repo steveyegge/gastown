@@ -1,5 +1,5 @@
 ---
-title: "DOCS/CLI/GT ROLE ENV"
+title: "GT ROLE ENV"
 ---
 
 ## gt role env
