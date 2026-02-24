@@ -1006,8 +1006,8 @@ If context is high (>80%), prepare for handoff:
 This enables the Deacon to burn and respawn cleanly."""
 
 [[steps]]
-id = "loop-or-exit"
-title = "Loop or exit for respawn"
+id = "loop-or-handoff"
+title = "Loop or request handoff for respawn"
 needs = ["context-check"]
 description = """
 End of patrol cycle decision.
@@ -1055,11 +1055,37 @@ bd update "$NEW_WISP" --status=hooked --assignee=deacon
 4. Continue executing from the inbox-check step of the new wisp
 
 **If context HIGH** (approaching limit):
-1. Write handoff mail with notable observations:
-```bash
-gt handoff -s "Deacon patrol handoff" -m "<observations>"
-```
-2. Exit cleanly - the daemon will respawn a fresh Deacon session
 
-**IMPORTANT**: You must either create a new wisp (context LOW) or exit (context HIGH).
-Never leave the session idle without work on your hook."""
+**DO NOT exit directly** - the Deacon has an auto-respawn hook that will
+immediately restart Claude, causing wisp tracking to get out of sync.
+
+Instead, request a lifecycle restart from the daemon:
+
+1. Send a LIFECYCLE restart request to the daemon:
+```bash
+gt mail send deacon/ -s "LIFECYCLE: context limit" \
+  -m '{"action": "restart"}'
+```
+
+2. The daemon will:
+   - Delete the lifecycle message (claim it)
+   - Kill the current session cleanly
+   - Restart a fresh Deacon session
+   - The new session will find no active patrol and create a fresh wisp
+
+3. Wait for the daemon to process the request:
+```bash
+# Give daemon ~10 seconds to process
+sleep 10
+```
+
+4. Exit cleanly - the daemon has already killed the session:
+```bash
+# Session will be killed by daemon, just exit
+exit
+```
+
+**IMPORTANT**: Never exit directly without sending the LIFECYCLE request first.
+The auto-respawn hook will restart Claude in the same session, causing
+patrol wisp accumulation. Always use the daemon lifecycle mechanism for
+clean session termination."""
