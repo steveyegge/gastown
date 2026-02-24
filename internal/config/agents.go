@@ -339,6 +339,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			PromptFlag: "-p",
 			OutputFlag: "--no-session",
 		},
+		// Pi's Node.js TUI takes several seconds to initialize before it can
+		// receive tmux input. Without a readiness delay, the startup nudge
+		// arrives before the TUI is ready and gets dropped silently.
+		ReadyDelayMs: 8000,
 	},
 }
 
