@@ -43,7 +43,13 @@ var convoyLaunchCmd = &cobra.Command{
 and dispatching Wave 1 tasks.
 
 For staged convoy-id input: transitions directly and dispatches.
-For epic/task input: runs stage + launch in one step.`,
+For epic/task input: runs stage + launch in one step.
+
+Examples:
+  gt convoy launch hq-cv-staged       # Launch staged convoy
+  gt convoy launch hq-epic-abc        # Stage and launch epic
+  gt convoy launch gt-task1 gt-task2  # Stage and launch tasks
+  gt convoy launch hq-cv-staged --force  # Launch even with warnings`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runConvoyLaunch,
 }

@@ -224,7 +224,12 @@ var convoyStatusCmd = &cobra.Command{
 	Long: `Show detailed status for a convoy.
 
 Displays convoy metadata, tracked issues, and completion progress.
-Without an ID, shows status of all active convoys.`,
+Without an ID, shows status of all active convoys.
+
+Examples:
+  gt convoy status              # Show all active convoys
+  gt convoy status hq-cv-abc    # Show specific convoy
+  gt convoy status --json       # Machine-readable output`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runConvoyStatus,
 }
@@ -252,7 +257,8 @@ If the convoy is closed, it will be automatically reopened.
 
 Examples:
   gt convoy add hq-cv-abc gt-new-issue
-  gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3`,
+  gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3
+  gt convoy add hq-cv-abc --notify mayor/  # Reopen and notify`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runConvoyAdd,
 }

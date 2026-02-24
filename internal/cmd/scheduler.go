@@ -47,24 +47,49 @@ Config:
 var schedulerStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show scheduler state: pending, capacity, active polecats",
-	RunE:  runSchedulerStatus,
+	Long: `Show the current state of the dispatch scheduler.
+
+Displays pending beads, available capacity, and active polecats.
+Use --json for machine-readable output.
+
+Examples:
+  gt scheduler status       # Show scheduler state
+  gt scheduler status --json  # JSON output`,
 }
 
 var schedulerListCmd = &cobra.Command{
-	Use:   "list",
 	Short: "List all scheduled beads with titles, rig, blocked status",
+	Long: `List all beads currently in the scheduler queue.
+
+Shows bead ID, title, rig, and blocked status for each scheduled item.
+Use --json for machine-readable output.
+
+Examples:
+  gt scheduler list       # List all scheduled beads
+  gt scheduler list --json  # JSON output`,
 	RunE:  runSchedulerList,
 }
 
 var schedulerPauseCmd = &cobra.Command{
-	Use:   "pause",
 	Short: "Pause all scheduler dispatch (town-wide)",
+	Long: `Pause the dispatch scheduler town-wide.
+
+When paused, the scheduler will not dispatch any new work to polecats.
+Already-running work continues unaffected.
+
+Examples:
+  gt scheduler pause      # Pause dispatch`,
 	RunE:  runSchedulerPause,
 }
 
 var schedulerResumeCmd = &cobra.Command{
-	Use:   "resume",
 	Short: "Resume scheduler dispatch",
+	Long: `Resume the dispatch scheduler after a pause.
+
+Allows the scheduler to resume dispatching work to polecats.
+
+Examples:
+  gt scheduler resume     # Resume dispatch`,
 	RunE:  runSchedulerResume,
 }
 
@@ -74,7 +99,11 @@ var schedulerClearCmd = &cobra.Command{
 	Long: `Remove beads from the scheduler by closing sling context beads.
 
 Without --bead, removes ALL beads from the scheduler.
-With --bead, removes only the specified bead.`,
+With --bead, removes only the specified bead.
+
+Examples:
+  gt scheduler clear              # Remove all beads from scheduler
+  gt scheduler clear --bead gt-abc  # Remove specific bead`,
 	RunE: runSchedulerClear,
 }
 
@@ -86,6 +115,7 @@ var schedulerRunCmd = &cobra.Command{
 This dispatches scheduled beads using the same logic as the daemon heartbeat,
 but can be run ad-hoc. Useful for testing or when the daemon is not running.
 
+Examples:
   gt scheduler run                  # Dispatch using config defaults
   gt scheduler run --batch 5        # Dispatch up to 5
   gt scheduler run --dry-run        # Preview what would dispatch`,
