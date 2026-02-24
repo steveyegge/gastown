@@ -1638,8 +1638,16 @@ func detectParkedRigs(dag *ConvoyDAG) []StagingFinding {
 		}
 	}
 
+	// Sort rig names for deterministic output with multiple parked rigs
+	rigNames := make([]string, 0, len(parkedRigBeads))
+	for rigName := range parkedRigBeads {
+		rigNames = append(rigNames, rigName)
+	}
+	sort.Strings(rigNames)
+
 	var findings []StagingFinding
-	for rigName, beadIDs := range parkedRigBeads {
+	for _, rigName := range rigNames {
+		beadIDs := parkedRigBeads[rigName]
 		// Sort bead IDs for determinism
 		sort.Strings(beadIDs)
 		findings = append(findings, StagingFinding{
