@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func initTestRepo(t *testing.T) string {
@@ -1552,5 +1553,149 @@ func TestClearPushURL(t *testing.T) {
 	// Clearing again should be a no-op (not an error)
 	if err := g.ClearPushURL("origin"); err != nil {
 		t.Errorf("ClearPushURL (idempotent) should not error, got: %v", err)
+	}
+}
+
+func TestFetchIfStale_FreshFetchHead_SkipsFetch(t *testing.T) {
+	localDir, _, _ := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Write a fresh FETCH_HEAD (1 second old) so it appears recent.
+	fetchHead := filepath.Join(localDir, ".git", "FETCH_HEAD")
+	if err := os.WriteFile(fetchHead, []byte("# test\n"), 0644); err != nil {
+		t.Fatalf("write FETCH_HEAD: %v", err)
+	}
+	// Set mtime to a known time well within maxAge.
+	knownTime := time.Now().Add(-5 * time.Second)
+	if err := os.Chtimes(fetchHead, knownTime, knownTime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Record mtime before the call.
+	before, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+
+	// FetchIfStale with 60s maxAge should skip the fetch (no network needed).
+	if err := g.FetchIfStale("origin", 60*time.Second); err != nil {
+		t.Errorf("FetchIfStale with fresh FETCH_HEAD: %v", err)
+	}
+
+	// Verify fetch was skipped: FETCH_HEAD mtime must be unchanged.
+	after, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("FetchIfStale updated FETCH_HEAD mtime (fetch was NOT skipped): before=%v after=%v",
+			before.ModTime(), after.ModTime())
+	}
+}
+
+func TestFetchIfStale_StaleFetchHead_FetchHappens(t *testing.T) {
+	localDir, _, _ := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Write a stale FETCH_HEAD (2 minutes old).
+	fetchHead := filepath.Join(localDir, ".git", "FETCH_HEAD")
+	if err := os.WriteFile(fetchHead, []byte("# test\n"), 0644); err != nil {
+		t.Fatalf("write FETCH_HEAD: %v", err)
+	}
+	stale := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(fetchHead, stale, stale); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// FetchIfStale with 60s maxAge should trigger a real fetch.
+	if err := g.FetchIfStale("origin", 60*time.Second); err != nil {
+		t.Errorf("FetchIfStale with stale FETCH_HEAD: %v", err)
+	}
+
+	// FETCH_HEAD mtime should now be recent.
+	info, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("stat FETCH_HEAD: %v", err)
+	}
+	if time.Since(info.ModTime()) > 10*time.Second {
+		t.Error("expected FETCH_HEAD to be updated after fetch")
+	}
+}
+
+func TestFetchIfStale_MissingFetchHead_FetchHappens(t *testing.T) {
+	localDir, _, _ := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Remove FETCH_HEAD if it exists so we start clean.
+	fetchHead := filepath.Join(localDir, ".git", "FETCH_HEAD")
+	_ = os.Remove(fetchHead)
+
+	// FetchIfStale should detect missing FETCH_HEAD and fetch.
+	if err := g.FetchIfStale("origin", 60*time.Second); err != nil {
+		t.Errorf("FetchIfStale with missing FETCH_HEAD: %v", err)
+	}
+
+	// FETCH_HEAD should now exist and be recent.
+	info, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("FETCH_HEAD not created after fetch: %v", err)
+	}
+	if time.Since(info.ModTime()) > 10*time.Second {
+		t.Error("expected fresh FETCH_HEAD after fetch")
+	}
+}
+
+func TestFetchIfStale_ExplicitGitDir_SkipsFetch(t *testing.T) {
+	_, remoteDir, mainBranch := initTestRepoWithRemote(t)
+
+	// Create a bare clone of the remote (mirrors how polecat rigs work).
+	tmp := t.TempDir()
+	bareDir := filepath.Join(tmp, "bare.git")
+	helper := NewGit(tmp)
+	if err := helper.CloneBare(remoteDir, bareDir); err != nil {
+		t.Fatalf("CloneBare: %v", err)
+	}
+
+	// Verify the clone has the expected branch so origin is reachable.
+	exists, err := NewGitWithDir(bareDir, "").RefExists("origin/" + mainBranch)
+	if err != nil {
+		t.Fatalf("RefExists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("expected origin/%s to exist in bare clone", mainBranch)
+	}
+
+	// Create a Git instance with gitDir set explicitly (bypasses rev-parse --git-dir).
+	g := NewGitWithDir(bareDir, "")
+
+	// Write a fresh FETCH_HEAD directly inside the bare repo (the git dir IS bareDir).
+	fetchHead := filepath.Join(bareDir, "FETCH_HEAD")
+	if err := os.WriteFile(fetchHead, []byte("# test\n"), 0644); err != nil {
+		t.Fatalf("write FETCH_HEAD: %v", err)
+	}
+	knownTime := time.Now().Add(-5 * time.Second)
+	if err := os.Chtimes(fetchHead, knownTime, knownTime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Record mtime before the call.
+	before, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+
+	// FetchIfStale with 60s maxAge must skip the fetch when gitDir is explicit.
+	if err := g.FetchIfStale("origin", 60*time.Second); err != nil {
+		t.Errorf("FetchIfStale with explicit gitDir and fresh FETCH_HEAD: %v", err)
+	}
+
+	// FETCH_HEAD mtime must be unchanged — fetch was skipped.
+	after, err := os.Stat(fetchHead)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("FetchIfStale updated FETCH_HEAD mtime (fetch was NOT skipped): before=%v after=%v",
+			before.ModTime(), after.ModTime())
 	}
 }

@@ -670,8 +670,9 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
-	// Fetch latest from origin to ensure worktree starts from up-to-date code
-	if err := repoGit.Fetch("origin"); err != nil {
+	// Fetch latest from origin to ensure worktree starts from up-to-date code.
+	// Skip if a fetch was done within the last 60s to avoid redundant SSH round-trips.
+	if err := repoGit.FetchIfStale("origin", 60*time.Second); err != nil {
 		// Non-fatal - proceed with potentially stale code
 		style.PrintWarning("could not fetch origin: %v", err)
 	}
@@ -1141,8 +1142,9 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		}
 	}
 
-	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
-	_ = repoGit.Fetch("origin")
+	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline).
+	// Skip if a fetch was done within the last 60s to avoid redundant SSH round-trips.
+	_ = repoGit.FetchIfStale("origin", 60*time.Second)
 
 	// Ensure polecat directory exists for new structure
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // GitError contains raw output from a git command for agent observation.
@@ -394,6 +395,37 @@ func (g *Git) FetchBranchShallow(remote, branch string) error {
 	refspec := branch + ":refs/remotes/" + remote + "/" + branch
 	_, err := g.run("fetch", "--depth", "1", remote, refspec)
 	return err
+}
+
+// FetchIfStale fetches from the remote only if FETCH_HEAD is older than maxAge
+// (or missing). If a recent fetch has been done, it returns nil immediately.
+// This avoids redundant fetches during polecat spawn, which can take ~4.8s on
+// SSH remotes.
+func (g *Git) FetchIfStale(remote string, maxAge time.Duration) error {
+	// Determine the git directory to find FETCH_HEAD.
+	gitDir := g.gitDir
+	if gitDir == "" {
+		// Normal (non-bare) repo: ask git for its git dir.
+		dir, err := g.run("rev-parse", "--git-dir")
+		if err != nil {
+			// If we can't determine the git dir, fall through to fetch.
+			return g.Fetch(remote)
+		}
+		if filepath.IsAbs(dir) {
+			gitDir = dir
+		} else {
+			gitDir = filepath.Join(g.workDir, dir)
+		}
+	}
+
+	fetchHead := filepath.Join(gitDir, "FETCH_HEAD")
+	if info, err := os.Stat(fetchHead); err == nil {
+		if time.Since(info.ModTime()) < maxAge {
+			return nil
+		}
+	}
+
+	return g.Fetch(remote)
 }
 
 // Pull pulls from the remote branch.
