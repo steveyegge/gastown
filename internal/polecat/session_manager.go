@@ -70,10 +70,6 @@ type SessionStartOptions struct {
 	// If set, this is injected as an environment variable.
 	RuntimeConfigDir string
 
-	// DoltBranch is the polecat-specific Dolt branch for write isolation.
-	// If set, BD_BRANCH env var is injected into the polecat session.
-	DoltBranch string
-
 	// Agent is the agent override for this polecat session (e.g., "codex", "gemini").
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
@@ -225,11 +221,25 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Use ResolveRoleAgentConfig instead of deprecated LoadRuntimeConfig to properly
-	// resolve role_agents from town settings. This ensures EnsureSettingsForRole
-	// creates the correct settings/plugin for the configured agent (e.g., opencode).
+	// Resolve runtime config for the agent that will actually run in this session.
+	// When an explicit --agent override is provided (e.g., "codex"), use it to resolve
+	// the correct agent config. Without this, ResolveRoleAgentConfig returns the default
+	// role agent (usually Claude), causing WaitForRuntimeReady to poll for the wrong
+	// prompt prefix and all fallback/nudge logic to use incorrect agent capabilities.
+	// This was the root cause of gt-1j3m: Codex polecats sat idle because the startup
+	// sequence used Claude's ReadyPromptPrefix ("❯ ") to detect readiness in a Codex
+	// session, timing out instead of using Codex's delay-based readiness.
 	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	var runtimeConfig *config.RuntimeConfig
+	if opts.Agent != "" {
+		rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, m.rig.Path, opts.Agent)
+		if err != nil {
+			return fmt.Errorf("resolving agent config for %s: %w", opts.Agent, err)
+		}
+		runtimeConfig = rc
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	}
 
 	// Ensure runtime settings exist in the shared polecats parent directory.
 	// Settings are passed to Claude Code via --settings flag.
@@ -275,11 +285,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
-	}
-
-	// Branch-per-polecat: inject BD_BRANCH into startup command
-	if opts.DoltBranch != "" {
-		command = config.PrependEnv(command, map[string]string{"BD_BRANCH": opts.DoltBranch})
 	}
 
 	// Disable Dolt auto-commit for polecats to prevent manifest contention
@@ -350,12 +355,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	debugSession("SetEnvironment GT_POLECAT_PATH", m.tmux.SetEnvironment(sessionID, "GT_POLECAT_PATH", workDir))
 	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
-
-	// Branch-per-polecat: set BD_BRANCH in tmux session environment
-	// This ensures respawned processes also inherit the branch setting.
-	if opts.DoltBranch != "" {
-		debugSession("SetEnvironment BD_BRANCH", m.tmux.SetEnvironment(sessionID, "BD_BRANCH", opts.DoltBranch))
-	}
 
 	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
 	// This ensures respawned processes also inherit the setting.

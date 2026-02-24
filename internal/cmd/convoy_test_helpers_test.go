@@ -156,15 +156,16 @@ func (d *testDAG) ConditionalBlockedBy(blockerID string) *testDAG {
 }
 
 // TrackedBy adds a "tracks" dependency: convoyID tracks the last-added bead.
-// Models: the bead is tracked by the convoy (dep from bead to convoy, type "tracks").
+// Models: convoy depends on the bead via "tracks" (matching production
+// `bd dep add convoyID beadID --type=tracks`).
 func (d *testDAG) TrackedBy(convoyID string) *testDAG {
 	d.t.Helper()
 	if d.last == "" {
 		d.t.Fatal("TrackedBy called with no current bead")
 	}
 	d.deps = append(d.deps, testDep{
-		IssueID:     d.last,
-		DependsOnID: convoyID,
+		IssueID:     convoyID,
+		DependsOnID: d.last,
 		Type:        "tracks",
 	})
 	return d
@@ -226,6 +227,25 @@ func (d *testDAG) BdStubScript() string {
 		sb.WriteString("    ;;\n")
 	}
 
+	// --- handle: dep list --direction=down (tracked beads for convoys) ---
+	// Must come before generic dep list handler.
+	sb.WriteString("  dep\\ list\\ *--direction=down*)\n")
+	sb.WriteString("    # Return tracked bead IDs in {\"id\":\"...\"} format\n")
+	for id, b := range d.beads {
+		if b.Type == "convoy" {
+			trackedJSON := d.trackedBeadsJSONFor(id)
+			sb.WriteString(`    case "$ALL_ARGS" in` + "\n")
+			sb.WriteString(fmt.Sprintf("      *%s*)\n", id))
+			sb.WriteString(fmt.Sprintf("        echo '%s'\n", trackedJSON))
+			sb.WriteString("        exit 0\n")
+			sb.WriteString("        ;;\n")
+			sb.WriteString("    esac\n")
+		}
+	}
+	sb.WriteString("    echo '[]'\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("    ;;\n")
+
 	// --- handle: dep list <id> --json | dep list --json <id> ---
 	sb.WriteString("  dep\\ list\\ *)\n")
 	sb.WriteString("    # Find the bead ID in the args\n")
@@ -240,6 +260,13 @@ func (d *testDAG) BdStubScript() string {
 		sb.WriteString("    esac\n")
 	}
 	sb.WriteString("    echo '[]'\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("    ;;\n")
+
+	// --- handle: list --type=convoy --all --json (overlapping convoy detection) ---
+	convoyListJSON := d.convoyListJSON()
+	sb.WriteString("  list\\ *--type=convoy*)\n")
+	sb.WriteString(fmt.Sprintf("    echo '%s'\n", convoyListJSON))
 	sb.WriteString("    exit 0\n")
 	sb.WriteString("    ;;\n")
 
@@ -334,6 +361,17 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 		t.Fatalf("write routes.jsonl: %v", err)
 	}
 
+	// Create rig .beads directories referenced by routes so that
+	// beadsDirForID() can resolve them and bdListChildren() can chdir.
+	for _, b := range d.beads {
+		if b.Rig != "" {
+			rigBeadsDir := filepath.Join(townRoot, b.Rig, ".beads")
+			if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+				t.Fatalf("mkdir rig .beads dir %s: %v", rigBeadsDir, err)
+			}
+		}
+	}
+
 	// Inject bin/ into PATH.
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -396,26 +434,31 @@ func (d *testDAG) beadJSON(b *testBead) string {
 // depsJSONFor returns the JSON array of deps associated with a bead.
 // Includes deps where the bead is the dependent (IssueID) or the dependency
 // (DependsOnID), matching what `bd dep list <id> --json` returns in production.
+//
+// Production bd dep list returns fields: "id" (the dependency target) and
+// "dependency_type" (blocks, parent-child, etc.), matching bdDepResult in
+// convoy_stage.go.
 func (d *testDAG) depsJSONFor(issueID string) string {
 	type depOut struct {
-		IssueID     string `json:"issue_id"`
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type"`
-		CreatedAt   string `json:"created_at"`
-		CreatedBy   string `json:"created_by"`
-		Metadata    string `json:"metadata"`
+		ID             string `json:"id"`
+		DependencyType string `json:"dependency_type"`
+		CreatedAt      string `json:"created_at"`
+		CreatedBy      string `json:"created_by"`
+		Metadata       string `json:"metadata"`
 	}
 
 	var out []depOut
 	for _, dep := range d.deps {
-		if dep.IssueID == issueID || dep.DependsOnID == issueID {
+		// Production bd dep list returns only deps where the queried bead
+		// IS the dependent (IssueID), not where it's the target. The "id"
+		// field contains the dependency target (DependsOnID).
+		if dep.IssueID == issueID {
 			out = append(out, depOut{
-				IssueID:     dep.IssueID,
-				DependsOnID: dep.DependsOnID,
-				Type:        dep.Type,
-				CreatedAt:   "2025-01-01T00:00:00Z",
-				CreatedBy:   "test",
-				Metadata:    "{}",
+				ID:             dep.DependsOnID,
+				DependencyType: dep.Type,
+				CreatedAt:      "2025-01-01T00:00:00Z",
+				CreatedBy:      "test",
+				Metadata:       "{}",
 			})
 		}
 	}
@@ -444,6 +487,53 @@ func (d *testDAG) childrenJSONFor(parentID string) string {
 				Status:    b.Status,
 				IssueType: b.Type,
 			})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// trackedBeadsJSONFor returns the JSON array for `bd dep list <convoyID>
+// --direction=down --type=tracks --json`. This returns the simplified format
+// with just {"id":"..."} for each tracked bead, matching production bd behavior.
+func (d *testDAG) trackedBeadsJSONFor(convoyID string) string {
+	type idOnly struct {
+		ID string `json:"id"`
+	}
+
+	var out []idOnly
+	for _, dep := range d.deps {
+		// tracks deps: IssueID is the convoy, DependsOnID is the tracked bead.
+		if dep.Type == "tracks" && dep.IssueID == convoyID {
+			out = append(out, idOnly{ID: dep.DependsOnID})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// convoyListJSON returns the JSON array for `bd list --type=convoy --all --json`.
+// Returns all convoy-type beads with their ID and status.
+func (d *testDAG) convoyListJSON() string {
+	type convoyEntry struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+
+	var out []convoyEntry
+	for _, b := range d.beads {
+		if b.Type == "convoy" {
+			status := b.Status
+			if status == "" {
+				status = "open"
+			}
+			out = append(out, convoyEntry{ID: b.ID, Status: status})
 		}
 	}
 	if out == nil {
@@ -506,22 +596,21 @@ func TestDagBuilder_BasicSetup(t *testing.T) {
 	}
 
 	var depResult []struct {
-		IssueID     string `json:"issue_id"`
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type"`
+		ID             string `json:"id"`
+		DependencyType string `json:"dependency_type"`
 	}
 	if err := json.Unmarshal(out, &depResult); err != nil {
 		t.Fatalf("unmarshal dep list output: %v\nraw: %s", err, out)
 	}
-	// task-2 has deps on both sides: blocked by task-1, and task-3 blocked by task-2.
-	// bd dep list returns all deps referencing the bead on either side.
+	// task-2 is blocked by task-1. bd dep list returns only deps where
+	// task-2 is the dependent, so we expect task-1 as a blocks dep target.
 	if len(depResult) < 1 {
 		t.Fatalf("expected at least 1 dep for task-2, got %d", len(depResult))
 	}
-	// Find the dep where task-2 is the dependent (blocked by task-1).
+	// Find the dep where task-1 is the blocker (task-2 blocked by task-1).
 	foundBlocker := false
 	for _, dep := range depResult {
-		if dep.IssueID == "task-2" && dep.DependsOnID == "task-1" && dep.Type == "blocks" {
+		if dep.ID == "task-1" && dep.DependencyType == "blocks" {
 			foundBlocker = true
 		}
 	}

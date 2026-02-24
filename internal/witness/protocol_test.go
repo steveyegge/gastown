@@ -93,6 +93,48 @@ func TestParsePolecatDone_InvalidSubject(t *testing.T) {
 	}
 }
 
+func TestParsePolecatDone_MRFailed(t *testing.T) {
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+Branch: polecat/nux-abc123
+MRFailed: true
+Errors: MR bead creation failed: connection refused`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if !payload.MRFailed {
+		t.Error("MRFailed = false, want true")
+	}
+	if payload.MRID != "" {
+		t.Errorf("MRID = %q, want empty when MR failed", payload.MRID)
+	}
+	if payload.Exit != "COMPLETED" {
+		t.Errorf("Exit = %q, want COMPLETED", payload.Exit)
+	}
+}
+
+func TestParsePolecatDone_MRFailedAbsent(t *testing.T) {
+	// When MRFailed is not in the body, it should default to false
+	subject := "POLECAT_DONE nux"
+	body := `Exit: COMPLETED
+Issue: gt-abc123
+MR: gt-mr-xyz
+Branch: polecat/nux-abc123`
+
+	payload, err := ParsePolecatDone(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePolecatDone() error = %v", err)
+	}
+
+	if payload.MRFailed {
+		t.Error("MRFailed = true, want false when not in body")
+	}
+}
+
 func TestParseHelp(t *testing.T) {
 	subject := "HELP: Tests failing on CI"
 	body := `Agent: gastown/polecats/nux

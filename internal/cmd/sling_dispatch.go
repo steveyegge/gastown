@@ -107,13 +107,28 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		return result, fmt.Errorf("could not get bead info: %w", err)
 	}
 
+	// Save explicit force state before dead-agent auto-force, so the deferred
+	// gate below still requires an explicit --force for deferred beads.
+	explicitForce := params.Force
+
 	if (info.Status == "pinned" || info.Status == "hooked") && !params.Force {
-		result.ErrMsg = "already " + info.Status
-		return result, fmt.Errorf("already %s (use --force to re-sling)", info.Status)
+		// Auto-force when hooked agent's session is confirmed dead (gt-npzy).
+		// Mirrors the dead-agent detection in runSling (sling.go) so that
+		// programmatic dispatch also handles stale hooks from nuked polecats.
+		if info.Status == "hooked" && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
+			fmt.Printf("  %s Hooked agent %s has no active session, auto-forcing dispatch...\n",
+				style.Warning.Render("⚠"), info.Assignee)
+			params.Force = true
+		} else {
+			result.ErrMsg = "already " + info.Status
+			return result, fmt.Errorf("already %s (use --force to re-sling)", info.Status)
+		}
 	}
 
 	// Guard against slinging deferred beads (gt-1326mw).
-	if isDeferredBead(info) && !params.Force {
+	// Uses explicitForce (not params.Force) so dead-agent auto-force doesn't
+	// accidentally bypass the deferred gate.
+	if isDeferredBead(info) && !explicitForce {
 		result.ErrMsg = "deferred"
 		return result, fmt.Errorf("bead %s is deferred (use --force to override)", params.BeadID)
 	}
@@ -290,17 +305,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		updateAgentMode(targetAgent, params.Mode, hookWorkDir, beadsDir)
 	}
 
-	// 11. Create Dolt branch AFTER all sling writes are complete.
-	if spawnInfo.DoltBranch != "" {
-		if err := spawnInfo.CreateDoltBranch(); err != nil {
-			fmt.Printf("  %s Could not create Dolt branch: %v, cleaning up...\n", style.Dim.Render("✗"), err)
-			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
-			result.ErrMsg = fmt.Sprintf("dolt branch failed: %v", err)
-			return result, fmt.Errorf("creating Dolt branch: %w", err)
-		}
-	}
-
-	// 12. Start polecat session
+	// 11. Start polecat session
 	pane, err := spawnInfo.StartSession()
 	if err != nil {
 		fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)

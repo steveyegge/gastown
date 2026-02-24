@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -128,9 +128,9 @@ func collectExistingMolecules(info *beadInfo) []string {
 	return molecules
 }
 
-// burnExistingMolecules detaches and burns all molecule wisps attached to a bead.
-// First detaches the molecule from the base bead (clears attached_molecule in description),
-// then force-closes the orphaned wisp beads. Returns an error if detach fails, since
+// burnExistingMolecules burns all molecule wisps attached to a bead.
+// Order: force-close descendants → detach from bead → force-close roots.
+// Matches nukeCleanupMolecules pattern. Returns an error if detach fails, since
 // proceeding with a stale attached_molecule reference creates harder-to-debug orphans.
 func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	if len(molecules) == 0 {
@@ -138,11 +138,24 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	}
 	burnDir := beads.ResolveHookDir(townRoot, beadID, "")
 
-	// Step 1: Detach molecule from the base bead using the Go API (with audit logging
+	// Follows the same order as nukeCleanupMolecules:
+	//   1. Force-close descendants (children before parents)
+	//   2. Detach molecule from bead (clears attached_molecule in description)
+	//   3. Force-close molecule roots
+	// Closing descendants first ensures that if detach succeeds but a later step
+	// crashes, we don't leave a detached root with live children.
+	bd := beads.New(burnDir)
+
+	// Step 1: Force-close descendant steps before detaching. Uses force variant
+	// since burn is a destructive recovery path where prior state may be inconsistent.
+	for _, molID := range molecules {
+		forceCloseDescendants(bd, molID)
+	}
+
+	// Step 2: Detach molecule from the base bead using the Go API (with audit logging
 	// and advisory locking). This clears attached_molecule/attached_at from the description.
 	// Without this, storeFieldsInBead preserves the stale reference because it only
 	// overwrites when updates.AttachedMolecule is non-empty.
-	bd := beads.New(burnDir)
 	if _, err := bd.DetachMoleculeWithAudit(beadID, beads.DetachOptions{
 		Operation: "burn",
 		Reason:    "force re-sling: burning stale molecules",
@@ -150,8 +163,7 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 		return fmt.Errorf("detaching molecule from %s: %w", beadID, err)
 	}
 
-	// Step 2: Force-close the orphaned wisp beads so they don't linger.
-	// Uses --force to handle wisps with open child steps (matching gt done pattern).
+	// Step 3: Force-close the orphaned wisp roots so they don't linger.
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
 			style.Dim.Render("Warning:"), err)
@@ -171,7 +183,6 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 func verifyBeadExists(beadID string) error {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
-		StripBdBranch().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -188,7 +199,6 @@ func verifyBeadExists(beadID string) error {
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
-		StripBdBranch().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -231,11 +241,10 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 
 	issue := &beads.Issue{}
 	if logPath == "" {
-		// Read the bead once (strip BD_BRANCH so we read from main)
+		// Read the bead once
 		out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 			Dir(resolveBeadDir(beadID)).
-			StripBdBranch().
-			Stderr(io.Discard).
+				Stderr(io.Discard).
 			Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -296,10 +305,6 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
-	// Write retains BD_BRANCH intentionally — polecat writes need branch isolation.
-	// The read/write asymmetry is correct: read from main (source of truth for existing
-	// fields), write to polecat branch (for isolation). This function is called from sling
-	// (typically Mayor/Deacon context where BD_BRANCH is absent anyway).
 	if err := BdCmd("update", beadID, "--description="+newDesc).
 		Dir(resolveBeadDir(beadID)).
 		Run(); err != nil {
@@ -660,14 +665,20 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-			Run(); err != nil {
+				Run(); err != nil {
 			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
 		}
 	}
 
-	// Step 2: Create wisp with feature and issue variables from bead
+	// Build variable list once so both legacy and fallback paths use
+	// identical formula inputs.
 	featureVar := fmt.Sprintf("feature=%s", title)
 	issueVar := fmt.Sprintf("issue=%s", beadID)
+	formulaVars := []string{featureVar, issueVar}
+	formulaVars = append(formulaVars, extraVars...)
+	formulaVars = ensureFormulaRequiredVars(formulaName, formulaVars)
+
+	// Step 2: Create wisp with feature and issue variables from bead
 	wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
@@ -688,30 +699,146 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		return nil, fmt.Errorf("parsing wisp output: %w", err)
 	}
 
-	// Step 3: Bond wisp to original bead (creates compound)
+	// Step 3: Bond wisp to original bead (creates compound).
+	//
+	// Compatibility fallback:
+	// Some bd versions return a wisp ID from `mol wisp` that is not bond-resolvable
+	// ("<id> not found"), while direct formula->bead bond still works. If legacy
+	// wisp->bead bond fails, retry with direct formula bond in ephemeral mode.
 	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
 	bondOut, err := BdCmd(bondArgs...).
 		Dir(formulaWorkDir).
 		WithAutoCommit().
 		WithGTRoot(townRoot).
-		StripBdBranch().
 		Output()
 	if err != nil {
-		return nil, fmt.Errorf("bonding formula to bead: %w", err)
+		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("bonding formula to bead: %w (direct formula bond fallback failed: %v)", err, fallbackErr)
+		}
+		return &FormulaOnBeadResult{
+			WispRootID: fallbackRootID,
+			BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
+		}, nil
 	}
 
-	// Parse bond output - the wisp root becomes the compound root
-	var bondResult struct {
-		RootID string `json:"root_id"`
+	// Parse bond output - the wisp root becomes the compound root.
+	// Some environments may return success with non-JSON/empty stdout while
+	// still writing an error to stderr. If parsing fails, retry direct bond.
+	parsedRootID, parsed := parseBondSpawnRootIDWithStatus(bondOut, formulaName, beadID, wispRootID)
+	if !parsed {
+		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("bond output not parseable and direct formula bond fallback failed: %v", fallbackErr)
+		}
+		return &FormulaOnBeadResult{
+			WispRootID: fallbackRootID,
+			BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
+		}, nil
 	}
-	if err := json.Unmarshal(bondOut, &bondResult); err == nil && bondResult.RootID != "" {
-		wispRootID = bondResult.RootID
+	if parsedRootID != "" {
+		wispRootID = parsedRootID
 	}
 
 	return &FormulaOnBeadResult{
 		WispRootID: wispRootID,
 		BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
 	}, nil
+}
+
+// bondFormulaDirect retries formula attachment using direct formula->bead bond.
+// Newer bd versions support this polymorphic path even when legacy wisp->bead
+// bonding fails with "not found" for the generated wisp ID.
+func bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot string, vars []string) (string, error) {
+	bondArgs := []string{"mol", "bond", formulaName, beadID, "--json", "--ephemeral"}
+	for _, variable := range vars {
+		bondArgs = append(bondArgs, "--var", variable)
+	}
+	bondOut, err := BdCmd(bondArgs...).
+		Dir(formulaWorkDir).
+		WithAutoCommit().
+		WithGTRoot(townRoot).
+		Output()
+	if err != nil {
+		return "", fmt.Errorf("%w (args: %s)", err, strings.Join(bondArgs, " "))
+	}
+
+	rootID := parseBondSpawnRootID(bondOut, formulaName, beadID, "")
+	if rootID == "" {
+		return "", fmt.Errorf("direct bond output missing spawned root id (output: %s)", trimJSONForError(bondOut))
+	}
+	return rootID, nil
+}
+
+// parseBondSpawnRootID extracts the spawned molecule root from bd mol bond JSON.
+// Handles both legacy output (root_id) and polymorphic output (result_id + id_mapping).
+func parseBondSpawnRootID(bondOut []byte, formulaName, beadID, fallbackID string) string {
+	rootID, _ := parseBondSpawnRootIDWithStatus(bondOut, formulaName, beadID, fallbackID)
+	return rootID
+}
+
+func parseBondSpawnRootIDWithStatus(bondOut []byte, formulaName, beadID, fallbackID string) (string, bool) {
+	var bondResult struct {
+		RootID    string            `json:"root_id"`
+		ResultID  string            `json:"result_id"`
+		NewEpicID string            `json:"new_epic_id"`
+		IDMapping map[string]string `json:"id_mapping"`
+	}
+	if err := json.Unmarshal(bondOut, &bondResult); err != nil {
+		return fallbackID, false
+	}
+
+	if len(bondResult.IDMapping) > 0 {
+		if mappedID := bondResult.IDMapping[formulaName]; mappedID != "" {
+			return mappedID, true
+		}
+		if !strings.HasPrefix(formulaName, "mol-") {
+			if mappedID := bondResult.IDMapping["mol-"+formulaName]; mappedID != "" {
+				return mappedID, true
+			}
+		}
+	}
+
+	for _, candidate := range []string{bondResult.RootID, bondResult.ResultID, bondResult.NewEpicID} {
+		if candidate != "" && candidate != beadID {
+			return candidate, true
+		}
+	}
+	return fallbackID, true
+}
+
+// ensureFormulaRequiredVars appends missing required vars for formulas that enforce
+// strict var presence on direct bond paths.
+func ensureFormulaRequiredVars(formulaName string, vars []string) []string {
+	// Currently only mol-polecat-work has strict required vars on bond.
+	if formulaName != "mol-polecat-work" && formulaName != "polecat-work" {
+		return vars
+	}
+
+	seen := make(map[string]bool, len(vars))
+	for _, variable := range vars {
+		if eq := strings.Index(variable, "="); eq > 0 {
+			seen[variable[:eq]] = true
+		}
+	}
+
+	requiredDefaults := []struct {
+		Key   string
+		Value string
+	}{
+		{"base_branch", "main"},
+		{"setup_command", ""},
+		{"typecheck_command", ""},
+		{"lint_command", ""},
+		{"test_command", "go test ./..."},
+		{"build_command", ""},
+	}
+	for _, item := range requiredDefaults {
+		if !seen[item.Key] {
+			vars = append(vars, item.Key+"="+item.Value)
+		}
+	}
+	return vars
 }
 
 // CookFormula cooks a formula to ensure its proto exists.

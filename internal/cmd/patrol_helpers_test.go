@@ -1,14 +1,18 @@
 package cmd
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 func TestBuildRefineryPatrolVars_NilContext(t *testing.T) {
@@ -421,9 +425,18 @@ func requireBd(t *testing.T) {
 
 func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	t.Helper()
+	testutil.RequireDoltServer(t)
+	port, _ := strconv.Atoi(testutil.DoltTestPort())
 	tmpDir := t.TempDir()
-	b := beads.NewIsolated(tmpDir)
-	if err := b.Init("pt"); err != nil {
+	b := beads.NewIsolatedWithPort(tmpDir, port)
+	// Use a unique prefix per test run to avoid cross-run contamination
+	// in the shared Dolt database.
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	prefix := "pt" + hex.EncodeToString(buf[:])
+	if err := b.Init(prefix); err != nil {
 		t.Fatalf("bd init: %v", err)
 	}
 	return tmpDir, b
@@ -475,6 +488,7 @@ func TestFindActivePatrolHooked(t *testing.T) {
 		PatrolMolName: molName,
 		BeadsDir:      tmpDir,
 		Assignee:      assignee,
+		Beads:         b,
 	}
 
 	patrolID, _, found, findErr := findActivePatrol(cfg)
@@ -523,6 +537,7 @@ func TestFindActivePatrolStale(t *testing.T) {
 		PatrolMolName: molName,
 		BeadsDir:      tmpDir,
 		Assignee:      assignee,
+		Beads:         b,
 	}
 
 	_, _, found, findErr := findActivePatrol(cfg)
@@ -559,6 +574,7 @@ func TestFindActivePatrolZeroChildren(t *testing.T) {
 		PatrolMolName: molName,
 		BeadsDir:      tmpDir,
 		Assignee:      assignee,
+		Beads:         b,
 	}
 
 	patrolID, _, found, findErr := findActivePatrol(cfg)
@@ -611,6 +627,7 @@ func TestFindActivePatrolMultiple(t *testing.T) {
 		PatrolMolName: molName,
 		BeadsDir:      tmpDir,
 		Assignee:      assignee,
+		Beads:         b,
 	}
 
 	patrolID, _, found, findErr := findActivePatrol(cfg)

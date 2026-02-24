@@ -97,8 +97,8 @@ This command is intended to be run by Deacon patrol (daily) or manually.
 It reads entries from ~/.gt/costs.jsonl for a target date, creates a single
 aggregate "Cost Report YYYY-MM-DD" bead, then removes the source entries.
 
-The resulting digest bead is permanent (exported to JSONL, synced via git)
-and provides an audit trail without log-in-database pollution.
+The resulting digest bead is permanent (synced via git) and provides
+an audit trail without log-in-database pollution.
 
 Examples:
   gt costs digest --yesterday   # Digest yesterday's costs (default for patrol)
@@ -971,7 +971,12 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		session = detectCurrentTmuxSession()
 	}
 	if session == "" {
-		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
+		// Not a Gas Town session (e.g., Claude Code launched outside gt agent system).
+		// Exit silently — no costs to record.
+		if costsVerbose {
+			fmt.Fprintf(os.Stderr, "[costs] no session context found, skipping costs record\n")
+		}
+		return nil
 	}
 
 	// Get working directory from environment or tmux session

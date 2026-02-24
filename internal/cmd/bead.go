@@ -153,15 +153,18 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build create command for target
-	createArgs := []string{
-		"create",
-		"--prefix", targetPrefix,
-		"--title=" + source.Title,
+	// Build create command for target.
+	// Skip --prefix for empty or bare "-" (normalization above turns "" into "-").
+	createArgs := []string{"create"}
+	if targetPrefix != "" && targetPrefix != "-" {
+		createArgs = append(createArgs, "--prefix", targetPrefix)
+	}
+	createArgs = append(createArgs,
+		"--title="+source.Title,
 		"--type", source.Type,
 		"--priority", fmt.Sprintf("%d", source.Priority),
 		"--silent", // Only output the ID
-	}
+	)
 
 	if source.Description != "" {
 		createArgs = append(createArgs, "--description", source.Description)

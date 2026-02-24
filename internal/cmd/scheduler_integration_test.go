@@ -5,7 +5,7 @@
 // dry-run, circuit breaker) against a Dolt-server-backed beads DB. No Claude
 // credentials, no agent sessions.
 //
-// Requires a Dolt server on port 3307 (managed by requireDoltServer/cleanupDoltServer).
+// Requires a Dolt server (managed by requireDoltServer/cleanupDoltServer).
 //
 // Run with:
 //
@@ -33,7 +33,7 @@ import (
 var schedulerTestCounter atomic.Int32
 
 // initBeadsDBForServer initializes a beads DB that can operate against the
-// shared Dolt test server on port 3307. Uses local init (bd init --prefix)
+// shared Dolt test server. Uses local init (bd init --prefix)
 // which reliably creates the schema, then bd auto-detects the running server
 // at runtime for SQL operations.
 //
@@ -59,7 +59,7 @@ func initBeadsDBForServer(t *testing.T, dir, prefix string) {
 }
 
 // setupSchedulerIntegrationTown creates a minimal town filesystem for scheduler tests.
-// Uses the shared Dolt test server on port 3307 (managed by requireDoltServer)
+// Uses the shared Dolt test server (managed by requireDoltServer)
 // for beads databases. No gt install, no Claude credentials, no agent sessions.
 //
 // Returns (hqPath, rigPath, gtBinary, env).

@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -465,7 +464,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		displayState := p.State
 		if p.SessionRunning && displayState == polecat.StateDone {
 			displayState = polecat.StateWorking
-		} else if !p.SessionRunning && !p.Zombie && displayState.IsActive() {
+		} else if !p.SessionRunning && !p.Zombie && displayState == polecat.StateWorking {
 			displayState = polecat.StateDone
 		}
 
@@ -965,7 +964,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	} else {
 		// Use cleanup_status from agent bead
 		status.CleanupStatus = polecat.CleanupStatus(fields.CleanupStatus)
-		if status.CleanupStatus.IsSafe() {
+		if status.CleanupStatus.IsSafe() && fields.ActiveMR == "" {
 			status.NeedsRecovery = false
 			status.Verdict = "SAFE_TO_NUKE"
 		} else {
@@ -1193,11 +1192,19 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		fmt.Printf("  %s killed session\n", style.Success.Render("✓"))
 	}
 
-	// Step 2: Get polecat info before deletion (for branch name)
+	// Step 2: Get polecat info before deletion (for branch name + hooked work bead)
 	polecatInfo, getErr := mgr.Get(polecatName)
 	var branchToDelete string
 	if getErr == nil && polecatInfo != nil {
 		branchToDelete = polecatInfo.Branch
+	}
+
+	// Step 2.5: Burn any molecule attached to the polecat's hooked work bead.
+	// Without this, nuked polecats leave orphan molecule refs that block re-sling.
+	// The stale attached_molecule in the work bead's description causes sling to
+	// fail with "bead already has N attached molecule(s)" on re-dispatch (gt-npzy).
+	if getErr == nil && polecatInfo != nil && polecatInfo.Issue != "" {
+		nukeCleanupMolecules(polecatInfo.Issue, r)
 	}
 
 	// Step 3: Delete worktree (nuclear=true to bypass safety checks for stale polecats)
@@ -1249,21 +1256,74 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		}
 	}
 
-	// Step 5: Close agent bead (if exists)
+	// Step 5: Reset agent bead for reuse (if exists)
+	// Uses ResetAgentBeadForReuse instead of bd close because agent beads are
+	// ephemeral (wisps table). Shelling out to `bd close` operates on the issues
+	// table and silently fails to affect wisps, leaving stale rows that block
+	// re-sling with "duplicate primary key" errors. (gt--irj)
+	// ResetAgentBeadForReuse keeps the bead open with agent_state="nuked" so
+	// CreateOrReopenAgentBead can simply update it on re-spawn without needing
+	// a close/reopen cycle.
 	agentBeadID := polecatBeadIDForRig(r, rigName, polecatName)
-	closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
-	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
-		closeArgs = append(closeArgs, "--session="+sessionID)
-	}
-	closeCmd := exec.Command("bd", closeArgs...)
-	closeCmd.Dir = filepath.Join(r.Path, "mayor", "rig")
-	if err := closeCmd.Run(); err != nil {
-		fmt.Printf("  %s agent bead not found or already closed\n", style.Dim.Render("○"))
+	bd := beads.New(r.Path)
+	if err := bd.ResetAgentBeadForReuse(agentBeadID, "nuked"); err != nil {
+		// Bead may not exist (first spawn failed, or test environment)
+		fmt.Printf("  %s agent bead not found or already cleaned\n", style.Dim.Render("○"))
 	} else {
 		fmt.Printf("  %s closed agent bead %s\n", style.Success.Render("✓"), agentBeadID)
 	}
 
 	return nil
+}
+
+// nukeCleanupMolecules burns any molecule attached to a work bead during polecat nuke.
+// This prevents stale attached_molecule references from blocking re-dispatch (gt-npzy).
+// Best-effort: failures are logged but don't abort the nuke.
+func nukeCleanupMolecules(workBeadID string, r *rig.Rig) {
+	// Use mayor/rig as workDir so ResolveBeadsDir finds the Dolt-backed
+	// .beads/ directory, not the gitignored rig-root .beads/. Without this,
+	// detach/close operations route to the wrong database and the stale
+	// molecule attachment persists on the work bead. (gt--1up)
+	bd := beads.New(filepath.Join(r.Path, "mayor", "rig"))
+
+	// Fetch the work bead to check for attached molecules
+	issue, err := bd.Show(workBeadID)
+	if err != nil {
+		fmt.Printf("  %s molecule cleanup: could not fetch work bead %s: %v\n",
+			style.Dim.Render("○"), workBeadID, err)
+		return
+	}
+
+	attachment := beads.ParseAttachmentFields(issue)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		return // No molecule attached — nothing to clean up
+	}
+
+	moleculeID := attachment.AttachedMolecule
+
+	// Force-close descendant steps before detaching (prevents orphaned step beads).
+	// Uses force variant since nuke is destructive — must succeed even for beads in
+	// invalid states.
+	forceCloseDescendants(bd, moleculeID)
+
+	// Detach the molecule with audit trail
+	if _, detachErr := bd.DetachMoleculeWithAudit(workBeadID, beads.DetachOptions{
+		Operation: "burn",
+		Reason:    "polecat nuked: cleaning stale molecule",
+	}); detachErr != nil {
+		fmt.Printf("  %s molecule detach failed for %s: %v\n",
+			style.Warning.Render("⚠"), moleculeID, detachErr)
+		return
+	}
+
+	// Force-close the orphaned wisp root so it doesn't linger
+	if closeErr := bd.ForceCloseWithReason("burned: polecat nuked", moleculeID); closeErr != nil {
+		fmt.Printf("  %s molecule root close failed for %s: %v\n",
+			style.Warning.Render("⚠"), moleculeID, closeErr)
+	} else {
+		fmt.Printf("  %s burned stale molecule %s from work bead %s\n",
+			style.Success.Render("✓"), moleculeID, workBeadID)
+	}
 }
 
 // cleanupOrphanedProcesses kills Claude processes that survived session termination.

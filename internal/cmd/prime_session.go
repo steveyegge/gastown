@@ -239,18 +239,17 @@ func detectSessionState(ctx RoleContext) SessionState {
 	// Fallback: query hooked/in_progress beads by assignee.
 	agentID := getAgentIdentity(ctx)
 	if agentID != "" {
-		b := beads.New(ctx.WorkDir).OnMain()
-
+		b := beads.New(ctx.WorkDir)
 		// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 		agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
 		if agentBeadID != "" {
 			agentBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBeadID, ctx.WorkDir)
-			ab := beads.New(agentBeadDir).OnMain()
+			ab := beads.New(agentBeadDir)
 			if agentBead, err := ab.Show(agentBeadID); err == nil && agentBead != nil && agentBead.HookBead != "" {
 				// Resolve and verify the target bead exists with active status
 				// (mirrors molecule_status.go and signal_stop.go patterns)
 				hookBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBead.HookBead, ctx.WorkDir)
-				hb := beads.New(hookBeadDir).OnMain()
+				hb := beads.New(hookBeadDir)
 				if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
 					(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
 					state.State = "autonomous"

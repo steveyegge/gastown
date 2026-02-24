@@ -1042,38 +1042,60 @@ func (m *DoltServerManager) checkDatabaseIdentityLocked() error {
 		return nil // Can't verify further without expected databases
 	}
 
-	// Spot-check one database: query for issues table existence
+	// Spot-check one database: query for issues or wisps table existence.
+	// Agent beads may be in the wisps table after migration, so check both.
 	db := expectedDBs[0]
 	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
 	defer cancel()
 
+	// Try issues table first
+	issueCount := -1
 	query := fmt.Sprintf("SELECT COUNT(*) AS cnt FROM `%s`.`issues`", db)
 	cmd := m.buildDoltSQLCmd(ctx, "-r", "csv", "-q", query)
-	output, queryErr := cmd.Output()
-	if queryErr != nil {
-		// Table might not exist in this database — that's OK, not all DBs have issues
+	if output, queryErr := cmd.Output(); queryErr == nil {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(lines) >= 2 {
+			if c, err := strconv.Atoi(strings.TrimSpace(lines[len(lines)-1])); err == nil {
+				issueCount = c
+			}
+		}
+	}
+
+	// Also try wisps table (may not exist yet)
+	wispCount := -1
+	wispCtx, wispCancel := context.WithTimeout(context.Background(), doltCmdTimeout)
+	defer wispCancel()
+	wispQuery := fmt.Sprintf("SELECT COUNT(*) AS cnt FROM `%s`.`wisps`", db)
+	wispCmd := m.buildDoltSQLCmd(wispCtx, "-r", "csv", "-q", wispQuery)
+	if wispOutput, wispErr := wispCmd.Output(); wispErr == nil {
+		wispLines := strings.Split(strings.TrimSpace(string(wispOutput)), "\n")
+		if len(wispLines) >= 2 {
+			if c, err := strconv.Atoi(strings.TrimSpace(wispLines[len(wispLines)-1])); err == nil {
+				wispCount = c
+			}
+		}
+	}
+
+	// If neither table exists, that's OK (not all DBs have beads)
+	if issueCount < 0 && wispCount < 0 {
 		return nil
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 2 {
-		return nil
+	// Total across both tables
+	totalCount := 0
+	if issueCount > 0 {
+		totalCount += issueCount
 	}
-	count, parseErr := strconv.Atoi(strings.TrimSpace(lines[len(lines)-1]))
-	if parseErr != nil {
-		return nil
+	if wispCount > 0 {
+		totalCount += wispCount
 	}
 
-	// If we know the filesystem has data but the server returns 0 rows,
-	// this is suspicious. Check if the filesystem DB actually has commits
-	// (indicating it should have data).
-	if count == 0 {
+	// If we know the filesystem has data but the server returns 0 rows
+	// across both tables, this is suspicious.
+	if totalCount == 0 {
 		dbDir := doltserver.RigDatabaseDir(m.townRoot, db)
 		commitDir := filepath.Join(dbDir, ".dolt", "noms")
 		if info, err := os.Stat(commitDir); err == nil && info.IsDir() {
-			// The noms directory exists and has data — 0 issues is suspicious
-			// but might be legitimate for a fresh database. Only flag if the
-			// DB directory is substantial (> 1MB suggests real data).
 			var totalSize int64
 			_ = filepath.Walk(dbDir, func(_ string, info os.FileInfo, err error) error {
 				if err == nil && !info.IsDir() {
@@ -1082,7 +1104,7 @@ func (m *DoltServerManager) checkDatabaseIdentityLocked() error {
 				return nil
 			})
 			if totalSize > 1024*1024 { // > 1MB
-				return fmt.Errorf("database %q has %s on disk but 0 issues in server — possible imposter",
+				return fmt.Errorf("database %q has %s on disk but 0 rows in server (issues+wisps) — possible imposter",
 					db, formatDiskSize(totalSize))
 			}
 		}

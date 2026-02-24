@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -775,14 +776,14 @@ func setupMockBeads(t *testing.T, townRoot, rigName string) {
 			"labels":     []string{"gt:rig"},
 		},
 		{
-			"id":         prefix + "-" + rigName + "-witness",
+			"id":         beads.WitnessBeadIDWithPrefix(prefix, rigName),
 			"title":      "Witness for " + rigName,
 			"status":     "open",
 			"issue_type": "agent",
 			"labels":     []string{"gt:agent"},
 		},
 		{
-			"id":         prefix + "-" + rigName + "-refinery",
+			"id":         beads.RefineryBeadIDWithPrefix(prefix, rigName),
 			"title":      "Refinery for " + rigName,
 			"status":     "open",
 			"issue_type": "agent",

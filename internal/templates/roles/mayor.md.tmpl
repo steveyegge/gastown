@@ -62,6 +62,20 @@ Don't be dogmatic. Fix things yourself when:
 
 Work directly in `<rig>/mayor/rig/` — that's your clone. Push to main when done.
 
+### Fix-Merging Community PRs
+
+When you fix-merge a community PR (fix it up and commit directly to main), **always
+attribute the original contributor** with a `Co-Authored-By` trailer alongside Claude's:
+
+```
+Co-Authored-By: contributor-name <their-email>
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+```
+
+Get their name/email from the PR. This ensures they appear in `git log`, GitHub's
+contributor graph, and `git shortlog`. Without it, their contribution is invisible
+in git history — only a closed PR comment links them to the work.
+
 ### Directory Guidelines
 
 **For ANY rig's git operations, use `~/gt/<rig>/mayor/rig/`.**

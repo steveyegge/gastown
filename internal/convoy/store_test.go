@@ -16,6 +16,8 @@ import (
 func setupTestStore(t *testing.T) (beadsdk.Storage, func()) {
 	t.Helper()
 
+	t.Setenv("BEADS_TEST_MODE", "1")
+
 	dir := t.TempDir()
 	beadsDir := filepath.Join(dir, ".beads")
 	doltPath := filepath.Join(beadsDir, "dolt")

@@ -35,7 +35,6 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 		"backend":       "dolt",
 		"dolt_mode":     "server",
 		"dolt_database": doltDatabase,
-		"jsonl_export":  "issues.jsonl",
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {
@@ -56,7 +55,6 @@ func setupServerMetadata(t *testing.T, beadsDir, host string, port int) {
 		"backend":       "dolt",
 		"dolt_mode":     "server",
 		"dolt_database": "test",
-		"jsonl_export":  "issues.jsonl",
 	}
 	if host != "" {
 		meta["dolt_server_host"] = host
@@ -297,3 +295,4 @@ func TestDoltOrphanedDatabaseCheck_Name(t *testing.T) {
 		t.Errorf("expected name 'dolt-orphaned-databases', got %q", check.Name())
 	}
 }
+

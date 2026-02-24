@@ -351,7 +351,7 @@ func TestInitBeads_TrackedBeads_CreatesRedirect(t *testing.T) {
 	}
 
 	manager := &Manager{}
-	if err := manager.InitBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt", ""); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -400,7 +400,7 @@ exit 0
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	manager := &Manager{}
-	if err := manager.InitBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt", ""); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -443,7 +443,7 @@ exit 1
 	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 
 	manager := &Manager{}
-	if err := manager.InitBeads(rigPath, "gt"); err != nil {
+	if err := manager.InitBeads(rigPath, "gt", ""); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -484,7 +484,7 @@ exit 0
 	t.Setenv("BD_CMD_LOG", cmdLog)
 
 	manager := &Manager{}
-	if err := manager.InitBeads(rigPath, "myrig"); err != nil {
+	if err := manager.InitBeads(rigPath, "myrig", ""); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -666,7 +666,7 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 
 	for _, prefix := range tests {
 		t.Run(prefix, func(t *testing.T) {
-			err := manager.InitBeads(rigPath, prefix)
+			err := manager.InitBeads(rigPath, prefix, "")
 			if err == nil {
 				t.Errorf("initBeads(%q) should have failed", prefix)
 			}
@@ -709,6 +709,11 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 		{"myrig", "my"},
 		{"awesome", "aw"},
 		{"coolrig", "co"},
+
+		// camelCase names
+		{"myProject", "mp"},
+		{"gasStation", "gs"},
+		{"HTMLParser", "hp"},
 
 		// With language suffixes stripped
 		{"myproject-py", "my"},
@@ -762,6 +767,49 @@ func TestSplitCompoundWord(t *testing.T) {
 			for i := range got {
 				if got[i] != tt.want[i] {
 					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitCamelCase(t *testing.T) {
+	tests := []struct {
+		word string
+		want []string
+	}{
+		// Basic camelCase
+		{"myProject", []string{"my", "Project"}},
+		{"gasStation", []string{"gas", "Station"}},
+
+		// PascalCase
+		{"MyProject", []string{"My", "Project"}},
+
+		// Uppercase runs
+		{"HTMLParser", []string{"HTML", "Parser"}},
+		{"parseJSON", []string{"parse", "JSON"}},
+
+		// No splits (single word, all lower)
+		{"gastown", []string{"gastown"}},
+		{"a", []string{"a"}},
+
+		// All uppercase (no lower transition)
+		{"AB", []string{"AB"}},
+
+		// Empty
+		{"", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.word, func(t *testing.T) {
+			got := splitCamelCase(tt.word)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitCamelCase(%q) = %v, want %v", tt.word, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitCamelCase(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
 				}
 			}
 		})

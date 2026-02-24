@@ -67,11 +67,11 @@ type HandlerResult struct {
 // immediate merge queue processing. This ensures work flows through the system
 // without waiting for the daemon's heartbeat cycle.
 //
-// Ephemeral Polecat Model:
-// Polecats are truly ephemeral - done at MR submission, recyclable immediately.
-// Once the branch is pushed (cleanup_status=clean), the polecat can be nuked.
+// Persistent Polecat Model (gt-4ac):
+// Polecats persist after work completion - sandbox is preserved for reuse.
+// When work is done, the polecat transitions to idle state (no nuke).
 // The MR lifecycle continues independently in the Refinery.
-// If conflicts arise, Refinery creates a NEW conflict-resolution task for a NEW polecat.
+// If conflicts arise, Refinery creates a conflict-resolution task for an available polecat.
 func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.Router) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -96,7 +96,19 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message, router *mail.
 		return result
 	}
 
-	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
+	hasPendingMR := payload.MRID != ""
+
+	// When Exit==COMPLETED but MRID is empty and MR creation didn't explicitly
+	// fail, query beads to check if an MR bead exists for this branch.
+	// This handles the case where the MR was created but the ID wasn't included
+	// in the POLECAT_DONE message (e.g., message truncation, race condition).
+	if !hasPendingMR && payload.Exit == "COMPLETED" && !payload.MRFailed && payload.Branch != "" {
+		if mrID := findMRBeadForBranch(workDir, payload.Branch); mrID != "" {
+			payload.MRID = mrID
+			hasPendingMR = true
+		}
+	}
+
 	if hasPendingMR {
 		return handlePolecatDonePendingMR(workDir, rigName, payload, router, result)
 	}
@@ -151,25 +163,11 @@ func notifyRefineryMergeReady(workDir, rigName string, payload *PolecatDonePaylo
 // handlePolecatDoneNoMR handles a POLECAT_DONE with no pending MR.
 // Tries auto-nuke; falls back to creating a cleanup wisp for manual intervention.
 func handlePolecatDoneNoMR(workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
-	nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
-	if nukeResult.Nuked {
-		result.Handled = true
-		result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
-		return result
-	}
-	if nukeResult.Error != nil {
-		result.Error = nukeResult.Error
-	}
-
-	wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
-	if err != nil {
-		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
-		return result
-	}
-
+	// Persistent polecat model (gt-4ac): polecats go idle after completion, no nuke.
+	// The polecat has already set its own state to "idle" in gt done.
+	// We just acknowledge the completion here.
 	result.Handled = true
-	result.WispCreated = wispID
-	result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
+	result.Action = fmt.Sprintf("polecat %s completed (exit=%s, no MR) — now idle, sandbox preserved", payload.PolecatName, payload.Exit)
 	return result
 }
 
@@ -191,7 +189,7 @@ func isStalePolecatDone(workDir, rigName, polecatName string, msg *mail.Message)
 
 // HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.
 // Similar to POLECAT_DONE but triggered by daemon rather than polecat.
-// Auto-nukes if clean since shutdown means no pending work.
+// Persistent polecat model (gt-4ac): sandbox preserved, polecat goes idle.
 func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -206,28 +204,11 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 	}
 	polecatName := matches[1]
 
-	// Shutdown means no pending work - try to auto-nuke immediately
-	nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
-	if nukeResult.Nuked {
-		result.Handled = true
-		result.Action = fmt.Sprintf("auto-nuked %s (shutdown): %s", polecatName, nukeResult.Reason)
-		return result
-	}
-	if nukeResult.Error != nil {
-		// Nuke failed - fall through to create wisp
-		result.Error = nukeResult.Error
-	}
-
-	// Couldn't auto-nuke - create a cleanup wisp for manual intervention
-	wispID, err := createCleanupWisp(workDir, polecatName, "", "")
-	if err != nil {
-		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
-		return result
-	}
-
+	// Persistent model: polecat goes idle, sandbox preserved for reuse.
+	// If polecat has dirty state, that's fine — it stays idle until
+	// someone slings new work to it (which will repair the worktree).
 	result.Handled = true
-	result.WispCreated = wispID
-	result.Action = fmt.Sprintf("created cleanup wisp %s for shutdown %s (needs manual cleanup)", wispID, polecatName)
+	result.Action = fmt.Sprintf("polecat %s shutdown — now idle, sandbox preserved", polecatName)
 
 	return result
 }
@@ -316,42 +297,34 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	return result
 }
 
-// handleMergedCleanupStatus applies the nuke/block decision based on cleanup_status.
-// ZFC #10: prevents work loss when MERGED signal arrives for stale MRs or
-// when polecat has new unpushed work since the MR was created.
+// handleMergedCleanupStatus acknowledges merge completion for persistent polecats.
+// Persistent model (gt-4ac): polecats go idle after merge, sandbox preserved.
+// ZFC #10: still warns about dirty state (uncommitted/stash/unpushed) since
+// that indicates the polecat may have started new work after the MR.
 func handleMergedCleanupStatus(workDir, rigName, polecatName, cleanupStatus, wispID string, result *HandlerResult) {
 	result.Handled = true
 	result.WispCreated = wispID
 
 	switch cleanupStatus {
-	case "clean":
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
-			result.Error = fmt.Errorf("nuke failed for %s: %w", polecatName, err)
-			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, polecatName)
-		} else {
-			result.Action = fmt.Sprintf("auto-nuked %s (cleanup_status=clean, wisp=%s)", polecatName, wispID)
-		}
+	case "clean", "":
+		// Clean state — polecat is idle, sandbox preserved for reuse.
+		result.Action = fmt.Sprintf("polecat %s merged successfully — idle, sandbox preserved (wisp=%s)", polecatName, wispID)
 
 	case "has_uncommitted":
-		result.Error = fmt.Errorf("polecat %s has uncommitted changes - escalate to Mayor before nuke", polecatName)
-		result.Action = fmt.Sprintf("BLOCKED: %s has uncommitted work, needs escalation", polecatName)
+		result.Error = fmt.Errorf("polecat %s has uncommitted changes after merge - escalate to Mayor", polecatName)
+		result.Action = fmt.Sprintf("WARNING: %s has uncommitted work post-merge, needs review", polecatName)
 
 	case "has_stash":
-		result.Error = fmt.Errorf("polecat %s has stashed work - escalate to Mayor before nuke", polecatName)
-		result.Action = fmt.Sprintf("BLOCKED: %s has stashed work, needs escalation", polecatName)
+		result.Error = fmt.Errorf("polecat %s has stashed work after merge - escalate to Mayor", polecatName)
+		result.Action = fmt.Sprintf("WARNING: %s has stashed work post-merge, needs review", polecatName)
 
 	case "has_unpushed":
-		result.Error = fmt.Errorf("polecat %s has unpushed commits - DO NOT NUKE, escalate to Mayor", polecatName)
-		result.Action = fmt.Sprintf("BLOCKED: %s has unpushed commits, DO NOT NUKE", polecatName)
+		result.Error = fmt.Errorf("polecat %s has unpushed commits after merge - escalate to Mayor", polecatName)
+		result.Action = fmt.Sprintf("WARNING: %s has unpushed commits post-merge, needs review", polecatName)
 
 	default:
-		// Unknown or no status — commit verified on main, safe to nuke.
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
-			result.Error = fmt.Errorf("nuke failed for %s: %w", polecatName, err)
-			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, polecatName)
-		} else {
-			result.Action = fmt.Sprintf("auto-nuked %s (commit on main, cleanup_status=%s, wisp=%s)", polecatName, cleanupStatus, wispID)
-		}
+		// Unknown status — polecat is idle, let gt sling handle cleanup on reuse.
+		result.Action = fmt.Sprintf("polecat %s merged — idle, sandbox preserved (cleanup_status=%s, wisp=%s)", polecatName, cleanupStatus, wispID)
 	}
 }
 
@@ -585,6 +558,33 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	return ""
 }
 
+// findMRBeadForBranch queries beads for an open merge-request bead whose
+// description contains the given branch name. Returns the bead ID if found,
+// or empty string if no matching MR bead exists.
+func findMRBeadForBranch(workDir, branch string) string {
+	output, err := util.ExecWithOutput(workDir, "bd", "list",
+		"--type=merge-request", "--status=open", "--json", "--limit=0")
+	if err != nil || output == "" || output == "[]" || output == "null" {
+		return ""
+	}
+
+	var items []struct {
+		ID          string `json:"id"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(output), &items); err != nil {
+		return ""
+	}
+
+	needle := "branch: " + branch
+	for _, item := range items {
+		if strings.Contains(item.Description, needle) {
+			return item.ID
+		}
+	}
+	return ""
+}
+
 // sendMergeReady sends a MERGE_READY notification to the Refinery.
 // This signals that a polecat's work is ready for merge queue processing.
 func sendMergeReady(router *mail.Router, rigName string, payload *PolecatDonePayload) (string, error) {
@@ -810,57 +810,15 @@ type NukePolecatResult struct {
 	Error   error
 }
 
-// AutoNukeIfClean checks if a polecat is safe to nuke and nukes it if so.
-// This is used for orphaned polecats (no hooked work, no pending MR).
-// With the self-cleaning model, polecats should self-nuke on completion.
-// An orphan is likely from a crash before gt done completed.
-// Returns whether the nuke was performed and any error.
+// AutoNukeIfClean is a legacy function preserved for backward compatibility.
+// With persistent polecats (gt-4ac), polecats are no longer auto-nuked.
+// This function now always returns a "skipped" result since polecats go idle
+// instead of being destroyed. The polecat's sandbox is preserved for reuse.
 func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
-	result := &NukePolecatResult{}
-
-	// Check cleanup_status from agent bead
-	cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
-
-	switch cleanupStatus {
-	case "clean":
-		// Safe to nuke
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
-			result.Error = err
-			result.Reason = fmt.Sprintf("nuke failed: %v", err)
-		} else {
-			result.Nuked = true
-			result.Reason = "auto-nuked (cleanup_status=clean, no MR)"
-		}
-
-	case "has_uncommitted", "has_stash", "has_unpushed":
-		// Not safe - has work that could be lost
-		result.Skipped = true
-		result.Reason = fmt.Sprintf("skipped: has %s", strings.TrimPrefix(cleanupStatus, "has_"))
-
-	default:
-		// Unknown status - check git state directly as fallback
-		onMain, err := verifyCommitOnMain(workDir, rigName, polecatName)
-		if err != nil {
-			// Can't verify - skip (polecat may not exist)
-			result.Skipped = true
-			result.Reason = fmt.Sprintf("skipped: couldn't verify git state: %v", err)
-		} else if onMain {
-			// Commit is on main, likely safe
-			if err := NukePolecat(workDir, rigName, polecatName); err != nil {
-				result.Error = err
-				result.Reason = fmt.Sprintf("nuke failed: %v", err)
-			} else {
-				result.Nuked = true
-				result.Reason = "auto-nuked (commit on main, no cleanup_status)"
-			}
-		} else {
-			// Not on main - skip, might have unpushed work
-			result.Skipped = true
-			result.Reason = "skipped: commit not on main, may have unpushed work"
-		}
+	return &NukePolecatResult{
+		Skipped: true,
+		Reason:  "persistent polecat model: sandbox preserved for reuse (gt-4ac)",
 	}
-
-	return result
 }
 
 // verifyCommitOnMain checks if the polecat's current commit is on the default branch.
@@ -1391,9 +1349,11 @@ func getBeadStatus(workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 1. Resets status to open
-// 2. Clears assignee
-// 3. Sends mail to deacon for re-dispatch
+// 1. Records the respawn in the witness spawn-count ledger
+// 2. Resets status to open
+// 3. Clears assignee
+// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//    prefix and Urgent priority when count exceeds defaultMaxBeadRespawns)
 // Returns true if the bead was recovered.
 func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
 	if hookBead == "" {
@@ -1404,6 +1364,9 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 		return false
 	}
 
+	// Track respawn count for audit and storm detection.
+	respawnCount := recordBeadRespawn(workDir, hookBead)
+
 	// Reset bead status to open and clear assignee
 	if err := util.ExecRun(workDir, "bd", "update", hookBead, "--status=open", "--assignee="); err != nil {
 		return false
@@ -1411,20 +1374,32 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 
 	// Send mail to deacon for re-dispatch
 	if router != nil {
+		subject := fmt.Sprintf("RECOVERED_BEAD %s", hookBead)
+		priority := mail.PriorityHigh
+		stormNote := ""
+		if respawnCount > defaultMaxBeadRespawns {
+			subject = fmt.Sprintf("SPAWN_STORM RECOVERED_BEAD %s (respawned %dx)", hookBead, respawnCount)
+			priority = mail.PriorityUrgent
+			stormNote = fmt.Sprintf("\n\n⚠️ SPAWN STORM: bead has been reset %d times. "+
+				"A polecat may be exiting without closing its hook bead. "+
+				"Check polecat completion protocol or close the bead manually if not applicable.",
+				respawnCount)
+		}
 		msg := &mail.Message{
 			From:     fmt.Sprintf("%s/witness", rigName),
 			To:       "deacon/",
-			Subject:  fmt.Sprintf("RECOVERED_BEAD %s", hookBead),
-			Priority: mail.PriorityHigh,
+			Subject:  subject,
+			Priority: priority,
 			Body: fmt.Sprintf(`Recovered abandoned bead from dead polecat.
 
 Bead: %s
 Polecat: %s/%s
 Previous Status: %s
+Respawn Count: %d%s
 
 The bead has been reset to open with no assignee.
 Please re-dispatch to an available polecat.`,
-				hookBead, rigName, polecatName, status),
+				hookBead, rigName, polecatName, status, respawnCount, stormNote),
 		}
 		_ = router.Send(msg) // Best-effort
 	}

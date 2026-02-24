@@ -197,6 +197,11 @@ func isIssueStillOpen(workDir, id string) (bool, error) {
 		if ee, ok := err.(*exec.ExitError); ok {
 			stderr = strings.TrimSpace(string(ee.Stderr))
 		}
+		// "not found" means the issue was deleted or migrated (e.g. to wisps).
+		// Treat as "not open" rather than a probe error.
+		if strings.Contains(stderr, "not found") || strings.Contains(string(output), "no issues found") {
+			return false, nil
+		}
 		return false, fmt.Errorf("bd show %s: %v (%s)", id, err, stderr)
 	}
 	var issues []struct {
@@ -221,6 +226,11 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		return "merge-request type should be ephemeral"
 	}
 
+	// Check for agent type - agent operational state is ephemeral (gt-bewatn.9)
+	if issueType == "agent" {
+		return "agent type should be ephemeral"
+	}
+
 	// Check for patrol-related labels
 	for _, label := range labels {
 		if strings.Contains(label, "patrol") {
@@ -228,6 +238,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		}
 		if label == "gt:mail" || label == "gt:handoff" {
 			return "mail/handoff label indicates ephemeral message"
+		}
+		if label == "gt:agent" {
+			return "agent label indicates ephemeral operational state"
 		}
 	}
 

@@ -5,21 +5,18 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // bdCmd is a builder for constructing bd exec.Command calls.
 // It provides a fluent API for configuring environment variables,
 // working directory, and I/O settings common to bd CLI invocations.
 type bdCmd struct {
-	args          []string
-	dir           string
-	env           []string
-	stderr        io.Writer
-	stripBdBranch bool
-	autoCommit    bool
-	gtRoot        string
+	args       []string
+	dir        string
+	env        []string
+	stderr     io.Writer
+	autoCommit bool
+	gtRoot     string
 }
 
 // BdCmd creates a new bd command builder with the given arguments.
@@ -28,7 +25,6 @@ type bdCmd struct {
 // Example:
 //
 //	err := cmd.BdCmd("show", beadID, "--json").
-//	    StripBdBranch().
 //	    Dir(workDir).
 //	    Run()
 func BdCmd(args ...string) *bdCmd {
@@ -44,14 +40,6 @@ func BdCmd(args ...string) *bdCmd {
 // needs to see the changes from previous calls.
 func (b *bdCmd) WithAutoCommit() *bdCmd {
 	b.autoCommit = true
-	return b
-}
-
-// StripBdBranch removes BD_BRANCH from the environment.
-// This is used for read operations that need to access the main branch
-// instead of a polecat's write-isolation branch.
-func (b *bdCmd) StripBdBranch() *bdCmd {
-	b.stripBdBranch = true
 	return b
 }
 
@@ -92,11 +80,6 @@ func filterEnvKey(env []string, key string) []string {
 // buildEnv constructs the final environment slice based on configured options.
 func (b *bdCmd) buildEnv() []string {
 	env := b.env
-
-	// Strip BD_BRANCH if requested (for reading from main branch)
-	if b.stripBdBranch {
-		env = beads.StripBdBranch(env)
-	}
 
 	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls.
 	// Filter existing entries first — glibc getenv() returns the first match,

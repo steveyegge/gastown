@@ -15,14 +15,15 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName      string   // "deacon", "witness", "refinery"
-	PatrolMolName string   // "mol-deacon-patrol", etc.
-	BeadsDir      string   // where to look for beads
-	Assignee      string   // agent identity for pinning
-	HeaderEmoji   string   // display emoji
-	HeaderTitle   string   // "Patrol Status", etc.
-	WorkLoopSteps []string // role-specific instructions
-	ExtraVars     []string // additional --var key=value args for wisp creation
+	RoleName      string       // "deacon", "witness", "refinery"
+	PatrolMolName string       // "mol-deacon-patrol", etc.
+	BeadsDir      string       // where to look for beads
+	Assignee      string       // agent identity for pinning
+	HeaderEmoji   string       // display emoji
+	HeaderTitle   string       // "Patrol Status", etc.
+	WorkLoopSteps []string     // role-specific instructions
+	ExtraVars     []string     // additional --var key=value args for wisp creation
+	Beads         *beads.Beads // optional injected beads instance (for test isolation)
 }
 
 // findActivePatrol finds an active patrol molecule for the role.
@@ -37,7 +38,10 @@ type PatrolConfig struct {
 // e.g. after a squash that didn't close the root). Stale patrols are
 // cleaned up automatically.
 func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool, err error) {
-	b := beads.New(cfg.BeadsDir)
+	b := cfg.Beads
+	if b == nil {
+		b = beads.New(cfg.BeadsDir)
+	}
 
 	// Find hooked patrol beads for this agent
 	hookedBeads, listErr := b.List(beads.ListOptions{

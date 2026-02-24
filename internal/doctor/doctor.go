@@ -110,6 +110,18 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 	return d.FixStreaming(ctx, nil, 0)
 }
 
+// safeFixCheck calls check.Fix() with panic recovery. If the Fix method panics
+// (e.g., due to a Dolt nil pointer dereference propagating in-process — GH#1769),
+// the panic is caught and returned as an error instead of crashing gt doctor.
+func safeFixCheck(check Check, ctx *CheckContext) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("fix panicked: %v", r)
+		}
+	}()
+	return check.Fix(ctx)
+}
+
 // FixStreaming runs all checks with auto-fix and optional real-time output.
 // If w is non-nil, prints each check name as it starts and result when done.
 // If slowThreshold > 0, shows hourglass icon for slow checks.
@@ -150,7 +162,7 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" (fixing)..."))
 			}
 
-			err := check.Fix(ctx)
+			err := safeFixCheck(check, ctx)
 			if err == nil {
 				// Re-run check to verify fix worked
 				result = check.Run(ctx)

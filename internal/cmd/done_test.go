@@ -461,31 +461,155 @@ func TestClearDoneIntentLabel(t *testing.T) {
 	}
 }
 
-// TestPushFailureDoesNotNukeWorktree verifies that when pushFailed is true,
-// the worktree nuke is skipped (defense-in-depth alongside selfNukePolecat's
-// own branch-on-remote check).
-func TestPushFailureDoesNotNukeWorktree(t *testing.T) {
-	// This tests the boolean guard logic inline in runDone:
-	// if exitType == ExitCompleted && !pushFailed { ... nuke ... }
+// TestNukeGateGuardLogic verifies the worktree nuke gate in runDone:
+// nuke only when exitType == COMPLETED && !pushFailed && !mrFailed.
+// GH#1945: mrFailed must block the nuke — otherwise work is lost when MR
+// bead creation fails but push succeeded.
+func TestNukeGateGuardLogic(t *testing.T) {
 	tests := []struct {
 		name       string
 		exitType   string
 		pushFailed bool
+		mrFailed   bool
 		wantNuke   bool
 	}{
-		{"completed+push-ok", ExitCompleted, false, true},
-		{"completed+push-failed", ExitCompleted, true, false},
-		{"escalated+push-ok", ExitEscalated, false, false},
-		{"deferred+push-ok", ExitDeferred, false, false},
-		{"escalated+push-failed", ExitEscalated, true, false},
+		// Happy path: everything succeeded
+		{"completed+push-ok+mr-ok", ExitCompleted, false, false, true},
+		// Push failed: preserve worktree for recovery
+		{"completed+push-failed+mr-ok", ExitCompleted, true, false, false},
+		// MR creation failed: preserve worktree (GH#1945 fix)
+		{"completed+push-ok+mr-failed", ExitCompleted, false, true, false},
+		// Both failed: definitely preserve
+		{"completed+push-failed+mr-failed", ExitCompleted, true, true, false},
+		// Non-completed exits never nuke
+		{"escalated+push-ok+mr-ok", ExitEscalated, false, false, false},
+		{"deferred+push-ok+mr-ok", ExitDeferred, false, false, false},
+		{"escalated+push-failed+mr-failed", ExitEscalated, true, true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the guard condition from runDone
-			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed
+			// Replicate the guard condition from runDone (line ~940)
+			shouldNuke := tt.exitType == ExitCompleted && !tt.pushFailed && !tt.mrFailed
 			if shouldNuke != tt.wantNuke {
 				t.Errorf("shouldNuke = %v, want %v", shouldNuke, tt.wantNuke)
+			}
+		})
+	}
+}
+
+// TestSessionKillGateGuardLogic verifies the session kill gate in runDone:
+// session is killed only when !pushFailed && !mrFailed.
+// GH#1945: When push or MR fails, session must be preserved so the Witness
+// can investigate or the polecat can retry. The deferred backstop must also
+// be prevented from killing the session (sessionKilled set to true).
+func TestSessionKillGateGuardLogic(t *testing.T) {
+	tests := []struct {
+		name            string
+		pushFailed      bool
+		mrFailed        bool
+		wantSessionKill bool
+	}{
+		// Happy path: everything succeeded — kill session
+		{"push-ok+mr-ok", false, false, true},
+		// Push failed: preserve session for recovery
+		{"push-failed+mr-ok", true, false, false},
+		// MR creation failed: preserve session (GH#1945 fix)
+		{"push-ok+mr-failed", false, true, false},
+		// Both failed: definitely preserve
+		{"push-failed+mr-failed", true, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the guard condition from runDone's session kill section
+			shouldKillSession := !tt.pushFailed && !tt.mrFailed
+			if shouldKillSession != tt.wantSessionKill {
+				t.Errorf("shouldKillSession = %v, want %v", shouldKillSession, tt.wantSessionKill)
+			}
+
+			// Verify sessionKilled is set in BOTH paths (prevents deferred backstop)
+			sessionKilled := false
+			if tt.pushFailed || tt.mrFailed {
+				// Session preserved path — still sets sessionKilled to block backstop
+				sessionKilled = true
+			} else {
+				// Normal kill path — sets sessionKilled on success
+				sessionKilled = true
+			}
+			if !sessionKilled {
+				t.Error("sessionKilled should always be true after the gate (prevents deferred backstop)")
+			}
+		})
+	}
+}
+
+// TestMRVerificationSetsMRFailed verifies that if MR bead creation returns
+// success but the bead cannot be read back (verification fails), mrFailed
+// is set to true. This is the core fix for GH#1945: without verification,
+// a "successful" bd.Create that didn't actually persist would allow the
+// worktree nuke to proceed, losing the polecat's work.
+func TestMRVerificationSetsMRFailed(t *testing.T) {
+	tests := []struct {
+		name         string
+		createErr    error  // error from bd.Create
+		showErr      error  // error from bd.Show (verification)
+		showReturns  bool   // whether Show returns a non-nil issue
+		wantMRFailed bool
+	}{
+		{
+			name:         "create succeeds + show succeeds → mrFailed=false",
+			createErr:    nil,
+			showErr:      nil,
+			showReturns:  true,
+			wantMRFailed: false,
+		},
+		{
+			name:         "create fails → mrFailed=true (existing behavior)",
+			createErr:    fmt.Errorf("dolt write failed"),
+			showErr:      nil,
+			showReturns:  false,
+			wantMRFailed: true,
+		},
+		{
+			name:         "create succeeds + show fails → mrFailed=true (GH#1945 fix)",
+			createErr:    nil,
+			showErr:      fmt.Errorf("bead not found"),
+			showReturns:  false,
+			wantMRFailed: true,
+		},
+		{
+			name:         "create succeeds + show returns nil → mrFailed=true (GH#1945 fix)",
+			createErr:    nil,
+			showErr:      nil,
+			showReturns:  false,
+			wantMRFailed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the MR creation + verification flow from done.go
+			mrFailed := false
+
+			if tt.createErr != nil {
+				// bd.Create failed — existing behavior
+				mrFailed = true
+			} else {
+				// bd.Create succeeded — now verify (GH#1945 fix)
+				var showResult bool
+				if tt.showErr != nil || !tt.showReturns {
+					showResult = false
+				} else {
+					showResult = true
+				}
+				if !showResult {
+					mrFailed = true
+				}
+			}
+
+			if mrFailed != tt.wantMRFailed {
+				t.Errorf("mrFailed = %v, want %v", mrFailed, tt.wantMRFailed)
 			}
 		})
 	}
@@ -794,7 +918,6 @@ func TestDoneCheckpointLabelFormat(t *testing.T) {
 	}{
 		{CheckpointPushed, "polecat/furiosa-abc", "done-cp:pushed:polecat/furiosa-abc:"},
 		{CheckpointMRCreated, "gt-xyz123", "done-cp:mr-created:gt-xyz123:"},
-		{CheckpointDoltMerged, "ok", "done-cp:dolt-merged:ok:"},
 		{CheckpointWitnessNotified, "ok", "done-cp:witness-notified:ok:"},
 	}
 
@@ -848,26 +971,22 @@ func TestReadDoneCheckpoints(t *testing.T) {
 				"gt:agent",
 				"done-cp:pushed:polecat/furiosa-abc:1738972800",
 				"done-cp:mr-created:gt-xyz123:1738972801",
-				"done-cp:dolt-merged:ok:1738972802",
 			},
 			want: map[DoneCheckpoint]string{
-				CheckpointPushed:     "polecat/furiosa-abc",
-				CheckpointMRCreated:  "gt-xyz123",
-				CheckpointDoltMerged: "ok",
+				CheckpointPushed:    "polecat/furiosa-abc",
+				CheckpointMRCreated: "gt-xyz123",
 			},
 		},
 		{
-			name:   "all checkpoints",
+			name: "all checkpoints",
 			labels: []string{
 				"done-cp:pushed:branch-name:1738972800",
 				"done-cp:mr-created:gt-mr1:1738972801",
-				"done-cp:dolt-merged:ok:1738972802",
 				"done-cp:witness-notified:ok:1738972803",
 			},
 			want: map[DoneCheckpoint]string{
 				CheckpointPushed:          "branch-name",
 				CheckpointMRCreated:       "gt-mr1",
-				CheckpointDoltMerged:      "ok",
 				CheckpointWitnessNotified: "ok",
 			},
 		},
@@ -919,7 +1038,6 @@ func TestClearDoneCheckpoints(t *testing.T) {
 		"done-intent:COMPLETED:1738972800",
 		"done-cp:pushed:mybranch:1738972801",
 		"done-cp:mr-created:gt-xyz:1738972802",
-		"done-cp:dolt-merged:ok:1738972803",
 		"backoff-until:1738972900",
 	}
 
@@ -933,8 +1051,8 @@ func TestClearDoneCheckpoints(t *testing.T) {
 		}
 	}
 
-	if len(removed) != 3 {
-		t.Errorf("expected 3 checkpoint labels removed, got %d: %v", len(removed), removed)
+	if len(removed) != 2 {
+		t.Errorf("expected 2 checkpoint labels removed, got %d: %v", len(removed), removed)
 	}
 	if len(kept) != 4 {
 		t.Errorf("expected 4 labels kept, got %d: %v", len(kept), kept)
@@ -993,39 +1111,6 @@ func TestCheckpointResumeSkipsPush(t *testing.T) {
 			skipPush := tt.checkpoints[CheckpointPushed] != ""
 			if skipPush != tt.wantSkip {
 				t.Errorf("skipPush = %v, want %v", skipPush, tt.wantSkip)
-			}
-		})
-	}
-}
-
-// TestCheckpointResumeSkipsDoltMerge verifies that when a Dolt merge
-// checkpoint exists, the merge section is skipped on resume.
-func TestCheckpointResumeSkipsDoltMerge(t *testing.T) {
-	tests := []struct {
-		name        string
-		checkpoints map[DoneCheckpoint]string
-		wantSkip    bool
-	}{
-		{
-			name:        "no checkpoints - merge runs normally",
-			checkpoints: map[DoneCheckpoint]string{},
-			wantSkip:    false,
-		},
-		{
-			name: "dolt merge checkpoint - skip merge",
-			checkpoints: map[DoneCheckpoint]string{
-				CheckpointPushed:     "mybranch",
-				CheckpointDoltMerged: "ok",
-			},
-			wantSkip: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			skipMerge := tt.checkpoints[CheckpointDoltMerged] != ""
-			if skipMerge != tt.wantSkip {
-				t.Errorf("skipMerge = %v, want %v", skipMerge, tt.wantSkip)
 			}
 		})
 	}

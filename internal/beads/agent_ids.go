@@ -199,7 +199,8 @@ func ValidateAgentID(id string) error {
 		return fmt.Errorf("agent ID must include content after prefix (got %q)", id)
 	}
 
-	// Case 1: Single part after prefix - must be town-level role
+	// Case 1: Single part after prefix - town-level role or collapsed rig-level
+	// (collapsed form: when prefix == rig, e.g., "ff-witness" for rig "ff")
 	if len(parts) == 1 {
 		role := parts[0]
 		if isTownLevelRole(role) {
@@ -208,17 +209,25 @@ func ValidateAgentID(id string) error {
 		if isTownLevelNamedRole(role) {
 			return fmt.Errorf("agent role %q requires name: <prefix>-%s-<name> (got %q)", role, role, id)
 		}
-		if isValidRole(role) {
-			return fmt.Errorf("agent role %q requires rig: <prefix>-<rig>-%s (got %q)", role, role, id)
+		if isRigLevelRole(role) {
+			return nil // Valid collapsed rig-level singleton (prefix == rig)
+		}
+		if isNamedRole(role) {
+			return fmt.Errorf("agent role %q requires name: <prefix>-%s-<name> (got %q)", role, role, id)
 		}
 		return fmt.Errorf("invalid agent role %q (valid: %s)", role, strings.Join(ValidAgentRoles, ", "))
 	}
 
-	// Case 2: Two parts - could be town-level named (dog-alpha) or needs to scan for role
+	// Case 2: Two parts - could be town-level named (dog-alpha), rig-level singleton
+	// (gastown-witness), or collapsed named agent (polecat-nux when prefix == rig)
 	if len(parts) == 2 {
 		// Check if first part is a town-level named role
 		if isTownLevelNamedRole(parts[0]) {
 			return nil // Valid town-level named agent: gt-dog-alpha
+		}
+		// Check if first part is a named role (collapsed form: prefix-role-name)
+		if isNamedRole(parts[0]) {
+			return nil // Valid collapsed named agent: ff-polecat-nux (prefix == rig)
 		}
 		// Check if second part is a rig-level singleton role
 		if isRigLevelRole(parts[1]) {
@@ -324,10 +333,17 @@ func ValidateAgentID(id string) error {
 // For town-level agents (mayor, deacon), pass empty rig and name.
 // For rig-level singletons (witness, refinery), pass empty name.
 // For named agents (crew, polecat), pass all three.
+//
+// When prefix == rig (e.g., rig "ff" with derived prefix "ff"), the rig component
+// is omitted to avoid stuttered IDs like "ff-ff-witness". Instead produces "ff-witness".
 func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
-	if rig == "" {
-		// Town-level agent: prefix-mayor, prefix-deacon
-		return prefix + "-" + role
+	if rig == "" || rig == prefix {
+		// Town-level agent (rig=="") or collapsed form (rig==prefix):
+		//   prefix-role or prefix-role-name
+		if name == "" {
+			return prefix + "-" + role
+		}
+		return prefix + "-" + role + "-" + name
 	}
 	if name == "" {
 		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
@@ -388,6 +404,11 @@ func PolecatBeadID(rig, name string) string {
 // For town-level agents, rig will be empty.
 // For singletons, name will be empty.
 // Accepts any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
+//
+// Handles the collapsed form where prefix == rig (e.g., "ff-witness" for rig "ff").
+// In collapsed form, the prefix is returned as the rig:
+//   - "ff-witness"     → rig="ff", role="witness", name=""
+//   - "ff-polecat-nux" → rig="ff", role="polecat", name="nux"
 func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	// Find the prefix (everything before the first hyphen)
 	// Valid prefixes are 2-3 characters (e.g., "gt", "bd", "hq")
@@ -396,6 +417,7 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 		return "", "", "", false
 	}
 
+	prefix := id[:hyphenIdx]
 	rest := id[hyphenIdx+1:]
 	parts := strings.Split(rest, "-")
 
@@ -403,14 +425,29 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 		return "", "", "", false
 	}
 
-	// Single part: town-level role (gt-mayor, bd-deacon) or unknown
+	// Single part: town-level role (gt-mayor) or collapsed rig-level (ff-witness)
 	if len(parts) == 1 {
-		return "", parts[0], "", true
+		r := parts[0]
+		if isTownLevelRole(r) {
+			return "", r, "", true
+		}
+		// Collapsed rig-level singleton: prefix is the rig (e.g., ff-witness)
+		if isRigLevelRole(r) {
+			return prefix, r, "", true
+		}
+		// Unknown single-part — return as-is for backward compat
+		return "", r, "", true
 	}
 
 	// Check for town-level named roles (dog) first
 	if parts[0] == "dog" {
 		return "", "dog", strings.Join(parts[1:], "-"), true
+	}
+
+	// Check for collapsed named agent: prefix-role-name (e.g., ff-polecat-nux)
+	// This happens when prefix == rig, so the rig component was omitted.
+	if isNamedRole(parts[0]) {
+		return prefix, parts[0], strings.Join(parts[1:], "-"), true
 	}
 
 	// Scan from right for known role markers to handle hyphenated rig names.

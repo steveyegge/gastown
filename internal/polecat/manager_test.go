@@ -102,23 +102,6 @@ esac
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestStateIsActive(t *testing.T) {
-	tests := []struct {
-		state  State
-		active bool
-	}{
-		{StateWorking, true},
-		{StateDone, false},
-		{StateStuck, false},
-	}
-
-	for _, tt := range tests {
-		if got := tt.state.IsActive(); got != tt.active {
-			t.Errorf("%s.IsActive() = %v, want %v", tt.state, got, tt.active)
-		}
-	}
-}
-
 func TestStateIsWorking(t *testing.T) {
 	tests := []struct {
 		state   State

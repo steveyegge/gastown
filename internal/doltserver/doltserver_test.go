@@ -400,9 +400,6 @@ func TestEnsureMetadata_Rig(t *testing.T) {
 	if metadata["dolt_database"] != "myrig" {
 		t.Errorf("dolt_database = %v, want myrig", metadata["dolt_database"])
 	}
-	if metadata["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl", metadata["jsonl_export"])
-	}
 }
 
 func TestEnsureMetadata_Idempotent(t *testing.T) {
@@ -1769,51 +1766,6 @@ func TestEnsureMetadata_CreatesBeadsDir(t *testing.T) {
 	}
 }
 
-func TestEnsureMetadata_CorrectsStaleJSONLExport(t *testing.T) {
-	townRoot := t.TempDir()
-
-	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Simulate a stale jsonl_export value left by a historical migration
-	existing := map[string]interface{}{"jsonl_export": "beads.jsonl"}
-	data, _ := json.Marshal(existing)
-	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := EnsureMetadata(townRoot, "hq"); err != nil {
-		t.Fatalf("EnsureMetadata failed: %v", err)
-	}
-
-	updated, _ := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
-	var meta map[string]interface{}
-	json.Unmarshal(updated, &meta)
-	if meta["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl (stale value should be corrected)", meta["jsonl_export"])
-	}
-}
-
-func TestEnsureMetadata_SetsDefaultJSONLExport(t *testing.T) {
-	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := EnsureMetadata(townRoot, "hq"); err != nil {
-		t.Fatalf("EnsureMetadata failed: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(townRoot, ".beads", "metadata.json"))
-	var meta map[string]interface{}
-	json.Unmarshal(data, &meta)
-	if meta["jsonl_export"] != "issues.jsonl" {
-		t.Errorf("jsonl_export = %v, want issues.jsonl", meta["jsonl_export"])
-	}
-}
-
 // =============================================================================
 // InitRig validation tests
 // =============================================================================
@@ -2171,23 +2123,6 @@ func TestMoveDir_SourceNotExists(t *testing.T) {
 // Branch name validation tests (SQL injection prevention)
 // =============================================================================
 
-func TestValidateBranchName_ValidNames(t *testing.T) {
-	valid := []string{
-		"main",
-		"polecat-furiosa-1707400000",
-		"feature/my-branch",
-		"release-v1.2.3",
-		"my_branch",
-		"UPPER-case",
-		"a",
-	}
-	for _, name := range valid {
-		if err := validateBranchName(name); err != nil {
-			t.Errorf("validateBranchName(%q) = %v, want nil", name, err)
-		}
-	}
-}
-
 // =============================================================================
 // DatabaseExists tests
 // =============================================================================
@@ -2497,26 +2432,6 @@ func TestRecoverReadOnly_NoServer(t *testing.T) {
 	}
 }
 
-func TestValidateBranchName_InvalidNames(t *testing.T) {
-	invalid := []string{
-		"",                          // empty
-		"branch'name",               // single quote (SQL injection)
-		"branch;DROP TABLE",         // semicolon
-		"branch name",               // space
-		"branch\tname",              // tab
-		"$(command)",                // command substitution
-		"branch`cmd`",               // backtick
-		"branch\"name",              // double quote
-		"branch\\name",              // backslash
-		"'); DROP TABLE issues; --", // classic SQL injection
-	}
-	for _, name := range invalid {
-		if err := validateBranchName(name); err == nil {
-			t.Errorf("validateBranchName(%q) = nil, want error", name)
-		}
-	}
-}
-
 // =============================================================================
 // doltSQLScriptWithRetry tests
 // =============================================================================
@@ -2569,40 +2484,6 @@ func TestDoltSQLScriptWithRetry_NonRetryableError(t *testing.T) {
 		if !isDoltRetryableError(fmt.Errorf("%s", msg)) {
 			t.Errorf("isDoltRetryableError(%q) = false, want true", msg)
 		}
-	}
-}
-
-// =============================================================================
-// MergePolecatBranch script generation tests
-// =============================================================================
-
-func TestMergePolecatBranch_NoBranchDeleteInScripts(t *testing.T) {
-	// Verify that MergePolecatBranch's SQL scripts don't contain DOLT_BRANCH('-D').
-	// Branch deletion must happen AFTER successful merge, not inside the scripts,
-	// to prevent branch loss if the merge script fails partway through.
-	//
-	// We can't run the actual merge (requires dolt server), but we can verify
-	// the function validates branch names correctly — invalid names are rejected
-	// before any script is generated.
-	err := MergePolecatBranch(t.TempDir(), "testrig", "'; DROP TABLE --")
-	if err == nil {
-		t.Error("expected error for SQL injection branch name")
-	}
-	if !strings.Contains(err.Error(), "invalid") {
-		t.Errorf("expected 'invalid' in error, got: %v", err)
-	}
-}
-
-func TestMergePolecatBranch_ValidBranchName(t *testing.T) {
-	// Verify that valid branch names pass validation (function will fail
-	// later at the dolt execution step, but validation should pass).
-	err := MergePolecatBranch(t.TempDir(), "testrig", "polecat-alpha-123")
-	if err == nil {
-		t.Skip("dolt server available — merge unexpectedly succeeded")
-	}
-	// Should NOT be a validation error
-	if strings.Contains(err.Error(), "invalid") {
-		t.Errorf("valid branch name rejected: %v", err)
 	}
 }
 
@@ -2869,7 +2750,6 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 		"backend":       "dolt",
 		"dolt_mode":     "server",
 		"dolt_database": doltDatabase,
-		"jsonl_export":  "issues.jsonl",
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {
@@ -3623,3 +3503,4 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 		t.Errorf("WaitForReady took too long (%v), should succeed shortly after server starts", elapsed)
 	}
 }
+

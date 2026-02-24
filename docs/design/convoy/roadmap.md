@@ -121,7 +121,7 @@ on top of this pipeline.
 
 | # | Failure | Where | Severity | Recovery |
 |---|---------|-------|----------|----------|
-| 1 | Dolt branch merge fails after MR bead creation | `done.go:808-819` | Critical | MR bead stranded on dead Dolt branch. Invisible to refinery. No automated recovery. |
+| 1 | ~~Dolt branch merge fails~~ | ~~`done.go`~~ | Resolved | Eliminated by all-on-main architecture (no per-polecat Dolt branches). |
 | 2 | Push fails (all 3 tiers) | `done.go:531-572` | Critical | Commits local-only. Worktree preserved. Manual recovery required. |
 | 3 | MR bead creation fails | `done.go:744-752` | High | Branch pushed but no MR. Witness notified. No auto-recovery. |
 | 4 | Refinery never wakes (agent stall) | Agent-level | High | Heartbeat restarts, but gap can be minutes. |
@@ -236,8 +236,8 @@ can't deliver if the underlying pipeline drops tasks.
 
 | # | Problem | Proposed fix | Complexity |
 |---|---------|-------------|------------|
-| 1a | Dolt branch merge fails → MR stranded | Add retry loop in `done.go` for `MergePolecatBranch`. If all retries fail, store MR bead ID in a recovery file and notify witness with `RECOVERY_NEEDED` signal. | Medium |
-| 1b | No recovery for stranded MR beads | Daemon-level scan: periodically check for MR beads on non-main Dolt branches. If found, attempt merge. If merge succeeds, nudge refinery. | Medium |
+| 1a | ~~Dolt branch merge fails~~ | Resolved — all-on-main eliminates per-polecat Dolt branches. | N/A |
+| 1b | ~~Stranded MR beads on Dolt branches~~ | Resolved — no per-polecat Dolt branches to strand on. | N/A |
 | 1c | Refinery agent stall | Harden refinery heartbeat. Add a daemon-level MR queue monitor that nudges (or restarts) the refinery when MRs sit unprocessed beyond a threshold. | Medium |
 | 1d | Merge conflicts block indefinitely | Track conflict task age. If unresolved after N hours, escalate to Mayor/owner with the specific conflict details. | Low |
 

@@ -88,7 +88,7 @@ Session hook checks:
   - stale-task-dispatch      Detect stale task-dispatch guard in settings.json (fixable)
 
 Dolt checks:
-  - dolt-binary              Check that dolt is installed and in PATH
+  - dolt-binary              Check that dolt is installed and meets minimum version
   - dolt-metadata            Check dolt metadata tables exist
   - dolt-server-reachable    Check dolt sql-server is reachable
   - dolt-orphaned-databases  Detect orphaned dolt databases
@@ -226,6 +226,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewDoltMetadataCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())
 	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
+	d.Register(doctor.NewUnregisteredBeadsDirsCheck())
+	d.Register(doctor.NewNullAssigneeCheck())
 
 	// Worktree gitdir validity (runs across all rigs, or specific rig with --rig)
 	d.Register(doctor.NewWorktreeGitdirCheck())

@@ -89,10 +89,12 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Agent bead ID patterns:
-		// Crew:    prefix-rig-crew-name
-		// Polecat: prefix-rig-polecat-name
-		crewPrefix := fmt.Sprintf("%s-%s-crew-", prefix, rigName)
-		polecatPrefix := fmt.Sprintf("%s-%s-polecat-", prefix, rigName)
+		// Crew:    prefix-rig-crew-name (or prefix-crew-name when prefix == rig)
+		// Polecat: prefix-rig-polecat-name (or prefix-polecat-name when prefix == rig)
+		// Use AgentBeadIDWithPrefix to get the correct prefix, handling the
+		// collapsed form when prefix == rigName (GH#1877).
+		crewPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, "crew", "") + "-"
+		polecatPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, "polecat", "") + "-"
 		allBeads, err := bd.List(beads.ListOptions{
 			Status:   "open",
 			Priority: -1,
@@ -100,6 +102,15 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		})
 		if err != nil {
 			continue
+		}
+
+		// Also check wisps table for migrated agent beads
+		if wispMap, _ := bd.ListAgentBeadsFromWisps(); len(wispMap) > 0 {
+			for _, w := range wispMap {
+				if w.Status == "open" || w.Status == "in_progress" || w.Status == "hooked" {
+					allBeads = append(allBeads, w)
+				}
+			}
 		}
 
 		for _, issue := range allBeads {

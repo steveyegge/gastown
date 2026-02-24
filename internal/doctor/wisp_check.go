@@ -89,13 +89,54 @@ func (c *WispGCCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // countAbandonedWisps counts wisps older than the threshold in a rig.
+// Queries the wisps table via bd mol wisp list instead of reading issues.jsonl,
+// since wisps are stored in their own dolt_ignored table.
 func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
-	// Check the beads database for wisps (follows redirect if present)
+	// Query wisps table via bd CLI
+	cmd := exec.Command("bd", "mol", "wisp", "list", "--json")
+	cmd.Dir = rigPath
+
+	output, err := cmd.Output()
+	if err != nil {
+		// Wisps table may not exist yet — try legacy issues.jsonl fallback
+		return c.countAbandonedWispsLegacy(rigPath)
+	}
+
+	var wisps []struct {
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		Ephemeral bool   `json:"ephemeral"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(output, &wisps); err != nil {
+		return 0
+	}
+
+	cutoff := time.Now().Add(-c.threshold)
+	count := 0
+	for _, w := range wisps {
+		if w.Status == "closed" {
+			continue
+		}
+		updatedAt, err := time.Parse(time.RFC3339, w.UpdatedAt)
+		if err != nil {
+			continue
+		}
+		if !updatedAt.IsZero() && updatedAt.Before(cutoff) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// countAbandonedWispsLegacy counts wisps from issues.jsonl (pre-migration fallback).
+func (c *WispGCCheck) countAbandonedWispsLegacy(rigPath string) int {
 	beadsDir := beads.ResolveBeadsDir(rigPath)
 	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
 	file, err := os.Open(issuesPath)
 	if err != nil {
-		return 0 // No issues file
+		return 0
 	}
 	defer file.Close()
 
@@ -119,7 +160,6 @@ func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 			continue
 		}
 
-		// Count wisps that are not closed and older than threshold
 		if issue.Wisp && issue.Status != "closed" && !issue.UpdatedAt.IsZero() && issue.UpdatedAt.Before(cutoff) {
 			count++
 		}

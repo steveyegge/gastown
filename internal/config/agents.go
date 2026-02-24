@@ -33,6 +33,9 @@ const (
 	AgentCopilot AgentPreset = "copilot"
 	// AgentPi is Pi Coding Agent (extension-based lifecycle).
 	AgentPi AgentPreset = "pi"
+	// AgentOmp is Oh My Pi (OMP) — Pi fork with hook-based lifecycle.
+	// Inspired by github.com/ProbabilityEngineer/pi-mono gastown integration.
+	AgentOmp AgentPreset = "omp"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -325,7 +328,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentPi: {
 		Name:                AgentPi,
 		Command:             "pi",
-		Args:                []string{}, // Extension loaded via -e flag in town settings
+		Args:                []string{"-e", ".pi/extensions/gastown-hooks.js"},
 		ProcessNames:        []string{"pi", "node", "bun"}, // Pi runs as Node.js
 		SessionIDEnv:        "PI_SESSION_ID",
 		ResumeFlag:          "",    // No resume support yet
@@ -338,6 +341,25 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--no-session",
+		},
+		// Pi's Node.js TUI takes several seconds to initialize before it can
+		// receive tmux input. Without a readiness delay, the startup nudge
+		// arrives before the TUI is ready and gets dropped silently.
+		ReadyDelayMs: 8000,
+	},
+	AgentOmp: {
+		Name:                AgentOmp,
+		Command:             "omp",
+		Args:                []string{"--hook", ".omp/hooks/gastown-hook.ts"},
+		ProcessNames:        []string{"omp", "node", "bun"},
+		SessionIDEnv:        "OMP_SESSION_ID",
+		SupportsHooks:       true,
+		HooksProvider:       "omp",
+		HooksDir:            ".omp/hooks",
+		HooksSettingsFile:   "gastown-hook.ts",
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "--prompt",
 		},
 	},
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
@@ -394,13 +395,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			defaultBranch = bareGit.DefaultBranch()
 		}
 	}
-	// Validate user-provided branch exists on remote (auto-detected branches are inherently valid)
+	// When user specified --default-branch, the shallow single-branch clone may not
+	// have that branch (it only clones the remote HEAD). Fetch it explicitly.
 	if opts.DefaultBranch != "" {
 		ref := fmt.Sprintf("origin/%s", defaultBranch)
-		if exists, err := bareGit.RefExists(ref); err != nil {
-			return nil, fmt.Errorf("checking ref %s: %w", ref, err)
-		} else if !exists {
-			return nil, fmt.Errorf("branch %q does not exist on remote (ref %s not found in bare repo)", defaultBranch, ref)
+		if exists, _ := bareGit.RefExists(ref); !exists {
+			// Branch not in shallow clone — fetch just that branch
+			if err := bareGit.FetchBranchShallow("origin", defaultBranch); err != nil {
+				return nil, fmt.Errorf("branch %q does not exist on remote or could not be fetched: %w", defaultBranch, err)
+			}
 		}
 	}
 
@@ -413,30 +416,28 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create mayor as regular clone (separate from bare repo).
 	// Mayor doesn't need to see polecat branches - that's refinery's job.
 	// This also allows mayor to stay on the default branch without conflicting with refinery.
+	// Uses --single-branch --depth 1 --branch to clone only the default branch efficiently.
 	fmt.Printf("  Creating mayor clone...\n")
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
 	if localRepo != "" {
-		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo); err != nil {
+		if err := m.git.CloneBranchWithReference(opts.GitURL, mayorRigPath, defaultBranch, localRepo); err != nil {
 			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
 			_ = os.RemoveAll(mayorRigPath)
-			if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+			if err := m.git.CloneBranch(opts.GitURL, mayorRigPath, defaultBranch); err != nil {
 				return nil, fmt.Errorf("cloning for mayor: %w", err)
 			}
 		}
 	} else {
-		if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+		if err := m.git.CloneBranch(opts.GitURL, mayorRigPath, defaultBranch); err != nil {
 			return nil, fmt.Errorf("cloning for mayor: %w", err)
 		}
 	}
 
-	// Checkout the default branch for mayor (clone defaults to remote's HEAD, not our configured branch)
+	// No explicit checkout needed - --branch already checked out the default branch
 	mayorGit := git.NewGitWithDir("", mayorRigPath)
-	if err := mayorGit.Checkout(defaultBranch); err != nil {
-		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
-	}
 	// Configure push URL on mayor clone (separate clone, doesn't inherit from bare repo)
 	if opts.PushURL != "" {
 		if err := mayorGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
@@ -484,10 +485,19 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// to a new workspace), we still need to run bd init to create the server-side
 		// database and set issue_prefix. Always ensure issue_prefix is set afterward.
 		if !bdDatabaseExists(sourceBeadsDir) {
-			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix, "--server") // opts.BeadsPrefix validated earlier
+			initArgs := []string{"init"}
+			if opts.BeadsPrefix != "" {
+				initArgs = append(initArgs, "--prefix", opts.BeadsPrefix)
+			}
+			initArgs = append(initArgs, "--server")
+			cmd := exec.Command("bd", initArgs...)
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
+			}
+			// Drop orphaned beads_<prefix> database if it differs from rigName (gt-sv1h).
+			if orphanDB := "beads_" + opts.BeadsPrefix; orphanDB != opts.Name {
+				_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
 			}
 		}
 
@@ -522,7 +532,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Initialize beads at rig level BEFORE creating worktrees.
 	// This ensures rig/.beads exists so worktree redirects can point to it.
 	fmt.Printf("  Initializing beads database...\n")
-	if err := m.InitBeads(rigPath, opts.BeadsPrefix); err != nil {
+	if err := m.InitBeads(rigPath, opts.BeadsPrefix, opts.Name); err != nil {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
@@ -537,6 +547,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// or user can run gt doctor --fix to repair manually.
 		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
 		fmt.Printf("  Run 'gt doctor --fix' to repair, or it will self-heal on next daemon start.\n")
+	}
+
+	// Safety-net: drop orphaned beads_<prefix> database if it differs from rigName (gt-sv1h).
+	// InitBeads already does this, but repeat here in case EnsureMetadata path diverges.
+	if orphanDB := "beads_" + opts.BeadsPrefix; orphanDB != opts.Name {
+		_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
 	}
 
 	// Set issue_prefix on the correct server-side database.
@@ -754,7 +770,11 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
-func (m *Manager) InitBeads(rigPath, prefix string) error {
+//
+// rigName is the rig's database name (e.g. "gastown"). When non-empty and
+// different from the default "beads_<prefix>" database that bd init creates,
+// InitBeads drops the orphan database to prevent accumulation (gt-sv1h).
+func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	// Validate prefix format to prevent command injection from config files
 	if !isValidBeadsPrefix(prefix) {
 		return fmt.Errorf("invalid beads prefix %q: must be alphanumeric with optional hyphens, start with letter, max 20 chars", prefix)
@@ -796,7 +816,12 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).
 	// --server tells bd to set dolt_mode=server in metadata.json so bd
 	// connects to the centralized Dolt sql-server instead of embedded mode.
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
+	initArgs := []string{"init"}
+	if prefix != "" {
+		initArgs = append(initArgs, "--prefix", prefix)
+	}
+	initArgs = append(initArgs, "--server")
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, bdInitErr := cmd.CombinedOutput()
@@ -831,6 +856,17 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 		if syncModeOutput, syncModeErr := syncModeCmd.CombinedOutput(); syncModeErr != nil {
 			fmt.Printf("   ⚠ Could not set sync.mode via bd: %s\n", strings.TrimSpace(string(syncModeOutput)))
 		}
+
+		// Drop the orphaned beads_<prefix> database created by bd init (gt-sv1h).
+		// bd init --prefix creates a database named beads_<prefix> on the Dolt server,
+		// but the rig uses <rigName> as its database (set by InitRig + EnsureMetadata).
+		// Without cleanup, orphans accumulate with every polecat spawn.
+		if rigName != "" {
+			orphanDB := "beads_" + prefix
+			if orphanDB != rigName {
+				_ = doltserver.RemoveDatabase(m.townRoot, orphanDB)
+			}
+		}
 	}
 
 	if err := beads.EnsureConfigYAML(beadsDir, prefix); err != nil {
@@ -846,12 +882,10 @@ func (m *Manager) InitBeads(rigPath, prefix string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
-	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
-	// Without issues.jsonl, bd's auto-export might write issues to other .jsonl files.
+	// Ensure issues.jsonl exists — bd expects this file for git-tracked issue data.
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
 	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
 		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
-			// Non-fatal but log it
 			fmt.Printf("   ⚠ Could not create issues.jsonl: %v\n", err)
 		}
 	}
@@ -976,9 +1010,14 @@ func deriveBeadsPrefix(name string) string {
 		return r == '-' || r == '_'
 	})
 
-	// If single part, try to detect compound words (e.g., "gastown" -> "gas" + "town")
+	// If single part, try camelCase splitting first (e.g., "myProject" -> "my" + "Project"),
+	// then fall back to compound word detection (e.g., "gastown" -> "gas" + "town").
 	if len(parts) == 1 {
-		parts = splitCompoundWord(parts[0])
+		if camelParts := splitCamelCase(parts[0]); len(camelParts) >= 2 {
+			parts = camelParts
+		} else {
+			parts = splitCompoundWord(parts[0])
+		}
 	}
 
 	if len(parts) >= 2 {
@@ -1018,6 +1057,32 @@ func splitCompoundWord(word string) []string {
 	}
 
 	return []string{word}
+}
+
+// splitCamelCase splits a camelCase or PascalCase string into its word parts.
+// Examples: "myProject" -> ["my", "Project"], "gasStation" -> ["gas", "Station"],
+// "HTMLParser" -> ["HTML", "Parser"].
+func splitCamelCase(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var parts []string
+	start := 0
+	runes := []rune(s)
+	for i := 1; i < len(runes); i++ {
+		// Split when transitioning from lower to upper: "myProject" at 'P'
+		if unicode.IsLower(runes[i-1]) && unicode.IsUpper(runes[i]) {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
+		// Split when transitioning from upper run to upper+lower: "HTMLParser" at 'P'
+		if i >= 2 && unicode.IsUpper(runes[i-1]) && unicode.IsUpper(runes[i-2]) && unicode.IsLower(runes[i]) {
+			parts = append(parts, string(runes[start:i-1]))
+			start = i - 1
+		}
+	}
+	parts = append(parts, string(runes[start:]))
+	return parts
 }
 
 // detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.

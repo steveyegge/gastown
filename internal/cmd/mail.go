@@ -176,9 +176,10 @@ Examples:
   gt mail read hq-abc123    # Read by message ID
   gt mail read 3            # Read the 3rd message in inbox
 
+Use 'gt mail inbox' to list messages and their IDs.
 Use 'gt mail mark-read' to mark messages as read.`,
 	Aliases: []string{"show"},
-	Args:    cobra.ExactArgs(1),
+	Args:    cobra.MaximumNArgs(1),
 	RunE:    runMailRead,
 }
 

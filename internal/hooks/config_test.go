@@ -82,6 +82,34 @@ func TestLoadSaveOverride(t *testing.T) {
 	}
 }
 
+func TestLoadOverrideRejectsDuplicateMatchers(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	overridePath := OverridePath("crew")
+	if err := os.MkdirAll(filepath.Dir(overridePath), 0755); err != nil {
+		t.Fatalf("creating overrides dir: %v", err)
+	}
+
+	raw := `{
+  "PreToolUse": [
+    {"matcher": "Bash(git push*)", "hooks": [{"type": "command", "command": "first"}]},
+    {"matcher": "Bash(git push*)", "hooks": [{"type": "command", "command": "second"}]}
+  ]
+}`
+	if err := os.WriteFile(overridePath, []byte(raw), 0644); err != nil {
+		t.Fatalf("writing override: %v", err)
+	}
+
+	_, err := LoadOverride("crew")
+	if err == nil {
+		t.Fatal("expected duplicate matcher error")
+	}
+	if !strings.Contains(err.Error(), "duplicate matcher") {
+		t.Fatalf("expected duplicate matcher error, got: %v", err)
+	}
+}
+
 func TestLoadSaveOverrideRigRole(t *testing.T) {
 	tmpDir := t.TempDir()
 	setTestHome(t, tmpDir)
@@ -418,6 +446,38 @@ func TestComputeExpected(t *testing.T) {
 	}
 	if len(expected.PreToolUse) != 1 || expected.PreToolUse[0].Hooks[0].Command != "crew-guard" {
 		t.Errorf("expected crew PreToolUse, got %v", expected.PreToolUse)
+	}
+}
+
+func TestComputeExpectedFailsOnDuplicateOverrideMatcher(t *testing.T) {
+	tmpDir := t.TempDir()
+	setTestHome(t, tmpDir)
+
+	if err := SaveBase(DefaultBase()); err != nil {
+		t.Fatalf("SaveBase failed: %v", err)
+	}
+
+	overridePath := OverridePath("crew")
+	if err := os.MkdirAll(filepath.Dir(overridePath), 0755); err != nil {
+		t.Fatalf("creating overrides dir: %v", err)
+	}
+
+	raw := `{
+  "SessionStart": [
+    {"matcher": "", "hooks": [{"type": "command", "command": "first"}]},
+    {"matcher": "", "hooks": [{"type": "command", "command": "second"}]}
+  ]
+}`
+	if err := os.WriteFile(overridePath, []byte(raw), 0644); err != nil {
+		t.Fatalf("writing override: %v", err)
+	}
+
+	_, err := ComputeExpected("crew")
+	if err == nil {
+		t.Fatal("expected ComputeExpected to fail on duplicate matcher")
+	}
+	if !strings.Contains(err.Error(), "duplicate matcher") {
+		t.Fatalf("expected duplicate matcher error, got: %v", err)
 	}
 }
 

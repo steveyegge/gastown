@@ -36,7 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+
 	"runtime"
 	"strconv"
 	"strings"
@@ -1799,10 +1799,6 @@ func EnsureMetadata(townRoot, rigName string) error {
 		existing["dolt_database"] = rigName
 	}
 
-	// Always set jsonl_export to the canonical filename.
-	// Historical migrations may have left stale values (e.g., "beads.jsonl").
-	existing["jsonl_export"] = "issues.jsonl"
-
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling metadata: %w", err)
@@ -2406,46 +2402,6 @@ func isDoltRetryableError(err error) bool {
 		strings.Contains(msg, "Unknown database")
 }
 
-// validBranchNameRe matches only safe branch name characters: alphanumeric, hyphen,
-// underscore, dot, and forward slash. This prevents SQL injection via branch names
-// interpolated into Dolt stored procedure calls.
-var validBranchNameRe = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
-
-// validateBranchName returns an error if branchName contains characters that could
-// break out of SQL string literals. Defense-in-depth: PolecatBranchName generates
-// safe names, but callers accept arbitrary strings.
-func validateBranchName(branchName string) error {
-	if branchName == "" {
-		return fmt.Errorf("branch name must not be empty")
-	}
-	if !validBranchNameRe.MatchString(branchName) {
-		return fmt.Errorf("branch name %q contains invalid characters", branchName)
-	}
-	return nil
-}
-
-// PolecatBranchName returns the Dolt branch name for a polecat.
-// Format: polecat-<name>-<unix-timestamp>
-func PolecatBranchName(polecatName string) string {
-	return fmt.Sprintf("polecat-%s-%d", strings.ToLower(polecatName), time.Now().Unix())
-}
-
-// CreatePolecatBranch creates a Dolt branch for a polecat's isolated writes.
-// Each polecat gets its own branch to eliminate optimistic lock contention.
-// Retries with exponential backoff on transient errors (read-only, manifest lock, etc).
-// If read-only errors persist after retries, attempts server recovery (gt-chx92).
-func CreatePolecatBranch(townRoot, rigDB, branchName string) error {
-	if err := validateBranchName(branchName); err != nil {
-		return fmt.Errorf("creating Dolt branch in %s: %w", rigDB, err)
-	}
-	query := fmt.Sprintf("CALL DOLT_BRANCH('%s')", branchName)
-
-	if err := doltSQLWithRecovery(townRoot, rigDB, query); err != nil {
-		return fmt.Errorf("creating Dolt branch %s in %s: %w", branchName, rigDB, err)
-	}
-	return nil
-}
-
 // CommitServerWorkingSet stages all pending changes and commits them on the current branch via SQL.
 // This flushes the Dolt working set to HEAD so that DOLT_BRANCH (which forks from
 // HEAD, not the working set) will include all recent writes. Critical for the sling
@@ -2464,77 +2420,6 @@ func CommitServerWorkingSet(townRoot, rigDB, message string) error {
 	if err := doltSQLWithRecovery(townRoot, rigDB, query); err != nil {
 		return fmt.Errorf("committing working set in %s: %w", rigDB, err)
 	}
-	return nil
-}
-
-// MergePolecatBranch merges a polecat's Dolt branch into main and deletes it.
-// Called at gt done time to make the polecat's beads changes visible.
-//
-// CRITICAL: The entire operation runs as a single SQL script (one connection).
-// In Dolt server mode, each `dolt sql -q` call opens a new connection, and
-// DOLT_CHECKOUT only affects the current connection. Separate calls would
-// checkout the polecat branch on connection 1, then ADD/COMMIT on connection 2
-// (which defaults back to main), silently losing all polecat working set data.
-//
-// The script handles two scenarios:
-//  1. Fast-forward merge (no conflict): commit polecat working set, merge to main
-//  2. Conflict: disable autocommit, merge, resolve with --theirs (polecat wins), commit
-//
-// On conflict, a second script runs with autocommit disabled so conflicts can
-// be resolved rather than triggering an automatic rollback.
-func MergePolecatBranch(townRoot, rigDB, branchName string) error {
-	if err := validateBranchName(branchName); err != nil {
-		return fmt.Errorf("merging Dolt branch in %s: %w", rigDB, err)
-	}
-
-	// Phase 1: Commit polecat working set and attempt merge.
-	// All in one connection so DOLT_CHECKOUT persists across statements.
-	// NOTE: DOLT_BRANCH('-D') is deliberately NOT in the merge scripts.
-	// If the merge fails (conflict), the branch must still exist for Phase 2.
-	// Branch deletion happens separately after successful merge.
-	//
-	// IMPORTANT: The script begins by flushing main's working set. Other agents
-	// (witness, refinery) write to main with BD_DOLT_AUTO_COMMIT=off, leaving
-	// uncommitted changes. DOLT_MERGE requires a clean working set — without
-	// this flush, the merge fails and MR beads get stranded on dead polecat
-	// branches, invisible to the refinery.
-	escaped := strings.ReplaceAll(branchName, "'", "''")
-	script := fmt.Sprintf(`USE %s;
-CALL DOLT_ADD('-A');
-CALL DOLT_COMMIT('--allow-empty', '-m', 'auto-flush main before polecat merge');
-CALL DOLT_CHECKOUT('%s');
-CALL DOLT_ADD('-A');
-CALL DOLT_COMMIT('--allow-empty', '-m', 'polecat %s final state');
-CALL DOLT_CHECKOUT('main');
-CALL DOLT_MERGE('%s');
-`, rigDB, escaped, escaped, escaped)
-
-	if err := doltSQLScriptWithRetry(townRoot, script); err != nil {
-		if !strings.Contains(err.Error(), "Merge conflict") {
-			return fmt.Errorf("merging %s to main in %s: %w", branchName, rigDB, err)
-		}
-
-		// Phase 2: Conflict detected. Re-run merge with autocommit disabled
-		// so conflicts are staged (not rolled back) and can be resolved.
-		// --theirs: polecat state wins (latest mutations, always authoritative).
-		fmt.Printf("Dolt merge conflict on %s, auto-resolving (--theirs)...\n", branchName)
-		conflictScript := fmt.Sprintf(`USE %s;
-SET @@autocommit = 0;
-CALL DOLT_CHECKOUT('main');
-CALL DOLT_MERGE('%s');
-CALL DOLT_CONFLICTS_RESOLVE('--theirs', '.');
-CALL DOLT_COMMIT('-m', 'merge %s (conflicts auto-resolved)');
-SET @@autocommit = 1;
-`, rigDB, escaped, escaped)
-
-		if err := doltSQLScriptWithRetry(townRoot, conflictScript); err != nil {
-			return fmt.Errorf("conflict-resolving merge of %s in %s: %w", branchName, rigDB, err)
-		}
-	}
-
-	// Delete branch only after successful merge (either phase).
-	// This prevents branch loss if the merge script fails partway through.
-	DeletePolecatBranch(townRoot, rigDB, branchName)
 	return nil
 }
 
@@ -2601,16 +2486,3 @@ func doltSQLScriptWithRetry(townRoot, script string) error {
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
 
-// DeletePolecatBranch deletes a polecat's Dolt branch (cleanup/nuke).
-// Best-effort: logs warning if branch doesn't exist or deletion fails.
-func DeletePolecatBranch(townRoot, rigDB, branchName string) {
-	if err := validateBranchName(branchName); err != nil {
-		style.PrintWarning("invalid Dolt branch name %q: %v", branchName, err)
-		return
-	}
-	query := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", branchName)
-	if err := doltSQL(townRoot, rigDB, query); err != nil {
-		// Non-fatal: branch may not exist (already merged/deleted)
-		style.PrintWarning("could not delete Dolt branch %s: %v", branchName, err)
-	}
-}

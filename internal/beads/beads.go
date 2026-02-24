@@ -73,7 +73,7 @@ type Issue struct {
 	Blocks      []string `json:"blocks,omitempty"`
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
+	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues, not synced to git
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
@@ -145,7 +145,7 @@ type CreateOptions struct {
 	Description string
 	Parent      string
 	Actor       string // Who is creating this issue (populates created_by)
-	Ephemeral   bool   // Create as ephemeral (wisp) - not exported to JSONL
+	Ephemeral   bool   // Create as ephemeral (wisp) - not synced to git
 }
 
 // UpdateOptions specifies options for updating an issue.
@@ -170,10 +170,10 @@ type SyncStatus struct {
 
 // Beads wraps bd CLI operations for a working directory.
 type Beads struct {
-	workDir  string
-	beadsDir string // Optional BEADS_DIR override for cross-database access
-	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
-	onMain   bool   // If true, strip BD_BRANCH so reads target main (not polecat branch)
+	workDir    string
+	beadsDir   string // Optional BEADS_DIR override for cross-database access
+	isolated   bool   // If true, suppress inherited beads env vars (for test isolation)
+	serverPort int    // If set, pass --server-port to bd init and GT_DOLT_PORT to env
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -193,43 +193,18 @@ func NewIsolated(workDir string) *Beads {
 	return &Beads{workDir: workDir, isolated: true}
 }
 
+// NewIsolatedWithPort creates a Beads wrapper for test isolation that targets
+// a specific Dolt server port. Init() passes --server-port to bd init, and all
+// commands get GT_DOLT_PORT in their environment. This prevents tests from
+// creating databases on the production Dolt server (port 3307).
+func NewIsolatedWithPort(workDir string, serverPort int) *Beads {
+	return &Beads{workDir: workDir, isolated: true, serverPort: serverPort}
+}
+
 // NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
-}
-
-// OnMain returns a shallow copy of the Beads wrapper with onMain set to true.
-// When onMain is true, BD_BRANCH is stripped from the environment so that
-// bd read operations target the main branch instead of a polecat's write-isolation
-// branch. This fixes #1796: polecats couldn't find hooked work because
-// findAgentWork() was reading from the polecat's empty branch instead of main.
-//
-// Use OnMain() for READ operations that need main-branch data (work discovery,
-// hook lookups). Do NOT use it for write operations that need branch isolation.
-func (b *Beads) OnMain() *Beads {
-	return &Beads{
-		workDir:  b.workDir,
-		beadsDir: b.beadsDir,
-		isolated: b.isolated,
-		onMain:   true,
-		// townRoot and townRootOnce are not copied (sync.Once is not copyable).
-		// The new instance will re-derive townRoot lazily on first call if needed.
-	}
-}
-
-// StripBdBranch removes BD_BRANCH from an environment variable slice.
-// Use this for direct exec.Command("bd", ...) calls that need to read from
-// the main branch instead of a polecat's write-isolation branch.
-// This is the exec.Command counterpart to OnMain() (which is for Beads wrapper paths).
-func StripBdBranch(environ []string) []string {
-	filtered := make([]string, 0, len(environ))
-	for _, env := range environ {
-		if !strings.HasPrefix(env, "BD_BRANCH=") {
-			filtered = append(filtered, env)
-		}
-	}
-	return filtered
 }
 
 // getActor returns the BD_ACTOR value for this context.
@@ -264,8 +239,18 @@ func (b *Beads) getResolvedBeadsDir() string {
 
 // Init initializes a new beads database in the working directory.
 // This uses the same environment isolation as other commands.
+// If ServerPort is set (via NewIsolatedWithPort), passes --server-port to bd init
+// so the database is created on the test Dolt server.
 func (b *Beads) Init(prefix string) error {
-	_, err := b.run("init", "--prefix", prefix, "--quiet")
+	args := []string{"init"}
+	if prefix != "" {
+		args = append(args, "--prefix", prefix)
+	}
+	args = append(args, "--quiet")
+	if b.serverPort > 0 {
+		args = append(args, "--server-port", fmt.Sprintf("%d", b.serverPort))
+	}
+	_, err := b.run(args...)
 	return err
 }
 
@@ -277,8 +262,8 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	defer func() {
 		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
 	}()
-	// Use --allow-stale to prevent failures when db is out of sync with JSONL
-	// (e.g., after daemon is killed during shutdown before syncing).
+	// Use --allow-stale to prevent failures when db is temporarily stale
+	// (e.g., after daemon is killed during shutdown).
 	fullArgs := append([]string{"--allow-stale"}, args...)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
@@ -388,30 +373,48 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	return fmt.Errorf("bd %s: %w", strings.Join(args, " "), err)
 }
 
+// isSubprocessCrash returns true if the error indicates the subprocess crashed
+// (e.g., Dolt nil pointer dereference causing SIGSEGV). This is used to detect
+// recoverable failures where a fallback strategy should be attempted (GH#1769).
+func isSubprocessCrash(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Detect signals from crashed subprocesses (bd panic → SIGSEGV)
+	return strings.Contains(errStr, "signal:") ||
+		strings.Contains(errStr, "segmentation") ||
+		strings.Contains(errStr, "nil pointer") ||
+		strings.Contains(errStr, "panic:")
+}
+
 // buildRunEnv builds the environment for run() calls.
 // In isolated mode: strips all beads-related env vars for test isolation.
-// In onMain mode: strips BD_BRANCH so reads target main branch.
-// Otherwise: passes through the current environment.
+// Otherwise: strips inherited BEADS_DIR so the caller can append the correct value.
+// Without this, getenv() returns the first occurrence, so an inherited BEADS_DIR
+// (e.g., from a parent process or shell context) would shadow the explicit value
+// appended by run(). This was the root cause of gt-uygpe / GH #803.
 func (b *Beads) buildRunEnv() []string {
 	if b.isolated {
-		return filterBeadsEnv(os.Environ())
+		env := filterBeadsEnv(os.Environ())
+		if b.serverPort > 0 {
+			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+		}
+		return env
 	}
-	if b.onMain {
-		return StripBdBranch(os.Environ())
-	}
-	return os.Environ()
+	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
 
 // buildRoutingEnv builds the environment for runWithRouting() calls.
 // Always strips BEADS_DIR so bd uses native routing.
-// In isolated mode: also strips BD_ACTOR, BD_BRANCH, BEADS_*, GT_ROOT, HOME.
-// In onMain mode: also strips BD_BRANCH for main-branch reads.
+// In isolated mode: also strips BD_ACTOR, BEADS_*, GT_ROOT, HOME.
 func (b *Beads) buildRoutingEnv() []string {
 	if b.isolated {
-		return filterBeadsEnv(os.Environ())
-	}
-	if b.onMain {
-		return stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BD_BRANCH=")
+		env := filterBeadsEnv(os.Environ())
+		if b.serverPort > 0 {
+			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+		}
+		return env
 	}
 	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
 }
@@ -419,15 +422,24 @@ func (b *Beads) buildRoutingEnv() []string {
 // filterBeadsEnv removes beads-related environment variables from the given
 // environment slice. This ensures test isolation by preventing inherited
 // BD_ACTOR, BEADS_DB, GT_ROOT, HOME etc. from routing commands to production databases.
+//
+// Preserves GT_DOLT_PORT and BEADS_DOLT_PORT so that isolated-mode tests can
+// reach a test Dolt server on a non-default port.
 func filterBeadsEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {
+		// Preserve port env vars needed to reach test Dolt servers.
+		// These must be checked before the broad BEADS_ prefix strip below.
+		if strings.HasPrefix(env, "BEADS_DOLT_PORT=") ||
+			strings.HasPrefix(env, "GT_DOLT_PORT=") {
+			filtered = append(filtered, env)
+			continue
+		}
 		// Skip beads-related env vars that could interfere with test isolation
-		// BD_ACTOR, BD_BRANCH, BEADS_* - direct beads config
+		// BD_ACTOR, BEADS_* - direct beads config
 		// GT_ROOT - causes bd to find global routes file
 		// HOME - causes bd to find ~/.beads-planning routing
 		if strings.HasPrefix(env, "BD_ACTOR=") ||
-			strings.HasPrefix(env, "BD_BRANCH=") ||
 			strings.HasPrefix(env, "BEADS_") ||
 			strings.HasPrefix(env, "GT_ROOT=") ||
 			strings.HasPrefix(env, "HOME=") {
@@ -439,8 +451,7 @@ func filterBeadsEnv(environ []string) []string {
 }
 
 // stripEnvPrefixes removes entries matching any of the given prefixes from an
-// environment variable slice. Used by runWithRouting to strip BEADS_DIR and
-// optionally BD_BRANCH without duplicating the StripBdBranch filtering logic.
+// environment variable slice. Used by runWithRouting to strip BEADS_DIR.
 func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 	filtered := make([]string, 0, len(environ))
 	for _, env := range environ {

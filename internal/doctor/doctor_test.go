@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -347,6 +349,65 @@ func TestBaseCheck(t *testing.T) {
 	}
 	if err := b.Fix(nil); err != ErrCannotFix {
 		t.Errorf("BaseCheck.Fix() should return ErrCannotFix, got %v", err)
+	}
+}
+
+// panicCheck is a test check whose Fix panics.
+type panicCheck struct {
+	FixableCheck
+}
+
+func (p *panicCheck) Run(ctx *CheckContext) *CheckResult {
+	return &CheckResult{Name: p.CheckName, Status: StatusError, Message: "needs fix"}
+}
+
+func (p *panicCheck) Fix(ctx *CheckContext) error {
+	panic("dolt nil pointer dereference")
+}
+
+func TestSafeFixCheck_RecoversPanic(t *testing.T) {
+	check := &panicCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "panic-check",
+				CheckDescription: "A check that panics during fix",
+			},
+		},
+	}
+
+	err := safeFixCheck(check, &CheckContext{TownRoot: "/test"})
+	if err == nil {
+		t.Fatal("safeFixCheck should return error when Fix panics")
+	}
+	if !strings.Contains(err.Error(), "fix panicked") {
+		t.Errorf("error should mention 'fix panicked', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nil pointer") {
+		t.Errorf("error should contain panic message, got: %v", err)
+	}
+}
+
+func TestSafeFixCheck_NormalError(t *testing.T) {
+	check := newMockCheck("failing-fix", StatusError)
+	check.fixable = true
+	check.fixError = fmt.Errorf("some fix error")
+
+	err := safeFixCheck(check, &CheckContext{TownRoot: "/test"})
+	if err == nil {
+		t.Fatal("safeFixCheck should return the Fix error")
+	}
+	if err.Error() != "some fix error" {
+		t.Errorf("expected 'some fix error', got: %v", err)
+	}
+}
+
+func TestSafeFixCheck_Success(t *testing.T) {
+	check := newMockCheck("good-fix", StatusError)
+	check.fixable = true
+
+	err := safeFixCheck(check, &CheckContext{TownRoot: "/test"})
+	if err != nil {
+		t.Fatalf("safeFixCheck should return nil on success, got: %v", err)
 	}
 }
 

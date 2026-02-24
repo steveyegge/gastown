@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -120,8 +121,9 @@ func EnsureCustomTypes(beadsDir string) error {
 	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
 	cmd := exec.Command("bd", "config", "set", "types.custom", typesList)
 	cmd.Dir = beadsDir
-	// Set BEADS_DIR explicitly to ensure bd operates on the correct database
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	// Set BEADS_DIR explicitly to ensure bd operates on the correct database.
+	// Strip inherited BEADS_DIR first — getenv() returns the first match (gt-uygpe).
+	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure custom types in %s: %s: %w",
 			beadsDir, strings.TrimSpace(string(output)), err)
@@ -148,6 +150,13 @@ var prefixRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,19}$`)
 // Uses --server mode to match all production bd init callers (gastown uses a
 // centralized Dolt sql-server). JSONL auto-import is handled by bd init itself.
 func ensureDatabaseInitialized(beadsDir string) error {
+	// If this beads dir has a redirect, the database lives elsewhere.
+	// Never create a new database for a redirected location (polecats, crew, refinery).
+	redirectFile := filepath.Join(beadsDir, "redirect")
+	if _, err := os.Stat(redirectFile); err == nil {
+		return nil
+	}
+
 	// Check for Dolt database directory (embedded mode)
 	doltDir := filepath.Join(beadsDir, "dolt")
 	if _, err := os.Stat(doltDir); err == nil {
@@ -196,9 +205,14 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	// bd init must run from the parent directory (not inside .beads/).
 	// Use --server to match all production callers (rig/manager.go, doctor/rig_check.go, cmd/install.go).
 	parentDir := filepath.Dir(beadsDir)
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--server")
+	initArgs := []string{"init"}
+	if prefix != "" {
+		initArgs = append(initArgs, "--prefix", prefix)
+	}
+	initArgs = append(initArgs, "--server")
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = parentDir
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		// Handle "already initialized" gracefully, matching install.go behavior.
 		// This can happen due to race conditions or if detection heuristics miss
@@ -212,10 +226,33 @@ func ensureDatabaseInitialized(beadsDir string) error {
 
 	// Explicitly set issue_prefix — bd init --prefix may not persist it
 	// in newer versions (see rig/manager.go InitBeads).
-	pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-	pfxCmd.Dir = parentDir
-	pfxCmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-	_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	if prefix != "" {
+		pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+		pfxCmd.Dir = parentDir
+		pfxCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+		_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
+	}
+
+	// Run bd migrate to ensure the wisps table and auxiliary tables exist.
+	// Without this, bd create --ephemeral crashes with a Dolt nil pointer
+	// dereference when the wisps table is missing (GH#1769).
+	//
+	// After bd init --server, the Dolt SQL server may need time to register
+	// the new database in its catalog. Retry once after a short delay if the
+	// first migrate attempt fails (GH#1769).
+	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	migrateCmd := exec.Command("bd", "migrate", "--yes")
+	migrateCmd.Dir = parentDir
+	migrateCmd.Env = migrateEnv
+	if _, err := migrateCmd.CombinedOutput(); err != nil {
+		// First attempt failed — server may not have registered the database yet.
+		// Wait briefly and retry once.
+		time.Sleep(500 * time.Millisecond)
+		retryCmd := exec.Command("bd", "migrate", "--yes")
+		retryCmd.Dir = parentDir
+		retryCmd.Env = migrateEnv
+		_, _ = retryCmd.CombinedOutput() // Best effort on retry — CreateAgentBead fallback handles failure
+	}
 
 	return nil
 }

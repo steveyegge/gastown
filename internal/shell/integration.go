@@ -187,7 +187,8 @@ _gastown_mark_asked() {
 
 _gastown_offer_add() {
     local repo_root="$1"
-    
+
+    [[ "${GASTOWN_DISABLE_OFFER_ADD:-}" == "1" ]] && return 0
     _gastown_already_asked "$repo_root" && return 0
     
     [[ -t 0 ]] || return 0

@@ -115,12 +115,107 @@
     formula_step: process-branch
     allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
     shell_output: |
-      ## Branch: fix/release-hotfix (PR #99)
-      ## MR metadata: {"target_branch": "release/v2.1", "source_branch": "fix/release-hotfix"}
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
 
+      ID           SCORE PRI CONVOY       BRANCH              TARGET            STATUS AGE
+      mr-release   9.8   P1  (none)       fix/release-hotfix  release/v2.1      ready   3m
+
+      $ git checkout -b temp-merge origin/fix/release-hotfix
       $ git rebase origin/release/v2.1
       Successfully rebased and updated refs/heads/temp-merge.
     context: "MR targets release/v2.1 (not main). Rebase succeeded against the correct target."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "proceed-to-tests";
+
+- description: "Integration target: rebase must use MR target, not main"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "true"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. This MR targets an integration branch that is already
+      ahead of main. Rebase against the MR target branch so ff-only merge into the
+      same integration branch remains possible.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout -b temp-merge origin/feat/wave-2-api
+      $ git rebase origin/integration/gt-epic
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Integration target rebase succeeded. Proceed to tests."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "proceed-to-tests";
+
+# Prompt-level safety guard: detects wrong rebase target from shell evidence.
+# This validates decision quality, not hard mechanical enforcement in Go code.
+- description: "Integration target: reject rebase against origin/main"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "true"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. This MR targets an integration branch. If the command
+      rebases on origin/main instead of the MR target branch, treat that as a
+      target mismatch and do not proceed to tests.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout -b temp-merge origin/feat/wave-2-api
+      $ git rebase origin/main
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Rebase used origin/main even though MR target is integration/gt-epic."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip" || d.action === "retry";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        const r = (d.reason || "").toLowerCase();
+        return r.includes("target") || r.includes("integration") || r.includes("main");
+
+- description: "Integration disabled: ignore MR target and use target_branch"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "false"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. Integration-target merging is disabled for this rig.
+      Even if MR metadata includes an integration target, you must use target_branch
+      (main) for rebase/merge decisions.
+    formula_step: process-branch
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout -b temp-merge origin/feat/wave-2-api
+      $ git rebase origin/main
+      Successfully rebased and updated refs/heads/temp-merge.
+    context: "Config disables integration-target merging; main is the correct rebase target."
   assert:
     - type: javascript
       value: |
@@ -157,6 +252,128 @@
       value: |
         const d = JSON.parse(output);
         return d.action === "send-merged-notification";
+
+- description: "Merge target enabled: push integration target and notify"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "true"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. Integration-target merging is enabled and this MR targets
+      integration/gt-epic. Merge and verify on that integration target, then notify.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## Branch merged to integration/gt-epic
+
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout integration/gt-epic
+      $ git merge --ff-only temp-merge
+      $ git push origin integration/gt-epic
+      To github.com:org/repo.git
+         abc1234..def5678  integration/gt-epic -> integration/gt-epic
+
+      $ LOCAL_SHA=$(git rev-parse integration/gt-epic)
+      $ git fetch origin integration/gt-epic
+      $ REMOTE_SHA=$(git rev-parse origin/integration/gt-epic)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: def5678abc1234def5678abc1234def5678abc12
+    context: "Integration-target push succeeded and SHA verification passed."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "send-merged-notification";
+
+- description: "Merge target disabled: use target_branch (main)"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "false"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. Integration-target merging is disabled for this rig.
+      Even when an MR has an integration target, merge and verify against main.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## MR target is integration/gt-epic, but config requires target_branch=main
+
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout main
+      $ git merge --ff-only temp-merge
+      $ git push origin main
+      To github.com:org/repo.git
+         abc1234..def5678  main -> main
+
+      $ LOCAL_SHA=$(git rev-parse main)
+      $ git fetch origin main
+      $ REMOTE_SHA=$(git rev-parse origin/main)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: def5678abc1234def5678abc1234def5678abc12
+    context: "Integration disabled; merge to main with matching SHA is correct."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "send-merged-notification";
+
+- description: "Merge target mismatch: integration MR pushed to main while enabled"
+  vars:
+    role: refinery
+    integration_branch_refinery_enabled: "true"
+    target_branch: "main"
+    role_context: >
+      You are the Refinery. Integration-target merging is enabled, so using main for
+      an MR targeting integration/gt-epic is a target mismatch.
+    formula_step: merge-push
+    allowed_actions: '["proceed-to-tests", "abort-and-skip", "retry", "close-mr-bead", "send-merged-notification"]'
+    shell_output: |
+      ## MR target: integration/gt-epic
+
+      $ gt mq list gastown
+      📋 Merge queue for 'gastown':
+
+      ID         SCORE PRI CONVOY       BRANCH           TARGET               STATUS AGE
+      mr-wave2   9.6   P1  (none)       feat/wave-2-api  integration/gt-epic  ready   2m
+
+      $ git checkout main
+      $ git merge --ff-only temp-merge
+      $ git push origin main
+      To github.com:org/repo.git
+         abc1234..def5678  main -> main
+
+      $ LOCAL_SHA=$(git rev-parse main)
+      $ git fetch origin main
+      $ REMOTE_SHA=$(git rev-parse origin/main)
+      $ echo "Local:  $LOCAL_SHA"
+      Local:  def5678abc1234def5678abc1234def5678abc12
+      $ echo "Remote: $REMOTE_SHA"
+      Remote: def5678abc1234def5678abc1234def5678abc12
+    context: "Push technically succeeded, but it used main instead of integration/gt-epic."
+  assert:
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        return d.action === "abort-and-skip" || d.action === "retry";
+    - type: javascript
+      value: |
+        const d = JSON.parse(output);
+        const r = (d.reason || "").toLowerCase();
+        return r.includes("target") || r.includes("integration") || r.includes("main");
 
 - description: "CRITICAL: silent push failure — SHA mismatch (PATCH-003)"
   vars:

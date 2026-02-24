@@ -344,7 +344,10 @@ func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 		if fi == nil || fj == nil {
 			return fi != nil // valid contexts sort before invalid
 		}
-		return fi.EnqueuedAt < fj.EnqueuedAt
+		if fi.EnqueuedAt != fj.EnqueuedAt {
+			return fi.EnqueuedAt < fj.EnqueuedAt
+		}
+		return allContexts[i].ID < allContexts[j].ID // deterministic tiebreaker
 	})
 
 	seenWork := make(map[string]bool)

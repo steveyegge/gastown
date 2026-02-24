@@ -4,64 +4,63 @@
 
 ## Overview
 
-Polecats have three distinct lifecycle layers that operate independently. Confusing
-these layers leads to "heresies" like thinking there are "idle polecats" and
-misunderstanding when recycling occurs.
+Polecats have three distinct lifecycle layers that operate independently. The
+key design principle: **polecats are persistent**. They survive work completion
+and can be reused across assignments.
 
-## The Three Operating States
+## The Four Operating States
 
-Polecats have exactly three operating states. There is **no idle pool**.
+Polecats have four operating states:
 
 | State | Description | How it happens |
 |-------|-------------|----------------|
-| **Working** | Actively doing assigned work | Normal operation |
+| **Working** | Actively doing assigned work | Normal operation after `gt sling` |
+| **Idle** | Work completed, sandbox preserved for reuse | After `gt done` completes successfully |
 | **Stalled** | Session stopped mid-work | Interrupted, crashed, or timed out without being nudged |
-| **Zombie** | Completed work but failed to die | `gt done` failed during cleanup |
+| **Zombie** | Completed work but failed to exit | `gt done` failed during cleanup |
 
-**The key distinction:** Zombies completed their work; stalled polecats did not.
+**Key distinctions:**
 
-- **Stalled** = supposed to be working, but stopped. The polecat was interrupted or
-  crashed and was never nudged back to life. Work is incomplete.
-- **Zombie** = finished work, tried to exit via `gt done`, but cleanup failed. The
-  session should have shut down but didn't. Work is complete, just stuck in limbo.
+- **Working** = actively executing. Session alive, hook set, doing work.
+- **Idle** = work done, session killed, sandbox preserved. Ready for next `gt sling`.
+- **Stalled** = supposed to be working, but stopped. Needs Witness intervention.
+- **Zombie** = finished work, tried to exit, but cleanup failed. Stuck in limbo.
 
-There is no "idle" state. Polecats don't wait around between tasks. When work is
-done, `gt done` shuts down the session. If you see a non-working polecat, something
-is broken.
+## The Persistent Polecat Model (gt-4ac)
 
-## The Self-Cleaning Polecat Model
-
-**Polecats are responsible for their own cleanup.** When a polecat completes its
-work unit, it:
+**Polecats persist after completing work.** When a polecat finishes its assignment:
 
 1. Signals completion via `gt done`
-2. Exits its session immediately (no idle waiting)
-3. Requests its own nuke (self-delete)
+2. Pushes branch, submits MR to merge queue
+3. Clears its hook (work is done)
+4. Sets agent state to "idle"
+5. Kills its own session
+6. **Sandbox (worktree) is preserved for reuse**
 
-This removes dependency on the Witness/Deacon for cleanup and ensures polecats
-never sit idle. The simple model: **sandbox dies with session**.
+The next `gt sling` reuses idle polecats before allocating new ones, avoiding
+the overhead of creating fresh worktrees.
 
-### Why Self-Cleaning?
+### Why Persistent?
 
-- **No idle polecats** - There's no state where a polecat exists without work
-- **Reduced watchdog overhead** - Deacon patrols for stalled/zombie polecats, not idle ones
-- **Faster turnover** - Resources freed immediately on completion
-- **Simpler mental model** - Done means gone
+- **Faster turnaround** — Reusing an existing worktree is faster than creating one
+- **Preserved identity** — The polecat's agent bead, CV chain, and work history persist
+- **Simpler lifecycle** — No nuke/respawn cycle between assignments
+- **Done means idle** — Session dies, sandbox lives, polecat awaits next assignment
 
 ### What About Pending Merges?
 
 The Refinery owns the merge queue. Once `gt done` submits work:
 - The branch is pushed to origin
 - Work exists in the MQ, not in the polecat
-- If rebase fails, Refinery re-implements on new baseline (fresh polecat)
-- The original polecat is already gone - no sending work "back"
+- If rebase fails, Refinery creates a conflict-resolution task
+- The idle polecat can be reused for the conflict resolution work
 
 ## The Three Layers
 
 | Layer | Component | Lifecycle | Persistence |
 |-------|-----------|-----------|-------------|
 | **Identity** | Agent bead, CV chain, work history | Permanent | Never dies |
-| **Sandbox** | Git worktree, branch, hook assignment | Ephemeral per assignment | Created on sling, nuked on done |
+| **Sandbox** | Git worktree, branch | Persistent across assignments | Created on first sling, reused thereafter |
 | **Session** | Claude (tmux pane), context window | Ephemeral per step | Cycles per step/handoff |
 
 ### Identity Layer
@@ -72,7 +71,7 @@ The polecat's **identity is permanent**. It includes:
 - CV chain (work history accumulates across all assignments)
 - Mailbox and attribution record
 
-Identity survives all session cycles and sandbox nukes. In the HOP model, this IS
+Identity survives all session cycles and sandbox resets. In the HOP model, this IS
 the polecat — everything else is infrastructure that comes and goes. See
 [Polecat Identity](#polecat-identity) below for details.
 
@@ -94,7 +93,7 @@ Session 2: Steps 3-4 → handoff
 Session 3: Step 5 → gt done
 ```
 
-All three sessions are the **same polecat**. The sandbox and slot persist throughout.
+All three sessions are the **same polecat**. The sandbox persists throughout.
 
 ### Sandbox Layer
 
@@ -105,12 +104,12 @@ The sandbox is the **git worktree**—the polecat's working directory:
 ```
 
 This worktree:
-- Exists from `gt sling` until `gt polecat nuke`
+- Exists from first `gt sling` and persists across assignments
 - Survives all session cycles
-- Contains uncommitted work, staged changes, branch state
-- Is independent of other polecat sandboxes
+- Is repaired (reset to fresh branch from main) when reused by `gt sling`
+- Contains uncommitted work, staged changes, branch state during active work
 
-The Witness never destroys sandboxes mid-work. Only `nuke` removes them.
+The Witness never destroys sandboxes. Only explicit `gt polecat nuke` removes them.
 
 ### Slot Layer
 
@@ -125,15 +124,15 @@ The slot:
 - Determines the sandbox path (`polecats/Toast/`)
 - Maps to a tmux session (`gt-gastown-Toast`)
 - Appears in attribution (`gastown/polecats/Toast`)
-- Is released only on nuke
+- Persists until explicit nuke
 
 ## Correct Lifecycle
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        gt sling                             │
-│  → Allocate slot from pool (Toast)                         │
-│  → Create sandbox (worktree on new branch)                 │
+│  → Find idle polecat OR allocate slot from pool (Toast)    │
+│  → Create/repair sandbox (worktree on new branch)          │
 │  → Start session (Claude in tmux)                          │
 │  → Hook molecule to polecat                                │
 └─────────────────────────────────────────────────────────────┘
@@ -152,14 +151,14 @@ The slot:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  gt done (self-cleaning)                    │
+│                  gt done (persistent model)                  │
 │  → Push branch to origin                                   │
 │  → Submit work to merge queue (MR bead)                    │
-│  → Request self-nuke (sandbox + session cleanup)           │
-│  → Exit immediately                                        │
+│  → Set agent state to "idle"                               │
+│  → Kill session                                            │
 │                                                             │
-│  Work now lives in MQ, not in polecat.                     │
-│  Polecat is GONE. No idle state.                           │
+│  Work now lives in MQ. Polecat is IDLE, not gone.          │
+│  Sandbox preserved for reuse by next gt sling.             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -168,8 +167,7 @@ The slot:
 │  → Rebase and merge to target branch                       │
 │    (main or integration branch — see below)                │
 │  → Close the issue                                         │
-│  → If conflict: spawn FRESH polecat to re-implement        │
-│    (never send work back to original polecat - it's gone)  │
+│  → If conflict: create task for available polecat          │
 │                                                             │
 │  Integration branch path:                                  │
 │  → MRs from epic children merge to integration/<epic>      │
@@ -185,35 +183,15 @@ The slot:
 gt handoff  # Session cycles, polecat continues
 ```
 
-**Sandbox recreation**: Repair only. Should be rare.
+**Sandbox repair**: On reuse. `gt sling` resets the worktree to a fresh branch.
 
 ```bash
-gt polecat repair Toast  # Emergency: recreate corrupted worktree
+gt sling gt-xyz gastown  # Reuses idle Toast, repairs worktree
 ```
 
-Session cycling happens constantly. Sandbox recreation should almost never happen
-during normal operation.
+Session cycling happens constantly. Sandbox repair happens between assignments.
 
 ## Anti-Patterns
-
-### "Idle" Polecats (They Don't Exist)
-
-**Myth:** Polecats wait between tasks in an idle pool.
-
-**Reality:** There is no idle state. Polecats don't exist without work:
-1. Work assigned → polecat spawned
-2. Work done → `gt done` → session exits → polecat nuked
-3. There is no step 3 where they wait around
-
-If you see a non-working polecat, it's in a **failure state**:
-
-| What you see | What it is | What went wrong |
-|--------------|------------|-----------------|
-| Session exists but not working | **Stalled** | Interrupted/crashed, never nudged |
-| Session done but didn't exit | **Zombie** | `gt done` failed during cleanup |
-
-Don't call these "idle" - that implies they're waiting for work. They're not.
-A stalled polecat is *supposed* to be working. A zombie is *supposed* to be dead.
 
 ### Manual State Transitions
 
@@ -228,28 +206,26 @@ gt polecat reset Toast   # DON'T: manual lifecycle control
 # Polecat signals its own completion:
 gt done  # (from inside the polecat session)
 
-# Only Witness nukes polecats:
-gt polecat nuke Toast  # (from Witness, after verification)
+# Only explicit nuke destroys polecats:
+gt polecat nuke Toast  # (destroys sandbox, identity persists)
 ```
 
-Polecats manage their own session lifecycle. The Witness manages sandbox lifecycle.
-External manipulation bypasses verification.
+Polecats manage their own session lifecycle. External manipulation bypasses verification.
 
-### Sandboxes Without Work (Stalled Polecats)
+### Sandboxes Without Work (Idle vs Stalled)
 
-**Anti-pattern:** A sandbox exists but no molecule is hooked, or the session isn't running.
+An idle polecat has no hook and no session — this is **normal**. It completed
+its work and is waiting for the next `gt sling`.
 
-This is a **stalled** polecat. It means:
+A **stalled** polecat has a hook but no session — this is a **failure**:
 - The session crashed and wasn't nudged back to life
 - The hook was lost during a crash
 - State corruption occurred
 
-This is NOT an "idle" polecat waiting for work. It's stalled - supposed to be
-working but stopped unexpectedly.
-
-**Recovery:**
+**Recovery for stalled:**
 ```bash
-# From Witness:
+# Witness respawns the session in the existing sandbox
+# Or, if unrecoverable:
 gt polecat nuke Toast        # Clean up the stalled polecat
 gt sling gt-abc gastown      # Respawn with fresh polecat
 ```
@@ -278,16 +254,17 @@ Sessions cycle for these reasons:
 | `gt handoff` | Voluntary | Clean cycle to fresh context |
 | Context compaction | Automatic | Forced by Claude Code |
 | Crash/timeout | Failure | Witness respawns |
-| `gt done` | Completion | Session exits, Witness takes over |
+| `gt done` | Completion | Session exits, polecat goes idle |
 
-All except `gt done` result in continued work. Only `gt done` signals completion.
+All except `gt done` result in continued work. Only `gt done` signals completion
+and transitions the polecat to idle.
 
 ## Witness Responsibilities
 
 The Witness monitors polecats but does NOT:
 - Force session cycles (polecats self-manage via handoff)
 - Interrupt mid-step (unless truly stuck)
-- Nuke polecats (polecats self-nuke via `gt done`)
+- Nuke polecats after completion (persistent model)
 
 The Witness DOES:
 - Detect and nudge stalled polecats (sessions that stopped unexpectedly)
@@ -297,7 +274,7 @@ The Witness DOES:
 
 ## Polecat Identity
 
-**Key insight:** Polecat *identity* is long-lived; only sessions and sandboxes are ephemeral.
+**Key insight:** Polecat *identity* is permanent; sessions are ephemeral, sandboxes are persistent.
 
 In the HOP model, every entity has a chain (CV) that tracks:
 - What work they've done
@@ -305,15 +282,16 @@ In the HOP model, every entity has a chain (CV) that tracks:
 - Skills demonstrated
 - Quality metrics
 
-The polecat *name* (Toast, Shadow, etc.) is a slot from a pool - truly ephemeral.
-But the *agent identity* that executes as that polecat accumulates a work history.
+The polecat *name* (Toast, Shadow, etc.) is a slot from a pool — persistent until
+explicit nuke. The *agent identity* that executes as that polecat accumulates a
+work history across all assignments.
 
 ```
-POLECAT IDENTITY (persistent)     SESSION (ephemeral)     SANDBOX (ephemeral)
+POLECAT IDENTITY (permanent)      SESSION (ephemeral)     SANDBOX (persistent)
 ├── CV chain                      ├── Claude instance     ├── Git worktree
 ├── Work history                  ├── Context window      ├── Branch
-├── Skills demonstrated           └── Dies on handoff     └── Dies on gt done
-└── Credit for work                   or gt done
+├── Skills demonstrated           └── Dies on handoff     └── Repaired on reuse
+└── Credit for work                   or gt done              by gt sling
 ```
 
 This distinction matters for:

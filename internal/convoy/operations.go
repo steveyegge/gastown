@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	beadsdk "github.com/steveyegge/beads"
@@ -218,8 +219,15 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 		return
 	}
 
+	// Sort by priority (lower = higher) then by ID for deterministic tie-breaking.
+	sort.Slice(tracked, func(i, j int) bool {
+		if tracked[i].Priority != tracked[j].Priority {
+			return tracked[i].Priority < tracked[j].Priority
+		}
+		return tracked[i].ID < tracked[j].ID
+	})
+
 	// Find the first ready issue (open, no assignee, not blocked).
-	// Pick the first match, which is typically the highest priority.
 	for _, issue := range tracked {
 		if issue.Status != "open" || issue.Assignee != "" {
 			continue

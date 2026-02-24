@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -27,7 +28,12 @@ type DispatchResult struct {
 var dispatchTaskDirect = func(townRoot, beadID, rig string) error {
 	cmd := exec.Command("gt", "sling", beadID, rig)
 	cmd.Dir = townRoot
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gt sling %s %s: %w\nstderr: %s", beadID, rig, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 var convoyLaunchCmd = &cobra.Command{
@@ -81,9 +87,15 @@ func transitionConvoyToOpen(convoyID string, force bool) error {
 	}
 }
 
-// bdUpdateStatus runs `bd update <id> --status=<status>`.
+// bdUpdateStatus runs `bd update <id> --status=<status>` against the town beads
+// database, since convoys live at the HQ level.
 func bdUpdateStatus(beadID, status string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
 	cmd := exec.Command("bd", "update", beadID, "--status="+status)
+	cmd.Dir = townBeads
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("bd update %s --status=%s: %w\noutput: %s", beadID, status, err, out)
 	}
