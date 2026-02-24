@@ -1290,3 +1290,737 @@ func TestSendKeys_RaceWithStartup(t *testing.T) {
 		t.Log("Unclear result - may depend on system speed")
 	}
 }
+
+// =============================================================================
+// NUDGE DELIVERY TIMING TESTS (gt-k8uxb: prompt not received)
+// =============================================================================
+
+// TestNudge_BeforeAgentReady reproduces the scenario where a nudge is sent
+// before the agent process is ready to receive input.
+// This is the "sits at welcome screen" bug - the prompt is sent but never displayed.
+func TestNudge_BeforeAgentReady(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-early-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Simulate slow agent startup (like claude-code loading)
+	// The agent takes 3 seconds before it's ready to receive input
+	cmd := `bash -c 'sleep 3; cat'` // cat will echo input when ready
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Send nudge IMMEDIATELY after session creation (before agent is ready)
+	// This simulates the race condition in polecat startup
+	nudgeMessage := "EARLY_NUDGE_TEST: This message should be received"
+	err = tm.NudgeSession(sessionName, nudgeMessage)
+	if err != nil {
+		t.Logf("NudgeSession returned error: %v", err)
+	}
+
+	// Wait for agent to become ready
+	time.Sleep(4 * time.Second)
+
+	// Capture output to see if the nudge was received
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after early nudge:\n%s", output)
+
+	// The bug: if nudge was sent before agent was ready, the message is lost
+	if strings.Contains(output, "EARLY_NUDGE_TEST") {
+		t.Log("Early nudge was received - no timing issue")
+	} else {
+		t.Log("NUDGE LOST: Message sent before agent was ready")
+		t.Log("This reproduces gt-k8uxb: polecat sits at welcome screen")
+	}
+}
+
+// TestNudge_DuringAgentStartup tests nudge delivery during the window when
+// shell has started but agent process hasn't fully initialized.
+func TestNudge_DuringAgentStartup(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-startup-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Use exec env pattern like polecat startup
+	// The command starts running but takes time to initialize
+	cmd := `exec env GT_TEST=1 bash -c 'echo "STARTING..."; sleep 2; echo "READY"; read line; echo "GOT: $line"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Wait for "STARTING..." but not "READY"
+	time.Sleep(500 * time.Millisecond)
+
+	// Check initial state
+	outputBefore, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output before nudge:\n%s", outputBefore)
+
+	if strings.Contains(outputBefore, "READY") {
+		t.Log("Agent already ready - test timing needs adjustment")
+	}
+
+	// Send nudge during startup (after STARTING but before READY)
+	err = tm.NudgeSession(sessionName, "STARTUP_NUDGE")
+	if err != nil {
+		t.Logf("NudgeSession error: %v", err)
+	}
+
+	// Wait for startup to complete
+	time.Sleep(3 * time.Second)
+
+	// Check if nudge was received
+	outputAfter, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after startup:\n%s", outputAfter)
+
+	if strings.Contains(outputAfter, "GOT: STARTUP_NUDGE") {
+		t.Log("Nudge delivered during startup - timing worked")
+	} else if strings.Contains(outputAfter, "STARTUP_NUDGE") {
+		t.Log("Nudge visible but not processed by read")
+	} else {
+		t.Log("NUDGE TIMING ISSUE: Message not received during startup window")
+	}
+}
+
+// TestNudge_WithWaitForCommand tests the polecat startup pattern:
+// WaitForCommand, then nudge. This is the actual pattern used in session_manager.go
+func TestNudge_WithWaitForCommand(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-waitcmd-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Simulate claude-code: starts as shell, then becomes 'node' (or whatever runtime)
+	// Using python as a proxy for claude-code since it's a long-running process
+	cmd := `exec python3 -c "import sys; print('Agent started'); sys.stdout.flush(); line = input(); print('Received: ' + line)"`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Wait for command (like polecat startup does)
+	shellsToExclude := []string{"bash", "zsh", "sh"}
+	err = tm.WaitForCommand(sessionName, shellsToExclude, 5*time.Second)
+	if err != nil {
+		t.Logf("WaitForCommand: %v", err)
+		// Continue anyway to document behavior
+	}
+
+	// Check pane command
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command after WaitForCommand: %q", paneCmd)
+
+	// Small delay like polecat startup has
+	time.Sleep(500 * time.Millisecond)
+
+	// Send nudge after WaitForCommand
+	err = tm.NudgeSession(sessionName, "AFTER_WAIT_NUDGE")
+	if err != nil {
+		t.Logf("NudgeSession error: %v", err)
+	}
+
+	// Wait for processing
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after WaitForCommand + nudge:\n%s", output)
+
+	if strings.Contains(output, "Received: AFTER_WAIT_NUDGE") {
+		t.Log("Nudge correctly delivered after WaitForCommand")
+	} else if strings.Contains(output, "Agent started") {
+		t.Log("Agent started but nudge not processed")
+	} else {
+		t.Log("UNEXPECTED STATE: Check output for details")
+	}
+}
+
+// TestNudge_MultipleRapid tests sending multiple nudges rapidly.
+// This can cause interleaving or dropped messages.
+func TestNudge_MultipleRapid(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nudge-rapid-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Use a shell that will receive multiple inputs
+	cmd := `bash -c 'while read line; do echo "GOT: $line"; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Send multiple nudges rapidly
+	messages := []string{"MSG_1", "MSG_2", "MSG_3"}
+	for _, msg := range messages {
+		go func(m string) {
+			_ = tm.NudgeSession(sessionName, m)
+		}(msg)
+	}
+
+	// Wait for all nudges to be processed
+	time.Sleep(3 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after rapid nudges:\n%s", output)
+
+	// Check which messages were received
+	received := 0
+	for _, msg := range messages {
+		if strings.Contains(output, "GOT: "+msg) {
+			received++
+		}
+	}
+	t.Logf("Messages received: %d/%d", received, len(messages))
+
+	if received < len(messages) {
+		t.Logf("RAPID NUDGE ISSUE: Some messages lost or interleaved")
+	}
+}
+
+// =============================================================================
+// SESSION LIFECYCLE EDGE CASES (gt-uyrsg: zombie polecats)
+// =============================================================================
+
+// TestSessionDeath_AfterStartupCheck tests the window between startup
+// verification and actual work. The session could die in this gap.
+func TestSessionDeath_AfterStartupCheck(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-death-gap-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Command that dies after a short delay (simulates agent crash)
+	cmd := `bash -c 'echo "Started"; sleep 2; exit 1'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Verify session is running (like polecat startup does)
+	exists, _ := tm.HasSession(sessionName)
+	if !exists {
+		t.Fatal("Session should exist immediately after creation")
+	}
+	t.Log("Session exists after startup check")
+
+	// Simulate gap where startup returns success but work hasn't started
+	time.Sleep(500 * time.Millisecond)
+
+	// Try to send work (like nudge with instructions)
+	err = tm.NudgeSession(sessionName, "WORK_INSTRUCTIONS")
+	t.Logf("Nudge during gap: error=%v", err)
+
+	// Wait for command to exit
+	time.Sleep(2 * time.Second)
+
+	// Check session state now
+	exists, _ = tm.HasSession(sessionName)
+	t.Logf("Session exists after command exit: %v", exists)
+
+	if !exists {
+		t.Log("ZOMBIE PATTERN REPRODUCED: Session died after startup check passed")
+		t.Log("Work was dispatched but session died before processing")
+	}
+}
+
+// TestSessionDeath_DuringWork tests session dying while processing work.
+// This is the zombie polecat pattern where work is committed but gt done never runs.
+func TestSessionDeath_DuringWork(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-death-work-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Simulate agent that does work then crashes before cleanup
+	cmd := `bash -c 'echo "Working..."; sleep 1; echo "Work done"; exit 1'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Simulate startup sequence
+	time.Sleep(500 * time.Millisecond)
+	exists, _ := tm.HasSession(sessionName)
+	t.Logf("Session exists at start: %v", exists)
+
+	// Wait for work to complete
+	time.Sleep(2 * time.Second)
+
+	// Check session state
+	exists, _ = tm.HasSession(sessionName)
+	output, _ := tm.CapturePane(sessionName, 50)
+
+	t.Logf("Session exists after work: %v", exists)
+	t.Logf("Output: %s", strings.TrimSpace(output))
+
+	if !exists {
+		t.Log("ZOMBIE PATTERN: Work completed (committed) but session died")
+		t.Log("In real scenario: branch has commits but gt done never ran")
+	}
+}
+
+// TestSessionDeath_DetectionDelay tests how long it takes to detect a dead session.
+func TestSessionDeath_DetectionDelay(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-death-detect-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Session that dies immediately
+	cmd := `exit 0`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Check immediately
+	checkTimes := []time.Duration{0, 50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond}
+	for _, delay := range checkTimes {
+		time.Sleep(delay)
+		exists, _ := tm.HasSession(sessionName)
+		t.Logf("After %v: session exists = %v", delay, exists)
+	}
+
+	// Document detection timing
+	t.Log("Detection timing matters for zombie pattern - slow detection means late recovery")
+}
+
+// TestSessionDeath_WhileNudgePending tests session dying with pending nudge.
+func TestSessionDeath_WhileNudgePending(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-death-nudge-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Session that dies quickly
+	cmd := `bash -c 'sleep 0.5; exit 1'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Try to send nudge while session is dying
+	done := make(chan error, 1)
+	go func() {
+		// This nudge might arrive at a dying session
+		done <- tm.NudgeSession(sessionName, "LATE_NUDGE")
+	}()
+
+	// Wait for nudge to complete
+	select {
+	case err := <-done:
+		t.Logf("NudgeSession error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Log("NudgeSession blocked (may be stuck on dead session)")
+	}
+
+	// Check final state
+	time.Sleep(500 * time.Millisecond)
+	exists, _ := tm.HasSession(sessionName)
+	t.Logf("Session exists after nudge attempt: %v", exists)
+}
+
+// =============================================================================
+// WAIT FOR COMMAND EDGE CASES
+// =============================================================================
+
+// TestWaitForCommand_SlowStartup tests WaitForCommand with slow agent startup.
+func TestWaitForCommand_SlowStartup(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-waitcmd-slow-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Shell wrapper that takes 3 seconds to exec to the target
+	cmd := `bash -c 'sleep 3; exec cat'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Short timeout that will expire before exec
+	shellsToExclude := []string{"bash", "zsh", "sh"}
+	start := time.Now()
+	err = tm.WaitForCommand(sessionName, shellsToExclude, 1*time.Second)
+	elapsed := time.Since(start)
+
+	t.Logf("WaitForCommand took %v, error: %v", elapsed, err)
+
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command at timeout: %q", paneCmd)
+
+	if err != nil {
+		t.Log("WaitForCommand timed out (expected with slow startup)")
+		t.Log("Subsequent nudges may be sent before agent is ready")
+	}
+
+	// Wait for actual startup
+	time.Sleep(3 * time.Second)
+	paneCmd, _ = tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command after full startup: %q", paneCmd)
+}
+
+// TestWaitForCommand_NeverExec tests WaitForCommand when command never execs.
+// This simulates a stuck agent that never transitions from shell.
+func TestWaitForCommand_NeverExec(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-waitcmd-never-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Command that runs in bash but never execs (stays as bash child)
+	cmd := `bash -c 'while true; do sleep 1; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	shellsToExclude := []string{"bash", "zsh", "sh"}
+	start := time.Now()
+	err = tm.WaitForCommand(sessionName, shellsToExclude, 2*time.Second)
+	elapsed := time.Since(start)
+
+	t.Logf("WaitForCommand took %v, error: %v", elapsed, err)
+
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command: %q", paneCmd)
+
+	// Document: pane command is bash but sleep is a child
+	// WaitForCommand correctly times out because pane process is bash
+	if err != nil && paneCmd == "bash" {
+		t.Log("WaitForCommand correctly times out when process stays as shell")
+		t.Log("This is the expected behavior for commands that don't exec")
+	}
+}
+
+// TestWaitForCommand_SessionDeath tests WaitForCommand when session dies.
+func TestWaitForCommand_SessionDeath(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-waitcmd-death-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Command that exits quickly
+	cmd := `exit 0`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// WaitForCommand on dead/dying session
+	shellsToExclude := []string{"bash", "zsh", "sh"}
+	start := time.Now()
+	err = tm.WaitForCommand(sessionName, shellsToExclude, 2*time.Second)
+	elapsed := time.Since(start)
+
+	t.Logf("WaitForCommand took %v, error: %v", elapsed, err)
+
+	exists, _ := tm.HasSession(sessionName)
+	t.Logf("Session exists after WaitForCommand: %v", exists)
+
+	// Document behavior when session dies during wait
+	if err != nil {
+		t.Log("WaitForCommand errors on dead session (expected)")
+	}
+}
+
+// =============================================================================
+// PANE COMMAND DETECTION EDGE CASES
+// =============================================================================
+
+// TestPaneCommand_VersionNumberArgv0 tests pane command detection when
+// argv[0] is a version number (like "3.12" for python).
+func TestPaneCommand_VersionNumberArgv0(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-pane-version-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Python shows version in pane command sometimes
+	cmd := `exec python3 -c "import time; time.sleep(5)"`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command for python: %q", paneCmd)
+
+	// Document what pane command looks like for various runtimes
+	// This affects WaitForCommand shell exclusion
+	if paneCmd == "python3" || paneCmd == "python" {
+		t.Log("Python shows as expected process name")
+	} else if strings.HasPrefix(paneCmd, "3.") {
+		t.Log("ISSUE: Pane command is version number, not process name")
+		t.Log("WaitForCommand may not correctly detect this as non-shell")
+	}
+}
+
+// TestPaneCommand_NodeWithArgs tests pane command detection for node processes.
+func TestPaneCommand_NodeWithArgs(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-pane-node-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Simulate claude-code which is node-based
+	cmd := `exec node -e "setTimeout(() => {}, 5000)"`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		// Node might not be installed
+		t.Skipf("Node not available: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	t.Logf("Pane command for node: %q", paneCmd)
+
+	// Document: what does tmux show for node processes?
+	t.Log("This is what claude-code would look like in pane command")
+}
+
+// =============================================================================
+// ACCEPT BYPASS PERMISSIONS EDGE CASES
+// =============================================================================
+
+// TestAcceptBypass_NoDialog tests AcceptBypassPermissionsWarning when no dialog.
+func TestAcceptBypass_NoDialog(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-bypass-none-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Normal session without bypass dialog
+	cmd := `echo "Normal output"; sleep 5`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Call AcceptBypassPermissionsWarning on session without dialog
+	start := time.Now()
+	err = tm.AcceptBypassPermissionsWarning(sessionName)
+	elapsed := time.Since(start)
+
+	t.Logf("AcceptBypassPermissionsWarning took %v, error: %v", elapsed, err)
+
+	// This should complete quickly (1s sleep + check)
+	if elapsed > 2*time.Second {
+		t.Log("AcceptBypassPermissionsWarning took too long for no-dialog case")
+	} else {
+		t.Log("AcceptBypassPermissionsWarning returned quickly when no dialog present")
+	}
+}
+
+// TestAcceptBypass_DeadSession tests AcceptBypassPermissionsWarning on dead session.
+func TestAcceptBypass_DeadSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-bypass-dead-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Session that dies immediately
+	cmd := `exit 0`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Call on dead session
+	err = tm.AcceptBypassPermissionsWarning(sessionName)
+	t.Logf("AcceptBypassPermissionsWarning on dead session: error=%v", err)
+
+	// Document behavior
+	if err != nil {
+		t.Log("Correctly returns error on dead session")
+	} else {
+		t.Log("WARNING: No error on dead session - may mask startup failures")
+	}
+}
+
+// =============================================================================
+// SESSION STATE CONSISTENCY TESTS
+// =============================================================================
+
+// TestSessionState_RapidStateChanges tests detecting state changes during rapid operations.
+func TestSessionState_RapidStateChanges(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-state-rapid-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Session that changes state rapidly
+	cmd := `bash -c 'for i in 1 2 3 4 5; do echo "State $i"; sleep 0.5; done; exit 0'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Poll session state rapidly
+	var stateChanges []string
+	for i := 0; i < 10; i++ {
+		exists, _ := tm.HasSession(sessionName)
+		paneCmd, _ := tm.GetPaneCommand(sessionName)
+		stateChanges = append(stateChanges, fmt.Sprintf("exists=%v cmd=%q", exists, paneCmd))
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	for i, state := range stateChanges {
+		t.Logf("Poll %d: %s", i, state)
+	}
+
+	// Document state transition visibility
+	t.Log("State polling shows transition from running to dead")
+}
+
+// TestSessionState_OrphanDetection tests detecting orphaned sessions
+// (sessions that exist but have no active process).
+func TestSessionState_OrphanDetection(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-state-orphan-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session with remain-on-exit so it stays after command exits
+	err := tm.NewSession(sessionName, "")
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Set remain-on-exit
+	_, _ = tm.run("set-option", "-t", sessionName, "remain-on-exit", "on")
+
+	// Run a command that exits
+	_ = tm.SendKeysRaw(sessionName, "exit")
+	_, _ = tm.run("send-keys", "-t", sessionName, "Enter")
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Session exists but pane is dead
+	exists, _ := tm.HasSession(sessionName)
+	paneCmd, _ := tm.GetPaneCommand(sessionName)
+	output, _ := tm.CapturePane(sessionName, 20)
+
+	t.Logf("Session exists: %v", exists)
+	t.Logf("Pane command: %q", paneCmd)
+	t.Logf("Output: %q", strings.TrimSpace(output))
+
+	// Check for orphan indicators
+	if exists && (paneCmd == "" || strings.Contains(output, "Pane is dead")) {
+		t.Log("ORPHAN SESSION DETECTED: Session exists but pane is dead")
+		t.Log("This pattern can cause zombie polecats if not cleaned up")
+	}
+}
