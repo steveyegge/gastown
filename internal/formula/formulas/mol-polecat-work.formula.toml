@@ -155,78 +155,11 @@ Empty setup_command means "not configured" — skip this step.
 
 **Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
 
-[[steps]]
-id = "preflight-tests"
-title = "Verify pre-flights pass on base branch"
-needs = ["branch-setup"]
-description = """
-Check if the codebase is healthy BEFORE starting your work.
-
-**The Scotty Principle:** Don't walk past a broken warp core. But also don't
-let someone else's mess consume your entire mission.
-
-**1. Run pre-flights on {{base_branch}}:**
-
-Your branch was just created from or rebased on `origin/{{base_branch}}` with no
-implementation changes yet — you're already at the base branch state.
-
-Run each configured check, then tests:
-
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If test_command is set: `{{test_command}}`
-
-```bash
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{test_command}}            # Run tests (if command set)
-```
-
-Empty commands mean "not configured" — skip silently.
-
-**2. If pre-flights pass:**
-
-Continue to implement step.
-
-**3. If pre-flights fail on {{base_branch}}:**
-
-File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
-not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
-
-| Situation | Action |
-|-----------|--------|
-| Any pre-existing failure | File bead, proceed with your work |
-
-FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
-You work on YOUR feature branch only. `gt done` handles push/MR.
-
-**File and proceed path:**
-```bash
-bd create --title "Pre-existing failure: <description>" \
-  --type bug --priority 1
-
-gt mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
-  -m "Found pre-existing failures on {{base_branch}}.
-Filed: <bead-id>
-Proceeding with my assigned work ({{issue}})."
-```
-
-**Context consideration:**
-If investigating pre-existing failures consumed significant context:
-```bash
-gt handoff -s "Investigated pre-existing failures, ready for assigned work" \
-  -m "Issue: {{issue}}
-Found: <what failed>
-Ready to start: implement step"
-```
-Fresh session continues from implement.
-
-**Exit criteria:** Pre-flights pass on {{base_branch}} (or issue filed), ready to implement."""
 
 [[steps]]
 id = "implement"
 title = "Implement the solution"
-needs = ["preflight-tests"]
+needs = ["branch-setup"]
 description = """
 Do the actual implementation work.
 
@@ -270,7 +203,7 @@ id = "self-review"
 title = "Self-review changes"
 needs = ["implement"]
 description = """
-Review your own changes before running tests.
+Review your own changes before submitting.
 
 **1. Review the diff:**
 ```bash
@@ -299,79 +232,13 @@ git diff --stat origin/{{base_branch}}...HEAD
 
 If you accidentally modified unrelated files, remove those changes.
 
-**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
+**Exit criteria:** Changes are clean, reviewed, and ready for commit."""
 
-[[steps]]
-id = "run-tests"
-title = "Run quality checks and tests"
-needs = ["self-review"]
-description = """
-Verify your changes don't break anything and are properly tested.
-
-**1. Run quality checks (skip any that are not configured):**
-
-If setup_command is set: `{{setup_command}}`
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If build_command is set: `{{build_command}}`
-
-```bash
-{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{build_command}}            # Make sure it builds (if command set)
-```
-
-Empty commands mean "not configured for this project" — skip silently.
-
-**2. If quality checks fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
-
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-# Re-run the failing command(s)
-git checkout -
-git stash pop
-```
-
-**3. Run the full test suite:**
-```bash
-{{test_command}}            # Run tests (configured per-rig)
-```
-
-**ALL TESTS MUST PASS.** Do not proceed with failures.
-
-**4. If tests fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
-
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-{{test_command}}
-git checkout -
-git stash pop
-```
-
-**5. Verify test coverage for new code:**
-- New features should have tests
-- Bug fixes should have regression tests
-- If you added significant code without tests, add them now
-
-**Exit criteria:** All quality checks and tests pass, new code has appropriate test coverage."""
 
 [[steps]]
 id = "commit-changes"
 title = "Commit all implementation changes"
-needs = ["run-tests"]
+needs = ["self-review"]
 description = """
 Ensure ALL implementation work is committed before cleanup.
 
