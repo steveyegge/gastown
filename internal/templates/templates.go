@@ -166,8 +166,17 @@ func (t *Templates) RenderRole(role string, data RoleData) (string, error) {
 }
 
 // getOverridePath returns the path to a local override for a template.
-// Override path: ~/.gt/overrides/{templateName}
+// Priority: 1) GT_TOWN_ROOT/.gt/overrides (town git) 2) ~/.gt/overrides (legacy)
 func getOverridePath(templateName string) string {
+	// Try town root first (tracked in town git)
+	if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+		path := filepath.Join(townRoot, ".gt", "overrides", templateName)
+		if _, err := os.Stat(path); err == nil {
+			return path // Found in town root
+		}
+	}
+
+	// Fallback to legacy location (not tracked)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -183,13 +192,31 @@ func HasOverride(role string) bool {
 	return err == nil
 }
 
-// ListOverrides returns the list of role templates that have local overrides.
-func ListOverrides() ([]string, error) {
+// getOverrideDir returns the override directory path with fallback chain.
+// Priority: 1) GT_TOWN_ROOT/.gt/overrides (town git) 2) ~/.gt/overrides (legacy)
+func getOverrideDir() string {
+	// Try town root first
+	if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+		path := filepath.Join(townRoot, ".gt", "overrides")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	// Fallback to legacy location
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return ""
 	}
-	overrideDir := filepath.Join(homeDir, ".gt", "overrides")
+	return filepath.Join(homeDir, ".gt", "overrides")
+}
+
+// ListOverrides returns the list of role templates that have local overrides.
+func ListOverrides() ([]string, error) {
+	overrideDir := getOverrideDir()
+	if overrideDir == "" {
+		return []string{}, nil
+	}
 
 	entries, err := os.ReadDir(overrideDir)
 	if err != nil {
@@ -208,14 +235,18 @@ func ListOverrides() ([]string, error) {
 	return overrides, nil
 }
 
-// WriteOverride writes a role template override to the local override directory.
+// WriteOverride writes a role template override to the town root override directory.
+// This ensures overrides are tracked in town git.
 func WriteOverride(role string, content string) error {
 	templateName := role + ".md.tmpl"
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	
+	// Always write to town root (tracked in git)
+	townRoot := os.Getenv("GT_TOWN_ROOT")
+	if townRoot == "" {
+		return fmt.Errorf("GT_TOWN_ROOT not set - cannot determine town root")
 	}
-	overrideDir := filepath.Join(homeDir, ".gt", "overrides")
+	
+	overrideDir := filepath.Join(townRoot, ".gt", "overrides")
 	if err := os.MkdirAll(overrideDir, 0755); err != nil {
 		return fmt.Errorf("creating override directory: %w", err)
 	}
@@ -226,11 +257,10 @@ func WriteOverride(role string, content string) error {
 // DeleteOverride removes a local override, reverting to the embedded template.
 func DeleteOverride(role string) error {
 	templateName := role + ".md.tmpl"
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	overridePath := getOverridePath(templateName)
+	if overridePath == "" {
+		return fmt.Errorf("could not determine override path")
 	}
-	overridePath := filepath.Join(homeDir, ".gt", "overrides", templateName)
 	return os.Remove(overridePath)
 }
 
