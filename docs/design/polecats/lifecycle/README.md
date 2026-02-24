@@ -18,6 +18,16 @@ configured, and managed throughout their lifecycle in Gas Town.
 8. [Edge Cases & Failure Modes](#edge-cases--failure-modes)
 9. [Key Files Reference](#key-files-reference)
 
+## Supplementary Documents
+
+| File | Coverage |
+|------|----------|
+| [dispatch-flow.md](dispatch-flow.md) | Visual diagrams, decision points, timing |
+| [environment.md](environment.md) | Environment variables, configuration hierarchy |
+| [edge-cases.md](edge-cases.md) | Zombie classes, race conditions, failure modes |
+| [work-discovery.md](work-discovery.md) | gt prime --hook, work discovery, fallback nudges |
+| [cleanup-flow.md](cleanup-flow.md) | gt done, refinery processing, MERGED signal, nuke |
+
 ---
 
 ## Overview
