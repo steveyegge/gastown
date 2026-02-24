@@ -144,7 +144,7 @@ Rigs support layered configuration through:
 
 Three settings control how polecat work branches are named, in priority order:
 
-**1. `polecat_branch_prefix`** — namespace prefix (e.g. `"branch/"`, `"feature/"`). Empty = legacy format.
+**1. `polecat_branch_prefix`** — namespace prefix (e.g. `"feature/"`, `"fix/"`, `"work/"`). Empty = legacy format.
 
 **2. `polecat_branch_descriptive`** — when prefix is set: `true` (default) = slug from issue title; `false` = `{issue}-{timestamp}` hash.
 
@@ -152,17 +152,17 @@ Three settings control how polecat work branches are named, in priority order:
 
 ```bash
 # Opt into new-style branches with descriptive slugs (recommended):
-gt rig settings set <rig> polecat_branch_prefix "branch/"
-# → branch/fix-auth-bug
-
-# Use hash-based names instead of slugs:
-gt rig settings set <rig> polecat_branch_prefix "branch/"
-gt rig settings set <rig> polecat_branch_descriptive false
-# → branch/gt-123-m1ks7a
-
-# Custom namespace:
 gt rig settings set <rig> polecat_branch_prefix "feature/"
 # → feature/fix-auth-bug
+
+# Use hash-based names instead of slugs:
+gt rig settings set <rig> polecat_branch_prefix "feature/"
+gt rig settings set <rig> polecat_branch_descriptive false
+# → feature/gt-123-m1ks7a
+
+# Custom namespace:
+gt rig settings set <rig> polecat_branch_prefix "work/"
+# → work/fix-auth-bug
 
 # Full template (overrides prefix settings):
 gt rig settings set <rig> polecat_branch_template "adam/{year}/{month}/{description}"
