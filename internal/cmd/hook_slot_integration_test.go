@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 // setupHookTestTown creates a minimal Gas Town with a polecat for testing hooks.
@@ -70,11 +71,12 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 	return townRoot, polecatDir
 }
 
-// initBeadsDB initializes the beads database by running bd init.
+// initBeadsDB initializes the beads database by running bd init on the test server.
 func initBeadsDB(t *testing.T, dir string) {
 	t.Helper()
+	testutil.RequireDoltServer(t)
 
-	cmd := exec.Command("bd", "init")
+	cmd := exec.Command("bd", "init", "--server-port", testutil.DoltTestPort())
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, output)

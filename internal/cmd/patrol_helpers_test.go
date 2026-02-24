@@ -457,6 +457,8 @@ func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 		if _, err := db.Exec("DROP DATABASE IF EXISTS `" + dbName + "`"); err != nil {
 			t.Logf("cleanup: failed to drop %s: %v", dbName, err)
 		}
+		// Purge dropped databases to prevent accumulation on disk
+		db.Exec("CALL dolt_purge_dropped_databases()") //nolint:errcheck
 	})
 
 	return tmpDir, b
