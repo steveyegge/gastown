@@ -2024,3 +2024,788 @@ func TestSessionState_OrphanDetection(t *testing.T) {
 		t.Log("This pattern can cause zombie polecats if not cleaned up")
 	}
 }
+
+// =============================================================================
+// COPY MODE INTERFERENCE TESTS
+// =============================================================================
+
+// TestCopyMode_NudgeBlocked tests whether nudges work when session is in copy mode.
+// Users or automation may put sessions in copy mode, blocking input.
+func TestCopyMode_NudgeBlocked(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-copymode-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session with a simple receiver
+	cmd := `bash -c 'while read line; do echo "GOT: $line"; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Enter copy mode
+	_, err = tm.run("copy-mode", "-t", sessionName)
+	if err != nil {
+		t.Logf("Failed to enter copy mode: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Try to send nudge while in copy mode
+	err = tm.NudgeSession(sessionName, "COPYMODE_TEST")
+	t.Logf("NudgeSession during copy mode: error=%v", err)
+
+	// Wait and check
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after nudge in copy mode:\n%s", output)
+
+	// Exit copy mode and check again
+	_, _ = tm.run("send-keys", "-t", sessionName, "q") // q exits copy mode
+	time.Sleep(500 * time.Millisecond)
+
+	output2, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after exiting copy mode:\n%s", output2)
+
+	if strings.Contains(output, "GOT: COPYMODE_TEST") {
+		t.Log("Nudge worked even in copy mode")
+	} else if strings.Contains(output2, "GOT: COPYMODE_TEST") {
+		t.Log("Nudge queued and delivered after exiting copy mode")
+	} else {
+		t.Log("COPY MODE ISSUE: Nudge lost or blocked by copy mode")
+	}
+}
+
+// TestCopyMode_ScrollingState tests nudge behavior when user is scrolling.
+func TestCopyMode_ScrollingState(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-scroll-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Generate lots of output to enable scrolling
+	cmd := `bash -c 'for i in $(seq 1 100); do echo "Line $i"; done; while read line; do echo "GOT: $line"; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Enter copy mode and scroll up
+	_, _ = tm.run("copy-mode", "-t", sessionName)
+	_, _ = tm.run("send-keys", "-t", sessionName, "C-u") // scroll up
+	time.Sleep(200 * time.Millisecond)
+
+	// Try to send nudge while scrolled
+	err = tm.NudgeSession(sessionName, "SCROLL_TEST")
+	t.Logf("NudgeSession while scrolled: error=%v", err)
+
+	// Exit copy mode
+	_, _ = tm.run("send-keys", "-t", sessionName, "q")
+	time.Sleep(500 * time.Millisecond)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after scroll nudge:\n%s", output)
+
+	if strings.Contains(output, "GOT: SCROLL_TEST") {
+		t.Log("Nudge delivered after exiting scroll mode")
+	} else {
+		t.Log("SCROLL STATE ISSUE: Nudge may be lost when scrolled")
+	}
+}
+
+// =============================================================================
+// LARGE MESSAGE HANDLING TESTS
+// =============================================================================
+
+// TestLargeNudge_VeryLong tests nudge with a very large message.
+func TestLargeNudge_VeryLong(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-large-nudge-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session that will receive and echo
+	cmd := `bash -c 'read line; echo "LENGTH: ${#line}"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Send a very large nudge (10KB)
+	largeMessage := strings.Repeat("A", 10000) + "_END"
+
+	start := time.Now()
+	err = tm.NudgeSession(sessionName, largeMessage)
+	elapsed := time.Since(start)
+
+	t.Logf("Large nudge (%d bytes) took %v, error=%v", len(largeMessage), elapsed, err)
+
+	// Wait for processing
+	time.Sleep(2 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after large nudge:\n%s", output)
+
+	if strings.Contains(output, "LENGTH:") {
+		t.Log("Large message was received")
+		// Check if full length was received
+		if strings.Contains(output, "LENGTH: 10004") {
+			t.Log("Full message received (10004 chars = 10000 A's + _END)")
+		} else {
+			t.Log("LARGE MESSAGE ISSUE: Message may be truncated")
+		}
+	} else {
+		t.Log("LARGE MESSAGE ISSUE: Message not received")
+	}
+}
+
+// TestLargeNudge_MultiLine tests nudge with many newlines.
+func TestLargeNudge_MultiLine(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-multiline-nudge-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session
+	cmd := `bash -c 'cat; echo "---DONE---"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Send message with many newlines
+	multilineMessage := "LINE1\nLINE2\nLINE3\nLINE4\nLINE5"
+
+	err = tm.NudgeSession(sessionName, multilineMessage)
+	t.Logf("Multiline nudge error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	// Send Ctrl-D to end cat input
+	_, _ = tm.run("send-keys", "-t", sessionName, "C-d")
+	time.Sleep(500 * time.Millisecond)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after multiline nudge:\n%s", output)
+
+	// Count how many lines were received
+	lineCount := 0
+	for i := 1; i <= 5; i++ {
+		if strings.Contains(output, fmt.Sprintf("LINE%d", i)) {
+			lineCount++
+		}
+	}
+	t.Logf("Lines received: %d/5", lineCount)
+
+	if lineCount < 5 {
+		t.Log("MULTILINE ISSUE: Not all lines received")
+	}
+}
+
+// =============================================================================
+// SPECIAL CHARACTER HANDLING TESTS
+// =============================================================================
+
+// TestSpecialChars_EscapeSequences tests nudge with escape sequences.
+func TestSpecialChars_EscapeSequences(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-escape-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd := `bash -c 'read line; echo "GOT: $line"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Message with escape sequences that might confuse tmux
+	escapeMessage := "Test\x1b[31mRED\x1b[0mNormal" // ANSI color codes
+
+	err = tm.NudgeSession(sessionName, escapeMessage)
+	t.Logf("Escape sequence nudge error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after escape sequence nudge:\n%s", output)
+
+	if strings.Contains(output, "GOT:") {
+		t.Log("Message with escape sequences was received")
+	} else {
+		t.Log("ESCAPE SEQUENCE ISSUE: Message not received correctly")
+	}
+}
+
+// TestSpecialChars_ControlChars tests nudge with control characters.
+func TestSpecialChars_ControlChars(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-control-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd := `bash -c 'read line; echo "GOT: $line"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Message with tab and other control characters
+	controlMessage := "Before\tTab\rCarriage\bBackspace"
+
+	err = tm.NudgeSession(sessionName, controlMessage)
+	t.Logf("Control char nudge error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after control char nudge:\n%s", output)
+
+	if strings.Contains(output, "GOT:") {
+		t.Log("Message with control characters was processed")
+	} else {
+		t.Log("CONTROL CHAR ISSUE: Message processing failed")
+	}
+}
+
+// TestSpecialChars_Quotes tests nudge with various quote types.
+func TestSpecialChars_Quotes(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-quotes-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd := `bash -c 'read line; echo "GOT: $line"'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Message with quotes that might break shell parsing
+	quoteMessage := "Say \"hello\" and 'goodbye' with `backticks`"
+
+	err = tm.NudgeSession(sessionName, quoteMessage)
+	t.Logf("Quote nudge error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after quote nudge:\n%s", output)
+
+	if strings.Contains(output, "hello") && strings.Contains(output, "goodbye") {
+		t.Log("Quoted message received correctly")
+	} else {
+		t.Log("QUOTE HANDLING ISSUE: Quotes may break message delivery")
+	}
+}
+
+// =============================================================================
+// DETACHED SESSION BEHAVIOR TESTS
+// =============================================================================
+
+// TestDetached_NudgeWakeup tests that WakePane properly wakes detached sessions.
+func TestDetached_NudgeWakeup(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-detached-wake-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create detached session
+	cmd := `bash -c 'while read line; do echo "GOT: $line"; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify session is detached
+	attached := tm.IsSessionAttached(sessionName)
+	t.Logf("Session attached: %v", attached)
+
+	// Send nudge to detached session
+	err = tm.NudgeSession(sessionName, "DETACHED_TEST")
+	t.Logf("NudgeSession to detached: error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output from detached session:\n%s", output)
+
+	if strings.Contains(output, "GOT: DETACHED_TEST") {
+		t.Log("Nudge to detached session worked correctly")
+	} else {
+		t.Log("DETACHED ISSUE: Nudge may not wake detached session properly")
+	}
+}
+
+// TestDetached_ResizeWake tests that resize-based wake actually triggers SIGWINCH.
+func TestDetached_ResizeWake(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-resize-wake-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Use a script that detects SIGWINCH
+	cmd := `bash -c 'trap "echo SIGWINCH_RECEIVED" SIGWINCH; while true; do sleep 0.5; done'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Call WakePane
+	tm.WakePane(sessionName)
+
+	time.Sleep(500 * time.Millisecond)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output after WakePane:\n%s", output)
+
+	if strings.Contains(output, "SIGWINCH_RECEIVED") {
+		t.Log("WakePane correctly triggered SIGWINCH")
+	} else {
+		t.Log("WAKE ISSUE: SIGWINCH may not be received")
+	}
+}
+
+// =============================================================================
+// ENVIRONMENT VARIABLE EDGE CASES
+// =============================================================================
+
+// TestEnvironment_SetOnDeadSession tests SetEnvironment on dead session.
+func TestEnvironment_SetOnDeadSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-dead-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session that exits immediately
+	cmd := `exit 0`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Try to set environment on dead/dying session
+	err = tm.SetEnvironment(sessionName, "TEST_VAR", "test_value")
+	t.Logf("SetEnvironment on dead session: error=%v", err)
+
+	if err != nil {
+		t.Log("SetEnvironment correctly fails on dead session")
+	} else {
+		t.Log("WARNING: SetEnvironment succeeds on dead session")
+	}
+}
+
+// TestEnvironment_LargeValue tests SetEnvironment with very large value.
+func TestEnvironment_LargeValue(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-large-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd := `bash -c 'echo "TEST_LARGE=$TEST_LARGE" | head -c 100'`
+
+	err := tm.NewSessionWithCommand(sessionName, "", cmd)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Set very large environment variable (100KB)
+	largeValue := strings.Repeat("X", 100000)
+	err = tm.SetEnvironment(sessionName, "TEST_LARGE", largeValue)
+	t.Logf("SetEnvironment with 100KB value: error=%v", err)
+
+	if err != nil {
+		t.Log("LARGE ENV ISSUE: Large environment values fail")
+	} else {
+		t.Log("Large environment value accepted")
+	}
+}
+
+// =============================================================================
+// MULTI-PANE SESSION TESTS
+// =============================================================================
+
+// TestMultiPane_NudgeTarget tests nudge targeting with multiple panes.
+func TestMultiPane_NudgeTarget(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-multipane-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session with first pane
+	err := tm.NewSessionWithCommand(sessionName, "", `bash -c 'echo "PANE1"; read line; echo "PANE1 GOT: $line"'`)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Split to create second pane
+	_, err = tm.run("split-window", "-t", sessionName, "-h", `bash -c 'echo "PANE2"; read line; echo "PANE2 GOT: $line"'`)
+	if err != nil {
+		t.Logf("Split window failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Nudge the session - which pane receives it?
+	err = tm.NudgeSession(sessionName, "MULTIPANE_TEST")
+	t.Logf("NudgeSession to multipane: error=%v", err)
+
+	time.Sleep(1 * time.Second)
+
+	// Capture both panes
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Output from session (active pane):\n%s", output)
+
+	// Try to capture from specific pane
+	output2, _ := tm.run("capture-pane", "-p", "-t", sessionName+":0.1", "-S", "-50")
+	t.Logf("Output from second pane:\n%s", output2)
+
+	// Document which pane received the nudge
+	if strings.Contains(output, "MULTIPANE_TEST") {
+		t.Log("Active pane received the nudge")
+	}
+	if strings.Contains(output2, "MULTIPANE_TEST") {
+		t.Log("Second pane received the nudge")
+	}
+	if !strings.Contains(output, "MULTIPANE_TEST") && !strings.Contains(output2, "MULTIPANE_TEST") {
+		t.Log("MULTIPANE ISSUE: Nudge may be lost in multipane sessions")
+	}
+}
+
+// =============================================================================
+// SESSION CREATION RACE CONDITIONS
+// =============================================================================
+
+// TestRace_OperationImmediatelyAfterCreate tests operations immediately after session creation.
+func TestRace_OperationImmediatelyAfterCreate(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-race-create-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session
+	err := tm.NewSessionWithCommand(sessionName, "", `bash -c 'sleep 5'`)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Immediately try various operations
+	var results []string
+
+	// HasSession
+	exists, _ := tm.HasSession(sessionName)
+	results = append(results, fmt.Sprintf("HasSession: %v", exists))
+
+	// GetPaneCommand
+	cmd, err := tm.GetPaneCommand(sessionName)
+	results = append(results, fmt.Sprintf("GetPaneCommand: %q, err=%v", cmd, err))
+
+	// SetEnvironment
+	err = tm.SetEnvironment(sessionName, "IMMEDIATE_VAR", "immediate_value")
+	results = append(results, fmt.Sprintf("SetEnvironment: err=%v", err))
+
+	// CapturePane
+	output, err := tm.CapturePane(sessionName, 10)
+	results = append(results, fmt.Sprintf("CapturePane: len=%d, err=%v", len(output), err))
+
+	for _, r := range results {
+		t.Log(r)
+	}
+
+	// All operations should work immediately after create
+	if !exists {
+		t.Error("RACE ISSUE: Session not found immediately after creation")
+	}
+}
+
+// TestRace_ConcurrentCreation tests creating sessions with similar names concurrently.
+func TestRace_ConcurrentCreation(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	baseSessionName := "gt-test-race-concurrent"
+
+	// Clean up
+	for i := 0; i < 5; i++ {
+		_ = tm.KillSession(fmt.Sprintf("%s-%d", baseSessionName, i))
+	}
+	defer func() {
+		for i := 0; i < 5; i++ {
+			_ = tm.KillSession(fmt.Sprintf("%s-%d", baseSessionName, i))
+		}
+	}()
+
+	// Try to create 5 sessions concurrently
+	results := make(chan string, 5)
+	for i := 0; i < 5; i++ {
+		go func(idx int) {
+			name := fmt.Sprintf("%s-%d", baseSessionName, idx)
+			err := tm.NewSessionWithCommand(name, "", "sleep 5")
+			if err != nil {
+				results <- fmt.Sprintf("Session %d: FAILED - %v", idx, err)
+			} else {
+				results <- fmt.Sprintf("Session %d: OK", idx)
+			}
+		}(i)
+	}
+
+	// Collect results
+	for i := 0; i < 5; i++ {
+		t.Log(<-results)
+	}
+}
+
+// TestRace_KillDuringOperation tests killing session while operation is in progress.
+func TestRace_KillDuringOperation(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-race-kill-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session
+	err := tm.NewSessionWithCommand(sessionName, "", "sleep 10")
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	// Start a long operation in background
+	done := make(chan error, 1)
+	go func() {
+		// Send a large message that takes time
+		done <- tm.NudgeSession(sessionName, strings.Repeat("X", 1000))
+	}()
+
+	// Kill session while nudge is happening
+	time.Sleep(100 * time.Millisecond)
+	killErr := tm.KillSession(sessionName)
+
+	// Wait for nudge to complete
+	nudgeErr := <-done
+
+	t.Logf("Kill error: %v", killErr)
+	t.Logf("Nudge error: %v", nudgeErr)
+
+	// Document behavior when session is killed during operation
+	if nudgeErr != nil {
+		t.Log("Nudge correctly failed when session was killed")
+	} else {
+		t.Log("Nudge completed before kill (race outcome)")
+	}
+}
+
+// =============================================================================
+// TIMEOUT AND BLOCKING TESTS
+// =============================================================================
+
+// TestTimeout_NudgeLockContention tests nudge lock timeout behavior.
+// The lock has a 30s timeout to prevent permanent lockout.
+func TestTimeout_NudgeLockContention(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-lock-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session
+	err := tm.NewSessionWithCommand(sessionName, "", `bash -c 'while read line; do echo "GOT: $line"; done'`)
+	if err != nil {
+		t.Fatalf("Session creation failed: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Send multiple nudges concurrently to test lock serialization
+	results := make(chan string, 3)
+	for i := 0; i < 3; i++ {
+		go func(idx int) {
+			start := time.Now()
+			err := tm.NudgeSession(sessionName, fmt.Sprintf("MSG_%d", idx))
+			elapsed := time.Since(start)
+			results <- fmt.Sprintf("Nudge %d: elapsed=%v, err=%v", idx, elapsed, err)
+		}(i)
+	}
+
+	// Collect results
+	for i := 0; i < 3; i++ {
+		t.Log(<-results)
+	}
+
+	// Nudges should be serialized, so total time should be ~3x single nudge time
+	time.Sleep(2 * time.Second)
+
+	output, _ := tm.CapturePane(sessionName, 50)
+	t.Logf("Final output:\n%s", output)
+
+	// Count how many messages were received
+	received := 0
+	for i := 0; i < 3; i++ {
+		if strings.Contains(output, fmt.Sprintf("GOT: MSG_%d", i)) {
+			received++
+		}
+	}
+	t.Logf("Messages received through lock: %d/3", received)
+}
+
+// TestTimeout_WaitForCommandVariations tests WaitForCommand with different timeouts.
+func TestTimeout_WaitForCommandVariations(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	testCases := []struct {
+		name    string
+		timeout time.Duration
+		delay   time.Duration // how long before exec
+	}{
+		{"immediate", 2 * time.Second, 0},
+		{"short-delay", 2 * time.Second, 500 * time.Millisecond},
+		{"timeout-exceeded", 500 * time.Millisecond, 2 * time.Second},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionName := "gt-test-waitcmd-var-" + tc.name
+
+			_ = tm.KillSession(sessionName)
+			defer func() { _ = tm.KillSession(sessionName) }()
+
+			// Command with configurable delay before exec
+			var cmd string
+			if tc.delay > 0 {
+				cmd = fmt.Sprintf(`bash -c 'sleep %.1f; exec cat'`, tc.delay.Seconds())
+			} else {
+				cmd = `exec cat`
+			}
+
+			err := tm.NewSessionWithCommand(sessionName, "", cmd)
+			if err != nil {
+				t.Fatalf("Session creation failed: %v", err)
+			}
+
+			start := time.Now()
+			err = tm.WaitForCommand(sessionName, []string{"bash", "sh", "zsh"}, tc.timeout)
+			elapsed := time.Since(start)
+
+			t.Logf("Timeout=%v, Delay=%v, Elapsed=%v, Error=%v", tc.timeout, tc.delay, elapsed, err)
+
+			if tc.delay > tc.timeout && err == nil {
+				t.Error("Should have timed out but didn't")
+			}
+			if tc.delay <= tc.timeout && err != nil {
+				t.Errorf("Should have succeeded but got: %v", err)
+			}
+		})
+	}
+}
