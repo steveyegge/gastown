@@ -388,6 +388,17 @@ func isSubprocessCrash(err error) bool {
 		strings.Contains(errStr, "panic:")
 }
 
+// isTypeValidationError returns true if the error indicates a custom type
+// validation failure (e.g., "invalid issue type: agent"). This typically means
+// the types sentinel file is stale and custom types need to be reconfigured
+// in the target database (gt-uaq).
+func isTypeValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "invalid issue type")
+}
+
 // buildRunEnv builds the environment for run() calls.
 // In isolated mode: strips all beads-related env vars for test isolation.
 // Otherwise: strips inherited BEADS_DIR so the caller can append the correct value.

@@ -210,17 +210,28 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	if err != nil {
 		out, err = b.run(buildArgs()...)
 		if err != nil {
-			// Both bd create attempts failed. If EnsureCustomTypes also failed,
-			// the database may be completely uninitialized. Fall back to writing
-			// the agent bead directly as a JSONL entry (GH#1769 workaround).
-			if ensureErr != nil || isSubprocessCrash(err) {
-				issue, jsonlErr := createAgentBeadViaJSONL(targetDir, id, title, description)
-				if jsonlErr != nil {
-					return nil, fmt.Errorf("creating %s: bd create failed (%w), JSONL fallback also failed (%w)", id, err, jsonlErr)
+			// Type validation error (e.g., "invalid issue type: agent") indicates
+			// a stale sentinel — the sentinel says types are configured but the
+			// database disagrees (gt-uaq). Invalidate and retry once.
+			if isTypeValidationError(err) {
+				InvalidateSentinel(targetDir)
+				if retryErr := EnsureCustomTypes(targetDir); retryErr == nil {
+					out, err = b.run(buildArgs()...)
 				}
-				return issue, nil
 			}
-			return nil, err
+			if err != nil {
+				// Both bd create attempts failed. If EnsureCustomTypes also failed,
+				// the database may be completely uninitialized. Fall back to writing
+				// the agent bead directly as a JSONL entry (GH#1769 workaround).
+				if ensureErr != nil || isSubprocessCrash(err) {
+					issue, jsonlErr := createAgentBeadViaJSONL(targetDir, id, title, description)
+					if jsonlErr != nil {
+						return nil, fmt.Errorf("creating %s: bd create failed (%w), JSONL fallback also failed (%w)", id, err, jsonlErr)
+					}
+					return issue, nil
+				}
+				return nil, err
+			}
 		}
 	}
 

@@ -2799,6 +2799,26 @@ func TestIsSubprocessCrash(t *testing.T) {
 	}
 }
 
+func TestIsTypeValidationError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"normal error", fmt.Errorf("bd create: exit status 1"), false},
+		{"type validation error", fmt.Errorf("failed to create issue in rig \"beads\": validation failed: invalid issue type: agent"), true},
+		{"type validation wrapped", fmt.Errorf("bd stderr: invalid issue type: molecule-v2"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTypeValidationError(tt.err); got != tt.want {
+				t.Errorf("isTypeValidationError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestCreateAgentBeadViaJSONL verifies the JSONL fallback creates valid entries (GH#1769).
 func TestCreateAgentBeadViaJSONL(t *testing.T) {
 	t.Run("creates valid JSONL entry", func(t *testing.T) {

@@ -2,12 +2,14 @@
 package beads
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,17 @@ var (
 	ensuredDirs = make(map[string]bool)
 	ensuredMu   sync.Mutex
 )
+
+// typesFingerprint returns a deterministic version string derived from the
+// current custom types list. When types are added or removed, the fingerprint
+// changes, causing stale sentinel files to be detected and reconfigured.
+func typesFingerprint() string {
+	types := make([]string, len(constants.BeadsCustomTypesList()))
+	copy(types, constants.BeadsCustomTypesList())
+	sort.Strings(types)
+	h := sha256.Sum256([]byte(strings.Join(types, ",")))
+	return fmt.Sprintf("v2:%x", h[:8])
+}
 
 // FindTownRoot walks up from startDir to find the Gas Town root directory.
 // The town root is identified by the presence of mayor/town.json.
@@ -100,11 +113,15 @@ func EnsureCustomTypes(beadsDir string) error {
 		return nil
 	}
 
-	// Fast path: sentinel file exists (previous CLI invocation)
+	// Fast path: sentinel file exists with current fingerprint (previous CLI invocation)
 	sentinelPath := filepath.Join(beadsDir, typesSentinel)
-	if _, err := os.Stat(sentinelPath); err == nil {
-		ensuredDirs[beadsDir] = true
-		return nil
+	expectedFP := typesFingerprint()
+	if data, err := os.ReadFile(sentinelPath); err == nil { //nolint:gosec // G304: path constructed internally
+		if strings.TrimSpace(string(data)) == expectedFP {
+			ensuredDirs[beadsDir] = true
+			return nil
+		}
+		// Sentinel exists but is stale (types list changed) — fall through to reconfigure
 	}
 
 	// Verify beads directory exists
@@ -129,9 +146,9 @@ func EnsureCustomTypes(beadsDir string) error {
 			beadsDir, strings.TrimSpace(string(output)), err)
 	}
 
-	// Write sentinel file (best effort - don't fail if this fails)
-	// The sentinel contains a version marker for future compatibility
-	_ = os.WriteFile(sentinelPath, []byte("v1\n"), 0644)
+	// Write sentinel file with types fingerprint (best effort)
+	// The fingerprint changes when the types list changes, triggering reconfiguration.
+	_ = os.WriteFile(sentinelPath, []byte(expectedFP+"\n"), 0644)
 
 	ensuredDirs[beadsDir] = true
 	return nil
@@ -331,4 +348,14 @@ func ResetEnsuredDirs() {
 	ensuredMu.Lock()
 	defer ensuredMu.Unlock()
 	ensuredDirs = make(map[string]bool)
+}
+
+// InvalidateSentinel removes the sentinel file and in-memory cache for a
+// beads directory, forcing the next EnsureCustomTypes call to reconfigure.
+// Used when a type validation error indicates the sentinel was stale.
+func InvalidateSentinel(beadsDir string) {
+	ensuredMu.Lock()
+	delete(ensuredDirs, beadsDir)
+	ensuredMu.Unlock()
+	_ = os.Remove(filepath.Join(beadsDir, typesSentinel))
 }
