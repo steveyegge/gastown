@@ -1,15 +1,12 @@
 package doctor
 
 import (
-	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // CheckMisclassifiedWisps detects issues that should be marked as wisps but aren't.
@@ -119,103 +116,57 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// findMisclassifiedWisps finds issues that should be wisps but aren't in a single location.
+// misclassifiedWispsQuery selects non-ephemeral, non-closed issues for misclassification detection.
+const misclassifiedWispsQuery = `SELECT id, title, status, issue_type, labels, ephemeral FROM issues WHERE status != 'closed' AND (ephemeral IS NULL OR ephemeral = 0)`
+
+// findMisclassifiedWisps queries Dolt for issues that should be wisps but aren't.
 // Returns the found misclassified wisps and the number of DB probe errors encountered.
 func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName string) ([]misclassifiedWisp, int) {
-	beadsDir := beads.ResolveBeadsDir(path)
-	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
-	file, err := os.Open(issuesPath)
+	cmd := exec.Command("bd", "sql", "--csv", misclassifiedWispsQuery) //nolint:gosec // G204: query is a constant
+	cmd.Dir = path
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, 0 // No issues file
+		// Dolt query failed — count as a probe error but don't block the check.
+		return nil, 1
 	}
-	defer file.Close()
+
+	r := csv.NewReader(strings.NewReader(string(output)))
+	records, err := r.ReadAll()
+	if err != nil || len(records) < 2 {
+		return nil, 0 // No results or parse error
+	}
 
 	var found []misclassifiedWisp
-	var probeErrors int
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+	for _, rec := range records[1:] { // Skip CSV header
+		if len(rec) < 6 {
 			continue
 		}
+		id := strings.TrimSpace(rec[0])
+		title := strings.TrimSpace(rec[1])
+		issueType := strings.TrimSpace(rec[3])
+		labelsStr := strings.TrimSpace(rec[4])
 
-		var issue struct {
-			ID        string   `json:"id"`
-			Title     string   `json:"title"`
-			Status    string   `json:"status"`
-			Type      string   `json:"issue_type"`
-			Labels    []string `json:"labels"`
-			Ephemeral bool     `json:"ephemeral"`
-		}
-		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			continue
-		}
-
-		// Skip issues already marked as ephemeral/wisps
-		if issue.Ephemeral {
-			continue
-		}
-
-		// Skip closed issues - they're done, no need to reclassify
-		if issue.Status == "closed" {
-			continue
-		}
-
-		// Check for wisp characteristics
-		if reason := c.shouldBeWisp(issue.ID, issue.Title, issue.Type, issue.Labels); reason != "" {
-			// Verify the current DB state (JSONL may be stale if daemon isn't running)
-			open, err := isIssueStillOpen(path, issue.ID)
-			if err != nil {
-				probeErrors++
-				continue
-			}
-			if open {
-				found = append(found, misclassifiedWisp{
-					rigName: rigName,
-					id:      issue.ID,
-					title:   issue.Title,
-					reason:  reason,
-				})
+		// Parse labels (CSV field may be comma-separated or JSON array)
+		var labels []string
+		if labelsStr != "" {
+			if strings.HasPrefix(labelsStr, "[") {
+				_ = json.Unmarshal([]byte(labelsStr), &labels)
+			} else {
+				labels = strings.Split(labelsStr, ",")
 			}
 		}
+
+		if reason := c.shouldBeWisp(id, title, issueType, labels); reason != "" {
+			found = append(found, misclassifiedWisp{
+				rigName: rigName,
+				id:      id,
+				title:   title,
+				reason:  reason,
+			})
+		}
 	}
 
-	return found, probeErrors
-}
-
-// isIssueStillOpen verifies an issue is still open/non-ephemeral in the live DB.
-// This guards against stale JSONL data when the daemon isn't running and hasn't flushed.
-// Uses --allow-stale to survive DB/JSONL drift (consistent with all other bd invocations).
-// Returns an error if the probe fails, so callers can track and surface failures.
-func isIssueStillOpen(workDir, id string) (bool, error) {
-	cmd := exec.Command("bd", "--allow-stale", "show", id, "--json")
-	cmd.Dir = workDir
-	output, err := cmd.Output()
-	if err != nil {
-		stderr := ""
-		if ee, ok := err.(*exec.ExitError); ok {
-			stderr = strings.TrimSpace(string(ee.Stderr))
-		}
-		// "not found" means the issue was deleted or migrated (e.g. to wisps).
-		// Treat as "not open" rather than a probe error.
-		if strings.Contains(stderr, "not found") || strings.Contains(string(output), "no issues found") {
-			return false, nil
-		}
-		return false, fmt.Errorf("bd show %s: %v (%s)", id, err, stderr)
-	}
-	var issues []struct {
-		Status    string `json:"status"`
-		Ephemeral bool   `json:"ephemeral"`
-	}
-	if err := json.Unmarshal(output, &issues); err != nil {
-		return false, fmt.Errorf("bd show %s: parse error: %v", id, err)
-	}
-	if len(issues) == 0 {
-		return false, fmt.Errorf("bd show %s: empty result", id)
-	}
-	issue := issues[0]
-	return issue.Status != "closed" && !issue.Ephemeral, nil
+	return found, 0
 }
 
 // shouldBeWisp checks if an issue has characteristics indicating it should be a wisp.

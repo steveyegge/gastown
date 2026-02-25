@@ -290,6 +290,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		}
 	}
 
+	// Dolt server is required — refuse to proceed without it.
+	// Gastown does not support embedded Dolt or JSONL-only mode.
+	// Check early to fail fast before expensive clone operations.
+	if running, _, err := doltserver.IsRunning(m.townRoot); err != nil {
+		return nil, fmt.Errorf("checking Dolt server: %w", err)
+	} else if !running {
+		return nil, fmt.Errorf("Dolt server is not running (required for beads init); start it with 'gt up' or 'gt dolt start'")
+	}
+
 	rigPath := filepath.Join(m.townRoot, opts.Name)
 
 	// Check if directory already exists
@@ -475,7 +484,8 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 		// Initialize bd database if runtime files are missing.
 		// DB files are gitignored so they won't exist after clone — bd init creates them.
-		// bd init --prefix will create the database and auto-import from issues.jsonl.
+		// bd init --prefix will create the database on the Dolt server and attempt to
+		// auto-import from issues.jsonl (if present) only if a connection to the Dolt server can be made.
 		//
 		// Note: bdDatabaseExists checks for metadata.json which may be tracked in git.
 		// When metadata.json exists but the Dolt server database doesn't (fresh clone
@@ -878,14 +888,6 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
-	// Ensure issues.jsonl exists — bd expects this file for git-tracked issue data.
-	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
-	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
-		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
-			fmt.Printf("   ⚠ Could not create issues.jsonl: %v\n", err)
-		}
-	}
-
 	// NOTE: We intentionally do NOT create routes.jsonl in rig beads.
 	// bd's routing walks up to find town root (via mayor/town.json) and uses
 	// town-level routes.jsonl for prefix-based routing. Rig-level routes.jsonl
@@ -1083,7 +1085,6 @@ func splitCamelCase(s string) []string {
 
 // detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.
 // Returns empty string if the file doesn't exist or doesn't contain a prefix.
-// Falls back to detecting prefix from existing issues in issues.jsonl.
 //
 // beadsPrefixRegexp validates beads prefix format: alphanumeric, may contain hyphens,
 // must start with letter, max 20 chars. Prevents shell injection via config files.
@@ -1182,52 +1183,6 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 					return strings.TrimSuffix(value, "-")
 				}
 			}
-		}
-	}
-
-	// Fallback: try to detect prefix from existing issues in issues.jsonl
-	// Parse multiple lines and only consider regular issue IDs (5-char hashes)
-	// to avoid misdetecting agent beads like "gt-demo-witness" as prefix "gt-demo".
-	beadsDir := filepath.Dir(configPath)
-	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
-	if issuesData, err := os.ReadFile(issuesPath); err == nil {
-		issuesLines := strings.Split(string(issuesData), "\n")
-		var detectedPrefix string
-		for _, line := range issuesLines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			// Look for "id":"<prefix>-<hash>" pattern
-			if idx := strings.Index(line, `"id":"`); idx != -1 {
-				start := idx + 6 // len(`"id":"`)
-				if end := strings.Index(line[start:], `"`); end != -1 {
-					issueID := line[start : start+end]
-					// Only consider IDs with a 5-char alphanumeric hash suffix
-					// (standard bead format). This filters out agent beads
-					// (gt-demo-witness), merge requests (gt-mr-abc1234567),
-					// and other multi-hyphen IDs.
-					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
-						hash := issueID[dashIdx+1:]
-						if !isStandardBeadHash(hash) {
-							continue
-						}
-						prefix := issueID[:dashIdx]
-						if !isValidBeadsPrefix(prefix) {
-							continue
-						}
-						if detectedPrefix == "" {
-							detectedPrefix = prefix
-						} else if detectedPrefix != prefix {
-							// Conflicting prefixes — can't determine reliably
-							return ""
-						}
-					}
-				}
-			}
-		}
-		if detectedPrefix != "" {
-			return detectedPrefix
 		}
 	}
 

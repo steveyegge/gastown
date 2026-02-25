@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deps"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -1029,6 +1030,11 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			if prefix == "" {
 				break
 			}
+			// Dolt server is required for beads init.
+			if running, _, sErr := doltserver.IsRunning(townRoot); sErr != nil || !running {
+				fmt.Printf("  %s Could not init bd database: Dolt server is not running\n", style.Warning.Render("!"))
+				break
+			}
 			if err := mgr.InitBeads(rigPath, prefix, name); err != nil {
 				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
@@ -1041,7 +1047,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	// If no existing .beads/ candidate was found, initialize a fresh database
 	// to match the behavior of the normal (non-adopt) gt rig add path.
 	if !foundBeadsCandidate && result.BeadsPrefix != "" {
-		if err := mgr.InitBeads(rigPath, result.BeadsPrefix, name); err != nil {
+		// Dolt server is required for beads init.
+		if running, _, sErr := doltserver.IsRunning(townRoot); sErr != nil || !running {
+			fmt.Printf("  %s Could not init beads database: Dolt server is not running\n", style.Warning.Render("!"))
+		} else if err := mgr.InitBeads(rigPath, result.BeadsPrefix, name); err != nil {
 			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
 		} else {
 			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))

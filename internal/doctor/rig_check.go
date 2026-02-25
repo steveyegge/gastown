@@ -1067,11 +1067,11 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
-// hasBeadsData checks if a beads directory has actual data (issues.jsonl, issues.db, config.yaml)
+// hasBeadsData checks if a beads directory has actual data (issues.db, config.yaml)
 // as opposed to just being a redirect-only directory.
 func hasBeadsData(beadsDir string) bool {
-	// Check for actual beads data files
-	dataFiles := []string{"issues.jsonl", "issues.db", "config.yaml"}
+	// Check for actual beads data files (Dolt-only — issues.jsonl is no longer supported)
+	dataFiles := []string{"issues.db", "config.yaml"}
 	for _, f := range dataFiles {
 		if _, err := os.Stat(filepath.Join(beadsDir, f)); err == nil {
 			return true

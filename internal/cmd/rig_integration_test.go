@@ -178,6 +178,13 @@ func setupTestTown(t *testing.T) string {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
+	// Create .dolt-data directory so doltserver.InitRig doesn't consider
+	// a running server "orphaned" (data dir missing) and kill it.
+	doltDataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatalf("mkdir .dolt-data: %v", err)
+	}
+
 	return townRoot
 }
 
@@ -330,6 +337,7 @@ esac
 // TestRigAddCreatesCorrectStructure verifies that gt rig add creates
 // the expected directory structure.
 func TestRigAddCreatesCorrectStructure(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "testproject")
@@ -489,6 +497,7 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 // TestRigAddInitializesBeads verifies that beads is initialized with
 // the correct prefix.
 func TestRigAddInitializesBeads(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "beadstest")
@@ -546,16 +555,17 @@ func TestRigAddInitializesBeads(t *testing.T) {
 		t.Errorf("routes.jsonl should NOT exist in rig .beads directory (breaks bd walk-up routing)")
 	}
 
-	// Verify issues.jsonl exists (bd expects this for git-tracked issue data).
+	// Verify issues.jsonl does NOT exist — Dolt is the only backend.
 	rigIssuesPath := filepath.Join(beadsDir, "issues.jsonl")
-	if _, err := os.Stat(rigIssuesPath); err != nil {
-		t.Errorf("issues.jsonl should exist in rig .beads directory: %v", err)
+	if _, err := os.Stat(rigIssuesPath); err == nil {
+		t.Errorf("issues.jsonl should NOT exist in rig .beads directory (Dolt-only mode)")
 	}
 }
 
 // TestRigAddUpdatesRoutes verifies that routes.jsonl is updated
 // with the new rig's route.
 func TestRigAddUpdatesRoutes(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "routetest")
@@ -625,6 +635,7 @@ func TestRigAddUpdatesRoutes(t *testing.T) {
 // TestRigAddUpdatesRigsJson verifies that rigs.json is updated
 // with the new rig entry.
 func TestRigAddUpdatesRigsJson(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "jsontest")
@@ -677,6 +688,7 @@ func TestRigAddUpdatesRigsJson(t *testing.T) {
 // TestRigAddDerivesPrefix verifies that when no prefix is specified,
 // one is derived from the rig name.
 func TestRigAddDerivesPrefix(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "myproject")
@@ -708,6 +720,7 @@ func TestRigAddDerivesPrefix(t *testing.T) {
 // TestRigAddCreatesRigConfig verifies that config.json contains
 // the correct rig configuration.
 func TestRigAddCreatesRigConfig(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "configtest")
@@ -763,6 +776,7 @@ func TestRigAddCreatesRigConfig(t *testing.T) {
 
 // TestRigAddCreatesAgentDirs verifies that agent state files are created.
 func TestRigAddCreatesAgentDirs(t *testing.T) {
+	requireDoltServer(t)
 	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "agenttest")
@@ -848,6 +862,7 @@ func TestRigAddRejectsInvalidNames(t *testing.T) {
 // TestRigAddCreatesAgentBeads verifies that gt rig add creates
 // witness and refinery agent beads via the manager's initAgentBeads.
 func TestRigAddCreatesAgentBeads(t *testing.T) {
+	requireDoltServer(t)
 	bdLogPath := mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "agentbeadtest")
@@ -981,10 +996,10 @@ func TestAgentWorktreesStayClean(t *testing.T) {
 
 // agentWorktree describes an agent's worktree to check for cleanliness.
 type agentWorktree struct {
-	name        string   // Human-readable name (e.g., "mayor", "polecat")
-	path        string   // Path to the worktree
-	allowlist   []string // Additional allowlisted files beyond .beads/redirect
-	isClone     bool     // True if this is a clone (not worktree) - has different expectations
+	name      string   // Human-readable name (e.g., "mayor", "polecat")
+	path      string   // Path to the worktree
+	allowlist []string // Additional allowlisted files beyond .beads/redirect
+	isClone   bool     // True if this is a clone (not worktree) - has different expectations
 }
 
 // runAgentCleanTest runs the agent worktree cleanliness test for all agent types.
