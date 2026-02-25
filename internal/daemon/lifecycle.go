@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -365,26 +366,29 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		d.syncWorkspace(workDir)
 	}
 
-	// Create session
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
+	// Build startup command BEFORE creating the session so we can use
+	// NewSessionWithCommand (command as initial pane process). This eliminates
+	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
+	// the shell might not be ready to receive keystrokes, producing empty windows.
+	startCmd := d.getStartCommand(config, parsed)
+
+	// Create session with command as initial process (replaces EnsureSessionFresh + SendKeys).
+	// EnsureSessionFreshWithCommand kills zombie sessions and creates a new one atomically.
+	if err := d.tmux.EnsureSessionFreshWithCommand(sessionName, workDir, startCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionRunning) {
+			d.logger.Printf("Session %s already running with healthy agent, skipping restart", sessionName)
+			return nil
+		}
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment variables
+	// Set environment variables in tmux session table (for debugging/monitoring tools).
 	d.setSessionEnvironment(sessionName, config, parsed)
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	d.applySessionTheme(sessionName, parsed)
 
-	// Get and send startup command
-	startCmd := d.getStartCommand(config, parsed)
-	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
-	}
-
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated role starts aren't blocked by the warning dialog.
+	// Wait for Claude to start, then accept startup dialogs if they appear.
 	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - Claude might still start
 	}
@@ -997,11 +1001,11 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// List polecat agent beads for this rig (issues + wisps tables)
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
 	var agents []struct {
-		ID          string `json:"id"`
-		Description string `json:"description"`
-		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"` // Read from database column, not description
-		AgentState  string `json:"agent_state"`
+		ID          string   `json:"id"`
+		Description string   `json:"description"`
+		UpdatedAt   string   `json:"updated_at"`
+		HookBead    string   `json:"hook_bead"` // Read from database column, not description
+		AgentState  string   `json:"agent_state"`
 		Labels      []string `json:"labels"`
 		Type        string   `json:"issue_type"`
 	}

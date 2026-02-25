@@ -39,11 +39,12 @@ var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer            = errors.New("no tmux server running")
-	ErrSessionExists       = errors.New("session already exists")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrInvalidSessionName  = errors.New("invalid session name")
-	ErrIdleTimeout         = errors.New("agent not idle before timeout")
+	ErrNoServer           = errors.New("no tmux server running")
+	ErrSessionExists      = errors.New("session already exists")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrSessionRunning     = errors.New("session already running with healthy agent")
+	ErrInvalidSessionName = errors.New("invalid session name")
+	ErrIdleTimeout        = errors.New("agent not idle before timeout")
 )
 
 // validateSessionName checks that a session name contains only safe characters.
@@ -270,6 +271,38 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 		return nil
 	}
 	return err
+}
+
+// EnsureSessionFreshWithCommand is like EnsureSessionFresh but creates the
+// session with a command as the pane's initial process via NewSessionWithCommand.
+// This eliminates the race condition in the EnsureSessionFresh + SendKeys pattern
+// where the shell may not be ready to receive keystrokes, resulting in empty
+// windows. The command runs as the pane's initial process — no shell involved.
+//
+// If an existing session has a healthy agent, returns ErrSessionRunning.
+func (t *Tmux) EnsureSessionFreshWithCommand(name, workDir, command string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
+	// Check if session exists
+	running, err := t.HasSession(name)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if running {
+		if t.IsAgentRunning(name) {
+			// Session is healthy — don't replace it
+			return ErrSessionRunning
+		}
+		// Zombie session: tmux alive but agent dead — kill it
+		if err := t.KillSessionWithProcesses(name); err != nil {
+			return fmt.Errorf("killing zombie session: %w", err)
+		}
+	}
+
+	// Create session with command as the initial process
+	return t.NewSessionWithCommand(name, workDir, command)
 }
 
 // KillSession terminates a tmux session. Idempotent: returns nil if the
@@ -1104,8 +1137,8 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 // AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
 // automated sessions. Currently handles (in order):
-//   1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
-//   2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+//  1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
+//  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
 //
 // Call this after starting Claude and waiting for it to initialize (WaitForCommand),
 // but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
@@ -2562,4 +2595,3 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 
 	return nil
 }
-

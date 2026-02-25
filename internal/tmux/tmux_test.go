@@ -316,6 +316,89 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionFreshWithCommand_NoExisting(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-fwc-new-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// EnsureSessionFreshWithCommand should create a new session with the command
+	// as the initial pane process (no shell involved).
+	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", "sleep 10"); err != nil {
+		t.Fatalf("EnsureSessionFreshWithCommand: %v", err)
+	}
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("expected session to exist")
+	}
+
+	// Verify the command is running (not a shell)
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+	if cmd != "sleep" {
+		t.Logf("pane command = %q (expected 'sleep')", cmd)
+	}
+}
+
+func TestEnsureSessionFreshWithCommand_KillsZombie(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-fwc-zombie-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create a zombie session (empty shell, no agent)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// Verify it's a zombie
+	if tm.IsAgentRunning(sessionName) {
+		t.Skip("session unexpectedly has agent running")
+	}
+
+	// EnsureSessionFreshWithCommand should kill the zombie and create fresh session
+	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", "sleep 10"); err != nil {
+		t.Fatalf("EnsureSessionFreshWithCommand on zombie: %v", err)
+	}
+
+	// Session should exist with the new command
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("expected session to exist after replacing zombie")
+	}
+
+	// The command should be sleep, not a shell
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+	if cmd != "sleep" {
+		t.Logf("pane command = %q (expected 'sleep' after zombie replacement)", cmd)
+	}
+}
+
 func TestIsAgentRunning(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
@@ -1775,7 +1858,7 @@ func TestNudgeSession_WithRetry(t *testing.T) {
 func TestMatchesPromptPrefix(t *testing.T) {
 	const (
 		nbsp          = "\u00a0" // non-breaking space
-		regularPrefix = "❯ "    // default: ❯ + regular space
+		regularPrefix = "❯ "     // default: ❯ + regular space
 	)
 
 	tests := []struct {
