@@ -1903,11 +1903,15 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 
 	var cmd string
 	if len(exports) > 0 {
-		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
-		// running agent via pane_current_command (which shows the direct
-		// process, not child processes).
-		cmd = "exec env " + strings.Join(exports, " ") + " "
+		// Pi-rust's TUI crashes when launched via 'exec env' in tmux (the exec
+		// replaces the shell and pi-rust loses proper TTY setup). Use plain 'env'
+		// for pi-rust agents; use 'exec env' for others so WaitForCommand can
+		// detect the running agent via pane_current_command.
+		if rc.Command == "pir" || rc.Command == "pi" {
+			cmd = "env " + strings.Join(exports, " ") + " "
+		} else {
+			cmd = "exec env " + strings.Join(exports, " ") + " "
+		}
 	}
 
 	// Add runtime command
@@ -2077,11 +2081,13 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	var cmd string
 	if len(exports) > 0 {
-		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
-		// running agent via pane_current_command (which shows the direct
-		// process, not child processes).
-		cmd = "exec env " + strings.Join(exports, " ") + " "
+		// Pi-rust's TUI crashes when launched via 'exec env' in tmux.
+		// Use plain 'env' for pi-rust; 'exec env' for others.
+		if rc.Command == "pir" || rc.Command == "pi" {
+			cmd = "env " + strings.Join(exports, " ") + " "
+		} else {
+			cmd = "exec env " + strings.Join(exports, " ") + " "
+		}
 	}
 
 	if prompt != "" {

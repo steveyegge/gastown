@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -59,6 +60,8 @@ func (m *mockTmux) AcceptStartupDialogs(_ string) error            { return nil 
 func (m *mockTmux) AcceptWorkspaceTrustDialog(_ string) error      { return nil }
 func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error  { return nil }
 func (m *mockTmux) SendKeysRaw(_, _ string) error                  { return m.sendKeysErr }
+func (m *mockTmux) NudgeSession(_, _ string) error                                          { return nil }
+func (m *mockTmux) WaitForRuntimeReady(_ string, _ *config.RuntimeConfig, _ time.Duration) error { return nil }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
