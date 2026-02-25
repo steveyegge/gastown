@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -401,30 +402,69 @@ func checkSlungWork(ctx RoleContext) bool {
 		return false
 	}
 
-	// Check for hooked beads (work on the agent's hook)
-	b := beads.New(ctx.WorkDir)
-	hookedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil {
-		return false
-	}
-
-	// If no hooked beads found, also check in_progress beads assigned to this agent.
-	// This handles the case where work was claimed (status changed to in_progress)
-	// but the session was interrupted before completion. The hook should persist.
-	if len(hookedBeads) == 0 {
-		inProgressBeads, err := b.List(beads.ListOptions{
+	// findHookedWork searches a beads directory for hooked or in-progress beads.
+	// Returns nil if none found or if there's a database error.
+	findHookedWork := func(beadsDir string) []*beads.Issue {
+		b := beads.New(beadsDir)
+		hooked, err := b.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err == nil && len(hooked) > 0 {
+			return hooked
+		}
+		// Also check in_progress beads: work may have been claimed before session restart.
+		inProgress, err := b.List(beads.ListOptions{
 			Status:   "in_progress",
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err != nil || len(inProgressBeads) == 0 {
-			return false
+		if err == nil && len(inProgress) > 0 {
+			return inProgress
 		}
-		hookedBeads = inProgressBeads
+		return nil
+	}
+
+	// Polecats and crew workers use a retry loop to handle the timing race where
+	// the hook slot write (SetHookBead) or status=hooked update hasn't propagated
+	// to the database by the time gt prime runs on session startup.
+	// See: https://github.com/steveyegge/gastown/issues/1438
+	maxAttempts := 1
+	retryDelay := time.Duration(0)
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		maxAttempts = 3
+		retryDelay = 2 * time.Second
+	}
+
+	var hookedBeads []*beads.Issue
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(retryDelay)
+		}
+
+		// Search rig-level beads (primary location for most work).
+		hookedBeads = findHookedWork(ctx.WorkDir)
+		if len(hookedBeads) > 0 {
+			break
+		}
+
+		// Also search town-level beads for hq-* beads slung to rig agents.
+		// When the Mayor slings a town-level bead (hq-abc) to a polecat in rig X,
+		// the bead lives in the town's .beads database, not the rig's .beads.
+		// Without this search, the polecat concludes it has no work and self-terminates.
+		// See: https://github.com/steveyegge/gastown/issues/1438
+		if ctx.TownRoot != "" {
+			townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+			hookedBeads = findHookedWork(townBeadsDir)
+			if len(hookedBeads) > 0 {
+				break
+			}
+		}
+	}
+
+	if len(hookedBeads) == 0 {
+		return false
 	}
 
 	// Use the first hooked bead (agents typically have one)

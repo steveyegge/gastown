@@ -372,11 +372,15 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			// IMPORTANT: Don't use ParseAgentFieldsFromDescription - the description
 			// field may contain stale data, causing the wrong issue to be hooked.
 			if agentBead.HookBead != "" {
-				// Fetch the bead on the hook
+				// Fetch the bead on the hook - first try local (rig-level) beads.
 				hookBead, err = b.Show(agentBead.HookBead)
-				if err != nil {
-					// Hook bead referenced but not found - report error but continue
-					hookBead = nil
+				if err != nil || hookBead == nil {
+					// Not found locally - the bead may be town-level (hq-* prefix).
+					// Town beads live in townRoot/.beads, not the rig's .beads.
+					if townRoot != "" {
+						townB := beads.New(filepath.Join(townRoot, ".beads"))
+						hookBead, _ = townB.Show(agentBead.HookBead)
+					}
 				}
 			}
 		}
@@ -436,6 +440,26 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// For town-level roles (mayor, deacon), scan all rigs if nothing found locally
 		if len(hookedBeads) == 0 && isTownLevelRole(target) {
 			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+		}
+
+		// For rig-level agents, also search town beads for hq-* beads slung to them.
+		// When the Mayor slings a town-level bead (hq-abc) to a polecat, the bead
+		// lives in townRoot/.beads, not the rig's .beads database.
+		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+			townB := beads.New(filepath.Join(townRoot, ".beads"))
+			if townHooked, err := townB.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Assignee: target,
+				Priority: -1,
+			}); err == nil && len(townHooked) > 0 {
+				hookedBeads = townHooked
+			} else if townInProgress, err := townB.List(beads.ListOptions{
+				Status:   "in_progress",
+				Assignee: target,
+				Priority: -1,
+			}); err == nil && len(townInProgress) > 0 {
+				hookedBeads = townInProgress
+			}
 		}
 
 		status.HasWork = len(hookedBeads) > 0
