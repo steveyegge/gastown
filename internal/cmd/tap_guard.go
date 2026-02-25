@@ -21,6 +21,7 @@ forbidden operation entirely.
 Available guards:
   pr-workflow        - Block PR creation and feature branches
   dangerous-command  - Block rm -rf, force push, hard reset, git clean
+  context-budget     - Monitor context window usage and enforce handoff thresholds
 
 Example hook configuration:
   {

@@ -757,6 +757,13 @@ func DefaultBase() *HooksConfig {
 					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
 				}},
 			},
+			{
+				Matcher: "",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard context-budget", pathSetup),
+				}},
+			},
 		},
 		SessionStart: []HookEntry{
 			{
