@@ -222,13 +222,18 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
 			log.Printf("warning: agent readiness wait for %s: %v", sessionID, err)
 		}
-		if err := t.NudgeSession(sessionID, initialPrompt); err != nil {
-			log.Printf("warning: nudging refinery prompt for %s: %v", sessionID, err)
+		// Verify the session still exists after the ready delay.
+		if ok, _ := t.HasSession(sessionID); !ok {
+			log.Printf("warning: session %s disappeared after ready wait, skipping nudge", sessionID)
+		} else {
+			if err := t.NudgeSession(sessionID, initialPrompt); err != nil {
+				log.Printf("warning: nudging refinery prompt for %s: %v", sessionID, err)
+			}
+			// Pi-rust's TUI can swallow the Enter after NudgeSession's Escape key.
+			// Send a redundant Enter as a safety net (harmless if already submitted).
+			time.Sleep(500 * time.Millisecond)
+			_ = t.SendKeysRaw(sessionID, "Enter")
 		}
-		// Pi-rust's TUI can swallow the Enter after NudgeSession's Escape key.
-		// Send a redundant Enter as a safety net (harmless if already submitted).
-		time.Sleep(500 * time.Millisecond)
-		_ = t.SendKeysRaw(sessionID, "Enter")
 	}
 
 	return nil
