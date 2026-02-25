@@ -261,6 +261,26 @@ func (a *AgentSession) displayLabel() string {
 	return a.Name
 }
 
+// buildMenuAction returns a tmux command string for the display-menu action
+// that handles both same-socket and cross-socket session switching.
+//
+// When townSocket is set (multi-socket layout), the action:
+//  1. Tries switch-client first (instant, no flicker — works on same socket)
+//  2. Falls back to detach + reattach via -L <socket> (cross-socket)
+//
+// When townSocket is empty (single-server), uses plain switch-client.
+func buildMenuAction(townSocket, session string) string {
+	if townSocket == "" {
+		return fmt.Sprintf("switch-client -t '%s'", session)
+	}
+	// Try switch-client (same socket, instant). If it fails (cross-socket),
+	// detach and reattach to the town socket's session.
+	return fmt.Sprintf(
+		"run-shell 'tmux -L %s switch-client -t \"%s\" 2>/dev/null || tmux detach-client -E \"tmux -L %s attach -t %s\"'",
+		townSocket, session, townSocket, session,
+	)
+}
+
 // shortcutKey returns a keyboard shortcut for the menu item.
 func shortcutKey(index int) string {
 	if index < 9 {
@@ -295,6 +315,9 @@ func runAgents(cmd *cobra.Command, args []string) error {
 		"-y", "C", // Center vertically
 	}
 
+	// Get the town socket so menu actions can handle cross-socket switching.
+	townSocket := tmux.GetDefaultSocket()
+
 	var currentRig string
 	keyIndex := 0
 
@@ -312,7 +335,7 @@ func runAgents(cmd *cobra.Command, args []string) error {
 
 		key := shortcutKey(keyIndex)
 		label := agent.displayLabel()
-		action := fmt.Sprintf("switch-client -t '%s'", agent.Name)
+		action := buildMenuAction(townSocket, agent.Name)
 
 		menuArgs = append(menuArgs, label, key, action)
 		keyIndex++
@@ -376,11 +399,11 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 
 // CollisionReport holds the results of a collision check.
 type CollisionReport struct {
-	TotalSessions int                    `json:"total_sessions"`
-	TotalLocks    int                    `json:"total_locks"`
-	Collisions    int                    `json:"collisions"`
-	StaleLocks    int                    `json:"stale_locks"`
-	Issues        []CollisionIssue       `json:"issues,omitempty"`
+	TotalSessions int                       `json:"total_sessions"`
+	TotalLocks    int                       `json:"total_locks"`
+	Collisions    int                       `json:"collisions"`
+	StaleLocks    int                       `json:"stale_locks"`
+	Issues        []CollisionIssue          `json:"issues,omitempty"`
 	Locks         map[string]*lock.LockInfo `json:"locks,omitempty"`
 }
 
