@@ -385,6 +385,37 @@ func TestRunAgentsList_EmptyList_Output(t *testing.T) {
 	}
 }
 
+// TestDisplayLabel_PersonalSession verifies the display format for non-GT sessions.
+func TestDisplayLabel_PersonalSession(t *testing.T) {
+	agent := AgentSession{Name: "fix-tmux", Type: AgentPersonal}
+	label := agent.displayLabel()
+	if !strings.Contains(label, "fix-tmux") {
+		t.Errorf("personal session label should contain session name, got: %q", label)
+	}
+	if !strings.Contains(label, AgentTypeColors[AgentPersonal]) {
+		t.Errorf("personal session label should use AgentPersonal color, got: %q", label)
+	}
+}
+
+// TestBuildMenuAction_PerSessionSocket verifies that buildMenuAction uses the
+// session's own socket, not a global town socket.
+func TestBuildMenuAction_PerSessionSocket(t *testing.T) {
+	// GT session on the gt socket
+	action := buildMenuAction("gt", "hq-deacon")
+	if !strings.Contains(action, "-L gt") {
+		t.Errorf("GT session action should use -L gt, got: %s", action)
+	}
+
+	// Personal session on the default socket
+	action = buildMenuAction("default", "fix-tmux")
+	if !strings.Contains(action, "-L default") {
+		t.Errorf("personal session action should use -L default, got: %s", action)
+	}
+	if !strings.Contains(action, "fix-tmux") {
+		t.Errorf("personal session action should target fix-tmux, got: %s", action)
+	}
+}
+
 // TestBuildMenuAction_CrossSocket verifies that menu actions handle
 // cross-socket switching. When the town socket is set, the action must:
 // 1. Try switch-client first (works when user is on the same socket, no flicker)

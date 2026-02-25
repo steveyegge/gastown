@@ -28,6 +28,7 @@ const (
 	AgentRefinery
 	AgentCrew
 	AgentPolecat
+	AgentPersonal // Non-GT session (user's terminal session)
 )
 
 // AgentSession represents a categorized tmux session.
@@ -36,6 +37,7 @@ type AgentSession struct {
 	Type      AgentType
 	Rig       string // For rig-specific agents
 	AgentName string // e.g., crew name, polecat name
+	Socket    string // tmux socket name this session lives on
 }
 
 // AgentTypeColors maps agent types to tmux color codes.
@@ -46,6 +48,7 @@ var AgentTypeColors = map[AgentType]string{
 	AgentRefinery: "#[fg=blue]",
 	AgentCrew:     "#[fg=green]",
 	AgentPolecat:  "#[fg=white,dim]",
+	AgentPersonal: "#[fg=magenta]",
 }
 
 // rigTypeOrder defines the display order of rig-level agent types.
@@ -176,7 +179,7 @@ func categorizeSession(name string) *AgentSession {
 	return sess
 }
 
-// getAgentSessions returns all categorized Gas Town sessions.
+// getAgentSessions returns all categorized Gas Town sessions from the town socket.
 func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 	t := tmux.NewTmux()
 	sessions, err := t.ListSessions()
@@ -184,6 +187,53 @@ func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
 		return nil, err
 	}
 	return filterAndSortSessions(sessions, includePolecats), nil
+}
+
+// socketGroup holds sessions for a single tmux socket.
+type socketGroup struct {
+	Socket   string
+	Sessions []*AgentSession
+}
+
+// getAllSocketSessions lists sessions from all known tmux sockets, categorized
+// and grouped. The town socket's GT agent sessions come first, followed by
+// personal sessions from other sockets (e.g., default).
+func getAllSocketSessions(includePolecats bool) []socketGroup {
+	townSocket := tmux.GetDefaultSocket()
+	var groups []socketGroup
+
+	// Town socket: GT agent sessions
+	townTmux := tmux.NewTmux() // uses default (town) socket
+	if sessions, err := townTmux.ListSessions(); err == nil && len(sessions) > 0 {
+		agents := filterAndSortSessions(sessions, includePolecats)
+		for _, a := range agents {
+			a.Socket = townSocket
+		}
+		if len(agents) > 0 {
+			groups = append(groups, socketGroup{Socket: townSocket, Sessions: agents})
+		}
+	}
+
+	// Other sockets: list personal sessions.
+	// Check the "default" socket if it differs from the town socket.
+	if townSocket != "" && townSocket != "default" {
+		defTmux := tmux.NewTmuxWithSocket("default")
+		if sessions, err := defTmux.ListSessions(); err == nil && len(sessions) > 0 {
+			var personal []*AgentSession
+			for _, name := range sessions {
+				personal = append(personal, &AgentSession{
+					Name:   name,
+					Type:   AgentPersonal,
+					Socket: "default",
+				})
+			}
+			if len(personal) > 0 {
+				groups = append(groups, socketGroup{Socket: "default", Sessions: personal})
+			}
+		}
+	}
+
+	return groups
 }
 
 // filterAndSortSessions filters raw session names into categorized, sorted agents.
@@ -257,6 +307,8 @@ func (a *AgentSession) displayLabel() string {
 		return fmt.Sprintf("%s%s %s/crew/%s#[default]", color, icon, a.Rig, a.AgentName)
 	case AgentPolecat:
 		return fmt.Sprintf("%s%s %s/%s#[default]", color, icon, a.Rig, a.AgentName)
+	case AgentPersonal:
+		return fmt.Sprintf("%s%s#[default]", color, a.Name)
 	}
 	return a.Name
 }
@@ -264,20 +316,20 @@ func (a *AgentSession) displayLabel() string {
 // buildMenuAction returns a tmux command string for the display-menu action
 // that handles both same-socket and cross-socket session switching.
 //
-// When townSocket is set (multi-socket layout), the action:
+// targetSocket is the socket the session lives on. When set, the action:
 //  1. Tries switch-client first (instant, no flicker — works on same socket)
 //  2. Falls back to detach + reattach via -L <socket> (cross-socket)
 //
-// When townSocket is empty (single-server), uses plain switch-client.
-func buildMenuAction(townSocket, session string) string {
-	if townSocket == "" {
+// When targetSocket is empty, uses plain switch-client (single-server).
+func buildMenuAction(targetSocket, session string) string {
+	if targetSocket == "" {
 		return fmt.Sprintf("switch-client -t '%s'", session)
 	}
 	// Try switch-client (same socket, instant). If it fails (cross-socket),
-	// detach and reattach to the town socket's session.
+	// detach and reattach to the target socket's session.
 	return fmt.Sprintf(
 		"run-shell 'tmux -L %s switch-client -t \"%s\" 2>/dev/null || tmux detach-client -E \"tmux -L %s attach -t %s\"'",
-		townSocket, session, townSocket, session,
+		targetSocket, session, targetSocket, session,
 	)
 }
 
@@ -294,12 +346,15 @@ func shortcutKey(index int) string {
 }
 
 func runAgents(cmd *cobra.Command, args []string) error {
-	agents, err := getAgentSessions(agentsAllFlag)
-	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
+	groups := getAllSocketSessions(agentsAllFlag)
+
+	// Count total sessions across all groups
+	total := 0
+	for _, g := range groups {
+		total += len(g.Sessions)
 	}
 
-	if len(agents) == 0 {
+	if total == 0 {
 		fmt.Println("No agent sessions running.")
 		fmt.Println("\nStart agents with:")
 		fmt.Println("  gt mayor start")
@@ -310,35 +365,43 @@ func runAgents(cmd *cobra.Command, args []string) error {
 	// Build display-menu arguments
 	menuArgs := []string{
 		"display-menu",
-		"-T", "#[fg=cyan,bold]⚙️  Gas Town Agents",
+		"-T", "#[fg=cyan,bold]⚙️  Gas Town Sessions",
 		"-x", "C", // Center horizontally
 		"-y", "C", // Center vertically
 	}
 
-	// Get the town socket so menu actions can handle cross-socket switching.
-	townSocket := tmux.GetDefaultSocket()
-
-	var currentRig string
+	multiSocket := len(groups) > 1
 	keyIndex := 0
 
-	for _, agent := range agents {
-		// Add rig header when rig changes (skip for town-level agents)
-		if agent.Rig != "" && agent.Rig != currentRig {
-			if currentRig != "" || keyIndex > 0 {
-				// Add separator before new rig section
-				menuArgs = append(menuArgs, "")
+	for gi, group := range groups {
+		// Socket header when there are multiple sockets
+		if multiSocket {
+			if gi > 0 {
+				menuArgs = append(menuArgs, "") // separator
 			}
-			// Add rig header (non-selectable)
-			menuArgs = append(menuArgs, fmt.Sprintf("#[fg=white,dim]── %s ──", agent.Rig), "", "")
-			currentRig = agent.Rig
+			menuArgs = append(menuArgs,
+				fmt.Sprintf("#[fg=white,bold]── %s ──", group.Socket), "", "")
 		}
 
-		key := shortcutKey(keyIndex)
-		label := agent.displayLabel()
-		action := buildMenuAction(townSocket, agent.Name)
+		var currentRig string
+		for _, agent := range group.Sessions {
+			// Rig sub-headers for GT agent sessions
+			if agent.Type != AgentPersonal && agent.Rig != "" && agent.Rig != currentRig {
+				if currentRig != "" || (keyIndex > 0 && !multiSocket) {
+					menuArgs = append(menuArgs, "")
+				}
+				menuArgs = append(menuArgs,
+					fmt.Sprintf("#[fg=white,dim]── %s ──", agent.Rig), "", "")
+				currentRig = agent.Rig
+			}
 
-		menuArgs = append(menuArgs, label, key, action)
-		keyIndex++
+			key := shortcutKey(keyIndex)
+			label := agent.displayLabel()
+			action := buildMenuAction(agent.Socket, agent.Name)
+
+			menuArgs = append(menuArgs, label, key, action)
+			keyIndex++
+		}
 	}
 
 	// Execute tmux display-menu
