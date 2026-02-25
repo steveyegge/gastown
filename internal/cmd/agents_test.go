@@ -279,14 +279,14 @@ func TestFilterAndSortSessions_BootSessionFiltered(t *testing.T) {
 func TestFilterAndSortSessions_SortOrder(t *testing.T) {
 	setupCmdTestRegistry(t)
 	input := []string{
-		"gt-crew-zed",    // crew (gastown)
-		"gt-witness",     // witness (gastown)
-		"hq-deacon",      // deacon
-		"gt-refinery",    // refinery (gastown)
-		"hq-mayor",       // mayor
-		"gt-furiosa",     // polecat (gastown)
-		"mr-witness",     // witness (myrig)
-		"gt-crew-alpha",  // crew (gastown)
+		"gt-crew-zed",   // crew (gastown)
+		"gt-witness",    // witness (gastown)
+		"hq-deacon",     // deacon
+		"gt-refinery",   // refinery (gastown)
+		"hq-mayor",      // mayor
+		"gt-furiosa",    // polecat (gastown)
+		"mr-witness",    // witness (myrig)
+		"gt-crew-alpha", // crew (gastown)
 	}
 
 	got := filterAndSortSessions(input, true)
@@ -382,6 +382,95 @@ func TestRunAgentsList_EmptyList_Output(t *testing.T) {
 		!strings.Contains(output, "Deacon") &&
 		!strings.Contains(output, "witness") {
 		t.Errorf("unexpected output from runAgentsList: %q", output)
+	}
+}
+
+// TestDisplayLabel_PersonalSession verifies the display format for non-GT sessions.
+func TestDisplayLabel_PersonalSession(t *testing.T) {
+	agent := AgentSession{Name: "fix-tmux", Type: AgentPersonal}
+	label := agent.displayLabel()
+	if !strings.Contains(label, "fix-tmux") {
+		t.Errorf("personal session label should contain session name, got: %q", label)
+	}
+	if !strings.Contains(label, AgentTypeColors[AgentPersonal]) {
+		t.Errorf("personal session label should use AgentPersonal color, got: %q", label)
+	}
+}
+
+// TestBuildMenuAction_PerSessionSocket verifies that buildMenuAction uses the
+// session's own socket, not a global town socket.
+func TestBuildMenuAction_PerSessionSocket(t *testing.T) {
+	// GT session on the gt socket
+	action := buildMenuAction("gt", "hq-deacon")
+	if !strings.Contains(action, "-L gt") {
+		t.Errorf("GT session action should use -L gt, got: %s", action)
+	}
+
+	// Personal session on the default socket
+	action = buildMenuAction("default", "fix-tmux")
+	if !strings.Contains(action, "-L default") {
+		t.Errorf("personal session action should use -L default, got: %s", action)
+	}
+	if !strings.Contains(action, "fix-tmux") {
+		t.Errorf("personal session action should target fix-tmux, got: %s", action)
+	}
+}
+
+// TestBuildMenuAction_CrossSocket verifies that menu actions handle
+// cross-socket switching. When the town socket is set, the action must:
+// 1. Try switch-client first (works when user is on the same socket, no flicker)
+// 2. Fall back to detach+reattach (works cross-socket)
+// 3. Include the -L <socket> flag so tmux targets the correct server
+func TestBuildMenuAction_CrossSocket(t *testing.T) {
+	tests := []struct {
+		name        string
+		townSocket  string
+		session     string
+		wantContain []string // substrings that must be present
+		wantMissing []string // substrings that must NOT be present
+	}{
+		{
+			name:       "with town socket — cross-socket aware",
+			townSocket: "gt",
+			session:    "hq-deacon",
+			wantContain: []string{
+				"-L gt",         // targets the town socket
+				"switch-client", // fast path (same socket)
+				"detach-client", // fallback (cross-socket)
+				"hq-deacon",     // session name
+			},
+		},
+		{
+			name:       "empty socket — same-server switch only",
+			townSocket: "",
+			session:    "hq-mayor",
+			wantContain: []string{
+				"switch-client",
+				"hq-mayor",
+			},
+			wantMissing: []string{
+				"detach-client", // no cross-socket fallback needed
+				"-L ",           // no socket flag
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action := buildMenuAction(tt.townSocket, tt.session)
+			for _, want := range tt.wantContain {
+				if !strings.Contains(action, want) {
+					t.Errorf("buildMenuAction(%q, %q) = %q\n  missing substring: %q",
+						tt.townSocket, tt.session, action, want)
+				}
+			}
+			for _, notWant := range tt.wantMissing {
+				if strings.Contains(action, notWant) {
+					t.Errorf("buildMenuAction(%q, %q) = %q\n  should not contain: %q",
+						tt.townSocket, tt.session, action, notWant)
+				}
+			}
+		})
 	}
 }
 

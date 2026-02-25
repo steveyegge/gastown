@@ -2419,6 +2419,58 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	return err
 }
 
+// EnsureBindingsOnSocket sets the agents and feed keybindings on the specified
+// socket. This is used by gt up to ensure prefix+g and prefix+a work even when
+// the user is attached to a different tmux server (e.g., the default server).
+//
+// Unlike SetAgentsBinding/SetFeedBinding (called during gt prime), this method:
+//   - Targets a specific socket regardless of the Tmux instance's default
+//   - Skips the session-name guard when there's no pre-existing user binding,
+//     since the user may be in a personal session (not matching GT prefixes)
+//     and still wants the agent menu for cross-socket navigation
+//
+// Safe to call multiple times; skips if bindings already exist.
+func EnsureBindingsOnSocket(socket string) error {
+	t := NewTmuxWithSocket(socket)
+
+	// Agents binding (prefix + g)
+	if !t.isGTBinding("prefix", "g") {
+		ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+		fallback := t.getKeyBinding("prefix", "g")
+		if fallback == "" || fallback == ":" {
+			// No user binding to preserve — always show the GT agent menu.
+			// This is critical for cross-socket use: on the default socket,
+			// no session names match GT prefixes, so the if-shell guard would
+			// prevent the menu from ever appearing.
+			_, _ = t.run("bind-key", "-T", "prefix", "g",
+				"run-shell", "gt agents menu")
+		} else {
+			// User has a custom binding — guard it
+			_, _ = t.run("bind-key", "-T", "prefix", "g",
+				"if-shell", ifShell,
+				"run-shell 'gt agents menu'",
+				fallback)
+		}
+	}
+
+	// Feed binding (prefix + a)
+	if !t.isGTBinding("prefix", "a") {
+		ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+		fallback := t.getKeyBinding("prefix", "a")
+		if fallback == "" || fallback == ":" {
+			_, _ = t.run("bind-key", "-T", "prefix", "a",
+				"run-shell", "gt feed --window")
+		} else {
+			_, _ = t.run("bind-key", "-T", "prefix", "a",
+				"if-shell", ifShell,
+				"run-shell 'gt feed --window'",
+				fallback)
+		}
+	}
+
+	return nil
+}
+
 // GetSessionCreatedUnix returns the Unix timestamp when a session was created.
 // Returns 0 if the session doesn't exist or can't be queried.
 func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {

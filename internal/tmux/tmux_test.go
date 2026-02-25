@@ -2267,3 +2267,112 @@ func TestCheckSessionHealth_ActivityCheck(t *testing.T) {
 	// (if the agent were actually running). This tests the activity threshold logic
 	// without needing a real Claude process.
 }
+
+// TestEnsureBindingsOnSocket verifies that EnsureBindingsOnSocket sets the
+// agents and feed keybindings on a specified tmux socket. This is the mechanism
+// that allows prefix+g to work when the user is on a different socket than the
+// town's agent sessions.
+func TestEnsureBindingsOnSocket(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	// Use an isolated socket to avoid polluting the real default/gt servers
+	socket := fmt.Sprintf("gt-test-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+		socketPath := fmt.Sprintf("/tmp/tmux-%d/%s", os.Getuid(), socket)
+		_ = os.Remove(socketPath)
+	})
+
+	// Start a tmux server on the test socket (need at least one session)
+	out, err := exec.Command("tmux", "-L", socket, "new-session", "-d", "-s", "test-session", "sleep 300").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to create test session: %v\n%s", err, out)
+	}
+
+	// Verify no GT binding exists yet
+	tm := NewTmuxWithSocket(socket)
+	if tm.isGTBinding("prefix", "g") {
+		t.Fatal("GT binding should not exist on fresh socket")
+	}
+
+	// Set bindings
+	if err := EnsureBindingsOnSocket(socket); err != nil {
+		t.Fatalf("EnsureBindingsOnSocket: %v", err)
+	}
+
+	// Verify the agents binding (prefix+g) now exists and contains "gt agents menu"
+	raw, err := tm.run("list-keys", "-T", "prefix", "g")
+	if err != nil {
+		t.Fatalf("list-keys after EnsureBindingsOnSocket: %v", err)
+	}
+	t.Logf("prefix+g binding: %s", raw)
+	if !strings.Contains(raw, "gt agents menu") {
+		t.Errorf("prefix+g binding should contain 'gt agents menu', got: %s", raw)
+	}
+	// Without a pre-existing user binding, there should be NO if-shell guard
+	if strings.Contains(raw, "if-shell") {
+		t.Errorf("prefix+g binding should NOT have if-shell guard (no user binding to preserve), got: %s", raw)
+	}
+
+	// Verify the feed binding (prefix+a) exists
+	raw, err = tm.run("list-keys", "-T", "prefix", "a")
+	if err != nil {
+		t.Fatalf("list-keys for prefix+a: %v", err)
+	}
+	if !strings.Contains(raw, "gt feed") {
+		t.Errorf("prefix+a binding should contain 'gt feed', got: %s", raw)
+	}
+
+	// Calling again should be idempotent (no error, no change)
+	if err := EnsureBindingsOnSocket(socket); err != nil {
+		t.Fatalf("second EnsureBindingsOnSocket: %v", err)
+	}
+}
+
+// TestEnsureBindingsOnSocket_PreservesUserBinding verifies that when a user
+// has a custom prefix+g binding, EnsureBindingsOnSocket wraps it with an
+// if-shell guard instead of overwriting it.
+func TestEnsureBindingsOnSocket_PreservesUserBinding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	socket := fmt.Sprintf("gt-test-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+		socketPath := fmt.Sprintf("/tmp/tmux-%d/%s", os.Getuid(), socket)
+		_ = os.Remove(socketPath)
+	})
+
+	out, err := exec.Command("tmux", "-L", socket, "new-session", "-d", "-s", "test-session", "sleep 300").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to create test session: %v\n%s", err, out)
+	}
+
+	// Set a custom user binding BEFORE GT bindings
+	tm := NewTmuxWithSocket(socket)
+	_, err = tm.run("bind-key", "-T", "prefix", "g", "display-message", "my-custom-binding")
+	if err != nil {
+		t.Fatalf("setting custom binding: %v", err)
+	}
+
+	// Now set GT bindings
+	if err := EnsureBindingsOnSocket(socket); err != nil {
+		t.Fatalf("EnsureBindingsOnSocket: %v", err)
+	}
+
+	// Should have if-shell guard wrapping the custom binding
+	raw, _ := tm.run("list-keys", "-T", "prefix", "g")
+	t.Logf("prefix+g binding: %s", raw)
+	if !strings.Contains(raw, "if-shell") {
+		t.Errorf("should have if-shell guard when user binding exists, got: %s", raw)
+	}
+	if !strings.Contains(raw, "my-custom-binding") {
+		t.Errorf("user's original binding should be preserved as fallback, got: %s", raw)
+	}
+	if !strings.Contains(raw, "gt agents menu") {
+		t.Errorf("GT agents menu should be in the binding, got: %s", raw)
+	}
+}
