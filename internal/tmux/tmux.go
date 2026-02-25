@@ -39,11 +39,11 @@ var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer            = errors.New("no tmux server running")
-	ErrSessionExists       = errors.New("session already exists")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrInvalidSessionName  = errors.New("invalid session name")
-	ErrIdleTimeout         = errors.New("agent not idle before timeout")
+	ErrNoServer           = errors.New("no tmux server running")
+	ErrSessionExists      = errors.New("session already exists")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrInvalidSessionName = errors.New("invalid session name")
+	ErrIdleTimeout        = errors.New("agent not idle before timeout")
 )
 
 // validateSessionName checks that a session name contains only safe characters.
@@ -107,7 +107,10 @@ func NewTmux() *Tmux {
 	return &Tmux{socketName: defaultSocket}
 }
 
-// NewTmuxWithSocket creates a new Tmux wrapper with a specific socket name.
+// NewTmuxWithSocket creates a Tmux wrapper that targets a named socket.
+// This creates/connects to an isolated tmux server, separate from the user's
+// default server. Primarily used in tests to prevent session name collisions
+// and keystroke leaks (e.g. Escape from NudgeSession hitting the user's prefix table).
 func NewTmuxWithSocket(socket string) *Tmux {
 	return &Tmux{socketName: socket}
 }
@@ -116,7 +119,8 @@ func NewTmuxWithSocket(socket string) *Tmux {
 // All commands include -u flag for UTF-8 support regardless of locale settings.
 // See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
-	// Prepend -u flag for UTF-8 mode (PATCH-004)
+	// Prepend global flags: -u (UTF-8 mode, PATCH-004) and optionally -L (socket).
+	// The -L flag must come before the subcommand, so it goes in the prefix.
 	allArgs := []string{"-u"}
 	if t.socketName != "" {
 		allArgs = append(allArgs, "-L", t.socketName)
@@ -177,19 +181,51 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // Unlike NewSession + SendKeys, this avoids race conditions where the shell isn't ready
 // or the command arrives before the shell prompt. The command runs directly as the
 // initial process of the pane.
+//
+// Validates workDir (if non-empty) exists and is a directory. After creation, performs
+// a brief health check to catch immediate command failures (binary not found, syntax
+// errors, etc.) so callers get an error instead of a silently dead session.
 // See: https://github.com/anthropics/gastown/issues/280
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
+	if workDir != "" {
+		info, err := os.Stat(workDir)
+		if err != nil {
+			return fmt.Errorf("invalid work directory %q: %w", workDir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("work directory %q is not a directory", workDir)
+		}
+	}
+
+	// Two-step creation: create session with default shell first, configure
+	// remain-on-exit, then replace the shell with the actual command. This
+	// eliminates the race between command exit and health check setup.
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
-	// Add the command as the last argument - tmux runs it as the pane's initial process
-	args = append(args, command)
-	_, err := t.run(args...)
-	return err
+	if _, err := t.run(args...); err != nil {
+		return err
+	}
+
+	// Enable remain-on-exit BEFORE command runs so we can inspect exit status
+	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "on")
+
+	// Replace the initial shell with the actual command
+	respawnArgs := []string{"respawn-pane", "-k", "-t", name}
+	if workDir != "" {
+		respawnArgs = append(respawnArgs, "-c", workDir)
+	}
+	respawnArgs = append(respawnArgs, command)
+	if _, err := t.run(respawnArgs...); err != nil {
+		_ = t.KillSession(name)
+		return fmt.Errorf("failed to start command in session %q: %w", name, err)
+	}
+
+	return t.checkSessionAfterCreate(name, command)
 }
 
 // NewSessionWithCommandAndEnv creates a new detached tmux session with environment
@@ -203,6 +239,21 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 // but -e provides defense-in-depth for the initial shell environment.
 // Requires tmux >= 3.2.
 func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env map[string]string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+	if workDir != "" {
+		info, err := os.Stat(workDir)
+		if err != nil {
+			return fmt.Errorf("invalid work directory %q: %w", workDir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("work directory %q is not a directory", workDir)
+		}
+	}
+
+	// Two-step creation: create session with env vars and default shell, then
+	// replace the shell with the actual command after configuring remain-on-exit.
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
@@ -217,10 +268,56 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	for _, k := range keys {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, env[k]))
 	}
-	// Add the command as the last argument
-	args = append(args, command)
-	_, err := t.run(args...)
-	return err
+	if _, err := t.run(args...); err != nil {
+		return err
+	}
+
+	// Enable remain-on-exit BEFORE command runs so we can inspect exit status
+	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "on")
+
+	// Replace the initial shell with the actual command
+	respawnArgs := []string{"respawn-pane", "-k", "-t", name}
+	if workDir != "" {
+		respawnArgs = append(respawnArgs, "-c", workDir)
+	}
+	respawnArgs = append(respawnArgs, command)
+	if _, err := t.run(respawnArgs...); err != nil {
+		_ = t.KillSession(name)
+		return fmt.Errorf("failed to start command in session %q: %w", name, err)
+	}
+
+	return t.checkSessionAfterCreate(name, command)
+}
+
+// checkSessionAfterCreate verifies that a newly created session's command didn't
+// fail immediately (binary not found, syntax error, etc.). Expects remain-on-exit
+// to already be enabled on the session. Checks the exit status after a brief delay.
+// Only returns an error for non-zero exits (command failures), not clean exits (status 0).
+func (t *Tmux) checkSessionAfterCreate(name, command string) error {
+	// Brief delay for immediate failures to manifest (binary not found, syntax errors).
+	time.Sleep(50 * time.Millisecond)
+
+	// Check if pane died
+	paneDead, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead}")
+	if strings.TrimSpace(paneDead) == "1" {
+		// Pane is dead — check exit status
+		exitStatus, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead_status}")
+		status := strings.TrimSpace(exitStatus)
+		if status != "" && status != "0" {
+			// Command failed (non-zero exit) — clean up and return error
+			_ = t.KillSession(name)
+			return fmt.Errorf("session %q: command exited with status %s: %s", name, status, command)
+		}
+		// Command exited cleanly (status 0) — clean up the dead session.
+		// This matches the default tmux behavior (no remain-on-exit) where
+		// sessions are destroyed when the pane process exits.
+		_ = t.KillSession(name)
+		return nil
+	}
+
+	// Pane is alive — restore default (no need to keep dead sessions around)
+	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "off")
+	return nil
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -927,11 +1024,29 @@ func (t *Tmux) IsSessionAttached(target string) bool {
 // Note: This always performs the resize. Use WakePaneIfDetached to skip
 // attached sessions where the wake is unnecessary.
 func (t *Tmux) WakePane(target string) {
-	// Resize pane down by 1 row, then up by 1 row
-	// This triggers SIGWINCH without changing the final pane size
-	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	// Use resize-window to trigger SIGWINCH. resize-pane doesn't work on
+	// single-pane sessions because the pane already fills the window.
+	// resize-window changes the window dimensions, which sends SIGWINCH to
+	// all processes in all panes of that window.
+	//
+	// Get current width, bump +1, then restore. This avoids permanent size
+	// changes even if the second resize fails.
+	widthStr, err := t.run("display-message", "-p", "-t", target, "#{window_width}")
+	if err != nil {
+		return // session may be dead
+	}
+	width := strings.TrimSpace(widthStr)
+	if width == "" {
+		return
+	}
+	// Parse width to compute +1
+	var w int
+	if _, err := fmt.Sscanf(width, "%d", &w); err != nil || w < 1 {
+		return
+	}
+	_, _ = t.run("resize-window", "-t", target, "-x", fmt.Sprintf("%d", w+1))
 	time.Sleep(50 * time.Millisecond)
-	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+	_, _ = t.run("resize-window", "-t", target, "-x", width)
 }
 
 // WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
@@ -953,6 +1068,72 @@ func isTransientSendKeysError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "not in a mode")
+}
+
+// sanitizeNudgeMessage removes control characters that corrupt tmux send-keys
+// delivery. ESC (0x1b) triggers terminal escape sequences, CR (0x0d) acts as
+// premature Enter, BS (0x08) deletes characters. TAB is replaced with a space
+// to avoid triggering shell completion. Printable characters (including quotes,
+// backticks, and Unicode) are preserved.
+func sanitizeNudgeMessage(msg string) string {
+	var b strings.Builder
+	b.Grow(len(msg))
+	for _, r := range msg {
+		switch {
+		case r == '\t': // TAB → space (avoid triggering completion)
+			b.WriteRune(' ')
+		case r == '\n': // preserve newlines (send-keys -l treats as Enter, known limitation)
+			b.WriteRune(r)
+		case r < 0x20: // strip all other control chars (ESC, CR, BS, etc.)
+			continue
+		case r == 0x7f: // DEL
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// sendMessageToTarget sends a sanitized message to a tmux target. For small
+// messages (< sendKeysChunkSize), uses send-keys -l. For larger messages,
+// sends in chunks with delays to avoid overwhelming the TTY input buffer.
+//
+// NOTE: The Linux TTY canonical mode buffer is 4096 bytes. Messages longer
+// than ~4000 bytes may be truncated by the kernel's line discipline when
+// delivered to programs using line-buffered input (readline, read, etc.).
+// This is a fundamental kernel limit, not a tmux limitation. Programs reading
+// raw stdin (like Claude Code's TUI) are not affected.
+const sendKeysChunkSize = 512
+
+func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) error {
+	if len(text) <= sendKeysChunkSize {
+		return t.sendKeysLiteralWithRetry(target, text, timeout)
+	}
+	// Send in chunks to avoid tmux send-keys argument length limits.
+	// Each chunk is sent with a small delay to let the terminal process it.
+	for i := 0; i < len(text); i += sendKeysChunkSize {
+		end := i + sendKeysChunkSize
+		if end > len(text) {
+			end = len(text)
+		}
+		chunk := text[i:end]
+		if i == 0 {
+			// First chunk uses retry logic for startup race
+			if err := t.sendKeysLiteralWithRetry(target, chunk, timeout); err != nil {
+				return err
+			}
+		} else {
+			if _, err := t.run("send-keys", "-t", target, "-l", chunk); err != nil {
+				return err
+			}
+		}
+		// Small delay between chunks to let the terminal process
+		if end < len(text) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	return nil
 }
 
 // sendKeysLiteralWithRetry sends literal text to a tmux target, retrying on
@@ -1030,20 +1211,36 @@ func (t *Tmux) NudgeSession(session, message string) error {
 		target = agentPane
 	}
 
-	// 1. Send text in literal mode with retry on transient errors
-	if err := t.sendKeysLiteralWithRetry(target, message, constants.NudgeReadyTimeout); err != nil {
+	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
+	//    preventing delivery to the underlying process.
+	if inMode, _ := t.run("display-message", "-p", "-t", target, "#{pane_in_mode}"); strings.TrimSpace(inMode) == "1" {
+		_, _ = t.run("send-keys", "-t", target, "-X", "cancel")
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// 2. Sanitize control characters that corrupt delivery
+	sanitized := sanitizeNudgeMessage(message)
+
+	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
+	//    with 10ms inter-chunk delays to avoid argument length limits.
+	if err := t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout); err != nil {
 		return err
 	}
 
-	// 2. Wait 500ms for paste to complete (tested, required)
+	// 4. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", target, "Escape")
-	time.Sleep(100 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+	// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
+	// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
+	// does NOT submit the line.
+	time.Sleep(600 * time.Millisecond)
+
+	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -1053,7 +1250,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		// 8. Wake the pane to trigger SIGWINCH for detached sessions
 		t.WakePaneIfDetached(session)
 		return nil
 	}
@@ -1072,20 +1269,33 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	}
 	defer releaseNudgeLock(pane)
 
-	// 1. Send text in literal mode with retry on transient errors
-	if err := t.sendKeysLiteralWithRetry(pane, message, constants.NudgeReadyTimeout); err != nil {
+	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
+	//    preventing delivery to the underlying process.
+	if inMode, _ := t.run("display-message", "-p", "-t", pane, "#{pane_in_mode}"); strings.TrimSpace(inMode) == "1" {
+		_, _ = t.run("send-keys", "-t", pane, "-X", "cancel")
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// 2. Sanitize control characters that corrupt delivery
+	sanitized := sanitizeNudgeMessage(message)
+
+	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
+	//    with 10ms inter-chunk delays to avoid argument length limits.
+	if err := t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout); err != nil {
 		return err
 	}
 
-	// 2. Wait 500ms for paste to complete (tested, required)
+	// 4. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", pane, "Escape")
-	time.Sleep(100 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+	time.Sleep(600 * time.Millisecond)
+
+	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -1095,7 +1305,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		// 8. Wake the pane to trigger SIGWINCH for detached sessions
 		t.WakePaneIfDetached(pane)
 		return nil
 	}
@@ -2562,4 +2772,3 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 
 	return nil
 }
-
