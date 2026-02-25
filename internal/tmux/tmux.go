@@ -39,11 +39,11 @@ var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Common errors
 var (
-	ErrNoServer            = errors.New("no tmux server running")
-	ErrSessionExists       = errors.New("session already exists")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrInvalidSessionName  = errors.New("invalid session name")
-	ErrIdleTimeout         = errors.New("agent not idle before timeout")
+	ErrNoServer           = errors.New("no tmux server running")
+	ErrSessionExists      = errors.New("session already exists")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrInvalidSessionName = errors.New("invalid session name")
+	ErrIdleTimeout        = errors.New("agent not idle before timeout")
 )
 
 // validateSessionName checks that a session name contains only safe characters.
@@ -1104,8 +1104,8 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 // AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
 // automated sessions. Currently handles (in order):
-//   1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
-//   2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+//  1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
+//  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
 //
 // Call this after starting Claude and waiting for it to initialize (WaitForCommand),
 // but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
@@ -2120,6 +2120,27 @@ func (t *Tmux) SetMailClickBinding(session string) error {
 	return err
 }
 
+// IsPaneDead checks if the pane in a session has exited (remain-on-exit keeps it visible).
+// Returns true if the pane's process has exited but the pane is still displayed.
+// This distinguishes a "dead pane waiting for respawn" from a "zombie shell still running".
+func (t *Tmux) IsPaneDead(session string) bool {
+	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_dead}")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) == "1"
+}
+
+// RespawnPaneDefault restarts a dead pane with its original command.
+// This is used when the pane process has exited (remain-on-exit on) and we
+// want to restart it in place without killing the entire session.
+// Unlike RespawnPane, this does NOT specify a new command — tmux reuses the
+// command from when the pane was created or last respawned.
+func (t *Tmux) RespawnPaneDefault(session string) error {
+	_, err := t.run("respawn-pane", "-k", "-t", session)
+	return err
+}
+
 // RespawnPane kills all processes in a pane and starts a new command.
 // This is used for "hot reload" of agent sessions - instantly restart in place.
 // The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
@@ -2552,7 +2573,16 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 	// IMPORTANT: respawn-pane automatically resets remain-on-exit to off!
 	// We must re-enable it after each respawn for continuous recovery.
 	// The sleep prevents rapid respawn loops if Claude crashes immediately.
-	hookCmd := fmt.Sprintf(`run-shell "sleep 3 && tmux respawn-pane -k -t '%s' && tmux set-option -t '%s' remain-on-exit on"`, safeSession, safeSession)
+	//
+	// When a socket is configured, the embedded tmux commands MUST include
+	// the -L flag. run-shell spawns a subprocess that runs bare `tmux` which
+	// would otherwise connect to the default server instead of the town socket.
+	tmuxCmd := "tmux"
+	if t.socketName != "" {
+		tmuxCmd = fmt.Sprintf("tmux -L %s", t.socketName)
+	}
+	hookCmd := fmt.Sprintf(`run-shell "sleep 3 && %s respawn-pane -k -t '%s' && %s set-option -t '%s' remain-on-exit on"`,
+		tmuxCmd, safeSession, tmuxCmd, safeSession)
 
 	// Set the hook on this specific session
 	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
@@ -2562,4 +2592,3 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 
 	return nil
 }
-
