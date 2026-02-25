@@ -44,6 +44,28 @@ type HealthReport struct {
 	Error     int // file could not be read (e.g. permission denied)
 }
 
+// GetEmbeddedFormulaContent returns the raw content of an embedded formula by name.
+// The name can be with or without the .formula.toml suffix.
+// Returns the content bytes, or an error if the formula is not found.
+func GetEmbeddedFormulaContent(name string) ([]byte, error) {
+	// Normalize: ensure the filename has the correct suffix
+	filename := name
+	if !hasFormulaSuffix(filename) {
+		filename = filename + ".formula.toml"
+	}
+	content, err := formulasFS.ReadFile("formulas/" + filename)
+	if err != nil {
+		return nil, fmt.Errorf("embedded formula %q not found: %w", name, err)
+	}
+	return content, nil
+}
+
+// hasFormulaSuffix checks if a name already has a formula file suffix.
+func hasFormulaSuffix(name string) bool {
+	return len(name) > len(".formula.toml") &&
+		name[len(name)-len(".formula.toml"):] == ".formula.toml"
+}
+
 // computeHash computes SHA256 hash of data.
 func computeHash(data []byte) string {
 	hash := sha256.Sum256(data)

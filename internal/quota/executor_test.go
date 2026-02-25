@@ -97,6 +97,8 @@ func (m *mockExecutor) RespawnPane(pane, command string) error {
 	return nil
 }
 
+func (m *mockExecutor) AcceptStartupDialogs(_ string) error          { return nil }
+func (m *mockExecutor) AcceptWorkspaceTrustDialog(_ string) error    { return nil }
 func (m *mockExecutor) AcceptBypassPermissionsWarning(_ string) error {
 	return nil
 }
@@ -499,7 +501,7 @@ func TestExecute_NonCriticalWarnings(t *testing.T) {
 	}
 
 	// Should have logged warnings for the non-critical failures
-	// (SetRemainOnExit, KillPaneProcesses, ClearHistory, AcceptBypassPermissionsWarning)
+	// (SetRemainOnExit, KillPaneProcesses, ClearHistory, AcceptStartupDialogs)
 	if len(log.warnings) != 4 {
 		t.Errorf("expected 4 warnings, got %d: %v", len(log.warnings), log.warnings)
 	}
@@ -552,6 +554,10 @@ func (f *failingNonCriticalExecutor) RespawnPane(pane, command string) error {
 	return nil
 }
 
+func (f *failingNonCriticalExecutor) AcceptStartupDialogs(_ string) error {
+	return fmt.Errorf("accept startup dialogs failed")
+}
+func (f *failingNonCriticalExecutor) AcceptWorkspaceTrustDialog(_ string) error    { return nil }
 func (f *failingNonCriticalExecutor) AcceptBypassPermissionsWarning(_ string) error {
 	return fmt.Errorf("accept bypass permissions failed")
 }

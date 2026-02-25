@@ -287,9 +287,9 @@ func TestResolveSettingsTarget(t *testing.T) {
 			expected: "/home/user/gt/myrig/witness",
 		},
 		{
-			name:     "refinery subdir resolves to refinery parent",
+			name:     "refinery subdir resolves to refinery/rig",
 			cwd:      "/home/user/gt/myrig/refinery/rig",
-			expected: "/home/user/gt/myrig/refinery",
+			expected: "/home/user/gt/myrig/refinery/rig",
 		},
 		{
 			name:     "mayor stays at cwd",

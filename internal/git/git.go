@@ -108,7 +108,7 @@ func (g *Git) run(args ...string) (string, error) {
 }
 
 // runWithEnv executes a git command with additional environment variables.
-func (g *Git) runWithEnv(args []string, extraEnv []string) (string, error) {
+func (g *Git) runWithEnv(args []string, extraEnv []string) (_ string, _ error) { //nolint:unparam // string return kept for consistency with Run()
 	if g.gitDir != "" {
 		args = append([]string{"--git-dir=" + g.gitDir}, args...)
 	}
@@ -652,6 +652,12 @@ func (g *Git) MergeSquash(branch, message string) error {
 // performing squash merges.
 func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
 	return g.run("log", "-1", "--format=%B", branch)
+}
+
+// RecentCommits returns the last n commits as one-line summaries (hash + subject).
+// Returns empty string if there are no commits or the repo is empty.
+func (g *Git) RecentCommits(n int) (string, error) {
+	return g.run("log", "--oneline", fmt.Sprintf("-%d", n))
 }
 
 // DeleteRemoteBranch deletes a branch on the remote.

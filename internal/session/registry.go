@@ -11,7 +11,10 @@ import (
 	"strings"
 	"sync"
 
+	"regexp"
+
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // PrefixRegistry maps beads prefixes to rig names and vice versa.
@@ -108,6 +111,20 @@ func SetDefaultRegistry(r *PrefixRegistry) {
 func InitRegistry(townRoot string) error {
 	var errs []error
 
+	// Set tmux socket for session discovery.
+	// If we're inside tmux, parse the socket from $TMUX (e.g. /tmp/tmux-501/default,pid,idx)
+	// so we query the same server our session lives on. When not inside tmux
+	// (e.g., daemon process), leave the socket unset so tmux uses its default
+	// server — the same one the user's interactive sessions live on.
+	// Session names already include rig prefixes (hq-deacon, gt-witness, etc.)
+	// so there's no collision risk on the default server.
+	if tmuxEnv := os.Getenv("TMUX"); tmuxEnv != "" {
+		// $TMUX format: /path/to/socket,server_pid,session_index
+		if socketPath, _, ok := strings.Cut(tmuxEnv, ","); ok && socketPath != "" {
+			tmux.SetDefaultSocket(filepath.Base(socketPath))
+		}
+	}
+
 	r, err := BuildPrefixRegistryFromTown(townRoot)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("prefix registry: %w", err))
@@ -122,6 +139,21 @@ func InitRegistry(townRoot string) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// sanitizeRe matches non-alphanumeric, non-hyphen characters.
+var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// sanitizeTownName cleans a town name to be a valid tmux socket name.
+// Lowercases, replaces non-alphanumeric characters with hyphens, trims hyphens.
+func sanitizeTownName(name string) string {
+	name = strings.ToLower(name)
+	name = sanitizeRe.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+	if name == "" {
+		return "default"
+	}
+	return name
 }
 
 // PrefixFor returns the beads prefix for a rig, using the default registry.

@@ -125,8 +125,11 @@ func TestBeadsRedirectTargetCheck_PolecatBrokenTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create polecat with redirect to non-existent target
+	// Create polecat with .git (old flat structure) and redirect to non-existent target
 	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(polecatDir, ".git"), []byte("gitdir: /fake\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(polecatBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -398,6 +401,10 @@ func TestBeadsRedirectTargetCheck_MultipleWorktrees(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(beadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Mark polecat as old-style flat worktree (has .git)
+	if err := os.WriteFile(filepath.Join(rigDir, "polecats", "polecat1", ".git"), []byte("gitdir: /fake\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
 	check := NewBeadsRedirectTargetCheck()

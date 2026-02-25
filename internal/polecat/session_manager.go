@@ -384,8 +384,8 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Wait for Claude to start (non-fatal)
 	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
 
-	// Accept bypass permissions warning dialog if it appears
-	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear
+	debugSession("AcceptStartupDialogs", m.tmux.AcceptStartupDialogs(sessionID))
 
 	// Wait for runtime to be fully ready at the prompt (not just started).
 	// Uses prompt-based polling for agents with ReadyPromptPrefix (e.g., Claude "❯ "),
@@ -415,6 +415,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			// Send work instructions via nudge
 			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
 		}
+	}
+
+	// Verify startup nudge was delivered: poll for idle prompt and retry if lost.
+	// This fixes the Mode B race where the nudge arrives before Claude Code is ready,
+	// causing the polecat to sit idle at an empty prompt. See GH#1379.
+	if fallbackInfo.SendStartupNudge {
+		m.verifyStartupNudgeDelivery(sessionID, runtimeConfig)
 	}
 
 	// Legacy fallback for other startup paths (non-fatal)
@@ -711,6 +718,58 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 		return fmt.Errorf("%w: %s is tombstoned", ErrIssueInvalid, issueID)
 	}
 	return nil
+}
+
+// verifyStartupNudgeDelivery checks if the polecat started working after the
+// startup nudge and retries the nudge if the agent is still idle at its prompt.
+// This fixes the Mode B race condition (GH#1379) where the startup nudge arrives
+// before Claude Code is ready, causing the polecat to sit idle.
+//
+// The approach models ensureAgentReady (sling_helpers.go): after the nudge, wait
+// a verification delay, then check if the agent is at its idle prompt. If idle,
+// re-send the nudge and check again, up to StartupNudgeMaxRetries times.
+//
+// Non-fatal: if verification fails or times out, the session is left running.
+// The witness zombie patrol will eventually detect and handle truly idle polecats.
+func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config.RuntimeConfig) {
+	// Only verify for agents with prompt detection. Without ReadyPromptPrefix,
+	// we can't distinguish "idle at prompt" from "busy processing".
+	if rc == nil || rc.Tmux == nil || rc.Tmux.ReadyPromptPrefix == "" {
+		return
+	}
+
+	nudgeContent := runtime.StartupNudgeContent()
+
+	for attempt := 1; attempt <= constants.StartupNudgeMaxRetries; attempt++ {
+		// Wait for the agent to process the nudge before checking.
+		time.Sleep(constants.StartupNudgeVerifyDelay)
+
+		// Check if session is still alive
+		running, err := m.tmux.HasSession(sessionID)
+		if err != nil || !running {
+			return // Session died, nothing to verify
+		}
+
+		// If the agent is NOT at the prompt, it's working — nudge was received.
+		if !m.tmux.IsAtPrompt(sessionID, rc) {
+			return
+		}
+
+		// Agent is at the idle prompt — nudge was likely lost. Retry.
+		fmt.Fprintf(os.Stderr, "[startup-nudge] attempt %d/%d: agent %s idle at prompt, retrying nudge\n",
+			attempt, constants.StartupNudgeMaxRetries, sessionID)
+		if err := m.tmux.NudgeSession(sessionID, nudgeContent); err != nil {
+			fmt.Fprintf(os.Stderr, "[startup-nudge] retry nudge failed for %s: %v\n", sessionID, err)
+			return
+		}
+	}
+
+	// If we exhausted retries and the agent is still idle, log a warning.
+	// The witness zombie patrol will handle this case.
+	if m.tmux.IsAtPrompt(sessionID, rc) {
+		fmt.Fprintf(os.Stderr, "[startup-nudge] WARNING: agent %s still idle after %d nudge retries\n",
+			sessionID, constants.StartupNudgeMaxRetries)
+	}
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.

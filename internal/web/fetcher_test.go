@@ -435,7 +435,7 @@ func TestNewConvoyHandler_StoresTimeout(t *testing.T) {
 	mock := &MockConvoyFetcher{}
 	timeout := 15 * time.Second
 
-	handler, err := NewConvoyHandler(mock, timeout)
+	handler, err := NewConvoyHandler(mock, timeout, "test-token")
 	if err != nil {
 		t.Fatalf("NewConvoyHandler: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestNewConvoyHandler_StoresTimeout(t *testing.T) {
 
 func TestNewConvoyHandler_ZeroTimeout(t *testing.T) {
 	mock := &MockConvoyFetcher{}
-	handler, err := NewConvoyHandler(mock, 0)
+	handler, err := NewConvoyHandler(mock, 0, "test-token")
 	if err != nil {
 		t.Fatalf("NewConvoyHandler: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestNewAPIHandler_StoresTimeouts(t *testing.T) {
 	defTimeout := 45 * time.Second
 	maxTimeout := 90 * time.Second
 
-	handler := NewAPIHandler(defTimeout, maxTimeout)
+	handler := NewAPIHandler(defTimeout, maxTimeout, "test-token")
 	if handler.defaultRunTimeout != defTimeout {
 		t.Errorf("defaultRunTimeout = %v, want %v", handler.defaultRunTimeout, defTimeout)
 	}

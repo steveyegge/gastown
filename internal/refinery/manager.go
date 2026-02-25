@@ -201,9 +201,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
 
-	// Accept bypass permissions warning dialog if it appears.
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
 	// Must be before WaitForRuntimeReady to avoid race where dialog blocks prompt detection.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
+	_ = t.AcceptStartupDialogs(sessionID)
 
 	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
 	// WaitForRuntimeReady waits for the runtime to be ready

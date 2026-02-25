@@ -2610,6 +2610,55 @@ func TestStripEnvPrefixes_PreservesOrder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// translateDoltPort tests
+// ---------------------------------------------------------------------------
+
+// TestTranslateDoltPort verifies GT_DOLT_PORT → BEADS_DOLT_PORT translation.
+// This is the core fix for hq-27t: gastown sets GT_DOLT_PORT but bd only reads
+// BEADS_DOLT_PORT. Without translation, bd falls back to metadata.json port 3307.
+func TestTranslateDoltPort(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{
+			name: "translates GT to BEADS",
+			env:  []string{"GT_DOLT_PORT=12345", "PATH=/usr/bin"},
+			want: []string{"GT_DOLT_PORT=12345", "PATH=/usr/bin", "BEADS_DOLT_PORT=12345"},
+		},
+		{
+			name: "skips if BEADS_DOLT_PORT already set",
+			env:  []string{"GT_DOLT_PORT=12345", "BEADS_DOLT_PORT=99999"},
+			want: []string{"GT_DOLT_PORT=12345", "BEADS_DOLT_PORT=99999"},
+		},
+		{
+			name: "no-op without GT_DOLT_PORT",
+			env:  []string{"PATH=/usr/bin"},
+			want: []string{"PATH=/usr/bin"},
+		},
+		{
+			name: "empty env",
+			env:  []string{},
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := translateDoltPort(tt.env)
+			if len(got) != len(tt.want) {
+				t.Fatalf("translateDoltPort() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Integration tests — verify env behavior with real os.Environ()
 // ---------------------------------------------------------------------------
 

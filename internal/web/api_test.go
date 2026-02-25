@@ -247,7 +247,7 @@ func TestParseCommandArgs(t *testing.T) {
 }
 
 func TestAPIHandler_Commands(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/commands", nil)
 	w := httptest.NewRecorder()
@@ -293,11 +293,12 @@ func TestAPIHandler_Commands(t *testing.T) {
 }
 
 func TestAPIHandler_Run_BlockedCommand(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{"command": "delete everything"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -320,11 +321,12 @@ func TestAPIHandler_Run_BlockedCommand(t *testing.T) {
 }
 
 func TestAPIHandler_Run_InvalidJSON(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -335,11 +337,12 @@ func TestAPIHandler_Run_InvalidJSON(t *testing.T) {
 }
 
 func TestAPIHandler_Run_EmptyCommand(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{"command": ""}`
 	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -349,8 +352,76 @@ func TestAPIHandler_Run_EmptyCommand(t *testing.T) {
 	}
 }
 
+func TestAPIHandler_Run_MissingCSRFToken(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+
+	body := `{"command": "status"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	// Deliberately omit X-Dashboard-Token header
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/run without CSRF token status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	var resp CommandResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("Expected success=false without CSRF token")
+	}
+	if !strings.Contains(resp.Error, "dashboard token") {
+		t.Errorf("Expected error about dashboard token, got: %q", resp.Error)
+	}
+}
+
+func TestAPIHandler_Run_WrongCSRFToken(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+
+	body := `{"command": "status"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "wrong-token")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/run with wrong CSRF token status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestAPIHandler_Run_ConfirmRequired(t *testing.T) {
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+
+	// "mail send" requires Confirm: true in AllowedCommands
+	body := `{"command": "mail send alice -s test -m hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/run confirm command without confirmed=true status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	var resp CommandResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "confirmation") {
+		t.Errorf("Expected error about confirmation, got: %q", resp.Error)
+	}
+}
+
 func TestAPIHandler_NotFound(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
 	w := httptest.NewRecorder()
@@ -384,7 +455,7 @@ func TestGetCommandList(t *testing.T) {
 }
 
 func TestAPIHandler_Crew(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/crew", nil)
 	w := httptest.NewRecorder()
@@ -410,7 +481,7 @@ func TestAPIHandler_Crew(t *testing.T) {
 }
 
 func TestAPIHandler_Ready(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	w := httptest.NewRecorder()
@@ -436,11 +507,12 @@ func TestAPIHandler_Ready(t *testing.T) {
 }
 
 func TestAPIHandler_IssueCreate_MissingTitle(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{"title": ""}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -451,7 +523,7 @@ func TestAPIHandler_IssueCreate_MissingTitle(t *testing.T) {
 }
 
 func TestAPIHandler_IssueCreate_InvalidTitle(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	tests := []struct {
 		name  string
@@ -470,6 +542,7 @@ func TestAPIHandler_IssueCreate_InvalidTitle(t *testing.T) {
 			body, _ := json.Marshal(payload)
 			req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Dashboard-Token", "test-token")
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -482,7 +555,7 @@ func TestAPIHandler_IssueCreate_InvalidTitle(t *testing.T) {
 }
 
 func TestAPIHandler_IssueCreate_InvalidDescription(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	payload := map[string]interface{}{
 		"title":       "Valid title",
@@ -491,6 +564,7 @@ func TestAPIHandler_IssueCreate_InvalidDescription(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -501,11 +575,12 @@ func TestAPIHandler_IssueCreate_InvalidDescription(t *testing.T) {
 }
 
 func TestAPIHandler_IssueCreate_InvalidJSON(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{not valid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -767,7 +842,7 @@ func TestParseIssueShowJSON_InvalidInputs(t *testing.T) {
 }
 
 func TestAPIHandler_SSE_ContentType(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	// Cancel context quickly so the SSE handler returns instead of blocking

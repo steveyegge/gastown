@@ -75,6 +75,9 @@ type Issue struct {
 	Labels      []string `json:"labels,omitempty"`
 	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues, not synced to git
 
+	// Content fields (parsed from bd show --json)
+	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
+
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
@@ -98,6 +101,22 @@ func HasLabel(issue *Issue, label string) bool {
 		}
 	}
 	return false
+}
+
+// HasUncheckedCriteria checks if an issue has acceptance criteria with unchecked items.
+// Returns the count of unchecked items (0 means all checked or no criteria).
+func HasUncheckedCriteria(issue *Issue) int {
+	if issue == nil || issue.AcceptanceCriteria == "" {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(issue.AcceptanceCriteria, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- [ ] ") {
+			count++
+		}
+	}
+	return count
 }
 
 // IsAgentBead checks if an issue is an agent bead by checking for the gt:agent
@@ -399,10 +418,12 @@ func (b *Beads) buildRunEnv() []string {
 		env := filterBeadsEnv(os.Environ())
 		if b.serverPort > 0 {
 			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+			env = append(env, fmt.Sprintf("BEADS_DOLT_PORT=%d", b.serverPort))
 		}
 		return env
 	}
-	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	env := stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	return translateDoltPort(env)
 }
 
 // buildRoutingEnv builds the environment for runWithRouting() calls.
@@ -413,10 +434,12 @@ func (b *Beads) buildRoutingEnv() []string {
 		env := filterBeadsEnv(os.Environ())
 		if b.serverPort > 0 {
 			env = append(env, fmt.Sprintf("GT_DOLT_PORT=%d", b.serverPort))
+			env = append(env, fmt.Sprintf("BEADS_DOLT_PORT=%d", b.serverPort))
 		}
 		return env
 	}
-	return stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	env := stripEnvPrefixes(os.Environ(), "BEADS_DIR=")
+	return translateDoltPort(env)
 }
 
 // filterBeadsEnv removes beads-related environment variables from the given
@@ -448,6 +471,27 @@ func filterBeadsEnv(environ []string) []string {
 		filtered = append(filtered, env)
 	}
 	return filtered
+}
+
+// translateDoltPort ensures BEADS_DOLT_PORT is set when GT_DOLT_PORT is present.
+// Gas Town uses GT_DOLT_PORT; beads uses BEADS_DOLT_PORT. This translation
+// prevents bd subprocesses from falling back to metadata.json's port 3307
+// (production) when a test or daemon has set GT_DOLT_PORT to an alternate port.
+func translateDoltPort(env []string) []string {
+	var gtPort string
+	hasBDP := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "GT_DOLT_PORT=") {
+			gtPort = strings.TrimPrefix(e, "GT_DOLT_PORT=")
+		}
+		if strings.HasPrefix(e, "BEADS_DOLT_PORT=") {
+			hasBDP = true
+		}
+	}
+	if gtPort != "" && !hasBDP {
+		env = append(env, "BEADS_DOLT_PORT="+gtPort)
+	}
+	return env
 }
 
 // stripEnvPrefixes removes entries matching any of the given prefixes from an
@@ -525,47 +569,27 @@ func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	})
 }
 
-// GetAssignedIssue returns the first open or hooked issue assigned to the given assignee.
-// Returns nil if no open or hooked issue is assigned.
+// GetAssignedIssue returns the first issue assigned to the given assignee.
+// Checks open, in_progress, and hooked statuses (hooked = work on agent's hook).
+// Returns nil if no matching issue is assigned.
 func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
-	issues, err := b.List(ListOptions{
-		Status:   "open",
-		Assignee: assignee,
-		Priority: -1,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Also check in_progress status explicitly
-	if len(issues) == 0 {
-		issues, err = b.List(ListOptions{
-			Status:   "in_progress",
+	// Check all active work statuses: open, in_progress, and hooked
+	// "hooked" status is set by gt sling when work is attached to an agent's hook
+	for _, status := range []string{"open", "in_progress", StatusHooked} {
+		issues, err := b.List(ListOptions{
+			Status:   status,
 			Assignee: assignee,
 			Priority: -1,
 		})
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	// Also check hooked status - polecat may have work attached but not yet started
-	if len(issues) == 0 {
-		issues, err = b.List(ListOptions{
-			Status:   "hooked",
-			Assignee: assignee,
-			Priority: -1,
-		})
-		if err != nil {
-			return nil, err
+		if len(issues) > 0 {
+			return issues[0], nil
 		}
 	}
 
-	if len(issues) == 0 {
-		return nil, nil
-	}
-
-	return issues[0], nil
+	return nil, nil
 }
 
 // Ready returns issues that are ready to work (not blocked).

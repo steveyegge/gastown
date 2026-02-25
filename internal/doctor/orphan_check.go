@@ -394,7 +394,7 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 	sessions, _ := t.ListSessions()
 	for _, session := range sessions {
 		// Get pane PIDs for this session
-		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		out, err := tmux.BuildCommand("list-panes", "-t", session, "-F", "#{pane_pid}").Output()
 		if err != nil {
 			continue
 		}

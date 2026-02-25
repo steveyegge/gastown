@@ -205,9 +205,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return fmt.Errorf("waiting for witness to start: %w", err)
 	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	if err := t.AcceptBypassPermissionsWarning(sessionID); err != nil {
-		log.Printf("warning: accepting bypass permissions for %s: %v", sessionID, err)
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
+	if err := t.AcceptStartupDialogs(sessionID); err != nil {
+		log.Printf("warning: accepting startup dialogs for %s: %v", sessionID, err)
 	}
 
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)

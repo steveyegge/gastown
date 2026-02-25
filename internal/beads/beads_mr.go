@@ -30,3 +30,25 @@ func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
 	return nil, nil
 }
 
+// FindMRForBranchAny searches for a merge-request bead for the given branch
+// across all statuses (open and closed). Used by recovery checks to determine
+// if work was ever submitted to the merge queue. See #1035.
+func (b *Beads) FindMRForBranchAny(branch string) (*Issue, error) {
+	issues, err := b.List(ListOptions{
+		Status: "all",
+		Label:  "gt:merge-request",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	branchPrefix := "branch: " + branch + "\n"
+	for _, issue := range issues {
+		if strings.HasPrefix(issue.Description, branchPrefix) {
+			return issue, nil
+		}
+	}
+
+	return nil, nil
+}
+

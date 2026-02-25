@@ -18,6 +18,8 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -62,9 +64,37 @@ type TownStatus struct {
 	Name     string         `json:"name"`
 	Location string         `json:"location"`
 	Overseer *OverseerInfo  `json:"overseer,omitempty"` // Human operator
+	Daemon   *ServiceInfo   `json:"daemon,omitempty"`   // Daemon status
+	Dolt     *DoltInfo      `json:"dolt,omitempty"`     // Dolt server status
+	Tmux     *TmuxInfo      `json:"tmux,omitempty"`     // Tmux server status
 	Agents   []AgentRuntime `json:"agents"`             // Global agents (Mayor, Deacon)
 	Rigs     []RigStatus    `json:"rigs"`
 	Summary  StatusSum      `json:"summary"`
+}
+
+// ServiceInfo represents a background service status.
+type ServiceInfo struct {
+	Running bool `json:"running"`
+	PID     int  `json:"pid,omitempty"`
+}
+
+// DoltInfo represents the Dolt server status.
+type DoltInfo struct {
+	Running       bool   `json:"running"`
+	PID           int    `json:"pid,omitempty"`
+	Port          int    `json:"port"`
+	Remote        bool   `json:"remote,omitempty"`
+	DataDir       string `json:"data_dir,omitempty"`
+	PortConflict  bool   `json:"port_conflict,omitempty"`   // Port taken by another town's Dolt
+	ConflictOwner string `json:"conflict_owner,omitempty"`  // --data-dir of the process holding the port
+}
+
+// TmuxInfo represents the tmux server status.
+type TmuxInfo struct {
+	Socket       string `json:"socket"`                  // Socket name (e.g., "mytown" or "default")
+	SocketPath   string `json:"socket_path,omitempty"`   // Full socket path
+	Running      bool   `json:"running"`                 // Is the tmux server running?
+	SessionCount int    `json:"session_count"`            // Number of sessions
 }
 
 // OverseerInfo represents the human operator's identity and status.
@@ -743,6 +773,51 @@ func gatherStatus() (TownStatus, error) {
 		Rigs:     make([]RigStatus, len(rigs)),
 	}
 
+	// Daemon status
+	if daemonRunning, daemonPid, err := daemon.IsRunning(townRoot); err == nil {
+		status.Daemon = &ServiceInfo{Running: daemonRunning, PID: daemonPid}
+	}
+
+	// Dolt status
+	doltCfg := doltserver.DefaultConfig(townRoot)
+	if doltCfg.IsRemote() {
+		status.Dolt = &DoltInfo{Remote: true, Port: doltCfg.Port}
+	} else {
+		doltRunning, doltPid, _ := doltserver.IsRunning(townRoot)
+		doltInfo := &DoltInfo{
+			Running: doltRunning,
+			PID:     doltPid,
+			Port:    doltCfg.Port,
+			DataDir: doltCfg.DataDir,
+		}
+		// Check if port is held by another town's Dolt
+		if !doltRunning {
+			if conflictPid, conflictDir := doltserver.CheckPortConflict(townRoot); conflictPid > 0 {
+				doltInfo.PortConflict = true
+				doltInfo.ConflictOwner = conflictDir
+			}
+		}
+		status.Dolt = doltInfo
+	}
+
+	// Tmux status
+	socket := tmux.GetDefaultSocket()
+	socketLabel := "default"
+	if socket != "" {
+		socketLabel = socket
+	}
+	tmuxInfo := &TmuxInfo{
+		Socket:       socketLabel,
+		SessionCount: len(allSessions),
+		Running:      len(allSessions) > 0,
+	}
+	// Resolve socket path: /tmp/tmux-<UID>/<socket>
+	tmuxInfo.SocketPath = filepath.Join(os.TempDir(), fmt.Sprintf("tmux-%d", os.Getuid()), socketLabel)
+	if _, err := os.Stat(tmuxInfo.SocketPath); err == nil {
+		tmuxInfo.Running = true
+	}
+	status.Tmux = tmuxInfo
+
 	var wg sync.WaitGroup
 
 	// Fetch global agents in parallel with rig discovery
@@ -863,6 +938,39 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		if status.Overseer.UnreadMail > 0 {
 			fmt.Fprintf(w, "   📬 %d unread\n", status.Overseer.UnreadMail)
 		}
+		fmt.Fprintln(w)
+	}
+
+	// Infrastructure services
+	if status.Daemon != nil || status.Dolt != nil || status.Tmux != nil {
+		fmt.Fprintf(w, "%s ", style.Bold.Render("Services:"))
+		var parts []string
+		if status.Daemon != nil {
+			if status.Daemon.Running {
+				parts = append(parts, fmt.Sprintf("daemon %s", style.Dim.Render(fmt.Sprintf("(PID %d)", status.Daemon.PID))))
+			} else {
+				parts = append(parts, fmt.Sprintf("daemon %s", style.Dim.Render("(stopped)")))
+			}
+		}
+		if status.Dolt != nil {
+			if status.Dolt.Remote {
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(remote :%d)", status.Dolt.Port))))
+			} else if status.Dolt.Running {
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(PID %d, :%d)", status.Dolt.PID, status.Dolt.Port))))
+			} else if status.Dolt.PortConflict {
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Bold.Render(fmt.Sprintf("(stopped, :%d ⚠ port used by %s)", status.Dolt.Port, status.Dolt.ConflictOwner))))
+			} else {
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(stopped, :%d)", status.Dolt.Port))))
+			}
+		}
+		if status.Tmux != nil {
+			if status.Tmux.Running {
+				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, %d sessions)", status.Tmux.Socket, status.Tmux.SessionCount))))
+			} else {
+				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, no server)", status.Tmux.Socket))))
+			}
+		}
+		fmt.Fprintf(w, "%s\n", strings.Join(parts, "  "))
 		fmt.Fprintln(w)
 	}
 

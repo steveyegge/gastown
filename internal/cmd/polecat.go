@@ -214,14 +214,15 @@ Examples:
 var polecatCheckRecoveryCmd = &cobra.Command{
 	Use:   "check-recovery <rig>/<polecat>",
 	Short: "Check if polecat needs recovery vs safe to nuke",
-	Long: `Check recovery status of a polecat based on cleanup_status in agent bead.
+	Long: `Check recovery status of a polecat based on cleanup_status and merge queue state.
 
 Used by the Witness to determine appropriate cleanup action:
-  - SAFE_TO_NUKE: cleanup_status is 'clean' - no work at risk
+  - SAFE_TO_NUKE: cleanup_status is 'clean' AND work submitted to merge queue
+  - NEEDS_MQ_SUBMIT: git is clean but work was never submitted to the merge queue
   - NEEDS_RECOVERY: cleanup_status indicates unpushed/uncommitted work
 
 This prevents accidental data loss when cleaning up dormant polecats.
-The Witness should escalate NEEDS_RECOVERY cases to the Mayor.
+The Witness should escalate NEEDS_RECOVERY and NEEDS_MQ_SUBMIT cases to the Mayor.
 
 Examples:
   gt polecat check-recovery greenplace/Toast
@@ -900,9 +901,10 @@ type RecoveryStatus struct {
 	Polecat       string                `json:"polecat"`
 	CleanupStatus polecat.CleanupStatus `json:"cleanup_status"`
 	NeedsRecovery bool                  `json:"needs_recovery"`
-	Verdict       string                `json:"verdict"` // SAFE_TO_NUKE or NEEDS_RECOVERY
+	Verdict       string                `json:"verdict"` // SAFE_TO_NUKE, NEEDS_RECOVERY, or NEEDS_MQ_SUBMIT
 	Branch        string                `json:"branch,omitempty"`
 	Issue         string                `json:"issue,omitempty"`
+	MQStatus      string                `json:"mq_status,omitempty"` // "submitted", "not_submitted", "unknown"
 }
 
 func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
@@ -975,6 +977,26 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// MQ check: if verdict is SAFE_TO_NUKE and polecat has a branch,
+	// verify the work was actually submitted to the merge queue.
+	// Without this check, polecats that crashed between push and MQ submission
+	// would be nuked with orphaned branches on the remote. See #1035.
+	if status.Verdict == "SAFE_TO_NUKE" && status.Branch != "" {
+		mqBd := beads.New(r.Path)
+		mr, mrErr := mqBd.FindMRForBranchAny(status.Branch)
+		if mrErr != nil {
+			// Can't verify MQ — be conservative
+			status.MQStatus = "unknown"
+		} else if mr != nil {
+			status.MQStatus = "submitted"
+		} else {
+			// Work was pushed but never entered the merge queue
+			status.MQStatus = "not_submitted"
+			status.NeedsRecovery = true
+			status.Verdict = "NEEDS_MQ_SUBMIT"
+		}
+	}
+
 	// JSON output
 	if polecatCheckRecoveryJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -993,13 +1015,23 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	if status.NeedsRecovery {
+	switch status.Verdict {
+	case "NEEDS_MQ_SUBMIT":
+		fmt.Printf("  Verdict:         %s\n", style.Warning.Render("NEEDS_MQ_SUBMIT"))
+		fmt.Printf("  MQ Status:       %s\n", status.MQStatus)
+		fmt.Println()
+		fmt.Printf("  %s Work is pushed but was never submitted to the merge queue.\n", style.Warning.Render("⚠"))
+		fmt.Println("  Submit to MQ before cleanup, or the branch will be orphaned.")
+	case "NEEDS_RECOVERY":
 		fmt.Printf("  Verdict:         %s\n", style.Error.Render("NEEDS_RECOVERY"))
 		fmt.Println()
 		fmt.Printf("  %s This polecat has unpushed/uncommitted work.\n", style.Warning.Render("⚠"))
 		fmt.Println("  Escalate to Mayor for recovery before cleanup.")
-	} else {
+	default:
 		fmt.Printf("  Verdict:         %s\n", style.Success.Render("SAFE_TO_NUKE"))
+		if status.MQStatus != "" {
+			fmt.Printf("  MQ Status:       %s\n", status.MQStatus)
+		}
 		fmt.Println()
 		fmt.Printf("  %s Safe to nuke - no work at risk.\n", style.Success.Render("✓"))
 	}
@@ -1205,6 +1237,34 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 	// fail with "bead already has N attached molecule(s)" on re-dispatch (gt-npzy).
 	if getErr == nil && polecatInfo != nil && polecatInfo.Issue != "" {
 		nukeCleanupMolecules(polecatInfo.Issue, r)
+	}
+
+	// Step 2.75: Best-effort push before nuke (gt-4vr guardrail).
+	// Try to preserve any unpushed commits on the branch. If push fails,
+	// proceed — --force already means "I accept data loss".
+	if branchToDelete != "" {
+		var pushGit *git.Git
+		// Try worktree first (may still exist), then bare repo fallback
+		if polecatInfo != nil {
+			wtPath := filepath.Join(r.Path, "polecats", polecatName)
+			if _, statErr := os.Stat(wtPath); statErr == nil {
+				pushGit = git.NewGit(wtPath)
+			}
+		}
+		if pushGit == nil {
+			bareRepoPath := filepath.Join(r.Path, ".repo.git")
+			if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+				pushGit = git.NewGitWithDir(bareRepoPath, "")
+			}
+		}
+		if pushGit != nil {
+			refspec := branchToDelete + ":" + branchToDelete
+			if err := pushGit.Push("origin", refspec, false); err != nil {
+				fmt.Printf("  %s best-effort push failed (proceeding): %v\n", style.Dim.Render("○"), err)
+			} else {
+				fmt.Printf("  %s pushed branch %s before nuke\n", style.Success.Render("✓"), branchToDelete)
+			}
+		}
 	}
 
 	// Step 3: Delete worktree (nuclear=true to bypass safety checks for stale polecats)

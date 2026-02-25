@@ -77,7 +77,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 7
+version = 8
 
 [vars]
 [vars.wisp_type]
@@ -482,6 +482,31 @@ bd list --type=merge-request --status=open | grep <polecat-name>
 **VALIDATION**: The MR bead's source_issue should be a valid bead ID (gt-xxxxx),
 not a branch name. If source_issue contains a branch name, flag for investigation.
 
+**Step 3.5: Close source issue (REQUIRED)**
+
+The source issue is the original work bead that the polecat was assigned. Closing it
+signals convoy completion — without this, the convoy stays open indefinitely and the
+Mayor is never notified. This mirrors the Go Engineer behavior (engineer.go:896-904).
+
+```bash
+# The source issue ID was in the MERGE_READY message body (Issue: <id>)
+# You tracked it during inbox-check
+bd close <source-issue-id> --reason "Merged in <mr-bead-id>"
+```
+
+**If the source issue ID is not available** from your tracked data, extract it from the MR bead:
+```bash
+bd show <mr-bead-id> --json | jq -r '.[0].source_issue'
+```
+
+**VALIDATION**: Verify the close succeeded:
+```bash
+bd show <source-issue-id> --json | jq -r '.[0].status'
+# Must show "closed"
+```
+
+If close fails, log the warning but continue — do not block the rest of the pipeline.
+
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
 gt mail archive <merge-ready-message-id>
@@ -505,6 +530,7 @@ If delete_merged_branches is "false": Leave the remote branch intact.
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
 - [x] MR bead closed
+- [x] Source issue closed
 - [x] MERGE_READY mail archived
 
 If you skipped notifications or archiving, GO BACK AND DO THEM NOW.
@@ -542,14 +568,16 @@ Summarize this patrol cycle.
 **VERIFICATION**: Before generating summary, confirm for each merged branch:
 - [ ] MERGED mail was sent to witness
 - [ ] MR bead was closed
+- [ ] Source issue was closed
 - [ ] MERGE_READY mail archived
 
-If any notifications or archiving were missed, do them now!
+If any notifications, closures, or archiving were missed, do them now!
 
 Include in summary:
 - Branches merged (count, names)
 - MERGED mails sent (count - should match branches merged)
 - MR beads closed (count - should match branches merged)
+- Source issues closed (count - should match branches merged)
 - MERGE_READY mails archived (count - should match branches merged)
 - Test results (pass/fail)
 - Branches with conflicts (count, names)

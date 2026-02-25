@@ -56,12 +56,60 @@ func validateSessionName(name string) error {
 	return nil
 }
 
-// Tmux wraps tmux operations.
-type Tmux struct{}
+// defaultSocket is the tmux socket name (-L flag) for multi-instance isolation.
+// When set, all tmux commands use this socket instead of the default server.
+var defaultSocket string
 
-// NewTmux creates a new Tmux wrapper.
+// SetDefaultSocket sets the package-level default tmux socket name.
+// Called during init to scope tmux to the current town.
+func SetDefaultSocket(name string) { defaultSocket = name }
+
+// GetDefaultSocket returns the current default tmux socket name.
+func GetDefaultSocket() string { return defaultSocket }
+
+// IsInSameSocket checks if the current process is inside a tmux session on the
+// same socket as the default town socket. Used to decide between switch-client
+// (same socket) and attach-session (different socket or outside tmux).
+func IsInSameSocket() bool {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return false
+	}
+	// TMUX format: /tmp/tmux-UID/socketname,pid,index
+	parts := strings.SplitN(tmuxEnv, ",", 2)
+	currentSocket := filepath.Base(parts[0])
+
+	targetSocket := defaultSocket
+	if targetSocket == "" {
+		targetSocket = "default"
+	}
+	return currentSocket == targetSocket
+}
+
+// BuildCommand creates an exec.Cmd for tmux with the default socket applied.
+// Use this instead of exec.Command("tmux", ...) for code outside the Tmux struct.
+func BuildCommand(args ...string) *exec.Cmd {
+	allArgs := []string{"-u"}
+	if defaultSocket != "" {
+		allArgs = append(allArgs, "-L", defaultSocket)
+	}
+	allArgs = append(allArgs, args...)
+	return exec.Command("tmux", allArgs...)
+}
+
+// Tmux wraps tmux operations.
+type Tmux struct {
+	socketName string // tmux socket name (-L flag), empty = default socket
+}
+
+// NewTmux creates a new Tmux wrapper that inherits the default socket.
 func NewTmux() *Tmux {
-	return &Tmux{}
+	return &Tmux{socketName: defaultSocket}
+}
+
+// NewTmuxWithSocket creates a new Tmux wrapper with a specific socket name.
+func NewTmuxWithSocket(socket string) *Tmux {
+	return &Tmux{socketName: socket}
 }
 
 // run executes a tmux command and returns stdout.
@@ -69,7 +117,11 @@ func NewTmux() *Tmux {
 // See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
 	// Prepend -u flag for UTF-8 mode (PATCH-004)
-	allArgs := append([]string{"-u"}, args...)
+	allArgs := []string{"-u"}
+	if t.socketName != "" {
+		allArgs = append(allArgs, "-L", t.socketName)
+	}
+	allArgs = append(allArgs, args...)
 	cmd := exec.Command("tmux", allArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -1050,6 +1102,55 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
+// AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
+// automated sessions. Currently handles (in order):
+//   1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
+//   2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+//
+// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
+// but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
+func (t *Tmux) AcceptStartupDialogs(session string) error {
+	if err := t.AcceptWorkspaceTrustDialog(session); err != nil {
+		return fmt.Errorf("workspace trust dialog: %w", err)
+	}
+	if err := t.AcceptBypassPermissionsWarning(session); err != nil {
+		return fmt.Errorf("bypass permissions warning: %w", err)
+	}
+	return nil
+}
+
+// AcceptWorkspaceTrustDialog dismisses the Claude Code workspace trust dialog.
+// Starting with Claude Code v2.1.55, a "Quick safety check" dialog appears on first launch
+// in a workspace, asking the user to confirm they trust the folder. Option 1 ("Yes, I trust
+// this folder") is pre-selected, so we just need to press Enter to accept.
+// This dialog appears BEFORE the bypass permissions warning, so call this first.
+func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
+	// Wait for the dialog to potentially render
+	time.Sleep(1 * time.Second)
+
+	// Check if the workspace trust dialog is present
+	content, err := t.CapturePane(session, 30)
+	if err != nil {
+		return err
+	}
+
+	// Look for characteristic trust dialog text
+	if !strings.Contains(content, "trust this folder") && !strings.Contains(content, "Quick safety check") {
+		// Trust dialog not present, nothing to do
+		return nil
+	}
+
+	// Option 1 ("Yes, I trust this folder") is already pre-selected, just press Enter
+	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		return err
+	}
+
+	// Wait for dialog to dismiss before proceeding to bypass permissions
+	time.Sleep(500 * time.Millisecond)
+
+	return nil
+}
+
 // AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
 // When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
 // requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
@@ -1807,6 +1908,29 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 	return ErrIdleTimeout
 }
 
+// IsAtPrompt checks if the agent is currently at an idle prompt (non-blocking).
+// Returns true if the pane shows the ReadyPromptPrefix, indicating the agent is
+// idle and ready for input. Used by startup nudge verification to detect whether
+// a nudge was lost (agent returned to prompt without processing it).
+func (t *Tmux) IsAtPrompt(session string, rc *config.RuntimeConfig) bool {
+	promptPrefix := DefaultReadyPromptPrefix
+	if rc != nil && rc.Tmux != nil && rc.Tmux.ReadyPromptPrefix != "" {
+		promptPrefix = rc.Tmux.ReadyPromptPrefix
+	}
+
+	lines, err := t.CapturePaneLines(session, 10)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		if matchesPromptPrefix(line, promptPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetSessionInfo returns detailed information about a session.
 func (t *Tmux) GetSessionInfo(name string) (*SessionInfo, error) {
 	format := "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}|#{session_activity}|#{session_last_attached}"
@@ -2077,6 +2201,18 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ")
 }
 
+// isGTBindingWithClient checks if the given key has a GT binding that includes
+// --client for multi-client support. Older GT bindings without --client cause
+// switch-client to target the wrong client when multiple clients are attached.
+func (t *Tmux) isGTBindingWithClient(table, key string) bool {
+	output, err := t.run("list-keys", "-T", table, key)
+	if err != nil || output == "" {
+		return false
+	}
+	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") &&
+		strings.Contains(output, "--client")
+}
+
 // getKeyBinding returns the current tmux command bound to the given key in the
 // specified key table. Returns empty string if no binding exists or if querying
 // fails. This is used to capture user bindings before overwriting them, so the
@@ -2191,8 +2327,10 @@ func sessionPrefixPattern() string {
 // reliably preserve the session context. tmux expands #{session_name} at binding
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
-	// Skip if already configured — preserves user's original fallback from first call
-	if t.isGTBinding("prefix", "n") {
+	// Skip if already correctly configured (has --client for multi-client support).
+	// We must re-bind if an older GT binding exists without --client, since that
+	// version targets the wrong client when multiple tmux clients are attached.
+	if t.isGTBindingWithClient("prefix", "n") {
 		return nil
 	}
 	pattern := sessionPrefixPattern()
@@ -2209,16 +2347,18 @@ func (t *Tmux) SetCycleBindings(session string) error {
 	}
 
 	// C-b n → gt cycle next for Gas Town sessions, original binding otherwise
+	// Pass --client #{client_tty} so switch-client targets the correct client
+	// when multiple tmux clients are attached (e.g., gastown + beads rigs).
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
 		"if-shell", ifShell,
-		"run-shell 'gt cycle next --session #{session_name}'",
+		"run-shell 'gt cycle next --session #{session_name} --client #{client_tty}'",
 		nextFallback); err != nil {
 		return err
 	}
 	// C-b p → gt cycle prev for Gas Town sessions, original binding otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
 		"if-shell", ifShell,
-		"run-shell 'gt cycle prev --session #{session_name}'",
+		"run-shell 'gt cycle prev --session #{session_name} --client #{client_tty}'",
 		prevFallback); err != nil {
 		return err
 	}
@@ -2293,6 +2433,23 @@ func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {
 	return ts, nil
 }
 
+// SocketFromEnv extracts the tmux socket name from the TMUX environment variable.
+// TMUX format: /path/to/socket,server_pid,session_index
+// Returns the basename of the socket path (e.g., "default", "gt"), or empty if
+// not in tmux or the env variable is not set.
+func SocketFromEnv() string {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return ""
+	}
+	// Extract socket path (everything before first comma)
+	parts := strings.SplitN(tmuxEnv, ",", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	return filepath.Base(parts[0])
+}
+
 // CurrentSessionName returns the tmux session name for the current process.
 // It parses the TMUX environment variable (format: socket,pid,session_index)
 // and queries tmux for the session name. Returns empty string if not in tmux.
@@ -2303,7 +2460,7 @@ func CurrentSessionName() string {
 	}
 	// TMUX format: /path/to/socket,server_pid,session_index
 	// We can use display-message to get the session name directly
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	out, err := BuildCommand("display-message", "-p", "#{session_name}").Output()
 	if err != nil {
 		return ""
 	}

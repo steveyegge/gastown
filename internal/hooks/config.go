@@ -20,7 +20,7 @@ type HookEntry struct {
 
 // Hook represents an individual hook command.
 type Hook struct {
-	Type    string `json:"type"`    // "command"
+	Type    string `json:"type"` // "command"
 	Command string `json:"command"`
 }
 
@@ -229,12 +229,85 @@ func DefaultOverrides() map[string]*HooksConfig {
 				},
 			},
 		},
+		// Deacon roles: patrol-formula-guard (same as witness).
+		// Deacons also run patrols and must use wisps, not persistent molecules.
+		"deacon": {
+			PreToolUse: []HookEntry{
+				{
+					Matcher: "Bash(*bd mol pour*patrol*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-witness*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-deacon*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-refinery*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+			},
+		},
+		// Refinery roles: patrol-formula-guard (same as witness).
+		// Refineries also run patrols and must use wisps, not persistent molecules.
+		"refinery": {
+			PreToolUse: []HookEntry{
+				{
+					Matcher: "Bash(*bd mol pour*patrol*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-witness*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-deacon*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+				{
+					Matcher: "Bash(*bd mol pour *mol-refinery*)",
+					Hooks: []Hook{{
+						Type:    "command",
+						Command: "echo '❌ BLOCKED: Patrol formulas must use wisps, not persistent molecules.' && echo 'Use: bd mol wisp mol-*-patrol' && echo 'Not:  bd mol pour mol-*-patrol' && exit 2",
+					}},
+				},
+			},
+		},
 	}
 }
 
 // ComputeExpected computes the expected HooksConfig for a target by loading
 // the base config and applying all applicable overrides in order of specificity.
 // If no base config exists, uses DefaultBase().
+//
+// When an on-disk base exists, DefaultBase() is merged underneath it so that
+// new hook types (e.g., SessionStart added after the base was created) are
+// automatically backfilled. User customizations in the on-disk base take
+// precedence. Hook types absent from the on-disk base inherit from DefaultBase.
 //
 // For each override key, built-in defaults (from DefaultOverrides)
 // are merged first, then on-disk overrides layer on top. On-disk overrides can
@@ -247,6 +320,11 @@ func ComputeExpected(target string) (*HooksConfig, error) {
 		} else {
 			return nil, fmt.Errorf("loading base config: %w", err)
 		}
+	} else {
+		// Backfill: merge DefaultBase as floor, then on-disk base on top.
+		// This ensures new hook types added to DefaultBase are always present,
+		// while preserving user customizations from the on-disk base.
+		base = Merge(DefaultBase(), base)
 	}
 
 	defaults := DefaultOverrides()
@@ -345,11 +423,11 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			})
 		}
 
-		// Refinery — settings in the refinery parent directory
-		refineryDir := filepath.Join(rigPath, "refinery")
-		if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
+		// Refinery — settings in the refinery working directory (refinery/rig/)
+		refineryRigDir := filepath.Join(rigPath, "refinery", "rig")
+		if info, err := os.Stat(refineryRigDir); err == nil && info.IsDir() {
 			targets = append(targets, Target{
-				Path: filepath.Join(refineryDir, ".claude", "settings.json"),
+				Path: filepath.Join(refineryRigDir, ".claude", "settings.json"),
 				Key:  rigName + "/refinery",
 				Rig:  rigName,
 				Role: "refinery",

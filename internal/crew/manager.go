@@ -13,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -816,10 +817,27 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, t)
 
-	// Note: We intentionally don't wait for the agent to start here.
-	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when the agent is ready,
-	// they can check with IsAgentAlive().
+	// Wait for the agent to start, then accept the bypass permissions warning
+	// dialog if it appears. Without this, crew sessions get stuck on the
+	// "Bypass Permissions mode" confirmation dialog.
+	if !opts.Interactive {
+		agentName := opts.AgentOverride
+		if agentName == "" {
+			if rc := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
+				agentName = rc.Provider
+			} else {
+				agentName = "claude"
+			}
+		}
+		preset := config.GetAgentPresetByName(agentName)
+		if preset != nil && preset.EmitsPermissionWarning {
+			if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+				// Non-fatal — agent might still start
+				style.PrintWarning("timeout waiting for agent to start: %v", err)
+			}
+			_ = t.AcceptStartupDialogs(sessionID)
+		}
+	}
 
 	return nil
 }

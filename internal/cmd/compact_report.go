@@ -109,6 +109,19 @@ func runDailyDigest() error {
 		dateStr = compactReportDate
 	}
 
+	// Idempotency check: see if digest already exists for this date
+	existingID, err := findExistingCompactReport(dateStr)
+	if err != nil {
+		// Non-fatal: continue with creation attempt
+		if compactReportVerbose {
+			fmt.Fprintf(os.Stderr, "warning: idempotency check failed: %v\n", err)
+		}
+	} else if existingID != "" {
+		fmt.Printf("%s Compaction digest already sent for %s (bead: %s)\n",
+			style.Dim.Render("○"), dateStr, existingID)
+		return nil
+	}
+
 	// Run compaction with --json to get results
 	compactOut, err := exec.Command("gt", "compact", "--json").Output()
 	if err != nil {
@@ -298,10 +311,11 @@ func formatDailyDigest(report *compactReport) string {
 func sendCompactDigest(dateStr, body string) error {
 	subject := fmt.Sprintf("Wisp Compaction: %s", dateStr)
 
-	mailCmd := exec.Command("gt", "mail", "send", "deacon/",
+	// Send to mayor/ only — deacon/ is not a valid mail address (audit bead
+	// serves as the deacon-side record).
+	mailCmd := exec.Command("gt", "mail", "send", "mayor/",
 		"-s", subject,
 		"-m", body,
-		"--cc", "mayor/",
 	)
 	mailCmd.Stdout = os.Stdout
 	mailCmd.Stderr = os.Stderr
@@ -347,6 +361,18 @@ func runWeeklyRollup() error {
 	now := time.Now().UTC()
 	weekEnd := now.Format("2006-01-02")
 	weekStart := now.AddDate(0, 0, -7).Format("2006-01-02")
+
+	// Idempotency check: see if weekly rollup already exists for this week
+	existingID, err := findExistingWeeklyRollup(weekStart, weekEnd)
+	if err != nil {
+		if compactReportVerbose {
+			fmt.Fprintf(os.Stderr, "warning: weekly idempotency check failed: %v\n", err)
+		}
+	} else if existingID != "" {
+		fmt.Printf("%s Weekly rollup already sent for %s to %s (bead: %s)\n",
+			style.Dim.Render("○"), weekStart, weekEnd, existingID)
+		return nil
+	}
 
 	// Query compaction report event beads from the past week
 	reports, err := queryCompactionReports(weekStart, weekEnd)
@@ -395,6 +421,12 @@ func runWeeklyRollup() error {
 		return nil
 	}
 
+	// Create audit event bead for the weekly rollup (for future idempotency checks)
+	beadID, beadErr := createWeeklyRollupBead(rollup, markdown)
+	if beadErr != nil && compactReportVerbose {
+		fmt.Fprintf(os.Stderr, "warning: failed to create weekly rollup bead: %v\n", beadErr)
+	}
+
 	// Send to mayor/
 	subject := fmt.Sprintf("Weekly Wisp Compaction: %s to %s", weekStart, weekEnd)
 	mailCmd := exec.Command("gt", "mail", "send", "mayor/",
@@ -409,6 +441,9 @@ func runWeeklyRollup() error {
 
 	fmt.Printf("%s Weekly compaction rollup sent to mayor/ (%s to %s)\n",
 		style.Success.Render("✓"), weekStart, weekEnd)
+	if beadID != "" {
+		fmt.Printf("  Audit bead: %s\n", beadID)
+	}
 
 	return nil
 }
@@ -516,4 +551,99 @@ func formatWeeklyRollup(rollup *weeklyRollup) string {
 	}
 
 	return sb.String()
+}
+
+// findExistingCompactReport checks if a compaction digest already exists for the given date.
+// Returns the bead ID if found, empty string if not found.
+func findExistingCompactReport(dateStr string) (string, error) {
+	expectedTitle := fmt.Sprintf("Compaction Report %s", dateStr)
+
+	listCmd := exec.Command("bd", "list",
+		"--type=event",
+		"--json",
+		"--limit=50",
+	)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	var events []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(listOutput, &events); err != nil {
+		return "", err
+	}
+
+	for _, evt := range events {
+		if evt.Title == expectedTitle {
+			return evt.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// findExistingWeeklyRollup checks if a weekly rollup already exists for the given week.
+// Returns the bead ID if found, empty string if not found.
+func findExistingWeeklyRollup(weekStart, weekEnd string) (string, error) {
+	expectedTitle := fmt.Sprintf("Weekly Compaction Rollup %s to %s", weekStart, weekEnd)
+
+	listCmd := exec.Command("bd", "list",
+		"--type=event",
+		"--json",
+		"--limit=20",
+	)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	var events []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(listOutput, &events); err != nil {
+		return "", err
+	}
+
+	for _, evt := range events {
+		if evt.Title == expectedTitle {
+			return evt.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// createWeeklyRollupBead creates a permanent audit bead for the weekly rollup.
+func createWeeklyRollupBead(rollup *weeklyRollup, markdown string) (string, error) {
+	payloadJSON, err := json.Marshal(rollup)
+	if err != nil {
+		return "", fmt.Errorf("marshaling rollup payload: %w", err)
+	}
+
+	title := fmt.Sprintf("Weekly Compaction Rollup %s to %s", rollup.WeekStart, rollup.WeekEnd)
+	bdArgs := []string{
+		"create",
+		"--type=event",
+		"--title=" + title,
+		"--event-category=wisp.compaction.weekly",
+		"--event-payload=" + string(payloadJSON),
+		"--description=" + markdown,
+		"--silent",
+	}
+
+	bdCmd := exec.Command("bd", bdArgs...)
+	output, err := bdCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("creating weekly rollup bead: %w\nOutput: %s", err, string(output))
+	}
+
+	beadID := strings.TrimSpace(string(output))
+
+	// Auto-close (audit record, not work)
+	closeCmd := exec.Command("bd", "close", beadID, "--reason=weekly compaction rollup")
+	_ = closeCmd.Run()
+
+	return beadID, nil
 }

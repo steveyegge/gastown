@@ -1,4 +1,5 @@
 {
+  "skipDangerousModePermissionPrompt": true,
   "editorMode": "normal",
   "enabledPlugins": {
     "beads@beads-marketplace": false

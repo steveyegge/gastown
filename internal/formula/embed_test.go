@@ -863,3 +863,30 @@ func TestCheckFormulaHealth_MixedScenarios(t *testing.T) {
 		t.Errorf("formula %s status = %q, want %q", modifiedFormula, statusMap[modifiedFormula], "modified")
 	}
 }
+
+// TestGetEmbeddedFormulaContent verifies extraction of individual embedded formulas.
+func TestGetEmbeddedFormulaContent(t *testing.T) {
+	// Known embedded formula should succeed
+	content, err := GetEmbeddedFormulaContent("mol-polecat-work")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent(mol-polecat-work) error: %v", err)
+	}
+	if len(content) == 0 {
+		t.Error("expected non-empty content")
+	}
+
+	// With suffix should also work
+	content2, err := GetEmbeddedFormulaContent("mol-polecat-work.formula.toml")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent with suffix error: %v", err)
+	}
+	if string(content) != string(content2) {
+		t.Error("content should be identical with or without suffix")
+	}
+
+	// Non-existent formula should fail
+	_, err = GetEmbeddedFormulaContent("nonexistent-formula")
+	if err == nil {
+		t.Error("expected error for non-existent formula")
+	}
+}

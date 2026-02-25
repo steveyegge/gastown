@@ -525,6 +525,23 @@ func outputAttachmentStatus(ctx RoleContext) {
 	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
 }
 
+// outputContinuationDirective displays a brief continuation prompt for post-compact/resume.
+// Unlike outputAutonomousDirective, this does NOT ask the agent to re-announce or
+// re-run startup protocol — it just reminds the agent what's on the hook. (GH#1965)
+func outputContinuationDirective(hookedBead *beads.Issue, hasMolecule bool) {
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## ▶ CONTINUE HOOKED WORK"))
+	fmt.Println("Your context was compacted/resumed. **Continue working on your hooked bead.**")
+	fmt.Println("Do NOT re-announce, re-initialize, or re-read the bead from scratch.")
+	fmt.Println("Pick up where you left off.")
+	fmt.Println()
+	fmt.Printf("  Hooked: %s — %s\n", style.Bold.Render(hookedBead.ID), hookedBead.Title)
+	if hasMolecule {
+		fmt.Println("  (Has attached molecule — check `bd mol current` for next step)")
+	}
+	fmt.Println()
+}
+
 // outputHandoffWarning outputs the post-handoff warning message.
 func outputHandoffWarning(prevSession string) {
 	fmt.Println()

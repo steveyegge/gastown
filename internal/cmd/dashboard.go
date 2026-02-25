@@ -119,7 +119,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  launching dashboard at %s  •  api: %s/api/  •  ctrl+c to stop\n", url, url)
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", dashboardPort),
+		Addr:              fmt.Sprintf("127.0.0.1:%d", dashboardPort),
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

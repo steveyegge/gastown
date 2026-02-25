@@ -15,6 +15,7 @@ var (
 	doctorVerbose         bool
 	doctorRig             string
 	doctorRestartSessions bool
+	doctorNoStart         bool
 	doctorSlow            string
 )
 
@@ -51,10 +52,12 @@ Cleanup checks (fixable):
   - orphan-processes         Detect orphaned Claude processes
   - session-name-format      Detect sessions with outdated naming format (fixable)
   - wisp-gc                  Detect and clean abandoned wisps (>1h)
+  - misclassified-wisps      Detect issues that should be wisps (purges to wisps table, fixable)
+  - jsonl-bloat              Detect stale/bloated issues.jsonl vs live database
   - stale-beads-redirect     Detect stale files in .beads directories with redirects
 
 Clone divergence checks:
-  - persistent-role-branches Detect crew/witness/refinery not on main
+  - persistent-role-branches Detect witness/refinery not on main (excludes crew)
   - clone-divergence         Detect clones significantly behind origin/main
   - default-branch-all-rigs  Verify default_branch exists on remote for all rigs
   - worktree-gitdir-valid    Verify worktree .git files reference existing paths (fixable)
@@ -100,6 +103,7 @@ Patrol checks:
   - patrol-plugins-accessible Verify plugin directories
 
 Use --fix to attempt automatic fixes for issues that support it.
+Use --no-start with --fix to suppress starting the daemon and agents.
 Use --rig to check a specific rig instead of the entire workspace.
 Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`,
 	RunE: runDoctor,
@@ -110,6 +114,7 @@ func init() {
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
+	doctorCmd.Flags().BoolVar(&doctorNoStart, "no-start", false, "Suppress starting daemon/agents during --fix")
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
 	// Allow --slow without a value (uses default 1s)
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
@@ -129,6 +134,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		RigName:         doctorRig,
 		Verbose:         doctorVerbose,
 		RestartSessions: doctorRestartSessions,
+		NoStart:         doctorNoStart,
 	}
 
 	// Create doctor and register checks
@@ -146,6 +152,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
+	// Claude settings must be fixed BEFORE the daemon starts, so sessions
+	// launched by the daemon find correct settings files. If daemon runs first,
+	// its EnsureSettingsForRole sees stale files → returns early → sessions
+	// start with missing PATH exports. See gt-99u.
+	d.Register(doctor.NewClaudeSettingsCheck())
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewTownBeadsConfigCheck())
@@ -165,6 +176,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
 	d.Register(doctor.NewCheckMisclassifiedWisps())
+	d.Register(doctor.NewCheckJSONLBloat())
 	d.Register(doctor.NewStaleBeadsRedirectCheck())
 	d.Register(doctor.NewBeadsRedirectTargetCheck())
 	d.Register(doctor.NewBranchCheck())
@@ -193,7 +205,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewSessionHookCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
-	d.Register(doctor.NewClaudeSettingsCheck())
+	// NOTE: ClaudeSettingsCheck moved before DaemonCheck (gt-99u race fix)
 	d.Register(doctor.NewDeprecatedMergeQueueKeysCheck())
 	d.Register(doctor.NewLandWorktreeGitignoreCheck())
 	d.Register(doctor.NewHooksPathAllRigsCheck())

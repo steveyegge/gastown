@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,6 +66,14 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 	var details []string
 	for _, rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
+		// If rigPath doesn't exist, fall back to TownRoot. This handles the case
+		// where gt doctor runs from a mayor's canonical clone, where TownRoot
+		// resolves to the clone itself (e.g. gastown/mayor/rig) rather than the
+		// actual town root. The rig directory won't be a subdirectory of the clone,
+		// but patrol formulas are town-level and accessible from TownRoot itself.
+		if _, statErr := os.Stat(rigPath); os.IsNotExist(statErr) {
+			rigPath = ctx.TownRoot
+		}
 		missing := c.checkPatrolFormulas(rigPath)
 		if len(missing) > 0 {
 			c.missingFormulas[rigName] = missing
@@ -91,21 +100,14 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 
 // checkPatrolFormulas returns missing patrol formula names for a rig.
 func (c *PatrolMoleculesExistCheck) checkPatrolFormulas(rigPath string) []string {
-	// List formulas accessible from this rig using bd formula list
-	// This checks .beads/formulas/, ~/.beads/formulas/, and $GT_ROOT/.beads/formulas/
-	cmd := exec.Command("bd", "formula", "list")
-	cmd.Dir = rigPath
-	output, err := cmd.Output()
-	if err != nil {
-		// Can't check formulas, assume all missing
-		return patrolFormulas
-	}
-
-	outputStr := string(output)
+	// Check for formula files directly on the filesystem rather than shelling
+	// out to `bd formula list`, which may not be available in all environments
+	// (e.g., CI). Formulas are provisioned as .formula.toml files in .beads/formulas/.
+	formulasDir := filepath.Join(rigPath, ".beads", "formulas")
 	var missing []string
 	for _, formulaName := range patrolFormulas {
-		// Formula list output includes the formula name without extension
-		if !strings.Contains(outputStr, formulaName) {
+		formulaPath := filepath.Join(formulasDir, formulaName+".formula.toml")
+		if _, err := os.Stat(formulaPath); os.IsNotExist(err) {
 			missing = append(missing, formulaName)
 		}
 	}
@@ -228,12 +230,17 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 
 	var stuckWisps []string
 	for _, rigName := range rigs {
-		// Check main beads database for wisps (issues with Wisp=true)
-		// Follows redirect if present (rig root may redirect to mayor/rig/.beads)
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
-		beadsDir := beads.ResolveBeadsDir(rigPath)
-		beadsPath := filepath.Join(beadsDir, "issues.jsonl")
-		stuck := c.checkStuckWisps(beadsPath, rigName)
+
+		// Try Dolt database first (canonical source in server mode),
+		// fall back to issues.jsonl for non-Dolt rigs or when Dolt is unavailable.
+		stuck, err := c.checkStuckWispsDolt(rigPath, rigName)
+		if err != nil {
+			// Dolt query failed — fall back to JSONL
+			beadsDir := beads.ResolveBeadsDir(rigPath)
+			beadsPath := filepath.Join(beadsDir, "issues.jsonl")
+			stuck = c.checkStuckWisps(beadsPath, rigName)
+		}
 		stuckWisps = append(stuckWisps, stuck...)
 	}
 
@@ -255,7 +262,58 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// checkStuckWisps returns descriptions of stuck wisps in a rig.
+// stuckWispsQuery selects in_progress issues for stuck-wisp detection via Dolt.
+const stuckWispsQuery = `SELECT id, title, status, updated_at FROM issues WHERE status = 'in_progress' ORDER BY updated_at ASC`
+
+// checkStuckWispsDolt queries the Dolt database for stuck wisps using bd sql.
+// Returns an error if the query fails (caller should fall back to JSONL).
+func (c *PatrolNotStuckCheck) checkStuckWispsDolt(rigPath string, rigName string) ([]string, error) {
+	cmd := exec.Command("bd", "sql", "--csv", stuckWispsQuery) //nolint:gosec // G204: query is a constant
+	cmd.Dir = rigPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("bd sql: %w", err)
+	}
+
+	r := csv.NewReader(strings.NewReader(string(output)))
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("csv parse: %w", err)
+	}
+	if len(records) < 2 {
+		return nil, nil // No results (header only or empty)
+	}
+
+	var stuck []string
+	cutoff := time.Now().Add(-c.stuckThreshold)
+
+	for _, rec := range records[1:] { // Skip CSV header
+		if len(rec) < 4 {
+			continue
+		}
+		id := strings.TrimSpace(rec[0])
+		title := strings.TrimSpace(rec[1])
+		updatedAt := strings.TrimSpace(rec[3])
+
+		t, err := time.Parse("2006-01-02 15:04:05", updatedAt)
+		if err != nil {
+			// Try RFC3339 as fallback
+			t, err = time.Parse(time.RFC3339, updatedAt)
+			if err != nil {
+				continue
+			}
+		}
+
+		if !t.IsZero() && t.Before(cutoff) {
+			stuck = append(stuck, fmt.Sprintf("%s: %s (%s) - stale since %s",
+				rigName, id, title, t.Format("2006-01-02 15:04")))
+		}
+	}
+
+	return stuck, nil
+}
+
+// checkStuckWisps returns descriptions of stuck wisps in a rig (JSONL fallback).
 func (c *PatrolNotStuckCheck) checkStuckWisps(issuesPath string, rigName string) []string {
 	file, err := os.Open(issuesPath)
 	if err != nil {

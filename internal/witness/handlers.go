@@ -162,7 +162,7 @@ func notifyRefineryMergeReady(workDir, rigName string, payload *PolecatDonePaylo
 
 // handlePolecatDoneNoMR handles a POLECAT_DONE with no pending MR.
 // Tries auto-nuke; falls back to creating a cleanup wisp for manual intervention.
-func handlePolecatDoneNoMR(workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
+func handlePolecatDoneNoMR(_, _ string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
 	// Persistent polecat model (gt-4ac): polecats go idle after completion, no nuke.
 	// The polecat has already set its own state to "idle" in gt done.
 	// We just acknowledge the completion here.
@@ -301,7 +301,7 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 // Persistent model (gt-4ac): polecats go idle after merge, sandbox preserved.
 // ZFC #10: still warns about dirty state (uncommitted/stash/unpushed) since
 // that indicates the polecat may have started new work after the MR.
-func handleMergedCleanupStatus(workDir, rigName, polecatName, cleanupStatus, wispID string, result *HandlerResult) {
+func handleMergedCleanupStatus(_, _, polecatName, cleanupStatus, wispID string, result *HandlerResult) {
 	result.Handled = true
 	result.WispCreated = wispID
 
@@ -1118,6 +1118,11 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 			return ZombieResult{}, false // Recent — still working through gt done
 		}
 		_, diHookBead := getAgentBeadState(workDir, agentBeadID)
+
+		// If bead is already closed, the polecat completed successfully.
+		// Just nuke the dead session; don't trigger re-dispatch. (gt-sy8)
+		beadAlreadyClosed := diHookBead != "" && getBeadStatus(workDir, diHookBead) == "closed"
+
 		zombie := ZombieResult{
 			PolecatName: polecatName,
 			AgentState:  "done-intent-dead",
@@ -1128,13 +1133,23 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 			zombie.Error = err
 			zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
 		}
-		zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, diHookBead, polecatName, router)
+		// Only attempt bead recovery if the bead isn't already closed. (gt-sy8)
+		if !beadAlreadyClosed {
+			zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, diHookBead, polecatName, router)
+		}
 		return zombie, true
 	}
 
 	// Standard zombie detection: active state or hooked bead with dead session.
 	agentState, hookBead := getAgentBeadState(workDir, agentBeadID)
 	if !isZombieState(agentState, hookBead) {
+		return ZombieResult{}, false
+	}
+
+	// A polecat whose hook bead is already CLOSED completed its work
+	// successfully. The dead session is expected (gt done kills it).
+	// Don't flag as zombie or trigger re-dispatch. (gt-sy8)
+	if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
 		return ZombieResult{}, false
 	}
 
@@ -1287,6 +1302,23 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 			result.Errors = append(result.Errors,
 				fmt.Errorf("capturing pane for %s: %w", sessionName, err))
 			continue
+		}
+
+		// Check for workspace trust dialog (appears before bypass-permissions)
+		if strings.Contains(content, "trust this folder") || strings.Contains(content, "Quick safety check") {
+			stalled := StalledResult{
+				PolecatName: polecatName,
+				StallType:   "workspace-trust",
+			}
+			if err := t.AcceptWorkspaceTrustDialog(sessionName); err != nil {
+				stalled.Action = "escalated"
+				stalled.Error = fmt.Errorf("auto-dismiss failed: %w", err)
+			} else {
+				stalled.Action = "auto-dismissed"
+			}
+			result.Stalled = append(result.Stalled, stalled)
+			// Re-capture after dismissing trust dialog, bypass-permissions may follow
+			content, _ = t.CapturePane(sessionName, 30)
 		}
 
 		// Check for bypass-permissions prompt

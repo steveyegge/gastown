@@ -143,10 +143,14 @@ type DoltRemotesConfig struct {
 
 // DaemonPatrolConfig is the structure of mayor/daemon.json.
 type DaemonPatrolConfig struct {
-	Type      string         `json:"type"`
-	Version   int            `json:"version"`
-	Heartbeat *PatrolConfig  `json:"heartbeat,omitempty"`
-	Patrols   *PatrolsConfig `json:"patrols,omitempty"`
+	Type      string            `json:"type"`
+	Version   int               `json:"version"`
+	Heartbeat *PatrolConfig     `json:"heartbeat,omitempty"`
+	Patrols   *PatrolsConfig    `json:"patrols,omitempty"`
+	// Env holds environment variables to set at startup.
+	// Propagated to all sessions spawned by the daemon and read by gt up/mayor attach.
+	// Example: {"GT_DOLT_PORT": "43211"}
+	Env       map[string]string `json:"env,omitempty"`
 }
 
 // PatrolConfigFile returns the path to the patrol config file.

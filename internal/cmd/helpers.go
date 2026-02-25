@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // inferRigFromCwd tries to determine the rig from the current directory.
@@ -64,7 +65,7 @@ func isInTmuxSession(targetSession string) bool {
 	}
 
 	// Get current session name
-	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
+	cmd := tmux.BuildCommand("display-message", "-p", "#{session_name}")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -72,6 +73,12 @@ func isInTmuxSession(targetSession string) bool {
 
 	currentSession := strings.TrimSpace(string(out))
 	return currentSession == targetSession
+}
+
+// isInSameTmuxSocket checks if we're inside a tmux session on the same socket
+// as the current town. Used to decide between switch-client and attach-session.
+func isInSameTmuxSocket() bool {
+	return tmux.IsInSameSocket()
 }
 
 // attachToTmuxSession attaches to a tmux session.
@@ -85,14 +92,19 @@ func attachToTmuxSession(sessionID string) error {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
 
-	// Build args with -u for UTF-8 support
+	// Base args with UTF-8 and socket support
+	baseArgs := []string{"tmux", "-u"}
+	if socket := tmux.GetDefaultSocket(); socket != "" {
+		baseArgs = append(baseArgs, "-L", socket)
+	}
+
 	var args []string
-	if os.Getenv("TMUX") != "" {
-		// Inside tmux: switch to the target session
-		args = []string{"tmux", "-u", "switch-client", "-t", sessionID}
+	if isInSameTmuxSocket() {
+		// Same tmux socket: switch to the target session
+		args = append(baseArgs, "switch-client", "-t", sessionID)
 	} else {
-		// Outside tmux: attach to the session
-		args = []string{"tmux", "-u", "attach-session", "-t", sessionID}
+		// Outside tmux or different socket: attach to the session
+		args = append(baseArgs, "attach-session", "-t", sessionID)
 	}
 
 	// Replace the Go process with tmux for direct terminal control

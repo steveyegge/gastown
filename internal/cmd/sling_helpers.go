@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -353,7 +354,7 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 func getSessionFromPane(pane string) string {
 	if strings.HasPrefix(pane, "%") {
 		// Pane ID format - query tmux for the session
-		cmd := exec.Command("tmux", "display-message", "-t", pane, "-p", "#{session_name}")
+		cmd := tmux.BuildCommand("display-message", "-t", pane, "-p", "#{session_name}")
 		out, err := cmd.Output()
 		if err != nil {
 			return ""
@@ -387,7 +388,8 @@ func ensureAgentReady(sessionName string) error {
 		}
 	}
 
-	// Accept bypass permissions warning if the agent emits one on startup
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear
+	_ = t.AcceptWorkspaceTrustDialog(sessionName)
 	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
 	if shouldAcceptPermissionWarning(agentName) {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
@@ -430,7 +432,7 @@ func ensureAgentReady(sessionName string) error {
 
 // isSessionYoung returns true if the tmux session was created less than maxAge ago.
 func isSessionYoung(sessionName string, maxAge time.Duration) bool {
-	out, err := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{session_created}").Output()
+	out, err := tmux.BuildCommand("display-message", "-t", sessionName, "-p", "#{session_created}").Output()
 	if err != nil {
 		return false
 	}
@@ -661,12 +663,31 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
 	// Step 1: Cook the formula (ensures proto exists)
+	// If cook fails, retry with the embedded formula extracted to a temp file.
+	// This handles non-gastown rigs that don't have formulas provisioned on disk.
+	// See gt-oir.
+	resolvedFormula := formulaName
+	var formulaCleanup func()
 	if !skipCook {
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
 				Run(); err != nil {
-			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
+			// Retry with embedded formula
+			resolvedFormula, formulaCleanup = resolveFormulaToTempFile(formulaName)
+			if formulaCleanup != nil {
+				defer formulaCleanup()
+			}
+			if resolvedFormula != formulaName {
+				if retryErr := BdCmd("cook", resolvedFormula).
+					Dir(formulaWorkDir).
+					WithGTRoot(townRoot).
+					Run(); retryErr != nil {
+					return nil, fmt.Errorf("cooking formula %s: %w (embedded retry: %v)", formulaName, err, retryErr)
+				}
+			} else {
+				return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
+			}
 		}
 	}
 
@@ -678,8 +699,9 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	formulaVars = append(formulaVars, extraVars...)
 	formulaVars = ensureFormulaRequiredVars(formulaName, formulaVars)
 
-	// Step 2: Create wisp with feature and issue variables from bead
-	wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+	// Step 2: Create wisp with feature and issue variables from bead.
+	// Use resolvedFormula which may be a temp file path if the embedded fallback was used.
+	wispArgs := []string{"mol", "wisp", resolvedFormula, "--var", featureVar, "--var", issueVar}
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
 	}
@@ -712,7 +734,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		WithGTRoot(townRoot).
 		Output()
 	if err != nil {
-		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
+		fallbackRootID, fallbackErr := bondFormulaDirect(resolvedFormula, beadID, formulaWorkDir, townRoot, formulaVars)
 		if fallbackErr != nil {
 			return nil, fmt.Errorf("bonding formula to bead: %w (direct formula bond fallback failed: %v)", err, fallbackErr)
 		}
@@ -727,7 +749,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// still writing an error to stderr. If parsing fails, retry direct bond.
 	parsedRootID, parsed := parseBondSpawnRootIDWithStatus(bondOut, formulaName, beadID, wispRootID)
 	if !parsed {
-		fallbackRootID, fallbackErr := bondFormulaDirect(formulaName, beadID, formulaWorkDir, townRoot, formulaVars)
+		fallbackRootID, fallbackErr := bondFormulaDirect(resolvedFormula, beadID, formulaWorkDir, townRoot, formulaVars)
 		if fallbackErr != nil {
 			return nil, fmt.Errorf("bond output not parseable and direct formula bond fallback failed: %v", fallbackErr)
 		}
@@ -844,11 +866,50 @@ func ensureFormulaRequiredVars(formulaName string, vars []string) []string {
 // CookFormula cooks a formula to ensure its proto exists.
 // This is useful for batch mode where we cook once before processing multiple beads.
 // townRoot is required for GT_ROOT so bd can find town-level formulas.
+// Falls back to embedded formula extraction if bd can't find the formula on disk.
 func CookFormula(formulaName, workDir, townRoot string) error {
-	return BdCmd("cook", formulaName).
+	err := BdCmd("cook", formulaName).
 		Dir(workDir).
 		WithGTRoot(townRoot).
 		Run()
+	if err == nil {
+		return nil
+	}
+	// Retry with embedded formula extracted to temp file
+	resolved, cleanup := resolveFormulaToTempFile(formulaName)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if resolved == formulaName {
+		return err // No embedded fallback available
+	}
+	return BdCmd("cook", resolved).
+		Dir(workDir).
+		WithGTRoot(townRoot).
+		Run()
+}
+
+// resolveFormulaToTempFile extracts an embedded formula to a temp file.
+// Returns the temp file path and a cleanup function, or the original name
+// if extraction fails. Used as a fallback when bd can't find the formula on disk.
+func resolveFormulaToTempFile(formulaName string) (resolved string, cleanup func()) {
+	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	if err != nil {
+		return formulaName, nil
+	}
+
+	tmpFile, err := os.CreateTemp("", "gt-formula-*.formula.toml")
+	if err != nil {
+		return formulaName, nil
+	}
+	if _, err := tmpFile.Write(content); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return formulaName, nil
+	}
+	tmpFile.Close()
+
+	return tmpFile.Name(), func() { os.Remove(tmpFile.Name()) }
 }
 
 // isHookedAgentDeadFn is a seam for tests. Production uses isHookedAgentDead.

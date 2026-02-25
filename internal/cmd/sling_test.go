@@ -467,6 +467,93 @@ exit /b 0
 	}
 }
 
+func TestRollbackSlingArtifactsBurnsAttachedMolecules(t *testing.T) {
+	townRoot, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdScript := `#!/bin/sh
+set -e
+cmd="$1"
+shift || true
+case "$cmd" in
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+set "cmd=%1"
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	prevGetBead := getBeadInfoForRollback
+	prevCollect := collectExistingMoleculesForRollback
+	prevBurn := burnExistingMoleculesForRollback
+	t.Cleanup(func() {
+		getBeadInfoForRollback = prevGetBead
+		collectExistingMoleculesForRollback = prevCollect
+		burnExistingMoleculesForRollback = prevBurn
+	})
+
+	getBeadInfoForRollback = func(beadID string) (*beadInfo, error) {
+		if beadID != "gt-abc123" {
+			t.Fatalf("unexpected bead id: %q", beadID)
+		}
+		return &beadInfo{
+			Description: "attached_molecule: gt-wisp-stale",
+			Dependencies: []beads.IssueDep{
+				{ID: "gt-wisp-stale"},
+			},
+		}, nil
+	}
+	collectExistingMoleculesForRollback = collectExistingMolecules
+
+	burnCalled := false
+	burnExistingMoleculesForRollback = func(molecules []string, beadID, gotTownRoot string) error {
+		burnCalled = true
+		if beadID != "gt-abc123" {
+			t.Fatalf("unexpected burn bead id: %q", beadID)
+		}
+		if gotTownRoot != townRoot {
+			t.Fatalf("unexpected town root: got %q want %q", gotTownRoot, townRoot)
+		}
+		if len(molecules) != 1 || molecules[0] != "gt-wisp-stale" {
+			t.Fatalf("unexpected molecules to burn: %#v", molecules)
+		}
+		return nil
+	}
+
+	rollbackSlingArtifacts(&SpawnedPolecatInfo{
+		RigName:     "gastown",
+		PolecatName: "Toast",
+	}, "gt-abc123", "")
+
+	if !burnCalled {
+		t.Fatalf("expected rollbackSlingArtifacts to burn attached molecules")
+	}
+}
+
 func TestSlingFormulaRollsBackSpawnedPolecatOnWispFailure(t *testing.T) {
 	townRoot := t.TempDir()
 

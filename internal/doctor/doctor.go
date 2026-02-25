@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -178,6 +179,9 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 					result.Message = result.Message + " (fixed)"
 					result.Fixed = true
 				}
+			} else if errors.Is(err, ErrSkippedNoStart) {
+				// Fix skipped due to --no-start flag
+				result.Details = append(result.Details, "Skipped: --no-start suppresses startup")
 			} else {
 				// Fix failed, add error to details
 				result.Details = append(result.Details, "Fix failed: "+err.Error())

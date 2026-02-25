@@ -139,6 +139,7 @@ func (c *RigRoutesJSONLCheck) findRigDirectories(townRoot string) []string {
 
 	// Source 2: routes.jsonl (for rigs that may not be in registry)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
+	townBeadsInfo, townBeadsErr := os.Stat(townBeadsDir)
 	if routes, err := beads.LoadRoutes(townBeadsDir); err == nil {
 		for _, route := range routes {
 			if route.Path == "." || route.Path == "" {
@@ -169,7 +170,16 @@ func (c *RigRoutesJSONLCheck) findRigDirectories(townRoot string) []string {
 			}
 			rigPath := filepath.Join(townRoot, entry.Name())
 			beadsDir := filepath.Join(rigPath, ".beads")
-			if _, err := os.Stat(beadsDir); err == nil && !seen[rigPath] {
+			beadsDirInfo, err := os.Stat(beadsDir)
+			if err != nil {
+				continue // .beads doesn't exist
+			}
+			// Skip if this dir's .beads resolves to the town root .beads
+			// (e.g. deacon uses a symlinked .beads dir pointing to town beads)
+			if townBeadsErr == nil && os.SameFile(townBeadsInfo, beadsDirInfo) {
+				continue
+			}
+			if !seen[rigPath] {
 				rigDirs = append(rigDirs, rigPath)
 				seen[rigPath] = true
 			}

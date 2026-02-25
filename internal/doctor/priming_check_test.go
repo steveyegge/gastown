@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -738,3 +739,152 @@ func TestPrimingCheck_FixRemovesStaleIntermediateFiles(t *testing.T) {
 	}
 }
 
+// TestPrimingCheck_DetectsNoPrimeHook verifies that settings.json files
+// missing 'gt prime' in SessionStart are detected.
+func TestPrimingCheck_DetectsNoPrimeHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create town root CLAUDE.md identity anchor
+	if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte("# Gas Town\nRun gt prime\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up rig with .beads and PRIME.md
+	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create witness directory with settings.json MISSING gt prime
+	witnessDir := filepath.Join(tmpDir, rigName, "witness")
+	witnessClaudeDir := filepath.Join(witnessDir, ".claude")
+	if err := os.MkdirAll(witnessClaudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Settings with PATH but no gt prime hook
+	staleSettings := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\"",
+						},
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(staleSettings, "", "  ")
+	if err := os.WriteFile(filepath.Join(witnessClaudeDir, "settings.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run priming check
+	check := NewPrimingCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+	result := check.Run(ctx)
+
+	// Should detect the missing gt prime hook
+	foundIssue := false
+	for _, detail := range result.Details {
+		if strings.Contains(detail, "witness") && strings.Contains(detail, "gt prime") {
+			foundIssue = true
+			break
+		}
+	}
+
+	if !foundIssue {
+		t.Errorf("expected no_prime_hook issue for witness, got details: %v", result.Details)
+	}
+
+	// Issue should be fixable
+	for _, issue := range check.issues {
+		if issue.issueType == "no_prime_hook" {
+			if !issue.fixable {
+				t.Errorf("no_prime_hook issue should be fixable")
+			}
+			if issue.agentType != "witness" {
+				t.Errorf("expected agentType 'witness', got '%s'", issue.agentType)
+			}
+			if issue.rigName != rigName {
+				t.Errorf("expected rigName '%s', got '%s'", rigName, issue.rigName)
+			}
+		}
+	}
+}
+
+// TestPrimingCheck_FixNoPrimeHook verifies that doctor --fix recreates
+// settings.json from template when gt prime hook is missing.
+func TestPrimingCheck_FixNoPrimeHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create town root CLAUDE.md identity anchor
+	if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte("# Gas Town\nRun gt prime\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up rig with .beads and PRIME.md
+	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create witness directory with settings.json MISSING gt prime
+	witnessDir := filepath.Join(tmpDir, rigName, "witness")
+	witnessClaudeDir := filepath.Join(witnessDir, ".claude")
+	if err := os.MkdirAll(witnessClaudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	staleSettings := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\"",
+						},
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(staleSettings, "", "  ")
+	settingsPath := filepath.Join(witnessClaudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run priming check and fix
+	check := NewPrimingCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+	_ = check.Run(ctx)
+
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix() failed: %v", err)
+	}
+
+	// Verify settings.json was recreated and now has gt prime
+	newData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("settings.json should exist after fix: %v", err)
+	}
+
+	if !strings.Contains(string(newData), "gt prime") {
+		t.Errorf("recreated settings.json should contain 'gt prime', got: %s", string(newData))
+	}
+}

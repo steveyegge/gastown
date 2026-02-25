@@ -26,7 +26,6 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 		"create", "--json",
 		"--id=" + beadID,
 		"--type=agent",
-		"--role-type=dog",
 		"--title=" + title,
 		"--description=" + description,
 		"--labels=" + strings.Join(labels, ","),

@@ -1734,9 +1734,22 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
+// Also propagates beads git config (role, issue_prefix) so bd commands work without warnings.
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, clonePath)
+	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {
+		return err
+	}
+
+	// Propagate beads git config to the worktree so bd commands in polecat
+	// sessions don't warn about missing role/prefix.
+	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
+	if prefix != "" {
+		_ = exec.Command("git", "-C", clonePath, "config", "beads.issue-prefix", prefix).Run()
+	}
+	_ = exec.Command("git", "-C", clonePath, "config", "beads.role", "contributor").Run()
+
+	return nil
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
@@ -1863,7 +1876,7 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 // checkTmuxSession checks if a tmux session exists.
 func checkTmuxSession(sessionName string) bool {
 	// Use has-session command which returns 0 if session exists
-	cmd := exec.Command("tmux", "has-session", "-t", sessionName) //nolint:gosec // G204: sessionName is constructed internally
+	cmd := tmux.BuildCommand("has-session", "-t", sessionName)
 	return cmd.Run() == nil
 }
 

@@ -19,6 +19,8 @@ type TmuxExecutor interface {
 	KillPaneProcesses(pane string) error
 	ClearHistory(pane string) error
 	RespawnPane(pane, command string) error
+	AcceptStartupDialogs(session string) error
+	AcceptWorkspaceTrustDialog(session string) error
 	AcceptBypassPermissionsWarning(session string) error
 }
 
@@ -239,9 +241,9 @@ func (r *Rotator) executeOne(state *config.QuotaState, mu *sync.Mutex, session, 
 		return result
 	}
 
-	// 9. Accept bypass permissions warning (non-critical).
-	if err := r.tmuxExec.AcceptBypassPermissionsWarning(session); err != nil {
-		r.log.Warn("could not accept bypass permissions for %s: %v", session, err)
+	// 9. Accept startup dialogs (non-critical).
+	if err := r.tmuxExec.AcceptStartupDialogs(session); err != nil {
+		r.log.Warn("could not accept startup dialogs for %s: %v", session, err)
 	}
 
 	// 10. Update in-memory quota state (no disk I/O here).

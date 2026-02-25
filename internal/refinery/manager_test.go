@@ -3,12 +3,14 @@ package refinery
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 func setupTestRegistry(t *testing.T) {
@@ -100,7 +102,9 @@ func TestManager_Queue_NoBeads(t *testing.T) {
 
 func TestManager_Queue_FiltersClosedMergeRequests(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
-	b := beads.New(rigPath)
+	testutil.RequireDoltServer(t)
+	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	b := beads.NewIsolatedWithPort(rigPath, port)
 	if err := b.Init("gt"); err != nil {
 		t.Skipf("bd init unavailable in test environment: %v", err)
 	}

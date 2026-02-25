@@ -68,6 +68,10 @@ func (c *DaemonCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix starts the daemon.
 func (c *DaemonCheck) Fix(ctx *CheckContext) error {
+	if ctx.NoStart {
+		return ErrSkippedNoStart
+	}
+
 	// Find gt executable
 	gtPath, err := os.Executable()
 	if err != nil {

@@ -108,7 +108,7 @@ func TestBrowser_ConvoyListLoads(t *testing.T) {
 		},
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestBrowser_LastActivityColors(t *testing.T) {
 		},
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestBrowser_HtmxAutoRefresh(t *testing.T) {
 		},
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestBrowser_EmptyState(t *testing.T) {
 		convoys: []ConvoyRow{}, // Empty convoy list
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestBrowser_StatusIndicators(t *testing.T) {
 		},
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBrowser_ProgressDisplay(t *testing.T) {
 		},
 	}
 
-	handler, err := NewConvoyHandler(fetcher, 8*time.Second)
+	handler, err := NewConvoyHandler(fetcher, 8*time.Second, "test-token")
 	if err != nil {
 		t.Fatalf("Failed to create handler: %v", err)
 	}

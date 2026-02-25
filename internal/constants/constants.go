@@ -51,6 +51,16 @@ const (
 	// BdSubprocessTimeout is the timeout for bd subprocess calls in TUI panels.
 	// Prevents the TUI from freezing if these commands hang.
 	BdSubprocessTimeout = 5 * time.Second
+
+	// StartupNudgeVerifyDelay is how long to wait after sending a startup nudge
+	// before checking if the agent started working. Must be long enough for the
+	// agent to begin processing the nudge (receive text, parse, start first tool).
+	StartupNudgeVerifyDelay = 5 * time.Second
+
+	// StartupNudgeMaxRetries is the maximum number of times to retry a startup
+	// nudge if the agent appears idle after delivery. Each retry re-sends the
+	// nudge content and waits StartupNudgeVerifyDelay before checking again.
+	StartupNudgeMaxRetries = 3
 )
 
 // Directory names within a Gas Town workspace.

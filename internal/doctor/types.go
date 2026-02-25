@@ -63,6 +63,7 @@ type CheckContext struct {
 	RigName         string // Rig name (empty for town-level checks)
 	Verbose         bool   // Enable verbose output
 	RestartSessions bool   // Restart patrol sessions when fixing (requires explicit --restart-sessions flag)
+	NoStart         bool   // Suppress starting daemon/agents during --fix
 }
 
 // RigPath returns the full path to the rig directory.

@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -201,6 +202,41 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 
 		if len(rigs) != 0 {
 			t.Errorf("expected 0 rigs (mayor and .beads should be excluded), got %d: %v", len(rigs), rigs)
+		}
+	})
+
+	t.Run("excludes dirs whose .beads symlinks to town root .beads", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create town-level .beads
+		townBeads := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(townBeads, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create a real rig with its own .beads
+		if err := os.MkdirAll(filepath.Join(tmpDir, "realrig", ".beads"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create deacon dir with .beads symlinked to town root .beads
+		deaconDir := filepath.Join(tmpDir, "deacon")
+		if err := os.MkdirAll(deaconDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(townBeads, filepath.Join(deaconDir, ".beads")); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewRigRoutesJSONLCheck()
+		rigs := check.findRigDirectories(tmpDir)
+
+		// Should find realrig but NOT deacon
+		if len(rigs) != 1 {
+			t.Errorf("expected 1 rig (deacon should be excluded), got %d: %v", len(rigs), rigs)
+		}
+		if len(rigs) == 1 && !strings.HasSuffix(rigs[0], "realrig") {
+			t.Errorf("expected realrig, got %s", rigs[0])
 		}
 	})
 }

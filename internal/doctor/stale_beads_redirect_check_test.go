@@ -484,8 +484,11 @@ func TestStaleBeadsRedirectCheck_PolecatWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create polecat workspace WITHOUT redirect
+	// Create polecat workspace WITHOUT redirect (old flat structure with .git)
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(polecatDir, ".git"), []byte("gitdir: /fake\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -501,6 +504,39 @@ func TestStaleBeadsRedirectCheck_PolecatWorkspace(t *testing.T) {
 
 	if result.Status != StatusWarning {
 		t.Errorf("Expected StatusWarning for polecat missing redirect, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestStaleBeadsRedirectCheck_NestedPolecatWorkspace(t *testing.T) {
+	// Polecats with nested structure: polecats/<name>/<rig_name>/
+	townRoot := t.TempDir()
+	rigDir := filepath.Join(townRoot, "myrig")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	// Nested clone path: polecats/polecat1/myrig/
+	polecatClone := filepath.Join(rigDir, "polecats", "polecat1", "myrig")
+
+	// Create rig beads (canonical location)
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create nested polecat workspace WITHOUT redirect
+	if err := os.MkdirAll(polecatClone, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also need a .git to make it look like a rig
+	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewStaleBeadsRedirectCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("Expected StatusWarning for nested polecat missing redirect, got %v: %s", result.Status, result.Message)
 	}
 }
 

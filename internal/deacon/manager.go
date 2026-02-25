@@ -31,6 +31,8 @@ type tmuxOps interface {
 	ConfigureGasTownSession(session string, theme tmux.Theme, rig, worker, role string) error
 	WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error
 	SetAutoRespawnHook(session string) error
+	AcceptStartupDialogs(session string) error
+	AcceptWorkspaceTrustDialog(session string) error
 	AcceptBypassPermissionsWarning(session string) error
 	SendKeysRaw(session, keys string) error
 	GetSessionInfo(name string) (*tmux.SessionInfo, error)
@@ -164,8 +166,8 @@ func (m *Manager) Start(agentOverride string) error {
 		fmt.Printf("warning: failed to set auto-respawn hook for deacon: %v\n", err)
 	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	_ = t.AcceptBypassPermissionsWarning(sessionID)
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
+	_ = t.AcceptStartupDialogs(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

@@ -13,6 +13,7 @@
 package cmd
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -142,6 +143,27 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 		t.Fatalf("mkdir rigPath: %v", err)
 	}
 	initBeadsDBForServer(t, rigPath, rigPrefix)
+
+	// Drop test databases on cleanup to prevent orphaned databases on the Dolt server.
+	t.Cleanup(func() {
+		port := os.Getenv("GT_DOLT_PORT")
+		if port == "" {
+			port = "3307"
+		}
+		dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/", port)
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			t.Logf("cleanup: could not connect to drop test databases: %v", err)
+			return
+		}
+		defer db.Close()
+		for _, prefix := range []string{hqPrefix, rigPrefix} {
+			dbName := "beads_" + prefix
+			if _, err := db.Exec("DROP DATABASE IF EXISTS `" + dbName + "`"); err != nil {
+				t.Logf("cleanup: failed to drop %s: %v", dbName, err)
+			}
+		}
+	})
 
 	// Redirect: testrig/.beads/ → mayor/rig/.beads
 	// beadsSearchDirs scans townRoot/<dir>/.beads — the redirect lets bd commands

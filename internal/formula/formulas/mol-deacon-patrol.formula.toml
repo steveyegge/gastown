@@ -14,6 +14,17 @@ The Deacon is the Mayor's background process that runs continuously, handling ca
 
 This prevents flooding idle agents with health checks every few seconds.
 
+## Mayor Nudge Policy
+
+**NEVER nudge the Mayor for health checks, pings, or routine status.**
+The Mayor should ONLY be nudged for genuine emergencies:
+- Escalations that require Mayor decision-making
+- Sending mail to mayor/ (which is non-interruptive)
+
+Health pings to the Mayor are a ZFC violation — they burn Mayor context
+on ceremony instead of work. The Mayor is your boss, not a subordinate
+to be monitored. Use `gt mail send mayor/` for non-urgent communication.
+
 ## Second-Order Monitoring
 
 Witnesses passively monitor Deacon health by checking the Deacon's agent bead
@@ -825,7 +836,7 @@ needs = ["wisp-compact"]
 description = """
 Generate and send the daily compaction digest.
 
-**Step 1: Send daily digest**
+**Step 1: Send daily digest (idempotent — safe to run every cycle)**
 ```bash
 gt compact report
 ```
@@ -835,8 +846,9 @@ builds a per-category breakdown (Heartbeats, Patrols, Errors, Untyped),
 detects anomalies, and sends the digest to deacon/ (cc mayor/).
 
 A permanent event bead (wisp.compaction) is created for audit trail.
+Skips automatically if today's digest was already sent.
 
-**Step 2: Weekly rollup (Mondays only)**
+**Step 2: Weekly rollup (Mondays only, idempotent)**
 If today is Monday, also send the weekly rollup:
 ```bash
 gt compact report --weekly
@@ -844,6 +856,7 @@ gt compact report --weekly
 
 This aggregates the past 7 days of compaction event beads and sends
 trend data (totals, promotion rate, avg deleted/day) to mayor/.
+Skips automatically if this week's rollup was already sent.
 
 **Exit criteria:** Compaction digest sent (or nothing to report)."""
 

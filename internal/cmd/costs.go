@@ -841,7 +841,7 @@ func extractCostFromWorkDir(workDir string) (float64, error) {
 
 // getTmuxSessionWorkDir gets the current working directory of a tmux session.
 func getTmuxSessionWorkDir(session string) (string, error) {
-	cmd := exec.Command("tmux", "display-message", "-t", session, "-p", "#{pane_current_path}")
+	cmd := tmux.BuildCommand("display-message", "-t", session, "-p", "#{pane_current_path}")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -1115,7 +1115,7 @@ func deriveSessionName() string {
 // Note: We don't check TMUX env var because it may not be inherited when Claude Code
 // runs bash commands, even though we are inside a tmux session.
 func detectCurrentTmuxSession() string {
-	cmd := exec.Command("tmux", "display-message", "-p", "#S")
+	cmd := tmux.BuildCommand("display-message", "-p", "#S")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""

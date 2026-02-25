@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 // installMockBd places a fake bd binary in PATH that handles the commands
@@ -838,7 +840,9 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
+		testutil.RequireDoltServer(t)
+		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
 		}
@@ -950,7 +954,9 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
+		testutil.RequireDoltServer(t)
+		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
 		}
@@ -1094,7 +1100,9 @@ func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		bd := beads.NewWithBeadsDir(mayorRig, mayorBeads)
+		testutil.RequireDoltServer(t)
+		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
 		}

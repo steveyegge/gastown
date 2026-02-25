@@ -546,13 +546,13 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	originalStatus := info.Status
 	originalAssignee := info.Assignee
 	force := slingForce // local copy to avoid mutating package-level flag
-	if (info.Status == "pinned" || info.Status == "hooked") && !force {
-		// Auto-force when hooked agent's session is confirmed dead (gt-pqf9x).
+	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "in_progress") && !force {
+		// Auto-force when hooked/in_progress agent's session is confirmed dead (gt-pqf9x, GH#1380).
 		// This eliminates the #1 friction in convoy feeding: stale hooks from
 		// dead polecats blocking re-sling without --force.
 		// IMPORTANT: Stale-hook check must run BEFORE idempotency check so that
 		// a dead polecat with a matching target triggers re-sling, not a no-op.
-		if info.Status == "hooked" && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
+		if (info.Status == "hooked" || info.Status == "in_progress") && info.Assignee != "" && isHookedAgentDeadFn(info.Assignee) {
 			fmt.Printf("%s Hooked agent %s has no active session, auto-forcing re-sling...\n",
 				style.Warning.Render("⚠"), info.Assignee)
 			force = true
@@ -658,8 +658,8 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 	}
 
-	// Handle --force when bead is already hooked: send shutdown to old polecat and unhook
-	if info.Status == "hooked" && force && info.Assignee != "" {
+	// Handle --force when bead is already hooked/in_progress: send shutdown to old polecat and unhook (GH#1380)
+	if (info.Status == "hooked" || info.Status == "in_progress") && force && info.Assignee != "" {
 		fmt.Printf("%s Bead already hooked to %s, forcing reassignment...\n", style.Warning.Render("⚠"), info.Assignee)
 
 		// Determine requester identity from env vars, fall back to "gt-sling"
@@ -980,6 +980,12 @@ func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
 // rollbackSlingArtifactsFn is a seam for tests. Production uses rollbackSlingArtifacts.
 var rollbackSlingArtifactsFn = rollbackSlingArtifacts
 
+// Rollback seams allow tests to assert molecule-cleanup behavior without
+// depending on full beads storage side effects.
+var getBeadInfoForRollback = getBeadInfo
+var collectExistingMoleculesForRollback = collectExistingMolecules
+var burnExistingMoleculesForRollback = burnExistingMolecules
+
 func restorePinnedBead(townRoot, beadID, assignee string) {
 	if townRoot == "" || beadID == "" {
 		return
@@ -1021,12 +1027,30 @@ func tryAcquireSlingBeadLock(townRoot, beadID string) (func(), error) {
 func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
 	townRoot, err := workspace.FindFromCwdOrError()
 
-	// 1. Unhook the bead (set status back to open so it can be re-slung).
+	// 1. Burn any attached molecules from partial formula instantiation.
+	// This clears attached_molecule metadata and closes stale wisps that
+	// otherwise block subsequent sling attempts.
 	// Some failure modes happen before any bead is hooked (e.g., wisp creation fails).
 	if beadID != "" {
 		if err != nil {
-			fmt.Printf("  %s Could not find workspace to unhook bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
+			fmt.Printf("  %s Could not find workspace to rollback bead %s: %v\n", style.Dim.Render("Warning:"), beadID, err)
 		} else {
+			info, infoErr := getBeadInfoForRollback(beadID)
+			if infoErr != nil {
+				fmt.Printf("  %s Could not inspect bead %s for stale molecules: %v\n", style.Dim.Render("Warning:"), beadID, infoErr)
+			} else {
+				existingMolecules := collectExistingMoleculesForRollback(info)
+				if len(existingMolecules) > 0 {
+					if burnErr := burnExistingMoleculesForRollback(existingMolecules, beadID, townRoot); burnErr != nil {
+						fmt.Printf("  %s Could not burn stale molecule(s) from %s: %v\n", style.Dim.Render("Warning:"), beadID, burnErr)
+					} else {
+						fmt.Printf("  %s Burned %d stale molecule(s): %s\n",
+							style.Dim.Render("○"), len(existingMolecules), strings.Join(existingMolecules, ", "))
+					}
+				}
+			}
+
+			// 2. Unhook the bead (set status back to open so it can be re-slung).
 			unhookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 			unhookCmd := exec.Command("bd", "update", beadID, "--status=open", "--assignee=")
 			unhookCmd.Dir = unhookDir

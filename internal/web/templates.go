@@ -31,6 +31,7 @@ type ConvoyData struct {
 	Activity    []ActivityRow
 	Summary     *DashboardSummary
 	Expand      string // Panel to show fullscreen (from ?expand=name)
+	CSRFToken   string // Token for CSRF protection on POST requests
 }
 
 // RigRow represents a registered rig in the dashboard.

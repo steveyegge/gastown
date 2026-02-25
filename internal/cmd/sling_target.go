@@ -7,6 +7,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // spawnPolecatForSling is a seam for tests. Production uses SpawnPolecatForSling.
@@ -177,6 +178,15 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 
 	// Rig target (auto-spawn polecat)
 	if rigName, isRig := IsRigName(target); isRig {
+		// Check if rig is parked before dispatching (gt-4owfd.1)
+		townRoot := opts.TownRoot
+		if townRoot == "" {
+			townRoot, _ = workspace.FindFromCwd()
+		}
+		if townRoot != "" && IsRigParked(townRoot, rigName) {
+			return nil, fmt.Errorf("cannot sling to parked rig %q\nUnpark with: gt rig unpark %s", rigName, rigName)
+		}
+
 		if opts.BeadID != "" && !opts.Force {
 			if err := checkCrossRigGuard(opts.BeadID, rigName+"/polecats/_", opts.TownRoot); err != nil {
 				return nil, err

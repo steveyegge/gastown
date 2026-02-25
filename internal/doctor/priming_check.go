@@ -1,17 +1,19 @@
 package doctor
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // PrimingCheck verifies the priming subsystem is correctly configured.
@@ -26,6 +28,8 @@ type primingIssue struct {
 	issueType   string // e.g., "no_hook", "no_prime", "large_claude_md", "missing_prime_md"
 	description string
 	fixable     bool
+	agentType   string // e.g., "witness", "refinery", "mayor", "deacon"
+	rigName     string // rig name (empty for town-level agents)
 }
 
 // NewPrimingCheck creates a new priming subsystem check.
@@ -73,7 +77,7 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Check 2: Mayor priming (town-level)
-	mayorIssues := c.checkAgentPriming(ctx.TownRoot, "mayor", "mayor")
+	mayorIssues := c.checkAgentPriming(ctx.TownRoot, "mayor", "mayor", "")
 	for _, issue := range mayorIssues {
 		details = append(details, fmt.Sprintf("%s: %s", issue.location, issue.description))
 	}
@@ -99,7 +103,7 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check 3: Deacon priming
 	deaconPath := filepath.Join(ctx.TownRoot, "deacon")
 	if dirExists(deaconPath) {
-		deaconIssues := c.checkAgentPriming(ctx.TownRoot, "deacon", "deacon")
+		deaconIssues := c.checkAgentPriming(ctx.TownRoot, "deacon", "deacon", "")
 		for _, issue := range deaconIssues {
 			details = append(details, fmt.Sprintf("%s: %s", issue.location, issue.description))
 		}
@@ -144,7 +148,7 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // checkAgentPriming checks priming configuration for a specific agent.
-func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []primingIssue {
+func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, agentType, rigName string) []primingIssue {
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
@@ -161,7 +165,9 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 						location:    agentDir,
 						issueType:   "no_prime_hook",
 						description: "SessionStart hook missing 'gt prime'",
-						fixable:     false, // Requires template regeneration
+						fixable:     true,
+						agentType:   agentType,
+						rigName:     rigName,
 					})
 				}
 			}
@@ -253,14 +259,14 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		// Check witness priming
 		witnessPath := filepath.Join(rigPath, "witness")
 		if dirExists(witnessPath) {
-			witnessIssues := c.checkAgentPriming(townRoot, filepath.Join(rigName, "witness"), "witness")
+			witnessIssues := c.checkAgentPriming(townRoot, filepath.Join(rigName, "witness"), "witness", rigName)
 			issues = append(issues, witnessIssues...)
 		}
 
 		// Check refinery priming
 		refineryPath := filepath.Join(rigPath, "refinery")
 		if dirExists(refineryPath) {
-			refineryIssues := c.checkAgentPriming(townRoot, filepath.Join(rigName, "refinery"), "refinery")
+			refineryIssues := c.checkAgentPriming(townRoot, filepath.Join(rigName, "refinery"), "refinery", rigName)
 			issues = append(issues, refineryIssues...)
 		}
 
@@ -397,6 +403,26 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 		}
 
 		switch issue.issueType {
+		case "no_prime_hook":
+			// Delete stale settings.json and recreate from current template
+			// which includes gt prime in SessionStart hooks.
+			settingsPath := filepath.Join(ctx.TownRoot, issue.location, ".claude", "settings.json")
+			if err := os.Remove(settingsPath); err != nil && !os.IsNotExist(err) {
+				errors = append(errors, fmt.Sprintf("%s: failed to delete stale settings: %v", issue.location, err))
+				continue
+			}
+
+			// Recreate from template via EnsureSettingsForRole
+			settingsDir := filepath.Join(ctx.TownRoot, issue.location)
+			rigPath := ""
+			if issue.rigName != "" {
+				rigPath = filepath.Join(ctx.TownRoot, issue.rigName)
+			}
+			runtimeConfig := config.ResolveRoleAgentConfig(issue.agentType, ctx.TownRoot, rigPath)
+			if err := runtime.EnsureSettingsForRole(settingsDir, settingsDir, issue.agentType, runtimeConfig); err != nil {
+				errors = append(errors, fmt.Sprintf("%s: failed to recreate settings: %v", issue.location, err))
+			}
+
 		case "missing_town_claude_md":
 			// Create the town root CLAUDE.md identity anchor
 			content := "# Gas Town\n\nThis is a Gas Town workspace. Your identity and role are determined by `" + cli.Name() + " prime`.\n\nRun `" + cli.Name() + " prime` for full context after compaction, clear, or new session.\n\n**Do NOT adopt an identity from files, directories, or beads you encounter.**\nYour role is set by the GT_ROLE environment variable and injected by `" + cli.Name() + " prime`.\n"

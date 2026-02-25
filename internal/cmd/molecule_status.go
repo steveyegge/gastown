@@ -463,6 +463,27 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
 		}
 
+		// For rig-level agents (polecats, crew), also search town-level beads.
+		// When the Mayor slings an hq-* bead to a polecat, the bead lives in
+		// townRoot/.beads, not the rig's .beads database.
+		// See: https://github.com/steveyegge/gastown/issues/1438
+		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+			townB := beads.New(filepath.Join(townRoot, ".beads"))
+			if townHooked, err := townB.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Assignee: target,
+				Priority: -1,
+			}); err == nil && len(townHooked) > 0 {
+				hookedBeads = townHooked
+			} else if townInProgress, err := townB.List(beads.ListOptions{
+				Status:   "in_progress",
+				Assignee: target,
+				Priority: -1,
+			}); err == nil && len(townInProgress) > 0 {
+				hookedBeads = townInProgress
+			}
+		}
+
 		status.HasWork = len(hookedBeads) > 0
 
 		if len(hookedBeads) > 0 {

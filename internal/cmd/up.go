@@ -153,6 +153,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Load daemon.json env vars so services (Dolt, etc.) use the right config.
+	// The daemon does this too, but gt up starts services before the daemon.
+	if patrolCfg := daemon.LoadPatrolConfig(townRoot); patrolCfg != nil {
+		for k, v := range patrolCfg.Env {
+			os.Setenv(k, v)
+		}
+	}
+
 	allOK := true
 	var services []ServiceStatus
 
@@ -190,7 +198,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			doltDetail = err.Error()
 		} else {
 			doltOK = true
-			doltDetail = fmt.Sprintf("started (port %d)", doltserver.DefaultPort)
+			doltDetail = fmt.Sprintf("started (port %d)", cfg.Port)
 		}
 	}()
 

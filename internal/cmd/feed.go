@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -355,7 +354,7 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 // windowExists checks if a window with the given name exists in the session.
 // Note: getCurrentTmuxSession is defined in handoff.go
 func windowExists(_ *tmux.Tmux, session, windowName string) (bool, error) { // t unused: direct exec for simplicity
-	cmd := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}")
+	cmd := tmux.BuildCommand("list-windows", "-t", session, "-F", "#{window_name}")
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
@@ -372,12 +371,12 @@ func windowExists(_ *tmux.Tmux, session, windowName string) (bool, error) { // t
 // createWindow creates a new tmux window with the given name and command.
 func createWindow(_ *tmux.Tmux, session, windowName, workDir, command string) error { // t unused: direct exec for simplicity
 	args := []string{"new-window", "-t", session, "-n", windowName, "-c", workDir, command}
-	cmd := exec.Command("tmux", args...)
+	cmd := tmux.BuildCommand(args...)
 	return cmd.Run()
 }
 
 // selectWindow switches to the specified window.
 func selectWindow(_ *tmux.Tmux, target string) error { // t unused: direct exec for simplicity
-	cmd := exec.Command("tmux", "select-window", "-t", target)
+	cmd := tmux.BuildCommand("select-window", "-t", target)
 	return cmd.Run()
 }

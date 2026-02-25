@@ -281,6 +281,13 @@ func runMayorRestart(cmd *cobra.Command, args []string) error {
 // to the Mayor session. Warns and auto-starts each if absent. Non-fatal:
 // failures are reported but do not block the attach.
 func ensureMayorInfra(townRoot string) {
+	// Load daemon.json env vars (e.g., GT_DOLT_PORT) so Dolt uses the right port.
+	if patrolCfg := daemon.LoadPatrolConfig(townRoot); patrolCfg != nil {
+		for k, v := range patrolCfg.Env {
+			os.Setenv(k, v)
+		}
+	}
+
 	// Daemon
 	daemonRunning, _, _ := daemon.IsRunning(townRoot)
 	if !daemonRunning {
@@ -302,7 +309,7 @@ func ensureMayorInfra(townRoot string) {
 				if err := doltserver.Start(townRoot); err != nil {
 					style.PrintWarning("Dolt server start failed: %v", err)
 				} else {
-					fmt.Printf("  %s Dolt server started (port %d)\n", style.Bold.Render("✓"), doltserver.DefaultPort)
+					fmt.Printf("  %s Dolt server started (port %d)\n", style.Bold.Render("✓"), doltCfg.Port)
 				}
 			}
 		}

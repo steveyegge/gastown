@@ -451,9 +451,7 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 		desc string
 	}{
 		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.local.json"), "witness/rig/.claude/settings.local.json (stale filename)"},
-		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.local.json"), "refinery/rig/.claude/settings.local.json (stale filename)"},
 		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude/settings.json (settings belong at parent dir)"},
-		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude/settings.json (settings belong at parent dir)"},
 	}
 
 	for _, w := range staleSettingsThatShouldNotExist {

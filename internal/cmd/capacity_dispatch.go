@@ -261,9 +261,14 @@ func cleanupStaleContexts(townRoot string) {
 		return
 	}
 
-	// Batch-fetch work bead info: single bd list per dir instead of
-	// per-context bd show. Build info map from all beads across dirs.
-	workBeadInfo := batchFetchBeadInfo(townRoot)
+	// Collect work bead IDs to fetch
+	workBeadIDs := make([]string, 0, len(staleCheckFields))
+	for _, fields := range staleCheckFields {
+		workBeadIDs = append(workBeadIDs, fields.WorkBeadID)
+	}
+
+	// Batch-fetch work bead info for only the specific IDs we need
+	workBeadInfo := batchFetchBeadInfoByIDs(townRoot, workBeadIDs)
 
 	// Second pass: close contexts whose work beads are stale.
 	// Note: in_progress is intentionally excluded — the work bead is being
@@ -285,14 +290,24 @@ type beadStatusInfo struct {
 	Title  string
 }
 
-// batchFetchBeadInfo returns a map of bead ID → status+title for all beads
-// across all rig dirs. Uses a single bd list per dir instead of per-bead bd show.
-func batchFetchBeadInfo(townRoot string) map[string]beadStatusInfo {
+// batchFetchBeadInfoByIDs returns a map of bead ID → status+title for specific beads.
+// Uses `bd show` with multiple IDs per rig directory instead of fetching all beads.
+// This avoids the O(minutes) latency of `bd list --all --json --limit=0` on large repos.
+func batchFetchBeadInfoByIDs(townRoot string, ids []string) map[string]beadStatusInfo {
 	result := make(map[string]beadStatusInfo)
+	if len(ids) == 0 {
+		return result
+	}
+
+	// Group IDs by prefix to route to the correct rig directory
+	// Most IDs will have a common prefix (e.g., "gt-", "bcc-", "hq-")
+	// For simplicity, try all dirs - bd show will return results only for matching IDs
 	for _, dir := range beadsSearchDirs(townRoot) {
-		listCmd := exec.Command("bd", "list", "--all", "--json", "--limit=0")
-		listCmd.Dir = dir
-		out, err := listCmd.Output()
+		// bd show can accept multiple IDs
+		args := append([]string{"show", "--json"}, ids...)
+		showCmd := exec.Command("bd", args...)
+		showCmd.Dir = dir
+		out, err := showCmd.Output()
 		if err != nil {
 			continue
 		}

@@ -571,3 +571,72 @@ func TestHandoffProcessNames(t *testing.T) {
 		}
 	})
 }
+
+// TestCollectGitState verifies that collectGitState returns deterministic
+// workspace state from a git repo without shelling out to gt/bd. (GH#1996)
+func TestCollectGitState(t *testing.T) {
+	t.Run("returns_state_from_git_repo", func(t *testing.T) {
+		// Create a temp git repo
+		tmpDir := t.TempDir()
+		cmds := [][]string{
+			{"git", "init"},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+		}
+		for _, args := range cmds {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = tmpDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %s", args, out)
+			}
+		}
+
+		// Create a file and commit
+		if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("hello"), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		for _, args := range [][]string{
+			{"git", "add", "file.txt"},
+			{"git", "commit", "-m", "initial commit"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = tmpDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %s", args, out)
+			}
+		}
+
+		// Modify a file to create uncommitted changes
+		if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("modified"), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		// Run collectGitState from the temp repo
+		t.Chdir(tmpDir)
+
+		state := collectGitState()
+
+		if state == "" {
+			t.Fatal("collectGitState() returned empty string for a git repo with changes")
+		}
+		if !strings.Contains(state, "## Workspace State") {
+			t.Errorf("expected '## Workspace State' header, got: %s", state)
+		}
+		if !strings.Contains(state, "Modified") {
+			t.Errorf("expected 'Modified' in state, got: %s", state)
+		}
+		if !strings.Contains(state, "initial commit") {
+			t.Errorf("expected recent commit in state, got: %s", state)
+		}
+	})
+
+	t.Run("returns_empty_outside_git_repo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		state := collectGitState()
+		if state != "" {
+			t.Errorf("expected empty string outside git repo, got: %s", state)
+		}
+	})
+}

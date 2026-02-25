@@ -44,6 +44,11 @@ func TestExtractMoleculeIDFromStep(t *testing.T) {
 			expected: "",
 		},
 		{
+			name:     "wisp format - no dot",
+			stepID:   "go-wisp-75l",
+			expected: "", // Wisp IDs don't encode molecule ID - use Parent field
+		},
+		{
 			name:     "not a step - non-numeric suffix",
 			stepID:   "gt-abc.xyz",
 			expected: "",

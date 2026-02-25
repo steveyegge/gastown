@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // minOrphanAge is the minimum age (in seconds) a process must be before
@@ -31,7 +33,7 @@ func getTmuxSessionPIDs() map[int]bool {
 	pids := make(map[int]bool)
 
 	// Get list of ALL tmux sessions (not just gt-*/hq-*)
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	out, err := tmux.BuildCommand("list-sessions", "-F", "#{session_name}").Output()
 	if err != nil {
 		return pids // tmux not available or no sessions
 	}
@@ -44,7 +46,7 @@ func getTmuxSessionPIDs() map[int]bool {
 		if session == "" {
 			continue
 		}
-		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		out, err := tmux.BuildCommand("list-panes", "-t", session, "-F", "#{pane_pid}").Output()
 		if err != nil {
 			continue
 		}
@@ -482,7 +484,7 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Returning empty is safer than marking all Claude processes as zombies.
 	if len(validPIDs) == 0 {
 		// Check if tmux is even running
-		if err := exec.Command("tmux", "list-sessions").Run(); err != nil {
+		if err := tmux.BuildCommand("list-sessions").Run(); err != nil {
 			return nil, fmt.Errorf("tmux not available: %w", err)
 		}
 		// tmux is running but no gt-*/hq-* sessions - that's a valid state,

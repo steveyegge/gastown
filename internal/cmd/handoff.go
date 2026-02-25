@@ -459,12 +459,19 @@ func runHandoffCycle() error {
 		fmt.Fprintf(os.Stderr, "handoff --cycle: saved state to %s\n", beadID)
 	}
 
-	// Write handoff marker so post-cycle prime knows it's post-handoff
+	// Write handoff marker so post-cycle prime knows it's post-handoff.
+	// Format: "session_id\nreason" — the reason enables isCompactResume()
+	// to detect compaction-triggered cycles and use a lighter continuation
+	// directive instead of full re-initialization. (GH#1965)
 	if cwd, err := os.Getwd(); err == nil {
 		runtimeDir := filepath.Join(cwd, constants.DirRuntime)
 		_ = os.MkdirAll(runtimeDir, 0755)
 		markerPath := filepath.Join(runtimeDir, constants.FileHandoffMarker)
-		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
+		markerContent := currentSession
+		if handoffReason != "" {
+			markerContent += "\n" + handoffReason
+		}
+		_ = os.WriteFile(markerPath, []byte(markerContent), 0644)
 	}
 
 	// Log cycle event
@@ -512,7 +519,7 @@ func runHandoffCycle() error {
 
 // getCurrentTmuxSession returns the current tmux session name.
 func getCurrentTmuxSession() (string, error) {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	out, err := tmux.BuildCommand("display-message", "-p", "#{session_name}").Output()
 	if err != nil {
 		return "", err
 	}
@@ -1031,7 +1038,7 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 	if handoffWatch {
 		fmt.Printf("Switching to %s...\n", targetSession)
 		// Use tmux switch-client to move our view to the target session
-		if err := exec.Command("tmux", "-u", "switch-client", "-t", targetSession).Run(); err != nil {
+		if err := tmux.BuildCommand("switch-client", "-t", targetSession).Run(); err != nil {
 			// Non-fatal - they can manually switch
 			fmt.Printf("Note: Could not auto-switch (use: tmux switch-client -t %s)\n", targetSession)
 		}
@@ -1043,7 +1050,7 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 // getSessionPane returns the pane identifier for a session's main pane.
 func getSessionPane(sessionName string) (string, error) {
 	// Get the pane ID for the first pane in the session
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
+	out, err := tmux.BuildCommand("list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
 	if err != nil {
 		return "", err
 	}
@@ -1239,9 +1246,16 @@ func hookBeadForHandoff(beadID string) error {
 }
 
 // collectHandoffState gathers current state for handoff context.
-// Collects: inbox summary, ready beads, hooked work.
+// Collects: git workspace state (deterministic), inbox summary, ready beads, hooked work.
+// Git state is always collected first via Go library calls (no shelling out) to ensure
+// the handoff always contains useful context even when external commands fail. (GH#1996)
 func collectHandoffState() string {
 	var parts []string
+
+	// Deterministic git state — always collected via Go library, never empty. (GH#1996)
+	if gitState := collectGitState(); gitState != "" {
+		parts = append(parts, gitState)
+	}
 
 	// Get hooked work
 	hookOutput, err := exec.Command("gt", "hook").Output()
@@ -1298,4 +1312,64 @@ func collectHandoffState() string {
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// collectGitState captures deterministic workspace state using the Go git library.
+// This uses only the git.Git wrapper (no shelling out to gt/bd), so it works
+// reliably even when PATH is broken or external commands are unavailable.
+// Returns empty string if git state cannot be read (e.g., not in a git repo). (GH#1996)
+func collectGitState() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	g := git.NewGit(cwd)
+	if !g.IsRepo() {
+		return ""
+	}
+
+	var lines []string
+
+	// Branch
+	if branch, err := g.CurrentBranch(); err == nil && branch != "" {
+		lines = append(lines, "Branch: "+branch)
+	}
+
+	// Uncommitted work summary (skip section on error, don't bail entirely)
+	if work, err := g.CheckUncommittedWork(); err == nil {
+		if work.HasUncommittedChanges {
+			if len(work.ModifiedFiles) > 0 {
+				files := work.ModifiedFiles
+				if len(files) > 10 {
+					files = append(files[:10], fmt.Sprintf("... (+%d more)", len(work.ModifiedFiles)-10))
+				}
+				lines = append(lines, "Modified: "+strings.Join(files, ", "))
+			}
+			if len(work.UntrackedFiles) > 0 {
+				files := work.UntrackedFiles
+				if len(files) > 5 {
+					files = append(files[:5], fmt.Sprintf("... (+%d more)", len(work.UntrackedFiles)-5))
+				}
+				lines = append(lines, "Untracked: "+strings.Join(files, ", "))
+			}
+		}
+		if work.StashCount > 0 {
+			lines = append(lines, fmt.Sprintf("Stashes: %d", work.StashCount))
+		}
+		if work.UnpushedCommits > 0 {
+			lines = append(lines, fmt.Sprintf("Unpushed commits: %d", work.UnpushedCommits))
+		}
+	}
+
+	// Recent commits (last 5) for context on what was being worked on.
+	if logStr, err := g.RecentCommits(5); err == nil && logStr != "" {
+		lines = append(lines, "Recent commits:\n"+logStr)
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return "## Workspace State\n" + strings.Join(lines, "\n")
 }

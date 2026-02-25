@@ -7,7 +7,6 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -169,11 +168,23 @@ func getConvoyInfoForIssue(issueID string) *ConvoyInfo {
 	// Get convoy details (labels + description) for ownership and merge strategy
 	showCmd := exec.Command("bd", "show", convoyID, "--json")
 	showCmd.Dir = townBeads
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	showCmd.Stdout = &stdout
+	showCmd.Stderr = &stderr
 
 	if err := showCmd.Run(); err != nil {
-		return &ConvoyInfo{ID: convoyID} // Return basic info even if details fail
+		// Check if this is a "not found" error (phantom convoy) vs transient error.
+		// Phantom convoys occur when a convoy bead is deleted from HQ but tracking
+		// deps still exist in local beads DB (gt-9xum2). Return nil to treat as
+		// untracked, allowing normal MR flow to proceed.
+		stderrStr := stderr.String()
+		if strings.Contains(stderrStr, "not found") ||
+			strings.Contains(stderrStr, "Issue not found") ||
+			strings.Contains(stderrStr, "no issue found") {
+			return nil // Phantom convoy - proceed without convoy context
+		}
+		// Other error (transient) - return basic info as fallback
+		return &ConvoyInfo{ID: convoyID}
 	}
 
 	var convoys []struct {
@@ -343,25 +354,20 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
-	createCmd.Stderr = os.Stderr
-
-	if err := createCmd.Run(); err != nil {
-		return "", nil, fmt.Errorf("creating batch convoy: %w", err)
+	// Use BdCmd with WithAutoCommit to ensure convoy is persisted even when
+	// gt sling has set BD_DOLT_AUTO_COMMIT=off globally (gt-9xum2 root cause fix).
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
+		return "", nil, fmt.Errorf("creating batch convoy: %w\noutput: %s", err, out)
 	}
 
 	// Add tracking relations for all beads, recording which succeed.
+	// Use WithAutoCommit for the same reason as above.
 	var tracked []string
 	for _, beadID := range beadIDs {
 		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townRoot
-		depCmd.Stderr = os.Stderr
-
-		if err := depCmd.Run(); err != nil {
+		if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().CombinedOutput(); err != nil {
 			// Log but continue — partial tracking is better than no tracking
-			fmt.Printf("  Warning: could not track %s in convoy: %v\n", beadID, err)
+			fmt.Printf("  Warning: could not track %s in convoy: %v\nOutput: %s\n", beadID, err, out)
 		} else {
 			tracked = append(tracked, beadID)
 		}
@@ -413,28 +419,21 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
-	createCmd.Stderr = os.Stderr
-
-	if err := createCmd.Run(); err != nil {
-		return "", fmt.Errorf("creating convoy: %w", err)
+	// Use BdCmd with WithAutoCommit to ensure convoy is persisted even when
+	// gt sling has set BD_DOLT_AUTO_COMMIT=off globally (gt-9xum2 root cause fix).
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
+		return "", fmt.Errorf("creating convoy: %w\noutput: %s", err, out)
 	}
 
 	// Add tracking relation: convoy tracks the issue.
 	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
 	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
+	// Use WithAutoCommit for the same reason as above.
 	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = townRoot
-	depCmd.Stderr = os.Stderr
-
-	if err := depCmd.Run(); err != nil {
+	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().CombinedOutput(); err != nil {
 		// Tracking failed — delete the orphan convoy to prevent accumulation
-		delCmd := exec.Command("bd", "close", convoyID, "-r", "tracking dep failed")
-		delCmd.Dir = townRoot
-		_ = delCmd.Run()
-		return "", fmt.Errorf("adding tracking relation for %s: %w", beadID, err)
+		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townRoot).Run()
+		return "", fmt.Errorf("adding tracking relation for %s: %w\noutput: %s", beadID, err, out)
 	}
 
 	return convoyID, nil

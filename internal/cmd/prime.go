@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -29,6 +30,10 @@ var primeExplain bool
 // primeHookSource stores the SessionStart source ("startup", "resume", "clear", "compact")
 // when running in hook mode. Used to provide lighter output on compaction/resume.
 var primeHookSource string
+
+// primeHandoffReason stores the reason from the handoff marker (e.g., "compaction").
+// Set by checkHandoffMarker when a marker with a reason field is found.
+var primeHandoffReason string
 
 // Role represents a detected agent role.
 type Role string
@@ -180,17 +185,31 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 // runPrimeCompactResume runs a lighter prime after compaction or resume.
 // The agent already has full role context in compressed memory. This just
 // restores identity, checks hook/work status, and injects any new mail.
+//
+// Unlike the full prime path, this uses a continuation directive instead of
+// the full AUTONOMOUS WORK MODE block. This prevents agents from re-announcing
+// and re-initializing after compaction. (GH#1965)
 func runPrimeCompactResume(ctx RoleContext, cwd string) {
 	// Brief identity confirmation
 	actor := getAgentIdentity(ctx)
+	source := primeHookSource
+	if source == "" && primeHandoffReason != "" {
+		source = "handoff-" + primeHandoffReason
+	}
 	fmt.Printf("\n> **Recovery**: Context %s complete. You are **%s** (%s).\n",
-		primeHookSource, actor, ctx.Role)
+		source, actor, ctx.Role)
 
 	// Session metadata for seance
 	outputSessionMetadata(ctx)
 
-	// Check for hooked work — critical for resuming after compaction
-	hasSlungWork := checkSlungWork(ctx)
+	// Find hooked work and output continuation directive (not full autonomous startup).
+	// The agent already knows what it was doing — just remind it of the hook.
+	hookedBead := findAgentWork(ctx)
+	if hookedBead != nil {
+		attachment := beads.ParseAttachmentFields(hookedBead)
+		hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
+		outputContinuationDirective(hookedBead, hasMolecule)
+	}
 
 	// Molecule progress if available
 	outputMoleculeContext(ctx)
@@ -200,8 +219,8 @@ func runPrimeCompactResume(ctx RoleContext, cwd string) {
 		runMailCheckInject(cwd)
 	}
 
-	// Startup directive if no hooked work
-	if !hasSlungWork {
+	// Startup directive only if no hooked work
+	if hookedBead == nil {
 		outputStartupDirective(ctx)
 	}
 }
@@ -268,8 +287,14 @@ func handlePrimeHookMode(townRoot, cwd string) {
 // isCompactResume returns true if the current prime is running after compaction or resume.
 // In these cases, the agent already has role context in compressed memory and only needs
 // a brief identity confirmation plus hook/work status.
+//
+// This also returns true for compaction-triggered handoff cycles (crew workers).
+// When PreCompact runs "gt handoff --cycle --reason compaction", the new session
+// gets source="startup" but the handoff marker carries reason="compaction".
+// Without this, the new session runs full prime with AUTONOMOUS WORK MODE,
+// causing the agent to re-initialize instead of continuing. (GH#1965)
 func isCompactResume() bool {
-	return primeHookSource == "compact" || primeHookSource == "resume"
+	return primeHookSource == "compact" || primeHookSource == "resume" || primeHandoffReason == "compaction"
 }
 
 // warnRoleMismatch outputs a prominent warning if GT_ROLE disagrees with cwd detection.
@@ -415,6 +440,9 @@ func checkSlungWork(ctx RoleContext) bool {
 // findAgentWork looks up hooked or in-progress beads assigned to this agent.
 // Primary: reads hook_bead from the agent bead (same strategy as detectSessionState/gt hook).
 // Fallback: queries by assignee for agents without an agent bead.
+// For polecats and crew, retries up to 3 times with 2-second delays to handle
+// the timing race where hook state hasn't propagated by the time gt prime runs.
+// See: https://github.com/steveyegge/gastown/issues/1438
 // Returns nil if no work is found.
 func findAgentWork(ctx RoleContext) *beads.Issue {
 	agentID := getAgentIdentity(ctx)
@@ -422,6 +450,29 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 		return nil
 	}
 
+	// Polecats and crew use a retry loop to handle the timing race where
+	// the hook slot write (SetHookBead) hasn't propagated to the database
+	// by the time gt prime runs on session startup.
+	maxAttempts := 1
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		maxAttempts = 3
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(2 * time.Second)
+		}
+
+		if result := findAgentWorkOnce(ctx, agentID); result != nil {
+			return result
+		}
+	}
+
+	return nil
+}
+
+// findAgentWorkOnce performs a single attempt to find hooked work for an agent.
+func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 	b := beads.New(ctx.WorkDir)
 	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 	agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)

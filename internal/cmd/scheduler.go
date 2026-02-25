@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -403,10 +403,18 @@ func listScheduledBeads(townRoot string) ([]scheduledBeadInfo, error) {
 		return nil, nil
 	}
 
-	// Build readyIDs set and batch-fetch work bead info in parallel-ish
-	// (both are independent queries)
+	// Collect work bead IDs from contexts for targeted fetch
+	var workBeadIDs []string
+	for _, ctx := range allContexts {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil && fields.WorkBeadID != "" {
+			workBeadIDs = append(workBeadIDs, fields.WorkBeadID)
+		}
+	}
+
+	// Build readyIDs set and batch-fetch work bead info for specific IDs
 	readyWorkIDs := listReadyWorkBeadIDs(townRoot)
-	workBeadInfo := batchFetchBeadInfo(townRoot)
+	workBeadInfo := batchFetchBeadInfoByIDs(townRoot, workBeadIDs)
 
 	seenWork := make(map[string]bool)
 	var result []scheduledBeadInfo
@@ -505,7 +513,7 @@ func beadsSearchDirs(townRoot string) []string {
 
 // countActivePolecats counts all running polecats across all rigs in the town.
 func countActivePolecats() int {
-	listCmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
+	listCmd := tmux.BuildCommand("list-sessions", "-F", "#{session_name}")
 	out, err := listCmd.Output()
 	if err != nil {
 		return 0

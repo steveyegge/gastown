@@ -290,6 +290,11 @@ func detectSessionState(ctx RoleContext) SessionState {
 // This prevents the "handoff loop" bug where a new session sees /handoff in context
 // and incorrectly runs it again. The marker tells the new session: "handoff is DONE,
 // the /handoff you see in context was from YOUR PREDECESSOR, not a request for you."
+//
+// The marker format is: "session_id\nreason" (reason is optional, on second line).
+// When present, the reason is stored in primeHandoffReason for compact/resume detection.
+// This enables compaction-triggered handoff cycles to route through the lighter
+// compact/resume path instead of full re-initialization. (GH#1965)
 func checkHandoffMarker(workDir string) {
 	markerPath := filepath.Join(workDir, constants.DirRuntime, constants.FileHandoffMarker)
 	data, err := os.ReadFile(markerPath)
@@ -298,8 +303,12 @@ func checkHandoffMarker(workDir string) {
 		return
 	}
 
-	// Marker found - this is a post-handoff session
-	prevSession := strings.TrimSpace(string(data))
+	// Parse marker: first line is session ID, optional second line is reason
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	prevSession := strings.TrimSpace(lines[0])
+	if len(lines) > 1 {
+		primeHandoffReason = strings.TrimSpace(lines[1])
+	}
 
 	// Remove the marker FIRST so we don't warn twice
 	_ = os.Remove(markerPath)
@@ -318,9 +327,14 @@ func checkHandoffMarkerDryRun(workDir string) {
 		return
 	}
 
-	// Marker found - this is a post-handoff session
-	prevSession := strings.TrimSpace(string(data))
-	explain(true, fmt.Sprintf("Post-handoff: marker found (predecessor: %s), marker NOT removed in dry-run", prevSession))
+	// Parse marker: first line is session ID, optional second line is reason
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	prevSession := strings.TrimSpace(lines[0])
+	if len(lines) > 1 {
+		primeHandoffReason = strings.TrimSpace(lines[1])
+	}
+
+	explain(true, fmt.Sprintf("Post-handoff: marker found (predecessor: %s, reason: %s), marker NOT removed in dry-run", prevSession, primeHandoffReason))
 
 	// Output the warning but don't remove marker
 	outputHandoffWarning(prevSession)

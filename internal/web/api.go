@@ -25,6 +25,8 @@ type CommandRequest struct {
 	Command string `json:"command"`
 	// Timeout in seconds (optional; see WebTimeoutsConfig for defaults)
 	Timeout int `json:"timeout,omitempty"`
+	// Confirmed must be true for commands that require confirmation.
+	Confirmed bool `json:"confirmed,omitempty"`
 }
 
 // CommandResponse is the JSON response from /api/run.
@@ -56,6 +58,8 @@ type APIHandler struct {
 	optionsCacheMu   sync.RWMutex
 	// cmdSem limits concurrent command executions to prevent resource exhaustion.
 	cmdSem chan struct{}
+	// csrfToken is validated on POST requests to prevent cross-site request forgery.
+	csrfToken string
 }
 
 const optionsCacheTTL = 30 * time.Second
@@ -64,8 +68,11 @@ const optionsCacheTTL = 30 * time.Second
 // handleOptions alone spawns 7; allow headroom for other concurrent handlers.
 const maxConcurrentCommands = 12
 
-// NewAPIHandler creates a new API handler with the given run timeouts.
-func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
+// NewAPIHandler creates a new API handler with the given run timeouts and CSRF token.
+func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration, csrfToken string) *APIHandler {
+	if csrfToken == "" {
+		log.Printf("WARNING: APIHandler created with empty CSRF token — POST requests will not be protected")
+	}
 	// Use PATH lookup for gt binary. Do NOT use os.Executable() here - during
 	// tests it returns the test binary, causing fork bombs when executed.
 	workDir, _ := os.Getwd()
@@ -75,19 +82,26 @@ func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration) *APIHandler {
 		defaultRunTimeout: defaultRunTimeout,
 		maxRunTimeout:     maxRunTimeout,
 		cmdSem:            make(chan struct{}, maxConcurrentCommands),
+		csrfToken:         csrfToken,
 	}
 }
 
 // ServeHTTP routes API requests to the appropriate handler.
 func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers for dashboard
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// No CORS headers — the dashboard is served from the same origin.
+	// Omitting Access-Control-Allow-Origin prevents cross-origin requests.
 
 	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+
+	// Validate CSRF token on all POST requests.
+	if r.Method == http.MethodPost && h.csrfToken != "" {
+		if r.Header.Get("X-Dashboard-Token") != h.csrfToken {
+			h.sendError(w, "Invalid or missing dashboard token", http.StatusForbidden)
+			return
+		}
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api")
@@ -141,6 +155,12 @@ func (h *APIHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	meta, err := ValidateCommand(req.Command)
 	if err != nil {
 		h.sendError(w, fmt.Sprintf("Command blocked: %v", err), http.StatusForbidden)
+		return
+	}
+
+	// Enforce server-side confirmation for dangerous commands
+	if meta.Confirm && !req.Confirmed {
+		h.sendError(w, "This command requires confirmation (set confirmed: true)", http.StatusForbidden)
 		return
 	}
 
@@ -2051,7 +2071,6 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	ctx := r.Context()

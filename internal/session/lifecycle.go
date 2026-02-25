@@ -229,9 +229,9 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		}
 	}
 
-	// 10. Accept bypass permissions warning.
+	// 10. Accept startup dialogs (workspace trust + bypass permissions).
 	if cfg.AcceptBypass {
-		_ = t.AcceptBypassPermissionsWarning(cfg.SessionID)
+		_ = t.AcceptStartupDialogs(cfg.SessionID)
 	}
 
 	// 11. Ready delay: wait for agent to be fully ready at the prompt.

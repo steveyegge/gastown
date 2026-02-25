@@ -22,6 +22,7 @@ import (
 	convoyops "github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -1367,7 +1368,7 @@ func isReadyIssue(t trackedIssueInfo, scheduledSet map[string]bool) bool {
 	}
 
 	// Check if tmux session exists
-	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	checkCmd := tmux.BuildCommand("has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err != nil {
 		// Session doesn't exist = orphaned molecule or dead worker
 		// This is the key fix: issues with in_progress/hooked status but

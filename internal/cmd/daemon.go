@@ -107,7 +107,7 @@ Examples:
 }
 
 var (
-	daemonLogLines int
+	daemonLogLines  int
 	daemonLogFollow bool
 )
 
@@ -222,6 +222,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("●"),
 			style.Bold.Render("running"),
 			pid)
+		fmt.Printf("  Town: %s\n", townRoot)
 
 		// Load state for more details
 		state, err := daemon.LoadState(townRoot)

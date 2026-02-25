@@ -247,7 +247,7 @@ func TestExpandHomePath(t *testing.T) {
 // real binaries (e.g., via gastown-docker).
 
 func TestHandler_MailRead_InvalidID(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/mail/read?id=--inject", nil)
 	w := httptest.NewRecorder()
@@ -259,11 +259,12 @@ func TestHandler_MailRead_InvalidID(t *testing.T) {
 }
 
 func TestHandler_MailSend_InvalidRecipient(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{"to": "--flag", "subject": "test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/mail/send", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -273,13 +274,14 @@ func TestHandler_MailSend_InvalidRecipient(t *testing.T) {
 }
 
 func TestHandler_MailSend_ValidAgentPath(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// rig/agent is a valid mail address — should NOT be rejected by validation.
 	// gt isn't available in test, so expect 500 (command failed), NOT 400 (validation).
 	body := `{"to": "myrig/agent", "subject": "test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/mail/send", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -298,7 +300,7 @@ func TestHandler_MailSend_ValidAgentPath(t *testing.T) {
 }
 
 func TestHandler_MailSend_OversizedSubject(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	payload := map[string]interface{}{
 		"to":      "alice",
@@ -307,6 +309,7 @@ func TestHandler_MailSend_OversizedSubject(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/api/mail/send", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -316,7 +319,7 @@ func TestHandler_MailSend_OversizedSubject(t *testing.T) {
 }
 
 func TestHandler_IssueShow_InvalidID(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/show?id=--help", nil)
 	w := httptest.NewRecorder()
@@ -328,7 +331,7 @@ func TestHandler_IssueShow_InvalidID(t *testing.T) {
 }
 
 func TestHandler_PRShow_InvalidNumber(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pr/show?repo=owner/repo&number=abc", nil)
 	w := httptest.NewRecorder()
@@ -340,7 +343,7 @@ func TestHandler_PRShow_InvalidNumber(t *testing.T) {
 }
 
 func TestHandler_PRShow_InvalidURL(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pr/show?url=--evil", nil)
 	w := httptest.NewRecorder()
@@ -352,7 +355,7 @@ func TestHandler_PRShow_InvalidURL(t *testing.T) {
 }
 
 func TestHandler_IssueShow_ExternalPrefixID(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// external:prefix:id format should pass validation (unwrapped to raw ID).
 	// Expect 500 (bd not available), NOT 400 (validation failure).
@@ -375,7 +378,7 @@ func TestHandler_IssueShow_ExternalPrefixID(t *testing.T) {
 }
 
 func TestHandler_PRShow_URLIgnoresRepoNumber(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// When url is provided, repo/number should be ignored (not validated).
 	// Expect 500 (gh not available), NOT 400 (validation failure).
@@ -397,7 +400,7 @@ func TestHandler_PRShow_URLIgnoresRepoNumber(t *testing.T) {
 }
 
 func TestSetupHandler_Install_FlagPathInjection(t *testing.T) {
-	handler := NewSetupAPIHandler()
+	handler := NewSetupAPIHandler("test-token")
 
 	// Validates the validation layer: "--help" passes expandHomePath (it's a
 	// relative path) and reaches gt install. The -- sentinel in the args
@@ -406,6 +409,7 @@ func TestSetupHandler_Install_FlagPathInjection(t *testing.T) {
 	body := `{"path": "--help"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/install", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -417,11 +421,12 @@ func TestSetupHandler_Install_FlagPathInjection(t *testing.T) {
 }
 
 func TestSetupHandler_RigAdd_InvalidGitURL(t *testing.T) {
-	handler := NewSetupAPIHandler()
+	handler := NewSetupAPIHandler("test-token")
 
 	body := `{"name": "myrig", "gitUrl": "--evil"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/rig/add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -431,11 +436,12 @@ func TestSetupHandler_RigAdd_InvalidGitURL(t *testing.T) {
 }
 
 func TestSetupHandler_Install_InvalidName(t *testing.T) {
-	handler := NewSetupAPIHandler()
+	handler := NewSetupAPIHandler("test-token")
 
 	body := `{"path": "/tmp/test", "name": "--inject"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/install", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -445,13 +451,14 @@ func TestSetupHandler_Install_InvalidName(t *testing.T) {
 }
 
 func TestSetupHandler_RigAdd_HyphenatedName(t *testing.T) {
-	handler := NewSetupAPIHandler()
+	handler := NewSetupAPIHandler("test-token")
 
 	// Rig names with hyphens should be rejected — hyphens are reserved for
 	// agent ID parsing (see internal/rig/manager.go:269).
 	body := `{"name": "my-rig", "gitUrl": "https://github.com/org/repo.git"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/rig/add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -461,11 +468,12 @@ func TestSetupHandler_RigAdd_HyphenatedName(t *testing.T) {
 }
 
 func TestSetupHandler_CheckWorkspace_TraversalPath(t *testing.T) {
-	handler := NewSetupAPIHandler()
+	handler := NewSetupAPIHandler("test-token")
 
 	body := `{"path": "~/../../etc/passwd"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/check-workspace", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -483,7 +491,7 @@ func TestSetupHandler_CheckWorkspace_TraversalPath(t *testing.T) {
 }
 
 func TestHandler_IssueShow_MalformedExternalPrefix(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// external:foo (only 2 parts) should get a specific error, not generic "Invalid issue ID".
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/show?id=external:foo", nil)
@@ -504,7 +512,7 @@ func TestHandler_IssueShow_MalformedExternalPrefix(t *testing.T) {
 }
 
 func TestHandler_IssueShow_ExternalWithExtraColons(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// SplitN(":", 3) puts "id:with:colons" in parts[2]. isValidID rejects colons.
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/show?id=external:prefix:id:with:colons", nil)
@@ -525,11 +533,12 @@ func TestHandler_IssueShow_ExternalWithExtraColons(t *testing.T) {
 }
 
 func TestHandler_MailSend_NullByteSubject(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	body := `{"to": "alice", "subject": "test\u0000inject"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/mail/send", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -539,7 +548,7 @@ func TestHandler_MailSend_NullByteSubject(t *testing.T) {
 }
 
 func TestHandler_IssueCreate_FlagTitle(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// A title of "--help" should pass validation (no control chars, no newlines)
 	// and reach bd create. The -- sentinel ensures it's treated as positional.
@@ -547,6 +556,7 @@ func TestHandler_IssueCreate_FlagTitle(t *testing.T) {
 	body := `{"title": "--help"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/create", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Dashboard-Token", "test-token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -556,7 +566,7 @@ func TestHandler_IssueCreate_FlagTitle(t *testing.T) {
 }
 
 func TestHandler_SessionPreview_MissingParam(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/session/preview", nil)
 	w := httptest.NewRecorder()
@@ -568,7 +578,7 @@ func TestHandler_SessionPreview_MissingParam(t *testing.T) {
 }
 
 func TestHandler_SessionPreview_InvalidPrefix(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/session/preview?session=evil-session", nil)
 	w := httptest.NewRecorder()
@@ -580,7 +590,7 @@ func TestHandler_SessionPreview_InvalidPrefix(t *testing.T) {
 }
 
 func TestHandler_SessionPreview_InvalidChars(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// Session name with shell metacharacters should be rejected
 	req := httptest.NewRequest(http.MethodGet, "/api/session/preview?session=gt-evil;rm+-rf+/", nil)
@@ -593,7 +603,7 @@ func TestHandler_SessionPreview_InvalidChars(t *testing.T) {
 }
 
 func TestHandler_SessionPreview_ValidName(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
 	// A valid session name should pass validation and reach tmux capture-pane.
 	// tmux isn't available in test, so expect 500 (command failed), NOT 400 (validation).

@@ -9,7 +9,7 @@ prompt_template = "polecat.md.tmpl"
 [session]
 pattern = "{prefix}-{name}"
 work_dir = "{town}/{rig}/polecats/{name}"
-needs_pre_sync = true
+needs_pre_sync = false
 start_command = "exec claude --dangerously-skip-permissions"
 
 [env]

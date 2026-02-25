@@ -1689,6 +1689,29 @@ func TestWithRoleSettingsFlag_InjectsForClaude(t *testing.T) {
 	}
 }
 
+func TestRoleSettingsDir(t *testing.T) {
+	t.Parallel()
+	rigPath := "/fake/rig"
+	tests := []struct {
+		role string
+		want string
+	}{
+		{"crew", filepath.Join(rigPath, "crew")},
+		{"witness", filepath.Join(rigPath, "witness")},
+		{"refinery", filepath.Join(rigPath, "refinery", "rig")},
+		{"polecat", filepath.Join(rigPath, "polecats")},
+		{"mayor", ""},
+		{"deacon", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := RoleSettingsDir(tt.role, rigPath)
+		if got != tt.want {
+			t.Errorf("RoleSettingsDir(%q, %q) = %q, want %q", tt.role, rigPath, got, tt.want)
+		}
+	}
+}
+
 func TestDaemonPatrolConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

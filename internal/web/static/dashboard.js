@@ -2,6 +2,22 @@
     'use strict';
 
     // ============================================
+    // CSRF PROTECTION
+    // ============================================
+    // Inject dashboard token into all POST requests to prevent cross-site request forgery.
+    var _origFetch = window.fetch;
+    var _csrfMeta = document.querySelector('meta[name="dashboard-token"]');
+    var _csrfToken = _csrfMeta ? _csrfMeta.getAttribute('content') : '';
+    window.fetch = function(url, opts) {
+        opts = opts || {};
+        if (opts.method && opts.method.toUpperCase() === 'POST' && _csrfToken) {
+            opts.headers = opts.headers || {};
+            opts.headers['X-Dashboard-Token'] = _csrfToken;
+        }
+        return _origFetch.call(this, url, opts);
+    };
+
+    // ============================================
     // SSE (Server-Sent Events) CONNECTION
     // ============================================
     window.sseConnected = false;
@@ -671,10 +687,16 @@
 
         showToast('info', 'Running...', 'gt ' + cmdName);
 
+        var payload = { command: cmdName };
+        // Include confirmed flag if the command requires server-side confirmation
+        if (matchedCmd && matchedCmd.confirm) {
+            payload.confirmed = true;
+        }
+
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmdName })
+            body: JSON.stringify(payload)
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1186,7 +1208,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: 'hook detach ' + beadId })
+            body: JSON.stringify({ command: 'hook detach ' + beadId, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1249,7 +1271,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: 'hook attach ' + beadId })
+            body: JSON.stringify({ command: 'hook attach ' + beadId, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1297,7 +1319,7 @@
             fetch('/api/run', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: 'hook detach ' + beadId })
+                body: JSON.stringify({ command: 'hook detach ' + beadId, confirmed: true })
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -1762,7 +1784,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd })
+            body: JSON.stringify({ command: cmd, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1830,7 +1852,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd })
+            body: JSON.stringify({ command: cmd, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -2662,7 +2684,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd })
+            body: JSON.stringify({ command: cmd, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -2733,7 +2755,7 @@
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmdName })
+            body: JSON.stringify({ command: cmdName, confirmed: true })
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -2819,7 +2841,7 @@
             fetch('/api/run', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: cmdName })
+                body: JSON.stringify({ command: cmdName, confirmed: true })
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {

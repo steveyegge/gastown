@@ -3,7 +3,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"log"
@@ -40,10 +42,11 @@ type ConvoyHandler struct {
 	fetcher      ConvoyFetcher
 	template     *template.Template
 	fetchTimeout time.Duration
+	csrfToken    string
 }
 
-// NewConvoyHandler creates a new convoy handler with the given fetcher and fetch timeout.
-func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration) (*ConvoyHandler, error) {
+// NewConvoyHandler creates a new convoy handler with the given fetcher, fetch timeout, and CSRF token.
+func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration, csrfToken string) (*ConvoyHandler, error) {
 	tmpl, err := LoadTemplates()
 	if err != nil {
 		return nil, err
@@ -53,6 +56,7 @@ func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration) (*Convo
 		fetcher:      fetcher,
 		template:     tmpl,
 		fetchTimeout: fetchTimeout,
+		csrfToken:    csrfToken,
 	}, nil
 }
 
@@ -236,6 +240,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Activity:    activity,
 		Summary:     summary,
 		Expand:      expandPanel,
+		CSRFToken:   h.csrfToken,
 	}
 
 	var buf bytes.Buffer
@@ -328,6 +333,15 @@ func enrichIssuesWithAssignees(issues []IssueRow, hooks []HookRow) []IssueRow {
 	return issues
 }
 
+// generateCSRFToken creates a cryptographically random token for CSRF protection.
+func generateCSRFToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("failed to generate CSRF token: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
+
 // NewDashboardMux creates an HTTP handler that serves both the dashboard and API.
 // webCfg may be nil, in which case defaults are used.
 func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (http.Handler, error) {
@@ -335,15 +349,17 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 		webCfg = config.DefaultWebTimeoutsConfig()
 	}
 
+	csrfToken := generateCSRFToken()
+
 	fetchTimeout := config.ParseDurationOrDefault(webCfg.FetchTimeout, 8*time.Second)
-	convoyHandler, err := NewConvoyHandler(fetcher, fetchTimeout)
+	convoyHandler, err := NewConvoyHandler(fetcher, fetchTimeout, csrfToken)
 	if err != nil {
 		return nil, err
 	}
 
 	defaultRunTimeout := config.ParseDurationOrDefault(webCfg.DefaultRunTimeout, 30*time.Second)
 	maxRunTimeout := config.ParseDurationOrDefault(webCfg.MaxRunTimeout, 60*time.Second)
-	apiHandler := NewAPIHandler(defaultRunTimeout, maxRunTimeout)
+	apiHandler := NewAPIHandler(defaultRunTimeout, maxRunTimeout, csrfToken)
 
 	// Create static file server from embedded files
 	staticFS, err := fs.Sub(staticFiles, "static")

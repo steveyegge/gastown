@@ -101,7 +101,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		return nil
 	}
 
-	if (info.Status == "pinned" || info.Status == "hooked") && !opts.Force {
+	if (info.Status == "pinned" || info.Status == "hooked" || info.Status == "in_progress") && !opts.Force {
 		return fmt.Errorf("bead %s is already %s to %s\nUse --force to override", beadID, info.Status, info.Assignee)
 	}
 

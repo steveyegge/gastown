@@ -75,6 +75,12 @@ type ConvoyManager struct {
 	// The first cycle advances high-water marks without processing events,
 	// preventing a burst of historical event replay on daemon restart.
 	seeded atomic.Bool
+
+	// processedCloses tracks issue IDs that have already been processed for
+	// close events. This prevents duplicate convoy checks when the same close
+	// event is seen from multiple stores or across poll cycles where high-water
+	// marks don't perfectly deduplicate (e.g., event replication). See GH #1798.
+	processedCloses sync.Map // map[string]bool
 }
 
 // NewConvoyManager creates a new convoy manager.
@@ -263,6 +269,14 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 			continue
 		}
 		seen[issueID] = true
+
+		// Cross-cycle dedup: skip if this issue's close was already processed
+		// in a previous poll cycle. The same close event can appear from
+		// multiple stores (replication) or across poll cycles when high-water
+		// marks don't perfectly filter. See GH #1798.
+		if _, alreadyProcessed := m.processedCloses.LoadOrStore(issueID, true); alreadyProcessed {
+			continue
+		}
 
 		m.logger("Convoy: close detected: %s (from %s)", issueID, name)
 		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)

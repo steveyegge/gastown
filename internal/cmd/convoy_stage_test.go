@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -1182,9 +1183,28 @@ func TestRenderDAGTree_OutputOrdering(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // U-22: Parked rig detected and warned
+// This test uses the isRigParkedFn seam to mock parked rig detection.
 func TestDetectWarnings_ParkedRig(t *testing.T) {
+	// Set up a temp dir as town root and cd there for workspace.FindFromCwd()
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
+		t.Fatalf("failed to create .beads: %v", err)
+	}
+	oldDir, _ := os.Getwd()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(oldDir) })
+
+	// Override isRigParkedFn to return true for "parkedrig"
+	origFn := isRigParkedFn
+	isRigParkedFn = func(townRoot, rigName string) bool {
+		return rigName == "parkedrig"
+	}
+	t.Cleanup(func() { isRigParkedFn = origFn })
+
 	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
-		"gt-a": {ID: "gt-a", Type: "task", Rig: "gastown.parked"},
+		"gt-a": {ID: "gt-a", Type: "task", Rig: "parkedrig"},
 		"gt-b": {ID: "gt-b", Type: "task", Rig: "gastown"},
 	}}
 	input := &StageInput{Kind: StageInputTasks, IDs: []string{"gt-a", "gt-b"}}

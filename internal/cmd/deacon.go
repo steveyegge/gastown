@@ -555,9 +555,8 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 
-	// Accept bypass permissions warning dialog if it appears.
-	// This prevents hangs on systems where Claude prompts for permissions.
-	_ = t.AcceptBypassPermissionsWarning(sessionName)
+	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
+	_ = t.AcceptStartupDialogs(sessionName)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

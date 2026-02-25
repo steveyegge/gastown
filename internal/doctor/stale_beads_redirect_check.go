@@ -24,8 +24,8 @@ import (
 // instead of following the redirect.
 type StaleBeadsRedirectCheck struct {
 	FixableCheck
-	staleLocations   []string        // Cached for Fix - dirs with stale files
-	missingRedirects []redirectIssue // Cached for Fix - worktrees missing redirects
+	staleLocations     []string        // Cached for Fix - dirs with stale files
+	missingRedirects   []redirectIssue // Cached for Fix - worktrees missing redirects
 	incorrectRedirects []redirectIssue // Cached for Fix - worktrees with wrong redirect target
 }
 
@@ -260,12 +260,14 @@ func getBeadsDirsToCheck(rigDir string) []string {
 	}
 
 	// Polecats .beads directories: <rig>/polecats/*/.beads
+	// Polecats may use nested structure: polecats/<name>/<rig_name>/.beads
 	polecatsDir := filepath.Join(rigDir, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, entry := range entries {
 			// Skip hidden directories
 			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-				beadsDir := filepath.Join(polecatsDir, entry.Name(), ".beads")
+				clonePath := polecatClonePath(rigDir, entry.Name())
+				beadsDir := filepath.Join(clonePath, ".beads")
 				if _, err := os.Stat(beadsDir); err == nil {
 					dirs = append(dirs, beadsDir)
 				}
@@ -407,13 +409,15 @@ func getWorktreePaths(rigDir string) []string {
 	}
 
 	// Polecats: <rig>/polecats/*
+	// Polecats may use nested structure: polecats/<name>/<rig_name>/
+	// where <rig_name>/ is the actual git worktree (clone path).
 	polecatsDir := filepath.Join(rigDir, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, entry := range entries {
 			name := entry.Name()
 			// Skip hidden directories
 			if entry.IsDir() && !strings.HasPrefix(name, ".") {
-				paths = append(paths, filepath.Join(polecatsDir, name))
+				paths = append(paths, polecatClonePath(rigDir, name))
 			}
 		}
 	}
@@ -425,6 +429,29 @@ func getWorktreePaths(rigDir string) []string {
 	}
 
 	return paths
+}
+
+// polecatClonePath returns the actual git worktree path for a polecat.
+// Mirrors the logic in polecat/manager.go:clonePath() to handle both:
+//   - New nested structure: polecats/<name>/<rig_name>/ (gives LLMs repo context)
+//   - Old flat structure: polecats/<name>/ (backward compat)
+func polecatClonePath(rigDir, polecatName string) string {
+	rigName := filepath.Base(rigDir)
+	polecatDir := filepath.Join(rigDir, "polecats", polecatName)
+
+	// New structure: polecats/<name>/<rig_name>/
+	nestedPath := filepath.Join(polecatDir, rigName)
+	if dirExists(nestedPath) {
+		return nestedPath
+	}
+
+	// Old structure: polecats/<name>/ (check for .git to confirm it's a worktree)
+	if _, err := os.Stat(filepath.Join(polecatDir, ".git")); err == nil {
+		return polecatDir
+	}
+
+	// Default to new structure (consistent with manager.go)
+	return nestedPath
 }
 
 // readRedirectTarget reads the redirect target from a worktree's .beads/redirect file.
@@ -448,4 +475,3 @@ func normalizeRedirectPath(path string) string {
 	path = strings.TrimSuffix(path, "/")
 	return path
 }
-

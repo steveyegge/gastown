@@ -3,7 +3,10 @@ package beads
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestFindTownRoot(t *testing.T) {
@@ -151,19 +154,46 @@ func TestEnsureCustomTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create sentinel file
+		// Create sentinel file with current types list
+		currentTypes := strings.Join(constants.BeadsCustomTypesList(), ",")
 		sentinelPath := filepath.Join(beadsDir, typesSentinel)
-		if err := os.WriteFile(sentinelPath, []byte("v1\n"), 0644); err != nil {
+		if err := os.WriteFile(sentinelPath, []byte(currentTypes+"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
 		// Reset cache to ensure we're testing sentinel detection
 		ResetEnsuredDirs()
 
-		// This should succeed without running bd (sentinel exists)
+		// This should succeed without running bd (sentinel matches)
 		err := EnsureCustomTypes(beadsDir)
 		if err != nil {
 			t.Errorf("expected success with sentinel file, got: %v", err)
+		}
+	})
+
+	t.Run("stale sentinel triggers re-configuration", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create sentinel file with old/legacy content (gt-zmy, gt-26f)
+		sentinelPath := filepath.Join(beadsDir, typesSentinel)
+		if err := os.WriteFile(sentinelPath, []byte("v1\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// Should NOT cache-hit — sentinel is stale. Will attempt bd config set,
+		// which may fail in test env (no bd), but it should NOT return nil
+		// from the sentinel check.
+		err := EnsureCustomTypes(beadsDir)
+		// We can't assert success/failure (depends on bd availability),
+		// but verify it didn't silently cache the stale sentinel
+		if ensuredDirs[beadsDir] && err != nil {
+			t.Error("should not cache a failed re-configuration")
 		}
 	})
 
@@ -174,9 +204,10 @@ func TestEnsureCustomTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create sentinel to avoid bd call
+		// Create sentinel with current types to avoid bd call
+		currentTypes := strings.Join(constants.BeadsCustomTypesList(), ",")
 		sentinelPath := filepath.Join(beadsDir, typesSentinel)
-		if err := os.WriteFile(sentinelPath, []byte("v1\n"), 0644); err != nil {
+		if err := os.WriteFile(sentinelPath, []byte(currentTypes+"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 

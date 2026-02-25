@@ -1263,8 +1263,10 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 // roles where settings and session directory are the same (mayor, deacon).
 func RoleSettingsDir(role, rigPath string) string {
 	switch role {
-	case "crew", "witness", "refinery":
+	case "crew", "witness":
 		return filepath.Join(rigPath, role)
+	case "refinery":
+		return filepath.Join(rigPath, "refinery", "rig")
 	case "polecat":
 		return filepath.Join(rigPath, "polecats")
 	default:

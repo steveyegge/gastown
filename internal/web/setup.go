@@ -15,36 +15,50 @@ import (
 )
 
 // SetupHandler handles the setup flow when no workspace exists.
-type SetupHandler struct{}
-
-// NewSetupHandler creates a new setup handler.
-func NewSetupHandler() *SetupHandler {
-	return &SetupHandler{}
+type SetupHandler struct {
+	csrfToken string
 }
 
-// ServeHTTP renders the setup page.
+// NewSetupHandler creates a new setup handler with the given CSRF token.
+func NewSetupHandler(csrfToken string) *SetupHandler {
+	return &SetupHandler{csrfToken: csrfToken}
+}
+
+// ServeHTTP renders the setup page with the CSRF token injected.
 func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(setupHTML))
+	html := strings.Replace(setupHTML, "<!--CSRF_TOKEN-->", h.csrfToken, 1)
+	_, _ = w.Write([]byte(html))
 }
 
 // SetupAPIHandler handles API requests for setup operations.
-type SetupAPIHandler struct{}
+type SetupAPIHandler struct {
+	csrfToken string
+}
 
-// NewSetupAPIHandler creates a new setup API handler.
-func NewSetupAPIHandler() *SetupAPIHandler {
-	return &SetupAPIHandler{}
+// NewSetupAPIHandler creates a new setup API handler with the given CSRF token.
+func NewSetupAPIHandler(csrfToken string) *SetupAPIHandler {
+	if csrfToken == "" {
+		log.Printf("WARNING: SetupAPIHandler created with empty CSRF token — POST requests will not be protected")
+	}
+	return &SetupAPIHandler{csrfToken: csrfToken}
 }
 
 // ServeHTTP routes setup API requests.
 func (h *SetupAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// No CORS headers — the setup page is served from the same origin.
 
 	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+
+	// Validate CSRF token on all POST requests.
+	if r.Method == http.MethodPost && h.csrfToken != "" {
+		if r.Header.Get("X-Dashboard-Token") != h.csrfToken {
+			h.sendError(w, "Invalid or missing dashboard token", http.StatusForbidden)
+			return
+		}
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api")
@@ -389,8 +403,9 @@ func (h *SetupAPIHandler) sendJSON(w http.ResponseWriter, resp SetupResponse) {
 
 // NewSetupMux creates the HTTP handler for setup mode.
 func NewSetupMux() (http.Handler, error) {
-	setupHandler := NewSetupHandler()
-	apiHandler := NewSetupAPIHandler()
+	csrfToken := generateCSRFToken()
+	setupHandler := NewSetupHandler(csrfToken)
+	apiHandler := NewSetupAPIHandler(csrfToken)
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiHandler)
@@ -404,6 +419,7 @@ const setupHTML = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="dashboard-token" content="<!--CSRF_TOKEN-->">
     <title>Gas Town Setup</title>
     <style>
         :root {
@@ -798,6 +814,21 @@ const setupHTML = `<!DOCTYPE html>
     </div>
 
     <script>
+        // CSRF protection: inject token into all POST requests
+        (function() {
+            var orig = window.fetch;
+            var meta = document.querySelector('meta[name="dashboard-token"]');
+            var token = meta ? meta.getAttribute('content') : '';
+            window.fetch = function(url, opts) {
+                opts = opts || {};
+                if (opts.method && opts.method.toUpperCase() === 'POST' && token) {
+                    opts.headers = opts.headers || {};
+                    opts.headers['X-Dashboard-Token'] = token;
+                }
+                return orig.call(this, url, opts);
+            };
+        })();
+
         var workspacePath = '';
 
         function showMode(mode) {
