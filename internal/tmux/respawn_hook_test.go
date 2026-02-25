@@ -2,7 +2,9 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,9 @@ func testSocket(t *testing.T) string {
 	t.Cleanup(func() {
 		// Kill the entire tmux server on this socket
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+		// Remove the socket file — tmux kill-server leaves it behind
+		socketPath := filepath.Join(fmt.Sprintf("/tmp/tmux-%d", os.Getuid()), socket)
+		_ = os.Remove(socketPath)
 	})
 	return socket
 }
