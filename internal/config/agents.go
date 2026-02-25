@@ -36,6 +36,9 @@ const (
 	// AgentOmp is Oh My Pi (OMP) — Pi fork with hook-based lifecycle.
 	// Inspired by github.com/ProbabilityEngineer/pi-mono gastown integration.
 	AgentOmp AgentPreset = "omp"
+	// AgentPiRust is Pi Agent Rust — Rust port with QuickJS extension runtime.
+	// Uses different event names than pi-mono: startup, agent_start, agent_end.
+	AgentPiRust AgentPreset = "pirust"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -361,6 +364,22 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "--prompt",
 		},
+	},
+	AgentPiRust: {
+		Name:              AgentPiRust,
+		Command:           "pir",
+		Args:              []string{"--extension-policy", "permissive", "--tools", "read,bash,edit,write,grep,find,ls"},
+		ProcessNames:      []string{"pir", "pi"}, // Rust binary via pir symlink
+		SupportsHooks:     true,
+		HooksProvider:     "pirust",
+		HooksDir:          ".pi/extensions",
+		HooksSettingsFile: "gastown-hook.js",
+		PromptMode:   "none", // Pi-rust exits after one response if prompt is a positional arg
+		ReadyDelayMs: 8000,  // Wait for TUI to fully initialize before sending prompt via send-keys
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+		},
+		InstructionsFile: "AGENTS.md",
 	},
 }
 

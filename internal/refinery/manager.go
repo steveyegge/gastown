@@ -215,6 +215,22 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
 
+	// For agents with prompt_mode="none" (e.g., pi-rust), the startup prompt
+	// is not embedded in the command. Send it as a nudge after the agent is ready.
+	if runtimeConfig.PromptMode == "none" {
+		// Wait for the TUI to be fully ready before sending the nudge.
+		if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+			log.Printf("warning: agent readiness wait for %s: %v", sessionID, err)
+		}
+		if err := t.NudgeSession(sessionID, initialPrompt); err != nil {
+			log.Printf("warning: nudging refinery prompt for %s: %v", sessionID, err)
+		}
+		// Pi-rust's TUI can swallow the Enter after NudgeSession's Escape key.
+		// Send a redundant Enter as a safety net (harmless if already submitted).
+		time.Sleep(500 * time.Millisecond)
+		_ = t.SendKeysRaw(sessionID, "Enter")
+	}
+
 	return nil
 }
 

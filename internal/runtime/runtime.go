@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/omp"
 	"github.com/steveyegge/gastown/internal/opencode"
 	"github.com/steveyegge/gastown/internal/pi"
+	"github.com/steveyegge/gastown/internal/pirust"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -41,8 +42,12 @@ func init() {
 		return omp.EnsureHookAt(workDir, hooksDir, hooksFile)
 	})
 	config.RegisterHookInstaller("pi", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Pi extensions stay in workDir — loaded via -e flag.
+		// Pi-mono extensions stay in workDir — loaded via -e flag.
 		return pi.EnsureHookAt(workDir, hooksDir, hooksFile)
+	})
+	config.RegisterHookInstaller("pirust", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
+		// Pi-rust extensions stay in workDir — QuickJS runtime, different event names.
+		return pirust.EnsureHookAt(workDir, hooksDir, hooksFile)
 	})
 }
 
