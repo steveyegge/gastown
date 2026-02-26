@@ -377,9 +377,9 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Migrate any existing ephemeral (wisp) beads to the issues table
 	// by removing the ephemeral flag. This ensures agent state persists
 	// across polecat lifecycles for idle detection and reuse.
-	if _, err := target.run("update", id, "--no-ephemeral"); err != nil {
+	if _, err := target.run("update", id, "--persistent"); err != nil {
 		// Non-fatal: the bead is functional either way
-		// --no-ephemeral may not be supported in all bd versions
+		// --persistent promotes wisp to issues table (bd update --help)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -719,15 +719,21 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 }
 
 // isAgentBeadByID detects agent beads by their ID naming convention.
-// Agent bead IDs follow the pattern: prefix-rig-role[-name]
+// Agent bead IDs follow two patterns:
+//   - Full form (prefix != rig): prefix-rig-role[-name] (e.g., gt-gastown-witness)
+//   - Collapsed form (prefix == rig): prefix-role[-name] (e.g., bcc-witness)
+//
 // where role is one of: witness, refinery, crew, polecat, deacon, mayor.
+// The collapsed form has only 2 parts for role-only IDs, so we must check
+// from parts[1:] not parts[2:].
 func isAgentBeadByID(id string) bool {
 	parts := strings.Split(id, "-")
-	if len(parts) < 3 {
+	if len(parts) < 2 {
 		return false
 	}
-	// Check if any part matches an agent role keyword
-	for _, part := range parts[2:] {
+	// Check parts[1:] to handle both full-form (role at parts[2]) and
+	// collapsed-form (role at parts[1]) agent bead IDs.
+	for _, part := range parts[1:] {
 		switch part {
 		case "witness", "refinery", "crew", "polecat", "deacon", "mayor":
 			return true

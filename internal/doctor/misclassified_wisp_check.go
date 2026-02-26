@@ -64,7 +64,11 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 		// Dolt path covers rig databases only (no town-level beads).
 		// Town-level beads are rare and covered by the JSONL fallback path.
 		for _, db := range databases {
+			// The "hq" database lives at the town root itself, not townRoot/hq.
 			rigDir := filepath.Join(ctx.TownRoot, db)
+			if db == "hq" {
+				rigDir = ctx.TownRoot
+			}
 			found, probeErrors := c.findMisclassifiedWispsDolt(rigDir, db)
 			totalProbeErrors += probeErrors
 			if len(found) > 0 {
@@ -324,10 +328,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		return "merge-request type should be ephemeral"
 	}
 
-	// Check for agent type - agent operational state is ephemeral (gt-bewatn.9)
-	if issueType == "agent" {
-		return "agent type should be ephemeral"
-	}
+	// Agent type is NOT ephemeral: persistent polecats design (c410c10a) stores
+	// agent beads in the issues table for durability across polecat lifecycles.
+	// Previously flagged as ephemeral (gt-bewatn.9) but that was reversed.
 
 	// Check for event type - session/cost events are operational telemetry
 	if issueType == "event" {
@@ -352,9 +355,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 		if label == "gt:mail" || label == "gt:handoff" {
 			return "mail/handoff label indicates ephemeral message"
 		}
-		if label == "gt:agent" {
-			return "agent label indicates ephemeral operational state"
-		}
+		// gt:agent label is NOT an ephemeral indicator: persistent polecats
+		// design (c410c10a) keeps agent beads in the issues table.
+		// Previously flagged here but that would undo the migration.
 	}
 
 	// Check for formula instance patterns in ID
@@ -510,4 +513,3 @@ func bdTableExistsDoctor(workDir, tableName string) bool {
 	err := cmd.Run()
 	return err == nil
 }
-

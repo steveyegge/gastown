@@ -282,20 +282,20 @@ After migration, 'bd mol wisp list' will work and agent lifecycle
 }
 
 var (
-	doltLogLines          int
-	doltLogFollow         bool
-	doltMigrateDry        bool
-	doltCleanupDry        bool
-	doltCleanupForce      bool
+	doltLogLines     int
+	doltLogFollow    bool
+	doltMigrateDry   bool
+	doltCleanupDry   bool
+	doltCleanupForce bool
 
-	doltMigrateWispsDry   bool
-	doltMigrateWispsDB    string
-	doltRollbackDry       bool
-	doltRollbackList      bool
-	doltSyncDry           bool
-	doltSyncForce         bool
-	doltSyncDB            string
-	doltSyncGC            bool
+	doltMigrateWispsDry bool
+	doltMigrateWispsDB  string
+	doltRollbackDry     bool
+	doltRollbackList    bool
+	doltSyncDry         bool
+	doltSyncForce       bool
+	doltSyncDB          string
+	doltSyncGC          bool
 )
 
 func init() {
@@ -1496,9 +1496,12 @@ func runDoltMigrateWisps(cmd *cobra.Command, args []string) error {
 		if db == "wl_commons" || strings.HasPrefix(db, "testdb_") {
 			continue
 		}
-		// Find the rig directory for this database
+		// Find the rig directory for this database.
+		// The "hq" database lives at the town root itself, not townRoot/hq.
 		rigDir := filepath.Join(townRoot, db)
-		if _, err := os.Stat(rigDir); os.IsNotExist(err) {
+		if db == "hq" {
+			rigDir = townRoot
+		} else if _, err := os.Stat(rigDir); os.IsNotExist(err) {
 			continue // Not a rig directory
 		}
 		fmt.Printf("\n%s Migrating: %s\n", style.Bold.Render("→"), db)
@@ -1541,5 +1544,3 @@ func printMigrateWispsResult(result *doltserver.MigrateWispsResult) {
 		fmt.Printf("  %s Already migrated (no changes needed)\n", style.Bold.Render("✓"))
 	}
 }
-
-
