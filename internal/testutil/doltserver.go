@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -86,13 +87,15 @@ func DoltTestPort() string {
 
 // LockFilePathForPort returns the lock file path for a given port.
 // Port-specific paths prevent contention between test binaries using different ports.
+// Uses os.TempDir() for cross-platform compatibility (Windows lacks /tmp/).
 func LockFilePathForPort(port string) string {
-	return fmt.Sprintf("/tmp/dolt-test-server-%s.lock", port)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("dolt-test-server-%s.lock", port))
 }
 
 // PidFilePathForPort returns the PID file path for a given port.
+// Uses os.TempDir() for cross-platform compatibility (Windows lacks /tmp/).
 func PidFilePathForPort(port string) string {
-	return fmt.Sprintf("/tmp/dolt-test-server-%s.pid", port)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("dolt-test-server-%s.pid", port))
 }
 
 // FindFreePort binds to port 0 to let the OS assign an ephemeral port,
