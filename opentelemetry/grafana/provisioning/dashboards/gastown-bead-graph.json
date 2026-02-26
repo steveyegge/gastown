@@ -1,0 +1,161 @@
+{
+  "uid": "gastown-bead-graph",
+  "title": "Gas Town Bead Graph",
+  "tags": ["gastown", "beads", "graph"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "type": "custom",
+        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "includeAll": false,
+        "current": { "text": "hq", "value": "hq" }
+      },
+      {
+        "name": "root_bead",
+        "label": "Bead",
+        "type": "query",
+        "datasource": { "uid": "dolt-beads" },
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY CASE issue_type WHEN 'convoy' THEN 0 WHEN 'epic' THEN 1 ELSE 2 END, priority ASC, created_at DESC",
+        "refresh": 1,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Dependency Graph",
+      "description": "Select a database and optionally enter a root bead ID to filter. Nodes = beads, edges = dependencies (parent-child, blocks).",
+      "type": "nodeGraph",
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "refId": "nodes",
+          "rawSql": "SELECT i.id, CONCAT(i.issue_type, ': ', LEFT(i.title, 60)) AS title, i.status AS subtitle, CASE i.issue_type WHEN 'convoy' THEN 1.0 WHEN 'epic' THEN 0.8 ELSE 0.5 END AS mainstat FROM ${database}.issues i WHERE i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies)",
+          "format": "table"
+        },
+        {
+          "refId": "edges",
+          "rawSql": "SELECT CONCAT(d.depends_on_id, '->', d.issue_id) AS id, d.depends_on_id AS source, d.issue_id AS target, d.type AS mainstat FROM ${database}.dependencies d WHERE d.depends_on_id IN (SELECT id FROM ${database}.issues) AND d.issue_id IN (SELECT id FROM ${database}.issues)",
+          "format": "table"
+        }
+      ],
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Bead Detail (select root bead above)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—') AS assignee, i.created_at, COALESCE(NULLIF(i.created_by,''),'—') AS created_by, LEFT(i.description, 500) AS description, LEFT(i.design, 300) AS design, LEFT(i.acceptance_criteria, 300) AS acceptance_criteria, LEFT(i.notes, 300) AS notes FROM ${database}.issues i WHERE ('${root_bead}' = '' OR i.id = '${root_bead}' OR i.id IN (SELECT issue_id FROM ${database}.dependencies WHERE depends_on_id = '${root_bead}') OR i.id IN (SELECT depends_on_id FROM ${database}.dependencies WHERE issue_id = '${root_bead}')) AND i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY i.priority ASC LIMIT 50",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" },
+                  { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 3,
+      "title": "Dependency Edges",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT d.depends_on_id AS parent, p.title AS parent_title, p.status AS parent_status, d.type AS relationship, d.issue_id AS child, c.title AS child_title, c.status AS child_status FROM ${database}.dependencies d LEFT JOIN ${database}.issues p ON d.depends_on_id = p.id LEFT JOIN ${database}.issues c ON d.issue_id = c.id WHERE ('${root_bead}' = '' OR d.depends_on_id = '${root_bead}' OR d.issue_id = '${root_bead}') ORDER BY d.depends_on_id, d.type, d.issue_id",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "parent" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [{ "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "child" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [{ "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 10,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 36 },
+      "options": { "mode": "markdown", "content": "## Convoy Breakdown" }
+    },
+    {
+      "id": 11,
+      "title": "Convoy Children (all active convoys)",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 38 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT convoy.id AS convoy_id, LEFT(convoy.title, 80) AS convoy_title, convoy.status AS convoy_status, child.id AS child_id, LEFT(child.title, 80) AS child_title, child.issue_type AS child_type, child.status AS child_status, child.priority, COALESCE(NULLIF(child.assignee,''),'—') AS assignee FROM ${database}.dependencies d JOIN ${database}.issues convoy ON d.depends_on_id = convoy.id AND convoy.issue_type = 'convoy' JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.type = 'parent-child' ORDER BY convoy.id, child.priority ASC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "convoy_id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [{ "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" }]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "child_id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [{ "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    }
+  ],
+  "schemaVersion": 39
+}

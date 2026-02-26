@@ -1,0 +1,332 @@
+{
+  "uid": "gastown-bead-detail",
+  "title": "Bead Detail",
+  "tags": ["gastown", "beads"],
+  "timezone": "browser",
+  "refresh": "",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "type": "custom",
+        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "includeAll": false,
+        "current": { "text": "hq", "value": "hq" }
+      },
+      {
+        "name": "filter",
+        "label": "Show",
+        "type": "custom",
+        "query": "all,convoy,epic,task,bug,feature,agent",
+        "includeAll": false,
+        "current": { "text": "all", "value": "all" }
+      },
+      {
+        "name": "bead_id",
+        "label": "Bead",
+        "type": "query",
+        "datasource": { "uid": "dolt-beads" },
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 70), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE deleted_at IS NULL AND ('${filter}' = 'all' OR issue_type = '${filter}') ORDER BY CASE WHEN status IN ('open','in_progress','hooked','ready') THEN 0 ELSE 1 END, updated_at DESC LIMIT 200",
+        "refresh": 1,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Identity",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT id, title, issue_type AS type, status, priority, COALESCE(NULLIF(assignee,''),'—') AS assignee, COALESCE(NULLIF(owner,''),'—') AS owner, COALESCE(NULLIF(rig,''),'—') AS rig, work_type, mol_type FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 2,
+      "title": "Description",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT description FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "displayMode": "auto", "inspect": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "description" },
+            "properties": [{ "id": "custom.width", "value": 800 }]
+          }
+        ]
+      },
+      "options": { "showHeader": false, "cellHeight": "lg" }
+    },
+    {
+      "id": 3,
+      "title": "Design",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT design FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "displayMode": "auto", "inspect": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "design" },
+            "properties": [{ "id": "custom.width", "value": 800 }]
+          }
+        ]
+      },
+      "options": { "showHeader": false, "cellHeight": "lg" }
+    },
+    {
+      "id": 4,
+      "title": "Acceptance Criteria",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT acceptance_criteria FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "displayMode": "auto", "inspect": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "acceptance_criteria" },
+            "properties": [{ "id": "custom.width", "value": 800 }]
+          }
+        ]
+      },
+      "options": { "showHeader": false, "cellHeight": "lg" }
+    },
+    {
+      "id": 5,
+      "title": "Notes",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT notes FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "displayMode": "auto", "inspect": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "notes" },
+            "properties": [{ "id": "custom.width", "value": 800 }]
+          }
+        ]
+      },
+      "options": { "showHeader": false, "cellHeight": "lg" }
+    },
+    {
+      "id": 6,
+      "title": "Timestamps & Lifecycle",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT created_at, COALESCE(NULLIF(created_by,''),'—') AS created_by, updated_at, closed_at, COALESCE(NULLIF(closed_by_session,''),'—') AS closed_by, LEFT(close_reason, 200) AS close_reason, due_at, defer_until, last_activity, estimated_minutes FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 7,
+      "title": "Agent & System",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 22 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(NULLIF(sender,''),'—') AS sender, COALESCE(NULLIF(role_type,''),'—') AS role_type, COALESCE(NULLIF(agent_state,''),'—') AS agent_state, COALESCE(NULLIF(hook_bead,''),'—') AS hook_bead, COALESCE(NULLIF(role_bead,''),'—') AS role_bead, COALESCE(NULLIF(event_kind,''),'—') AS event_kind, COALESCE(NULLIF(actor,''),'—') AS actor, COALESCE(NULLIF(target,''),'—') AS target, COALESCE(NULLIF(await_type,''),'—') AS await_type, COALESCE(NULLIF(await_id,''),'—') AS await_id, COALESCE(NULLIF(source_system,''),'—') AS source_system, COALESCE(NULLIF(source_repo,''),'—') AS source_repo, COALESCE(NULLIF(external_ref,''),'—') AS external_ref FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 8,
+      "title": "Flags",
+      "type": "table",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT ephemeral, pinned, is_template, crystallizes, quality_score, compaction_level, compacted_at, original_size, COALESCE(NULLIF(wisp_type,''),'—') AS wisp_type, COALESCE(NULLIF(original_type,''),'—') AS original_type FROM ${database}.issues WHERE id = '${bead_id}'",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 20,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 29 },
+      "options": { "mode": "markdown", "content": "## Labels" }
+    },
+    {
+      "id": 9,
+      "title": "Labels",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 31 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT label, created_at FROM ${database}.labels WHERE issue_id = '${bead_id}' ORDER BY label",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 21,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 35 },
+      "options": { "mode": "markdown", "content": "## Dependencies" }
+    },
+    {
+      "id": 10,
+      "title": "This bead depends on (parents / blockers)",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 37 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT d.type AS relationship, d.depends_on_id AS depends_on, COALESCE(p.title, d.depends_on_id) AS depends_on_title, COALESCE(p.status, '—') AS depends_on_status, COALESCE(p.issue_type, '—') AS depends_on_type FROM ${database}.dependencies d LEFT JOIN ${database}.issues p ON d.depends_on_id = p.id WHERE d.issue_id = '${bead_id}' ORDER BY d.type, d.depends_on_id",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "depends_on" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${database}&var-bead_id=${__value.raw}" },
+                  { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 11,
+      "title": "Depends on this bead (children / blocked by this)",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 43 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT d.type AS relationship, d.issue_id AS dependent, COALESCE(c.title, d.issue_id) AS dependent_title, COALESCE(c.status, '—') AS dependent_status, COALESCE(c.issue_type, '—') AS dependent_type FROM ${database}.dependencies d LEFT JOIN ${database}.issues c ON d.issue_id = c.id WHERE d.depends_on_id = '${bead_id}' ORDER BY d.type, d.issue_id",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "dependent" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${database}&var-bead_id=${__value.raw}" },
+                  { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 22,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 49 },
+      "options": { "mode": "markdown", "content": "## Comments" }
+    },
+    {
+      "id": 12,
+      "title": "Comments",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 51 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT created_at, COALESCE(NULLIF(author,''),'—') AS author, text FROM ${database}.comments WHERE issue_id = '${bead_id}' ORDER BY created_at ASC",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "lg" }
+    },
+    {
+      "id": 23,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 59 },
+      "options": { "mode": "markdown", "content": "## Events" }
+    },
+    {
+      "id": 13,
+      "title": "Events",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 61 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT created_at, event_type, COALESCE(NULLIF(actor,''),'—') AS actor, old_value, new_value, LEFT(comment, 300) AS comment FROM ${database}.events WHERE issue_id = '${bead_id}' ORDER BY created_at ASC",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    }
+  ],
+  "schemaVersion": 39
+}
