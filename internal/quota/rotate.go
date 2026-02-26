@@ -93,7 +93,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		}
 	}
 
-	// Get available accounts
+	// Get available accounts, excluding the from-account (we're rotating away from it).
 	available := mgr.AvailableAccounts(state)
 
 	// Validate tokens for available accounts — skip accounts with expired or
@@ -102,6 +102,9 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	skipped := make(map[string]string)
 	var validAvailable []string
 	for _, handle := range available {
+		if handle == fromAccount {
+			continue // rotating away from this account, not a candidate
+		}
 		acct, ok := acctCfg.Accounts[handle]
 		if !ok {
 			continue
