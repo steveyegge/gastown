@@ -18,6 +18,22 @@ import (
 	"time"
 )
 
+// testTmuxSocket is the package-level tmux socket name for integration tests.
+// Set by TestMain. When non-empty, all raw tmux exec.Command calls must
+// include "-L <socket>" to target the isolated server.
+//
+// This variable mirrors tmux.GetDefaultSocket() but avoids an import cycle
+// (config cannot import tmux because tmux already imports config).
+var testTmuxSocket string
+
+// tmuxCmd builds an exec.Command for tmux using the package-level test socket.
+func tmuxCmd(args ...string) *exec.Cmd {
+	if testTmuxSocket != "" {
+		return exec.Command("tmux", append([]string{"-L", testTmuxSocket}, args...)...)
+	}
+	return exec.Command("tmux", args...)
+}
+
 // TestRigLevelCustomAgentIntegration tests end-to-end rig-level custom agent functionality.
 // This test:
 // 1. Creates a stub agent script that echoes identifiable output
@@ -279,13 +295,13 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 	sessionName := fmt.Sprintf("gt-test-pid%d-%d", os.Getpid(), time.Now().UnixNano())
 	workDir := tmpDir
 
-	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	tmuxCmd("kill-session", "-t", sessionName).Run()
 
 	defer func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		tmuxCmd("kill-session", "-t", sessionName).Run()
 	}()
 
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", workDir)
+	cmd := tmuxCmd("new-session", "-d", "-s", sessionName, "-c", workDir)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
@@ -297,14 +313,14 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 	}
 
 	for key, val := range envVars {
-		cmd := exec.Command("tmux", "set-environment", "-t", sessionName, key, val)
+		cmd := tmuxCmd("set-environment", "-t", sessionName, key, val)
 		if err := cmd.Run(); err != nil {
 			t.Logf("Warning: failed to set %s: %v", key, err)
 		}
 	}
 
 	agentCmd := fmt.Sprintf("%s --test-mode --stub", stubAgentPath)
-	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, agentCmd, "Enter")
+	cmd = tmuxCmd("send-keys", "-t", sessionName, agentCmd, "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to send keys: %v", err)
 	}
@@ -318,7 +334,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		t.Logf("Warning: GT_ROLE not visible in agent output (tmux env may not propagate to subshell)")
 	}
 
-	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "ping", "Enter")
+	cmd = tmuxCmd("send-keys", "-t", sessionName, "ping", "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to send ping: %v", err)
 	}
@@ -328,7 +344,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		t.Errorf("Expected 'pong' response, got:\n%s", output)
 	}
 
-	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "exit", "Enter")
+	cmd = tmuxCmd("send-keys", "-t", sessionName, "exit", "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Logf("Warning: failed to send exit: %v", err)
 	}
@@ -345,7 +361,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 func captureTmuxPane(t *testing.T, sessionName string, lines int) string {
 	t.Helper()
 
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", fmt.Sprintf("-%d", lines))
+	cmd := tmuxCmd("capture-pane", "-t", sessionName, "-p", "-S", fmt.Sprintf("-%d", lines))
 	output, err := cmd.Output()
 	if err != nil {
 		t.Logf("Warning: failed to capture pane: %v", err)

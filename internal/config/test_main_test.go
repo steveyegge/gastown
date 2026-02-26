@@ -3,11 +3,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
 func TestMain(m *testing.M) {
+	// Isolate tmux sessions on a package-specific socket.
+	// We can't call tmux.SetDefaultSocket here due to import cycle
+	// (config ← tmux), so we set the package-level testTmuxSocket variable
+	// defined in integration_test.go instead.
+	if _, err := exec.LookPath("tmux"); err == nil {
+		testTmuxSocket = fmt.Sprintf("gt-test-config-%d", os.Getpid())
+	}
+
 	stubDir, err := os.MkdirTemp("", "gt-agent-bin-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create stub dir: %v\n", err)
@@ -39,5 +48,11 @@ func TestMain(m *testing.M) {
 
 	_ = os.Setenv("PATH", originalPath)
 	_ = os.RemoveAll(stubDir)
+	// Clean up tmux socket
+	if testTmuxSocket != "" {
+		_ = exec.Command("tmux", "-L", testTmuxSocket, "kill-server").Run()
+		socketPath := filepath.Join(fmt.Sprintf("/tmp/tmux-%d", os.Getuid()), testTmuxSocket)
+		_ = os.Remove(socketPath)
+	}
 	os.Exit(code)
 }
