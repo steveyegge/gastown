@@ -419,8 +419,19 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		if quotaJSON {
 			return json.NewEncoder(os.Stdout).Encode([]quota.RotateResult{})
 		}
-		fmt.Printf(" %s %d sessions rate-limited but no available accounts to rotate to\n",
-			style.WarningPrefix, len(plan.LimitedSessions))
+		if rotateFrom != "" {
+			fmt.Printf(" %s %d session(s) on %q but no available accounts to rotate to\n",
+				style.WarningPrefix, len(plan.LimitedSessions), rotateFrom)
+		} else {
+			fmt.Printf(" %s %d sessions rate-limited but no available accounts to rotate to\n",
+				style.WarningPrefix, len(plan.LimitedSessions))
+		}
+		if len(plan.SkippedAccounts) > 0 {
+			fmt.Println()
+			for handle, reason := range plan.SkippedAccounts {
+				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, reason)
+			}
+		}
 		return nil
 	}
 

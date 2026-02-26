@@ -77,14 +77,18 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		}
 	}
 
-	// Update state: mark detected limited accounts
-	for _, r := range limitedSessions {
-		if r.AccountHandle != "" {
-			state.Accounts[r.AccountHandle] = config.AccountQuotaState{
-				Status:    config.QuotaStatusLimited,
-				LimitedAt: state.Accounts[r.AccountHandle].LimitedAt,
-				ResetsAt:  r.ResetsAt,
-				LastUsed:  state.Accounts[r.AccountHandle].LastUsed,
+	// Update state: mark detected limited accounts.
+	// Skip for preemptive rotation — the from-account isn't actually rate-limited,
+	// and marking it limited would remove it from the available pool incorrectly.
+	if fromAccount == "" {
+		for _, r := range limitedSessions {
+			if r.AccountHandle != "" {
+				state.Accounts[r.AccountHandle] = config.AccountQuotaState{
+					Status:    config.QuotaStatusLimited,
+					LimitedAt: state.Accounts[r.AccountHandle].LimitedAt,
+					ResetsAt:  r.ResetsAt,
+					LastUsed:  state.Accounts[r.AccountHandle].LastUsed,
+				}
 			}
 		}
 	}
