@@ -474,3 +474,92 @@ func TestAutoRespawnHookCmd_Format(t *testing.T) {
 		})
 	}
 }
+
+// TestIsPaneDead_And_RespawnPaneDefault is an integration test that exercises
+// the exact code path the deacon uses to recover from a dead pane:
+//
+//  1. Create a session with remain-on-exit on, running a short-lived process
+//  2. Wait for the process to exit → pane becomes dead
+//  3. Verify IsPaneDead returns true
+//  4. Call RespawnPaneDefault to restart the pane
+//  5. Verify the pane comes back alive with a new PID
+//
+// This tests the deacon's "respawn instead of kill+recreate" path against a
+// real tmux server. The deacon uses this to avoid incrementing the daemon's
+// crash counter when a patrol cycle completes normally.
+func TestIsPaneDead_And_RespawnPaneDefault(t *testing.T) {
+	socket := requireTestSocket(t)
+	session := "test-respawn-default"
+
+	// Create session running a fast-exiting command.
+	testSession(t, socket, session, "sleep 1")
+	defer func() { _ = exec.Command("tmux", "-L", socket, "kill-session", "-t", session).Run() }()
+
+	// Enable remain-on-exit so the pane stays visible after the process exits.
+	if out, err := exec.Command("tmux", "-L", socket, "set-option", "-t", session, "remain-on-exit", "on").CombinedOutput(); err != nil {
+		t.Fatalf("failed to set remain-on-exit: %v\n%s", err, out)
+	}
+
+	// Capture the original PID.
+	originalPID := getPanePID(t, socket, session)
+	t.Logf("Original pane PID: %s", originalPID)
+
+	// Wait for sleep 1 to exit → pane should become dead.
+	t.Log("Waiting for process to exit...")
+	deadline := time.Now().Add(5 * time.Second)
+	paneDied := false
+	for time.Now().Before(deadline) {
+		if isPaneDead(socket, session) {
+			paneDied = true
+			t.Log("Pane is dead (remain-on-exit holding it)")
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !paneDied {
+		t.Fatal("pane never died — remain-on-exit may not be working")
+	}
+
+	// This is the exact call the deacon makes:
+	tmx := NewTmux()
+	if !tmx.IsPaneDead(session) {
+		t.Fatal("IsPaneDead returned false but pane should be dead")
+	}
+
+	// Respawn using the API the deacon calls:
+	t.Log("Calling RespawnPaneDefault...")
+	if err := tmx.RespawnPaneDefault(session); err != nil {
+		t.Fatalf("RespawnPaneDefault failed: %v", err)
+	}
+
+	// Wait for the pane to come back alive.
+	t.Log("Waiting for pane to come back alive...")
+	alive := false
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !isPaneDead(socket, session) {
+			alive = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !alive {
+		t.Fatal("pane did not come back alive after RespawnPaneDefault")
+	}
+
+	// Verify the PID changed — proof the pane was actually respawned.
+	newPID := getPanePID(t, socket, session)
+	t.Logf("New pane PID: %s (was %s)", newPID, originalPID)
+	if newPID == originalPID {
+		t.Error("pane PID did not change after respawn — pane may not have been restarted")
+	}
+
+	// Verify the session is intact (not killed and recreated).
+	has, err := tmx.HasSession(session)
+	if err != nil {
+		t.Fatalf("HasSession after respawn: %v", err)
+	}
+	if !has {
+		t.Error("session disappeared after RespawnPaneDefault — should have stayed intact")
+	}
+}
