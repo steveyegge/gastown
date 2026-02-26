@@ -484,8 +484,8 @@ func TestPlanRotation_MarksLimitedAccountsInState(t *testing.T) {
 		t.Errorf("expected limited account alpha, got %q", plan.LimitedSessions[0].AccountHandle)
 	}
 
-	// Reload state — PlanRotation updates in-memory state but the caller
-	// is responsible for persisting. Verify the limited sessions output
+	// PlanRotation does NOT mark accounts as limited in state — the caller
+	// is responsible for persisting after execution. Verify the plan output
 	// contains enough info for the caller to persist.
 	if plan.LimitedSessions[0].ResetsAt == "" {
 		t.Errorf("expected non-empty ResetsAt for rate-limited session")

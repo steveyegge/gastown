@@ -77,23 +77,13 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		}
 	}
 
-	// Update state: mark detected limited accounts.
-	// Skip for preemptive rotation — the from-account isn't actually rate-limited,
-	// and marking it limited would remove it from the available pool incorrectly.
-	if fromAccount == "" {
-		for _, r := range limitedSessions {
-			if r.AccountHandle != "" {
-				state.Accounts[r.AccountHandle] = config.AccountQuotaState{
-					Status:    config.QuotaStatusLimited,
-					LimitedAt: state.Accounts[r.AccountHandle].LimitedAt,
-					ResetsAt:  r.ResetsAt,
-					LastUsed:  state.Accounts[r.AccountHandle].LastUsed,
-				}
-			}
-		}
-	}
-
-	// Get available accounts, excluding the from-account (we're rotating away from it).
+	// Available accounts come from persisted state only — NOT from scan
+	// detections. Stale sessions (e.g., parked rigs with old rate-limit
+	// messages still in the pane) would otherwise mark their accounts as
+	// limited, shrinking the available pool and blocking rotation of
+	// sessions that actually need it.
+	//
+	// The caller persists confirmed rate-limit state after execution.
 	available := mgr.AvailableAccounts(state)
 
 	// Validate tokens for available accounts — skip accounts with expired or
@@ -162,6 +152,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 			if availIdx >= len(available) {
 				break
 			}
+			candidate = available[availIdx] // re-read after skip
 		}
 		configDirSwaps[configDir] = candidate
 		availIdx++

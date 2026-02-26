@@ -394,14 +394,11 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("planning rotation: %w", err)
 	}
 
-	// Persist detected rate-limit statuses so subsequent rotations
-	// remember which accounts are limited (review finding #1).
-	// Skip for preemptive rotations — the account isn't actually rate-limited.
-	if rotateFrom == "" && len(plan.LimitedSessions) > 0 {
-		if err := updateQuotaState(townRoot, plan.LimitedSessions, acctCfg); err != nil {
-			return fmt.Errorf("persisting detected rate limits: %w", err)
-		}
-	}
+	// NOTE: We intentionally do NOT persist scan-detected rate limits here.
+	// Stale sessions (e.g., parked rigs with old rate-limit messages in the
+	// pane) would poison the available account pool, blocking rotation of
+	// sessions that actually need it. Account state is updated only after
+	// successful rotation execution (LastUsed in executeKeychainRotation).
 
 	if len(plan.LimitedSessions) == 0 {
 		if quotaJSON {
