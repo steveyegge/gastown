@@ -103,8 +103,8 @@ func TestRecordSessionStart(t *testing.T) {
 	resetInstruments(t)
 	ctx := context.Background()
 
-	RecordSessionStart(ctx, "sess-123", "mol/witness", nil)
-	RecordSessionStart(ctx, "sess-456", "mol/refinery", errors.New("fail"))
+	RecordSessionStart(ctx, "sess-123", "mol/witness", "myrig", nil)
+	RecordSessionStart(ctx, "sess-456", "mol/refinery", "myrig", errors.New("fail"))
 }
 
 func TestRecordSessionStop(t *testing.T) {

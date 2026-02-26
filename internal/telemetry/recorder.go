@@ -215,7 +215,8 @@ func RecordBDCall(ctx context.Context, args []string, durationMs float64, err er
 }
 
 // RecordSessionStart records an agent session start (metrics + log event).
-func RecordSessionStart(ctx context.Context, sessionID, role string, err error) {
+// rig is the rig name (e.g., "sfgastown"); empty for town-level agents.
+func RecordSessionStart(ctx context.Context, sessionID, role, rig string, err error) {
 	initInstruments()
 	status := statusStr(err)
 	inst.sessionTotal.Add(ctx, 1,
@@ -227,6 +228,7 @@ func RecordSessionStart(ctx context.Context, sessionID, role string, err error) 
 	emit(ctx, "session.start", severity(err),
 		otellog.String("session_id", sessionID),
 		otellog.String("role", role),
+		otellog.String("rig", rig),
 		otellog.String("status", status),
 		errKV(err),
 	)

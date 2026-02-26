@@ -471,51 +471,23 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Topic:     "lifecycle-restart",
 	}, "Run `gt prime --hook` and begin work.")
 
-	// Build default command using the role-resolved runtime config.
+	// Build restart command with full AgentEnv for ALL role types.
 	// PrependEnv produces "export K=V ... && exec cmd" which is safe for
 	// WaitForCommand/pane_current_command detection: exec replaces the shell,
 	// so tmux sees the agent process, not a shell running exports.
-	defaultEnv := map[string]string{}
-	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
-		defaultEnv["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
+	var sessionIDEnv string
+	if runtimeConfig.Session != nil {
+		sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 	}
-	config.SanitizeAgentEnv(defaultEnv, map[string]string{})
-	defaultCmd := config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), defaultEnv)
-
-	// Polecats and crew need environment variables set in the command
-	if parsed.RoleType == "polecat" {
-		var sessionIDEnv string
-		if runtimeConfig.Session != nil {
-			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
-		}
-		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "polecat",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
-		})
-		config.SanitizeAgentEnv(envVars, map[string]string{})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
-	}
-
-	if parsed.RoleType == "crew" {
-		var sessionIDEnv string
-		if runtimeConfig.Session != nil {
-			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
-		}
-		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "crew",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
-		})
-		config.SanitizeAgentEnv(envVars, map[string]string{})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
-	}
-
-	return defaultCmd
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:         parsed.RoleType,
+		Rig:          parsed.RigName,
+		AgentName:    parsed.AgentName,
+		TownRoot:     d.config.TownRoot,
+		SessionIDEnv: sessionIDEnv,
+	})
+	config.SanitizeAgentEnv(envVars, map[string]string{})
+	return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 }
 
 // setSessionEnvironment sets environment variables for the tmux session.

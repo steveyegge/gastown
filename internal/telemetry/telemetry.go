@@ -3,10 +3,10 @@
 // Metrics → VictoriaMetrics via OTLP HTTP
 // Logs    → VictoriaLogs via OTLP HTTP
 //
-// Enabled by setting at least one of:
-//
-//	GT_OTEL_METRICS_URL  (default: http://localhost:8428/opentelemetry/api/v1/push)
-//	GT_OTEL_LOGS_URL     (default: http://localhost:9428/insert/opentelemetry/v1/logs)
+// Activation (in priority order):
+//  1. Set GT_OTEL_METRICS_URL and/or GT_OTEL_LOGS_URL explicitly.
+//  2. Auto-detect: if neither var is set, probe localhost:8428. If
+//     VictoriaMetrics responds, enable telemetry with default URLs.
 //
 // Telemetry is best-effort: initialization errors are returned but do not
 // affect normal gt operation — callers should log and continue.
@@ -17,6 +17,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -85,6 +87,30 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// probeOTEL checks if a VictoriaMetrics endpoint is reachable via a fast TCP
+// connect. This avoids HTTP overhead and keeps startup latency under 50ms when
+// the stack is down.
+func probeOTEL(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := u.Host
+	if host == "" {
+		return false
+	}
+	// Ensure host:port format
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(host, "80")
+	}
+	conn, err := net.DialTimeout("tcp", host, 50*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
 // Init initializes OTel metric and log providers.
 //
 // Idempotent: subsequent calls (same or different arguments) return the
@@ -111,11 +137,22 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, e
 	metricsURL := os.Getenv(EnvMetricsURL)
 	logsURL := os.Getenv(EnvLogsURL)
 
-	// Both unset → telemetry disabled, not an error.
+	// Both unset → auto-detect: probe the default VictoriaMetrics port.
+	// If it responds, enable telemetry automatically so operators don't
+	// need to set env vars or edit shell profiles.
 	if metricsURL == "" && logsURL == "" {
-		initDone = true
-		globalProvider = nil
-		return nil, nil
+		if probeOTEL(DefaultMetricsURL) {
+			metricsURL = DefaultMetricsURL
+			logsURL = DefaultLogsURL
+			// Propagate into the process env so AgentEnv() and
+			// OTELEnvForSubprocess() forward them to children.
+			_ = os.Setenv(EnvMetricsURL, metricsURL)
+			_ = os.Setenv(EnvLogsURL, logsURL)
+		} else {
+			initDone = true
+			globalProvider = nil
+			return nil, nil
+		}
 	}
 	if metricsURL == "" {
 		metricsURL = DefaultMetricsURL

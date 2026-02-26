@@ -1,6 +1,7 @@
 package refinery
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -178,6 +180,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
+
+	// Record session start for telemetry (waterfall visibility).
+	telemetry.RecordSessionStart(context.Background(), sessionID, "refinery", m.rig.Name, nil)
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths

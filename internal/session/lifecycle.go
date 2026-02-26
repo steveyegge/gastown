@@ -134,7 +134,7 @@ type StartResult struct {
 // crew cycle bindings, etc.) should be handled by the caller before/after
 // calling StartSession.
 func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error) {
-	defer func() { telemetry.RecordSessionStart(context.Background(), cfg.SessionID, cfg.Role, retErr) }()
+	defer func() { telemetry.RecordSessionStart(context.Background(), cfg.SessionID, cfg.Role, cfg.RigName, retErr) }()
 	if cfg.SessionID == "" {
 		return nil, fmt.Errorf("SessionID is required")
 	}

@@ -188,6 +188,9 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// metrics (gt + claude) land in the same store.
 	// Opt-in: only active when GT_OTEL_METRICS_URL is explicitly set.
 	if metricsURL := os.Getenv("GT_OTEL_METRICS_URL"); metricsURL != "" {
+		// Propagate GT_OTEL_* so gt subprocesses (called from within agent
+		// sessions) also initialise their own telemetry pipeline.
+		env["GT_OTEL_METRICS_URL"] = metricsURL
 		env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
 		env["OTEL_METRICS_EXPORTER"] = "otlp"
 		env["OTEL_METRIC_EXPORT_INTERVAL"] = "1000"
@@ -200,6 +203,7 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		// session emits metrics/logs to the same VictoriaMetrics instance.
 		env["BD_OTEL_METRICS_URL"] = metricsURL
 		if logsURL := os.Getenv("GT_OTEL_LOGS_URL"); logsURL != "" {
+			env["GT_OTEL_LOGS_URL"] = logsURL
 			env["BD_OTEL_LOGS_URL"] = logsURL
 			// Claude Code supports OTLP log export; route to the same VictoriaLogs
 			// instance. Uses protobuf (VictoriaLogs rejects JSON).
