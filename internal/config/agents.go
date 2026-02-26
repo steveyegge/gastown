@@ -374,7 +374,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksProvider:     "pirust",
 		HooksDir:          ".pi/extensions",
 		HooksSettingsFile: "gastown-hook.js",
-		PromptMode:   "none", // Pi-rust exits after one response if prompt is a positional arg
+		PromptMode:   "none", // pir exits after one response with positional args; use NudgeSession instead
 		ReadyDelayMs: 8000,  // Wait for TUI to fully initialize before sending prompt via send-keys
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
