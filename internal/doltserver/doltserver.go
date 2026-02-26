@@ -854,6 +854,7 @@ func Start(townRoot string) error {
 	// Note: --user flag is deprecated in newer Dolt; authentication is handled
 	// via privilege system. Default is root user with no password for localhost.
 	args := []string{"sql-server",
+		"--host", "0.0.0.0",
 		"--port", strconv.Itoa(config.Port),
 		"--data-dir", config.DataDir,
 	}

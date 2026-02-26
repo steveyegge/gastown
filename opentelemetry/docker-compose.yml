@@ -33,6 +33,8 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin  # dev-only stack — change before any shared/remote deployment
       - GF_PLUGINS_PREINSTALL=victoriametrics-logs-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/gastown-overview.json
+      - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=10s
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning

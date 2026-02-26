@@ -17,3 +17,18 @@ datasources:
     url: http://victorialogs:9428
     jsonData:
       maxLines: 1000
+
+  - name: Dolt (Beads)
+    type: mysql
+    uid: dolt-beads
+    access: proxy
+    url: 172.18.0.1:3307
+    user: grafana
+    secureJsonData:
+      password: "grafana"
+    jsonData:
+      database: hq
+      maxOpenConns: 2
+      maxIdleConns: 2
+      connMaxLifetime: 300
+      allowNativePasswords: true
