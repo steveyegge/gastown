@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -1123,7 +1124,6 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	return true, ""
 }
 
-
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {
 	d.ProcessLifecycleRequests()
@@ -1641,21 +1641,31 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Pre-sync workspace (ensure beads are current)
 	d.syncWorkspace(workDir)
 
-	// Create new tmux session
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables using centralized AgentEnv
+	// Build startup command BEFORE creating the session so we can use
+	// NewSessionWithCommand (command as initial pane process). This eliminates
+	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
+	// the shell might not be ready to receive keystrokes, producing empty windows.
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  d.config.TownRoot,
 	})
+	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
+	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
 
-	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
+	// Create session with command as initial process (replaces EnsureSessionFresh + SendKeys).
+	// EnsureSessionFreshWithCommand kills zombie sessions and creates a new one atomically.
+	if err := d.tmux.EnsureSessionFreshWithCommand(sessionName, workDir, startCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionRunning) {
+			d.logger.Printf("Session %s already running with healthy agent, skipping restart", sessionName)
+			return nil
+		}
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment variables in tmux session table (for debugging/monitoring tools).
+	// The process itself gets env vars via 'exec env ...' in the startup command.
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
 	}
@@ -1664,7 +1674,6 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// (e.g., witness patrol) can detect non-Claude agents.
 	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
 	// isn't visible to tmux show-environment.
-	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
 	if rc.ResolvedAgent != "" {
 		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
 	}
@@ -1681,15 +1690,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	agentID := fmt.Sprintf("%s/%s", rigName, polecatName)
 	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
 
-	// Launch Claude with environment exported inline
-	// Pass rigPath so rig agent settings are honored (not town-level defaults)
-	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
-	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
-	}
-
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated restarts aren't blocked by the warning dialog.
+	// Wait for Claude to start, then accept startup dialogs if they appear.
 	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - Claude might still start
 	}
