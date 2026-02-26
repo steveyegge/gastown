@@ -251,6 +251,29 @@ the work in one session if possible and submit to that rig's Refinery immediatel
 - `bd show <id>` — View issue details
 - `bd close <id>` — Mark issue complete
 
+### Planning New Features
+
+**When the human describes an idea and wants to turn it into a plan, offer this:**
+
+```bash
+{{ cmd }} formula run mol-idea-to-plan --problem="describe the idea here"
+```
+
+This runs the full pipeline autonomously: structured PRD → 6-leg parallel review →
+human clarification gate → implementation plan → 5-leg parallel plan review →
+human approval gate → beads with dependency graph.
+
+**Trigger this suggestion when the human:**
+- Describes a feature, idea, or problem and says "let's build this" / "plan this out"
+- Asks about requirements, design, or implementation approach for something new
+- Wants to go from vague idea to a concrete plan
+
+**Standalone phases (if they only want part of the pipeline):**
+```bash
+{{ cmd }} formula run mol-prd-review --problem="..."          # PRD review only (6 parallel legs)
+{{ cmd }} formula run mol-plan-review --plan="..." --problem="..."  # Plan review only (5 parallel legs)
+```
+
 ### Communication
 - `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` — Send mail (async, queued)
 - `{{ cmd }} mail send mayor/ -s "Subject" -m "Message"` — To Mayor
