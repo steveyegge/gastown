@@ -69,7 +69,10 @@ const scanLines = 30
 // checkLines is the number of bottom lines to actually check for rate-limit
 // patterns. When Claude Code hits a rate limit, the prompt sits at the bottom.
 // Once resolved (e.g., /login, waiting), new output pushes it up.
-const checkLines = 10
+// 20 balances detection reliability (10 was too small — messages scrolled
+// out when agents kept working) against false-positive risk from stale
+// rate-limit messages lingering higher in the scroll buffer.
+const checkLines = 20
 
 // ScanAll scans all Gas Town tmux sessions for rate-limit indicators.
 // Returns results only for sessions where a rate-limit was detected or
