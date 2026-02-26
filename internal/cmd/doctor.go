@@ -145,10 +145,17 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	d.Register(doctor.NewGlobalStateCheck())
 
-	// Register built-in checks
+	// Infrastructure prerequisites — these must pass before any check that
+	// shells out to bd/dolt or queries the database. Order matters:
+	// 1. gt binary freshness
+	// 2. bd binary exists
+	// 3. dolt binary exists
+	// 4. Dolt server is reachable (everything downstream depends on this)
 	d.Register(doctor.NewStaleBinaryCheck())
 	d.Register(doctor.NewBeadsBinaryCheck())
-	// All database queries go through bd CLI
+	d.Register(doctor.NewDoltBinaryCheck())
+	d.Register(doctor.NewDoltServerReachableCheck())
+
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
@@ -233,10 +240,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewStaleTaskDispatchCheck())
 	d.Register(doctor.NewHooksSyncCheck())
 
-	// Dolt health checks
-	d.Register(doctor.NewDoltBinaryCheck())
+	// Dolt data health checks (binary + server reachability moved to top as prerequisites)
 	d.Register(doctor.NewDoltMetadataCheck())
-	d.Register(doctor.NewDoltServerReachableCheck())
 	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
 	d.Register(doctor.NewUnregisteredBeadsDirsCheck())
 	d.Register(doctor.NewNullAssigneeCheck())

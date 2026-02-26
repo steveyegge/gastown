@@ -2119,8 +2119,8 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 	// The mayor/rig/.beads path should only be used when the source repo
 	// has tracked beads (checked out via git clone). Creating it here would
 	// cause InitBeads to misdetect an untracked repo as having tracked beads,
-	// taking the redirect early-return and skipping config.yaml/issues.jsonl
-	// creation (see rig/manager.go InitBeads).
+	// taking the redirect early-return and skipping config.yaml creation
+	// (see rig/manager.go InitBeads).
 	if err := os.MkdirAll(rigBeads, 0755); err != nil {
 		return "", fmt.Errorf("creating beads dir: %w", err)
 	}
@@ -2707,4 +2707,3 @@ func doltSQLScriptWithRetry(townRoot, script string) error {
 	}
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
-

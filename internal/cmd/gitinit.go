@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	gitInitGitHub  string
-	gitInitPublic  bool
+	gitInitGitHub string
+	gitInitPublic bool
 )
 
 var gitInitCmd = &cobra.Command{
@@ -144,7 +144,7 @@ beads_hq/
 # Explicitly track (override above patterns)
 # =============================================================================
 # Note: .beads/ has its own .gitignore that handles database files
-# and keeps issues.jsonl, metadata.json, config file as source of truth
+# and keeps metadata.json, config file as source of truth
 `
 
 func runGitInit(cmd *cobra.Command, args []string) error {

@@ -508,8 +508,17 @@ func writeJSON(path string, data interface{}) error {
 
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
-// Uses Dolt backend in server mode (Gas Town runs a shared Dolt sql-server).
+// Uses Dolt backend in server mode (Gas Town requires a running Dolt sql-server).
 func initTownBeads(townPath string) error {
+	// Dolt server is required — refuse to proceed without it.
+	running, _, err := doltserver.IsRunning(townPath)
+	if err != nil {
+		return fmt.Errorf("checking Dolt server: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("Dolt server is not running (required for beads init); start it with 'gt dolt start'")
+	}
+
 	// Run: bd init --prefix hq --server
 	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
 	// Filter inherited BEADS_DIR so bd init targets this town, not a parent .beads.
