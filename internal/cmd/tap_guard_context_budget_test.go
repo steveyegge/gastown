@@ -8,7 +8,6 @@ import (
 )
 
 func TestLoadContextBudgetConfig_Defaults(t *testing.T) {
-	// Clear any env vars that might interfere
 	for _, env := range []string{
 		"GT_CONTEXT_BUDGET_WARN",
 		"GT_CONTEXT_BUDGET_SOFT_GATE",
@@ -107,7 +106,6 @@ func TestDetectCurrentRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear all role env vars
 			for _, env := range []string{"GT_ROLE", "GT_POLECAT", "GT_CREW", "GT_MAYOR", "GT_DEACON", "GT_WITNESS", "GT_REFINERY"} {
 				t.Setenv(env, "")
 			}
@@ -125,7 +123,7 @@ func TestDetectCurrentRole(t *testing.T) {
 
 func TestRoleHardGating(t *testing.T) {
 	tests := []struct {
-		role        string
+		role          string
 		wantHardGated bool
 	}{
 		{"mayor", true},
@@ -147,53 +145,41 @@ func TestRoleHardGating(t *testing.T) {
 			}
 
 			cfg := loadContextBudgetConfig()
-			if cfg.IsHardGated != tt.wantHardGated {
-				t.Errorf("role %q: IsHardGated = %v, want %v", tt.role, cfg.IsHardGated, tt.wantHardGated)
+			if cfg.HardGated != tt.wantHardGated {
+				t.Errorf("role %q: HardGated = %v, want %v", tt.role, cfg.HardGated, tt.wantHardGated)
 			}
 		})
 	}
 }
 
-func TestParseContextBudgetUsage(t *testing.T) {
-	// Create a temporary transcript file
+func TestParseLastInputTokens(t *testing.T) {
 	dir := t.TempDir()
 	transcriptPath := filepath.Join(dir, "test.jsonl")
 
-	// Write some transcript messages
 	messages := []TranscriptMessage{
 		{
 			Type: "assistant",
 			Message: &TranscriptMessageBody{
-				Model: "claude-sonnet-4-20250514",
-				Role:  "assistant",
 				Usage: &TranscriptUsage{
 					InputTokens:  50000,
 					OutputTokens: 1000,
 				},
 			},
 		},
-		{
-			Type: "human",
-		},
+		{Type: "human"},
 		{
 			Type: "assistant",
 			Message: &TranscriptMessageBody{
-				Model: "claude-sonnet-4-20250514",
-				Role:  "assistant",
 				Usage: &TranscriptUsage{
 					InputTokens:  100000,
 					OutputTokens: 2000,
 				},
 			},
 		},
-		{
-			Type: "human",
-		},
+		{Type: "human"},
 		{
 			Type: "assistant",
 			Message: &TranscriptMessageBody{
-				Model: "claude-sonnet-4-20250514",
-				Role:  "assistant",
 				Usage: &TranscriptUsage{
 					InputTokens:  150000,
 					OutputTokens: 3000,
@@ -214,23 +200,18 @@ func TestParseContextBudgetUsage(t *testing.T) {
 	}
 	f.Close()
 
-	usage, err := parseContextBudgetUsage(transcriptPath)
+	got, err := parseLastInputTokens(transcriptPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// LastInputTokens should be from the last assistant message
-	if usage.LastInputTokens != 150000 {
-		t.Errorf("LastInputTokens = %d, want 150000", usage.LastInputTokens)
-	}
-
-	// TotalOutputTokens should be sum of all assistant messages
-	if usage.TotalOutputTokens != 6000 {
-		t.Errorf("TotalOutputTokens = %d, want 6000", usage.TotalOutputTokens)
+	// Should return the last assistant message's input_tokens
+	if got != 150000 {
+		t.Errorf("parseLastInputTokens() = %d, want 150000", got)
 	}
 }
 
-func TestParseContextBudgetUsage_EmptyFile(t *testing.T) {
+func TestParseLastInputTokens_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	transcriptPath := filepath.Join(dir, "empty.jsonl")
 
@@ -238,47 +219,12 @@ func TestParseContextBudgetUsage_EmptyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	usage, err := parseContextBudgetUsage(transcriptPath)
+	got, err := parseLastInputTokens(transcriptPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if usage.LastInputTokens != 0 {
-		t.Errorf("LastInputTokens = %d, want 0", usage.LastInputTokens)
-	}
-}
-
-func TestFindActiveTranscript(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create two transcript files with different modification times
-	old := filepath.Join(dir, "old.jsonl")
-	if err := os.WriteFile(old, []byte(`{"type":"test"}`+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	newest := filepath.Join(dir, "newest.jsonl")
-	if err := os.WriteFile(newest, []byte(`{"type":"test"}`+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := findActiveTranscript(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Should find one of them (both have same mtime in fast test, but at least one should match)
-	if got != old && got != newest {
-		t.Errorf("findActiveTranscript() = %q, want %q or %q", got, old, newest)
-	}
-}
-
-func TestFindActiveTranscript_NoFiles(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := findActiveTranscript(dir)
-	if err == nil {
-		t.Error("expected error for empty directory, got nil")
+	if got != 0 {
+		t.Errorf("parseLastInputTokens() = %d, want 0 for empty file", got)
 	}
 }
 
