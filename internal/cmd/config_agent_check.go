@@ -42,9 +42,10 @@ func init() {
 // needsNudge returns true for TUI agents that exit when given a positional
 // arg (print-mode behavior). These agents need prompt_mode="none" so gt
 // sends the beacon via NudgeSession (tmux send-keys) after the TUI is ready.
+// Note: only pir (pi-rust) needs this. pi (pi-mono) accepts prompt_mode="arg".
 func needsNudge(command string) bool {
 	switch command {
-	case "pir", "pi":
+	case "pir":
 		return true
 	default:
 		return false

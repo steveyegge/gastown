@@ -30,9 +30,10 @@ func NewPromptModeCheck() *PromptModeCheck {
 
 // needsNudgeMode returns true for TUI agents that exit when given a
 // positional arg. These need prompt_mode="none" so gt uses NudgeSession.
+// Note: only pir (pi-rust) needs this. pi (pi-mono) accepts prompt_mode="arg".
 func needsNudgeMode(command string) bool {
 	switch command {
-	case "pir", "pi":
+	case "pir":
 		return true
 	default:
 		return false
