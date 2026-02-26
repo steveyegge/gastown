@@ -229,8 +229,11 @@ func runQuotaScan(cmd *cobra.Command, args []string) error {
 	acctCfg, loadErr := config.LoadAccountsConfig(accountsPath)
 	// acctCfg can be nil if no accounts configured — scan still works
 
-	// Create scanner
-	t := ttmux.NewTmux()
+	// Create scanner using the caller's tmux socket ($TMUX) so we see all
+	// sessions on this server, not just the town-name socket. Sessions may
+	// live on the "default" server even when SetDefaultSocket uses the town
+	// name — this ensures the scan finds them all.
+	t := ttmux.NewTmuxFromEnv()
 	scanner, err := quota.NewScanner(t, nil, acctCfg)
 	if err != nil {
 		return fmt.Errorf("creating scanner: %w", err)
@@ -381,8 +384,8 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create scanner and plan rotation
-	t := ttmux.NewTmux()
+	// Create scanner using the caller's tmux socket so we find all sessions.
+	t := ttmux.NewTmuxFromEnv()
 	scanner, err := quota.NewScanner(t, nil, acctCfg)
 	if err != nil {
 		return fmt.Errorf("creating scanner: %w", err)

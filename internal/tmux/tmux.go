@@ -108,6 +108,21 @@ func NewTmux() *Tmux {
 	return &Tmux{socketName: defaultSocket}
 }
 
+// NewTmuxFromEnv creates a Tmux wrapper targeting the socket that the current
+// process is running on (parsed from $TMUX). This is useful for scanning
+// commands that need to see all sessions on the caller's server, regardless
+// of what SetDefaultSocket configured. Falls back to NewTmux() if $TMUX is
+// not set (e.g., running outside tmux).
+func NewTmuxFromEnv() *Tmux {
+	if tmuxEnv := os.Getenv("TMUX"); tmuxEnv != "" {
+		parts := strings.SplitN(tmuxEnv, ",", 2)
+		if socket := filepath.Base(parts[0]); socket != "" {
+			return &Tmux{socketName: socket}
+		}
+	}
+	return NewTmux()
+}
+
 // NewTmuxWithSocket creates a Tmux wrapper that targets a named socket.
 // This creates/connects to an isolated tmux server, separate from the user's
 // default server. Primarily used in tests to prevent session name collisions
