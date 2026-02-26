@@ -1,0 +1,307 @@
+description = """
+Parallel implementation plan review via specialized analysts. Reviews a
+generated implementation plan for completeness, sequencing, risk, and scope
+before committing it to beads.
+
+Each leg examines the plan from a different perspective. Findings are
+synthesized into a consolidated review with must-fix issues and a go/no-go
+recommendation.
+
+## Legs (parallel execution)
+- **completeness**: Are all requirements covered? What's missing?
+- **sequencing**: Is the order right? Are dependencies correct?
+- **risk**: What could go wrong? What are the unknowns?
+- **scope-creep**: Is there unnecessary work? Can this be cut?
+- **testability**: Can we verify this plan worked?
+
+## Execution Model
+1. Each leg spawns as a separate polecat
+2. Polecats work in parallel
+3. Each writes their review to a designated output file
+4. Synthesis step combines all findings into a final verdict with must-fix items
+
+## Output
+A .plan-reviews/<review-id>/ directory containing:
+- Individual dimension reviews
+- plan-review.md with consolidated findings and go/no-go recommendation
+"""
+formula = "mol-plan-review"
+type = "convoy"
+version = 1
+
+[inputs]
+[inputs.plan]
+description = "The implementation plan to review (file path, bead ID, or inline description)"
+type = "string"
+required = true
+
+[inputs.problem]
+description = "The original problem/feature this plan is solving (for context)"
+type = "string"
+required = true
+
+[inputs.prd_review]
+description = "Path to the PRD review output (if available) for context"
+type = "string"
+required = false
+
+[prompts]
+base = """
+# Implementation Plan Review Assignment
+
+You are a specialized reviewer participating in a parallel plan review convoy.
+
+## Context
+- **Formula**: {{.formula_name}}
+- **Plan under review**: {{.plan}}
+- **Original problem**: {{.problem}}
+- **Your dimension**: {{.leg.focus}}
+- **Leg ID**: {{.leg.id}}
+
+{{if .prd_review}}
+## PRD Review Context (from earlier analysis)
+See: {{.prd_review}}
+{{end}}
+
+## Your Task
+{{.leg.description}}
+
+## Output Requirements
+Write your review to: **{{.output_path}}**
+
+Structure your output as follows:
+```markdown
+# {{.leg.title}}
+
+## Verdict
+PASS / PASS WITH NOTES / FAIL — one sentence rationale
+
+## Must Fix (blocks implementation)
+- Issue description
+- Why it matters
+- Suggested resolution
+
+## Should Fix (important but not blocking)
+- ...
+
+## Observations
+(Non-blocking notes)
+- ...
+```
+
+Be specific. Reference plan sections or bead IDs where possible.
+"""
+
+[output]
+directory = ".plan-reviews/{{.review_id}}"
+leg_pattern = "{{.leg.id}}.md"
+synthesis = "plan-review.md"
+
+# ============================================================================
+# LEGS
+# ============================================================================
+
+[[legs]]
+id = "completeness"
+title = "Plan Completeness"
+focus = "Are all requirements covered? What's missing from the plan?"
+description = """
+Verify that the implementation plan covers all stated requirements.
+
+**Look for:**
+- Requirements from the PRD with no corresponding plan step
+- Implied work that isn't explicitly planned (migrations, tests, docs, rollout)
+- Missing infrastructure or setup steps
+- No monitoring / alerting plan
+- No rollback plan for risky changes
+- Missing error handling or graceful degradation steps
+- Tests not mentioned as part of plan
+- Post-launch validation not planned
+- Clean-up or deprecation work not included
+
+**Questions to answer:**
+- Which PRD requirement has no plan step covering it?
+- What will be obviously missing when the last bead is closed?
+- What will the engineer ask "wasn't this supposed to be part of this?" about?
+"""
+
+[[legs]]
+id = "sequencing"
+title = "Sequencing and Dependencies"
+focus = "Is the order right? Are dependencies correct?"
+description = """
+Verify that the plan's sequencing and dependencies are sound.
+
+**Look for:**
+- Steps that depend on things not yet built at that point
+- Schema migrations that need to happen before code changes that use them
+- API changes that need coordination between frontend and backend
+- Steps that should be parallelizable but are listed sequentially
+- Steps listed in parallel that actually have a dependency
+- Missing blocking relationships between beads
+- Infrastructure that needs to exist before application code can run
+- Feature flag requirements not sequenced before the feature itself
+- Database seed data or configuration that's needed early
+
+**Questions to answer:**
+- Can every step start immediately when its dependencies are done?
+- Is there a circular dependency hiding somewhere?
+- What would cause a "we can't proceed" moment mid-implementation?
+- Which steps could run in parallel to speed up delivery?
+"""
+
+[[legs]]
+id = "risk"
+title = "Risk Assessment"
+focus = "What could go wrong? What are the unknowns?"
+description = """
+Identify implementation risks, unknowns, and potential failure modes.
+
+**Look for:**
+- Steps with high uncertainty or novel technology
+- External dependencies (third-party APIs, services) with reliability risk
+- Steps that will be hard to test or verify
+- Changes to shared infrastructure affecting other teams
+- Database migrations that are difficult to reverse
+- Breaking changes to existing integrations or APIs
+- Performance risks with no load testing plan
+- Security surface area expansion without security review step
+- "We'll figure it out" language or vague descriptions
+- Single points of failure in the implementation sequence
+- Steps with estimates that seem unrealistic given their description
+
+**Questions to answer:**
+- What's the highest-risk step? Does the plan de-risk it early?
+- What assumption in this plan is most likely to be wrong?
+- What's the recovery plan if step N fails mid-implementation?
+- What external factor could block progress entirely?
+"""
+
+[[legs]]
+id = "scope-creep"
+title = "Scope Discipline"
+focus = "Is there unnecessary work? What can be cut?"
+description = """
+Identify scope creep and opportunities to simplify.
+
+**Look for:**
+- Steps that aren't necessary for the MVP
+- Gold-plating: doing it "properly" when "good enough" would ship faster
+- Refactors bundled in that aren't required for the feature
+- Future-proofing that adds complexity without current benefit
+- Steps solving problems not mentioned in the original PRD
+- Premature abstraction or generalization
+- "While we're in there" cleanup that isn't blocking
+- Polishing steps for internal-only or low-traffic code paths
+- Testing coverage beyond what's proportionate to risk
+- Documentation for things that don't need external documentation
+
+**Questions to answer:**
+- What's the minimum set of steps for a working MVP?
+- What in this plan is for future requirements, not current ones?
+- Which steps could be filed as follow-up beads without blocking launch?
+- What would you cut if the timeline was half as long?
+"""
+
+[[legs]]
+id = "testability"
+title = "Testability and Verifiability"
+focus = "Can we verify the plan worked?"
+description = """
+Assess whether the implementation will be verifiable once complete.
+
+**Look for:**
+- Steps with no associated test plan
+- Features that are hard to test in isolation
+- End-to-end flows with no integration test coverage planned
+- No definition of what "passing" looks like for each step
+- Missing smoke tests or validation steps post-deployment
+- Metrics or observability not planned (how will we know it's working in prod?)
+- Manual verification steps that should be automated
+- Tests that can only run in production (not in dev/staging)
+- No regression test plan for existing behavior
+
+**Questions to answer:**
+- After all beads are closed, how do we know the feature works end-to-end?
+- What's the first signal that something went wrong in production?
+- Which steps have acceptance criteria that are verifiable by a computer?
+- What would QA sign off on vs what requires manual testing?
+"""
+
+# ============================================================================
+# SYNTHESIS
+# ============================================================================
+
+[synthesis]
+title = "Plan Review Synthesis"
+description = """
+Combine all leg reviews into a consolidated verdict with must-fix items.
+
+**Your input:**
+All leg reviews from: {{.output.directory}}/
+
+**Your task:**
+1. Read all leg reviews
+2. Aggregate verdicts (PASS / PASS WITH NOTES / FAIL per leg)
+3. Consolidate must-fix items (deduplicate, flag cross-leg findings)
+4. Determine overall go/no-go
+5. Write the synthesized review
+
+**Output file:** {{.output.directory}}/{{.output.synthesis}}
+
+**Structure:**
+```markdown
+# Plan Review: {{.problem}}
+
+## Overall Verdict
+**GO / GO WITH FIXES / NO-GO** — one paragraph rationale
+
+## Leg Verdicts
+| Dimension | Verdict | Key Finding |
+|-----------|---------|-------------|
+| Completeness | PASS/FAIL/NOTES | |
+| Sequencing | PASS/FAIL/NOTES | |
+| Risk | PASS/FAIL/NOTES | |
+| Scope Discipline | PASS/FAIL/NOTES | |
+| Testability | PASS/FAIL/NOTES | |
+
+## Must Fix Before Creating Beads
+(Blocking issues — plan needs revision before proceeding)
+
+### [Issue Title]
+- **Found by**: <which legs>
+- **Problem**: <what's wrong>
+- **Required fix**: <what needs to change in the plan>
+
+...
+
+## Should Fix
+(Important but not blocking beads creation)
+- ...
+
+## Observations
+(Non-blocking notes worth considering)
+- ...
+
+## Next Steps
+- [ ] Address must-fix items in plan (if any)
+- [ ] Re-review if NO-GO
+- [ ] Pour `shiny` or `mol-polecat-work` per plan bead if GO
+```
+
+**After writing the file, mail the coordinator (whoever poured this formula):**
+```bash
+gt mail send --human -s "Plan Review Complete: {{.problem}}" -m "
+Review is ready: {{.output.directory}}/plan-review.md
+
+Overall verdict: <GO / GO WITH FIXES / NO-GO>
+
+## Summary
+<2-3 sentence summary>
+
+## Must-Fix Items
+<paste any blocking issues, or 'None — ready to proceed'>
+"
+```
+"""
+depends_on = ["completeness", "sequencing", "risk", "scope-creep", "testability"]
