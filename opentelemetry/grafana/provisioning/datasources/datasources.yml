@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    uid: victoriametrics
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    jsonData:
+      timeInterval: "15s"
+
+  - name: VictoriaLogs
+    type: victoriametrics-logs-datasource
+    uid: victorialogs
+    access: proxy
+    url: http://victorialogs:9428
+    jsonData:
+      maxLines: 1000
