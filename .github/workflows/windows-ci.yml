@@ -52,6 +52,7 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\dolt"
           $bin = Get-ChildItem -Path "$env:RUNNER_TEMP\dolt" -Recurse -Filter 'dolt.exe' | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path "$env:GOPATH\bin" | Out-Null
           Copy-Item $bin.FullName "$env:GOPATH\bin\dolt.exe"
           dolt version
 
