@@ -130,6 +130,8 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleIssueUpdate(w, r)
 	case path == "/pr/show" && r.Method == http.MethodGet:
 		h.handlePRShow(w, r)
+	case path == "/rig/add" && r.Method == http.MethodPost:
+		h.handleRigAdd(w, r)
 	case path == "/crew" && r.Method == http.MethodGet:
 		h.handleCrew(w, r)
 	case path == "/ready" && r.Method == http.MethodGet:
@@ -2155,4 +2157,106 @@ func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
 
 	h256 := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return fmt.Sprintf("%x", h256[:8])
+}
+
+// handleRigAdd creates a new rig, optionally with a local bare repo.
+func (h *APIHandler) handleRigAdd(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name    string `json:"name"`
+		RepoURL string `json:"repo_url,omitempty"`
+		Local   bool   `json:"local,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		h.sendError(w, "Rig name is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidRigName(req.Name) {
+		h.sendError(w, "Invalid rig name: must be alphanumeric/underscore only", http.StatusBadRequest)
+		return
+	}
+
+	repoURL := req.RepoURL
+	if req.Local || repoURL == "" {
+		// Create a local bare repo with an initial commit
+		localRepoPath := fmt.Sprintf("/tmp/gastown-repos/%s.git", req.Name)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		// Create bare repo
+		mkdirCmd := exec.CommandContext(ctx, "mkdir", "-p", localRepoPath)
+		if out, err := mkdirCmd.CombinedOutput(); err != nil {
+			h.sendError(w, fmt.Sprintf("Failed to create repo dir: %s %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+
+		initCmd := exec.CommandContext(ctx, "git", "init", "--bare")
+		initCmd.Dir = localRepoPath
+		if out, err := initCmd.CombinedOutput(); err != nil {
+			h.sendError(w, fmt.Sprintf("Failed to init bare repo: %s %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+
+		// Clone, create initial commit, push
+		tmpDir := fmt.Sprintf("/tmp/gastown-repos/.tmp-%s", req.Name)
+		cloneCmd := exec.CommandContext(ctx, "git", "clone", localRepoPath, tmpDir)
+		if out, err := cloneCmd.CombinedOutput(); err != nil {
+			h.sendError(w, fmt.Sprintf("Failed to clone: %s %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			_ = exec.CommandContext(context.Background(), "rm", "-rf", tmpDir).Run()
+		}()
+
+		commitCmd := exec.CommandContext(ctx, "git", "commit", "--allow-empty", "-m", "Initial commit")
+		commitCmd.Dir = tmpDir
+		if out, err := commitCmd.CombinedOutput(); err != nil {
+			h.sendError(w, fmt.Sprintf("Failed to create initial commit: %s %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+
+		pushCmd := exec.CommandContext(ctx, "git", "push", "origin", "HEAD:main")
+		pushCmd.Dir = tmpDir
+		if out, err := pushCmd.CombinedOutput(); err != nil {
+			h.sendError(w, fmt.Sprintf("Failed to push: %s %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+
+		repoURL = localRepoPath
+	} else if !isValidGitURL(repoURL) {
+		h.sendError(w, "Invalid git URL", http.StatusBadRequest)
+		return
+	}
+
+	// Run gt rig add
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	output, err := h.runGtCommand(ctx, 55*time.Second, []string{"rig", "add", req.Name, repoURL})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+			"output":  output,
+		})
+		return
+	}
+
+	// Invalidate options cache so rig list updates
+	h.optionsCacheMu.Lock()
+	h.optionsCache = nil
+	h.optionsCacheMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Rig '%s' created successfully", req.Name),
+		"output":  output,
+	})
 }

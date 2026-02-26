@@ -70,6 +70,7 @@ var AllowedCommands = map[string]CommandMeta{
 	"convoy add":     {Confirm: true, Desc: "Add issue to convoy", Category: "Convoys", Args: "<convoy-id> <issue>", ArgType: "convoys"},
 
 	// Rig actions
+	"rig add":   {Confirm: true, Desc: "Add rig", Category: "Rigs", Args: "<rig-name> <git-url>"},
 	"rig boot":  {Confirm: true, Desc: "Boot rig", Category: "Rigs", Args: "<rig-name>", ArgType: "rigs"},
 	"rig start": {Confirm: true, Desc: "Start rig", Category: "Rigs", Args: "<rig-name>", ArgType: "rigs"},
 
