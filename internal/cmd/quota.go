@@ -697,7 +697,10 @@ func executeKeychainRotation(
 		ContinueSession: true,
 	})
 	if err != nil {
-		result.Error = fmt.Sprintf("building restart command: %v", err)
+		// Session types that can't be restarted (e.g., hq-boot/deacon) still
+		// benefit from the keychain swap above — mark as rotated without restart.
+		result.Rotated = true
+		result.Error = fmt.Sprintf("keychain swapped but could not restart: %v", err)
 		return result
 	}
 
