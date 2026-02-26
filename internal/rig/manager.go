@@ -809,6 +809,23 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
+	// Ensure BEADS_DOLT_PORT is set when GT_DOLT_PORT is present, so that
+	// bd subprocesses connect to the correct Dolt server (especially in tests
+	// where an ephemeral server runs on a non-default port).
+	var gtDoltPort string
+	hasBDP := false
+	for _, e := range filteredEnv {
+		if strings.HasPrefix(e, "GT_DOLT_PORT=") {
+			gtDoltPort = strings.TrimPrefix(e, "GT_DOLT_PORT=")
+		}
+		if strings.HasPrefix(e, "BEADS_DOLT_PORT=") {
+			hasBDP = true
+		}
+	}
+	if gtDoltPort != "" && !hasBDP {
+		filteredEnv = append(filteredEnv, "BEADS_DOLT_PORT="+gtDoltPort)
+	}
+
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).
 	// --server tells bd to set dolt_mode=server in metadata.json so bd
 	// connects to the centralized Dolt sql-server instead of embedded mode.
@@ -817,6 +834,11 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 		initArgs = append(initArgs, "--prefix", prefix)
 	}
 	initArgs = append(initArgs, "--server")
+	// When GT_DOLT_PORT is set (e.g., test environment with ephemeral server),
+	// pass --server-port so bd init configures the correct port in metadata.
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		initArgs = append(initArgs, "--server-port", p)
+	}
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
