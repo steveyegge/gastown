@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -22,7 +23,6 @@ import (
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -41,18 +41,18 @@ type agentStartResult struct {
 
 // UpOutput represents the JSON output of the up command.
 type UpOutput struct {
-	Success  bool              `json:"success"`
-	Services []ServiceStatus   `json:"services"`
-	Summary  UpSummary         `json:"summary"`
+	Success  bool            `json:"success"`
+	Services []ServiceStatus `json:"services"`
+	Summary  UpSummary       `json:"summary"`
 }
 
 // ServiceStatus represents the status of a single service.
 type ServiceStatus struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"` // daemon, deacon, mayor, witness, refinery, crew, polecat
-	Rig     string `json:"rig,omitempty"`
-	OK      bool   `json:"ok"`
-	Detail  string `json:"detail"`
+	Name   string `json:"name"`
+	Type   string `json:"type"` // daemon, deacon, mayor, witness, refinery, crew, polecat
+	Rig    string `json:"rig,omitempty"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
 }
 
 // UpSummary provides counts for the up command output.
@@ -364,6 +364,12 @@ func runUp(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Ensure keybindings (prefix+g, prefix+a) work on all tmux sockets.
+	// Agent sessions live on the town socket (e.g., -L gt), but the user may be
+	// attached to the default socket. Without this, prefix+g only works on the
+	// town socket where gt prime set it during session decoration.
+	ensureCrossSocketBindings()
 
 	// Log boot event for both JSON and text paths
 	if allOK {
@@ -873,6 +879,26 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	return started, errors
+}
+
+// ensureCrossSocketBindings sets GT keybindings on tmux sockets other than the
+// town socket. This allows prefix+g (agent menu) and prefix+a (feed) to work
+// when the user is attached to the default tmux server.
+//
+// The town socket's bindings are set by gt prime (during session decoration).
+// This function handles all other running tmux servers.
+func ensureCrossSocketBindings() {
+	townSocket := tmux.GetDefaultSocket()
+	if townSocket == "" {
+		return // no multi-socket isolation
+	}
+
+	// Always ensure bindings on the "default" socket since that's where
+	// users typically have their interactive terminal sessions.
+	// EnsureBindingsOnSocket is idempotent and safe if default == town.
+	if townSocket != "default" {
+		_ = tmux.EnsureBindingsOnSocket("default")
+	}
 }
 
 // doltReadyTimeout is how long gt up waits for the Dolt SQL server to accept
