@@ -68,3 +68,4 @@ result
 # bv (beads viewer) local config and caches
 .bv/
 .pi/
+opentelemetry/gastown-trace/gastown-trace
