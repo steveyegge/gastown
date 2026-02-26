@@ -484,8 +484,12 @@ func runHandoffCycle() error {
 		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(subject, true))
 	}
 
-	// Build restart command for fresh session
-	restartCmd, err := buildRestartCommand(currentSession)
+	// Build restart command with --continue so the new session resumes
+	// the previous conversation (preserves context across compaction cycles).
+	restartCmd, err := buildRestartCommandWithOpts(currentSession, buildRestartCommandOpts{
+		ContinueSession: true,
+		ContinuePrompt:  "Context compacted. Continue your previous task.",
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "handoff --cycle: could not build restart command: %v\n", err)
 		return err
@@ -678,7 +682,23 @@ var claudeEnvVars = []string{
 // buildRestartCommand creates the command to run when respawning a session's pane.
 // This needs to be the actual command to execute (e.g., claude), not a session attach command.
 // The command includes a cd to the correct working directory for the role.
+//
+// buildRestartCommandOpts controls restart command generation.
+type buildRestartCommandOpts struct {
+	// ContinueSession adds --continue and omits the beacon prompt,
+	// so the agent resumes its previous conversation silently.
+	ContinueSession bool
+	// ContinuePrompt overrides the default continuation prompt when
+	// ContinueSession is true. If empty, falls back to a generic
+	// continuation message.
+	ContinuePrompt string
+}
+
 func buildRestartCommand(sessionName string) (string, error) {
+	return buildRestartCommandWithOpts(sessionName, buildRestartCommandOpts{})
+}
+
+func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpts) (string, error) {
 	// Detect town root from current directory
 	townRoot := detectTownRootFromCwd()
 	if townRoot == "" {
@@ -705,14 +725,23 @@ func buildRestartCommand(sessionName string) (string, error) {
 		rigPath = filepath.Join(townRoot, identity.Rig)
 	}
 
-	// Build startup beacon for predecessor discovery via /resume
-	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
-	// The SessionStart hook handles context injection (gt prime --hook)
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: identity.BeaconAddress(),
-		Sender:    "self",
-		Topic:     "handoff",
-	})
+	// Build startup beacon for predecessor discovery via /resume.
+	// When ContinueSession is set, use a continuation prompt instead of
+	// the full handoff beacon — the agent resumes its previous context.
+	beacon := ""
+	if opts.ContinueSession {
+		if opts.ContinuePrompt != "" {
+			beacon = opts.ContinuePrompt
+		} else {
+			beacon = "Continue your previous task."
+		}
+	} else {
+		beacon = session.FormatStartupBeacon(session.BeaconConfig{
+			Recipient: identity.BeaconAddress(),
+			Sender:    "self",
+			Topic:     "handoff",
+		})
+	}
 
 	// For respawn-pane, we:
 	// 1. cd to the right directory (role's canonical home)
@@ -747,6 +776,11 @@ func buildRestartCommand(sessionName string) (string, error) {
 		runtimeCmd = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath).BuildCommandWithPrompt(beacon)
 	} else {
 		runtimeCmd = config.GetRuntimeCommandWithPrompt(rigPath, beacon)
+	}
+
+	// Add --continue flag to resume the most recent session.
+	if opts.ContinueSession {
+		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
 	}
 
 	// Build environment exports - role vars first, then Claude vars
