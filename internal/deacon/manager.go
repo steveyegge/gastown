@@ -24,6 +24,8 @@ var (
 type tmuxOps interface {
 	HasSession(name string) (bool, error)
 	IsAgentAlive(session string) bool
+	IsPaneDead(session string) bool
+	RespawnPaneDefault(session string) error
 	KillSessionWithProcesses(name string) error
 	NewSessionWithCommand(name, workDir, command string) error
 	SetRemainOnExit(pane string, on bool) error
@@ -82,6 +84,23 @@ func (m *Manager) Start(agentOverride string) error {
 		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
+
+		// Pane dead (remain-on-exit) vs zombie shell: different recovery paths.
+		// A dead pane means the agent exited cleanly (e.g., patrol cycle complete)
+		// and the pane is waiting for respawn. Use respawn-pane to restart in place,
+		// which is cheaper and avoids incrementing the daemon's crash counter.
+		// A zombie shell (pane alive but agent dead) needs kill+recreate.
+		if t.IsPaneDead(sessionID) {
+			if err := t.RespawnPaneDefault(sessionID); err == nil {
+				// Give the respawned process a moment to start
+				time.Sleep(500 * time.Millisecond)
+				if t.IsAgentAlive(sessionID) {
+					return ErrAlreadyRunning
+				}
+			}
+			// Respawn failed or agent didn't come back — fall through to kill+recreate
+		}
+
 		// Zombie - tmux alive but agent dead. Kill and recreate.
 		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		if err := t.KillSessionWithProcesses(sessionID); err != nil {
