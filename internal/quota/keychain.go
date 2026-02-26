@@ -245,11 +245,11 @@ func ValidateKeychainToken(configDir string) error {
 		}
 	}
 
-	// Strategy 3: HTTP validation — send a minimal malformed request to the
-	// Anthropic API. Auth is checked before request body: 401 = bad token,
-	// any other status (400, 422, etc.) = token accepted by auth layer.
-	// Network errors are treated as "can't determine" → assume valid.
-	return validateTokenHTTP(raw)
+	// Token is present but format is opaque (not JSON with expires_at, not JWT).
+	// Claude Code uses OAuth tokens that authenticate through a different flow
+	// than Bearer tokens against the Anthropic API, so HTTP validation would
+	// always return 401 for valid OAuth tokens. Assume valid if present.
+	return nil
 }
 
 // validateTokenHTTP sends a minimal request to the Anthropic API to check if a
