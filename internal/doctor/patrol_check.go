@@ -1,7 +1,6 @@
 package doctor
 
 import (
-	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -250,14 +248,12 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 	for _, rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 
-		// Try Dolt database first (canonical source in server mode),
-		// fall back to issues.jsonl for non-Dolt rigs or when Dolt is unavailable.
+		// Query Dolt database (the only supported backend).
 		stuck, err := c.checkStuckWispsDolt(rigPath, rigName)
 		if err != nil {
-			// Dolt query failed — fall back to JSONL
-			beadsDir := beads.ResolveBeadsDir(rigPath)
-			beadsPath := filepath.Join(beadsDir, "issues.jsonl")
-			stuck = c.checkStuckWisps(beadsPath, rigName)
+			// Dolt query failed — report as error rather than silently skipping.
+			stuckWisps = append(stuckWisps, fmt.Sprintf("%s: Dolt query failed: %v", rigName, err))
+			continue
 		}
 		stuckWisps = append(stuckWisps, stuck...)
 	}
@@ -329,44 +325,6 @@ func (c *PatrolNotStuckCheck) checkStuckWispsDolt(rigPath string, rigName string
 	}
 
 	return stuck, nil
-}
-
-// checkStuckWisps returns descriptions of stuck wisps in a rig (JSONL fallback).
-func (c *PatrolNotStuckCheck) checkStuckWisps(issuesPath string, rigName string) []string {
-	file, err := os.Open(issuesPath)
-	if err != nil {
-		return nil // No issues file
-	}
-	defer file.Close()
-
-	var stuck []string
-	cutoff := time.Now().Add(-c.stuckThreshold)
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var issue struct {
-			ID        string    `json:"id"`
-			Title     string    `json:"title"`
-			Status    string    `json:"status"`
-			UpdatedAt time.Time `json:"updated_at"`
-		}
-		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			continue
-		}
-
-		// Check for in_progress issues older than threshold
-		if issue.Status == "in_progress" && !issue.UpdatedAt.IsZero() && issue.UpdatedAt.Before(cutoff) {
-			stuck = append(stuck, fmt.Sprintf("%s: %s (%s) - stale since %s",
-				rigName, issue.ID, issue.Title, issue.UpdatedAt.Format("2006-01-02 15:04")))
-		}
-	}
-
-	return stuck
 }
 
 // PatrolPluginsAccessibleCheck verifies plugin directories exist and are readable.

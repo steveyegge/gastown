@@ -60,7 +60,7 @@
 # - linear.api-key
 # - github.org
 # - github.repo
-sync-branch: beads-sync
+# sync-branch: beads-sync  # Legacy — Dolt server mode doesn't use git sync
 
 # Cross-project dependencies (gt-o3is)
 # Maps project names to paths for external dependency resolution

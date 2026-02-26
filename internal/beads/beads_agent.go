@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gofrs/flock"
 
@@ -177,7 +175,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// This is cached (sentinel file + in-memory) so repeated calls are fast.
 	// On fresh rigs, this may fail if the database can't be initialized.
 	// Don't bail out — try the bd create calls anyway (GH#1769).
-	ensureErr := EnsureCustomTypes(targetDir)
+	_ = EnsureCustomTypes(targetDir)
 
 	description := FormatAgentDescription(title, fields)
 
@@ -210,17 +208,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	if err != nil {
 		out, err = b.run(buildArgs()...)
 		if err != nil {
-			// Both bd create attempts failed. If EnsureCustomTypes also failed,
-			// the database may be completely uninitialized. Fall back to writing
-			// the agent bead directly as a JSONL entry (GH#1769 workaround).
-			if ensureErr != nil || isSubprocessCrash(err) {
-				issue, jsonlErr := createAgentBeadViaJSONL(targetDir, id, title, description)
-				if jsonlErr != nil {
-					return nil, fmt.Errorf("creating %s: bd create failed (%w), JSONL fallback also failed (%w)", id, err, jsonlErr)
-				}
-				return issue, nil
-			}
-			return nil, err
+			// Both bd create attempts failed. Dolt server is required —
+			// no JSONL fallback. Surface the error directly.
+			return nil, fmt.Errorf("creating %s: bd create failed: %w", id, err)
 		}
 	}
 
@@ -247,52 +237,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	}
 
 	return &issue, nil
-}
-
-// createAgentBeadViaJSONL writes an agent bead directly to the issues.jsonl file
-// as a fallback when all bd create attempts fail (GH#1769). This bypasses the
-// Dolt database entirely and creates a JSONL entry that bd import can pick up.
-// The bead will be properly imported on the next bd init or bd import.
-func createAgentBeadViaJSONL(beadsDir, id, title, description string) (*Issue, error) {
-	jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	issue := &Issue{
-		ID:          id,
-		Title:       title,
-		Description: description,
-		Status:      "open",
-		Type:        "agent",
-		Labels:      []string{"gt:agent"},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	data, err := json.Marshal(issue)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling agent bead JSON: %w", err)
-	}
-
-	// Append to JSONL file (create if needed). Use O_APPEND for atomicity.
-	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G304: path is constructed internally
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", jsonlPath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return nil, fmt.Errorf("writing to %s: %w", jsonlPath, err)
-	}
-
-	// Try to import the JSONL file into the database (best effort).
-	// This may fail if the database is truly uninitialized, but the JSONL
-	// file is now on disk for manual or future import.
-	importCmd := exec.Command("bd", "import", "-i", jsonlPath)
-	importCmd.Dir = filepath.Dir(beadsDir)
-	importCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
-	_, _ = importCmd.CombinedOutput() // Best effort
-
-	return issue, nil
 }
 
 // CreateOrReopenAgentBead creates an agent bead or reopens an existing one.

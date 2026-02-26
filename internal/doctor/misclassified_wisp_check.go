@@ -510,4 +510,3 @@ func bdTableExistsDoctor(workDir, tableName string) bool {
 	err := cmd.Run()
 	return err == nil
 }
-

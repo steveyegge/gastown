@@ -1199,10 +1199,10 @@ func TestParseAgentBeadID(t *testing.T) {
 		// Worker name collides with role keyword + hyphenated rig
 		{"gt-my-rig-polecat-witness", "my-rig", "polecat", "witness", true},
 		// Collapsed form: prefix == rig (e.g., rig "ff" with prefix "ff")
-		{"ff-witness", "ff", "witness", "", true},            // collapsed rig-level singleton
-		{"ff-refinery", "ff", "refinery", "", true},          // collapsed rig-level singleton
-		{"ff-polecat-nux", "ff", "polecat", "nux", true},    // collapsed named agent
-		{"ff-crew-dave", "ff", "crew", "dave", true},         // collapsed named agent
+		{"ff-witness", "ff", "witness", "", true},                // collapsed rig-level singleton
+		{"ff-refinery", "ff", "refinery", "", true},              // collapsed rig-level singleton
+		{"ff-polecat-nux", "ff", "polecat", "nux", true},         // collapsed named agent
+		{"ff-crew-dave", "ff", "crew", "dave", true},             // collapsed named agent
 		{"ff-polecat-war-boy", "ff", "polecat", "war-boy", true}, // collapsed named with hyphen
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
@@ -2283,9 +2283,6 @@ func TestSetupRedirect(t *testing.T) {
 	})
 }
 
-
-
-
 // TestResetAgentBeadForReuse_NukeRespawnCycle tests the preferred nuke→respawn
 // lifecycle using ResetAgentBeadForReuse (gt-14b8o fix). This keeps the bead open
 // with agent_state="nuked", avoiding the close/reopen cycle
@@ -2382,29 +2379,24 @@ func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
 	t.Log("LIFECYCLE TEST PASSED: spawn → reset → respawn works without close/reopen")
 }
 
-
-
-
-
-
 // TestIsAgentBead verifies the IsAgentBead function correctly identifies agent
 // beads by checking both the gt:agent label (preferred) and the legacy type field.
 func TestIsAgentBead(t *testing.T) {
 	tests := []struct {
-		name   string
-		issue  *Issue
-		want   bool
+		name  string
+		issue *Issue
+		want  bool
 	}{
 		{
-			name: "nil issue",
+			name:  "nil issue",
 			issue: nil,
-			want: false,
+			want:  false,
 		},
 		{
 			name: "agent with legacy type",
 			issue: &Issue{
-				ID:   "gt-gastown-polecat-toast",
-				Type: "agent",
+				ID:     "gt-gastown-polecat-toast",
+				Type:   "agent",
 				Labels: []string{},
 			},
 			want: true,
@@ -2412,8 +2404,8 @@ func TestIsAgentBead(t *testing.T) {
 		{
 			name: "agent with gt:agent label",
 			issue: &Issue{
-				ID:   "gt-gastown-polecat-toast",
-				Type: "task",
+				ID:     "gt-gastown-polecat-toast",
+				Type:   "task",
 				Labels: []string{"gt:agent"},
 			},
 			want: true,
@@ -2421,8 +2413,8 @@ func TestIsAgentBead(t *testing.T) {
 		{
 			name: "agent with both type and label",
 			issue: &Issue{
-				ID:   "gt-gastown-polecat-toast",
-				Type: "agent",
+				ID:     "gt-gastown-polecat-toast",
+				Type:   "agent",
 				Labels: []string{"gt:agent", "other-label"},
 			},
 			want: true,
@@ -2430,8 +2422,8 @@ func TestIsAgentBead(t *testing.T) {
 		{
 			name: "not an agent - task type without label",
 			issue: &Issue{
-				ID:   "gt-abc123",
-				Type: "task",
+				ID:     "gt-abc123",
+				Type:   "task",
 				Labels: []string{},
 			},
 			want: false,
@@ -2439,8 +2431,8 @@ func TestIsAgentBead(t *testing.T) {
 		{
 			name: "not an agent - bug type with other labels",
 			issue: &Issue{
-				ID:   "gt-xyz456",
-				Type: "bug",
+				ID:     "gt-xyz456",
+				Type:   "bug",
 				Labels: []string{"priority-high", "blocked"},
 			},
 			want: false,
@@ -2448,8 +2440,8 @@ func TestIsAgentBead(t *testing.T) {
 		{
 			name: "agent with gt:agent label and other labels",
 			issue: &Issue{
-				ID:   "gt-gastown-witness",
-				Type: "task",
+				ID:     "gt-gastown-witness",
+				Type:   "task",
 				Labels: []string{"priority-high", "gt:agent", "status-running"},
 			},
 			want: true,
@@ -2846,87 +2838,4 @@ func TestIsSubprocessCrash(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestCreateAgentBeadViaJSONL verifies the JSONL fallback creates valid entries (GH#1769).
-func TestCreateAgentBeadViaJSONL(t *testing.T) {
-	t.Run("creates valid JSONL entry", func(t *testing.T) {
-		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-
-		issue, err := createAgentBeadViaJSONL(beadsDir, "gt-testrig-witness", "Witness for testrig", "Witness description\n\nrole_type: witness")
-		if err != nil {
-			t.Fatalf("createAgentBeadViaJSONL failed: %v", err)
-		}
-
-		if issue.ID != "gt-testrig-witness" {
-			t.Errorf("ID = %q, want %q", issue.ID, "gt-testrig-witness")
-		}
-		if issue.Status != "open" {
-			t.Errorf("Status = %q, want %q", issue.Status, "open")
-		}
-		if issue.Type != "agent" {
-			t.Errorf("Type = %q, want %q", issue.Type, "agent")
-		}
-		if len(issue.Labels) != 1 || issue.Labels[0] != "gt:agent" {
-			t.Errorf("Labels = %v, want [gt:agent]", issue.Labels)
-		}
-
-		// Verify JSONL file was created with valid content
-		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-		data, err := os.ReadFile(jsonlPath)
-		if err != nil {
-			t.Fatalf("reading issues.jsonl: %v", err)
-		}
-
-		var parsed Issue
-		if err := json.Unmarshal(data[:len(data)-1], &parsed); err != nil { // trim trailing newline
-			t.Fatalf("parsing JSONL entry: %v", err)
-		}
-		if parsed.ID != "gt-testrig-witness" {
-			t.Errorf("parsed ID = %q, want %q", parsed.ID, "gt-testrig-witness")
-		}
-		if parsed.Type != "agent" {
-			t.Errorf("parsed Type = %q, want %q", parsed.Type, "agent")
-		}
-	})
-
-	t.Run("appends to existing JSONL file", func(t *testing.T) {
-		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-
-		// Create first entry
-		_, err := createAgentBeadViaJSONL(beadsDir, "gt-testrig-witness", "Witness", "desc1")
-		if err != nil {
-			t.Fatalf("first create failed: %v", err)
-		}
-
-		// Create second entry
-		_, err = createAgentBeadViaJSONL(beadsDir, "gt-testrig-refinery", "Refinery", "desc2")
-		if err != nil {
-			t.Fatalf("second create failed: %v", err)
-		}
-
-		// Verify both entries are present
-		data, err := os.ReadFile(filepath.Join(beadsDir, "issues.jsonl"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) != 2 {
-			t.Errorf("expected 2 JSONL lines, got %d", len(lines))
-		}
-	})
-
-	t.Run("fails gracefully on read-only directory", func(t *testing.T) {
-		// Use a non-existent path (can't write)
-		_, err := createAgentBeadViaJSONL("/nonexistent/.beads", "gt-test", "Test", "desc")
-		if err == nil {
-			t.Error("expected error for non-existent directory")
-		}
-	})
 }

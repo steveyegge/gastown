@@ -58,8 +58,7 @@ var staleFilePatterns = []string{
 	"*.db",
 	"*.db-*",
 	"*.db?*",
-	// JSONL data files (tracked but stale in redirect locations)
-	"issues.jsonl",
+	// Legacy JSONL data files (stale in redirect locations)
 	"interactions.jsonl",
 	// Sync and metadata
 	"metadata.json",

@@ -7,31 +7,29 @@ on:
     branches: [ main ]
 
 jobs:
-  # Fast check to catch accidental .beads/issues.jsonl changes from contributors
-  check-no-beads-changes:
-    name: Check for .beads changes
+  # Guard: gastown no longer supports issues.jsonl — Dolt server is the only backend.
+  check-no-issues-jsonl:
+    name: Reject issues.jsonl
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
 
-      - name: Check for .beads/issues.jsonl changes
+      - name: Reject issues.jsonl if present
         run: |
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^\.beads/issues\.jsonl$"; then
-            echo "This PR includes changes to .beads/issues.jsonl"
+          if [ -f .beads/issues.jsonl ]; then
+            echo "ERROR: .beads/issues.jsonl must not exist in the repository."
             echo ""
-            echo "This file is the project's issue database and should not be modified in PRs."
+            echo "Gastown requires a Dolt server — issues.jsonl is no longer supported."
             echo ""
             echo "To fix, run:"
-            echo "  git checkout origin/main -- .beads/issues.jsonl"
+            echo "  git rm .beads/issues.jsonl"
             echo "  git commit --amend"
             echo "  git push --force"
             echo ""
             exit 1
           fi
-          echo "No .beads/issues.jsonl changes detected"
+          echo "OK: no issues.jsonl found"
 
   test:
     name: Test

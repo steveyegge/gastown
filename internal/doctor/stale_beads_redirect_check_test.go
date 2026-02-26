@@ -99,8 +99,9 @@ func TestStaleBeadsRedirectCheck_FixRemovesStaleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create stale files (config.yaml excluded - may be tracked in git)
-	staleFiles := []string{"issues.jsonl", "issues.db", "metadata.json"}
+	// Create stale files (config.yaml excluded - may be tracked in git;
+	// issues.jsonl no longer recognized — Dolt server is the only backend)
+	staleFiles := []string{"issues.db", "metadata.json"}
 	for _, f := range staleFiles {
 		if err := os.WriteFile(filepath.Join(beadsDir, f), []byte("stale data"), 0644); err != nil {
 			t.Fatal(err)

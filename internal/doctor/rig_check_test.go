@@ -475,12 +475,12 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 	rigName := "testrig"
 	rigDir := filepath.Join(tmpDir, rigName)
 
-	// Create tracked beads at mayor/rig/.beads
+	// Create tracked beads at mayor/rig/.beads with config.yaml as data marker
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
 	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(trackedBeads, "issues.jsonl"), []byte(`{"id":"tr-1"}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(trackedBeads, "config.yaml"), []byte("prefix: tr\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -489,7 +489,7 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 	if err := os.MkdirAll(localBeads, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(localBeads, "issues.jsonl"), []byte(`{"id":"local-1"}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(localBeads, "config.yaml"), []byte("prefix: local\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -505,11 +505,6 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 	// Apply fix - should remove conflicting local beads and create redirect
 	if err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
-	}
-
-	// Verify local issues.jsonl was removed
-	if _, err := os.Stat(filepath.Join(localBeads, "issues.jsonl")); !os.IsNotExist(err) {
-		t.Error("local issues.jsonl should have been removed")
 	}
 
 	// Verify redirect was created

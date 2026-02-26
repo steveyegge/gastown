@@ -1,15 +1,11 @@
 package doctor
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // WispGCCheck detects and cleans orphaned wisps that are older than a threshold.
@@ -89,8 +85,7 @@ func (c *WispGCCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // countAbandonedWisps counts wisps older than the threshold in a rig.
-// Queries the wisps table via bd mol wisp list instead of reading issues.jsonl,
-// since wisps are stored in their own dolt_ignored table.
+// Queries the wisps table via bd mol wisp list (Dolt server is required).
 func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 	// Query wisps table via bd CLI
 	cmd := exec.Command("bd", "mol", "wisp", "list", "--json")
@@ -98,8 +93,8 @@ func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 
 	output, err := cmd.Output()
 	if err != nil {
-		// Wisps table may not exist yet — try legacy issues.jsonl fallback
-		return c.countAbandonedWispsLegacy(rigPath)
+		// Dolt is the only supported backend — no wisps table means 0 abandoned wisps.
+		return 0
 	}
 
 	var wisps []struct {
@@ -123,44 +118,6 @@ func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 			continue
 		}
 		if !updatedAt.IsZero() && updatedAt.Before(cutoff) {
-			count++
-		}
-	}
-
-	return count
-}
-
-// countAbandonedWispsLegacy counts wisps from issues.jsonl (pre-migration fallback).
-func (c *WispGCCheck) countAbandonedWispsLegacy(rigPath string) int {
-	beadsDir := beads.ResolveBeadsDir(rigPath)
-	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
-	file, err := os.Open(issuesPath)
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	cutoff := time.Now().Add(-c.threshold)
-	count := 0
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var issue struct {
-			ID        string    `json:"id"`
-			Status    string    `json:"status"`
-			Wisp      bool      `json:"wisp"`
-			UpdatedAt time.Time `json:"updated_at"`
-		}
-		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			continue
-		}
-
-		if issue.Wisp && issue.Status != "closed" && !issue.UpdatedAt.IsZero() && issue.UpdatedAt.Before(cutoff) {
 			count++
 		}
 	}
