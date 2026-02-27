@@ -10,8 +10,10 @@ const (
 	ShutdownNotifyDelay = 500 * time.Millisecond
 
 	// ClaudeStartTimeout is how long to wait for Claude to start in a session.
-	// Increased to 60s because Claude can take 30s+ on slower machines.
-	ClaudeStartTimeout = 60 * time.Second
+	// 180s because the first turn must complete before ❯ appears: hooks fire
+	// (gt prime injects patrol context), then the full API round-trip runs.
+	// With large patrol formulas this regularly exceeds 60s, especially on Opus.
+	ClaudeStartTimeout = 180 * time.Second
 
 	// ShellReadyTimeout is how long to wait for shell prompt after command.
 	ShellReadyTimeout = 5 * time.Second
