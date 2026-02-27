@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -89,16 +90,34 @@ type agentStateResult struct {
 	Labels    map[string]string `json:"labels"`
 }
 
+// resolveBeadsDirForAgentBead returns the beads directory for the given bead ID.
+// For cross-rig beads (e.g., gt- prefix from the beads rig), it routes to the
+// correct rig's database so that BEADS_DIR points to the right store and bd
+// does not skip prefix-based routing (which it would if BEADS_DIR is local).
+func resolveBeadsDirForAgentBead(cwd, beadID string) string {
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix != "" {
+		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+			if rigPath := beads.GetRigPathForPrefix(townRoot, prefix); rigPath != "" {
+				if dir := beads.ResolveBeadsDir(rigPath); dir != "" {
+					return dir
+				}
+			}
+		}
+	}
+	return beads.ResolveBeadsDir(cwd)
+}
+
 func runAgentState(cmd *cobra.Command, args []string) error {
 	agentBead := args[0]
 
-	// Find beads directory
+	// Find beads directory, routing to the correct rig for this bead's prefix
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	beadsDir := beads.ResolveBeadsDir(cwd)
+	beadsDir := resolveBeadsDirForAgentBead(cwd, agentBead)
 	if beadsDir == "" {
 		return fmt.Errorf("not in a beads workspace")
 	}
