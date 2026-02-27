@@ -1994,6 +1994,12 @@ func (t *Tmux) resolveSessionProcessNames(session string) []string {
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
 // Useful for waiting until a shell has started a new process (e.g., claude).
 // Returns nil when a non-excluded command is detected, or error on timeout.
+//
+// Fallback: when the pane command IS a shell (e.g., bash), also checks
+// IsAgentAlive to detect agents wrapped in shell scripts (e.g., c2claude wrapping
+// claude-original). This handles cases where exec env does not replace the shell
+// as the pane foreground process. GT_PROCESS_NAMES must be set in the session
+// environment (via SetEnvironment) before calling for this fallback to work.
 func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -2011,6 +2017,14 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 			}
 		}
 		if !excluded {
+			return nil
+		}
+		// Fallback: if the pane is running a shell, check whether the agent is
+		// alive as a descendant process. This handles agents wrapped in shell
+		// scripts (e.g., c2claude -> claude-original) where exec env does not
+		// replace the shell as pane_current_command. GT_PROCESS_NAMES in the
+		// tmux session environment determines which process names are expected.
+		if t.IsAgentAlive(session) {
 			return nil
 		}
 		time.Sleep(constants.PollInterval)
