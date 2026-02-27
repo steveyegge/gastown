@@ -495,6 +495,9 @@ type GitStatus struct {
 	Modified []string
 	Added    []string
 	Deleted  []string
+	Renamed  []string
+	Copied   []string
+	Unmerged []string
 	Untracked []string
 }
 
@@ -519,6 +522,20 @@ func (g *Git) Status() (*GitStatus, error) {
 		file := line[3:]
 
 		switch {
+		case strings.Contains(code, "U") || code == "AA" || code == "DD":
+			status.Unmerged = append(status.Unmerged, file)
+		case strings.Contains(code, "R"):
+			// Rename format: "R  old -> new" — extract the new path
+			if idx := strings.Index(file, " -> "); idx >= 0 {
+				file = file[idx+4:]
+			}
+			status.Renamed = append(status.Renamed, file)
+		case strings.Contains(code, "C"):
+			// Copy format: "C  old -> new" — extract the new path
+			if idx := strings.Index(file, " -> "); idx >= 0 {
+				file = file[idx+4:]
+			}
+			status.Copied = append(status.Copied, file)
 		case strings.Contains(code, "M"):
 			status.Modified = append(status.Modified, file)
 		case strings.Contains(code, "A"):
@@ -1366,12 +1383,61 @@ func (s *UncommittedWorkStatus) CleanExcludingBeads() bool {
 		}
 	}
 
+	// Safety fallback: if HasUncommittedChanges is set but no files were
+	// classified (e.g. rename/copy/unmerged states), treat as dirty.
+	if s.HasUncommittedChanges && len(s.ModifiedFiles) == 0 && len(s.UntrackedFiles) == 0 {
+		return false
+	}
+
 	return true
 }
 
 // isBeadsPath returns true if the path is a .beads/ file.
 func isBeadsPath(path string) bool {
-	return strings.Contains(path, ".beads/") || strings.Contains(path, ".beads\\")
+	return strings.HasPrefix(path, ".beads/") || strings.HasPrefix(path, ".beads\\")
+}
+
+// isToolPath returns true if the path belongs to a known tool-generated file.
+// These paths are created by development tools (Copilot CLI, beads) and should not
+// block operations like gt done.
+func isToolPath(path string) bool {
+	return isBeadsPath(path) ||
+		strings.HasPrefix(path, ".copilot/") || strings.HasPrefix(path, ".copilot\\") ||
+		isGastownHookFile(path)
+}
+
+// isGastownHookFile returns true if the path is a Gas Town injected hook file.
+func isGastownHookFile(path string) bool {
+	base := filepath.Base(path)
+	return base == "gastown.json" || base == "gastown-pretool-guard.sh"
+}
+
+// CleanExcludingToolFiles returns true if the only uncommitted changes are from
+// known tool-generated paths (.beads/, .copilot/, .github/hooks/).
+func (s *UncommittedWorkStatus) CleanExcludingToolFiles() bool {
+	if s.StashCount > 0 || s.UnpushedCommits > 0 {
+		return false
+	}
+
+	for _, f := range s.ModifiedFiles {
+		if !isToolPath(f) {
+			return false
+		}
+	}
+
+	for _, f := range s.UntrackedFiles {
+		if !isToolPath(f) {
+			return false
+		}
+	}
+
+	// Safety fallback: if HasUncommittedChanges is set but no files were
+	// classified (e.g. rename/copy/unmerged states), treat as dirty.
+	if s.HasUncommittedChanges && len(s.ModifiedFiles) == 0 && len(s.UntrackedFiles) == 0 {
+		return false
+	}
+
+	return true
 }
 
 // String returns a human-readable summary of uncommitted work.
@@ -1404,6 +1470,9 @@ func (g *Git) CheckUncommittedWork() (*UncommittedWorkStatus, error) {
 	status.HasUncommittedChanges = !gitStatus.Clean
 	status.ModifiedFiles = append(gitStatus.Modified, gitStatus.Added...)
 	status.ModifiedFiles = append(status.ModifiedFiles, gitStatus.Deleted...)
+	status.ModifiedFiles = append(status.ModifiedFiles, gitStatus.Renamed...)
+	status.ModifiedFiles = append(status.ModifiedFiles, gitStatus.Copied...)
+	status.ModifiedFiles = append(status.ModifiedFiles, gitStatus.Unmerged...)
 	status.UntrackedFiles = gitStatus.Untracked
 
 	// Check stashes

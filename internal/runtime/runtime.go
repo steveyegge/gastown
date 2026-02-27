@@ -35,8 +35,12 @@ func init() {
 		return opencode.EnsurePluginAt(workDir, hooksDir, hooksFile)
 	})
 	config.RegisterHookInstaller("copilot", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Copilot custom instructions stay in workDir — no --settings equivalent.
-		return copilot.EnsureSettingsAt(workDir, hooksDir, hooksFile)
+		// 1. Provision lifecycle hooks (.github/hooks/gastown.json + guard script)
+		if err := copilot.EnsureHooksAt(workDir, role, hooksDir, hooksFile); err != nil {
+			return err
+		}
+		// 2. Retain custom instructions (.copilot/copilot-instructions.md)
+		return copilot.EnsureSettingsAt(workDir, ".copilot", "copilot-instructions.md")
 	})
 	config.RegisterHookInstaller("omp", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
 		// OMP hooks stay in workDir — loaded via --hook flag.

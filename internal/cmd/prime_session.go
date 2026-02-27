@@ -20,19 +20,39 @@ import (
 
 // hookInput represents the JSON input from LLM runtime hooks.
 // Claude Code sends this on stdin for SessionStart hooks.
+// Copilot CLI sends a different format with timestamp/cwd/initialPrompt.
 type hookInput struct {
+	// Claude Code format
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	Source         string `json:"source"` // startup, resume, clear, compact
+	// Copilot CLI format (additional fields)
+	Timestamp     int64  `json:"timestamp,omitempty"`
+	Cwd           string `json:"cwd,omitempty"`
+	InitialPrompt string `json:"initialPrompt,omitempty"`
 }
 
 // readHookSessionID reads session ID from available sources in hook mode.
 // Priority: stdin JSON, GT_SESSION_ID env, CLAUDE_SESSION_ID env, auto-generate.
 func readHookSessionID() (sessionID, source string) {
-	// 1. Try reading stdin JSON (Claude Code format)
+	// 1. Try reading stdin JSON (Claude Code or Copilot CLI format)
 	if input := readStdinJSON(); input != nil {
+		// Claude Code format: session_id present
 		if input.SessionID != "" {
 			return input.SessionID, input.Source
+		}
+		// Copilot CLI format: timestamp present, no session_id
+		if input.Timestamp > 0 {
+			// Map Copilot source values to Gas Town conventions
+			src := input.Source
+			if src == "new" {
+				src = "startup"
+			}
+			// Session ID from env or auto-generate
+			if id := os.Getenv("GT_SESSION_ID"); id != "" {
+				return id, src
+			}
+			return uuid.New().String(), src
 		}
 	}
 

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -82,7 +84,11 @@ func TestFindRigSessions(t *testing.T) {
 	}
 	setupRigTestRegistry(t)
 
-	tm := tmux.NewTmux()
+	// Use an isolated tmux socket so the test is not affected by stale
+	// tmux server state from previous runs or production sessions.
+	socket := fmt.Sprintf("gt-test-rig-%d", os.Getpid())
+	tm := tmux.NewTmuxWithSocket(socket)
+	t.Cleanup(func() { _ = tm.KillServer() })
 
 	// Create sessions that match our test rig prefix (zztr- for testrig1223)
 	matching := []string{
@@ -145,7 +151,10 @@ func TestFindRigSessions_NoSessions(t *testing.T) {
 	session.SetDefaultRegistry(reg)
 	defer session.SetDefaultRegistry(old)
 
-	tm := tmux.NewTmux()
+	// Use an isolated tmux socket for test hermiticity.
+	socket := fmt.Sprintf("gt-test-rig-nosess-%d", os.Getpid())
+	tm := tmux.NewTmuxWithSocket(socket)
+	t.Cleanup(func() { _ = tm.KillServer() })
 	got, err := findRigSessions(tm, "nonexistentrig999")
 	if err != nil {
 		t.Fatalf("findRigSessions: %v", err)
