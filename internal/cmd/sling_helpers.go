@@ -130,7 +130,7 @@ func collectExistingMolecules(info *beadInfo) []string {
 }
 
 // burnExistingMolecules burns all molecule wisps attached to a bead.
-// Order: force-close descendants → detach from bead → force-close roots.
+// Order: force-close descendants → detach from bead → remove dep bonds → force-close roots.
 // Matches nukeCleanupMolecules pattern. Returns an error if detach fails, since
 // proceeding with a stale attached_molecule reference creates harder-to-debug orphans.
 func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
@@ -139,10 +139,11 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	}
 	burnDir := beads.ResolveHookDir(townRoot, beadID, "")
 
-	// Follows the same order as nukeCleanupMolecules:
+	// Follows the same order as nukeCleanupMolecules, plus dep bond removal:
 	//   1. Force-close descendants (children before parents)
 	//   2. Detach molecule from bead (clears attached_molecule in description)
-	//   3. Force-close molecule roots
+	//   3. Remove dependency bonds (prevents "existing molecule(s)" on re-sling)
+	//   4. Force-close molecule roots
 	// Closing descendants first ensures that if detach succeeds but a later step
 	// crashes, we don't leave a detached root with live children.
 	bd := beads.New(burnDir)
@@ -164,7 +165,23 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 		return fmt.Errorf("detaching molecule from %s: %w", beadID, err)
 	}
 
-	// Step 3: Force-close the orphaned wisp roots so they don't linger.
+	// Step 3: Remove dependency bonds between the bead and each molecule.
+	// DetachMoleculeWithAudit (step 2) only clears the description metadata
+	// (attached_molecule/attached_at). The dependency bond from bd mol bond
+	// is a separate link that collectExistingMolecules reads via info.Dependencies.
+	// Without this, the next sling attempt finds the closed molecule via the
+	// bond and refuses with "bead has existing molecule(s)".
+	for _, molID := range molecules {
+		if err := bd.RemoveDependency(beadID, molID); err != nil {
+			fmt.Printf("  %s Could not remove dep bond %s → %s: %v\n",
+				style.Dim.Render("Warning:"), beadID, molID, err)
+			// Non-fatal: the detach already cleared the description pointer.
+			// The bond is stale metadata that won't cause functional issues
+			// beyond the "existing molecule(s)" check, which uses --force.
+		}
+	}
+
+	// Step 4: Force-close the orphaned wisp roots so they don't linger.
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
 			style.Dim.Render("Warning:"), err)
