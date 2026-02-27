@@ -448,6 +448,14 @@ func (d *Daemon) Run() error {
 				// Lifecycle signal: immediate lifecycle processing (from gt handoff)
 				d.logger.Println("Received lifecycle signal, processing lifecycle requests immediately")
 				d.processLifecycleRequests()
+			} else if isReloadRestartSignal(sig) {
+				// Reload restart tracker from disk (from 'gt daemon clear-backoff')
+				d.logger.Println("Received reload-restart signal, reloading restart tracker from disk")
+				if d.restartTracker != nil {
+					if err := d.restartTracker.Load(); err != nil {
+						d.logger.Printf("Warning: failed to reload restart tracker: %v", err)
+					}
+				}
 			} else {
 				d.logger.Printf("Received signal %v, shutting down", sig)
 				return d.shutdown(state)
