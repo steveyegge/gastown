@@ -149,7 +149,7 @@ func runSlingFormula(args []string) error {
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
-	wispArgs = append(wispArgs, "--root-only", "--json")
+	wispArgs = append(wispArgs, "--json")
 
 	wispOut, err := BdCmd(wispArgs...).
 		Dir(formulaWorkDir).

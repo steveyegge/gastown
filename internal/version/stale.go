@@ -128,9 +128,10 @@ func GetRepoRoot() (string, error) {
 	home := os.Getenv("HOME")
 	if home != "" {
 		candidates := []string{
-			home + "/gt/gastown",
+			home + "/gt",                    // Direct gt repo (most common)
+			home + "/gt/gastown",            // gt workspace with gastown subdir
 			home + "/gt/gastown/mayor/rig",
-			home + "/gastown",
+			home + "/gastown",               // Direct gastown repo
 			home + "/gastown/mayor/rig",
 			home + "/src/gastown",
 			home + "/src/gastown/mayor/rig",

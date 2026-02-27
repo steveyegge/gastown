@@ -727,7 +727,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
 	}
-	wispArgs = append(wispArgs, "--root-only", "--json")
+	wispArgs = append(wispArgs, "--json")
 	wispOut, err := BdCmd(wispArgs...).
 		Dir(formulaWorkDir).
 		WithAutoCommit().

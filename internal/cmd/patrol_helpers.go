@@ -177,8 +177,8 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
 	}
 
-	// Create the patrol wisp (root-only: no child step wisps, steps inlined at prime time)
-	spawnArgs := []string{"mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--root-only"}
+	// Create the patrol wisp (steps inlined at prime time, not materialized as child wisps)
+	spawnArgs := []string{"mol", "wisp", "create", protoID, "--actor", cfg.RoleName}
 	for _, v := range cfg.ExtraVars {
 		spawnArgs = append(spawnArgs, "--var", v)
 	}
