@@ -450,7 +450,9 @@ func (d *Daemon) doctorDogRestartServer() {
 	}
 
 	d.logger.Printf("doctor_dog: restart: stopping dolt server...")
-	d.doltServer.Stop()
+	if err := d.doltServer.Stop(); err != nil {
+		d.logger.Printf("doctor_dog: restart: stop returned error: %v", err)
+	}
 
 	// Small pause to let the port free up
 	time.Sleep(2 * time.Second)

@@ -226,7 +226,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	} else {
 		query = "SELECT * FROM `" + db + "`.issues ORDER BY id"
 	}
-	n, err := d.exportTableToJsonl(db, "issues", query, dbDir, dataDir)
+	n, err := d.exportTableToJsonl("issues", query, dbDir, dataDir)
 	if err != nil {
 		return 0, fmt.Errorf("issues: %w", err)
 	}
@@ -243,7 +243,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	// 2. Export supplemental tables (no scrub, full export).
 	for _, table := range supplementalTables {
 		tQuery := fmt.Sprintf("SELECT * FROM `%s`.`%s` ORDER BY 1", db, table)
-		tn, err := d.exportTableToJsonl(db, table, tQuery, dbDir, dataDir)
+		tn, err := d.exportTableToJsonl(table, tQuery, dbDir, dataDir)
 		if err != nil {
 			// Non-fatal for supplemental tables — log and continue.
 			d.logger.Printf("jsonl_git_backup: %s/%s: export failed (non-fatal): %v", db, table, err)
@@ -258,7 +258,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 
 // exportTableToJsonl runs a query and writes the result as JSONL to {dir}/{table}.jsonl.
 // Returns the number of records exported.
-func (d *Daemon) exportTableToJsonl(db, table, query, dir, dataDir string) (int, error) {
+func (d *Daemon) exportTableToJsonl(table, query, dir, dataDir string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), jsonlExportTimeout)
 	defer cancel()
 

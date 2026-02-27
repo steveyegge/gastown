@@ -1524,10 +1524,12 @@ func cleanupMoleculeOnHandoff() {
 	}
 
 	// Detach molecule with audit trail
-	b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
+	if _, err := b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
 		Operation: "squash",
 		Reason:    "handoff: session cycling",
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "handoff: warning: detach molecule audit failed: %v\n", err)
+	}
 
 	// Force-close the molecule root wisp
 	if err := b.ForceCloseWithReason("handoff", molID); err != nil {

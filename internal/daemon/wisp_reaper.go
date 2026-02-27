@@ -238,7 +238,7 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 
 	// Close stale open wisps (status=open, created before cutoff).
 	// Also close stale hooked/in_progress wisps — these are abandoned molecule steps.
-	closeQuery := fmt.Sprintf(
+	closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 		"UPDATE `%s`.wisps SET status='closed', closed_at=NOW() WHERE status IN ('open', 'hooked', 'in_progress') AND created_at < ?",
 		dbName)
 	result, err := db.ExecContext(ctx, closeQuery, cutoff)
@@ -250,7 +250,7 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 
 	// Count remaining open wisps.
 	var openCount int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 	if err := db.QueryRowContext(ctx, countQuery).Scan(&openCount); err != nil {
 		return int(reaped), 0, fmt.Errorf("count open wisps: %w", err)
 	}
@@ -275,7 +275,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	defer db.Close()
 
 	// Digest: count closed wisps eligible for deletion, grouped by wisp_type.
-	digestQuery := fmt.Sprintf(
+	digestQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 		"SELECT COALESCE(wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? GROUP BY wtype",
 		dbName)
 	rows, err := db.QueryContext(ctx, digestQuery, deleteCutoff)
