@@ -964,6 +964,13 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		return
 	}
 
+	// If crash-loop guard is active, don't kill or nudge — the guard is
+	// deliberately holding off restarts to break the loop.
+	if d.restartTracker != nil && d.restartTracker.IsInCrashLoop("deacon") {
+		d.logger.Printf("Deacon heartbeat stale but crash-loop guard active — skipping restart")
+		return
+	}
+
 	// Session exists but heartbeat is stale - Deacon is stuck
 	// PATCH-002: Reduced from 30m to 10m for faster recovery.
 	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
