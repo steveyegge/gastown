@@ -1762,13 +1762,24 @@ func (m *Manager) setupSharedBeads(clonePath string) error {
 	return nil
 }
 
-// setupRefs symlinks rig-level refs into a polecat workspace.
-// Each ref at <rig>/refs/<alias> becomes <polecatDir>/refs/<alias> via relative symlink.
+// setupRefs symlinks rig-level refs and pool refs into a polecat workspace.
+// Phase 1: Each ref at <rig>/refs/<alias> becomes <polecatDir>/refs/<alias> via relative symlink.
+// Phase 2: Each pool ref becomes <polecatDir>/refs/<alias>, skipping self-references and
+//          aliases already linked in Phase 1 (rig-local wins).
 // Non-fatal: returns error but callers should treat as warning.
 func (m *Manager) setupRefs(polecatDir string) error {
 	cfg, err := rig.LoadRigConfig(m.rig.Path)
-	if err != nil || cfg.Refs == nil || len(cfg.Refs) == 0 {
-		return nil // no refs configured
+	if err != nil {
+		cfg = &rig.RigConfig{} // proceed with empty config for pool phase
+	}
+
+	hasRigRefs := cfg.Refs != nil && len(cfg.Refs) > 0
+	poolPath := rig.ResolvePoolPath()
+	hasPool := poolPath != ""
+
+	// Nothing to do if no rig refs and no pool
+	if !hasRigRefs && !hasPool {
+		return nil
 	}
 
 	refsDir := filepath.Join(polecatDir, "refs")
@@ -1776,28 +1787,79 @@ func (m *Manager) setupRefs(polecatDir string) error {
 		return fmt.Errorf("creating polecat refs dir: %w", err)
 	}
 
-	rigRefsDir := rig.RefsDir(m.rig.Path)
-	for alias := range cfg.Refs {
-		src := filepath.Join(rigRefsDir, alias)
-		dst := filepath.Join(refsDir, alias)
+	// Phase 1: rig-local refs
+	linkedAliases := make(map[string]bool)
+	if hasRigRefs {
+		rigRefsDir := rig.RefsDir(m.rig.Path)
+		for alias := range cfg.Refs {
+			src := filepath.Join(rigRefsDir, alias)
+			dst := filepath.Join(refsDir, alias)
 
-		// Skip if source doesn't exist
-		if _, err := os.Lstat(src); err != nil {
-			continue
+			// Skip if source doesn't exist
+			if _, err := os.Lstat(src); err != nil {
+				continue
+			}
+
+			// Skip if already linked
+			if _, err := os.Lstat(dst); err == nil {
+				linkedAliases[alias] = true
+				continue
+			}
+
+			// Create relative symlink
+			rel, err := filepath.Rel(refsDir, src)
+			if err != nil {
+				rel = src // fall back to absolute
+			}
+			if err := os.Symlink(rel, dst); err != nil {
+				return fmt.Errorf("symlinking ref %s: %w", alias, err)
+			}
+			linkedAliases[alias] = true
 		}
+	}
 
-		// Skip if already linked
-		if _, err := os.Lstat(dst); err == nil {
-			continue
-		}
-
-		// Create relative symlink
-		rel, err := filepath.Rel(refsDir, src)
+	// Phase 2: pool refs (cross-town shared)
+	if hasPool {
+		poolReg, err := rig.LoadPoolRegistry(poolPath)
 		if err != nil {
-			rel = src // fall back to absolute
+			return nil // pool unavailable, skip silently
 		}
-		if err := os.Symlink(rel, dst); err != nil {
-			return fmt.Errorf("symlinking ref %s: %w", alias, err)
+
+		// Get rig's git_url for self-exclusion
+		rigGitURL := cfg.GitURL
+
+		for alias, entry := range poolReg.Refs {
+			// Skip if already linked from Phase 1
+			if linkedAliases[alias] {
+				continue
+			}
+
+			// Self-exclusion: skip if pool ref matches rig's repo
+			if rigGitURL != "" && rig.GitURLsMatch(entry.GitURL, rigGitURL) {
+				continue
+			}
+
+			src := rig.PoolRefPath(poolPath, alias)
+			dst := filepath.Join(refsDir, alias)
+
+			// Skip if pool clone doesn't exist
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+
+			// Skip if already linked (shouldn't happen, but defensive)
+			if _, err := os.Lstat(dst); err == nil {
+				continue
+			}
+
+			// Create relative symlink
+			rel, err := filepath.Rel(refsDir, src)
+			if err != nil {
+				rel = src // fall back to absolute
+			}
+			if err := os.Symlink(rel, dst); err != nil {
+				return fmt.Errorf("symlinking pool ref %s: %w", alias, err)
+			}
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var rigLinkCmd = &cobra.Command{
@@ -133,8 +134,20 @@ func runRigLink(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Cloning %s as %s...\n", style.Dim.Render(gitURL), style.Bold.Render(alias))
 
-	if err := rig.LinkExternalRef(r.Path, alias, gitURL, linkBranch); err != nil {
-		return fmt.Errorf("cloning: %w", err)
+	// If shared pool is configured, clone there and symlink into rig
+	poolPath := rig.ResolvePoolPath()
+	if poolPath != "" {
+		townName := ""
+		if tn, tErr := workspace.GetTownName(townRoot); tErr == nil {
+			townName = tn
+		}
+		if err := rig.LinkExternalRefWithPool(r.Path, poolPath, alias, gitURL, linkBranch, townName); err != nil {
+			return fmt.Errorf("linking via pool: %w", err)
+		}
+	} else {
+		if err := rig.LinkExternalRef(r.Path, alias, gitURL, linkBranch); err != nil {
+			return fmt.Errorf("cloning: %w", err)
+		}
 	}
 
 	cfg.Refs[alias] = rig.RefEntry{
@@ -148,8 +161,13 @@ func runRigLink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	fmt.Printf("%s Linked %s (shallow clone)\n",
-		style.Success.Render("✓"), alias)
+	if poolPath != "" {
+		fmt.Printf("%s Linked %s (pool + symlink)\n",
+			style.Success.Render("✓"), alias)
+	} else {
+		fmt.Printf("%s Linked %s (shallow clone)\n",
+			style.Success.Render("✓"), alias)
+	}
 	return nil
 }
 

@@ -87,6 +87,39 @@ func LinkSameTownRef(townRoot, rigPath, alias, fromRig string) error {
 	return os.Symlink(rel, dest)
 }
 
+// LinkExternalRefWithPool clones to the shared pool and symlinks into the rig.
+// Falls back to LinkExternalRef if pool operations fail.
+func LinkExternalRefWithPool(rigPath, poolPath, alias, gitURL, branch, townName string) error {
+	if err := ValidateRefAlias(alias); err != nil {
+		return err
+	}
+
+	dest := RefPath(rigPath, alias)
+	if _, err := os.Stat(dest); err == nil {
+		return fmt.Errorf("ref %q already exists at %s", alias, dest)
+	}
+
+	// Register in pool (clones if not already present)
+	if err := RegisterPoolRef(poolPath, alias, gitURL, branch, townName); err != nil {
+		// Fall back to direct clone
+		return LinkExternalRef(rigPath, alias, gitURL, branch)
+	}
+
+	// Ensure refs directory exists
+	if err := os.MkdirAll(RefsDir(rigPath), 0755); err != nil {
+		return fmt.Errorf("creating refs dir: %w", err)
+	}
+
+	// Create symlink from rig/refs/<alias> → pool/<alias>
+	poolDest := PoolRefPath(poolPath, alias)
+	rel, err := filepath.Rel(RefsDir(rigPath), poolDest)
+	if err != nil {
+		rel = poolDest // fall back to absolute
+	}
+
+	return os.Symlink(rel, dest)
+}
+
 // UnlinkRef removes a linked reference (symlink or clone).
 func UnlinkRef(rigPath, alias string) error {
 	dest := RefPath(rigPath, alias)
