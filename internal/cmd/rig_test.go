@@ -21,6 +21,11 @@ func TestIsGitRemoteURL(t *testing.T) {
 		{"git://github.com/org/repo.git", true},
 		{"deploy@private-host.internal:repos/app.git", true},
 
+		// Custom git remote helper schemes — should return true
+		{"s3://my-bucket/rigs/my-project", true},
+		{"codecommit://my-repo", true},
+		{"gs://my-bucket/repos/foo", true},
+
 		// Local paths — should return false
 		{"/Users/scott/projects/foo", false},
 		{"/tmp/repo", false},

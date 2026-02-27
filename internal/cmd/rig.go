@@ -479,7 +479,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	gitURL := args[1]
 
 	if !isGitRemoteURL(gitURL) {
-		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
 	}
 
 	// Ensure beads (bd) is available before proceeding
@@ -896,7 +896,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 
 	// Validate --url if provided
 	if rigAddAdoptURL != "" && !isGitRemoteURL(rigAddAdoptURL) {
-		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddAdoptURL)
 	}
 
 	// Validate --push-url if provided
@@ -2034,8 +2034,9 @@ func findRigSessions(t *tmux.Tmux, rigName string) ([]string, error) {
 	return matches, nil
 }
 
-// isGitRemoteURL returns true if s looks like a remote git URL
-// (https, http, ssh, git protocol, or SCP-style) rather than a local path.
+// isGitRemoteURL returns true if s looks like a remote git URL rather than a
+// local path. Accepts any scheme:// URL (git delegates to git-remote-<scheme>
+// helpers, e.g. git-remote-s3 for s3:// URLs) as well as SCP-style SSH URLs.
 func isGitRemoteURL(s string) bool {
 	// Reject flag-like strings (defense-in-depth against argument injection)
 	if strings.HasPrefix(s, "-") {
@@ -2061,11 +2062,17 @@ func isGitRemoteURL(s string) bool {
 	if strings.HasPrefix(s, "file://") {
 		return false
 	}
-	// Accept known remote URL schemes
-	if strings.HasPrefix(s, "https://") ||
-		strings.HasPrefix(s, "http://") ||
-		strings.HasPrefix(s, "ssh://") ||
-		strings.HasPrefix(s, "git://") {
+	// Accept any scheme:// URL where scheme is alphanumeric (plus + - .).
+	// This covers https://, ssh://, git://, s3://, codecommit://, etc.
+	// Git invokes git-remote-<scheme> for non-builtin schemes.
+	if idx := strings.Index(s, "://"); idx > 0 {
+		scheme := s[:idx]
+		for _, c := range scheme {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.') {
+				return false
+			}
+		}
 		return true
 	}
 	// Accept SCP-style SSH URLs (user@host:path) where user and host are non-empty
