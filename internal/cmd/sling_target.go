@@ -178,13 +178,19 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 
 	// Rig target (auto-spawn polecat)
 	if rigName, isRig := IsRigName(target); isRig {
-		// Check if rig is parked before dispatching (gt-4owfd.1)
+		// Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
 		townRoot := opts.TownRoot
 		if townRoot == "" {
 			townRoot, _ = workspace.FindFromCwd()
 		}
-		if townRoot != "" && IsRigParked(townRoot, rigName) {
-			return nil, fmt.Errorf("cannot sling to parked rig %q\nUnpark with: gt rig unpark %s", rigName, rigName)
+		if townRoot != "" {
+			if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+				undoCmd := "gt rig unpark"
+				if reason == "docked" {
+					undoCmd = "gt rig undock"
+				}
+				return nil, fmt.Errorf("cannot sling to %s rig %q\n%s %s", reason, rigName, undoCmd, rigName)
+			}
 		}
 
 		if opts.BeadID != "" && !opts.Force {

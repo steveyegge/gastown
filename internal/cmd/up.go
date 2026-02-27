@@ -27,7 +27,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -603,12 +602,13 @@ func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*ri
 func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 	name := "Witness (" + rigName + ")"
 
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	// Check if rig is parked or docked (wisp + bead labels).
+	// Skip the check if auto_start_on_boot is set — that overrides dock status.
+	if !r.GetBoolConfig("auto_start_on_boot") {
+		townRoot := filepath.Dir(r.Path)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+			return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", reason)}
+		}
 	}
 
 	mgr := witness.NewManager(r)
@@ -626,12 +626,13 @@ func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
 	name := "Refinery (" + rigName + ")"
 
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	// Check if rig is parked or docked (wisp + bead labels).
+	// Skip the check if auto_start_on_boot is set — that overrides dock status.
+	if !r.GetBoolConfig("auto_start_on_boot") {
+		townRoot := filepath.Dir(r.Path)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+			return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", reason)}
+		}
 	}
 
 	mgr := refinery.NewManager(r)

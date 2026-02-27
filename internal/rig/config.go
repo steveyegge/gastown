@@ -33,6 +33,7 @@ type ConfigResult struct {
 var SystemDefaults = map[string]interface{}{
 	"status":                  "operational",
 	"auto_restart":            true,
+	"auto_start_on_boot":      false, // If true, rig agents start on gt up even when docked
 	"max_polecats":            10,
 	"priority_adjustment":     0,
 	"dnd":                     false,

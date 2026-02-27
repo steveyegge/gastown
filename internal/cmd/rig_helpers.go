@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
@@ -58,4 +61,56 @@ func getRig(rigName string) (string, *rig.Rig, error) {
 	}
 
 	return townRoot, r, nil
+}
+
+// hasRigBeadLabel checks if a rig's identity bead has a specific label.
+// Returns false if the rig config or bead can't be loaded (safe default).
+func hasRigBeadLabel(townRoot, rigName, label string) bool {
+	rigPath := filepath.Join(townRoot, rigName)
+	rigCfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil || rigCfg.Beads == nil {
+		return false
+	}
+
+	beadsPath := filepath.Join(rigPath, "mayor", "rig")
+	if _, err := os.Stat(beadsPath); err != nil {
+		beadsPath = rigPath
+	}
+
+	bd := beads.New(beadsPath)
+	rigBeadID := beads.RigBeadIDWithPrefix(rigCfg.Beads.Prefix, rigName)
+
+	rigBead, err := bd.Show(rigBeadID)
+	if err != nil {
+		return false
+	}
+
+	for _, l := range rigBead.Labels {
+		if l == label {
+			return true
+		}
+	}
+	return false
+}
+
+// IsRigParkedOrDocked checks if a rig is parked or docked by any mechanism
+// (wisp ephemeral state or persistent bead labels). Returns (blocked, reason).
+// This is the single entry point for sling/dispatch to check rig availability.
+func IsRigParkedOrDocked(townRoot, rigName string) (bool, string) {
+	if IsRigParked(townRoot, rigName) {
+		return true, "parked"
+	}
+
+	// Check docked via bead label (persistent)
+	rigPath := filepath.Join(townRoot, rigName)
+	rigCfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil || rigCfg.Beads == nil {
+		return false, ""
+	}
+
+	if IsRigDocked(townRoot, rigName, rigCfg.Beads.Prefix) {
+		return true, "docked"
+	}
+
+	return false, ""
 }
