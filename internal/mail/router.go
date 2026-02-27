@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -858,7 +859,92 @@ func (r *Router) validateRecipient(identity string) error {
 		}
 	}
 
+	// Filesystem fallback: check if the address corresponds to a known rig agent
+	// directory. This handles crew/polecat members that lack gt:agent beads.
+	// Identity format after AddressToIdentity normalization is "rig/name".
+	if r.townRoot != "" {
+		parts := strings.Split(identity, "/")
+		if len(parts) == 2 {
+			rig, name := parts[0], parts[1]
+			rigDir := filepath.Join(r.townRoot, rig)
+			if fi, err := os.Stat(rigDir); err == nil && fi.IsDir() {
+				// Check crew workers (rig/crew/name)
+				if fi2, err2 := os.Stat(filepath.Join(rigDir, "crew", name)); err2 == nil && fi2.IsDir() {
+					return nil
+				}
+				// Check polecats (rig/polecats/name)
+				if fi2, err2 := os.Stat(filepath.Join(rigDir, "polecats", name)); err2 == nil && fi2.IsDir() {
+					return nil
+				}
+				// Check singleton roles (witness, refinery)
+				for _, role := range []string{"witness", "refinery"} {
+					if name == role {
+						if fi2, err2 := os.Stat(filepath.Join(rigDir, role)); err2 == nil && fi2.IsDir() {
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return fmt.Errorf("no agent found")
+}
+
+// resolveCrewShorthand expands "crew/name" or "polecats/name" shorthand addresses
+// to fully-qualified "rig/name" form by scanning the town filesystem.
+//
+// When gt agents displays crew workers, it shows them as "crew/bob" (without rig).
+// This function enables "gt mail send crew/bob" to work by finding the rig.
+//
+// Returns the normalized identity if exactly one rig contains the crew member,
+// or the original identity unchanged if zero or multiple rigs match (to let
+// validation fail with an informative error).
+func (r *Router) resolveCrewShorthand(identity string) string {
+	if r.townRoot == "" {
+		return identity
+	}
+
+	parts := strings.Split(identity, "/")
+	if len(parts) != 2 {
+		return identity
+	}
+
+	roleDir, name := parts[0], parts[1]
+	// Only handle crew and polecats shorthand (not real rig names)
+	if roleDir != "crew" && roleDir != "polecats" {
+		return identity
+	}
+
+	// Check if "crew" or "polecats" is actually a real rig directory
+	if fi, err := os.Stat(filepath.Join(r.townRoot, roleDir)); err == nil && fi.IsDir() {
+		// It's a real rig, not a shorthand - let normal validation handle it
+		return identity
+	}
+
+	// Scan rig directories for a crew/polecats member with this name
+	entries, err := os.ReadDir(r.townRoot)
+	if err != nil {
+		return identity
+	}
+
+	var matches []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		rig := entry.Name()
+		agentDir := filepath.Join(r.townRoot, rig, roleDir, name)
+		if fi, err2 := os.Stat(agentDir); err2 == nil && fi.IsDir() {
+			matches = append(matches, rig+"/"+name)
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0] // Unambiguous: expand to rig/name
+	}
+
+	return identity // Ambiguous or not found: let validation handle it
 }
 
 // sendToSingle sends a message to a single recipient.
@@ -875,6 +961,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
+	// Expand crew/polecats shorthand (e.g., "crew/bob" → "pata/bob")
+	toIdentity = r.resolveCrewShorthand(toIdentity)
 
 	// Validate recipient exists
 	if err := r.validateRecipient(toIdentity); err != nil {

@@ -1190,3 +1190,142 @@ func TestAddressToAgentBeadID(t *testing.T) {
 		})
 	}
 }
+
+// ============ Crew Shorthand Resolution Tests ============
+
+func TestResolveCrewShorthand(t *testing.T) {
+	// Create a realistic town directory structure
+	tmpDir := t.TempDir()
+
+	// Create pata rig with crew members
+	for _, name := range []string{"alice", "bob"} {
+		dir := filepath.Join(tmpDir, "pata", "crew", name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Create pata polecat
+	if err := os.MkdirAll(filepath.Join(tmpDir, "pata", "polecats", "rust"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create another rig with crew
+	if err := os.MkdirAll(filepath.Join(tmpDir, "beads", "crew", "alice"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	tests := []struct {
+		name     string
+		identity string
+		want     string
+	}{
+		// crew/name shorthand: unambiguous single rig match
+		{
+			name:     "crew/bob unambiguous",
+			identity: "crew/bob",
+			want:     "pata/bob", // bob only in pata
+		},
+		// crew/name shorthand: ambiguous (in multiple rigs) - leave unchanged
+		{
+			name:     "crew/alice ambiguous",
+			identity: "crew/alice",
+			want:     "crew/alice", // alice in both pata and beads
+		},
+		// Already fully-qualified rig/name - leave unchanged
+		{
+			name:     "pata/bob already canonical",
+			identity: "pata/bob",
+			want:     "pata/bob",
+		},
+		// polecats shorthand
+		{
+			name:     "polecats/rust shorthand",
+			identity: "polecats/rust",
+			want:     "pata/rust", // rust only in pata polecats
+		},
+		// Non-crew address - leave unchanged
+		{
+			name:     "mayor/ unchanged",
+			identity: "mayor/",
+			want:     "mayor/",
+		},
+		// No town root - no resolution attempted
+		{
+			name:     "no town root",
+			identity: "crew/bob",
+			want:     "crew/bob", // tested with empty townRoot below
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := r
+			if tt.name == "no town root" {
+				router = NewRouterWithTownRoot(tmpDir, "") // empty townRoot
+			}
+			got := router.resolveCrewShorthand(tt.identity)
+			if got != tt.want {
+				t.Errorf("resolveCrewShorthand(%q) = %q, want %q", tt.identity, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateRecipientFilesystemFallback(t *testing.T) {
+	// Create a realistic town directory structure without any agent beads
+	tmpDir := t.TempDir()
+
+	// Create pata rig structure
+	for _, subpath := range []string{
+		"pata/crew/bob",
+		"pata/crew/alice",
+		"pata/polecats/rust",
+		"pata/witness",
+		"pata/refinery",
+	} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, subpath), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Create mayor/town.json marker
+	if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	tests := []struct {
+		name     string
+		identity string
+		wantErr  bool
+	}{
+		// Crew members found via filesystem (no agent beads needed)
+		{"crew bob", "pata/bob", false},
+		{"crew alice", "pata/alice", false},
+		// Polecat found via filesystem
+		{"polecat rust", "pata/rust", false},
+		// Singleton roles found via filesystem
+		{"witness", "pata/witness", false},
+		{"refinery", "pata/refinery", false},
+		// Overseer always valid
+		{"overseer", "overseer", false},
+		// Non-existent agent should fail
+		{"nonexistent", "pata/nobody", true},
+		{"wrong rig", "notarig/bob", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := r.validateRecipient(tt.identity)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateRecipient(%q) expected error, got nil", tt.identity)
+			} else if !tt.wantErr && err != nil {
+				t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
+			}
+		})
+	}
+}
