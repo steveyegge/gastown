@@ -104,6 +104,7 @@ Town ({{ .TownRoot }})
 ├── <rig>/          ← Project containers (not git clones)
 │   ├── .beads/     ← Issue tracking
 │   ├── polecats/   ← Worker worktrees
+│   ├── refs/       ← Linked reference repos (read-only)
 │   ├── refinery/   ← Merge queue processor
 │   └── witness/    ← Worker lifecycle manager
 ```
@@ -201,6 +202,16 @@ This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn
 - `{{ cmd }} polecat nuke <rig>/<name> --force` — Kill session + remove worktree
 - `{{ cmd }} polecat status <rig>/<name>` — Show polecat status
 
+### Linked Refs
+- `{{ cmd }} rig link <rig> <git-url> --name <alias>` — Link external repo (shallow clone)
+- `{{ cmd }} rig link <rig> --from <other-rig>` — Link sibling rig (symlink, zero cost)
+- `{{ cmd }} rig unlink <rig> <alias>` — Remove a linked ref
+- `{{ cmd }} rig refs <rig>` — List all linked refs
+- `{{ cmd }} rig sync <rig>` — Pull latest for cloned refs
+
+Linked refs give polecats read-only access to cross-repo context. Polecats get
+symlinks to refs automatically at spawn time.
+
 ### Beads
 - `{{ cmd }} sling <bead> <rig>` — Spawn polecat with work
 - `bd ready` — Issues ready to work (no blockers)
@@ -262,6 +273,8 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 | Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
 | Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Link cross-repo ref | `{{ cmd }} rig link <rig> <url> --name <alias>` | |
+| Link sibling rig | `{{ cmd }} rig link <rig> --from <other-rig>` | |
 
 **Rig lifecycle commands (park vs dock vs stop):**
 - `park/unpark` — Temporary pause. Daemon skips parked rigs.

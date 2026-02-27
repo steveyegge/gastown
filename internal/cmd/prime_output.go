@@ -280,6 +280,8 @@ func outputCommandQuickReference(ctx RoleContext) {
 		fmt.Printf("| Pause rig (daemon won't restart) | `%s rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |\n", c)
 		fmt.Printf("| Permanently disable rig | `%s rig dock <rig>` | ~~gt rig park~~ (temporary only) |\n", c)
 		fmt.Println("| Create issues | `bd create \"title\"` | ~~gt issue create~~ (not a command) |")
+		fmt.Printf("| Link cross-repo ref | `%s rig link <rig> <url> --name <alias>` | |\n", c)
+		fmt.Printf("| Link sibling rig | `%s rig link <rig> --from <other-rig>` | |\n", c)
 
 	case RoleCrew:
 		fmt.Println("| Want to... | Correct command | Common mistake |")

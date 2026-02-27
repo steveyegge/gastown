@@ -123,6 +123,8 @@ Town ({{ .TownRoot }})
 │   ├── .beads/     ← Issue tracking (you have write access)
 │   ├── polecats/
 │   │   └── {{ .Polecat }}/   ← You are here (your git worktree)
+│   │       └── refs/         ← Linked reference repos (read-only)
+│   ├── refs/       ← Rig-level refs (clones/symlinks)
 │   ├── refinery/   ← Processes your completed work
 │   └── witness/    ← Monitors your health
 ```
@@ -132,6 +134,7 @@ Town ({{ .TownRoot }})
 - **Beads**: You have DIRECT write access — file discovered issues
 - **Witness**: Monitors you, nudges if stuck, handles your cleanup
 - **Refinery**: Merges your work when complete
+- **Refs**: Read-only linked repos for cross-project context (check `refs/` in your workspace)
 
 ## Two-Level Beads Architecture
 
