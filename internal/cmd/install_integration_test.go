@@ -760,14 +760,16 @@ func TestInstallWithDaemon(t *testing.T) {
 	})
 }
 
-// cleanE2EEnv returns os.Environ() with all GT_* variables removed.
-// This ensures tests don't inherit stale role environment from CI or previous tests.
+// cleanE2EEnv returns os.Environ() with GT_* variables removed, except
+// GT_DOLT_PORT which is preserved so subprocesses connect to the ephemeral
+// Dolt test server started by TestMain instead of defaulting to port 3307.
 func cleanE2EEnv() []string {
 	var clean []string
 	for _, env := range os.Environ() {
-		if !strings.HasPrefix(env, "GT_") {
-			clean = append(clean, env)
+		if strings.HasPrefix(env, "GT_") && !strings.HasPrefix(env, "GT_DOLT_PORT=") {
+			continue
 		}
+		clean = append(clean, env)
 	}
 	return clean
 }

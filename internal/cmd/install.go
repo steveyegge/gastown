@@ -522,7 +522,13 @@ func initTownBeads(townPath string) error {
 	// Run: bd init --prefix hq --server
 	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
 	// Filter inherited BEADS_DIR so bd init targets this town, not a parent .beads.
-	cmd := exec.Command("bd", "init", "--prefix", "hq", "--server")
+	bdInitArgs := []string{"init", "--prefix", "hq", "--server"}
+	// Forward GT_DOLT_PORT so bd connects to the correct server when a
+	// non-default port is configured (e.g., ephemeral test servers in CI).
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		bdInitArgs = append(bdInitArgs, "--server-port", p)
+	}
+	cmd := exec.Command("bd", bdInitArgs...)
 	cmd.Dir = townPath
 	cmd.Env = withBeadsDirEnv(filepath.Join(townPath, ".beads"))
 

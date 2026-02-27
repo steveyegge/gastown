@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,45 @@ func configureTestGitIdentity(t *testing.T, homeDir string) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
+	}
+}
+
+// bridgeDoltPidToTown writes the test Dolt server's PID into townRoot/daemon/dolt.pid
+// so that doltserver.IsRunning(townRoot) finds it via the PID-file path.
+//
+// Without this, IsRunning falls through to port-scanning and then compares the
+// process's --data-dir against townRoot/.dolt-data. Because the test server's
+// data dir is in /tmp, the comparison fails and IsRunning returns false.
+// Writing the PID file short-circuits that check (PID-file path does not verify
+// data-dir).
+func bridgeDoltPidToTown(t *testing.T, townRoot string) {
+	t.Helper()
+
+	port := testutil.DoltTestPort()
+	if port == "" {
+		t.Fatal("bridgeDoltPidToTown: no test Dolt server running (DoltTestPort is empty)")
+	}
+
+	// Read the test server PID from the testutil PID file.
+	pidPath := testutil.PidFilePathForPort(port)
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("bridgeDoltPidToTown: reading PID file %s: %v", pidPath, err)
+	}
+	lines := strings.SplitN(string(data), "\n", 3)
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		t.Fatalf("bridgeDoltPidToTown: PID file %s is empty", pidPath)
+	}
+	pid := strings.TrimSpace(lines[0])
+
+	// Write the PID to townRoot/daemon/dolt.pid.
+	daemonDir := filepath.Join(townRoot, "daemon")
+	if err := os.MkdirAll(daemonDir, 0755); err != nil {
+		t.Fatalf("bridgeDoltPidToTown: mkdir daemon: %v", err)
+	}
+	townPidPath := filepath.Join(daemonDir, "dolt.pid")
+	if err := os.WriteFile(townPidPath, []byte(pid+"\n"), 0644); err != nil { //nolint:gosec
+		t.Fatalf("bridgeDoltPidToTown: write PID file: %v", err)
 	}
 }
 
