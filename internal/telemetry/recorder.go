@@ -44,6 +44,11 @@ type recorderInstruments struct {
 	formulaTotal       metric.Int64Counter
 	convoyTotal        metric.Int64Counter
 
+	// Merge & Guardian counters/histograms
+	mergeOutcomeTotal    metric.Int64Counter
+	guardianScoreHist    metric.Float64Histogram
+	guardianDurationHist metric.Float64Histogram
+
 	// Histograms
 	bdDurationHist metric.Float64Histogram
 }
@@ -111,6 +116,18 @@ func initInstruments() {
 		)
 		inst.convoyTotal, _ = m.Int64Counter("gastown.convoy.creates.total",
 			metric.WithDescription("Total auto-convoy creations"),
+		)
+
+		// Merge & Guardian instruments
+		inst.mergeOutcomeTotal, _ = m.Int64Counter("gastown.merge.outcome.total",
+			metric.WithDescription("Total mechanical merge outcomes"),
+		)
+		inst.guardianScoreHist, _ = m.Float64Histogram("gastown.guardian.score",
+			metric.WithDescription("Guardian quality review scores (0.0-1.0)"),
+		)
+		inst.guardianDurationHist, _ = m.Float64Histogram("gastown.guardian.duration_ms",
+			metric.WithDescription("Guardian review round-trip latency in milliseconds"),
+			metric.WithUnit("ms"),
 		)
 
 		// Histograms
@@ -471,6 +488,47 @@ func RecordConvoyCreate(ctx context.Context, beadID string, err error) {
 }
 
 const maxPaneOutputLog = 8192
+
+// RecordMergeOutcome records a mechanical merge result (metrics + log event).
+// outcome is one of "merged", "conflict", "test_failure", "skipped", "error".
+func RecordMergeOutcome(ctx context.Context, worker, rig, outcome, sourceIssue string, retryCount int) {
+	initInstruments()
+	inst.mergeOutcomeTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("worker", worker),
+			attribute.String("rig", rig),
+			attribute.String("outcome", outcome),
+		),
+	)
+	emit(ctx, "merge.outcome", otellog.SeverityInfo,
+		otellog.String("worker", worker),
+		otellog.String("rig", rig),
+		otellog.String("outcome", outcome),
+		otellog.String("source_issue", sourceIssue),
+		otellog.Int64("retry_count", int64(retryCount)),
+	)
+}
+
+// RecordGuardianResult records a Guardian quality assessment (metrics + log event).
+// recommendation is one of "approve", "request_changes", "skip".
+// score is the overall quality score (0.0-1.0).
+func RecordGuardianResult(ctx context.Context, worker, rig, recommendation string, score, durationMs float64) {
+	initInstruments()
+	attrs := metric.WithAttributes(
+		attribute.String("worker", worker),
+		attribute.String("rig", rig),
+		attribute.String("recommendation", recommendation),
+	)
+	inst.guardianScoreHist.Record(ctx, score, attrs)
+	inst.guardianDurationHist.Record(ctx, durationMs, attrs)
+	emit(ctx, "guardian.result", otellog.SeverityInfo,
+		otellog.String("worker", worker),
+		otellog.String("rig", rig),
+		otellog.String("recommendation", recommendation),
+		otellog.Float64("score", score),
+		otellog.Float64("duration_ms", durationMs),
+	)
+}
 
 // RecordPaneOutput emits a chunk of raw pane output (ANSI already stripped) to VictoriaLogs.
 // Opt-in: only called when GT_LOG_PANE_OUTPUT=true.

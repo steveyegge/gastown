@@ -69,6 +69,10 @@ const (
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
 
+	// Guardian review events
+	TypeGuardianReview  = "guardian_review"  // Guardian quality review completed
+	TypeGuardianSkipped = "guardian_skipped" // Guardian review skipped (docs-only, config-only, etc.)
+
 	// Scheduler events
 	TypeSchedulerEnqueue        = "scheduler_enqueue"         // Bead scheduled for deferred dispatch
 	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler

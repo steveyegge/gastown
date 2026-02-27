@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/guardian"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -21,6 +22,8 @@ type HealthDataSource interface {
 	ListAgentBeads() (map[string]*beads.Issue, error)
 	// IsSessionAlive checks if a tmux session exists (zombie detection only).
 	IsSessionAlive(sessionName string) (bool, error)
+	// LoadGuardianState returns the Guardian quality review state (nil if unavailable).
+	LoadGuardianState() (*guardian.GuardianState, error)
 }
 
 // AgentState represents the possible states for a GasTown agent.
@@ -28,19 +31,25 @@ type HealthDataSource interface {
 type AgentState int
 
 const (
-	StateGUPPViolation AgentState = iota // >30m no progress with hooked work - CRITICAL
-	StateStalled                         // >15m no progress with hooked work
-	StateWorking                         // Actively producing output
-	StateIdle                            // No hooked work
-	StateZombie                          // Dead/crashed session
+	StateGUPPViolation  AgentState = iota // >30m no progress with hooked work - CRITICAL
+	StateJudgmentBreach                   // Guardian quality score < 0.45
+	StateStalled                          // >15m no progress with hooked work
+	StateJudgmentWarn                     // Guardian quality score 0.45-0.60
+	StateWorking                          // Actively producing output
+	StateIdle                             // No hooked work
+	StateZombie                           // Dead/crashed session
 )
 
 func (s AgentState) String() string {
 	switch s {
 	case StateGUPPViolation:
 		return "gupp"
+	case StateJudgmentBreach:
+		return "judgment_breach"
 	case StateStalled:
 		return "stalled"
+	case StateJudgmentWarn:
+		return "judgment_warn"
 	case StateWorking:
 		return "working"
 	case StateIdle:
@@ -60,7 +69,7 @@ func (s AgentState) Priority() int {
 // NeedsAttention returns true if this state requires user action.
 func (s AgentState) NeedsAttention() bool {
 	switch s {
-	case StateGUPPViolation, StateStalled, StateZombie:
+	case StateGUPPViolation, StateJudgmentBreach, StateStalled, StateJudgmentWarn, StateZombie:
 		return true
 	default:
 		return false
@@ -72,8 +81,12 @@ func (s AgentState) Symbol() string {
 	switch s {
 	case StateGUPPViolation:
 		return "🔥"
+	case StateJudgmentBreach:
+		return "🔴"
 	case StateStalled:
 		return "⚠"
+	case StateJudgmentWarn:
+		return "🟡"
 	case StateWorking:
 		return "●"
 	case StateIdle:
@@ -90,8 +103,12 @@ func (s AgentState) Label() string {
 	switch s {
 	case StateGUPPViolation:
 		return "GUPP!"
+	case StateJudgmentBreach:
+		return "JUDG!"
 	case StateStalled:
 		return "STALL"
+	case StateJudgmentWarn:
+		return "JUDG?"
 	case StateWorking:
 		return "work"
 	case StateIdle:
@@ -151,10 +168,11 @@ type StuckDetector struct {
 }
 
 // NewStuckDetector creates a new stuck detector with default data sources.
-func NewStuckDetector(bd *beads.Beads) *StuckDetector {
+func NewStuckDetector(bd *beads.Beads, townRoot string) *StuckDetector {
 	return NewStuckDetectorWithSource(&defaultHealthSource{
-		bd:   bd,
-		tmux: tmux.NewTmux(),
+		bd:       bd,
+		tmux:     tmux.NewTmux(),
+		townRoot: townRoot,
 	})
 }
 
@@ -163,6 +181,12 @@ func NewStuckDetector(bd *beads.Beads) *StuckDetector {
 func NewStuckDetectorWithSource(source HealthDataSource) *StuckDetector {
 	return &StuckDetector{source: source}
 }
+
+// Judgment score thresholds for the problems view.
+const (
+	JudgmentBreachThreshold = 0.45 // avg score below this = BREACH
+	JudgmentWarnThreshold   = 0.60 // avg score below this = WARN
+)
 
 // CheckAll analyzes all agent beads and returns their health states.
 // This replaces the old FindGasTownSessions + AnalyzeSession loop.
@@ -180,8 +204,45 @@ func (d *StuckDetector) CheckAll() ([]*ProblemAgent, error) {
 		}
 	}
 
+	// Cross-reference with Guardian state for judgment scoring
+	d.applyJudgmentState(agents)
+
 	sortProblemAgents(agents)
 	return agents, nil
+}
+
+// applyJudgmentState overlays Guardian quality scores onto polecat agents.
+// An agent's state is overridden to judgment breach/warn only if the agent
+// is not already in a more urgent state (GUPP, stalled, zombie).
+func (d *StuckDetector) applyJudgmentState(agents []*ProblemAgent) {
+	gState, err := d.source.LoadGuardianState()
+	if err != nil || gState == nil || len(gState.Workers) == 0 {
+		return
+	}
+
+	for _, agent := range agents {
+		if agent.Role != "polecat" {
+			continue
+		}
+
+		pj, ok := gState.Workers[agent.Name]
+		if !ok || len(pj.RecentResults) == 0 {
+			continue
+		}
+
+		// Only override if agent is in a non-urgent state
+		if agent.State == StateGUPPViolation || agent.State == StateStalled || agent.State == StateZombie {
+			continue
+		}
+
+		if pj.AvgScore < JudgmentBreachThreshold {
+			agent.State = StateJudgmentBreach
+			agent.ActionHint = "Quality score below threshold: " + strconv.FormatFloat(pj.AvgScore, 'f', 2, 64)
+		} else if pj.AvgScore < JudgmentWarnThreshold {
+			agent.State = StateJudgmentWarn
+			agent.ActionHint = "Quality score warning: " + strconv.FormatFloat(pj.AvgScore, 'f', 2, 64)
+		}
+	}
 }
 
 // analyzeAgent determines the health state of a single agent from its bead data.
@@ -327,8 +388,9 @@ func sortProblemAgents(agents []*ProblemAgent) {
 
 // defaultHealthSource implements HealthDataSource using real beads and tmux.
 type defaultHealthSource struct {
-	bd   *beads.Beads
-	tmux *tmux.Tmux
+	bd       *beads.Beads
+	tmux     *tmux.Tmux
+	townRoot string
 }
 
 func (s *defaultHealthSource) ListAgentBeads() (map[string]*beads.Issue, error) {
@@ -341,4 +403,15 @@ func (s *defaultHealthSource) IsSessionAlive(sessionName string) (bool, error) {
 	// but Claude has crashed inside the pane.
 	status := s.tmux.CheckSessionHealth(sessionName, 0)
 	return status == tmux.SessionHealthy, nil
+}
+
+func (s *defaultHealthSource) LoadGuardianState() (*guardian.GuardianState, error) {
+	if s.townRoot == "" {
+		return nil, nil
+	}
+	state, err := guardian.LoadState(s.townRoot)
+	if err != nil {
+		return nil, err
+	}
+	return state, nil
 }

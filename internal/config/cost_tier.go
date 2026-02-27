@@ -39,7 +39,7 @@ func IsValidTier(tier string) bool {
 // Excluded roles: "dog" (watchdog/monitoring utility — always uses Haiku via early return
 // in resolveRoleAgentConfigCore) and "boot" (deacon bootstrap sub-role — transient,
 // always uses default agent).
-var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "guardian"}
 
 // CostTierRoleAgents returns the role_agents mapping for a given tier.
 // All tiers explicitly map every tier-managed role. Standard tier maps all roles
@@ -56,6 +56,7 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "",
 			"polecat":  "",
 			"crew":     "",
+			"guardian": "",
 		}
 	case TierEconomy:
 		return map[string]string{
@@ -65,6 +66,7 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "claude-sonnet",
 			"polecat":  "", // use default (opus)
 			"crew":     "", // use default (opus)
+			"guardian": "claude-sonnet",
 		}
 	case TierBudget:
 		return map[string]string{
@@ -74,6 +76,7 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "claude-haiku",
 			"polecat":  "claude-sonnet",
 			"crew":     "claude-sonnet",
+			"guardian": "claude-haiku",
 		}
 	default:
 		return nil
@@ -224,7 +227,7 @@ func FormatTierRoleTable(tier CostTier) string {
 		return ""
 	}
 
-	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "guardian"}
 	var lines []string
 	for _, role := range roles {
 		agent := roleAgents[role]

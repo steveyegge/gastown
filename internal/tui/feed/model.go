@@ -102,6 +102,7 @@ type Model struct {
 	selectedBeadID    string // stable selection tracking by bead ID
 	problemsViewport  viewport.Model
 	stuckDetector     *StuckDetector
+	bd                *beads.Beads // stored for re-creating detector when townRoot changes
 	lastProblemsCheck time.Time
 	problemsError     error // last error from problems fetch
 
@@ -138,7 +139,8 @@ func NewModel(bd *beads.Beads) *Model {
 		help:             h,
 		done:             make(chan struct{}),
 		viewMode:         ViewActivity,
-		stuckDetector:    NewStuckDetector(bd),
+		stuckDetector:    NewStuckDetector(bd, ""),
+		bd:               bd,
 	}
 }
 
@@ -151,11 +153,15 @@ func NewModelWithProblemsView(bd *beads.Beads) *Model {
 	return m
 }
 
-// SetTownRoot sets the town root for convoy fetching.
+// SetTownRoot sets the town root for convoy fetching and Guardian state loading.
 // Safe to call concurrently with the Bubble Tea event loop.
 func (m *Model) SetTownRoot(townRoot string) {
 	m.mu.Lock()
 	m.townRoot = townRoot
+	// Re-create stuck detector with townRoot so it can load Guardian state
+	if m.bd != nil {
+		m.stuckDetector = NewStuckDetector(m.bd, townRoot)
+	}
 	m.mu.Unlock()
 }
 
