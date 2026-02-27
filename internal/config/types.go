@@ -91,6 +91,31 @@ type TownSettings struct {
 
 	// Scheduler configures the capacity scheduler for polecat dispatch.
 	Scheduler *capacity.SchedulerConfig `json:"scheduler,omitempty"`
+
+	// Judgment configures the Guardian quality reviewer for merge diffs.
+	// Phase 1: measurement-only (reviews are recorded but do not gate merges).
+	Judgment *JudgmentConfig `json:"judgment,omitempty"`
+}
+
+// JudgmentConfig holds configuration for the Guardian quality reviewer.
+// This is stored in TownSettings to avoid circular imports with the guardian package.
+type JudgmentConfig struct {
+	// Enabled controls whether Guardian reviews are active. Default: false (opt-in).
+	Enabled bool `json:"enabled"`
+
+	// ReviewDepth controls how thorough the review is: "quick", "standard", "deep".
+	ReviewDepth string `json:"review_depth,omitempty"`
+
+	// TimeoutSecs is the maximum time for a single review. Default: 120.
+	TimeoutSecs int `json:"timeout_secs,omitempty"`
+
+	// SecurityPaths are path substrings that flag diffs as security-sensitive.
+	// If empty, defaults are used: auth, crypto, secret, token, credential.
+	SecurityPaths []string `json:"security_paths,omitempty"`
+
+	// CorePaths are path substrings that flag diffs as touching core infrastructure.
+	// If empty, defaults are used: internal/beads, internal/config, internal/session, internal/tmux.
+	CorePaths []string `json:"core_paths,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

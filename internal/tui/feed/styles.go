@@ -162,6 +162,14 @@ var (
 	ZombieStyle = lipgloss.NewStyle().
 			Foreground(colorDim)
 
+	// Judgment state styles
+	JudgmentBreachStyle = lipgloss.NewStyle().
+				Foreground(colorError).
+				Bold(true)
+
+	JudgmentWarnStyle = lipgloss.NewStyle().
+				Foreground(colorWarning)
+
 	// Event symbols
 	EventSymbols = map[string]string{
 		"create":   "+",

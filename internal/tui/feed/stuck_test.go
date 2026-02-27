@@ -6,14 +6,17 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/guardian"
 )
 
 // mockHealthSource is a test double for HealthDataSource
 type mockHealthSource struct {
-	agents     map[string]*beads.Issue
-	sessions   map[string]bool
-	listErr    error
-	sessionErr error // if set, IsSessionAlive returns this error
+	agents        map[string]*beads.Issue
+	sessions      map[string]bool
+	listErr       error
+	sessionErr    error // if set, IsSessionAlive returns this error
+	guardianState *guardian.GuardianState
+	guardianErr   error
 }
 
 func newMockHealthSource() *mockHealthSource {
@@ -37,6 +40,13 @@ func (m *mockHealthSource) IsSessionAlive(sessionName string) (bool, error) {
 	return m.sessions[sessionName], nil
 }
 
+func (m *mockHealthSource) LoadGuardianState() (*guardian.GuardianState, error) {
+	if m.guardianErr != nil {
+		return nil, m.guardianErr
+	}
+	return m.guardianState, nil
+}
+
 // TestAgentStateString tests the String() method for all AgentState values
 func TestAgentStateString(t *testing.T) {
 	tests := []struct {
@@ -44,7 +54,9 @@ func TestAgentStateString(t *testing.T) {
 		expected string
 	}{
 		{StateGUPPViolation, "gupp"},
+		{StateJudgmentBreach, "judgment_breach"},
 		{StateStalled, "stalled"},
+		{StateJudgmentWarn, "judgment_warn"},
 		{StateWorking, "working"},
 		{StateIdle, "idle"},
 		{StateZombie, "zombie"},
@@ -62,11 +74,17 @@ func TestAgentStateString(t *testing.T) {
 
 // TestAgentStatePriority tests that priorities are ordered correctly
 func TestAgentStatePriority(t *testing.T) {
-	if StateGUPPViolation.Priority() >= StateStalled.Priority() {
-		t.Error("GUPP violation should have higher priority than stalled")
+	if StateGUPPViolation.Priority() >= StateJudgmentBreach.Priority() {
+		t.Error("GUPP violation should have higher priority than judgment breach")
 	}
-	if StateStalled.Priority() >= StateWorking.Priority() {
-		t.Error("Stalled should have higher priority than working")
+	if StateJudgmentBreach.Priority() >= StateStalled.Priority() {
+		t.Error("Judgment breach should have higher priority than stalled")
+	}
+	if StateStalled.Priority() >= StateJudgmentWarn.Priority() {
+		t.Error("Stalled should have higher priority than judgment warn")
+	}
+	if StateJudgmentWarn.Priority() >= StateWorking.Priority() {
+		t.Error("Judgment warn should have higher priority than working")
 	}
 	if StateWorking.Priority() >= StateIdle.Priority() {
 		t.Error("Working should have higher priority than idle")
@@ -80,7 +98,9 @@ func TestAgentStatePriority(t *testing.T) {
 func TestAgentStateNeedsAttention(t *testing.T) {
 	needsAttention := []AgentState{
 		StateGUPPViolation,
+		StateJudgmentBreach,
 		StateStalled,
+		StateJudgmentWarn,
 		StateZombie,
 	}
 	noAttention := []AgentState{
@@ -107,7 +127,9 @@ func TestAgentStateSymbol(t *testing.T) {
 		expected string
 	}{
 		{StateGUPPViolation, "🔥"},
+		{StateJudgmentBreach, "🔴"},
 		{StateStalled, "⚠"},
+		{StateJudgmentWarn, "🟡"},
 		{StateWorking, "●"},
 		{StateIdle, "○"},
 		{StateZombie, "💀"},
@@ -130,7 +152,9 @@ func TestAgentStateLabel(t *testing.T) {
 		expected string
 	}{
 		{StateGUPPViolation, "GUPP!"},
+		{StateJudgmentBreach, "JUDG!"},
 		{StateStalled, "STALL"},
+		{StateJudgmentWarn, "JUDG?"},
 		{StateWorking, "work"},
 		{StateIdle, "idle"},
 		{StateZombie, "dead"},
@@ -208,7 +232,9 @@ func TestProblemAgentNeedsAttention(t *testing.T) {
 		expected bool
 	}{
 		{StateGUPPViolation, true},
+		{StateJudgmentBreach, true},
 		{StateStalled, true},
+		{StateJudgmentWarn, true},
 		{StateZombie, true},
 		{StateWorking, false},
 		{StateIdle, false},
@@ -732,6 +758,136 @@ func TestIsRalphMode(t *testing.T) {
 				t.Errorf("isRalphMode() = %v, want %v", got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestCheckAll_JudgmentBreach tests that Guardian quality scores are overlaid onto polecat agents
+func TestCheckAll_JudgmentBreach(t *testing.T) {
+	mock := newMockHealthSource()
+
+	// Working polecat with low quality score
+	mock.agents["gt-gastown-polecat-BadCoder"] = &beads.Issue{
+		ID:        "gt-gastown-polecat-BadCoder",
+		HookBead:  "gt-work1",
+		UpdatedAt: time.Now().Add(-2 * time.Minute).Format(time.RFC3339),
+	}
+	mock.sessions["gt-BadCoder"] = true
+
+	// Guardian state: low score
+	gState := guardian.NewGuardianState()
+	gState.AddResult("BadCoder", &guardian.GuardianResult{
+		Score:          0.30,
+		Recommendation: "request_changes",
+		Worker:         "BadCoder",
+	})
+	mock.guardianState = gState
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].State != StateJudgmentBreach {
+		t.Errorf("expected StateJudgmentBreach, got %s", agents[0].State)
+	}
+}
+
+// TestCheckAll_JudgmentWarn tests that warning-level quality scores are detected
+func TestCheckAll_JudgmentWarn(t *testing.T) {
+	mock := newMockHealthSource()
+
+	// Working polecat with warning quality score
+	mock.agents["gt-gastown-polecat-OkCoder"] = &beads.Issue{
+		ID:        "gt-gastown-polecat-OkCoder",
+		HookBead:  "gt-work2",
+		UpdatedAt: time.Now().Add(-3 * time.Minute).Format(time.RFC3339),
+	}
+	mock.sessions["gt-OkCoder"] = true
+
+	gState := guardian.NewGuardianState()
+	gState.AddResult("OkCoder", &guardian.GuardianResult{
+		Score:          0.50,
+		Recommendation: "approve",
+		Worker:         "OkCoder",
+	})
+	mock.guardianState = gState
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].State != StateJudgmentWarn {
+		t.Errorf("expected StateJudgmentWarn, got %s", agents[0].State)
+	}
+}
+
+// TestCheckAll_JudgmentDoesNotOverrideGUPP tests that judgment doesn't override more urgent states
+func TestCheckAll_JudgmentDoesNotOverrideGUPP(t *testing.T) {
+	mock := newMockHealthSource()
+
+	// GUPP agent that also has low quality score
+	mock.agents["gt-gastown-polecat-StuckBad"] = &beads.Issue{
+		ID:        "gt-gastown-polecat-StuckBad",
+		HookBead:  "gt-work3",
+		UpdatedAt: time.Now().Add(-45 * time.Minute).Format(time.RFC3339),
+	}
+	mock.sessions["gt-StuckBad"] = true
+
+	gState := guardian.NewGuardianState()
+	gState.AddResult("StuckBad", &guardian.GuardianResult{
+		Score:          0.20,
+		Recommendation: "request_changes",
+		Worker:         "StuckBad",
+	})
+	mock.guardianState = gState
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	// Should remain GUPP despite low quality score
+	if agents[0].State != StateGUPPViolation {
+		t.Errorf("expected StateGUPPViolation (not overridden), got %s", agents[0].State)
+	}
+}
+
+// TestCheckAll_JudgmentNoState tests that missing Guardian state is handled gracefully
+func TestCheckAll_JudgmentNoState(t *testing.T) {
+	mock := newMockHealthSource()
+
+	mock.agents["gt-gastown-polecat-NoData"] = &beads.Issue{
+		ID:        "gt-gastown-polecat-NoData",
+		HookBead:  "gt-work4",
+		UpdatedAt: time.Now().Add(-2 * time.Minute).Format(time.RFC3339),
+	}
+	mock.sessions["gt-NoData"] = true
+	// No guardian state set
+
+	detector := NewStuckDetectorWithSource(mock)
+	agents, err := detector.CheckAll()
+	if err != nil {
+		t.Fatalf("CheckAll: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].State != StateWorking {
+		t.Errorf("expected StateWorking (no guardian data), got %s", agents[0].State)
 	}
 }
 

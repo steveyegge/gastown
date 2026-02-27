@@ -21,9 +21,11 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/guardian"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // DefaultStaleClaimTimeout is the default duration after which a claimed MR
@@ -189,8 +191,9 @@ type Engineer struct {
 	git                   *git.Git
 	config                *MergeQueueConfig
 	workDir               string
-	output                io.Writer    // Output destination for user-facing messages
-	router                *mail.Router // Mail router for sending protocol messages
+	output                io.Writer         // Output destination for user-facing messages
+	router                *mail.Router      // Mail router for sending protocol messages
+	guardian              *guardian.Guardian // Quality reviewer (nil if disabled)
 	mergeSlotEnsureExists func() (string, error)
 	mergeSlotAcquire      func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error)
 	mergeSlotRelease      func(holder string) error
@@ -237,6 +240,12 @@ func NewEngineer(r *rig.Rig) *Engineer {
 // This is useful for testing or redirecting output.
 func (e *Engineer) SetOutput(w io.Writer) {
 	e.output = w
+}
+
+// SetGuardian sets the Guardian quality reviewer.
+// Pass nil to disable Guardian reviews.
+func (e *Engineer) SetGuardian(g *guardian.Guardian) {
+	e.guardian = g
 }
 
 // LoadConfig loads merge queue configuration from the rig's config.json.
@@ -848,8 +857,98 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mr.Worker)
 	_, _ = fmt.Fprintf(e.output, "  Source: %s\n", mr.SourceIssue)
 
+	// Guardian quality review (Phase 1: measurement-only, fail-open)
+	if e.guardian != nil {
+		e.runGuardianReview(ctx, mr)
+	}
+
 	// Use the shared merge logic
-	return e.doMerge(ctx, mr.Branch, mr.Target, mr.SourceIssue)
+	result := e.doMerge(ctx, mr.Branch, mr.Target, mr.SourceIssue)
+
+	// Record merge outcome telemetry
+	outcome := classifyMergeOutcome(result)
+	telemetry.RecordMergeOutcome(ctx, mr.Worker, mr.Rig, outcome, mr.SourceIssue, mr.RetryCount)
+
+	return result
+}
+
+// runGuardianReview performs a Guardian quality review on the merge diff.
+// This is measurement-only (Phase 1): the result is logged but does not gate the merge.
+func (e *Engineer) runGuardianReview(ctx context.Context, mr *MRInfo) {
+	diff := e.buildMergeDiff(mr)
+	if diff == nil {
+		return
+	}
+
+	result, err := e.guardian.Review(ctx, diff)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Guardian] Review error (fail-open): %v\n", err)
+		return
+	}
+	if result == nil {
+		return // disabled or skipped
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Guardian] Review: score=%.2f recommendation=%s issues=%d\n",
+		result.Score, result.Recommendation, len(result.Issues))
+
+	// Log event for feed visibility
+	eventType := events.TypeGuardianReview
+	if result.Recommendation == "skip" {
+		eventType = events.TypeGuardianSkipped
+	}
+	_ = events.LogFeed(eventType, mr.Worker, map[string]interface{}{
+		"bead":           mr.ID,
+		"score":          result.Score,
+		"recommendation": result.Recommendation,
+		"issues":         len(result.Issues),
+		"worker":         mr.Worker,
+	})
+}
+
+// buildMergeDiff creates a MergeDiff from an MRInfo by running git diff.
+func (e *Engineer) buildMergeDiff(mr *MRInfo) *guardian.MergeDiff {
+	// Get diff between target and branch
+	cmd := exec.Command("git", "diff", mr.Target+"..."+mr.Branch)
+	cmd.Dir = e.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Guardian] Failed to get diff: %v\n", err)
+		return nil
+	}
+
+	diffText := string(out)
+	var cfg *guardian.Config
+	if e.guardian != nil {
+		cfg = e.guardian.GetConfig()
+	}
+	stats := guardian.ComputeDiffStats(diffText, cfg)
+
+	return &guardian.MergeDiff{
+		BeadID:   mr.ID,
+		Branch:   mr.Branch,
+		Target:   mr.Target,
+		Worker:   mr.Worker,
+		Rig:      mr.Rig,
+		DiffText: diffText,
+		Stats:    stats,
+	}
+}
+
+// classifyMergeOutcome maps a ProcessResult to an outcome string for telemetry.
+func classifyMergeOutcome(result ProcessResult) string {
+	switch {
+	case result.Success:
+		return "merged"
+	case result.Conflict:
+		return "conflict"
+	case result.TestsFailed:
+		return "test_failure"
+	case result.SlotTimeout:
+		return "slot_timeout"
+	default:
+		return "error"
+	}
 }
 
 // HandleMRInfoSuccess handles a successful merge from MRInfo.

@@ -91,7 +91,7 @@ func (m *Model) countAgentStates() (ok, stuck, idle int) {
 			ok++
 		case StateIdle:
 			idle++
-		case StateGUPPViolation, StateStalled, StateZombie:
+		case StateGUPPViolation, StateJudgmentBreach, StateStalled, StateJudgmentWarn, StateZombie:
 			stuck++
 		}
 	}
@@ -248,8 +248,12 @@ func getStateStyle(state AgentState) lipgloss.Style {
 	switch state {
 	case StateGUPPViolation:
 		return GUPPStyle
+	case StateJudgmentBreach:
+		return JudgmentBreachStyle
 	case StateStalled:
 		return StalledStyle
+	case StateJudgmentWarn:
+		return JudgmentWarnStyle
 	case StateZombie:
 		return ZombieStyle
 	default:

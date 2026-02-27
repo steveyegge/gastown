@@ -225,3 +225,21 @@ func TestRecordConvoyCreate(t *testing.T) {
 	RecordConvoyCreate(ctx, "bead-abc", nil)
 	RecordConvoyCreate(ctx, "bead-def", errors.New("convoy error"))
 }
+
+func TestRecordMergeOutcome(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordMergeOutcome(ctx, "polecat-Toast", "gastown", "merged", "gt-abc12", 0)
+	RecordMergeOutcome(ctx, "polecat-Max", "gastown", "conflict", "gt-def34", 1)
+	RecordMergeOutcome(ctx, "polecat-Joe", "gastown", "error", "", 0)
+}
+
+func TestRecordGuardianResult(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordGuardianResult(ctx, "polecat-Toast", "gastown", "approve", 0.85, 1234.5)
+	RecordGuardianResult(ctx, "polecat-Max", "gastown", "request_changes", 0.35, 2000.0)
+	RecordGuardianResult(ctx, "polecat-Joe", "gastown", "skip", 1.0, 50.0)
+}
