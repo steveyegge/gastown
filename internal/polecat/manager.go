@@ -761,6 +761,11 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 		style.PrintWarning("could not run setup hooks: %v", err)
 	}
 
+	// Symlink rig-level refs into polecat workspace for cross-repo context.
+	if err := m.setupRefs(polecatDir); err != nil {
+		style.PrintWarning("could not set up refs: %v", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -1226,6 +1231,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
 		style.PrintWarning("could not copy overlay files: %v", err)
+	}
+
+	// Symlink rig-level refs into polecat workspace for cross-repo context.
+	if err := m.setupRefs(polecatDir); err != nil {
+		style.PrintWarning("could not set up refs: %v", err)
 	}
 
 	// Ensure .gitignore has required Gas Town patterns
@@ -1748,6 +1758,48 @@ func (m *Manager) setupSharedBeads(clonePath string) error {
 		_ = exec.Command("git", "-C", clonePath, "config", "beads.issue-prefix", prefix).Run()
 	}
 	_ = exec.Command("git", "-C", clonePath, "config", "beads.role", "contributor").Run()
+
+	return nil
+}
+
+// setupRefs symlinks rig-level refs into a polecat workspace.
+// Each ref at <rig>/refs/<alias> becomes <polecatDir>/refs/<alias> via relative symlink.
+// Non-fatal: returns error but callers should treat as warning.
+func (m *Manager) setupRefs(polecatDir string) error {
+	cfg, err := rig.LoadRigConfig(m.rig.Path)
+	if err != nil || cfg.Refs == nil || len(cfg.Refs) == 0 {
+		return nil // no refs configured
+	}
+
+	refsDir := filepath.Join(polecatDir, "refs")
+	if err := os.MkdirAll(refsDir, 0755); err != nil {
+		return fmt.Errorf("creating polecat refs dir: %w", err)
+	}
+
+	rigRefsDir := rig.RefsDir(m.rig.Path)
+	for alias := range cfg.Refs {
+		src := filepath.Join(rigRefsDir, alias)
+		dst := filepath.Join(refsDir, alias)
+
+		// Skip if source doesn't exist
+		if _, err := os.Lstat(src); err != nil {
+			continue
+		}
+
+		// Skip if already linked
+		if _, err := os.Lstat(dst); err == nil {
+			continue
+		}
+
+		// Create relative symlink
+		rel, err := filepath.Rel(refsDir, src)
+		if err != nil {
+			rel = src // fall back to absolute
+		}
+		if err := os.Symlink(rel, dst); err != nil {
+			return fmt.Errorf("symlinking ref %s: %w", alias, err)
+		}
+	}
 
 	return nil
 }

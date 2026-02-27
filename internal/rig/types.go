@@ -41,6 +41,9 @@ type Rig struct {
 
 	// HasMayor indicates if the rig has a mayor clone.
 	HasMayor bool `json:"has_mayor"`
+
+	// RefCount is the number of linked reference repos.
+	RefCount int `json:"ref_count,omitempty"`
 }
 
 // AgentDirs are the standard agent directories in a rig.
@@ -60,6 +63,7 @@ type RigSummary struct {
 	CrewCount    int    `json:"crew_count"`
 	HasWitness   bool   `json:"has_witness"`
 	HasRefinery  bool   `json:"has_refinery"`
+	RefCount     int    `json:"ref_count,omitempty"`
 }
 
 // Summary returns a RigSummary for this rig.
@@ -70,6 +74,7 @@ func (r *Rig) Summary() RigSummary {
 		CrewCount:    len(r.Crew),
 		HasWitness:   r.HasWitness,
 		HasRefinery:  r.HasRefinery,
+		RefCount:     r.RefCount,
 	}
 }
 

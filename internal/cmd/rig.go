@@ -685,6 +685,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		Refinery string `json:"refinery"`
 		Polecats int    `json:"polecats"`
 		Crew     int    `json:"crew"`
+		Refs     int    `json:"refs,omitempty"`
 		// sorting fields (not exported to JSON)
 		sortPrio int
 	}
@@ -722,6 +723,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 			Refinery: refineryStatus,
 			Polecats: summary.PolecatCount,
 			Crew:     summary.CrewCount,
+			Refs:     summary.RefCount,
 			sortPrio: rigStatePriority(witnessRunning, refineryRunning, opState),
 		})
 	}
@@ -767,7 +769,11 @@ func runRigList(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("   Witness: %s %s  Refinery: %s %s\n",
 			witnessIcon, ri.Witness, refineryIcon, ri.Refinery)
-		fmt.Printf("   Polecats: %d  Crew: %d\n", ri.Polecats, ri.Crew)
+		extra := ""
+		if ri.Refs > 0 {
+			extra = fmt.Sprintf("  Refs: %d", ri.Refs)
+		}
+		fmt.Printf("   Polecats: %d  Crew: %d%s\n", ri.Polecats, ri.Crew, extra)
 		fmt.Println()
 	}
 

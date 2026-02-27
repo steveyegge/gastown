@@ -88,13 +88,40 @@ type RigConfig struct {
 	PushURL       string       `json:"push_url,omitempty"`       // optional push URL (fork for read-only upstreams)
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
-	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
-	Beads         *BeadsConfig `json:"beads,omitempty"`
+	CreatedAt     time.Time            `json:"created_at"`               // when rig was created
+	Beads         *BeadsConfig        `json:"beads,omitempty"`
+	Refs          map[string]RefEntry `json:"refs,omitempty"` // linked reference repos (key = alias)
 }
 
 // BeadsConfig represents beads configuration for the rig.
 type BeadsConfig struct {
 	Prefix string `json:"prefix"` // issue prefix (e.g., "gt")
+}
+
+// RefEntry describes a linked reference repository.
+// Refs are read-only clones (or symlinks) polecats can browse for context.
+type RefEntry struct {
+	GitURL  string    `json:"git_url,omitempty"`  // external repo URL
+	FromRig string    `json:"from_rig,omitempty"` // same-town rig name (symlink)
+	Branch  string    `json:"branch,omitempty"`   // branch to track
+	Shallow bool      `json:"shallow,omitempty"`  // shallow clone (default for external)
+	AddedAt time.Time `json:"added_at"`
+}
+
+// ValidateRefAlias checks that a ref alias is valid (no slashes, dots, spaces; not empty).
+func ValidateRefAlias(alias string) error {
+	if alias == "" {
+		return fmt.Errorf("ref alias cannot be empty")
+	}
+	if strings.ContainsAny(alias, "/\\. \t\n") {
+		return fmt.Errorf("ref alias %q must not contain slashes, dots, or whitespace", alias)
+	}
+	for _, r := range alias {
+		if !unicode.IsPrint(r) {
+			return fmt.Errorf("ref alias %q contains non-printable characters", alias)
+		}
+	}
+	return nil
 }
 
 // CurrentRigConfigVersion is the current schema version.
@@ -212,6 +239,11 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	mayorPath := filepath.Join(rigPath, "mayor", "rig")
 	if _, err := os.Stat(mayorPath); err == nil {
 		rig.HasMayor = true
+	}
+
+	// Count linked refs
+	if cfg, err := LoadRigConfig(rigPath); err == nil && cfg.Refs != nil {
+		rig.RefCount = len(cfg.Refs)
 	}
 
 	return rig, nil
@@ -346,7 +378,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			Prefix: opts.BeadsPrefix,
 		},
 	}
-	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+	if err := SaveRigConfig(rigPath, rigConfig); err != nil {
 		return nil, fmt.Errorf("saving rig config: %w", err)
 	}
 
@@ -414,7 +446,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	rigConfig.DefaultBranch = defaultBranch
 	// Re-save config with default branch
-	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+	if err := SaveRigConfig(rigPath, rigConfig); err != nil {
 		return nil, fmt.Errorf("updating rig config with default branch: %w", err)
 	}
 
@@ -473,7 +505,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			opts.BeadsPrefix = sourcePrefix
 			rigConfig.Beads.Prefix = sourcePrefix
 			// Re-save rig config with detected prefix
-			if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+			if err := SaveRigConfig(rigPath, rigConfig); err != nil {
 				return nil, fmt.Errorf("updating rig config with detected prefix: %w", err)
 			}
 		} else {
@@ -746,8 +778,8 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
 }
 
-// saveRigConfig writes the rig configuration to config.json.
-func (m *Manager) saveRigConfig(rigPath string, cfg *RigConfig) error {
+// SaveRigConfig writes the rig configuration to config.json.
+func SaveRigConfig(rigPath string, cfg *RigConfig) error {
 	configPath := filepath.Join(rigPath, "config.json")
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -1366,7 +1398,7 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 	// Sync push URL to config.json so doctor check sees it
 	if existingConfig != nil && existingConfig.PushURL != pushURL {
 		existingConfig.PushURL = pushURL
-		if saveErr := m.saveRigConfig(rigPath, existingConfig); saveErr != nil {
+		if saveErr := SaveRigConfig(rigPath, existingConfig); saveErr != nil {
 			// Non-fatal: town.json has the value, but doctor may flag a mismatch
 			fmt.Fprintf(os.Stderr, "Warning: could not update config.json with push URL: %v\n", saveErr)
 		}
