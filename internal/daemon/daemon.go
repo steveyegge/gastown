@@ -91,6 +91,11 @@ type Daemon struct {
 	// Option B throttling: only pour when anomaly detected AND cooldown elapsed.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	lastDoctorMolTime time.Time
+
+	// bootLastSpawned tracks when Boot was last spawned to prevent
+	// spawning on every daemon heartbeat tick.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	bootLastSpawned time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -769,16 +774,22 @@ func (d *Daemon) getDeaconSessionName() string {
 	return session.DeaconSessionName()
 }
 
+// bootSpawnCooldown is the minimum interval between Boot spawns.
+// Prevents spawning Boot on every daemon heartbeat tick.
+const bootSpawnCooldown = 2 * time.Minute
+
 // ensureBootRunning spawns Boot to triage the Deacon.
-// Boot is a fresh-each-tick watchdog that decides whether to start/wake/nudge
-// the Deacon, centralizing the "when to wake" decision in an agent.
+// Boot decides whether to start/wake/nudge the Deacon, centralizing the
+// "when to wake" decision in an agent. A cooldown gate prevents spawning
+// on every daemon heartbeat tick.
 // In degraded mode (no tmux), falls back to mechanical checks.
 func (d *Daemon) ensureBootRunning() {
-	b := boot.New(d.config.TownRoot)
+	// Cooldown gate: skip if Boot was spawned recently.
+	if !d.bootLastSpawned.IsZero() && time.Since(d.bootLastSpawned) < bootSpawnCooldown {
+		return
+	}
 
-	// Boot is ephemeral - always spawn fresh each tick.
-	// spawnTmux() kills any existing session before spawning, ensuring
-	// Boot never accumulates context across triage cycles.
+	b := boot.New(d.config.TownRoot)
 
 	// Check for degraded mode
 	degraded := os.Getenv("GT_DEGRADED") == "true"
@@ -786,6 +797,7 @@ func (d *Daemon) ensureBootRunning() {
 		// In degraded mode, run mechanical triage directly
 		d.logger.Println("Degraded mode: running mechanical Boot triage")
 		d.runDegradedBootTriage(b)
+		d.bootLastSpawned = time.Now()
 		return
 	}
 
@@ -798,6 +810,7 @@ func (d *Daemon) ensureBootRunning() {
 		return
 	}
 
+	d.bootLastSpawned = time.Now()
 	d.logger.Println("Boot spawned successfully")
 }
 
