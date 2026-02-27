@@ -387,7 +387,7 @@ func TestStartupNudgeContent(t *testing.T) {
 }
 
 func TestEnsureSettingsForRole_CopilotUsesWorkDir(t *testing.T) {
-	// Copilot instructions must be installed in workDir (not settingsDir) because
+	// Copilot hooks and instructions must be installed in workDir (not settingsDir) because
 	// Copilot has no --settings equivalent for path redirection.
 	settingsDir := t.TempDir()
 	workDir := t.TempDir()
@@ -395,8 +395,8 @@ func TestEnsureSettingsForRole_CopilotUsesWorkDir(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		Hooks: &config.RuntimeHooksConfig{
 			Provider:     "copilot",
-			Dir:          ".copilot",
-			SettingsFile: "copilot-instructions.md",
+			Dir:          ".github/hooks",
+			SettingsFile: "gastown.json",
 		},
 	}
 
@@ -405,18 +405,31 @@ func TestEnsureSettingsForRole_CopilotUsesWorkDir(t *testing.T) {
 		t.Fatalf("EnsureSettingsForRole() error = %v", err)
 	}
 
-	// Instructions should be in workDir, not settingsDir
-	if _, err := os.Stat(settingsDir + "/.copilot/copilot-instructions.md"); err == nil {
-		t.Error("Copilot instructions should NOT be in settingsDir")
+	// Hooks should be in workDir/.github/hooks/
+	if _, err := os.Stat(workDir + "/.github/hooks/gastown.json"); err != nil {
+		t.Error("Copilot hooks should be in workDir/.github/hooks/")
 	}
+
+	// Guard script should be in workDir/.github/hooks/
+	if _, err := os.Stat(workDir + "/.github/hooks/gastown-pretool-guard.sh"); err != nil {
+		t.Error("Copilot guard script should be in workDir/.github/hooks/")
+	}
+
+	// Instructions should also be in workDir/.copilot/
 	if _, err := os.Stat(workDir + "/.copilot/copilot-instructions.md"); err != nil {
-		t.Error("Copilot instructions should be in workDir")
+		t.Error("Copilot instructions should be in workDir/.copilot/")
+	}
+
+	// Nothing should be in settingsDir
+	if _, err := os.Stat(settingsDir + "/.github/hooks/gastown.json"); err == nil {
+		t.Error("Copilot hooks should NOT be in settingsDir")
 	}
 }
 
 func TestGetStartupFallbackInfo_InformationalHooks(t *testing.T) {
-	// Copilot: hooks provider set but informational (instructions file, not executable).
+	// Test informational hooks behavior: provider set but informational (instructions-only).
 	// Should be treated as having NO hooks for startup fallback purposes.
+	// Note: Copilot preset no longer uses informational hooks, but user overrides can.
 	rc := &config.RuntimeConfig{
 		PromptMode: "arg",
 		Hooks: &config.RuntimeHooksConfig{
@@ -438,7 +451,8 @@ func TestGetStartupFallbackInfo_InformationalHooks(t *testing.T) {
 }
 
 func TestStartupFallbackCommands_InformationalHooks(t *testing.T) {
-	// Copilot has hooks provider set but informational — should still get fallback commands.
+	// Informational hooks provider — should still get fallback commands.
+	// Note: Copilot preset no longer uses informational hooks, but user overrides can.
 	rc := &config.RuntimeConfig{
 		Hooks: &config.RuntimeHooksConfig{
 			Provider:      "copilot",
@@ -449,6 +463,47 @@ func TestStartupFallbackCommands_InformationalHooks(t *testing.T) {
 	commands := StartupFallbackCommands("polecat", rc)
 	if commands == nil {
 		t.Error("StartupFallbackCommands() with informational hooks should return commands")
+	}
+}
+
+func TestGetStartupFallbackInfo_CopilotWithHooks(t *testing.T) {
+	// Copilot now has real lifecycle hooks (non-informational) + prompt support.
+	// Should need NO fallback actions — hooks handle everything.
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:      "copilot",
+			Informational: false,
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if info.IncludePrimeInBeacon {
+		t.Error("Copilot with hooks should NOT include prime in beacon")
+	}
+	if info.SendStartupNudge {
+		t.Error("Copilot with hooks should NOT need startup nudge")
+	}
+	if info.SendBeaconNudge {
+		t.Error("Copilot with hooks should NOT need beacon nudge")
+	}
+	if info.StartupNudgeDelayMs != 0 {
+		t.Errorf("Copilot with hooks StartupNudgeDelayMs = %d, want 0", info.StartupNudgeDelayMs)
+	}
+}
+
+func TestStartupFallbackCommands_CopilotWithHooks(t *testing.T) {
+	// Copilot with real hooks should NOT get fallback commands.
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:      "copilot",
+			Informational: false,
+		},
+	}
+
+	commands := StartupFallbackCommands("polecat", rc)
+	if commands != nil {
+		t.Error("StartupFallbackCommands() with real Copilot hooks should return nil")
 	}
 }
 

@@ -309,7 +309,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "",                   // Session IDs stored on disk, not in env
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
-		SupportsHooks:       false, // Copilot instructions file is not executable hooks
+		SupportsHooks:       true, // Copilot CLI native lifecycle hooks (.github/hooks/gastown.json)
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
@@ -318,9 +318,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		PromptMode:         "arg",
 		ConfigDir:          ".copilot",
 		HooksProvider:      "copilot",
-		HooksDir:           ".copilot",
-		HooksSettingsFile:  "copilot-instructions.md",
-		HooksInformational: true,
+		HooksDir:           ".github/hooks",
+		HooksSettingsFile:  "gastown.json",
+		HooksInformational: false,
 		ReadyPromptPrefix:  "❯ ",
 		ReadyDelayMs:       5000,
 		InstructionsFile:   "AGENTS.md",
