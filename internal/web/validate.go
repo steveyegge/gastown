@@ -73,18 +73,26 @@ func isValidMailAddress(s string) bool {
 }
 
 // isValidGitURL checks if a string looks like a valid git remote URL.
-// Inspired by internal/cmd/rig.go:isGitRemoteURL — accepts https://, http://,
-// ssh://, git://, and SCP-style (user@host:path). Rejects local paths,
-// flag-like strings, and bare owner/repo (which gt rig add doesn't accept).
-// NOTE: new protocol support in isGitRemoteURL requires updating this function too.
+// Accepts any scheme:// URL (git delegates to git-remote-<scheme> helpers,
+// e.g. git-remote-s3 for s3:// URLs), plus SCP-style (user@host:path).
+// Rejects local paths, file:// URIs, flag-like strings, and bare names.
 func isValidGitURL(s string) bool {
 	if len(s) == 0 || strings.HasPrefix(s, "-") {
 		return false
 	}
-	if strings.HasPrefix(s, "https://") ||
-		strings.HasPrefix(s, "http://") ||
-		strings.HasPrefix(s, "ssh://") ||
-		strings.HasPrefix(s, "git://") {
+	// Reject file:// URIs (local filesystem access)
+	if strings.HasPrefix(s, "file://") {
+		return false
+	}
+	// Accept any scheme:// URL where scheme is alphanumeric (plus + - .)
+	if idx := strings.Index(s, "://"); idx > 0 {
+		scheme := s[:idx]
+		for _, c := range scheme {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.') {
+				return false
+			}
+		}
 		return true
 	}
 	// SCP-style: user@host:path (user and host non-empty, path non-empty, host has no slashes)
