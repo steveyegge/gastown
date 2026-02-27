@@ -3,16 +3,20 @@ package mail
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/testutil"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 func TestDetectTownRoot(t *testing.T) {
@@ -1373,5 +1377,112 @@ func TestValidateRecipientFilesystemFallback(t *testing.T) {
 				t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
 			}
 		})
+	}
+}
+
+// requireNotifyTestSocket returns a per-test tmux socket and skips if tmux
+// is unavailable. The socket server is killed on test cleanup.
+func requireNotifyTestSocket(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	socket := fmt.Sprintf("gt-test-notify-%d", os.Getpid())
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+	})
+	return socket
+}
+
+// createNotifyTestSession creates a tmux session on the given socket and waits
+// for it to be ready.
+func createNotifyTestSession(t *testing.T, socket, sessionName, command string) {
+	t.Helper()
+	args := []string{"-L", socket, "new-session", "-d", "-s", sessionName, command}
+	out, err := exec.Command("tmux", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to create test session %q: %v\n%s", sessionName, err, out)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if exec.Command("tmux", "-L", socket, "has-session", "-t", sessionName).Run() == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("session %q never appeared on socket %q", sessionName, socket)
+}
+
+// TestNotifyRecipient_IdleAgent verifies that an idle agent (prompt visible)
+// receives a direct nudge instead of a queued one.
+func TestNotifyRecipient_IdleAgent(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-idletest"
+
+	// Create a session that displays the Claude Code prompt prefix, simulating idle.
+	// "printf" prints the prompt, then "cat" blocks keeping the session alive.
+	createNotifyTestSession(t, socket, sessionName, `sh -c 'printf "❯ \n" && cat'`)
+
+	// Wait briefly for printf output to appear in the pane.
+	time.Sleep(500 * time.Millisecond)
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 3 * time.Second,
+	}
+
+	msg := &Message{
+		From:    "gastown/crew/sender",
+		To:      "gastown/crew/idletest",
+		Subject: "test idle delivery",
+	}
+
+	err := r.notifyRecipient(msg)
+	if err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+
+	// Verify no nudge was queued — delivery should have been direct.
+	pending, _ := nudge.Pending(townRoot, sessionName)
+	if pending != 0 {
+		t.Errorf("expected 0 queued nudges for idle agent, got %d", pending)
+	}
+}
+
+// TestNotifyRecipient_BusyAgent verifies that a busy agent (no prompt visible)
+// gets a queued nudge instead of an immediate one.
+func TestNotifyRecipient_BusyAgent(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-busytest"
+
+	// Create a session running sleep — no prompt visible, simulating busy agent.
+	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 1 * time.Second, // short timeout for test speed
+	}
+
+	msg := &Message{
+		From:    "gastown/crew/sender",
+		To:      "gastown/crew/busytest",
+		Subject: "test busy delivery",
+	}
+
+	err := r.notifyRecipient(msg)
+	if err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+
+	// Verify the nudge was queued since the agent was busy.
+	pending, _ := nudge.Pending(townRoot, sessionName)
+	if pending != 1 {
+		t.Errorf("expected 1 queued nudge for busy agent, got %d", pending)
 	}
 }

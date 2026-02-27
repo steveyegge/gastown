@@ -29,7 +29,7 @@ var ErrUnknownAnnounce = errors.New("unknown announce channel")
 
 // DefaultIdleNotifyTimeout is how long the router waits for a recipient's
 // session to become idle before falling back to a queued nudge.
-const DefaultIdleNotifyTimeout = 1 * time.Second
+const DefaultIdleNotifyTimeout = 3 * time.Second
 
 // Router handles message delivery via beads.
 // It routes messages to the correct beads database based on address:
@@ -1556,24 +1556,14 @@ func (r *Router) notifyRecipient(msg *Message) error {
 
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
-		// Always enqueue mail notifications for cooperative delivery.
-		// Mail is not urgent enough to justify immediate NudgeSession,
-		// which risks a TOCTOU race: WaitForIdle may detect a brief
-		// inter-tool-call idle flash, then NudgeSession's Escape key
-		// disrupts the session that has resumed Cerebrating, leaving
-		// the notification text stuck in the input buffer with Enter
-		// never firing. See: https://github.com/steveyegge/gastown/issues/2032
-		if r.townRoot != "" {
-			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
-				Sender:  msg.From,
-				Message: notification,
-			})
-		}
-		// Fallback to idle-aware nudge if town root unavailable.
-		// This preserves the original behavior for edge cases where
-		// cooperative delivery isn't possible.
+		// Wait-idle-first delivery: try direct nudge if the agent is idle,
+		// fall back to cooperative queue if busy. The 3s timeout with 200ms
+		// polling (~15 polls) distinguishes a genuine idle prompt (persists
+		// indefinitely) from brief inter-tool-call gaps (~500ms).
+		// See: https://github.com/steveyegge/gastown/issues/2032
 		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
 		if waitErr == nil {
+			// Agent is idle — deliver directly for immediate wakeup.
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
 				return nil
 			} else if errors.Is(err, tmux.ErrSessionNotFound) {
@@ -1581,11 +1571,19 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			} else if errors.Is(err, tmux.ErrNoServer) {
 				return nil
 			}
-		} else if errors.Is(waitErr, tmux.ErrNoServer) {
-			return nil
 		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
 			continue
+		} else if errors.Is(waitErr, tmux.ErrNoServer) {
+			return nil
+		} else if r.townRoot != "" {
+			// Timeout (agent busy) — queue for cooperative delivery
+			// at the next turn boundary.
+			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+				Sender:  msg.From,
+				Message: notification,
+			})
 		}
+		// No town root available — last resort direct delivery.
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 
