@@ -308,7 +308,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	totalDeleted := 0
 	for {
 		// Get a batch of IDs to delete.
-		idQuery := fmt.Sprintf(
+		idQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 			"SELECT id FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? LIMIT %d",
 			dbName, deleteBatchSize)
 		idRows, err := db.QueryContext(ctx, idQuery, deleteCutoff)
@@ -343,7 +343,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 		// Delete from auxiliary tables first (foreign key safety).
 		auxTables := []string{"wisp_labels", "wisp_comments", "wisp_events", "wisp_dependencies"}
 		for _, tbl := range auxTables {
-			delAux := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE issue_id IN %s", dbName, tbl, inClause)
+			delAux := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE issue_id IN %s", dbName, tbl, inClause) //nolint:gosec // G201: dbName and tbl are internal constants, inClause is placeholders
 			if _, err := db.ExecContext(ctx, delAux, args...); err != nil {
 				// Log but continue — table might not exist in all databases.
 				d.logger.Printf("wisp_reaper: %s: delete from %s: %v", dbName, tbl, err)
@@ -351,7 +351,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 		}
 
 		// Delete the wisp rows themselves.
-		delWisps := fmt.Sprintf("DELETE FROM `%s`.wisps WHERE id IN %s", dbName, inClause)
+		delWisps := fmt.Sprintf("DELETE FROM `%s`.wisps WHERE id IN %s", dbName, inClause) //nolint:gosec // G201: dbName is an internal Dolt database name, inClause is placeholders
 		result, err := db.ExecContext(ctx, delWisps, args...)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("delete wisps batch: %w", err)
@@ -391,7 +391,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 
 	// Check if issues table exists (not all databases have it).
 	var dummy int
-	checkQuery := fmt.Sprintf("SELECT 1 FROM `%s`.issues LIMIT 1", dbName)
+	checkQuery := fmt.Sprintf("SELECT 1 FROM `%s`.issues LIMIT 1", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name
 	if err := db.QueryRowContext(ctx, checkQuery).Scan(&dummy); err != nil {
 		// Table doesn't exist or is empty — skip silently.
 		return 0, nil
@@ -400,7 +400,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 	// Find stale issue candidates: open >30 days, priority > 1 (exempt P0/P1),
 	// not epics, and not linked to any open issues via dependencies.
 	// We SELECT first (instead of blind UPDATE) so we can log each closure individually.
-	candidateQuery := fmt.Sprintf(
+	candidateQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 		`SELECT id, title, updated_at FROM `+"`%s`"+`.issues
 		WHERE status IN ('open', 'in_progress')
 		AND updated_at < ?
@@ -453,7 +453,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 	closed := 0
 	now := time.Now().UTC()
 	for _, c := range candidates {
-		closeQuery := fmt.Sprintf(
+		closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
 			dbName)
 		result, err := db.ExecContext(ctx, closeQuery, c.id)
@@ -476,7 +476,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 // Closes stale issues excluding epics and P0/P1, but cannot check dependencies.
 func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbName string, staleCutoff time.Time) (int, error) {
 	// Find candidates without dependency check.
-	candidateQuery := fmt.Sprintf(
+	candidateQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 		"SELECT id, title, updated_at FROM `%s`.issues WHERE status IN ('open', 'in_progress') AND updated_at < ? AND priority > 1 AND issue_type != 'epic'",
 		dbName)
 
@@ -495,7 +495,7 @@ func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbN
 			return closed, fmt.Errorf("scan candidate: %w", err)
 		}
 
-		closeQuery := fmt.Sprintf(
+		closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
 			dbName)
 		result, err := db.ExecContext(ctx, closeQuery, id)
