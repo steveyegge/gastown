@@ -20,6 +20,10 @@ Thumbs.db
 # Claude Code local state
 .claude/
 
+# Copilot CLI local state
+.copilot/
+.github/hooks/
+
 # Test
 coverage.out
 *.test

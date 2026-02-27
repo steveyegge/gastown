@@ -1366,6 +1366,38 @@ func isBeadsPath(path string) bool {
 	return strings.Contains(path, ".beads/") || strings.Contains(path, ".beads\\")
 }
 
+// isToolPath returns true if the path belongs to a known tool-generated directory.
+// These paths are created by development tools (Copilot CLI, beads) and should not
+// block operations like gt done.
+func isToolPath(path string) bool {
+	return isBeadsPath(path) ||
+		strings.HasPrefix(path, ".copilot/") || strings.HasPrefix(path, ".copilot\\") ||
+		strings.HasPrefix(path, ".github/hooks/") || strings.HasPrefix(path, ".github/hooks\\") ||
+		strings.HasPrefix(path, ".github\\hooks/") || strings.HasPrefix(path, ".github\\hooks\\")
+}
+
+// CleanExcludingToolFiles returns true if the only uncommitted changes are from
+// known tool-generated paths (.beads/, .copilot/, .github/hooks/).
+func (s *UncommittedWorkStatus) CleanExcludingToolFiles() bool {
+	if s.StashCount > 0 || s.UnpushedCommits > 0 {
+		return false
+	}
+
+	for _, f := range s.ModifiedFiles {
+		if !isToolPath(f) {
+			return false
+		}
+	}
+
+	for _, f := range s.UntrackedFiles {
+		if !isToolPath(f) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // String returns a human-readable summary of uncommitted work.
 func (s *UncommittedWorkStatus) String() string {
 	var issues []string
