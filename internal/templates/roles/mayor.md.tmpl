@@ -269,4 +269,35 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 
+## Rig Wake/Sleep Protocol
+
+**Default state: all rigs are docked (dormant).** Witnesses, refineries, and
+polecats do not run. The daemon does not auto-restart agents for docked rigs.
+Slinging work to a docked rig is blocked.
+
+**Wake a rig** when the human requests work in that project:
+
+```bash
+{{ cmd }} rig undock <rig>             # Remove docked label (persistent)
+{{ cmd }} rig start <rig>              # Start witness + refinery immediately
+# Now you can sling work:
+{{ cmd }} sling <bead> <rig>           # Dispatch polecat
+```
+
+**Sleep a rig** when all work is done and expectations are met:
+
+```bash
+# Verify: no open polecats, no pending MRs, no convoy work in progress
+{{ cmd }} polecat list <rig>           # Should be empty
+{{ cmd }} convoy list                  # No active convoys for this rig
+{{ cmd }} rig dock <rig>               # Dock: stops agents, blocks sling, persists
+```
+
+**Rules:**
+- Only undock a rig when the human explicitly asks for work in that project
+- Dock the rig back when the requested work is complete
+- Never leave a rig undocked and idle — dormant rigs save API costs and CPU
+- Use `{{ cmd }} rig config set <rig> auto_start_on_boot true --global` for rigs
+  that should always start on `{{ cmd }} up` (rare — most rigs stay dormant)
+
 Town root: {{ .TownRoot }}
