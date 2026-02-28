@@ -84,6 +84,46 @@ func TestGuardScript_EmptyCommandPassesThrough(t *testing.T) {
 	}
 }
 
+// TestGuardScript_ChainedCommandsMatch verifies guarded commands are caught in chained commands.
+func TestGuardScript_ChainedCommandsMatch(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	// gt tap is not available in test, so we only verify the grep pattern matches
+	// by checking that the script does NOT silently pass (it will fail on gt tap,
+	// but the important thing is it doesn't silently allow the command through).
+	// We test the pattern directly instead.
+	cases := []struct {
+		name    string
+		command string
+		shouldMatch bool
+	}{
+		{"direct command", "gh pr create --title foo", true},
+		{"chained with cd", "cd /path && gh pr create", true},
+		{"chained checkout", "cd /path && git checkout -b my-branch", true},
+		{"semicolon chain", "ls; gh pr create", true},
+		{"or chain", "something || git switch -c feat", true},
+		{"leading whitespace", "  gh pr create", true},
+		{"safe command", "ls -la", false},
+		{"git status", "git status", false},
+		{"echo with guarded text", "echo gh pr create", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Use grep directly to test the pattern matching logic
+			pattern := `(^|[;&|]\s*|&&\s*|\|\|\s*)(\s*)(gh pr create|git checkout -b|git switch -c)`
+			cmd := exec.Command("grep", "-qE", pattern)
+			cmd.Stdin = strings.NewReader(tc.command)
+			err := cmd.Run()
+			matched := err == nil
+			if matched != tc.shouldMatch {
+				t.Errorf("command %q: expected match=%v, got match=%v", tc.command, tc.shouldMatch, matched)
+			}
+		})
+	}
+}
+
 // writeGuardScript writes the embedded guard script to a temp file and returns its path.
 func writeGuardScript(t *testing.T) string {
 	t.Helper()

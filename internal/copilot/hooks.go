@@ -2,6 +2,7 @@
 package copilot
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -22,9 +23,9 @@ var guardScript []byte
 
 // hooksConfig is the top-level structure for Copilot CLI hooks.json files.
 type hooksConfig struct {
-	Version         int                    `json:"version"`
-	GastownManaged  bool                   `json:"x-gastown-managed"`
-	Hooks           map[string][]hookEntry `json:"hooks"`
+	Version        int                    `json:"version"`
+	GastownManaged bool                   `json:"x-gastown-managed"`
+	Hooks          map[string][]hookEntry `json:"hooks"`
 }
 
 // hookEntry represents a single hook entry in the hooks configuration.
@@ -51,6 +52,11 @@ func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 	} else {
 		templateData = hooksInteractiveJSON
 	}
+
+	// Template the guard script path using the actual hooksDir
+	guardRef := filepath.ToSlash(filepath.Join(hooksDir, "gastown-pretool-guard.sh"))
+	templateData = bytes.Replace(templateData,
+		[]byte(".github/hooks/gastown-pretool-guard.sh"), []byte(guardRef), -1)
 
 	// Validate the template is valid JSON
 	var config hooksConfig
