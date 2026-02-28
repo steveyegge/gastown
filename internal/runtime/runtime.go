@@ -39,7 +39,16 @@ func init() {
 			return err
 		}
 		// 2. Retain custom instructions (.copilot/copilot-instructions.md)
-		return copilot.EnsureSettingsAt(workDir, ".copilot", "copilot-instructions.md")
+		if err := copilot.EnsureSettingsAt(workDir, ".copilot", "copilot-instructions.md"); err != nil {
+			return err
+		}
+		// 3. Trust the town root so Copilot CLI doesn't prompt for workspace trust
+		if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+			if err := copilot.EnsureTownTrusted(townRoot); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	config.RegisterHookInstaller("omp", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
 		// OMP hooks stay in workDir — loaded via --hook flag.
