@@ -298,7 +298,7 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 			}
 
 			dag := buildConvoyDAG(beads, deps)
-			waves, err := computeWaves(dag)
+			waves, _, err := computeWaves(dag)
 			if err != nil {
 				return fmt.Errorf("compute waves for dispatch: %w", err)
 			}

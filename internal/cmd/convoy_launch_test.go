@@ -338,7 +338,7 @@ func TestDispatchWave1_AllDispatched(t *testing.T) {
 		"task-c": {ID: "task-c", Type: "task", Rig: "beads"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestDispatchWave1_ContinuesOnFailure(t *testing.T) {
 		"task-c": {ID: "task-c", Type: "task", Rig: "beads"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestRenderLaunchOutput_ConvoyIDAndMonitor(t *testing.T) {
 		"gt-task-1": {ID: "gt-task-1", Title: "Task One", Type: "task", Rig: "gastown"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestRenderLaunchOutput_DispatchedTasksWithRig(t *testing.T) {
 		"gt-task-2": {ID: "gt-task-2", Title: "Task Two", Type: "task", Rig: "beads"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestRenderLaunchOutput_TUIHint(t *testing.T) {
 		"gt-task-1": {ID: "gt-task-1", Title: "Task One", Type: "task", Rig: "gastown"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestRenderLaunchOutput_DaemonExplanation(t *testing.T) {
 	}}
 	dag.Nodes["gt-task-1"].Blocks = []string{"gt-task-2"}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestRenderLaunchOutput_Snapshot(t *testing.T) {
 		"gt-task-3": {ID: "gt-task-3", Title: "Task Three", Type: "task", Rig: "beads", BlockedBy: []string{"gt-task-1"}},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
@@ -679,7 +679,7 @@ func TestDispatchWave1_EndToEnd(t *testing.T) {
 	}
 
 	dag := buildConvoyDAG(beads, deps)
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
