@@ -282,7 +282,7 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// Install runtime settings in the shared crew parent directory.
 	// Settings are passed to Claude Code via --settings flag.
 	addTownRoot := filepath.Dir(m.rig.Path)
-	addRuntimeConfig := config.ResolveRoleAgentConfig("crew", addTownRoot, m.rig.Path)
+	addRuntimeConfig := config.ResolveWorkerAgentConfig(name, addTownRoot, m.rig.Path)
 	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(crewSettingsDir, crewPath, "crew", addRuntimeConfig); err != nil {
 		// Non-fatal - log warning but continue
@@ -679,7 +679,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Ensure runtime settings exist in the shared crew parent directory.
 	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
+	runtimeConfig := config.ResolveWorkerAgentConfig(name, townRoot, m.rig.Path)
 	crewSettingsDir := config.RoleSettingsDir("crew", m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(crewSettingsDir, worker.ClonePath, "crew", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
@@ -723,10 +723,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 
 		// Determine agent preset for resume flag.
-		// Try rig-level agent config first, fall back to "claude".
+		// Try worker-level agent config first, fall back to "claude".
 		agentName := opts.AgentOverride
 		if agentName == "" {
-			if rc := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
+			if rc := config.ResolveWorkerAgentConfig(name, townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
 				agentName = rc.Provider
 			} else {
 				agentName = "claude"
@@ -823,7 +823,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if !opts.Interactive {
 		agentName := opts.AgentOverride
 		if agentName == "" {
-			if rc := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
+			if rc := config.ResolveWorkerAgentConfig(name, townRoot, m.rig.Path); rc != nil && rc.Provider != "" {
 				agentName = rc.Provider
 			} else {
 				agentName = "claude"

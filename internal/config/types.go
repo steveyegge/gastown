@@ -578,6 +578,12 @@ type RigSettings struct {
 	// Overrides TownSettings.RoleAgents for this specific rig.
 	// Example: {"witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// WorkerAgents maps individual crew worker names to agent aliases.
+	// Allows per-worker agent selection, overriding RoleAgents["crew"].
+	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
+	// Example: {"denali": "codex", "glacier": "gemini"}
+	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
