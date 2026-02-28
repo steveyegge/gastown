@@ -27,6 +27,8 @@ var (
 	costsJSON    bool
 	costsToday   bool
 	costsWeek    bool
+	costsSince   string
+	costsHours   int
 	costsByRole  bool
 	costsByRig   bool
 	costsVerbose bool
@@ -57,6 +59,8 @@ Examples:
   gt costs              # Live costs from running sessions
   gt costs --today      # Today's costs from log file (not yet digested)
   gt costs --week       # This week's costs from digest beads + today's log
+  gt costs --since 4h   # Costs in the last 4 hours
+  gt costs --hours 1    # Costs in the last hour
   gt costs --by-role    # Breakdown by role (polecat, witness, etc.)
   gt costs --by-rig     # Breakdown by rig
   gt costs --json       # Output as JSON
@@ -133,6 +137,8 @@ func init() {
 	costsCmd.Flags().BoolVar(&costsJSON, "json", false, "Output as JSON")
 	costsCmd.Flags().BoolVar(&costsToday, "today", false, "Show today's total from session events")
 	costsCmd.Flags().BoolVar(&costsWeek, "week", false, "Show this week's total from session events")
+	costsCmd.Flags().StringVar(&costsSince, "since", "", "Show costs from the last duration (e.g. 30m, 4h, 1d)")
+	costsCmd.Flags().IntVar(&costsHours, "hours", 0, "Show costs from the last N hours")
 	costsCmd.Flags().BoolVar(&costsByRole, "by-role", false, "Show breakdown by role")
 	costsCmd.Flags().BoolVar(&costsByRig, "by-rig", false, "Show breakdown by rig")
 	costsCmd.Flags().BoolVarP(&costsVerbose, "verbose", "v", false, "Show debug output for failures")
@@ -197,8 +203,8 @@ type TranscriptMessage struct {
 
 // TranscriptMessageBody contains the message content and usage info.
 type TranscriptMessageBody struct {
-	Model string          `json:"model"`
-	Role  string          `json:"role"`
+	Model string           `json:"model"`
+	Role  string           `json:"role"`
 	Usage *TranscriptUsage `json:"usage,omitempty"`
 }
 
@@ -239,12 +245,20 @@ var modelPricing = map[string]struct {
 
 func runCosts(cmd *cobra.Command, args []string) error {
 	// If querying ledger, use ledger functions
-	if costsToday || costsWeek || costsByRole || costsByRig {
-		return runCostsFromLedger()
+	if costsToday || costsWeek || costsByRole || costsByRig || strings.TrimSpace(costsSince) != "" || costsHoursFlagChanged(cmd) {
+		return runCostsFromLedger(cmd)
 	}
 
 	// Default: show live costs from running sessions
 	return runLiveCosts()
+}
+
+func costsHoursFlagChanged(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return costsHours > 0
+	}
+	flag := cmd.Flags().Lookup("hours")
+	return flag != nil && flag.Changed
 }
 
 func runLiveCosts() error {
@@ -316,12 +330,23 @@ func runLiveCosts() error {
 	return outputCostsHuman(costs, total)
 }
 
-func runCostsFromLedger() error {
+func runCostsFromLedger(cmd *cobra.Command) error {
 	now := time.Now()
 	var entries []CostEntry
 	var err error
 
-	if costsToday {
+	lookbackCutoff, lookbackPeriod, hasLookback, err := resolveCostsLookback(cmd, now)
+	if err != nil {
+		return err
+	}
+
+	if hasLookback {
+		// --since/--hours queries local session cost logs by precise timestamp.
+		entries, err = querySessionCostEntriesSince(lookbackCutoff)
+		if err != nil {
+			return fmt.Errorf("querying session cost entries since %s: %w", lookbackCutoff.Format(time.RFC3339), err)
+		}
+	} else if costsToday {
 		// For today: query ephemeral wisps (not yet digested)
 		// This gives real-time view of today's costs
 		entries, err = querySessionCostEntries(now)
@@ -383,7 +408,9 @@ func runCostsFromLedger() error {
 	}
 
 	// Set period label
-	if costsToday {
+	if hasLookback {
+		output.Period = lookbackPeriod
+	} else if costsToday {
 		output.Period = "today"
 	} else if costsWeek {
 		output.Period = "this week"
@@ -394,6 +421,47 @@ func runCostsFromLedger() error {
 	}
 
 	return outputLedgerHuman(output, entries)
+}
+
+func resolveCostsLookback(cmd *cobra.Command, now time.Time) (time.Time, string, bool, error) {
+	since := strings.TrimSpace(costsSince)
+	hoursChanged := costsHoursFlagChanged(cmd)
+
+	if since != "" && hoursChanged {
+		return time.Time{}, "", false, fmt.Errorf("--since and --hours are mutually exclusive")
+	}
+	if (since != "" || hoursChanged) && (costsToday || costsWeek) {
+		return time.Time{}, "", false, fmt.Errorf("--since/--hours cannot be combined with --today or --week")
+	}
+
+	if since != "" {
+		dur, err := parseCostsSinceDuration(since)
+		if err != nil {
+			return time.Time{}, "", false, fmt.Errorf("invalid --since value %q: %w", since, err)
+		}
+		return now.Add(-dur), "last " + krcFormatDuration(dur), true, nil
+	}
+
+	if hoursChanged {
+		if costsHours <= 0 {
+			return time.Time{}, "", false, fmt.Errorf("--hours must be greater than 0")
+		}
+		dur := time.Duration(costsHours) * time.Hour
+		return now.Add(-dur), "last " + krcFormatDuration(dur), true, nil
+	}
+
+	return time.Time{}, "", false, nil
+}
+
+func parseCostsSinceDuration(raw string) (time.Duration, error) {
+	dur, err := krcParseDuration(strings.ToLower(strings.TrimSpace(raw)))
+	if err != nil {
+		return 0, err
+	}
+	if dur <= 0 {
+		return 0, fmt.Errorf("duration must be greater than 0")
+	}
+	return dur, nil
 }
 
 // SessionEvent represents a session.ended event from beads.
@@ -1269,6 +1337,53 @@ func querySessionCostEntries(targetDate time.Time) ([]CostEntry, error) {
 
 		// Filter by target date
 		if logEntry.EndedAt.Format("2006-01-02") != targetDay {
+			continue
+		}
+
+		entries = append(entries, CostEntry{
+			SessionID: logEntry.SessionID,
+			Role:      logEntry.Role,
+			Rig:       logEntry.Rig,
+			Worker:    logEntry.Worker,
+			CostUSD:   logEntry.CostUSD,
+			EndedAt:   logEntry.EndedAt,
+			WorkItem:  logEntry.WorkItem,
+		})
+	}
+
+	return entries, nil
+}
+
+// querySessionCostEntriesSince reads session cost entries from the local log file
+// and returns entries whose ended_at timestamp is within the requested window.
+func querySessionCostEntriesSince(cutoff time.Time) ([]CostEntry, error) {
+	logPath := getCostsLogPath()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading costs log: %w", err)
+	}
+
+	var entries []CostEntry
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var logEntry CostLogEntry
+		if err := json.Unmarshal([]byte(line), &logEntry); err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] failed to parse log entry: %v\n", err)
+			}
+			continue
+		}
+
+		if logEntry.EndedAt.Before(cutoff) {
 			continue
 		}
 

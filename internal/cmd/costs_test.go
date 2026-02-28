@@ -3,9 +3,12 @@ package cmd
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -17,6 +20,43 @@ func setupCostsTestRegistry(t *testing.T) {
 	old := session.DefaultRegistry()
 	session.SetDefaultRegistry(reg)
 	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+}
+
+func setupCostsFlagState(t *testing.T) *cobra.Command {
+	t.Helper()
+
+	oldJSON := costsJSON
+	oldToday := costsToday
+	oldWeek := costsWeek
+	oldSince := costsSince
+	oldHours := costsHours
+	oldByRole := costsByRole
+	oldByRig := costsByRig
+	oldVerbose := costsVerbose
+
+	costsJSON = false
+	costsToday = false
+	costsWeek = false
+	costsSince = ""
+	costsHours = 0
+	costsByRole = false
+	costsByRig = false
+	costsVerbose = false
+
+	t.Cleanup(func() {
+		costsJSON = oldJSON
+		costsToday = oldToday
+		costsWeek = oldWeek
+		costsSince = oldSince
+		costsHours = oldHours
+		costsByRole = oldByRole
+		costsByRig = oldByRig
+		costsVerbose = oldVerbose
+	})
+
+	cmd := &cobra.Command{Use: "costs-test"}
+	cmd.Flags().IntVar(&costsHours, "hours", 0, "")
+	return cmd
 }
 
 func TestDeriveSessionName(t *testing.T) {
@@ -290,5 +330,119 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 	}
 	if len(asDigest.ByRole) != 3 {
 		t.Errorf("by_role should have 3 entries, got %d", len(asDigest.ByRole))
+	}
+}
+
+func TestResolveCostsLookback_Since(t *testing.T) {
+	cmd := setupCostsFlagState(t)
+	costsSince = "30m"
+
+	now := time.Date(2026, time.February, 28, 12, 0, 0, 0, time.UTC)
+	cutoff, period, hasLookback, err := resolveCostsLookback(cmd, now)
+	if err != nil {
+		t.Fatalf("resolveCostsLookback returned error: %v", err)
+	}
+	if !hasLookback {
+		t.Fatalf("expected hasLookback=true")
+	}
+	if !cutoff.Equal(now.Add(-30 * time.Minute)) {
+		t.Fatalf("cutoff = %s, want %s", cutoff, now.Add(-30*time.Minute))
+	}
+	if period != "last 30m" {
+		t.Fatalf("period = %q, want %q", period, "last 30m")
+	}
+}
+
+func TestResolveCostsLookback_Hours(t *testing.T) {
+	cmd := setupCostsFlagState(t)
+	if err := cmd.Flags().Set("hours", "4"); err != nil {
+		t.Fatalf("setting --hours: %v", err)
+	}
+
+	now := time.Date(2026, time.February, 28, 12, 0, 0, 0, time.UTC)
+	cutoff, period, hasLookback, err := resolveCostsLookback(cmd, now)
+	if err != nil {
+		t.Fatalf("resolveCostsLookback returned error: %v", err)
+	}
+	if !hasLookback {
+		t.Fatalf("expected hasLookback=true")
+	}
+	if !cutoff.Equal(now.Add(-4 * time.Hour)) {
+		t.Fatalf("cutoff = %s, want %s", cutoff, now.Add(-4*time.Hour))
+	}
+	if period != "last 4h" {
+		t.Fatalf("period = %q, want %q", period, "last 4h")
+	}
+}
+
+func TestResolveCostsLookback_MutualExclusion(t *testing.T) {
+	cmd := setupCostsFlagState(t)
+	costsSince = "1h"
+	if err := cmd.Flags().Set("hours", "2"); err != nil {
+		t.Fatalf("setting --hours: %v", err)
+	}
+
+	_, _, _, err := resolveCostsLookback(cmd, time.Now())
+	if err == nil {
+		t.Fatal("expected error for --since with --hours")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %q, expected mutually exclusive", err.Error())
+	}
+}
+
+func TestQuerySessionCostEntriesSince(t *testing.T) {
+	setupCostsFlagState(t)
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	logDir := filepath.Join(homeDir, ".gt")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("creating log dir: %v", err)
+	}
+
+	now := time.Date(2026, time.February, 28, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-1 * time.Hour)
+	logEntries := []CostLogEntry{
+		{SessionID: "s-old", Role: "crew", CostUSD: 1.0, EndedAt: now.Add(-90 * time.Minute)},
+		{SessionID: "s-boundary", Role: "witness", CostUSD: 2.0, EndedAt: cutoff},
+		{SessionID: "s-new", Role: "polecat", CostUSD: 3.0, EndedAt: now.Add(-5 * time.Minute)},
+	}
+
+	var lines []string
+	for _, entry := range logEntries {
+		b, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("marshaling entry: %v", err)
+		}
+		lines = append(lines, string(b))
+	}
+	lines = append(lines, "{not-json")
+
+	logPath := filepath.Join(logDir, "costs.jsonl")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing log file: %v", err)
+	}
+
+	entries, err := querySessionCostEntriesSince(cutoff)
+	if err != nil {
+		t.Fatalf("querySessionCostEntriesSince returned error: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+
+	got := map[string]bool{}
+	for _, entry := range entries {
+		got[entry.SessionID] = true
+	}
+	if !got["s-boundary"] || !got["s-new"] {
+		t.Fatalf("expected s-boundary and s-new, got %+v", got)
+	}
+	if got["s-old"] {
+		t.Fatalf("did not expect s-old in results")
 	}
 }
