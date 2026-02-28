@@ -2,7 +2,6 @@ package style
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -58,15 +57,15 @@ func TestPrefixVariables(t *testing.T) {
 }
 
 func TestPrintWarning(t *testing.T) {
-	// Capture stdout
-	oldStdout := os.Stdout
+	// Capture stderr (PrintWarning writes to stderr, not stdout)
+	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintWarning("test warning: %s", "value")
 
 	w.Close()
-	os.Stdout = oldStdout
+	os.Stderr = oldStderr
 
 	// Read captured output
 	var buf bytes.Buffer
@@ -74,7 +73,7 @@ func TestPrintWarning(t *testing.T) {
 	output := buf.String()
 
 	if output == "" {
-		t.Error("PrintWarning() should produce output")
+		t.Error("PrintWarning() should produce output on stderr")
 	}
 
 	// Check that warning message is present
@@ -84,25 +83,54 @@ func TestPrintWarning(t *testing.T) {
 }
 
 func TestPrintWarning_NoFormatArgs(t *testing.T) {
-	oldStdout := os.Stdout
+	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintWarning("simple warning")
 
 	w.Close()
-	os.Stdout = oldStdout
+	os.Stderr = oldStderr
 
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	output := buf.String()
 
 	if output == "" {
-		t.Error("PrintWarning() should produce output")
+		t.Error("PrintWarning() should produce output on stderr")
 	}
 
 	if !bytes.Contains(buf.Bytes(), []byte("simple warning")) {
 		t.Error("PrintWarning() output should contain the message")
+	}
+}
+
+func TestPrintWarning_DoesNotWriteStdout(t *testing.T) {
+	// Verify PrintWarning does NOT write to stdout (prevents JSON contamination)
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+
+	stdoutR, stdoutW, _ := os.Pipe()
+	stderrR, stderrW, _ := os.Pipe()
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+
+	PrintWarning("should go to stderr only")
+
+	stdoutW.Close()
+	stderrW.Close()
+	os.Stdout = oldStdout
+	os.Stderr = oldStderr
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	io.Copy(&stdoutBuf, stdoutR)
+	io.Copy(&stderrBuf, stderrR)
+
+	if stdoutBuf.Len() > 0 {
+		t.Errorf("PrintWarning() must not write to stdout (got %q), it contaminates JSON output", stdoutBuf.String())
+	}
+	if stderrBuf.Len() == 0 {
+		t.Error("PrintWarning() should write to stderr")
 	}
 }
 
@@ -132,17 +160,17 @@ func TestStyles_RenderConsistently(t *testing.T) {
 }
 
 func TestMultiplePrintWarning(t *testing.T) {
-	// Test that multiple warnings can be printed
-	oldStdout := os.Stdout
+	// Test that multiple warnings can be printed to stderr
+	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	for i := 0; i < 3; i++ {
 		PrintWarning("warning %d", i)
 	}
 
 	w.Close()
-	os.Stdout = oldStdout
+	os.Stderr = oldStderr
 
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
@@ -162,8 +190,9 @@ func TestMultiplePrintWarning(t *testing.T) {
 }
 
 func ExamplePrintWarning() {
-	// This example demonstrates PrintWarning usage
-	fmt.Print("Example output:\n")
+	// PrintWarning writes to stderr (not stdout) to avoid contaminating
+	// structured output like JSON. This example demonstrates usage;
+	// output appears on stderr, not in the example output below.
 	PrintWarning("This is a warning message")
 	PrintWarning("Warning with value: %d", 42)
 }

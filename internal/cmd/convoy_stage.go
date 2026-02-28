@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -1081,8 +1082,9 @@ func renderWaveTable(waves []Wave, dag *ConvoyDAG) string {
 			}
 
 			title := node.Title
-			if len(title) > 28 {
-				title = title[:28] + ".."
+			if utf8.RuneCountInString(title) > 28 {
+				runes := []rune(title)
+				title = string(runes[:26]) + ".."
 			}
 
 			rig := node.Rig
