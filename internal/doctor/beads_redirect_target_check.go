@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,10 +174,10 @@ func (c *BeadsRedirectTargetCheck) Fix(ctx *CheckContext) error {
 		// written (e.g., due to a crash or interrupted setup).
 		if strings.Contains(bt.reason, "no beads setup") && dirExists(bt.resolvedPath) {
 			rigName := extractRigName(ctx.TownRoot, bt.worktreePath)
-			if err := beads.EnsureConfigYAMLFromMetadataIfMissing(bt.resolvedPath, rigName); err == nil {
-				if hasBeadsSetup(bt.resolvedPath) {
-					continue // Fixed — config.yaml created successfully
-				}
+			if err := beads.EnsureConfigYAMLFromMetadataIfMissing(bt.resolvedPath, rigName); err != nil {
+				log.Printf("[doctor] beads-redirect-target: could not create config.yaml from metadata in %s: %v", bt.resolvedPath, err)
+			} else if hasBeadsSetup(bt.resolvedPath) {
+				continue // Fixed — config.yaml created successfully
 			}
 		}
 
