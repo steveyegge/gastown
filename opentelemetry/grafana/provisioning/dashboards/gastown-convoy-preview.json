@@ -59,6 +59,41 @@
           "format": "table"
         }
       ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "priority" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
+                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
+                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
+                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
+                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "issue_type" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
+                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
+                  { "from": "task", "to": "task", "color": "green", "text": "task" },
+                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
+                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
+                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       "options": { "showHeader": true }
     },
     {
@@ -160,6 +195,37 @@
                     { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" },
                     { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}" }
                   ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "priority" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
+                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
+                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
+                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
+                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "issue_type" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
+                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
+                  { "from": "task", "to": "task", "color": "green", "text": "task" },
+                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
+                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
+                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                ]
               }
             ]
           }
