@@ -26,6 +26,74 @@ func (quotaLogger) Warn(format string, args ...interface{}) {
 	style.PrintWarning(format, args...)
 }
 
+// multiSocketClient aggregates tmux sessions from multiple sockets.
+// InitRegistry sets the town socket to "default" (-L default), but crew
+// sessions may have been created on the system default socket (no -L flag).
+// These are separate tmux servers with disjoint session lists. This client
+// scans both so quota doesn't silently miss sessions on the other socket.
+type multiSocketClient struct {
+	clients      []*ttmux.Tmux
+	sessionOwner map[string]*ttmux.Tmux // maps session name → client that owns it
+}
+
+// newMultiSocketClient creates a TmuxClient that scans both the town-scoped
+// socket and the system default socket, deduplicating by session name.
+func newMultiSocketClient() *multiSocketClient {
+	townSocket := ttmux.GetDefaultSocket()
+	clients := []*ttmux.Tmux{ttmux.NewTmuxWithSocket(townSocket)}
+	if townSocket != "" {
+		// Also scan the system default socket (no -L flag) for sessions
+		// that were created without the town socket flag.
+		clients = append(clients, ttmux.NewTmuxWithSocket(""))
+	}
+	return &multiSocketClient{clients: clients}
+}
+
+func (m *multiSocketClient) ListSessions() ([]string, error) {
+	m.sessionOwner = make(map[string]*ttmux.Tmux)
+	var sessions []string
+	for _, t := range m.clients {
+		ss, err := t.ListSessions()
+		if err != nil {
+			continue
+		}
+		for _, s := range ss {
+			if _, exists := m.sessionOwner[s]; !exists {
+				m.sessionOwner[s] = t
+				sessions = append(sessions, s)
+			}
+		}
+	}
+	if len(sessions) == 0 {
+		return nil, fmt.Errorf("no tmux sessions found on any socket")
+	}
+	return sessions, nil
+}
+
+func (m *multiSocketClient) CapturePane(session string, lines int) (string, error) {
+	if t, ok := m.sessionOwner[session]; ok {
+		return t.CapturePane(session, lines)
+	}
+	return "", fmt.Errorf("session %q not found on any socket", session)
+}
+
+func (m *multiSocketClient) GetEnvironment(session, key string) (string, error) {
+	if t, ok := m.sessionOwner[session]; ok {
+		return t.GetEnvironment(session, key)
+	}
+	return "", fmt.Errorf("session %q not found on any socket", session)
+}
+
+// ClientFor returns the *Tmux that owns a specific session. Used by rotation
+// operations that need a concrete Tmux (e.g., IsIdle, respawn-pane) and must
+// target the correct socket for the session being rotated.
+func (m *multiSocketClient) ClientFor(session string) *ttmux.Tmux {
+	if t, ok := m.sessionOwner[session]; ok {
+		return t
+	}
+	return m.clients[0]
+}
+
 // Quota command flags
 var (
 	quotaJSON bool
@@ -229,9 +297,9 @@ func runQuotaScan(cmd *cobra.Command, args []string) error {
 	acctCfg, loadErr := config.LoadAccountsConfig(accountsPath)
 	// acctCfg can be nil if no accounts configured — scan still works
 
-	// Create scanner
-	t := ttmux.NewTmux()
-	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	// Scan both the town socket and the system default socket.
+	// Sessions may live on either depending on how they were created.
+	scanner, err := quota.NewScanner(newMultiSocketClient(), nil, acctCfg)
 	if err != nil {
 		return fmt.Errorf("creating scanner: %w", err)
 	}
@@ -381,9 +449,9 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create scanner and plan rotation
-	t := ttmux.NewTmux()
-	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	// Scan both the town socket and the system default socket.
+	msClient := newMultiSocketClient()
+	scanner, err := quota.NewScanner(msClient, nil, acctCfg)
 	if err != nil {
 		return fmt.Errorf("creating scanner: %w", err)
 	}
@@ -451,7 +519,7 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	skippedBusy := 0
 	if rotateIdle {
 		for session := range plan.Assignments {
-			if !t.IsIdle(session) {
+			if !msClient.ClientFor(session).IsIdle(session) {
 				if !quotaJSON {
 					fmt.Printf(" %s %-25s %s\n",
 						style.Dim.Render("-"), session,
@@ -535,7 +603,7 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	var results []quota.RotateResult
 	for _, session := range sortedSessions {
 		newAccount := plan.Assignments[session]
-		result := executeKeychainRotation(t, mgr, acctCfg, session, newAccount, swappedConfigDirs)
+		result := executeKeychainRotation(msClient.ClientFor(session), mgr, acctCfg, session, newAccount, swappedConfigDirs)
 		results = append(results, result)
 
 		if !quotaJSON {
