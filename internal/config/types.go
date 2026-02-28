@@ -643,6 +643,10 @@ type RuntimeConfig struct {
 	// Default: "arg" for claude/generic, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
+	// PromptFlag is the CLI flag for delivering interactive prompts (e.g., "-i" for copilot).
+	// When set, BuildCommandWithPrompt uses this flag instead of a positional argument.
+	PromptFlag string `json:"prompt_flag,omitempty"`
+
 	// Session config controls environment integration for runtime session IDs.
 	Session *RuntimeSessionConfig `json:"session,omitempty"`
 
@@ -732,7 +736,8 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
-// For opencode, uses --prompt flag; for other agents, uses positional argument.
+// When PromptFlag is set, uses that flag (e.g., "-i" for copilot, "--prompt" for opencode).
+// Otherwise falls back to positional argument.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -747,10 +752,9 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// OpenCode requires --prompt flag for initial prompt in interactive mode.
-	// Positional argument causes opencode to exit immediately.
-	if resolved.Command == "opencode" {
-		return base + " --prompt " + quoteForShell(p)
+	// Use PromptFlag when set (e.g., copilot -i, opencode --prompt).
+	if resolved.PromptFlag != "" {
+		return base + " " + resolved.PromptFlag + " " + quoteForShell(p)
 	}
 
 	// Quote the prompt for shell safety (positional arg for claude and others)
@@ -768,7 +772,11 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		if resolved.PromptFlag != "" {
+			args = append(args, resolved.PromptFlag, p)
+		} else {
+			args = append(args, p)
+		}
 	}
 
 	return args

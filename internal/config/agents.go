@@ -97,6 +97,11 @@ type AgentPresetInfo struct {
 	// Defaults to "arg" if empty.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
+	// PromptFlag is the CLI flag for delivering interactive prompts (e.g., "-i" for copilot).
+	// When set, BuildCommandWithPrompt uses this flag instead of a positional argument.
+	// This is distinct from NonInteractive.PromptFlag which is for non-interactive mode.
+	PromptFlag string `json:"prompt_flag,omitempty"`
+
 	// ConfigDirEnv is the env var for the agent's config directory (e.g., "CLAUDE_CONFIG_DIR").
 	ConfigDirEnv string `json:"config_dir_env,omitempty"`
 
@@ -294,6 +299,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		// Runtime defaults
 		PromptMode:        "arg",
+		PromptFlag:        "--prompt", // opencode --prompt <text> for interactive prompt
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
 		HooksDir:          ".opencode/plugins",
@@ -316,6 +322,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		// Runtime defaults
 		PromptMode:         "arg",
+		PromptFlag:         "-i", // copilot -i <prompt> starts interactive mode with auto-execute
 		ConfigDir:          ".copilot",
 		HooksProvider:      "copilot",
 		HooksDir:           ".github/hooks",
