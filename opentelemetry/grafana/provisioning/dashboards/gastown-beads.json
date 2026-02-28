@@ -42,7 +42,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT rig, issue_type, COUNT(*) AS cnt FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY rig, issue_type ORDER BY rig, cnt DESC",
+          "rawSql": "SELECT rig, issue_type, COUNT(*) AS cnt FROM (SELECT 'hq' AS rig, issue_type, status FROM hq.issues UNION ALL SELECT 'sfgastown', issue_type, status FROM sfgastown.issues UNION ALL SELECT 'lora_forge', issue_type, status FROM lora_forge.issues UNION ALL SELECT 'sf_workflows', issue_type, status FROM sf_workflows.issues) t WHERE status NOT IN ('closed') GROUP BY rig, issue_type ORDER BY rig, cnt DESC",
           "format": "table"
         }
       ]
@@ -62,7 +62,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT status AS metric, COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY status ORDER BY value DESC",
+          "rawSql": "SELECT status AS metric, COUNT(*) AS value FROM (SELECT status FROM hq.issues UNION ALL SELECT status FROM sfgastown.issues UNION ALL SELECT status FROM lora_forge.issues UNION ALL SELECT status FROM sf_workflows.issues) t WHERE status NOT IN ('closed') GROUP BY status ORDER BY value DESC",
           "format": "table"
         }
       ],
@@ -88,7 +88,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT issue_type AS metric, COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY issue_type ORDER BY value DESC",
+          "rawSql": "SELECT issue_type AS metric, COUNT(*) AS value FROM (SELECT issue_type, status FROM hq.issues UNION ALL SELECT issue_type, status FROM sfgastown.issues UNION ALL SELECT issue_type, status FROM lora_forge.issues UNION ALL SELECT issue_type, status FROM sf_workflows.issues) t WHERE status NOT IN ('closed') GROUP BY issue_type ORDER BY value DESC",
           "format": "table"
         }
       ],
@@ -114,7 +114,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed')",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT status FROM hq.issues UNION ALL SELECT status FROM sfgastown.issues UNION ALL SELECT status FROM lora_forge.issues UNION ALL SELECT status FROM sf_workflows.issues) t WHERE status NOT IN ('closed')",
           "format": "table"
         }
       ],
@@ -154,7 +154,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'closed'",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT status FROM hq.issues UNION ALL SELECT status FROM sfgastown.issues UNION ALL SELECT status FROM lora_forge.issues UNION ALL SELECT status FROM sf_workflows.issues) t WHERE status = 'closed'",
           "format": "table"
         }
       ],
@@ -182,7 +182,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE issue_type = 'convoy' AND status NOT IN ('closed')",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT issue_type, status FROM hq.issues UNION ALL SELECT issue_type, status FROM sfgastown.issues UNION ALL SELECT issue_type, status FROM lora_forge.issues UNION ALL SELECT issue_type, status FROM sf_workflows.issues) t WHERE issue_type = 'convoy' AND status NOT IN ('closed')",
           "format": "table"
         }
       ]
@@ -202,7 +202,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_wisps",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT id FROM hq.wisps UNION ALL SELECT id FROM sfgastown.wisps UNION ALL SELECT id FROM lora_forge.wisps UNION ALL SELECT id FROM sf_workflows.wisps) t",
           "format": "table"
         }
       ]
@@ -222,7 +222,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'in_progress'",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT status FROM hq.issues UNION ALL SELECT status FROM sfgastown.issues UNION ALL SELECT status FROM lora_forge.issues UNION ALL SELECT status FROM sf_workflows.issues) t WHERE status = 'in_progress'",
           "format": "table"
         }
       ],
@@ -250,7 +250,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'hooked'",
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT status FROM hq.issues UNION ALL SELECT status FROM sfgastown.issues UNION ALL SELECT status FROM lora_forge.issues UNION ALL SELECT status FROM sf_workflows.issues) t WHERE status = 'hooked'",
           "format": "table"
         }
       ],
