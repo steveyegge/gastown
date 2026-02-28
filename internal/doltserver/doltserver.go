@@ -1000,6 +1000,8 @@ func Start(townRoot string) error {
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {
+			// Run post-start init SQL scripts (e.g. cross-rig views for Grafana).
+			runInitSQL(townRoot, config)
 			return nil // Server is up and accepting connections
 		} else {
 			lastErr = err
@@ -1007,6 +1009,48 @@ func Start(townRoot string) error {
 	}
 
 	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after 5s: %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, lastErr)
+}
+
+// runInitSQL executes SQL init scripts from opentelemetry/dolt/init/ if present.
+// These create cross-rig views used by Grafana dashboards. Errors are logged but
+// not fatal — dashboards degrade gracefully if views are missing.
+func runInitSQL(townRoot string, config *Config) {
+	// Look for init scripts in the sfgastown repo checkout.
+	patterns := []string{
+		filepath.Join(townRoot, "sfgastown", "mayor", "rig", "opentelemetry", "dolt", "init", "*.sql"),
+		filepath.Join(townRoot, "opentelemetry", "dolt", "init", "*.sql"),
+	}
+
+	var scripts []string
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) > 0 {
+			scripts = matches
+			break
+		}
+	}
+
+	if len(scripts) == 0 {
+		return
+	}
+
+	for _, script := range scripts {
+		data, err := os.ReadFile(script)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ Failed to read init script %s: %v\n", filepath.Base(script), err)
+			continue
+		}
+
+		cmd := exec.Command("mysql", "-h", "127.0.0.1", "-P", strconv.Itoa(config.Port), "-u", "root", "beads")
+		cmd.Stdin = bytes.NewReader(data)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ Init script %s failed: %v: %s\n", filepath.Base(script), err, stderr.String())
+		} else {
+			fmt.Fprintf(os.Stderr, "  ✓ Ran init script: %s\n", filepath.Base(script))
+		}
+	}
 }
 
 // cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.
