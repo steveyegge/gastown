@@ -701,39 +701,48 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 // ListAgentBeads returns all agent beads in a single query.
 // Returns a map of agent bead ID to Issue.
 //
-// Queries both the wisps table (primary, for migrated agent beads) and
-// the issues table (backward compat during migration). Wisps take
-// precedence for duplicate IDs.
+// Queries both the issues table (authoritative metadata source) and the
+// wisps table (fallback existence source). Issues take precedence for duplicate
+// IDs so labels/type are preserved for doctor validation.
 func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
-	result := make(map[string]*Issue)
-
-	// Query wisps table first (primary source after agent bead migration).
-	// Gracefully ignore errors — wisps table may not exist yet.
-	if wispBeads, _ := b.ListAgentBeadsFromWisps(); len(wispBeads) > 0 {
-		for id, issue := range wispBeads {
-			result[id] = issue
-		}
-	}
-
-	// Also query issues table (backward compat during migration).
+	// Query issues table first. Issues include labels and type metadata used by
+	// doctor checks (for example, validating gt:agent labels).
 	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
 	// Use --include-infra so they appear in results.
 	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json")
-	if err != nil && len(result) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	if err == nil {
-		var issues []*Issue
-		if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
-			for _, issue := range issues {
-				if _, exists := result[issue.ID]; !exists {
-					result[issue.ID] = issue
-				}
-			}
+	issuesByID := make(map[string]*Issue)
+	var issues []*Issue
+	if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
+		for _, issue := range issues {
+			issuesByID[issue.ID] = issue
 		}
 	}
 
-	return result, nil
+	// Query wisps table as a fallback source.
+	// Keep issues-table entries when both exist for the same ID so richer
+	// metadata (labels/type) is preserved.
+	wispBeads, _ := b.ListAgentBeadsFromWisps()
+
+	return mergeAgentBeadSources(issuesByID, wispBeads), nil
+}
+
+// mergeAgentBeadSources merges issue-backed and wisp-backed agent bead maps.
+// Issues are authoritative because they carry full metadata (labels/type),
+// while wisps are treated as a fallback existence source.
+func mergeAgentBeadSources(issuesByID, wispsByID map[string]*Issue) map[string]*Issue {
+	merged := make(map[string]*Issue, len(issuesByID)+len(wispsByID))
+	for id, issue := range issuesByID {
+		merged[id] = issue
+	}
+	for id, issue := range wispsByID {
+		if _, exists := merged[id]; !exists {
+			merged[id] = issue
+		}
+	}
+	return merged
 }
 
 // ListAgentBeadsFromWisps queries the wisps table for agent beads.
