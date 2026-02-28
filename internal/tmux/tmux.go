@@ -2011,13 +2011,22 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 // This allows clicking to select panes/windows, scrolling with mouse wheel,
 // and dragging to resize panes. Hold Shift for native terminal text selection.
 // Also enables clipboard integration so copied text goes to system clipboard.
+//
+// Respects the user's global mouse preference: if the global setting is "off",
+// mouse is not forced on for the session, so prefix+m toggles work correctly.
 func (t *Tmux) EnableMouseMode(session string) error {
+	// Check global mouse setting — respect user toggle (prefix+m)
+	out, err := t.run("show-options", "-gv", "mouse")
+	if err == nil && strings.TrimSpace(string(out)) == "off" {
+		// User has globally disabled mouse; don't override per-session
+		return nil
+	}
 	if _, err := t.run("set-option", "-t", session, "mouse", "on"); err != nil {
 		return err
 	}
 	// Enable clipboard integration with terminal (OSC 52)
 	// This allows copying text to system clipboard when selecting with mouse
-	_, err := t.run("set-option", "-t", session, "set-clipboard", "on")
+	_, err = t.run("set-option", "-t", session, "set-clipboard", "on")
 	return err
 }
 
