@@ -998,9 +998,11 @@ type AccountsConfig struct {
 
 // Account represents a single Claude Code account.
 type Account struct {
-	Email       string `json:"email"`                 // account email
-	Description string `json:"description,omitempty"` // human description
-	ConfigDir   string `json:"config_dir"`            // path to CLAUDE_CONFIG_DIR
+	Email         string `json:"email"`                    // account email
+	Description   string `json:"description,omitempty"`    // human description
+	ConfigDir     string `json:"config_dir"`               // path to CLAUDE_CONFIG_DIR
+	OrgID         string `json:"org_id,omitempty"`         // Claude org UUID for usage API (auto-extracted if empty)
+	SessionCookie string `json:"session_cookie,omitempty"` // Session cookie for usage API (falls back to keychain token)
 }
 
 // CurrentAccountsVersion is the current schema version for AccountsConfig.

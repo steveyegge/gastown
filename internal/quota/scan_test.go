@@ -416,3 +416,297 @@ func TestScanAll_ListSessionsError(t *testing.T) {
 		t.Error("expected error when ListSessions fails")
 	}
 }
+
+// --- Near-limit detection tests ---
+
+func TestScanAll_DetectsNearLimit_WarningPatterns(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "Working normally...\n85% of your daily usage consumed",
+			"gt-crew-wolf": "Working normally...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/personal"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/user/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/user/.claude-accounts/personal"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resultMap := make(map[string]ScanResult)
+	for _, r := range results {
+		resultMap[r.Session] = r
+	}
+
+	// bear should be near-limit (not hard-limited)
+	bear := resultMap["gt-crew-bear"]
+	if bear.RateLimited {
+		t.Error("expected gt-crew-bear to NOT be hard rate-limited")
+	}
+	if !bear.NearLimit {
+		t.Error("expected gt-crew-bear to be near-limit")
+	}
+	if bear.MatchedLine == "" {
+		t.Error("expected matched line for near-limit detection")
+	}
+
+	// wolf should be fine
+	wolf := resultMap["gt-crew-wolf"]
+	if wolf.RateLimited || wolf.NearLimit {
+		t.Error("expected gt-crew-wolf to have no limit signals")
+	}
+}
+
+func TestScanAll_HardLimitTakesPrecedence(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Session has both hard-limit and near-limit patterns.
+	// Hard limit should take precedence (NearLimit stays false).
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "85% of your daily usage consumed\nYou've hit your limit · resets 7pm (America/Los_Angeles)",
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !results[0].RateLimited {
+		t.Error("expected hard rate-limited")
+	}
+	if results[0].NearLimit {
+		t.Error("NearLimit should be false when hard rate-limited")
+	}
+}
+
+func TestScanAll_NearLimitVariousPatterns(t *testing.T) {
+	setupTestRegistry(t)
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"usage percentage", "90% of your usage limit", true},
+		{"approaching limit", "approaching your rate limit", true},
+		{"nearing limit", "nearing your limit", true},
+		{"close to limit", "close to your rate limit", true},
+		{"almost reached", "almost reached your rate limit", true},
+		{"messages remaining", "5 messages remaining", true},
+		{"requests left", "10 requests left", true},
+		{"usage at percentage", "usage is at 95%", true},
+		{"no warning", "Working on implementing feature X...", false},
+		{"single digit percentage", "5% of usage", false}, // only 2+ digit percentages
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmux := &mockTmux{
+				sessions: []string{"gt-crew-test"},
+				paneContent: map[string]string{
+					"gt-crew-test": tt.content,
+				},
+			}
+
+			scanner, err := NewScanner(tmux, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scanner.WithWarningPatterns(nil); err != nil {
+				t.Fatal(err)
+			}
+
+			results, err := scanner.ScanAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(results) != 1 {
+				t.Fatalf("expected 1 result, got %d", len(results))
+			}
+			if results[0].NearLimit != tt.want {
+				t.Errorf("NearLimit = %v, want %v for content %q", results[0].NearLimit, tt.want, tt.content)
+			}
+		})
+	}
+}
+
+// mockUsageChecker implements UsageChecker for testing.
+type mockUsageChecker struct {
+	usage map[string]*UsageInfo // orgID -> usage
+	err   error
+}
+
+func (m *mockUsageChecker) FetchUsage(orgID, _ string) (*UsageInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if u, ok := m.usage[orgID]; ok {
+		return u, nil
+	}
+	return nil, fmt.Errorf("no usage for org %s", orgID)
+}
+
+func TestScanAll_UsageAPIEnrichment(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "Working normally...",
+			"gt-crew-wolf": "Working normally...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/personal"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/user/.claude-accounts/work", OrgID: "org-work", SessionCookie: "cookie-work"},
+			"personal": {ConfigDir: "/home/user/.claude-accounts/personal", OrgID: "org-personal", SessionCookie: "cookie-personal"},
+		},
+	}
+
+	checker := &mockUsageChecker{
+		usage: map[string]*UsageInfo{
+			"org-work": {
+				FiveHour: &UsageWindow{Utilization: 85.0},
+				SevenDay: &UsageWindow{Utilization: 45.0},
+			},
+			"org-personal": {
+				FiveHour: &UsageWindow{Utilization: 30.0},
+				SevenDay: &UsageWindow{Utilization: 20.0},
+			},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner.WithUsageChecker(checker, 80.0)
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resultMap := make(map[string]ScanResult)
+	for _, r := range results {
+		resultMap[r.Session] = r
+	}
+
+	// bear (work) should be near-limit: 85% > 80% threshold
+	bear := resultMap["gt-crew-bear"]
+	if !bear.NearLimit {
+		t.Error("expected gt-crew-bear to be near-limit via usage API")
+	}
+	if bear.Usage == nil || bear.Usage.FiveHour == nil {
+		t.Fatal("expected usage data for gt-crew-bear")
+	}
+	if bear.Usage.FiveHour.Utilization != 85.0 {
+		t.Errorf("expected utilization 85.0, got %f", bear.Usage.FiveHour.Utilization)
+	}
+
+	// wolf (personal) should be fine: 30% < 80% threshold
+	wolf := resultMap["gt-crew-wolf"]
+	if wolf.NearLimit {
+		t.Error("expected gt-crew-wolf to NOT be near-limit")
+	}
+	if wolf.Usage == nil {
+		t.Error("expected usage data for gt-crew-wolf (even if below threshold)")
+	}
+}
+
+func TestScanAll_UsageAPIError_GracefulDegradation(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "Working normally...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work": {ConfigDir: "/home/user/.claude-accounts/work", OrgID: "org-work", SessionCookie: "cookie-work"},
+		},
+	}
+
+	// Usage API fails — should gracefully degrade (no panic, no near-limit)
+	checker := &mockUsageChecker{err: fmt.Errorf("network timeout")}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner.WithUsageChecker(checker, 80.0)
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].NearLimit {
+		t.Error("expected no near-limit when usage API fails")
+	}
+	if results[0].Usage != nil {
+		t.Error("expected no usage data when API fails")
+	}
+}
+
+func TestWithWarningPatterns_InvalidPattern(t *testing.T) {
+	scanner, err := NewScanner(&mockTmux{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = scanner.WithWarningPatterns([]string{"[invalid"})
+	if err == nil {
+		t.Error("expected error for invalid warning pattern")
+	}
+}

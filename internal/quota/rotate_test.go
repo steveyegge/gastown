@@ -32,7 +32,7 @@ func TestPlanRotation_NoLimitedSessions(t *testing.T) {
 	townRoot := setupTestTown(t)
 	mgr := NewManager(townRoot)
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestPlanRotation_AssignsAvailableAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestPlanRotation_NoAvailableAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestPlanRotation_SkipsSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestPlanRotation_MultipleLimitedSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestPlanRotation_ConfigDirGrouping_SameDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestPlanRotation_ConfigDirGrouping_DifferentDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestPlanRotation_MarksLimitedAccountsInState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestPlanRotation_DryRunReturnsValidPlan(t *testing.T) {
 
 	// PlanRotation returns a complete plan suitable for JSON serialization
 	// (used by --dry-run --json). Verify all fields are populated.
-	plan, err := PlanRotation(scanner, mgr, accounts, "")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +597,7 @@ func TestPlanRotation_PreemptiveFromAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "alpha")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{FromAccount: "alpha"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestPlanRotation_PreemptiveFromAccount_NoSessions(t *testing.T) {
 	townRoot := setupTestTown(t)
 	mgr := NewManager(townRoot)
 
-	plan, err := PlanRotation(scanner, mgr, accounts, "gamma")
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{FromAccount: "gamma"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,5 +659,155 @@ func TestPlanRotation_PreemptiveFromAccount_NoSessions(t *testing.T) {
 	}
 	if len(plan.Assignments) != 0 {
 		t.Errorf("expected 0 assignments, got %d", len(plan.Assignments))
+	}
+}
+
+// --- Near-limit proactive rotation tests ---
+
+func TestPlanRotation_IncludeNearLimit(t *testing.T) {
+	setupTestRegistry(t)
+
+	// bear is near-limit (warning pattern), wolf is fine
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "85% of your daily usage consumed",
+			"gt-crew-wolf": "working fine...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/personal"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/user/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/user/.claude-accounts/personal"},
+			"backup":   {ConfigDir: "/home/user/.claude-accounts/backup"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"work":     {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"personal": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+			"backup":   {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without IncludeNearLimit — near-limit sessions NOT included
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.LimitedSessions) != 0 {
+		t.Errorf("expected 0 hard-limited sessions, got %d", len(plan.LimitedSessions))
+	}
+	if len(plan.NearLimitSessions) != 1 {
+		t.Errorf("expected 1 near-limit session, got %d", len(plan.NearLimitSessions))
+	}
+	if len(plan.Assignments) != 0 {
+		t.Errorf("expected 0 assignments without IncludeNearLimit, got %d", len(plan.Assignments))
+	}
+
+	// With IncludeNearLimit — near-limit sessions ARE included
+	plan, err = PlanRotation(scanner, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.NearLimitSessions) != 1 {
+		t.Fatalf("expected 1 near-limit session, got %d", len(plan.NearLimitSessions))
+	}
+	if plan.NearLimitSessions[0].Session != "gt-crew-bear" {
+		t.Errorf("expected near-limit session gt-crew-bear, got %s", plan.NearLimitSessions[0].Session)
+	}
+	if len(plan.Assignments) != 1 {
+		t.Fatalf("expected 1 assignment with IncludeNearLimit, got %d", len(plan.Assignments))
+	}
+	newAccount := plan.Assignments["gt-crew-bear"]
+	if newAccount != "backup" {
+		t.Errorf("expected assignment to 'backup' (LRU), got %q", newAccount)
+	}
+}
+
+func TestPlanRotation_MixedHardAndNearLimit(t *testing.T) {
+	setupTestRegistry(t)
+
+	// bear is hard-limited, wolf is near-limit
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+			"gt-crew-wolf": "90% of your daily usage consumed",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+			"delta": {ConfigDir: "/home/user/.claude-accounts/delta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+			"gamma": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"delta": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T04:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both hard-limited and near-limited should be in the plan
+	if len(plan.LimitedSessions) != 1 {
+		t.Errorf("expected 1 hard-limited session, got %d", len(plan.LimitedSessions))
+	}
+	if len(plan.NearLimitSessions) != 1 {
+		t.Errorf("expected 1 near-limit session, got %d", len(plan.NearLimitSessions))
+	}
+
+	// Both should get assignments
+	if len(plan.Assignments) != 2 {
+		t.Fatalf("expected 2 assignments, got %d", len(plan.Assignments))
 	}
 }

@@ -288,6 +288,7 @@ func printScanJSON(results []quota.ScanResult) error {
 
 func printScanText(results []quota.ScanResult) error {
 	limited := 0
+	nearLimit := 0
 
 	for _, r := range results {
 		if r.RateLimited {
@@ -307,16 +308,42 @@ func printScanText(results []quota.ScanResult) error {
 				account,
 				resets,
 			)
+		} else if r.NearLimit {
+			nearLimit++
+			account := r.AccountHandle
+			if account == "" {
+				account = "(unknown)"
+			}
+			detail := ""
+			if r.Usage != nil {
+				detail = style.Dim.Render(fmt.Sprintf(" (%.0f%% utilization)", r.Usage.MaxUtilization()))
+			} else if r.MatchedLine != "" {
+				detail = style.Dim.Render(fmt.Sprintf(" (%s)", r.MatchedLine))
+			}
+			fmt.Printf(" %s %-25s %s %s%s\n",
+				style.Warning.Render("~"),
+				r.Session,
+				style.Dim.Render("account:"),
+				account,
+				detail,
+			)
 		}
 	}
 
-	if limited == 0 {
+	if limited == 0 && nearLimit == 0 {
 		fmt.Printf(" %s No rate-limited sessions detected (%d scanned)\n",
 			style.SuccessPrefix, len(results))
 	} else {
 		fmt.Println()
-		fmt.Printf(" %s %d of %d sessions rate-limited\n",
-			style.Warning.Render("Summary:"), limited, len(results))
+		parts := []string{}
+		if limited > 0 {
+			parts = append(parts, fmt.Sprintf("%d limited", limited))
+		}
+		if nearLimit > 0 {
+			parts = append(parts, fmt.Sprintf("%d near-limit", nearLimit))
+		}
+		fmt.Printf(" %s %s of %d sessions\n",
+			style.Warning.Render("Summary:"), strings.Join(parts, ", "), len(results))
 	}
 
 	return nil
@@ -389,7 +416,7 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	}
 
 	mgr := quota.NewManager(townRoot)
-	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, rotateFrom)
+	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{FromAccount: rotateFrom})
 	if err != nil {
 		return fmt.Errorf("planning rotation: %w", err)
 	}
@@ -765,6 +792,147 @@ func executeKeychainRotation(
 
 
 
+// Watch command flags
+var (
+	watchInterval  time.Duration
+	watchThreshold float64
+	watchDryRun    bool
+)
+
+var quotaWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Monitor sessions and rotate proactively before hard 429",
+	Long: `Continuously monitor sessions for approaching rate limits and rotate proactively.
+
+Polls all Gas Town sessions on the specified interval, checking for both
+hard rate limits and near-limit warning signals. Detection uses two methods:
+
+  1. Pane patterns: matches warning messages visible in tmux output
+  2. Usage API: queries Claude's usage endpoint for exact utilization %
+     (requires org_id in accounts.json or extractable from .claude.json)
+
+When a session is detected as approaching its limit, rotation is triggered
+before the hard 429 hits.
+
+Examples:
+  gt quota watch                      # Watch with default 5m interval
+  gt quota watch --interval 2m        # Custom interval
+  gt quota watch --threshold 90       # Rotate at 90% utilization
+  gt quota watch --dry-run            # Show detections without rotating`,
+	RunE: runQuotaWatch,
+}
+
+func runQuotaWatch(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	acctCfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return fmt.Errorf("no accounts configured: %w", err)
+	}
+	if len(acctCfg.Accounts) < 2 {
+		return fmt.Errorf("need at least 2 accounts for rotation (have %d)", len(acctCfg.Accounts))
+	}
+
+	fmt.Printf(" %s Watching for near-limit signals (interval: %s, threshold: %.0f%%)\n",
+		style.Info.Render("Watch:"), watchInterval, watchThreshold)
+	if watchDryRun {
+		fmt.Println(style.Dim.Render(" (dry run — detections only, no rotation)"))
+	}
+	fmt.Println()
+
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start, then on each tick
+	for {
+		runWatchCycle(townRoot, acctCfg)
+
+		<-ticker.C
+	}
+}
+
+func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
+	t := ttmux.NewTmux()
+	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	if err != nil {
+		style.PrintWarning("creating scanner: %v", err)
+		return
+	}
+
+	// Enable near-limit detection
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		style.PrintWarning("setting warning patterns: %v", err)
+		return
+	}
+
+	// Enable usage API if any accounts have credentials
+	usageClient := quota.NewHTTPUsageClient()
+	scanner.WithUsageChecker(usageClient, watchThreshold)
+
+	mgr := quota.NewManager(townRoot)
+	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		style.PrintWarning("planning rotation: %v", err)
+		return
+	}
+
+	// Report findings
+	now := time.Now().Format("15:04:05")
+	totalTargets := len(plan.LimitedSessions) + len(plan.NearLimitSessions)
+	if totalTargets == 0 {
+		fmt.Printf(" [%s] %s\n", style.Dim.Render(now), style.Dim.Render("all clear"))
+		return
+	}
+
+	for _, r := range plan.LimitedSessions {
+		fmt.Printf(" [%s] %s %-25s %s\n",
+			style.Dim.Render(now),
+			style.Error.Render("LIMITED"),
+			r.Session,
+			style.Dim.Render(r.AccountHandle))
+	}
+	for _, r := range plan.NearLimitSessions {
+		detail := ""
+		if r.Usage != nil {
+			detail = fmt.Sprintf(" (%.0f%%)", r.Usage.MaxUtilization())
+		}
+		fmt.Printf(" [%s] %s %-25s %s%s\n",
+			style.Dim.Render(now),
+			style.Warning.Render("NEAR"),
+			r.Session,
+			style.Dim.Render(r.AccountHandle),
+			style.Dim.Render(detail))
+	}
+
+	if watchDryRun || len(plan.Assignments) == 0 {
+		return
+	}
+
+	// Execute rotation
+	swappedConfigDirs := make(map[string]*quota.KeychainCredential)
+	for _, session := range slices.Sorted(maps.Keys(plan.Assignments)) {
+		newAccount := plan.Assignments[session]
+		result := executeKeychainRotation(t, mgr, acctCfg, session, newAccount, swappedConfigDirs)
+		if result.Rotated {
+			fmt.Printf(" [%s] %s %s → %s\n",
+				style.Dim.Render(now),
+				style.SuccessPrefix,
+				result.Session,
+				style.Success.Render(result.NewAccount))
+		} else if result.Error != "" {
+			fmt.Printf(" [%s] %s %s: %s\n",
+				style.Dim.Render(now),
+				style.ErrorPrefix,
+				result.Session,
+				result.Error)
+		}
+	}
+}
+
 func init() {
 	quotaStatusCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
 
@@ -776,10 +944,15 @@ func init() {
 	quotaRotateCmd.Flags().StringVar(&rotateFrom, "from", "", "Preemptively rotate sessions using this account")
 	quotaRotateCmd.Flags().BoolVar(&rotateIdle, "idle", false, "Only rotate sessions at the idle prompt (skip busy agents)")
 
+	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
+	quotaWatchCmd.Flags().Float64Var(&watchThreshold, "threshold", constants.DefaultUsageThreshold, "Usage % threshold for near-limit detection")
+	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
+
 	quotaCmd.AddCommand(quotaStatusCmd)
 	quotaCmd.AddCommand(quotaScanCmd)
 	quotaCmd.AddCommand(quotaRotateCmd)
 	quotaCmd.AddCommand(quotaClearCmd)
+	quotaCmd.AddCommand(quotaWatchCmd)
 
 	rootCmd.AddCommand(quotaCmd)
 }
