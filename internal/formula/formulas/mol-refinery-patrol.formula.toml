@@ -57,6 +57,8 @@ source of truth.
 | build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
+| judgment_enabled | false | Whether to run Guardian quality reviews (Phase 1: measurement-only) |
+| review_depth | standard | Quality review depth: quick, standard, deep |
 
 ## Target Resolution Rule
 
@@ -77,7 +79,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 7
+version = 8
 
 [vars]
 [vars.wisp_type]
@@ -123,6 +125,14 @@ default = "main"
 [vars.delete_merged_branches]
 description = "Whether to delete source branches after merge"
 default = "true"
+
+[vars.judgment_enabled]
+description = "Whether to run Guardian quality reviews on merge diffs (Phase 1: measurement-only)"
+default = "false"
+
+[vars.review_depth]
+description = "Quality review depth: quick, standard, or deep"
+default = "standard"
 
 [[steps]]
 id = "inbox-check"
@@ -347,9 +357,69 @@ If run_tests = "true":
 Track results: pass count, fail count, specific failures."""
 
 [[steps]]
+id = "quality-review"
+title = "Review merge diff quality"
+needs = ["run-tests"]
+description = """
+**Config: judgment_enabled = {{judgment_enabled}}**
+**Config: review_depth = {{review_depth}}**
+
+If judgment_enabled = "false": Skip this step. Proceed to handle-failures.
+
+This step is Phase 1 (measurement-only): scores are recorded but do NOT gate merges.
+You proceed to handle-failures regardless of the score.
+
+**Step 1: Get the merge diff**
+
+```bash
+git diff origin/<merge-target>...temp
+```
+
+Where `<merge-target>` is resolved using the **Target Resolution Rule** above.
+
+**Step 2: Review the diff**
+
+Review the diff for:
+- **Correctness**: Bugs, logic errors, missing edge cases, nil pointer risks
+- **Security**: Hardcoded secrets, injection vectors, auth bypasses, unsafe deserialization
+- **Clarity**: Confusing naming, missing context, unclear intent, dead code
+- **Style**: Inconsistent patterns, unnecessary complexity, convention violations
+
+Score the diff from 0.0 (terrible) to 1.0 (perfect).
+
+Choose a recommendation:
+- `approve` — no significant issues found
+- `request_changes` — significant issues that should be addressed
+
+Identify specific issues with severity (critical/major/minor/info), category
+(correctness/clarity/edge_case/security/style), description, file, and line number.
+
+**Step 3: Record the review**
+
+```bash
+gt judgment record --input '{"bead_id":"<mr-bead-id>","score":<score>,"recommendation":"<recommendation>","issues":[<issues-json>],"worker":"<polecat-name>","rig":"<rig>","duration_ms":<ms>,"model":"<review_depth>"}'
+```
+
+Example:
+```bash
+gt judgment record --input '{"bead_id":"gt-abc123","score":0.85,"recommendation":"approve","issues":[{"severity":"minor","category":"style","description":"Unused import","file":"main.go","line":3}],"worker":"polecat-Toast","rig":"myrig","duration_ms":5000,"model":"standard"}'
+```
+
+If `gt judgment record` fails, log the error and continue. Never block the merge flow.
+
+**Step 4: Note breach warnings**
+
+If score < 0.45 (breach threshold): Add a note to your merge summary that this branch
+had quality concerns. This does NOT block the merge in Phase 1.
+
+**IMPORTANT**: You (the Refinery agent) make the quality judgment. This is your assessment
+of the diff, not a delegation to an external tool. The `gt judgment record` command is
+purely for persisting your score so it can be tracked over time."""
+
+[[steps]]
 id = "handle-failures"
 title = "Handle quality check or test failures"
-needs = ["run-tests"]
+needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 
