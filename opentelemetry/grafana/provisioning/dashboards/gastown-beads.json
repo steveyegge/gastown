@@ -1,24 +1,45 @@
 {
   "uid": "gastown-beads",
   "title": "Gas Town Beads",
-  "tags": ["gastown", "beads"],
+  "tags": [
+    "gastown",
+    "beads"
+  ],
   "timezone": "browser",
   "refresh": "1m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 100,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
-      "options": { "mode": "markdown", "content": "## Cross-Rig Overview" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Cross-Rig Overview"
+      }
     },
     {
       "id": 1,
       "title": "Open Beads by Rig",
       "type": "barchart",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 2
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT rig, issue_type, COUNT(*) AS cnt FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY rig, issue_type ORDER BY rig, cnt DESC",
@@ -30,64 +51,135 @@
       "id": 2,
       "title": "Open Beads by Status (all rigs)",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 2
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT status AS metric, COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY status ORDER BY value DESC",
           "format": "table"
         }
       ],
-      "options": { "legend": { "displayMode": "table", "placement": "right" } }
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      }
     },
     {
       "id": 3,
       "title": "Open Beads by Type (all rigs)",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 2
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT issue_type AS metric, COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed') GROUP BY issue_type ORDER BY value DESC",
           "format": "table"
         }
       ],
-      "options": { "legend": { "displayMode": "table", "placement": "right" } }
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      }
     },
     {
       "id": 4,
       "title": "Total Open",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status NOT IN ('closed')",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color":"green","value":0},{"color":"yellow","value":200},{"color":"red","value":500}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 200
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        }
+      }
     },
     {
       "id": 5,
       "title": "Total Closed",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'closed'",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        }
+      }
     },
     {
       "id": 6,
       "title": "Active Convoys",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE issue_type = 'convoy' AND status NOT IN ('closed')",
@@ -99,8 +191,15 @@
       "id": 7,
       "title": "Wisps (all rigs)",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_wisps",
@@ -112,36 +211,71 @@
       "id": 8,
       "title": "In Progress",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'in_progress'",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        }
+      }
     },
     {
       "id": 9,
       "title": "Hooked",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 10 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 10
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM v_all_issues WHERE status = 'hooked'",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        }
+      }
     },
     {
       "id": 10,
       "title": "Beads Created Over Time (all rigs)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT DATE(created_at) AS time, rig, COUNT(*) AS value FROM (SELECT created_at, 'hq' AS rig FROM hq.issues UNION ALL SELECT created_at, 'sfgastown' FROM sfgastown.issues UNION ALL SELECT created_at, 'lora_forge' FROM lora_forge.issues UNION ALL SELECT created_at, 'sf_workflows' FROM sf_workflows.issues) t WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(created_at), rig ORDER BY time",
@@ -150,7 +284,13 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
         }
       }
     },
@@ -158,8 +298,15 @@
       "id": 11,
       "title": "Beads Closed Over Time (all rigs)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT DATE(closed_at) AS time, rig, COUNT(*) AS value FROM (SELECT closed_at, 'hq' AS rig FROM hq.issues WHERE closed_at IS NOT NULL UNION ALL SELECT closed_at, 'sfgastown' FROM sfgastown.issues WHERE closed_at IS NOT NULL UNION ALL SELECT closed_at, 'lora_forge' FROM lora_forge.issues WHERE closed_at IS NOT NULL UNION ALL SELECT closed_at, 'sf_workflows' FROM sf_workflows.issues WHERE closed_at IS NOT NULL) t WHERE closed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(closed_at), rig ORDER BY time",
@@ -168,8 +315,16 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } },
-          "color": { "mode": "palette-classic" }
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         }
       }
     },
@@ -177,8 +332,15 @@
       "id": 12,
       "title": "Created vs Closed per Rig (30d)",
       "type": "barchart",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT rig, SUM(created) AS created, SUM(closed) AS closed FROM (SELECT 'hq' AS rig, COUNT(*) AS created, 0 AS closed FROM hq.issues WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'hq', 0, COUNT(*) FROM hq.issues WHERE closed_at IS NOT NULL AND closed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'sfgastown', COUNT(*), 0 FROM sfgastown.issues WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'sfgastown', 0, COUNT(*) FROM sfgastown.issues WHERE closed_at IS NOT NULL AND closed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'lora_forge', COUNT(*), 0 FROM lora_forge.issues WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'lora_forge', 0, COUNT(*) FROM lora_forge.issues WHERE closed_at IS NOT NULL AND closed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'sf_workflows', COUNT(*), 0 FROM sf_workflows.issues WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) UNION ALL SELECT 'sf_workflows', 0, COUNT(*) FROM sf_workflows.issues WHERE closed_at IS NOT NULL AND closed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) t GROUP BY rig ORDER BY rig",
@@ -190,15 +352,30 @@
       "id": 101,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 30 },
-      "options": { "mode": "markdown", "content": "## Convoys (cross-rig)" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Convoys (cross-rig)"
+      }
     },
     {
       "id": 20,
       "title": "Active Convoys",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT rig, id, title, status, priority, assignee, created_at FROM (SELECT 'hq' AS rig, id, title, status, priority, assignee, created_at FROM hq.issues WHERE issue_type = 'convoy' UNION ALL SELECT 'sfgastown', id, title, status, priority, assignee, created_at FROM sfgastown.issues WHERE issue_type = 'convoy' UNION ALL SELECT 'lora_forge', id, title, status, priority, assignee, created_at FROM lora_forge.issues WHERE issue_type = 'convoy' UNION ALL SELECT 'sf_workflows', id, title, status, priority, assignee, created_at FROM sf_workflows.issues WHERE issue_type = 'convoy') t WHERE status NOT IN ('closed') ORDER BY priority ASC, created_at DESC",
@@ -208,35 +385,156 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "id" },
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
             "properties": [
               {
                 "id": "links",
                 "value": [
-                  { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}" },
-                    { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" },
-                  { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}" }
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}"
+                  },
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}"
+                  },
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "P0",
+                    "text": "P0",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P1",
+                    "text": "P1",
+                    "color": "orange"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P2",
+                    "text": "P2",
+                    "color": "yellow"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P3",
+                    "text": "P3",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P4",
+                    "text": "P4",
+                    "color": "grey"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "convoy",
+                    "text": "convoy",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "epic",
+                    "text": "epic",
+                    "color": "purple"
+                  },
+                  {
+                    "type": 1,
+                    "value": "task",
+                    "text": "task",
+                    "color": "green"
+                  },
+                  {
+                    "type": 1,
+                    "value": "bug",
+                    "text": "bug",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "feature",
+                    "text": "feature",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "agent",
+                    "text": "agent",
+                    "color": "orange"
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 102,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 40 },
-      "options": { "mode": "markdown", "content": "## Epics (cross-rig)" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Epics (cross-rig)"
+      }
     },
     {
       "id": 21,
       "title": "Active Epics",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT rig, id, title, status, priority, assignee, created_at FROM (SELECT 'hq' AS rig, id, title, status, priority, assignee, created_at FROM hq.issues WHERE issue_type = 'epic' UNION ALL SELECT 'sfgastown', id, title, status, priority, assignee, created_at FROM sfgastown.issues WHERE issue_type = 'epic' UNION ALL SELECT 'lora_forge', id, title, status, priority, assignee, created_at FROM lora_forge.issues WHERE issue_type = 'epic' UNION ALL SELECT 'sf_workflows', id, title, status, priority, assignee, created_at FROM sf_workflows.issues WHERE issue_type = 'epic') t WHERE status NOT IN ('closed') ORDER BY rig, priority ASC",
@@ -246,32 +544,152 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "id" },
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}" },
-                    { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" }]
+                "value": [
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}"
+                  },
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "P0",
+                    "text": "P0",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P1",
+                    "text": "P1",
+                    "color": "orange"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P2",
+                    "text": "P2",
+                    "color": "yellow"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P3",
+                    "text": "P3",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P4",
+                    "text": "P4",
+                    "color": "grey"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "convoy",
+                    "text": "convoy",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "epic",
+                    "text": "epic",
+                    "color": "purple"
+                  },
+                  {
+                    "type": 1,
+                    "value": "task",
+                    "text": "task",
+                    "color": "green"
+                  },
+                  {
+                    "type": 1,
+                    "value": "bug",
+                    "text": "bug",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "feature",
+                    "text": "feature",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "agent",
+                    "text": "agent",
+                    "color": "orange"
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 103,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 50 },
-      "options": { "mode": "markdown", "content": "## All Open Beads" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## All Open Beads"
+      }
     },
     {
       "id": 30,
       "title": "All Open Beads (all rigs)",
       "type": "table",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 52 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT rig, id, title, issue_type, status, priority, assignee, created_at FROM (SELECT 'hq' AS rig, id, title, issue_type, status, priority, assignee, created_at FROM hq.issues UNION ALL SELECT 'sfgastown', id, title, issue_type, status, priority, assignee, created_at FROM sfgastown.issues UNION ALL SELECT 'lora_forge', id, title, issue_type, status, priority, assignee, created_at FROM lora_forge.issues UNION ALL SELECT 'sf_workflows', id, title, issue_type, status, priority, assignee, created_at FROM sf_workflows.issues) t WHERE status NOT IN ('closed') ORDER BY priority ASC, created_at DESC LIMIT 100",
@@ -281,35 +699,156 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "id" },
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
             "properties": [
               {
                 "id": "links",
                 "value": [
-                    { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}" },
-                    { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" },
-                    { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}" }
-                  ]
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}"
+                  },
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}"
+                  },
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "P0",
+                    "text": "P0",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P1",
+                    "text": "P1",
+                    "color": "orange"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P2",
+                    "text": "P2",
+                    "color": "yellow"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P3",
+                    "text": "P3",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "P4",
+                    "text": "P4",
+                    "color": "grey"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": 1,
+                    "value": "convoy",
+                    "text": "convoy",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "epic",
+                    "text": "epic",
+                    "color": "purple"
+                  },
+                  {
+                    "type": 1,
+                    "value": "task",
+                    "text": "task",
+                    "color": "green"
+                  },
+                  {
+                    "type": 1,
+                    "value": "bug",
+                    "text": "bug",
+                    "color": "red"
+                  },
+                  {
+                    "type": 1,
+                    "value": "feature",
+                    "text": "feature",
+                    "color": "blue"
+                  },
+                  {
+                    "type": 1,
+                    "value": "agent",
+                    "text": "agent",
+                    "color": "orange"
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 104,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 64 },
-      "options": { "mode": "markdown", "content": "## Assignees & Labels" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Assignees & Labels"
+      }
     },
     {
       "id": 40,
       "title": "Top Assignees (all rigs)",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 66 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COALESCE(NULLIF(assignee, ''), 'unassigned') AS metric, COUNT(*) AS value FROM (SELECT assignee, status FROM hq.issues UNION ALL SELECT assignee, status FROM sfgastown.issues UNION ALL SELECT assignee, status FROM lora_forge.issues UNION ALL SELECT assignee, status FROM sf_workflows.issues) t WHERE status NOT IN ('closed') GROUP BY assignee ORDER BY value DESC LIMIT 15",
@@ -321,8 +860,15 @@
       "id": 41,
       "title": "Top Labels (all rigs)",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 66 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT label AS metric, COUNT(*) AS value FROM (SELECT l.label, i.status FROM hq.labels l JOIN hq.issues i ON l.issue_id = i.id UNION ALL SELECT l.label, i.status FROM sfgastown.labels l JOIN sfgastown.issues i ON l.issue_id = i.id UNION ALL SELECT l.label, i.status FROM lora_forge.labels l JOIN lora_forge.issues i ON l.issue_id = i.id UNION ALL SELECT l.label, i.status FROM sf_workflows.labels l JOIN sf_workflows.issues i ON l.issue_id = i.id) t WHERE status NOT IN ('closed') GROUP BY label ORDER BY value DESC LIMIT 20",
