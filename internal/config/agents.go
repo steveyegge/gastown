@@ -97,6 +97,11 @@ type AgentPresetInfo struct {
 	// Defaults to "arg" if empty.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
+	// PromptFlag is the CLI flag for delivering interactive prompts (e.g., "-i" for copilot).
+	// When set, BuildCommandWithPrompt uses this flag instead of a positional argument.
+	// This is distinct from NonInteractive.PromptFlag which is for non-interactive mode.
+	PromptFlag string `json:"prompt_flag,omitempty"`
+
 	// ConfigDirEnv is the env var for the agent's config directory (e.g., "CLAUDE_CONFIG_DIR").
 	ConfigDirEnv string `json:"config_dir_env,omitempty"`
 
@@ -117,6 +122,13 @@ type AgentPresetInfo struct {
 	// HooksInformational indicates hooks are instructions-only (not executable lifecycle hooks).
 	// For these providers, Gas Town sends startup fallback commands via nudge.
 	HooksInformational bool `json:"hooks_informational,omitempty"`
+
+	// NoHookStdoutInjection indicates that this agent's sessionStart hook stdout
+	// is NOT injected into LLM context (side-effect-only). When true, prime context
+	// must be inlined in the startup prompt instead.
+	// TODO: Remove once all agents inject sessionStart hook stdout into LLM context.
+	// See: https://github.com/github/copilot-cli/issues/1139
+	NoHookStdoutInjection bool `json:"no_hook_stdout_injection,omitempty"`
 
 	// ReadyPromptPrefix is the prompt prefix for tmux readiness detection (e.g., "❯ ").
 	// Empty means delay-based detection only.
@@ -298,6 +310,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		// Runtime defaults
 		PromptMode:        "arg",
+		PromptFlag:        "--prompt", // opencode --prompt <text> for interactive prompt
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
 		HooksDir:          ".opencode/plugins",
@@ -312,6 +325,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ProcessNames:        []string{"copilot"}, // Copilot CLI binary (Node.js but reports as "copilot")
 		SessionIDEnv:        "",                   // Session IDs stored on disk, not in env
 		ResumeFlag:          "--resume",
+		ContinueFlag:        "--continue",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true, // Copilot CLI native lifecycle hooks (.github/hooks/gastown.json)
 		SupportsForkSession: false,
@@ -320,11 +334,13 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		// Runtime defaults
 		PromptMode:         "arg",
+		PromptFlag:         "-i", // copilot -i <prompt> starts interactive mode with auto-execute
 		ConfigDir:          ".copilot",
 		HooksProvider:      "copilot",
 		HooksDir:           ".github/hooks",
 		HooksSettingsFile:  "gastown.json",
-		HooksInformational: false,
+		HooksInformational:    false,
+		NoHookStdoutInjection: true, // Copilot CLI sessionStart hook stdout is side-effect-only
 		ReadyPromptPrefix:  "❯ ",
 		ReadyDelayMs:       5000,
 		InstructionsFile:   "AGENTS.md",
@@ -591,6 +607,14 @@ func GetProcessNames(agentName string) []string {
 		return []string{"node", "claude"}
 	}
 	return info.ProcessNames
+}
+
+// NeedsInlinePrime returns true if the agent's sessionStart hook stdout is not
+// injected into LLM context, requiring prime context to be inlined in the
+// startup prompt instead.
+func NeedsInlinePrime(agentName string) bool {
+	info := GetAgentPresetByName(agentName)
+	return info != nil && info.NoHookStdoutInjection
 }
 
 // ResolveProcessNames determines the correct process names for liveness detection

@@ -74,3 +74,7 @@ result
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Built binaries
+gt-proxy-client
+gt-proxy-server

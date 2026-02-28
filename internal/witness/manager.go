@@ -297,6 +297,27 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		Sender:    "deacon",
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
+
+	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
+	// is injected into LLM context (currently side-effect-only).
+	// See: https://github.com/github/copilot-cli/issues/1139
+	resolvedAgent := agentOverride
+	if resolvedAgent == "" {
+		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
+		resolvedAgent = rc.ResolvedAgent
+	}
+	if config.NeedsInlinePrime(resolvedAgent) {
+		witnessDir := filepath.Join(rigPath, "witness", "rig")
+		primeEnv := map[string]string{
+			"GT_ROLE": "witness",
+			"GT_RIG":  rigName,
+			"GT_ROOT": townRoot,
+		}
+		if ctx := session.CapturePrimeContext(witnessDir, primeEnv); ctx != "" {
+			initialPrompt += "\n\n" + ctx
+		}
+	}
+
 	command, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
 		Role:        "witness",
 		Rig:         rigName,

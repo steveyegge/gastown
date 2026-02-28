@@ -2,9 +2,14 @@
 package session
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
+	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/cli"
 )
 
 // BeaconRecipient formats a human-readable, non-path-like recipient for the
@@ -127,4 +132,37 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 // so no separate propulsion nudge is needed.
 func BuildStartupPrompt(cfg BeaconConfig, instructions string) string {
 	return FormatStartupBeacon(cfg) + "\n\n" + instructions
+}
+
+// CapturePrimeContext runs `gt prime --dry-run` in the given working directory
+// and returns its stdout output. Used to inline prime context in the startup
+// prompt for agents whose sessionStart hook stdout is not injected into LLM
+// context (e.g., Copilot CLI).
+//
+// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
+// is injected into LLM context (currently side-effect-only).
+// See: https://github.com/github/copilot-cli/issues/1139
+//
+// The env map should contain role-identifying variables (GT_ROLE, GT_RIG,
+// GT_POLECAT, GT_ROOT) so gt prime can detect the correct role context.
+// --dry-run is used to avoid side effects (the sessionStart hook still runs
+// for side effects like session ID persistence).
+func CapturePrimeContext(workDir string, env map[string]string) string {
+	cmd := exec.Command(cli.Name(), "prime", "--dry-run")
+	cmd.Dir = workDir
+
+	// Inherit current environment, then overlay role-specific vars.
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
 }
