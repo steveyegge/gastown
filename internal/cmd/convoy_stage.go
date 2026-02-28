@@ -24,9 +24,15 @@ var convoyStageJSON bool
 // Set by `gt convoy stage --launch` or when `gt convoy launch` delegates to stage.
 var convoyStageLaunch bool
 
+// convoyStageTitle is an optional human-readable title for the staged convoy.
+// When empty, the title is derived from the input epic's title (for epic input)
+// or falls back to "Staged: N beads across M rigs".
+var convoyStageTitle string
+
 func init() {
 	convoyStageCmd.Flags().BoolVar(&convoyStageJSON, "json", false, "Output machine-readable JSON")
 	convoyStageCmd.Flags().BoolVar(&convoyStageLaunch, "launch", false, "Launch the convoy immediately after staging (transition to open)")
+	convoyStageCmd.Flags().StringVar(&convoyStageTitle, "title", "", "Human-readable title for the convoy (default: derived from epic title or auto-generated)")
 }
 
 // ---------------------------------------------------------------------------
@@ -312,11 +318,14 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 		fmt.Print(warnOutput)
 	}
 
+	// Step 14b: Resolve convoy title.
+	title := resolveConvoyTitle(convoyStageTitle, input, beadResults)
+
 	// Step 15: Create or update the staged convoy.
 	var convoyID string
 	if isRestage {
 		// Re-stage: update existing convoy in place.
-		if err := updateStagedConvoy(restageConvoyID, dag, waves, status); err != nil {
+		if err := updateStagedConvoy(restageConvoyID, dag, waves, status, title); err != nil {
 			return err
 		}
 		convoyID = restageConvoyID
@@ -324,7 +333,7 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 	} else {
 		// First stage: create a new convoy.
 		var err error
-		convoyID, err = createStagedConvoy(dag, waves, status)
+		convoyID, err = createStagedConvoy(dag, waves, status, title)
 		if err != nil {
 			return err
 		}
@@ -374,14 +383,17 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 	result.Status = status
 	result.Waves = buildWavesJSON(waves, dag)
 
+	// Resolve convoy title for JSON path.
+	title := resolveConvoyTitle(convoyStageTitle, input, nil)
+
 	if isRestage {
-		if err := updateStagedConvoy(restageConvoyID, dag, waves, status); err != nil {
+		if err := updateStagedConvoy(restageConvoyID, dag, waves, status, title); err != nil {
 			return err
 		}
 		result.ConvoyID = restageConvoyID
 		result.Restaged = true
 	} else {
-		convoyID, err := createStagedConvoy(dag, waves, status)
+		convoyID, err := createStagedConvoy(dag, waves, status, title)
 		if err != nil {
 			return err
 		}
@@ -559,13 +571,38 @@ func handleOverlappingConvoys(overlaps []overlappingConvoy) (bool, string, error
 	return true, staged[0].ID, nil
 }
 
+// resolveConvoyTitle determines the convoy title.
+// Priority: explicit --title flag > derived from epic title > auto-generated (empty).
+func resolveConvoyTitle(flagTitle string, input *StageInput, beadResults map[string]*bdShowResult) string {
+	if flagTitle != "" {
+		return flagTitle
+	}
+
+	// For epic input, derive from the epic's title.
+	if input.Kind == StageInputEpic && len(input.IDs) > 0 {
+		epicID := input.IDs[0]
+		if beadResults != nil {
+			if result, ok := beadResults[epicID]; ok && result.Title != "" {
+				return "Convoy: " + result.Title
+			}
+		}
+		// Fallback: fetch if beadResults not available (JSON path).
+		result, err := bdShow(epicID)
+		if err == nil && result.Title != "" {
+			return "Convoy: " + result.Title
+		}
+	}
+
+	return ""
+}
+
 // createStagedConvoy creates a convoy with the given staged status.
 // It generates a convoy ID, builds a title and description, then runs
 // `bd create` to create the convoy and `bd dep add` for each slingable bead.
 // Convoys live in the town HQ beads database (hq-cv-* prefix), so all bd
 // commands run against getTownBeadsDir(), matching gt convoy create behavior.
 // Returns the convoy ID.
-func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, error) {
+func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title string) (string, error) {
 	// Convoys live in the town HQ beads database.
 	townBeads, err := getTownBeadsDir()
 	if err != nil {
@@ -599,7 +636,9 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 	sort.Strings(slingableIDs)
 
 	// Build title and description.
-	title := fmt.Sprintf("Staged: %d beads across %d rigs", taskCount, rigCount)
+	if title == "" {
+		title = fmt.Sprintf("Staged: %d beads across %d rigs", taskCount, rigCount)
+	}
 	description := fmt.Sprintf("Staged convoy: %d tasks, %d waves. Staged at %s",
 		taskCount, len(waves), time.Now().UTC().Format(time.RFC3339))
 
@@ -643,7 +682,7 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string) (string, er
 // stale ones that are no longer in the DAG (e.g., tasks removed from the epic).
 // Convoy beads live in the town HQ beads database, so all bd commands
 // run against getTownBeadsDir().
-func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, status string) error {
+func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, status string, title string) error {
 	// Convoys live in the town HQ beads database.
 	townBeads, err := getTownBeadsDir()
 	if err != nil {
@@ -689,6 +728,15 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 		Dir(townBeads).WithAutoCommit().
 		CombinedOutput(); err != nil {
 		return fmt.Errorf("bd update %s --status: %w\noutput: %s", existingConvoyID, err, out)
+	}
+
+	// Update title if provided.
+	if title != "" {
+		if out, err := BdCmd("update", existingConvoyID, "--title="+title).
+			Dir(townBeads).WithAutoCommit().
+			CombinedOutput(); err != nil {
+			return fmt.Errorf("bd update %s --title: %w\noutput: %s", existingConvoyID, err, out)
+		}
 	}
 
 	// Update description with new wave count + timestamp.
