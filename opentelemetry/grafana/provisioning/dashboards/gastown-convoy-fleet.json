@@ -1,0 +1,381 @@
+{
+  "uid": "gastown-convoy-fleet",
+  "title": "Convoy Fleet",
+  "tags": [
+    "gastown",
+    "convoy",
+    "fleet"
+  ],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "All Convoys",
+      "type": "table",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT c.id, c.title, c.status, c.priority, COALESCE(NULLIF(c.assignee,''),'\u2014') AS owner, c.created_at, DATEDIFF(NOW(), c.created_at) AS age_days, (SELECT COUNT(*) FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks') AS tracked, (SELECT COUNT(*) FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks' AND SUBSTRING_INDEX(d.depends_on_id, ':', -1) IN (SELECT id FROM hq.issues WHERE status IN ('closed','completed'))) AS done, (SELECT COUNT(*) FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks' AND SUBSTRING_INDEX(d.depends_on_id, ':', -1) IN (SELECT id FROM hq.issues WHERE status = 'in_progress')) AS active, (SELECT GROUP_CONCAT(DISTINCT SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1) ORDER BY 1 SEPARATOR ', ') FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:%') AS rigs FROM hq.issues c WHERE c.issue_type = 'convoy' ORDER BY CASE WHEN c.status IN ('open','in_progress','staged_ready') THEN 0 ELSE 1 END, c.priority ASC, c.created_at DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Convoy Detail",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq&var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": {
+                        "color": "blue",
+                        "text": "open"
+                      },
+                      "in_progress": {
+                        "color": "orange",
+                        "text": "in_progress"
+                      },
+                      "closed": {
+                        "color": "green",
+                        "text": "closed"
+                      },
+                      "staged_ready": {
+                        "color": "purple",
+                        "text": "staged_ready"
+                      },
+                      "staged_warnings": {
+                        "color": "yellow",
+                        "text": "staged_warnings"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "status"
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "title": "Epics in Convoys",
+      "type": "table",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT c.id AS convoy, LEFT(c.title, 40) AS convoy_title, c.status AS convoy_status, SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1) AS rig, SUBSTRING_INDEX(d.depends_on_id, ':', -1) AS epic_id, i.title AS epic_title, i.status AS epic_status, i.priority FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE c.issue_type = 'convoy' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' AND i.issue_type = 'epic' UNION ALL SELECT c.id, LEFT(c.title, 40), c.status, SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1), SUBSTRING_INDEX(d.depends_on_id, ':', -1), i.title, i.status, i.priority FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE c.issue_type = 'convoy' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' AND i.issue_type = 'epic' UNION ALL SELECT c.id, LEFT(c.title, 40), c.status, SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1), SUBSTRING_INDEX(d.depends_on_id, ':', -1), i.title, i.status, i.priority FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id JOIN optuna.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE c.issue_type = 'convoy' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:optuna:%' AND i.issue_type = 'epic' UNION ALL SELECT c.id, LEFT(c.title, 40), c.status, SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1), SUBSTRING_INDEX(d.depends_on_id, ':', -1), i.title, i.status, i.priority FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE c.issue_type = 'convoy' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' AND i.issue_type = 'epic' UNION ALL SELECT c.id, LEFT(c.title, 40), c.status, SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1), SUBSTRING_INDEX(d.depends_on_id, ':', -1), i.title, i.status, i.priority FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id JOIN node0.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE c.issue_type = 'convoy' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:node0:%' AND i.issue_type = 'epic' ORDER BY convoy_status, priority ASC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "convoy"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Convoy Detail",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq&var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "epic_status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": {
+                        "color": "blue",
+                        "text": "open"
+                      },
+                      "in_progress": {
+                        "color": "orange",
+                        "text": "in_progress"
+                      },
+                      "closed": {
+                        "color": "green",
+                        "text": "closed"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 2,
+      "title": "Open",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.issues WHERE issue_type = 'convoy' AND status NOT IN ('closed','completed')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Closed (30d)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.issues WHERE issue_type = 'convoy' AND status IN ('closed','completed') AND updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Stale (>7d no progress)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.issues WHERE issue_type = 'convoy' AND status NOT IN ('closed','completed') AND updated_at < DATE_SUB(NOW(), INTERVAL 7 DAY)",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Total Beads in Flight",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id WHERE c.issue_type = 'convoy' AND c.status NOT IN ('closed','completed') AND d.type = 'tracks'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Avg Convoy Age (open, days)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(AVG(DATEDIFF(NOW(), created_at)), 1) AS value FROM hq.issues WHERE issue_type = 'convoy' AND status NOT IN ('closed','completed')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Rigs Touched",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 24
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(DISTINCT SUBSTRING_INDEX(SUBSTRING_INDEX(d.depends_on_id, ':', 2), ':', -1)) AS value FROM hq.dependencies d JOIN hq.issues c ON d.issue_id = c.id WHERE c.issue_type = 'convoy' AND c.status NOT IN ('closed','completed') AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:%'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "label": "Rig Database",
+        "type": "query",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": null,
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  }
+}

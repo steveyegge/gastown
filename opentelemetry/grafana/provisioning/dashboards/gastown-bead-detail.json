@@ -15,13 +15,19 @@
     "list": [
       {
         "name": "database",
-        "type": "custom",
-        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "type": "query",
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
         "includeAll": false,
         "current": {
           "text": "hq",
           "value": "hq"
-        }
+        },
+        "label": "Rig Database",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "refresh": 1,
+        "multi": false
       },
       {
         "name": "filter",
@@ -41,7 +47,7 @@
         "datasource": {
           "uid": "dolt-beads"
         },
-        "query": "SELECT id AS __value, CONCAT(LEFT(title, 70), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE deleted_at IS NULL AND ('${filter}' = 'all' OR issue_type = '${filter}') ORDER BY CASE WHEN status IN ('open','in_progress','hooked','ready') THEN 0 ELSE 1 END, updated_at DESC LIMIT 200",
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 70), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE ('${filter}' = 'all' OR issue_type = '${filter}') ORDER BY CASE WHEN status IN ('open','in_progress','hooked','ready') THEN 0 ELSE 1 END, updated_at DESC LIMIT 200",
         "refresh": 1,
         "includeAll": false
       }

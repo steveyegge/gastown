@@ -1,24 +1,42 @@
 {
   "uid": "gastown-convoy-preview",
   "title": "Convoy Preview",
-  "tags": ["gastown", "beads", "convoy"],
+  "tags": [
+    "gastown",
+    "beads",
+    "convoy"
+  ],
   "timezone": "browser",
   "refresh": "1m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "database",
-        "type": "custom",
-        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "type": "query",
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
         "includeAll": false,
-        "current": { "text": "hq", "value": "hq" }
+        "current": {
+          "text": "hq",
+          "value": "hq"
+        },
+        "label": "Rig Database",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "refresh": 1,
+        "multi": false
       },
       {
         "name": "convoy_id",
         "label": "Convoy",
         "type": "query",
-        "datasource": { "uid": "dolt-beads" },
+        "datasource": {
+          "uid": "dolt-beads"
+        },
         "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', status, ']') AS __text FROM ${database}.issues WHERE issue_type = 'convoy' ORDER BY CASE WHEN status LIKE 'staged%' THEN 0 WHEN status = 'open' THEN 1 WHEN status = 'in_progress' THEN 2 ELSE 3 END, priority ASC, created_at DESC",
         "refresh": 1,
         "includeAll": false
@@ -31,8 +49,15 @@
       "title": "Convoy Flow",
       "description": "Convoy and its tracked/child beads across rigs.",
       "type": "nodeGraph",
-      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "refId": "nodes",
@@ -51,57 +76,134 @@
       "id": 2,
       "title": "Convoy Summary",
       "type": "table",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
-          "rawSql": "SELECT id, title, status, priority, COALESCE(NULLIF(assignee,''),'—') AS owner, created_at, LEFT(description, 300) AS description FROM ${database}.issues WHERE id = '${convoy_id}'",
+          "rawSql": "SELECT id, title, status, priority, COALESCE(NULLIF(assignee,''),'\u2014') AS owner, created_at, LEFT(description, 300) AS description FROM ${database}.issues WHERE id = '${convoy_id}'",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "priority" },
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
-                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
-                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
-                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
-                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                  {
+                    "from": "0",
+                    "to": "0",
+                    "color": "red",
+                    "text": "P0"
+                  },
+                  {
+                    "from": "1",
+                    "to": "1",
+                    "color": "orange",
+                    "text": "P1"
+                  },
+                  {
+                    "from": "2",
+                    "to": "2",
+                    "color": "yellow",
+                    "text": "P2"
+                  },
+                  {
+                    "from": "3",
+                    "to": "3",
+                    "color": "blue",
+                    "text": "P3"
+                  },
+                  {
+                    "from": "4",
+                    "to": "4",
+                    "color": "grey",
+                    "text": "P4"
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "issue_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
-                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
-                  { "from": "task", "to": "task", "color": "green", "text": "task" },
-                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
-                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
-                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                  {
+                    "from": "convoy",
+                    "to": "convoy",
+                    "color": "red",
+                    "text": "convoy"
+                  },
+                  {
+                    "from": "epic",
+                    "to": "epic",
+                    "color": "purple",
+                    "text": "epic"
+                  },
+                  {
+                    "from": "task",
+                    "to": "task",
+                    "color": "green",
+                    "text": "task"
+                  },
+                  {
+                    "from": "bug",
+                    "to": "bug",
+                    "color": "red",
+                    "text": "bug"
+                  },
+                  {
+                    "from": "feature",
+                    "to": "feature",
+                    "color": "blue",
+                    "text": "feature"
+                  },
+                  {
+                    "from": "agent",
+                    "to": "agent",
+                    "color": "orange",
+                    "text": "agent"
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 3,
       "title": "Progress",
       "type": "gauge",
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('closed','completed') THEN 1 ELSE 0 END) / GREATEST(COUNT(*), 1), 1) AS value FROM (SELECT child.status FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%') t",
@@ -113,7 +215,26 @@
           "unit": "percent",
           "min": 0,
           "max": 100,
-          "thresholds": { "steps": [{"color":"red","value":0},{"color":"orange","value":25},{"color":"yellow","value":50},{"color":"green","value":75}] }
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 25
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          }
         }
       }
     },
@@ -121,8 +242,15 @@
       "id": 4,
       "title": "Tasks",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 3, "x": 6, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 6,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT (SELECT COUNT(*) FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child') + (SELECT COUNT(*) FROM ${database}.dependencies d WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks') AS value",
@@ -134,111 +262,239 @@
       "id": 5,
       "title": "Done",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 3, "x": 9, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 9,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM (SELECT child.status FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' AND child.status IN ('closed','completed') UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' AND i.status IN ('closed','completed') UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' AND i.status IN ('closed','completed') UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' AND i.status IN ('closed','completed') UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%' AND i.status IN ('closed','completed')) t",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      }
     },
     {
       "id": 6,
       "title": "In Progress",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 3, "x": 12, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 12,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM (SELECT child.status FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' AND child.status = 'in_progress' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' AND i.status = 'in_progress' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' AND i.status = 'in_progress' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' AND i.status = 'in_progress' UNION ALL SELECT i.status FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%' AND i.status = 'in_progress') t",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        }
+      }
     },
     {
       "id": 7,
       "title": "Blocked",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 3, "x": 15, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 15,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT COUNT(*) AS value FROM (SELECT child.id FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' AND child.id IN (SELECT issue_id FROM ${database}.blocked_issues) UNION ALL SELECT i.id FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' AND i.id IN (SELECT issue_id FROM hq.blocked_issues) UNION ALL SELECT i.id FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' AND i.id IN (SELECT issue_id FROM sfgastown.blocked_issues) UNION ALL SELECT i.id FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' AND i.id IN (SELECT issue_id FROM lora_forge.blocked_issues) UNION ALL SELECT i.id FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%' AND i.id IN (SELECT issue_id FROM sf_workflows.blocked_issues)) t",
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        }
+      }
     },
     {
       "id": 10,
       "title": "Child Beads (click ID to drill into graph)",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
-          "rawSql": "SELECT '${database}' AS rig, child.id, child.title, child.issue_type, child.status, child.priority, COALESCE(NULLIF(child.assignee,''),'—') AS assignee, child.created_at, LEFT(child.description, 200) AS description FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' UNION ALL SELECT 'hq', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' UNION ALL SELECT 'sfgastown', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' UNION ALL SELECT 'lora_forge', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' UNION ALL SELECT 'sf_workflows', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%' ORDER BY priority ASC, status DESC",
+          "rawSql": "SELECT '${database}' AS rig, child.id, child.title, child.issue_type, child.status, child.priority, COALESCE(NULLIF(child.assignee,''),'\u2014') AS assignee, child.created_at, LEFT(child.description, 200) AS description FROM ${database}.dependencies d JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.depends_on_id = '${convoy_id}' AND d.type = 'parent-child' UNION ALL SELECT 'hq', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN hq.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:hq:%' UNION ALL SELECT 'sfgastown', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN sfgastown.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sfgastown:%' UNION ALL SELECT 'lora_forge', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN lora_forge.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:lora_forge:%' UNION ALL SELECT 'sf_workflows', i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014'), i.created_at, LEFT(i.description, 200) FROM ${database}.dependencies d JOIN sf_workflows.issues i ON i.id = SUBSTRING_INDEX(d.depends_on_id, ':', -1) WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' AND d.depends_on_id LIKE 'external:sf_workflows:%' ORDER BY priority ASC, status DESC",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "id" },
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
             "properties": [
               {
                 "id": "links",
                 "value": [
-                    { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" },
-                    { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}" }
-                  ]
-              }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "priority" },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
-                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
-                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
-                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
-                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}"
+                  },
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${__data.fields.rig}&var-convoy_id=${__value.raw}"
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "issue_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
-                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
-                  { "from": "task", "to": "task", "color": "green", "text": "task" },
-                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
-                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
-                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                  {
+                    "from": "0",
+                    "to": "0",
+                    "color": "red",
+                    "text": "P0"
+                  },
+                  {
+                    "from": "1",
+                    "to": "1",
+                    "color": "orange",
+                    "text": "P1"
+                  },
+                  {
+                    "from": "2",
+                    "to": "2",
+                    "color": "yellow",
+                    "text": "P2"
+                  },
+                  {
+                    "from": "3",
+                    "to": "3",
+                    "color": "blue",
+                    "text": "P3"
+                  },
+                  {
+                    "from": "4",
+                    "to": "4",
+                    "color": "grey",
+                    "text": "P4"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "from": "convoy",
+                    "to": "convoy",
+                    "color": "red",
+                    "text": "convoy"
+                  },
+                  {
+                    "from": "epic",
+                    "to": "epic",
+                    "color": "purple",
+                    "text": "epic"
+                  },
+                  {
+                    "from": "task",
+                    "to": "task",
+                    "color": "green",
+                    "text": "task"
+                  },
+                  {
+                    "from": "bug",
+                    "to": "bug",
+                    "color": "red",
+                    "text": "bug"
+                  },
+                  {
+                    "from": "feature",
+                    "to": "feature",
+                    "color": "blue",
+                    "text": "feature"
+                  },
+                  {
+                    "from": "agent",
+                    "to": "agent",
+                    "color": "orange",
+                    "text": "agent"
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 11,
       "title": "Cross-Bead Dependencies (blocks / blocked-by)",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT blocker.id AS blocker_id, LEFT(blocker.title, 60) AS blocker_title, blocker.status AS blocker_status, d.type AS relationship, blocked.id AS blocked_id, LEFT(blocked.title, 60) AS blocked_title, blocked.status AS blocked_status FROM ${database}.dependencies d JOIN ${database}.issues blocker ON d.depends_on_id = blocker.id JOIN ${database}.issues blocked ON d.issue_id = blocked.id WHERE d.type = 'blocks' AND (d.issue_id IN (SELECT dd.issue_id FROM ${database}.dependencies dd WHERE dd.depends_on_id = '${convoy_id}' AND dd.type = 'parent-child') OR d.depends_on_id IN (SELECT dd.issue_id FROM ${database}.dependencies dd WHERE dd.depends_on_id = '${convoy_id}' AND dd.type = 'parent-child')) ORDER BY blocker.id",
@@ -248,26 +504,44 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "blocker_id" },
+            "matcher": {
+              "id": "byName",
+              "options": "blocker_id"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+                "value": [
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  }
+                ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "blocked_id" },
+            "matcher": {
+              "id": "byName",
+              "options": "blocked_id"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+                "value": [
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     }
   ],
   "schemaVersion": 39

@@ -1,24 +1,42 @@
 {
   "uid": "gastown-bead-graph",
   "title": "Gas Town Bead Graph",
-  "tags": ["gastown", "beads", "graph"],
+  "tags": [
+    "gastown",
+    "beads",
+    "graph"
+  ],
   "timezone": "browser",
   "refresh": "1m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "database",
-        "type": "custom",
-        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "type": "query",
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
         "includeAll": false,
-        "current": { "text": "hq", "value": "hq" }
+        "current": {
+          "text": "hq",
+          "value": "hq"
+        },
+        "label": "Rig Database",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "refresh": 1,
+        "multi": false
       },
       {
         "name": "root_bead",
         "label": "Bead",
         "type": "query",
-        "datasource": { "uid": "dolt-beads" },
+        "datasource": {
+          "uid": "dolt-beads"
+        },
         "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY CASE issue_type WHEN 'convoy' THEN 0 WHEN 'epic' THEN 1 ELSE 2 END, priority ASC, created_at DESC",
         "refresh": 1,
         "includeAll": false
@@ -31,8 +49,15 @@
       "title": "Dependency Graph",
       "description": "Select a database and optionally enter a root bead ID to filter. Nodes = beads, edges = dependencies (parent-child, blocks).",
       "type": "nodeGraph",
-      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "refId": "nodes",
@@ -51,69 +76,155 @@
       "id": 2,
       "title": "Bead Detail (select root bead above)",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
-          "rawSql": "SELECT i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—') AS assignee, i.created_at, COALESCE(NULLIF(i.created_by,''),'—') AS created_by, LEFT(i.description, 500) AS description, LEFT(i.design, 300) AS design, LEFT(i.acceptance_criteria, 300) AS acceptance_criteria, LEFT(i.notes, 300) AS notes FROM ${database}.issues i WHERE ('${root_bead}' = '' OR i.id = '${root_bead}' OR i.id IN (SELECT issue_id FROM ${database}.dependencies WHERE depends_on_id = '${root_bead}') OR i.id IN (SELECT depends_on_id FROM ${database}.dependencies WHERE issue_id = '${root_bead}')) AND i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY i.priority ASC LIMIT 50",
+          "rawSql": "SELECT i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014') AS assignee, i.created_at, COALESCE(NULLIF(i.created_by,''),'\u2014') AS created_by, LEFT(i.description, 500) AS description, LEFT(i.design, 300) AS design, LEFT(i.acceptance_criteria, 300) AS acceptance_criteria, LEFT(i.notes, 300) AS notes FROM ${database}.issues i WHERE ('${root_bead}' = '' OR i.id = '${root_bead}' OR i.id IN (SELECT issue_id FROM ${database}.dependencies WHERE depends_on_id = '${root_bead}') OR i.id IN (SELECT depends_on_id FROM ${database}.dependencies WHERE issue_id = '${root_bead}')) AND i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY i.priority ASC LIMIT 50",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "id" },
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
             "properties": [
               {
                 "id": "links",
                 "value": [
-                  { "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" },
-                  { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" }
+                  {
+                    "title": "Focus in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  },
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}"
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "priority" },
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
-                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
-                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
-                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
-                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                  {
+                    "from": "0",
+                    "to": "0",
+                    "color": "red",
+                    "text": "P0"
+                  },
+                  {
+                    "from": "1",
+                    "to": "1",
+                    "color": "orange",
+                    "text": "P1"
+                  },
+                  {
+                    "from": "2",
+                    "to": "2",
+                    "color": "yellow",
+                    "text": "P2"
+                  },
+                  {
+                    "from": "3",
+                    "to": "3",
+                    "color": "blue",
+                    "text": "P3"
+                  },
+                  {
+                    "from": "4",
+                    "to": "4",
+                    "color": "grey",
+                    "text": "P4"
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "issue_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "issue_type"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
-                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
-                  { "from": "task", "to": "task", "color": "green", "text": "task" },
-                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
-                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
-                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                  {
+                    "from": "convoy",
+                    "to": "convoy",
+                    "color": "red",
+                    "text": "convoy"
+                  },
+                  {
+                    "from": "epic",
+                    "to": "epic",
+                    "color": "purple",
+                    "text": "epic"
+                  },
+                  {
+                    "from": "task",
+                    "to": "task",
+                    "color": "green",
+                    "text": "task"
+                  },
+                  {
+                    "from": "bug",
+                    "to": "bug",
+                    "color": "red",
+                    "text": "bug"
+                  },
+                  {
+                    "from": "feature",
+                    "to": "feature",
+                    "color": "blue",
+                    "text": "feature"
+                  },
+                  {
+                    "from": "agent",
+                    "to": "agent",
+                    "color": "orange",
+                    "text": "agent"
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 3,
       "title": "Dependency Edges",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT d.depends_on_id AS parent, p.title AS parent_title, p.status AS parent_status, d.type AS relationship, d.issue_id AS child, c.title AS child_title, c.status AS child_status FROM ${database}.dependencies d LEFT JOIN ${database}.issues p ON d.depends_on_id = p.id LEFT JOIN ${database}.issues c ON d.issue_id = c.id WHERE ('${root_bead}' = '' OR d.depends_on_id = '${root_bead}' OR d.issue_id = '${root_bead}') ORDER BY d.depends_on_id, d.type, d.issue_id",
@@ -123,101 +234,212 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "parent" },
+            "matcher": {
+              "id": "byName",
+              "options": "parent"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+                "value": [
+                  {
+                    "title": "Focus in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  }
+                ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "child" },
+            "matcher": {
+              "id": "byName",
+              "options": "child"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "Focus in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
+                "value": [
+                  {
+                    "title": "Focus in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 10,
       "title": "",
       "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 36 },
-      "options": { "mode": "markdown", "content": "## Convoy Breakdown" }
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Convoy Breakdown"
+      }
     },
     {
       "id": 11,
       "title": "Convoy Children (all active convoys)",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 38 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
-          "rawSql": "SELECT convoy.id AS convoy_id, LEFT(convoy.title, 80) AS convoy_title, convoy.status AS convoy_status, child.id AS child_id, LEFT(child.title, 80) AS child_title, child.issue_type AS child_type, child.status AS child_status, child.priority, COALESCE(NULLIF(child.assignee,''),'—') AS assignee FROM ${database}.dependencies d JOIN ${database}.issues convoy ON d.depends_on_id = convoy.id AND convoy.issue_type = 'convoy' JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.type = 'parent-child' ORDER BY convoy.id, child.priority ASC",
+          "rawSql": "SELECT convoy.id AS convoy_id, LEFT(convoy.title, 80) AS convoy_title, convoy.status AS convoy_status, child.id AS child_id, LEFT(child.title, 80) AS child_title, child.issue_type AS child_type, child.status AS child_status, child.priority, COALESCE(NULLIF(child.assignee,''),'\u2014') AS assignee FROM ${database}.dependencies d JOIN ${database}.issues convoy ON d.depends_on_id = convoy.id AND convoy.issue_type = 'convoy' JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.type = 'parent-child' ORDER BY convoy.id, child.priority ASC",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "convoy_id" },
+            "matcher": {
+              "id": "byName",
+              "options": "convoy_id"
+            },
             "properties": [
               {
                 "id": "links",
-                "value": [{ "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" }]
-              }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "child_id" },
-            "properties": [
-              {
-                "id": "links",
-                "value": [{ "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}" }]
-              }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "priority" },
-            "properties": [
-              {
-                "id": "mappings",
                 "value": [
-                  { "from": "0", "to": "0", "color": "red", "text": "P0" },
-                  { "from": "1", "to": "1", "color": "orange", "text": "P1" },
-                  { "from": "2", "to": "2", "color": "yellow", "text": "P2" },
-                  { "from": "3", "to": "3", "color": "blue", "text": "P3" },
-                  { "from": "4", "to": "4", "color": "grey", "text": "P4" }
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}"
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "child_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "child_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "from": "convoy", "to": "convoy", "color": "red", "text": "convoy" },
-                  { "from": "epic", "to": "epic", "color": "purple", "text": "epic" },
-                  { "from": "task", "to": "task", "color": "green", "text": "task" },
-                  { "from": "bug", "to": "bug", "color": "red", "text": "bug" },
-                  { "from": "feature", "to": "feature", "color": "blue", "text": "feature" },
-                  { "from": "agent", "to": "agent", "color": "orange", "text": "agent" }
+                  {
+                    "from": "0",
+                    "to": "0",
+                    "color": "red",
+                    "text": "P0"
+                  },
+                  {
+                    "from": "1",
+                    "to": "1",
+                    "color": "orange",
+                    "text": "P1"
+                  },
+                  {
+                    "from": "2",
+                    "to": "2",
+                    "color": "yellow",
+                    "text": "P2"
+                  },
+                  {
+                    "from": "3",
+                    "to": "3",
+                    "color": "blue",
+                    "text": "P3"
+                  },
+                  {
+                    "from": "4",
+                    "to": "4",
+                    "color": "grey",
+                    "text": "P4"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "child_type"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "from": "convoy",
+                    "to": "convoy",
+                    "color": "red",
+                    "text": "convoy"
+                  },
+                  {
+                    "from": "epic",
+                    "to": "epic",
+                    "color": "purple",
+                    "text": "epic"
+                  },
+                  {
+                    "from": "task",
+                    "to": "task",
+                    "color": "green",
+                    "text": "task"
+                  },
+                  {
+                    "from": "bug",
+                    "to": "bug",
+                    "color": "red",
+                    "text": "bug"
+                  },
+                  {
+                    "from": "feature",
+                    "to": "feature",
+                    "color": "blue",
+                    "text": "feature"
+                  },
+                  {
+                    "from": "agent",
+                    "to": "agent",
+                    "color": "orange",
+                    "text": "agent"
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     }
   ],
   "schemaVersion": 39

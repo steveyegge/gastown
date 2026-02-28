@@ -877,5 +877,28 @@
       ]
     }
   ],
-  "schemaVersion": 39
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "label": "Rig Database",
+        "type": "query",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": null,
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  }
 }
