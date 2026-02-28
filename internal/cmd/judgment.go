@@ -327,13 +327,28 @@ func parseWindow(window string) (time.Duration, error) {
 	if strings.HasSuffix(window, "d") {
 		days := window[:len(window)-1]
 		var d int
-		if _, err := fmt.Sscanf(days, "%d", &d); err != nil {
+		n, err := fmt.Sscanf(days, "%d", &d)
+		if err != nil || n != 1 {
 			return 0, fmt.Errorf("invalid days: %s", window)
+		}
+		// Reject trailing characters (e.g. "1.5d" parses "1" but leaves ".5")
+		if fmt.Sprintf("%d", d) != days {
+			return 0, fmt.Errorf("invalid days: %s", window)
+		}
+		if d <= 0 {
+			return 0, fmt.Errorf("days must be positive: %s", window)
 		}
 		return time.Duration(d) * 24 * time.Hour, nil
 	}
 
-	return time.ParseDuration(window)
+	dur, err := time.ParseDuration(window)
+	if err != nil {
+		return 0, err
+	}
+	if dur <= 0 {
+		return 0, fmt.Errorf("window must be positive: %s", window)
+	}
+	return dur, nil
 }
 
 func formatJudgmentAge(d time.Duration) string {
@@ -350,10 +365,11 @@ func formatJudgmentAge(d time.Duration) string {
 }
 
 func truncateJudgmentStr(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	return string(runes[:max-1]) + "…"
 }
 
 var judgmentRecordCmd = &cobra.Command{
