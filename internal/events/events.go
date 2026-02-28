@@ -68,6 +68,10 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Guardian quality review events
+	TypeGuardianReview  = "guardian_review"
+	TypeGuardianSkipped = "guardian_skipped"
 )
 
 // EventsFile is the name of the raw events log.
@@ -329,4 +333,15 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 		p["cwd"] = cwd
 	}
 	return p
+}
+
+// GuardianPayload creates a payload for guardian review events.
+func GuardianPayload(beadID, worker, rig, recommendation string, score float64) map[string]interface{} {
+	return map[string]interface{}{
+		"bead":           beadID,
+		"worker":         worker,
+		"rig":            rig,
+		"recommendation": recommendation,
+		"score":          score,
+	}
 }

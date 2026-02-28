@@ -61,6 +61,18 @@ type TownSettings struct {
 	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
 	// Default: "gastown.local"
 	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
+
+	// Judgment configures the Guardian quality review system.
+	Judgment *JudgmentConfig `json:"judgment,omitempty"`
+}
+
+// JudgmentConfig configures the Guardian quality review system.
+type JudgmentConfig struct {
+	Enabled       bool     `json:"enabled"`
+	ReviewDepth   string   `json:"review_depth,omitempty"`   // "quick", "standard", "deep"
+	TimeoutSecs   int      `json:"timeout_secs,omitempty"`
+	SecurityPaths []string `json:"security_paths,omitempty"`
+	CorePaths     []string `json:"core_paths,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
