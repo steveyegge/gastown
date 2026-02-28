@@ -1120,6 +1120,13 @@ func (t *Tmux) WakePane(target string) {
 	_, _ = t.run("resize-window", "-t", target, "-x", fmt.Sprintf("%d", w+1))
 	time.Sleep(50 * time.Millisecond)
 	_, _ = t.run("resize-window", "-t", target, "-x", width)
+
+	// Reset window-size to "latest" after the resize dance. tmux automatically
+	// sets window-size to "manual" whenever resize-window is called, which
+	// permanently locks the window at the current dimensions. This prevents
+	// the window from auto-sizing to a client when a human later attaches,
+	// causing dots around the edges as if another smaller client is viewing.
+	_, _ = t.run("set-option", "-w", "-t", target, "window-size", "latest")
 }
 
 // WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
