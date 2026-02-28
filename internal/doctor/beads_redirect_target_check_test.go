@@ -490,6 +490,178 @@ func TestBeadsRedirectTargetCheck_AbsolutePathRedirect(t *testing.T) {
 	}
 }
 
+func TestExtractRigName(t *testing.T) {
+	tests := []struct {
+		name         string
+		townRoot     string
+		worktreePath string
+		want         string
+	}{
+		{
+			name:         "normal crew path",
+			townRoot:     "/town",
+			worktreePath: "/town/myrig/crew/worker1",
+			want:         "myrig",
+		},
+		{
+			name:         "refinery path",
+			townRoot:     "/town",
+			worktreePath: "/town/myrig/refinery/rig",
+			want:         "myrig",
+		},
+		{
+			name:         "polecat path",
+			townRoot:     "/town",
+			worktreePath: "/town/myrig/polecats/polecat1",
+			want:         "myrig",
+		},
+		{
+			name:         "single component (rig root itself)",
+			townRoot:     "/town",
+			worktreePath: "/town/myrig",
+			want:         "myrig",
+		},
+		{
+			name:         "deeply nested path",
+			townRoot:     "/town",
+			worktreePath: "/town/myrig/a/b/c/d",
+			want:         "myrig",
+		},
+		{
+			name:         "worktree equals town root",
+			townRoot:     "/town",
+			worktreePath: "/town",
+			want:         ".",
+		},
+		{
+			name:         "unreachable relative path",
+			townRoot:     "/other",
+			worktreePath: "/town/myrig",
+			want:         "..",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRigName(tt.townRoot, tt.worktreePath)
+			if got != tt.want {
+				t.Errorf("extractRigName(%q, %q) = %q, want %q",
+					tt.townRoot, tt.worktreePath, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBeadsRedirectTargetCheck_FixWithMissingConfigYaml(t *testing.T) {
+	// Target directory exists with metadata.json but no config.yaml/dolt/redirect.
+	// Fix should create config.yaml from metadata defaults.
+	townRoot := t.TempDir()
+	rigDir := filepath.Join(townRoot, "myrig")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	crewDir := filepath.Join(rigDir, "crew", "worker1")
+	crewBeadsDir := filepath.Join(crewDir, ".beads")
+
+	// Create rig beads with only metadata.json (no config.yaml, no dolt/, no redirect)
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadataJSON := `{"issue_prefix": "test", "dolt_database": "beads_test"}`
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"), []byte(metadataJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create crew with redirect to the rig beads dir (which has no beads setup yet)
+	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBeadsRedirectTargetCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+
+	// Run should detect "no beads setup"
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("Expected StatusWarning before fix, got %v: %s", result.Status, result.Message)
+	}
+
+	// Fix should create config.yaml from metadata.json
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify config.yaml was created
+	configData, err := os.ReadFile(filepath.Join(rigBeadsDir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("config.yaml not created by fix: %v", err)
+	}
+	content := string(configData)
+	if !strings.Contains(content, "prefix: test") {
+		t.Errorf("Expected config.yaml to contain 'prefix: test', got: %s", content)
+	}
+
+	// Run again — should now be clean
+	check2 := NewBeadsRedirectTargetCheck()
+	result = check2.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("Expected StatusOK after fix, got %v: %s (details: %v)",
+			result.Status, result.Message, result.Details)
+	}
+}
+
+func TestBeadsRedirectTargetCheck_FixMetadataRepairFails(t *testing.T) {
+	// Target directory exists but metadata repair can't fix it (no metadata.json,
+	// and the directory is writable so EnsureConfigYAML succeeds but with empty
+	// fallback prefix — the important thing is the fallback path works).
+	townRoot := t.TempDir()
+	rigDir := filepath.Join(townRoot, "myrig")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	crewDir := filepath.Join(rigDir, "crew", "worker1")
+	crewBeadsDir := filepath.Join(crewDir, ".beads")
+
+	// Create rig beads dir that is not writable (so config.yaml creation fails)
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Make beads dir read-only so EnsureConfigYAMLFromMetadataIfMissing fails
+	if err := os.Chmod(rigBeadsDir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(rigBeadsDir, 0755) })
+
+	// Create crew with redirect to the unwritable beads dir
+	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBeadsRedirectTargetCheck()
+	ctx := &CheckContext{TownRoot: townRoot}
+
+	// Run should detect "no beads setup"
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("Expected StatusWarning, got %v: %s", result.Status, result.Message)
+	}
+
+	// Fix should fail because: metadata repair fails (read-only dir) and
+	// no canonical beads with dolt/redirect/config.yaml exists
+	err := check.Fix(ctx)
+	if err == nil {
+		t.Error("Expected Fix to fail when metadata repair fails and no canonical beads exists")
+	}
+}
+
 func TestBeadsRedirectTargetCheck_FixWithAbsoluteRigRedirect(t *testing.T) {
 	// When rig/.beads/redirect contains an absolute path, the doctor fix
 	// (recomputeRedirect) should pass it through as-is, not prepend upPath.
