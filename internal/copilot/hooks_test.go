@@ -253,6 +253,45 @@ func TestEnsureHooksAt_SchemaVersion(t *testing.T) {
 	}
 }
 
+func TestEnsureHooksAt_CustomHooksDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	customDir := ".copilot/hooks"
+	err := EnsureHooksAt(tmpDir, "polecat", customDir, "gastown.json")
+	if err != nil {
+		t.Fatalf("EnsureHooksAt() error = %v", err)
+	}
+
+	hooksPath := filepath.Join(tmpDir, customDir, "gastown.json")
+	content, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("Failed to read hooks file: %v", err)
+	}
+
+	var config hooksConfig
+	if err := json.Unmarshal(content, &config); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	preToolUse := config.Hooks["preToolUse"]
+	if len(preToolUse) == 0 {
+		t.Fatal("Missing preToolUse hooks")
+	}
+	expectedPath := ".copilot/hooks/gastown-pretool-guard.sh"
+	if !strings.Contains(preToolUse[0].Bash, expectedPath) {
+		t.Errorf("preToolUse guard path should use custom hooksDir, got: %s", preToolUse[0].Bash)
+	}
+	if strings.Contains(preToolUse[0].Bash, ".github/hooks/gastown-pretool-guard.sh") {
+		t.Error("preToolUse should not contain hardcoded .github/hooks path when using custom hooksDir")
+	}
+
+	// Guard script should also be in custom dir
+	guardPath := filepath.Join(tmpDir, customDir, "gastown-pretool-guard.sh")
+	if _, err := os.Stat(guardPath); err != nil {
+		t.Fatalf("Guard script not created in custom dir: %v", err)
+	}
+}
+
 func TestEnsureHooksAt_EmptyParameters(t *testing.T) {
 	t.Run("empty hooksDir", func(t *testing.T) {
 		err := EnsureHooksAt("/tmp/work", "polecat", "", "gastown.json")

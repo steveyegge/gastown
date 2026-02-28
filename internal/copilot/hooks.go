@@ -2,6 +2,7 @@
 package copilot
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,11 @@ func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 	} else {
 		templateData = hooksInteractiveJSON
 	}
+
+	// Template the guard script path using the actual hooksDir
+	guardRef := filepath.ToSlash(filepath.Join(hooksDir, "gastown-pretool-guard.sh"))
+	templateData = bytes.Replace(templateData,
+		[]byte(".github/hooks/gastown-pretool-guard.sh"), []byte(guardRef), -1)
 
 	// Validate the template is valid JSON
 	var config hooksConfig
