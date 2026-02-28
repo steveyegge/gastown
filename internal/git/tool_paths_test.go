@@ -22,6 +22,9 @@ func TestIsToolPath(t *testing.T) {
 		{".github/workflows/ci.yml", false},
 		{".gitignore", false},
 		{"", false},
+		// isBeadsPath false positive: .beads/ nested inside another path
+		{"pkg/.beads/data.json", false},
+		{"vendor/.beads/db.json", false},
 	}
 
 	for _, tt := range tests {
@@ -116,6 +119,13 @@ func TestCleanExcludingToolFiles(t *testing.T) {
 				HasUncommittedChanges: true,
 				UnpushedCommits:       1,
 				UntrackedFiles:        []string{".copilot/state"},
+			},
+			want: false,
+		},
+		{
+			name: "uncommitted changes with no classified files blocks",
+			status: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
 			},
 			want: false,
 		},

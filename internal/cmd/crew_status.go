@@ -98,6 +98,9 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 			gitClean = gitStatus.Clean
 			modified = append(gitStatus.Modified, gitStatus.Added...)
 			modified = append(modified, gitStatus.Deleted...)
+			modified = append(modified, gitStatus.Renamed...)
+			modified = append(modified, gitStatus.Copied...)
+			modified = append(modified, gitStatus.Unmerged...)
 			untracked = gitStatus.Untracked
 		}
 
