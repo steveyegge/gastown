@@ -141,7 +141,7 @@ func LoadState(stateDir string) (*GuardianState, error) {
 	return &state, nil
 }
 
-// SaveState writes the Guardian state to disk.
+// SaveState writes the Guardian state to disk atomically via temp file + rename.
 func SaveState(stateDir string, state *GuardianState) error {
 	path := StateFilePath(stateDir)
 
@@ -158,5 +158,27 @@ func SaveState(stateDir string, state *GuardianState) error {
 		return fmt.Errorf("marshaling state: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0644) //nolint:gosec // G306: state file is non-sensitive operational data
+	// Atomic write: write to temp file, then rename
+	tmp, err := os.CreateTemp(dir, "judgment-state-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	return nil
 }

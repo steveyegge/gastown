@@ -1,6 +1,7 @@
 package guardian
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -119,6 +120,60 @@ func TestRecomputeAggregates_Empty(t *testing.T) {
 	}
 	if pj.RejectionRate != 0 {
 		t.Errorf("RejectionRate = %f, want 0", pj.RejectionRate)
+	}
+}
+
+func TestSaveState_Atomic(t *testing.T) {
+	dir := t.TempDir()
+
+	state := NewGuardianState()
+	state.AddResult("toast", &GuardianResult{Score: 0.8, Recommendation: "approve", Worker: "toast"})
+
+	if err := SaveState(dir, state); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	// Verify file exists and is valid
+	loaded, err := LoadState(dir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(loaded.Workers) != 1 {
+		t.Errorf("expected 1 worker, got %d", len(loaded.Workers))
+	}
+}
+
+func TestConcurrentSaveState(t *testing.T) {
+	dir := t.TempDir()
+
+	// Run multiple concurrent saves to detect race conditions
+	const goroutines = 10
+	errc := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(n int) {
+			state := NewGuardianState()
+			state.AddResult("toast", &GuardianResult{
+				BeadID: fmt.Sprintf("gt-test-%d", n),
+				Score:  0.5,
+				Worker: "toast",
+			})
+			errc <- SaveState(dir, state)
+		}(i)
+	}
+
+	for i := 0; i < goroutines; i++ {
+		if err := <-errc; err != nil {
+			t.Errorf("concurrent SaveState error: %v", err)
+		}
+	}
+
+	// Verify file is valid JSON after concurrent writes
+	loaded, err := LoadState(dir)
+	if err != nil {
+		t.Fatalf("LoadState after concurrent writes: %v", err)
+	}
+	if loaded.Workers == nil {
+		t.Fatal("expected non-nil workers")
 	}
 }
 

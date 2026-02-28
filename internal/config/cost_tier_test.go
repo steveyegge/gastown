@@ -341,7 +341,6 @@ func TestGetCurrentTier(t *testing.T) {
 			"deacon":   "claude-haiku",
 			"witness":  "claude-sonnet",
 			"refinery": "claude-sonnet",
-			"guardian": "claude-sonnet",
 		}
 		if got := GetCurrentTier(settings); got != "economy" {
 			t.Errorf("GetCurrentTier = %q, want %q (inferred)", got, "economy")
@@ -376,7 +375,6 @@ func TestTierRolesMatch(t *testing.T) {
 			"deacon":   "claude-haiku",
 			"witness":  "claude-sonnet",
 			"refinery": "claude-sonnet",
-			"guardian": "claude-sonnet",
 		}
 		expected := CostTierRoleAgents(TierEconomy)
 		if !tierRolesMatch(actual, expected) {

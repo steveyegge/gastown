@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/guardian"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -21,12 +26,15 @@ var (
 	judgmentHistPolecat string
 	judgmentHistLimit   int
 	judgmentHistJSON    bool
+
+	judgmentRecordInput string
 )
 
 func init() {
 	rootCmd.AddCommand(judgmentCmd)
 	judgmentCmd.AddCommand(judgmentStatusCmd)
 	judgmentCmd.AddCommand(judgmentHistoryCmd)
+	judgmentCmd.AddCommand(judgmentRecordCmd)
 
 	judgmentStatusCmd.Flags().BoolVar(&judgmentJSON, "json", false, "Output as JSON")
 	judgmentStatusCmd.Flags().StringVar(&judgmentRig, "rig", "", "Filter by rig name")
@@ -35,6 +43,8 @@ func init() {
 	judgmentHistoryCmd.Flags().StringVar(&judgmentHistPolecat, "polecat", "", "Filter by polecat name")
 	judgmentHistoryCmd.Flags().IntVar(&judgmentHistLimit, "limit", 20, "Maximum results to show")
 	judgmentHistoryCmd.Flags().BoolVar(&judgmentHistJSON, "json", false, "Output as JSON")
+
+	judgmentRecordCmd.Flags().StringVar(&judgmentRecordInput, "input", "", "JSON input (default: read from stdin)")
 }
 
 var judgmentCmd = &cobra.Command{
@@ -48,7 +58,8 @@ Phase 1 is measurement-only: scores are recorded but do not gate merges.
 
 Subcommands:
   gt judgment status     Show per-polecat quality summary
-  gt judgment history    Show individual review history`,
+  gt judgment history    Show individual review history
+  gt judgment record     Record a quality review result`,
 }
 
 var judgmentStatusCmd = &cobra.Command{
@@ -173,7 +184,10 @@ func runJudgmentStatus(cmd *cobra.Command, args []string) error {
 	})
 
 	if judgmentJSON {
-		data, _ := json.MarshalIndent(rows, "", "  ")
+		data, err := json.MarshalIndent(rows, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling JSON: %w", err)
+		}
 		fmt.Println(string(data))
 		return nil
 	}
@@ -255,7 +269,10 @@ func runJudgmentHistory(cmd *cobra.Command, args []string) error {
 	}
 
 	if judgmentHistJSON {
-		data, _ := json.MarshalIndent(rows, "", "  ")
+		data, err := json.MarshalIndent(rows, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling JSON: %w", err)
+		}
 		fmt.Println(string(data))
 		return nil
 	}
@@ -291,11 +308,11 @@ func runJudgmentHistory(cmd *cobra.Command, args []string) error {
 func statusStyle(status string) string {
 	switch status {
 	case "OK":
-		return fmt.Sprintf("● %s", status)
+		return "\033[32m● OK\033[0m"     // green
 	case "WARN":
-		return fmt.Sprintf("● %s", status)
+		return "\033[33m● WARN\033[0m"   // yellow
 	case "BREACH":
-		return fmt.Sprintf("● %s", status)
+		return "\033[31m● BREACH\033[0m" // red
 	default:
 		return status
 	}
@@ -337,5 +354,130 @@ func truncateJudgmentStr(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+var judgmentRecordCmd = &cobra.Command{
+	Use:   "record",
+	Short: "Record a quality review result",
+	Long: `Record a Guardian quality review result from JSON input.
+
+Accepts a GuardianResult JSON object via stdin or --input flag,
+validates it, persists to judgment-state.json, and records OTel telemetry.
+
+This is the write API used by formula steps to record review scores.
+
+JSON format:
+  {
+    "bead_id": "gt-abc123",
+    "score": 0.85,
+    "recommendation": "approve",
+    "issues": [{"severity": "minor", "category": "style", "description": "nit"}],
+    "worker": "polecat-Toast",
+    "rig": "myrig"
+  }
+
+Examples:
+  echo '{"bead_id":"gt-abc","score":0.9,"recommendation":"approve","worker":"toast","rig":"myrig"}' | gt judgment record
+  gt judgment record --input '{"bead_id":"gt-abc","score":0.9,"recommendation":"approve","worker":"toast","rig":"myrig"}'`,
+	RunE: runJudgmentRecord,
+}
+
+func runJudgmentRecord(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	// Read JSON input from flag or stdin
+	var inputData []byte
+	if judgmentRecordInput != "" {
+		inputData = []byte(judgmentRecordInput)
+	} else {
+		inputData, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+	}
+
+	if len(inputData) == 0 {
+		return fmt.Errorf("no input provided; pass JSON via stdin or --input flag")
+	}
+
+	// Parse and validate
+	var result guardian.GuardianResult
+	if err := json.Unmarshal(inputData, &result); err != nil {
+		return fmt.Errorf("invalid JSON input: %w", err)
+	}
+
+	if err := validateRecordInput(&result); err != nil {
+		return fmt.Errorf("validation error: %w", err)
+	}
+
+	// Set reviewed_at if not provided
+	if result.ReviewedAt.IsZero() {
+		result.ReviewedAt = time.Now()
+	}
+
+	// Persist to state
+	stateDir := townRoot
+	state, err := guardian.LoadState(stateDir)
+	if err != nil {
+		return fmt.Errorf("loading Guardian state: %w", err)
+	}
+
+	state.AddResult(result.Worker, &result)
+
+	if err := guardian.SaveState(stateDir, state); err != nil {
+		return fmt.Errorf("saving Guardian state: %w", err)
+	}
+
+	// Record OTel telemetry
+	telemetry.RecordGuardianResult(
+		context.Background(),
+		result.Worker,
+		result.Rig,
+		result.Recommendation,
+		result.Score,
+		result.DurationMs,
+	)
+
+	// Log event for feed visibility
+	eventType := events.TypeGuardianReview
+	if result.Recommendation == "skip" {
+		eventType = events.TypeGuardianSkipped
+	}
+	_ = events.LogFeed(eventType, result.Worker, map[string]interface{}{
+		"bead":           result.BeadID,
+		"score":          result.Score,
+		"recommendation": result.Recommendation,
+		"issues":         len(result.Issues),
+		"worker":         result.Worker,
+	})
+
+	fmt.Printf("Recorded: worker=%s score=%.2f recommendation=%s issues=%d\n",
+		result.Worker, result.Score, result.Recommendation, len(result.Issues))
+
+	return nil
+}
+
+func validateRecordInput(r *guardian.GuardianResult) error {
+	if r.Worker == "" {
+		return fmt.Errorf("worker is required")
+	}
+	if r.Rig == "" {
+		return fmt.Errorf("rig is required")
+	}
+	if r.Score < 0 || r.Score > 1 {
+		return fmt.Errorf("score must be between 0.0 and 1.0, got %f", r.Score)
+	}
+	switch r.Recommendation {
+	case "approve", "request_changes", "skip":
+		// valid
+	case "":
+		return fmt.Errorf("recommendation is required (approve, request_changes, or skip)")
+	default:
+		return fmt.Errorf("invalid recommendation %q (must be approve, request_changes, or skip)", r.Recommendation)
+	}
+	return nil
 }
 
