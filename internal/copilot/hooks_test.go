@@ -9,7 +9,15 @@ import (
 	"testing"
 )
 
-func TestEnsureHooksAt_AutonomousRole(t *testing.T) {
+// hooksConfigTest mirrors the hooks JSON structure for test assertions.
+type hooksConfigTest struct {
+	Version        int                `json:"version"`
+	GastownManaged bool               `json:"x-gastown-managed"`
+	Note           string             `json:"x-note"`
+	Hooks          map[string][]any   `json:"hooks"`
+}
+
+func TestEnsureHooksAt_StubHooksJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	err := EnsureHooksAt(tmpDir, "polecat", ".github/hooks", "gastown.json")
@@ -23,57 +31,46 @@ func TestEnsureHooksAt_AutonomousRole(t *testing.T) {
 		t.Fatalf("Failed to read hooks file: %v", err)
 	}
 
-	// Autonomous roles should have mail injection in sessionStart
-	if !strings.Contains(string(content), "gt mail check --inject") {
-		t.Error("Autonomous hooks should contain mail injection in sessionStart")
-	}
-
-	// Verify sessionStart has both prime and mail
-	var config hooksConfig
+	var config hooksConfigTest
 	if err := json.Unmarshal(content, &config); err != nil {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
-	sessionStart := config.Hooks["sessionStart"]
-	if len(sessionStart) == 0 {
-		t.Fatal("Missing sessionStart hooks")
+
+	// Hooks JSON should be a stub — lifecycle hooks live in the plugin
+	if len(config.Hooks) != 0 {
+		t.Errorf("Hooks should be empty (plugin handles lifecycle), got %d entries", len(config.Hooks))
 	}
-	if !strings.Contains(sessionStart[0].Bash, "gt prime --hook") {
-		t.Error("sessionStart should contain gt prime --hook")
+	if !config.GastownManaged {
+		t.Error("x-gastown-managed should be true")
 	}
-	if !strings.Contains(sessionStart[0].Bash, "gt mail check --inject") {
-		t.Error("Autonomous sessionStart should contain gt mail check --inject")
+	if config.Version != 1 {
+		t.Errorf("version = %d, want 1", config.Version)
+	}
+	if !strings.Contains(config.Note, "plugin") {
+		t.Error("x-note should mention the plugin")
 	}
 }
 
-func TestEnsureHooksAt_InteractiveRole(t *testing.T) {
-	tmpDir := t.TempDir()
+func TestEnsureHooksAt_AutonomousAndInteractiveSameStub(t *testing.T) {
+	tmpDir1 := t.TempDir()
+	tmpDir2 := t.TempDir()
 
-	err := EnsureHooksAt(tmpDir, "mayor", ".github/hooks", "gastown.json")
-	if err != nil {
-		t.Fatalf("EnsureHooksAt() error = %v", err)
+	if err := EnsureHooksAt(tmpDir1, "polecat", ".github/hooks", "gastown.json"); err != nil {
+		t.Fatalf("autonomous: %v", err)
 	}
-
-	hooksPath := filepath.Join(tmpDir, ".github/hooks/gastown.json")
-	content, err := os.ReadFile(hooksPath)
-	if err != nil {
-		t.Fatalf("Failed to read hooks file: %v", err)
+	if err := EnsureHooksAt(tmpDir2, "mayor", ".github/hooks", "gastown.json"); err != nil {
+		t.Fatalf("interactive: %v", err)
 	}
 
-	var config hooksConfig
-	if err := json.Unmarshal(content, &config); err != nil {
-		t.Fatalf("Invalid JSON: %v", err)
-	}
+	c1, _ := os.ReadFile(filepath.Join(tmpDir1, ".github/hooks/gastown.json"))
+	c2, _ := os.ReadFile(filepath.Join(tmpDir2, ".github/hooks/gastown.json"))
 
-	// Interactive sessionStart should NOT have mail injection
-	sessionStart := config.Hooks["sessionStart"]
-	if len(sessionStart) == 0 {
-		t.Fatal("Missing sessionStart hooks")
-	}
-	if strings.Contains(sessionStart[0].Bash, "gt mail check --inject") {
-		t.Error("Interactive sessionStart should NOT contain gt mail check --inject")
-	}
-	if !strings.Contains(sessionStart[0].Bash, "gt prime --hook") {
-		t.Error("Interactive sessionStart should contain gt prime --hook")
+	// Both should produce empty hooks stubs (plugin handles everything)
+	var cfg1, cfg2 hooksConfigTest
+	json.Unmarshal(c1, &cfg1)
+	json.Unmarshal(c2, &cfg2)
+	if len(cfg1.Hooks) != 0 || len(cfg2.Hooks) != 0 {
+		t.Error("Both autonomous and interactive should have empty hooks (plugin handles them)")
 	}
 }
 
@@ -179,6 +176,8 @@ func TestEnsureHooksAt_GuardScriptContent(t *testing.T) {
 }
 
 func TestEnsureHooksAt_PathSetup(t *testing.T) {
+	// Hooks JSON is now a stub — no hook entries with PATH setup needed.
+	// PATH setup is in the plugin's hooks.json instead.
 	tmpDir := t.TempDir()
 
 	err := EnsureHooksAt(tmpDir, "polecat", ".github/hooks", "gastown.json")
@@ -192,17 +191,13 @@ func TestEnsureHooksAt_PathSetup(t *testing.T) {
 		t.Fatalf("Failed to read hooks file: %v", err)
 	}
 
-	var config hooksConfig
+	var config hooksConfigTest
 	if err := json.Unmarshal(content, &config); err != nil {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
 
-	for hookName, entries := range config.Hooks {
-		for i, entry := range entries {
-			if !strings.Contains(entry.Bash, "export PATH=") {
-				t.Errorf("Hook %s[%d] missing PATH setup", hookName, i)
-			}
-		}
+	if len(config.Hooks) != 0 {
+		t.Error("Hooks should be empty (lifecycle hooks are in plugin)")
 	}
 }
 
@@ -240,7 +235,7 @@ func TestEnsureHooksAt_SchemaVersion(t *testing.T) {
 		t.Fatalf("Failed to read hooks file: %v", err)
 	}
 
-	var config hooksConfig
+	var config hooksConfigTest
 	if err := json.Unmarshal(content, &config); err != nil {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
@@ -262,30 +257,22 @@ func TestEnsureHooksAt_CustomHooksDir(t *testing.T) {
 		t.Fatalf("EnsureHooksAt() error = %v", err)
 	}
 
+	// Hooks JSON should be a stub
 	hooksPath := filepath.Join(tmpDir, customDir, "gastown.json")
 	content, err := os.ReadFile(hooksPath)
 	if err != nil {
 		t.Fatalf("Failed to read hooks file: %v", err)
 	}
 
-	var config hooksConfig
+	var config hooksConfigTest
 	if err := json.Unmarshal(content, &config); err != nil {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
-
-	preToolUse := config.Hooks["preToolUse"]
-	if len(preToolUse) == 0 {
-		t.Fatal("Missing preToolUse hooks")
-	}
-	expectedPath := ".copilot/hooks/gastown-pretool-guard.sh"
-	if !strings.Contains(preToolUse[0].Bash, expectedPath) {
-		t.Errorf("preToolUse guard path should use custom hooksDir, got: %s", preToolUse[0].Bash)
-	}
-	if strings.Contains(preToolUse[0].Bash, ".github/hooks/gastown-pretool-guard.sh") {
-		t.Error("preToolUse should not contain hardcoded .github/hooks path when using custom hooksDir")
+	if len(config.Hooks) != 0 {
+		t.Error("Hooks should be empty (plugin handles lifecycle)")
 	}
 
-	// Guard script should also be in custom dir
+	// Guard script should still be in custom dir
 	guardPath := filepath.Join(tmpDir, customDir, "gastown-pretool-guard.sh")
 	if _, err := os.Stat(guardPath); err != nil {
 		t.Fatalf("Guard script not created in custom dir: %v", err)

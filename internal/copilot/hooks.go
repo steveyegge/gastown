@@ -2,9 +2,7 @@
 package copilot
 
 import (
-	"bytes"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,23 +19,13 @@ var hooksInteractiveJSON []byte
 //go:embed plugin/gastown-pretool-guard.sh
 var guardScript []byte
 
-// hooksConfig is the top-level structure for Copilot CLI hooks.json files.
-type hooksConfig struct {
-	Version         int                    `json:"version"`
-	GastownManaged  bool                   `json:"x-gastown-managed"`
-	Hooks           map[string][]hookEntry `json:"hooks"`
-}
-
-// hookEntry represents a single hook entry in the hooks configuration.
-type hookEntry struct {
-	Type       string `json:"type"`
-	Bash       string `json:"bash"`
-	TimeoutSec int    `json:"timeoutSec"`
-}
-
-// EnsureHooksAt provisions the Copilot CLI lifecycle hooks configuration.
-// It creates .github/hooks/gastown.json and .github/hooks/gastown-pretool-guard.sh
-// in the agent's working directory. Files are not overwritten if they already exist.
+// EnsureHooksAt provisions the Copilot CLI hooks directory.
+//
+// Lifecycle hooks (sessionStart, userPromptSubmitted, sessionEnd) are provided
+// by the gastown Copilot CLI plugin (plugins/copilot-cli/). This function only
+// installs the per-project guard script and a stub hooks JSON marker file.
+//
+// Install the plugin with: copilot plugin install ./plugins/copilot-cli
 func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 	if hooksDir == "" || hooksFile == "" {
 		return nil
@@ -45,7 +33,7 @@ func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 
 	targetDir := filepath.Join(workDir, hooksDir)
 
-	// Select template based on role type
+	// Select stub template based on role type (both are empty hooks now)
 	var templateData []byte
 	if claude.RoleTypeFor(role) == claude.Autonomous {
 		templateData = hooksAutonomousJSON
@@ -53,18 +41,7 @@ func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 		templateData = hooksInteractiveJSON
 	}
 
-	// Template the guard script path using the actual hooksDir
-	guardRef := filepath.ToSlash(filepath.Join(hooksDir, "gastown-pretool-guard.sh"))
-	templateData = bytes.Replace(templateData,
-		[]byte(".github/hooks/gastown-pretool-guard.sh"), []byte(guardRef), -1)
-
-	// Validate the template is valid JSON
-	var config hooksConfig
-	if err := json.Unmarshal(templateData, &config); err != nil {
-		return fmt.Errorf("invalid hooks template: %w", err)
-	}
-
-	// Write hooks JSON file
+	// Write hooks JSON stub (marker file, no active hooks — plugin handles them)
 	hooksPath := filepath.Join(targetDir, hooksFile)
 	if _, err := os.Stat(hooksPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -77,7 +54,7 @@ func EnsureHooksAt(workDir, role, hooksDir, hooksFile string) error {
 		return fmt.Errorf("checking copilot hooks file: %w", err)
 	}
 
-	// Write guard script
+	// Write guard script (called by plugin's preToolUse hook)
 	guardPath := filepath.Join(targetDir, "gastown-pretool-guard.sh")
 	if _, err := os.Stat(guardPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
