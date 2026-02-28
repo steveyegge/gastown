@@ -7,22 +7,24 @@ import (
 )
 
 func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "atlas",
 		AgentState:  "idle",
 		HookBead:    "gt-abc123",
-		Action:      "auto-nuked",
+		Action:      "restarted",
 	})
 
 	if receipt.Verdict != PatrolVerdictStale {
 		t.Fatalf("Verdict = %q, want %q", receipt.Verdict, PatrolVerdictStale)
 	}
-	if receipt.RecommendedAction != "auto-nuked" {
-		t.Fatalf("RecommendedAction = %q, want %q", receipt.RecommendedAction, "auto-nuked")
+	if receipt.RecommendedAction != "restarted" {
+		t.Fatalf("RecommendedAction = %q, want %q", receipt.RecommendedAction, "restarted")
 	}
 }
 
 func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "echo",
 		AgentState:  "idle",
@@ -35,6 +37,7 @@ func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
 }
 
 func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "nux",
 		AgentState:  "running",
@@ -47,6 +50,7 @@ func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
 }
 
 func TestReceiptVerdictForZombie_AllStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		state    string
@@ -95,6 +99,7 @@ func TestReceiptVerdictForZombie_AllStates(t *testing.T) {
 }
 
 func TestBuildPatrolReceipts_NilAndEmpty(t *testing.T) {
+	t.Parallel()
 	if got := BuildPatrolReceipts("rig", nil); got != nil {
 		t.Errorf("BuildPatrolReceipts(nil) = %v, want nil", got)
 	}
@@ -107,13 +112,14 @@ func TestBuildPatrolReceipts_NilAndEmpty(t *testing.T) {
 }
 
 func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
+	t.Parallel()
 	receipts := BuildPatrolReceipts("gastown", &DetectZombiePolecatsResult{
 		Zombies: []ZombieResult{
 			{
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
-				Action:      "auto-nuked",
+				Action:      "restarted",
 			},
 		},
 	})
@@ -134,8 +140,8 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 	if decoded["verdict"] != string(PatrolVerdictStale) {
 		t.Fatalf("decoded verdict = %v, want %q", decoded["verdict"], PatrolVerdictStale)
 	}
-	if decoded["recommended_action"] != "auto-nuked" {
-		t.Fatalf("decoded recommended_action = %v, want %q", decoded["recommended_action"], "auto-nuked")
+	if decoded["recommended_action"] != "restarted" {
+		t.Fatalf("decoded recommended_action = %v, want %q", decoded["recommended_action"], "restarted")
 	}
 	evidence, ok := decoded["evidence"].(map[string]any)
 	if !ok {
@@ -147,13 +153,14 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 }
 
 func TestBuildPatrolReceipts_DeterministicStaleOrphanOrdering(t *testing.T) {
+	t.Parallel()
 	receipts := BuildPatrolReceipts("gastown", &DetectZombiePolecatsResult{
 		Zombies: []ZombieResult{
 			{
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
-				Action:      "auto-nuked",
+				Action:      "restarted",
 			},
 			{
 				PolecatName: "echo",

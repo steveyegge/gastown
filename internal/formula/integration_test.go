@@ -3,7 +3,6 @@ package formula
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -33,30 +32,10 @@ func TestParseRealFormulas(t *testing.T) {
 		t.Skip("No formula files found to test")
 	}
 
-	// Known files that use advanced features not yet supported:
-	// - Composition (extends, compose): shiny-enterprise, shiny-secure
-	// - Aspect-oriented (advice, pointcuts): security-audit
-	skipAdvanced := map[string]string{
-		"shiny-enterprise.formula.toml": "uses formula composition (extends)",
-		"shiny-secure.formula.toml":     "uses formula composition (extends)",
-		"security-audit.formula.toml":   "uses aspect-oriented features (advice/pointcuts)",
-	}
-
 	for _, path := range formulaFiles {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			baseName := filepath.Base(path)
-			if reason, ok := skipAdvanced[baseName]; ok {
-				t.Skipf("Skipping advanced formula: %s", reason)
-				return
-			}
-
 			f, err := ParseFile(path)
 			if err != nil {
-				// Check if this is a composition formula (has extends)
-				if strings.Contains(err.Error(), "requires at least one") {
-					t.Skipf("Skipping: likely a composition formula - %v", err)
-					return
-				}
 				t.Errorf("ParseFile failed: %v", err)
 				return
 			}

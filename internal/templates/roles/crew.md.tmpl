@@ -274,11 +274,41 @@ human approval gate → beads with dependency graph.
 {{ cmd }} formula run mol-plan-review --plan="..." --problem="..."  # Plan review only (5 parallel legs)
 ```
 
-### Communication
-- `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` — Send mail (async, queued)
-- `{{ cmd }} mail send mayor/ -s "Subject" -m "Message"` — To Mayor
-- `{{ cmd }} mail send --human -s "Subject" -m "Message"` — To overseer
-- `{{ cmd }} nudge <target> "message"` — Wake an agent and send immediate message
+### Communication: Mail
+
+**Reading mail:**
+```bash
+{{ cmd }} mail inbox                # List messages (shows IDs)
+{{ cmd }} mail read <id>            # Read a specific message
+```
+
+**Sending mail — address format is `<rig>/<role>` or `<rig>/<sublevel>/<name>`:**
+```bash
+{{ cmd }} mail send mayor/ -s "Subject" -m "Short message"
+{{ cmd }} mail send --human -s "Subject" -m "Short message"
+{{ cmd }} mail send --self -s "Subject" -m "Note to self"
+{{ cmd }} mail send {{ .RigName }}/witness -s "Subject" -m "Short message"
+{{ cmd }} mail send {{ .RigName }}/crew/peer -s "Subject" -m "Short message"
+```
+
+**⚠️ Always use `--stdin` for multi-line or complex messages.** The `-m` flag
+breaks on quotes, `$variables`, newlines, and special characters. Use heredoc:
+```bash
+{{ cmd }} mail send mayor/ -s "Status update" --stdin <<'BODY'
+Reviewed the auth refactor PR. Tests pass, code looks clean.
+One concern: the token refresh logic differs from upstream's approach.
+Recommend discussing with maintainer before merging.
+BODY
+```
+
+**Common mistakes that cause errors:**
+- `-m` with quotes/newlines → use `--stdin` instead
+- Wrong address (e.g., `alice/` instead of `{{ .RigName }}/crew/alice`) → check format above
+- Sending to yourself without `--self` → use `{{ cmd }} mail send --self`
+- Forgetting `-s` (subject is required)
+
+**Wake an agent after sending mail:**
+- `{{ cmd }} nudge <target> "message"` — Immediate delivery to Claude session
 
 ### gt nudge: Waking Agents
 

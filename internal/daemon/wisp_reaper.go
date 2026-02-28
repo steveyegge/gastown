@@ -20,6 +20,8 @@ const (
 	defaultStaleIssueAge = 30 * 24 * time.Hour
 	// Alert threshold: if open wisp count exceeds this, escalate.
 	wispAlertThreshold = 500
+	// Closed mail (gt:message) older than this is permanently deleted.
+	defaultMailDeleteAge = 30 * 24 * time.Hour
 	// Batch size for DELETE operations to avoid long-running transactions.
 	deleteBatchSize = 100
 )
@@ -208,6 +210,28 @@ func (d *Daemon) reapWisps() {
 		mol.closeStep("purge")
 	}
 
+	// --- MAIL PURGE STEP: delete closed mail older than 30 days ---
+
+	mailCutoff := time.Now().UTC().Add(-defaultMailDeleteAge)
+	totalMailPurged := 0
+
+	for _, dbName := range databases {
+		if !validDBName.MatchString(dbName) {
+			continue
+		}
+		purged, err := d.purgeOldMailInDB(dbName, mailCutoff)
+		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: mail purge error: %v", dbName, err)
+		} else {
+			totalMailPurged += purged
+		}
+	}
+
+	if totalMailPurged > 0 {
+		d.logger.Printf("wisp_reaper: total purged %d old mail rows across %d databases",
+			totalMailPurged, len(databases))
+	}
+
 	// --- REPORT STEP: log summary and alert ---
 
 	if totalOpen > wispAlertThreshold {
@@ -236,9 +260,17 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 	}
 	defer db.Close()
 
+	// Disable auto-commit so the close operation produces a single Dolt commit.
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return 0, 0, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
 	// Close stale open wisps (status=open, created before cutoff).
 	// Also close stale hooked/in_progress wisps — these are abandoned molecule steps.
-	closeQuery := fmt.Sprintf(
+	closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 		"UPDATE `%s`.wisps SET status='closed', closed_at=NOW() WHERE status IN ('open', 'hooked', 'in_progress') AND created_at < ?",
 		dbName)
 	result, err := db.ExecContext(ctx, closeQuery, cutoff)
@@ -248,9 +280,17 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 
 	reaped, _ := result.RowsAffected()
 
+	// Commit the close operation as a single Dolt commit.
+	if reaped > 0 {
+		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", reaped, dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg is constructed from safe values
+			d.logger.Printf("wisp_reaper: %s: dolt commit after reap failed: %v", dbName, err)
+		}
+	}
+
 	// Count remaining open wisps.
 	var openCount int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps WHERE status IN ('open', 'hooked', 'in_progress')", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 	if err := db.QueryRowContext(ctx, countQuery).Scan(&openCount); err != nil {
 		return int(reaped), 0, fmt.Errorf("count open wisps: %w", err)
 	}
@@ -260,6 +300,7 @@ func (d *Daemon) reapWispsInDB(dbName string, cutoff time.Time) (int, int, error
 
 // purgeClosedWispsInDB deletes closed wisp rows (and their auxiliary data) older than
 // the delete cutoff. Deletes in batches to avoid long-running transactions.
+// All deletes are wrapped in a single Dolt commit to minimize commit graph growth.
 // Returns the number of wisp rows deleted.
 func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -275,7 +316,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	defer db.Close()
 
 	// Digest: count closed wisps eligible for deletion, grouped by wisp_type.
-	digestQuery := fmt.Sprintf(
+	digestQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 		"SELECT COALESCE(wisp_type, 'unknown') AS wtype, COUNT(*) AS cnt FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? GROUP BY wtype",
 		dbName)
 	rows, err := db.QueryContext(ctx, digestQuery, deleteCutoff)
@@ -304,11 +345,22 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 	d.logger.Printf("wisp_reaper: %s: deleting %d closed wisp rows (closed before %v)",
 		dbName, digestTotal, deleteCutoff.Format(time.RFC3339))
 
+	// Disable auto-commit so all batch deletes produce a single Dolt commit.
+	// This prevents N*5 auto-commits (4 aux tables + 1 wisps per batch) from
+	// bloating the commit graph that the Compactor must later flatten.
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return 0, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		// Re-enable auto-commit on exit regardless of outcome.
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
 	// Batch delete: select IDs, delete aux tables first, then wisps.
 	totalDeleted := 0
 	for {
 		// Get a batch of IDs to delete.
-		idQuery := fmt.Sprintf(
+		idQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name, not user input
 			"SELECT id FROM `%s`.wisps WHERE status = 'closed' AND closed_at < ? LIMIT %d",
 			dbName, deleteBatchSize)
 		idRows, err := db.QueryContext(ctx, idQuery, deleteCutoff)
@@ -343,7 +395,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 		// Delete from auxiliary tables first (foreign key safety).
 		auxTables := []string{"wisp_labels", "wisp_comments", "wisp_events", "wisp_dependencies"}
 		for _, tbl := range auxTables {
-			delAux := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE issue_id IN %s", dbName, tbl, inClause)
+			delAux := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE issue_id IN %s", dbName, tbl, inClause) //nolint:gosec // G201: dbName and tbl are internal constants, inClause is placeholders
 			if _, err := db.ExecContext(ctx, delAux, args...); err != nil {
 				// Log but continue — table might not exist in all databases.
 				d.logger.Printf("wisp_reaper: %s: delete from %s: %v", dbName, tbl, err)
@@ -351,7 +403,7 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 		}
 
 		// Delete the wisp rows themselves.
-		delWisps := fmt.Sprintf("DELETE FROM `%s`.wisps WHERE id IN %s", dbName, inClause)
+		delWisps := fmt.Sprintf("DELETE FROM `%s`.wisps WHERE id IN %s", dbName, inClause) //nolint:gosec // G201: dbName is an internal Dolt database name, inClause is placeholders
 		result, err := db.ExecContext(ctx, delWisps, args...)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("delete wisps batch: %w", err)
@@ -360,8 +412,120 @@ func (d *Daemon) purgeClosedWispsInDB(dbName string, deleteCutoff time.Time) (in
 		totalDeleted += int(affected)
 	}
 
+	// Commit all deletes as a single Dolt commit to keep the commit graph clean.
 	if totalDeleted > 0 {
+		commitMsg := fmt.Sprintf("reaper: purge %d closed wisps from %s", totalDeleted, dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil {
+			d.logger.Printf("wisp_reaper: %s: dolt commit after purge failed: %v", dbName, err)
+			// Deletes still happened in the working set; auto-commit re-enable will capture them.
+		}
 		d.logger.Printf("wisp_reaper: %s: deleted %d closed wisp rows and associated data",
+			dbName, totalDeleted)
+	}
+
+	return totalDeleted, nil
+}
+
+// purgeOldMailInDB deletes closed mail (gt:message labeled) issues older than the
+// mail cutoff. Skips open/unread mail so messages to parked rigs don't vanish.
+// Deletes in batches following the same pattern as purgeClosedWispsInDB.
+// All deletes are wrapped in a single Dolt commit to minimize commit graph growth.
+func (d *Daemon) purgeOldMailInDB(dbName string, mailCutoff time.Time) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dsn := fmt.Sprintf("root@tcp(%s:%d)/%s?parseTime=true&timeout=5s&readTimeout=30s&writeTimeout=30s",
+		"127.0.0.1", d.doltServerPort(), dbName)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return 0, fmt.Errorf("open connection: %w", err)
+	}
+	defer db.Close()
+
+	// Count eligible mail for logging.
+	countQuery := fmt.Sprintf(
+		"SELECT COUNT(*) FROM `%s`.issues WHERE status = 'closed' AND closed_at < ? AND id IN (SELECT issue_id FROM `%s`.labels WHERE label = 'gt:message')",
+		dbName, dbName)
+	var count int
+	if err := db.QueryRowContext(ctx, countQuery, mailCutoff).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count mail: %w", err)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+
+	d.logger.Printf("wisp_reaper: %s: deleting %d closed mail rows older than %v",
+		dbName, count, mailCutoff.Format(time.RFC3339))
+
+	// Disable auto-commit so all batch deletes produce a single Dolt commit.
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return 0, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
+	// Batch delete: same pattern as wisp purge.
+	totalDeleted := 0
+	for {
+		idQuery := fmt.Sprintf(
+			"SELECT i.id FROM `%s`.issues i INNER JOIN `%s`.labels l ON i.id = l.issue_id WHERE i.status = 'closed' AND i.closed_at < ? AND l.label = 'gt:message' LIMIT %d",
+			dbName, dbName, deleteBatchSize)
+		idRows, err := db.QueryContext(ctx, idQuery, mailCutoff)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("select mail batch: %w", err)
+		}
+
+		var ids []string
+		for idRows.Next() {
+			var id string
+			if err := idRows.Scan(&id); err != nil {
+				idRows.Close()
+				return totalDeleted, fmt.Errorf("scan id: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		idRows.Close()
+
+		if len(ids) == 0 {
+			break
+		}
+
+		placeholders := make([]string, len(ids))
+		args := make([]interface{}, len(ids))
+		for i, id := range ids {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		inClause := "(" + joinStrings(placeholders, ",") + ")"
+
+		// Delete from auxiliary tables first.
+		auxTables := []string{"labels", "comments", "events", "dependencies"}
+		for _, tbl := range auxTables {
+			delAux := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE issue_id IN %s", dbName, tbl, inClause)
+			if _, err := db.ExecContext(ctx, delAux, args...); err != nil {
+				d.logger.Printf("wisp_reaper: %s: mail delete from %s: %v", dbName, tbl, err)
+			}
+		}
+
+		// Delete the issue rows.
+		delIssues := fmt.Sprintf("DELETE FROM `%s`.issues WHERE id IN %s", dbName, inClause)
+		result, err := db.ExecContext(ctx, delIssues, args...)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("delete mail batch: %w", err)
+		}
+		affected, _ := result.RowsAffected()
+		totalDeleted += int(affected)
+	}
+
+	// Commit all deletes as a single Dolt commit.
+	if totalDeleted > 0 {
+		commitMsg := fmt.Sprintf("reaper: purge %d old mail from %s", totalDeleted, dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil {
+			d.logger.Printf("wisp_reaper: %s: dolt commit after mail purge failed: %v", dbName, err)
+		}
+		d.logger.Printf("wisp_reaper: %s: deleted %d old mail rows and associated data",
 			dbName, totalDeleted)
 	}
 
@@ -391,16 +555,24 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 
 	// Check if issues table exists (not all databases have it).
 	var dummy int
-	checkQuery := fmt.Sprintf("SELECT 1 FROM `%s`.issues LIMIT 1", dbName)
+	checkQuery := fmt.Sprintf("SELECT 1 FROM `%s`.issues LIMIT 1", dbName) //nolint:gosec // G201: dbName is an internal Dolt database name
 	if err := db.QueryRowContext(ctx, checkQuery).Scan(&dummy); err != nil {
 		// Table doesn't exist or is empty — skip silently.
 		return 0, nil
 	}
 
+	// Disable auto-commit so all auto-closes produce a single Dolt commit.
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return 0, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
 	// Find stale issue candidates: open >30 days, priority > 1 (exempt P0/P1),
 	// not epics, and not linked to any open issues via dependencies.
 	// We SELECT first (instead of blind UPDATE) so we can log each closure individually.
-	candidateQuery := fmt.Sprintf(
+	candidateQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 		`SELECT id, title, updated_at FROM `+"`%s`"+`.issues
 		WHERE status IN ('open', 'in_progress')
 		AND updated_at < ?
@@ -453,7 +625,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 	closed := 0
 	now := time.Now().UTC()
 	for _, c := range candidates {
-		closeQuery := fmt.Sprintf(
+		closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
 			dbName)
 		result, err := db.ExecContext(ctx, closeQuery, c.id)
@@ -469,6 +641,14 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 		}
 	}
 
+	// Commit all auto-closes as a single Dolt commit.
+	if closed > 0 {
+		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", closed, dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg is constructed from safe values
+			d.logger.Printf("wisp_reaper: %s: dolt commit after auto-close failed: %v", dbName, err)
+		}
+	}
+
 	return closed, nil
 }
 
@@ -476,7 +656,7 @@ func (d *Daemon) autoCloseStaleIssuesInDB(dbName string, staleCutoff time.Time) 
 // Closes stale issues excluding epics and P0/P1, but cannot check dependencies.
 func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbName string, staleCutoff time.Time) (int, error) {
 	// Find candidates without dependency check.
-	candidateQuery := fmt.Sprintf(
+	candidateQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 		"SELECT id, title, updated_at FROM `%s`.issues WHERE status IN ('open', 'in_progress') AND updated_at < ? AND priority > 1 AND issue_type != 'epic'",
 		dbName)
 
@@ -495,7 +675,7 @@ func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbN
 			return closed, fmt.Errorf("scan candidate: %w", err)
 		}
 
-		closeQuery := fmt.Sprintf(
+		closeQuery := fmt.Sprintf( //nolint:gosec // G201: dbName is an internal Dolt database name
 			"UPDATE `%s`.issues SET status='closed', closed_at=NOW(), close_reason='stale:auto-closed by reaper' WHERE id = ? AND status IN ('open', 'in_progress')",
 			dbName)
 		result, err := db.ExecContext(ctx, closeQuery, id)
@@ -508,6 +688,15 @@ func (d *Daemon) autoCloseStaleIssuesSimple(ctx context.Context, db *sql.DB, dbN
 			age := now.Sub(updatedAt).Truncate(time.Hour)
 			d.logger.Printf("wisp_reaper: %s: auto-closed %s %q (age: %v, no dep check)", dbName, id, title, age)
 			closed++
+		}
+	}
+
+	// Commit all auto-closes as a single Dolt commit.
+	// The caller (autoCloseStaleIssuesInDB) has already disabled auto-commit.
+	if closed > 0 {
+		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s (no dep check)", closed, dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg is constructed from safe values
+			d.logger.Printf("wisp_reaper: %s: dolt commit after auto-close (simple) failed: %v", dbName, err)
 		}
 	}
 

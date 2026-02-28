@@ -36,6 +36,11 @@ var (
 // chosen port for integration tests. The server is shared across all tests
 // in the same test binary invocation.
 //
+// CONTRACT: Any package that calls RequireDoltServer MUST have a TestMain
+// that calls CleanupDoltServer() after m.Run(). Without this, the test
+// server process leaks as a zombie. See internal/mail/testmain_test.go
+// or internal/polecat/testmain_test.go for examples.
+//
 // Port selection:
 //   - If GT_DOLT_PORT is set externally, that port is used (allows reusing
 //     a pre-started server).

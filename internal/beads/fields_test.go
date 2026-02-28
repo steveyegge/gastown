@@ -290,3 +290,120 @@ func TestParseAgentFields_AllFields(t *testing.T) {
 		t.Errorf("NotificationLevel = %q, want %q", got.NotificationLevel, "verbose")
 	}
 }
+
+// --- Completion metadata fields (gt-x7t9) ---
+
+func TestAgentFieldsCompletionMetadataRoundTrip(t *testing.T) {
+	original := &AgentFields{
+		RoleType:       "polecat",
+		Rig:            "gastown",
+		AgentState:     "done",
+		HookBead:       "gt-abc",
+		ExitType:       "COMPLETED",
+		MRID:           "gt-mr-xyz",
+		Branch:         "polecat/nux/gt-abc@hash",
+		MRFailed:       false,
+		CompletionTime: "2026-02-28T01:00:00Z",
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", original)
+
+	// Verify all completion fields are present
+	if !strings.Contains(formatted, "exit_type: COMPLETED") {
+		t.Errorf("missing exit_type in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "mr_id: gt-mr-xyz") {
+		t.Errorf("missing mr_id in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "branch: polecat/nux/gt-abc@hash") {
+		t.Errorf("missing branch in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "completion_time: 2026-02-28T01:00:00Z") {
+		t.Errorf("missing completion_time in formatted output:\n%s", formatted)
+	}
+	// mr_failed=false should NOT appear
+	if strings.Contains(formatted, "mr_failed") {
+		t.Errorf("mr_failed should not appear when false:\n%s", formatted)
+	}
+
+	// Parse and verify round-trip
+	parsed := ParseAgentFields(formatted)
+	if parsed.ExitType != "COMPLETED" {
+		t.Errorf("ExitType: got %q, want %q", parsed.ExitType, "COMPLETED")
+	}
+	if parsed.MRID != "gt-mr-xyz" {
+		t.Errorf("MRID: got %q, want %q", parsed.MRID, "gt-mr-xyz")
+	}
+	if parsed.Branch != "polecat/nux/gt-abc@hash" {
+		t.Errorf("Branch: got %q, want %q", parsed.Branch, "polecat/nux/gt-abc@hash")
+	}
+	if parsed.MRFailed != false {
+		t.Errorf("MRFailed: got %v, want false", parsed.MRFailed)
+	}
+	if parsed.CompletionTime != "2026-02-28T01:00:00Z" {
+		t.Errorf("CompletionTime: got %q, want %q", parsed.CompletionTime, "2026-02-28T01:00:00Z")
+	}
+	// Verify non-completion fields survive
+	if parsed.RoleType != "polecat" {
+		t.Errorf("RoleType: got %q, want %q", parsed.RoleType, "polecat")
+	}
+	if parsed.HookBead != "gt-abc" {
+		t.Errorf("HookBead: got %q, want %q", parsed.HookBead, "gt-abc")
+	}
+}
+
+func TestAgentFieldsMRFailedTrue(t *testing.T) {
+	fields := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "done",
+		ExitType:   "COMPLETED",
+		MRFailed:   true,
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", fields)
+	if !strings.Contains(formatted, "mr_failed: true") {
+		t.Errorf("missing mr_failed: true in formatted output:\n%s", formatted)
+	}
+
+	parsed := ParseAgentFields(formatted)
+	if !parsed.MRFailed {
+		t.Errorf("MRFailed: got false, want true")
+	}
+}
+
+func TestAgentFieldsCompletionOmittedWhenEmpty(t *testing.T) {
+	fields := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "working",
+		// All completion fields intentionally empty
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", fields)
+	for _, keyword := range []string{"exit_type:", "mr_id:", "branch:", "mr_failed:", "completion_time:"} {
+		if strings.Contains(formatted, keyword) {
+			t.Errorf("empty completion field %q should not appear in output:\n%s", keyword, formatted)
+		}
+	}
+}
+
+func TestParseAgentFields_WithCompletionMetadata(t *testing.T) {
+	desc := "role_type: polecat\nrig: gastown\nagent_state: done\nhook_bead: gt-abc\nexit_type: ESCALATED\nbranch: polecat/nux/gt-abc@hash\nmr_failed: true\ncompletion_time: 2026-02-28T02:00:00Z"
+	got := ParseAgentFields(desc)
+	if got.ExitType != "ESCALATED" {
+		t.Errorf("ExitType = %q, want %q", got.ExitType, "ESCALATED")
+	}
+	if got.Branch != "polecat/nux/gt-abc@hash" {
+		t.Errorf("Branch = %q, want %q", got.Branch, "polecat/nux/gt-abc@hash")
+	}
+	if !got.MRFailed {
+		t.Errorf("MRFailed = false, want true")
+	}
+	if got.CompletionTime != "2026-02-28T02:00:00Z" {
+		t.Errorf("CompletionTime = %q, want %q", got.CompletionTime, "2026-02-28T02:00:00Z")
+	}
+	if got.MRID != "" {
+		t.Errorf("MRID = %q, want empty (not in desc)", got.MRID)
+	}
+}

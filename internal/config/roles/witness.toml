@@ -3,6 +3,8 @@
 
 role = "witness"
 scope = "rig"
+autonomous = true
+emoji = "🦉"
 nudge = "Run 'gt prime' to check worker status and begin patrol cycle."
 prompt_template = "witness.md.tmpl"
 

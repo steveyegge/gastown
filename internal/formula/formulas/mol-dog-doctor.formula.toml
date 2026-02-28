@@ -79,7 +79,7 @@ Check resource usage and detect anomalies.
 ```sql
 SELECT COUNT(*) FROM information_schema.PROCESSLIST;
 ```
-Warn if >= 80% of max connections (50).
+Warn if >= 80% of max connections (1000).
 
 **2. Disk usage:**
 Check data directory size. Warn if exceeding configured threshold.

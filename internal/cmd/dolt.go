@@ -86,6 +86,26 @@ Steps:
 	RunE: runDoltRestart,
 }
 
+var doltKillImpostersCmd = &cobra.Command{
+	Use:   "kill-imposters",
+	Short: "Kill dolt servers hijacking this workspace's port",
+	Long: `Find and kill any dolt sql-server that holds this workspace's configured
+port but serves from a different data directory (an "imposter").
+
+This is safe to run at any time. It only kills servers that are:
+  1. Listening on the same port as this workspace's Dolt config
+  2. Serving from a data directory OTHER than this workspace's .dolt-data/
+
+It never kills the workspace's own legitimate Dolt server.
+
+Examples:
+  gt dolt kill-imposters          # Kill imposters on configured port
+  gt dolt kill-imposters --dry-run # Preview without killing`,
+	RunE: runDoltKillImposters,
+}
+
+var doltKillImpostersDry bool
+
 var doltStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Dolt server status",
@@ -303,6 +323,7 @@ func init() {
 	doltCmd.AddCommand(doltStartCmd)
 	doltCmd.AddCommand(doltStopCmd)
 	doltCmd.AddCommand(doltRestartCmd)
+	doltCmd.AddCommand(doltKillImpostersCmd)
 	doltCmd.AddCommand(doltStatusCmd)
 	doltCmd.AddCommand(doltLogsCmd)
 	doltCmd.AddCommand(doltDumpCmd)
@@ -316,6 +337,8 @@ func init() {
 	doltCmd.AddCommand(doltRollbackCmd)
 	doltCmd.AddCommand(doltSyncCmd)
 	doltCmd.AddCommand(doltMigrateWispsCmd)
+
+	doltKillImpostersCmd.Flags().BoolVar(&doltKillImpostersDry, "dry-run", false, "Preview without killing")
 
 	doltCleanupCmd.Flags().BoolVar(&doltCleanupDry, "dry-run", false, "Preview what would be removed without making changes")
 	doltCleanupCmd.Flags().BoolVar(&doltCleanupForce, "force", false, "Remove databases even if they have user tables")
@@ -387,6 +410,40 @@ func runDoltStart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s All %d databases verified\n", style.Bold.Render("✓"), len(served))
 	}
 
+	return nil
+}
+
+func runDoltKillImposters(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	config := doltserver.DefaultConfig(townRoot)
+	if config.IsRemote() {
+		return fmt.Errorf("Dolt server is remote — imposter detection requires local server")
+	}
+
+	conflictPID, conflictDataDir := doltserver.CheckPortConflict(townRoot)
+	if conflictPID == 0 {
+		fmt.Printf("%s No imposters found on port %d\n", style.Bold.Render("✓"), config.Port)
+		return nil
+	}
+
+	fmt.Printf("Found imposter dolt server:\n")
+	fmt.Printf("  PID:      %d\n", conflictPID)
+	fmt.Printf("  Data-dir: %s\n", conflictDataDir)
+	fmt.Printf("  Expected: %s\n", config.DataDir)
+
+	if doltKillImpostersDry {
+		fmt.Printf("\n%s Dry-run — not killing\n", style.Warning.Render("~"))
+		return nil
+	}
+
+	if err := doltserver.KillImposters(townRoot); err != nil {
+		return fmt.Errorf("killing imposter: %w", err)
+	}
+	fmt.Printf("%s Imposter killed (PID %d)\n", style.Bold.Render("✓"), conflictPID)
 	return nil
 }
 

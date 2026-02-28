@@ -368,6 +368,13 @@ func (g *Git) Checkout(ref string) error {
 	return err
 }
 
+// CheckoutNewBranch creates a new branch from startPoint and checks it out.
+// Equivalent to: git checkout -b <branch> <startPoint>
+func (g *Git) CheckoutNewBranch(branch, startPoint string) error {
+	_, err := g.run("checkout", "-b", branch, startPoint)
+	return err
+}
+
 // Fetch fetches from the remote.
 func (g *Git) Fetch(remote string) error {
 	_, err := g.run("fetch", remote)

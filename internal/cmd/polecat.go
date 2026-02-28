@@ -125,6 +125,9 @@ Displays comprehensive information including:
   - Session creation time
   - Last activity time
 
+NOTE: The argument is <rig>/<polecat> — a single argument with a slash
+separator, NOT two separate arguments. For example: greenplace/Toast
+
 Examples:
   gt polecat status greenplace/Toast
   gt polecat status greenplace/Toast --json`,
@@ -1315,11 +1318,27 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		if hasPendingMR {
 			fmt.Printf("  %s skipped remote branch delete (MR pending in merge queue)\n", style.Dim.Render("○"))
 		} else {
-			// No pending MR — safe to delete remote branch
-			if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
-				fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+			// Check if remote branch has unmerged commits before deleting.
+			// Without this check, work is lost when polecats push branches but
+			// don't create MR beads (e.g., due to missing formula). The refinery
+			// needs the remote branch to merge the work.
+			// Fixes: gt-rm9f (nuke-before-merge data loss on bd-1lc, bd-019)
+			hasUnmerged := false
+			remoteBranch := "origin/" + branchToDelete
+			if ahead, aheadErr := repoGit.CommitsAhead("origin/main", remoteBranch); aheadErr == nil && ahead > 0 {
+				hasUnmerged = true
+				fmt.Printf("  %s preserving remote branch %s (%d unmerged commit(s) ahead of main)\n",
+					style.Warning.Render("⚠"), branchToDelete, ahead)
+			}
+			if hasUnmerged {
+				fmt.Printf("  %s skipped remote branch delete (unmerged commits — refinery or human should merge)\n", style.Dim.Render("○"))
 			} else {
-				fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+				// No pending MR and no unmerged commits — safe to delete remote branch
+				if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
+					fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+				} else {
+					fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+				}
 			}
 		}
 	}

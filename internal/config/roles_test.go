@@ -97,6 +97,57 @@ func TestLoadBuiltinRoleDefinition(t *testing.T) {
 	}
 }
 
+func TestIsAutonomous(t *testing.T) {
+	tests := []struct {
+		role string
+		want bool
+	}{
+		{"polecat", true},
+		{"witness", true},
+		{"refinery", true},
+		{"deacon", true},
+		{"boot", true},  // deacon variant, inherits autonomous
+		{"dog", true},
+		{"mayor", false},
+		{"crew", false},
+		{"unknown", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.role, func(t *testing.T) {
+			if got := IsAutonomous(tt.role); got != tt.want {
+				t.Errorf("IsAutonomous(%q) = %v, want %v", tt.role, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBuiltinRoleDefinition_Autonomous(t *testing.T) {
+	// Verify the Autonomous field is correctly loaded from TOML
+	autonomousRoles := map[string]bool{
+		"polecat":  true,
+		"witness":  true,
+		"refinery": true,
+		"deacon":   true,
+		"dog":      true,
+		"mayor":    false,
+		"crew":     false,
+	}
+
+	for role, wantAutonomous := range autonomousRoles {
+		t.Run(role, func(t *testing.T) {
+			def, err := loadBuiltinRoleDefinition(role)
+			if err != nil {
+				t.Fatalf("loadBuiltinRoleDefinition(%s) error: %v", role, err)
+			}
+			if def.Autonomous != wantAutonomous {
+				t.Errorf("Autonomous = %v, want %v", def.Autonomous, wantAutonomous)
+			}
+		})
+	}
+}
+
 func TestLoadBuiltinRoleDefinition_UnknownRole(t *testing.T) {
 	_, err := loadBuiltinRoleDefinition("nonexistent")
 	if err == nil {

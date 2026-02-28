@@ -185,6 +185,22 @@ Patrol cycles are **operational** work, not **auditable deliverables**:
 | Witness | `gt-<rig>-witness` |
 | Crew | `gt-<rig>-<name>` |
 
+## 📡 Communication Hygiene: Nudge First, Mail Rarely
+
+**Default to `gt nudge` for all routine communication.**
+
+| Use nudge for | Use mail for |
+|---------------|-------------|
+| Witness health checks | Escalations to Mayor |
+| TIMER callbacks | HANDOFF (only if extraordinary context) |
+| HEALTH_CHECK pokes | Cross-rig coordination requests |
+| Wake signals | Nothing else — mail is expensive |
+
+**Dogs should NEVER receive mail from you.** Dogs report via event beads or nudge.
+
+**The commit graph cost**: Every `gt mail send` creates a Dolt commit in the permanent history.
+At 4 agents × 15 cycles × 2 mails = 120 useless commits per day. Use nudge instead.
+
 ## Inbox Hygiene
 
 **CRITICAL**: Always delete messages after handling them.

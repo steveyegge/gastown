@@ -250,7 +250,7 @@ func vitalsFormatCount(n int) string {
 
 func vitalsShortHome(path string) string {
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
+		return "~" + filepath.ToSlash(path[len(home):])
 	}
 	return path
 }

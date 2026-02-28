@@ -3,6 +3,8 @@
 
 role = "deacon"
 scope = "town"
+autonomous = true
+emoji = "🐺"
 nudge = "Run 'gt prime' to check patrol status and begin heartbeat cycle."
 prompt_template = "deacon.md.tmpl"
 

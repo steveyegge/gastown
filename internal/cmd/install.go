@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ var (
 	installShell      bool
 	installWrappers   bool
 	installSupervisor bool
+	installDoltPort   int
 )
 
 var installCmd = &cobra.Command{
@@ -67,8 +69,9 @@ Examples:
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
   gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
   gt install ~/gt --supervisor                 # Configure launchd/systemd for daemon auto-restart`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runInstall,
+	Args:         cobra.MaximumNArgs(1),
+	RunE:         runInstall,
+	SilenceUsage: true,
 }
 
 func init() {
@@ -83,6 +86,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-gemini/gt-opencode wrapper scripts to ~/bin/")
 	installCmd.Flags().BoolVar(&installSupervisor, "supervisor", false, "Configure launchd/systemd for daemon auto-restart")
+	installCmd.Flags().IntVar(&installDoltPort, "dolt-port", 0, "Dolt SQL server port (default 3307; set when another instance owns the default port)")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -148,6 +152,31 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if _, err := exec.LookPath("dolt"); err == nil {
 			if err := doltserver.EnsureDoltIdentity(); err != nil {
 				return fmt.Errorf("dolt identity setup failed (required for beads): %w\n\nTo fix, run:\n  dolt config --global --add user.name \"Your Name\"\n  dolt config --global --add user.email \"you@example.com\"", err)
+			}
+
+			// Preflight: check Dolt port availability before creating any files.
+			// A port conflict would leave a partial install that needs --force to retry.
+			port := doltserver.DefaultPort
+			if installDoltPort != 0 {
+				port = installDoltPort
+				os.Setenv("GT_DOLT_PORT", strconv.Itoa(port))
+			}
+			if err := doltserver.CheckPortAvailable(port); err != nil {
+				pid, dataDir := doltserver.PortHolder(port)
+				msg := fmt.Sprintf("Dolt port %d is already in use", port)
+				if pid > 0 && dataDir != "" {
+					msg += fmt.Sprintf("\nPort is held by dolt PID %d serving %s", pid, dataDir)
+				} else if pid > 0 {
+					msg += fmt.Sprintf("\nPort is held by PID %d", pid)
+				}
+				msg += "\n\nAnother Gas Town instance is using this port. Specify a free port:"
+				origArgs := strings.Join(os.Args[1:], " ")
+				if freePort := doltserver.FindFreePort(port + 1); freePort > 0 {
+					msg += fmt.Sprintf("\n\n  gt %s --dolt-port %d", origArgs, freePort)
+				} else {
+					msg += fmt.Sprintf("\n\n  gt %s --dolt-port <port>", origArgs)
+				}
+				return fmt.Errorf("%s", msg)
 			}
 		}
 	}

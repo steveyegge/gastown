@@ -1267,6 +1267,100 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}, nil
 }
 
+// ReuseIdlePolecat prepares an idle polecat for new work using branch-only operations.
+// Unlike RepairWorktreeWithOptions, this does NOT create/remove git worktrees.
+// It simply creates a fresh branch on the existing worktree, which eliminates the
+// ~5s overhead of worktree creation. Phase 3 of persistent-polecat-pool.md.
+//
+// Steps:
+//  1. Verify polecat exists and worktree is accessible
+//  2. Fetch latest from origin
+//  3. Create fresh branch: git checkout -b <branch> <startPoint>
+//  4. Reset agent bead and set hook_bead atomically
+//  5. Return polecat in working state
+func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, error) {
+	// Acquire per-polecat file lock to prevent concurrent reuse/remove races
+	fl, err := m.lockPolecat(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fl.Unlock() }()
+
+	if !m.exists(name) {
+		return nil, ErrPolecatNotFound
+	}
+
+	// Get worktree path (must already exist for reuse)
+	clonePath := m.clonePath(name)
+	if _, err := os.Stat(clonePath); err != nil {
+		return nil, fmt.Errorf("idle polecat worktree not found at %s: %w", clonePath, err)
+	}
+
+	polecatGit := git.NewGit(clonePath)
+
+	// Fetch latest from origin (non-fatal: may be offline)
+	repoGit, err := m.repoBase()
+	if err == nil {
+		_ = repoGit.Fetch("origin")
+	}
+	// Also fetch in the worktree itself so it has the latest refs
+	_ = polecatGit.Fetch("origin")
+
+	// Determine the start point for the new branch
+	var startPoint string
+	if opts.BaseBranch != "" {
+		startPoint = opts.BaseBranch
+	} else {
+		defaultBranch := "main"
+		if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+		startPoint = fmt.Sprintf("origin/%s", defaultBranch)
+	}
+
+	// Validate that startPoint ref exists
+	if exists, err := polecatGit.RefExists(startPoint); err != nil {
+		return nil, fmt.Errorf("checking ref %s: %w", startPoint, err)
+	} else if !exists {
+		return nil, fmt.Errorf("start point %s not found — fall back to full repair", startPoint)
+	}
+
+	// Create fresh branch from start point (branch-only, no worktree add/remove)
+	branchName := m.buildBranchName(name, opts.HookBead)
+	if err := polecatGit.CheckoutNewBranch(branchName, startPoint); err != nil {
+		return nil, fmt.Errorf("creating branch %s from %s: %w", branchName, startPoint, err)
+	}
+
+	// Reset agent bead for reuse
+	agentID := m.agentBeadID(name)
+	if err := m.beads.ResetAgentBeadForReuse(agentID, "idle polecat reuse"); err != nil {
+		if !errors.Is(err, beads.ErrNotFound) {
+			style.PrintWarning("could not reset agent bead %s: %v", agentID, err)
+		}
+	}
+
+	// Create or reopen agent bead with hook_bead set atomically
+	if err = m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
+		RoleType:   "polecat",
+		Rig:        m.rig.Name,
+		AgentState: "spawning",
+		HookBead:   opts.HookBead,
+	}); err != nil {
+		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
+	}
+
+	now := time.Now()
+	return &Polecat{
+		Name:      name,
+		Rig:       m.rig.Name,
+		State:     StateWorking,
+		ClonePath: clonePath,
+		Branch:    branchName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
 // ReconcilePool derives pool InUse state from existing polecat directories and active sessions.
 // This implements ZFC: InUse is discovered from filesystem and tmux, not tracked separately.
 // Called before each allocation to ensure InUse reflects reality.

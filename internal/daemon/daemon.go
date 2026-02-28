@@ -75,6 +75,10 @@ type Daemon struct {
 	gtPath string
 	bdPath string
 
+	// Boot spawn cooldown: prevents Boot from spawning on every heartbeat tick.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	bootLastSpawned time.Time
+
 	// Restart tracking with exponential backoff to prevent crash loops
 	restartTracker *RestartTracker
 
@@ -92,10 +96,16 @@ type Daemon struct {
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	lastDoctorMolTime time.Time
 
-	// bootLastSpawned tracks when Boot was last spawned to prevent
-	// spawning on every daemon heartbeat tick.
+	// Doctor dog action cooldowns — prevent repeated actions within a window.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
-	bootLastSpawned time.Time
+	lastDoctorRestart   time.Time
+	lastDoctorJanitor   time.Time
+	lastDoctorBackup    time.Time
+	lastDoctorEscalate  time.Time
+
+	// lastMaintenanceRun tracks when scheduled maintenance last ran.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	lastMaintenanceRun time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -143,6 +153,14 @@ func New(config *Config) (*Daemon, error) {
 	// Initialize session prefix and agent registries from town root.
 	if err := session.InitRegistry(config.TownRoot); err != nil {
 		logger.Printf("Warning: failed to initialize town registry: %v", err)
+	}
+
+	// Set GT_TOWN_ROOT in tmux global environment so run-shell subprocesses
+	// (e.g., gt cycle next/prev) can find the workspace even when CWD is $HOME.
+	// Non-fatal: tmux server may not be running yet — daemon creates sessions shortly.
+	t := tmux.NewTmux()
+	if err := t.SetGlobalEnvironment("GT_TOWN_ROOT", config.TownRoot); err != nil {
+		logger.Printf("Warning: failed to set GT_TOWN_ROOT in tmux global env: %v", err)
 	}
 
 	// Load patrol config from mayor/daemon.json (optional - nil if missing)
@@ -423,16 +441,35 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Doctor dog ticker started (interval %v)", interval)
 	}
 
-	// Start janitor dog ticker if configured.
-	// Cleans up orphan test databases on the test server (port 3308).
-	var janitorDogTicker *time.Ticker
-	var janitorDogChan <-chan time.Time
-	if IsPatrolEnabled(d.patrolConfig, "janitor_dog") {
-		interval := janitorDogInterval(d.patrolConfig)
-		janitorDogTicker = time.NewTicker(interval)
-		janitorDogChan = janitorDogTicker.C
-		defer janitorDogTicker.Stop()
-		d.logger.Printf("Janitor dog ticker started (interval %v)", interval)
+	// Janitor dog: no longer uses a dedicated ticker.
+	// Dispatched via plugin system (dolt-janitor/plugin.md) through handleDogs().
+	// See docs/design/dog-execution-model.md for rationale.
+	var janitorDogChan <-chan time.Time // nil channel — never fires
+
+	// Start compactor dog ticker if configured.
+	// Flattens Dolt commit history to reclaim graph storage (daily).
+	var compactorDogTicker *time.Ticker
+	var compactorDogChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "compactor_dog") {
+		interval := compactorDogInterval(d.patrolConfig)
+		compactorDogTicker = time.NewTicker(interval)
+		compactorDogChan = compactorDogTicker.C
+		defer compactorDogTicker.Stop()
+		d.logger.Printf("Compactor dog ticker started (interval %v)", interval)
+	}
+
+	// Start scheduled maintenance ticker if configured.
+	// Checks periodically whether we're in the maintenance window and
+	// runs `gt maintain --force` when commit counts exceed threshold.
+	var scheduledMaintenanceTicker *time.Ticker
+	var scheduledMaintenanceChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "scheduled_maintenance") {
+		interval := maintenanceCheckInterval(d.patrolConfig)
+		scheduledMaintenanceTicker = time.NewTicker(interval)
+		scheduledMaintenanceChan = scheduledMaintenanceTicker.C
+		defer scheduledMaintenanceTicker.Stop()
+		window := maintenanceWindow(d.patrolConfig)
+		d.logger.Printf("Scheduled maintenance ticker started (check interval %v, window %s)", interval, window)
 	}
 
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
@@ -453,6 +490,14 @@ func (d *Daemon) Run() error {
 				// Lifecycle signal: immediate lifecycle processing (from gt handoff)
 				d.logger.Println("Received lifecycle signal, processing lifecycle requests immediately")
 				d.processLifecycleRequests()
+			} else if isReloadRestartSignal(sig) {
+				// Reload restart tracker from disk (from 'gt daemon clear-backoff')
+				d.logger.Println("Received reload-restart signal, reloading restart tracker from disk")
+				if d.restartTracker != nil {
+					if err := d.restartTracker.Load(); err != nil {
+						d.logger.Printf("Warning: failed to reload restart tracker: %v", err)
+					}
+				}
 			} else {
 				d.logger.Printf("Received signal %v, shutting down", sig)
 				return d.shutdown(state)
@@ -511,6 +556,20 @@ func (d *Daemon) Run() error {
 			// Janitor dog — pours molecule for test server orphan cleanup.
 			if !d.isShutdownInProgress() {
 				d.runJanitorDog()
+			}
+
+		case <-compactorDogChan:
+			// Compactor dog — flattens Dolt commit history on production databases.
+			// Reclaims commit graph storage, then runs gc to reclaim chunks.
+			if !d.isShutdownInProgress() {
+				d.runCompactorDog()
+			}
+
+		case <-scheduledMaintenanceChan:
+			// Scheduled maintenance — checks if we're in the maintenance window
+			// and runs `gt maintain --force` when commit counts exceed threshold.
+			if !d.isShutdownInProgress() {
+				d.runScheduledMaintenance()
 			}
 
 		case <-timer.C:
@@ -784,10 +843,13 @@ const bootSpawnCooldown = 2 * time.Minute
 // on every daemon heartbeat tick.
 // In degraded mode (no tmux), falls back to mechanical checks.
 func (d *Daemon) ensureBootRunning() {
-	// Cooldown gate: skip if Boot was spawned recently.
+	// Cooldown gate: skip if Boot was spawned recently (fixes #2084)
 	if !d.bootLastSpawned.IsZero() && time.Since(d.bootLastSpawned) < bootSpawnCooldown {
+		d.logger.Printf("Boot spawned %s ago, within cooldown (%s), skipping",
+			time.Since(d.bootLastSpawned).Round(time.Second), bootSpawnCooldown)
 		return
 	}
+
 
 	b := boot.New(d.config.TownRoot)
 
@@ -907,6 +969,14 @@ const deaconGracePeriod = 5 * time.Minute
 // - Grace period only applies if heartbeat is from BEFORE we started Deacon
 // - If heartbeat is from AFTER start but stale, Deacon is stuck
 func (d *Daemon) checkDeaconHeartbeat() {
+	// Respect crash-loop guard: if the restart tracker says Deacon is in a
+	// crash loop, do not kill the session — the guard is deliberately holding
+	// off restarts to break the cycle. (Fixes #2086)
+	if d.restartTracker != nil && d.restartTracker.IsInCrashLoop("deacon") {
+		d.logger.Printf("Deacon is in crash-loop state, skipping heartbeat kill check")
+		return
+	}
+
 	// Always read heartbeat first (PATCH-005)
 	hb := deacon.ReadHeartbeat(d.config.TownRoot)
 
@@ -1872,6 +1942,9 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		}
 		return fmt.Errorf("creating session: %w", err)
 	}
+
+	// Record polecat spawn metric.
+	d.metrics.recordPolecatSpawn(d.ctx, rigName)
 
 	// Set environment variables in tmux session table (for debugging/monitoring tools).
 	// The process itself gets env vars via 'exec env ...' in the startup command.

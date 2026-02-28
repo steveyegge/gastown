@@ -3,6 +3,8 @@
 
 role = "dog"
 scope = "town"
+autonomous = true
+emoji = "🐕"
 nudge = "Check your hook for work assignments."
 prompt_template = "dog.md.tmpl"
 

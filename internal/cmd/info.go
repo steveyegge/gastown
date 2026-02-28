@@ -104,6 +104,7 @@ var versionChanges = []VersionChange{
 			"FIX: Filter getCurrentWork by assignee to prevent cross-session bead leaks",
 			"FIX: Clean stale molecules during polecat nuke to unblock re-sling",
 			"FIX: 300+ additional bug fixes across patrol, boot, convoy, and test infrastructure",
+			"CHANGED: Witness restart-first policy — polecats are restarted instead of nuked (gt-dsgp)",
 		},
 	},
 	{

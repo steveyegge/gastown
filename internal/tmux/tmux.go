@@ -59,14 +59,26 @@ func validateSessionName(name string) error {
 
 // defaultSocket is the tmux socket name (-L flag) for multi-instance isolation.
 // When set, all tmux commands use this socket instead of the default server.
-var defaultSocket string
+// Access is protected by defaultSocketMu for concurrent test safety.
+var (
+	defaultSocket   string
+	defaultSocketMu sync.RWMutex
+)
 
 // SetDefaultSocket sets the package-level default tmux socket name.
 // Called during init to scope tmux to the current town.
-func SetDefaultSocket(name string) { defaultSocket = name }
+func SetDefaultSocket(name string) {
+	defaultSocketMu.Lock()
+	defaultSocket = name
+	defaultSocketMu.Unlock()
+}
 
 // GetDefaultSocket returns the current default tmux socket name.
-func GetDefaultSocket() string { return defaultSocket }
+func GetDefaultSocket() string {
+	defaultSocketMu.RLock()
+	defer defaultSocketMu.RUnlock()
+	return defaultSocket
+}
 
 // SocketDir returns the directory where tmux stores its socket files.
 // On macOS, tmux uses /tmp (not $TMPDIR which points to /var/folders/...),
@@ -87,7 +99,7 @@ func IsInSameSocket() bool {
 	parts := strings.SplitN(tmuxEnv, ",", 2)
 	currentSocket := filepath.Base(parts[0])
 
-	targetSocket := defaultSocket
+	targetSocket := GetDefaultSocket()
 	if targetSocket == "" {
 		targetSocket = "default"
 	}
@@ -98,8 +110,8 @@ func IsInSameSocket() bool {
 // Use this instead of exec.Command("tmux", ...) for code outside the Tmux struct.
 func BuildCommand(args ...string) *exec.Cmd {
 	allArgs := []string{"-u"}
-	if defaultSocket != "" {
-		allArgs = append(allArgs, "-L", defaultSocket)
+	if sock := GetDefaultSocket(); sock != "" {
+		allArgs = append(allArgs, "-L", sock)
 	}
 	allArgs = append(allArgs, args...)
 	return exec.Command("tmux", allArgs...)
@@ -110,9 +122,28 @@ type Tmux struct {
 	socketName string // tmux socket name (-L flag), empty = default socket
 }
 
-// NewTmux creates a new Tmux wrapper that inherits the default socket.
+// noTownSocket is a sentinel socket name used when no town socket is configured.
+// Using a non-existent socket causes tmux operations to fail with a clear
+// "no server running" error instead of silently connecting to the wrong server.
+const noTownSocket = "gt-no-town-socket"
+
+// NewTmux creates a new Tmux wrapper using the initialized town socket.
+// Falls back to GT_TOWN_SOCKET env var (set by cross-socket tmux bindings),
+// then to a sentinel socket that fails clearly if neither is available.
 func NewTmux() *Tmux {
-	return &Tmux{socketName: defaultSocket}
+	sock := GetDefaultSocket()
+	if sock == "" {
+		// GT_TOWN_SOCKET is embedded in tmux bindings created by EnsureBindingsOnSocket
+		// so that "gt agents menu" / "gt feed" invoked from a personal terminal still
+		// target the correct town server even when InitRegistry was not called.
+		sock = os.Getenv("GT_TOWN_SOCKET")
+	}
+	if sock == "" {
+		// No town context available: use sentinel to produce a clear error rather
+		// than silently connecting to the user's personal tmux server.
+		sock = noTownSocket
+	}
+	return &Tmux{socketName: sock}
 }
 
 // NewTmuxWithSocket creates a Tmux wrapper that targets a named socket.
@@ -181,8 +212,14 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
-	_, err := t.run(args...)
-	return err
+	if _, err := t.run(args...); err != nil {
+		return err
+	}
+	// tmux 3.3+ sets window-size=manual on detached sessions (no client present),
+	// which locks the window at 80x24 even after a client attaches. Override to
+	// "latest" so the window auto-resizes to the attaching client's terminal size.
+	_, _ = t.run("set-option", "-wt", name, "window-size", "latest")
+	return nil
 }
 
 // NewSessionWithCommand creates a new detached tmux session that immediately runs a command.
@@ -218,6 +255,10 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	if _, err := t.run(args...); err != nil {
 		return err
 	}
+	// tmux 3.3+ sets window-size=manual on detached sessions (no client present),
+	// which locks the window at 80x24 even after a client attaches. Override to
+	// "latest" so the window auto-resizes to the attaching client's terminal size.
+	_, _ = t.run("set-option", "-wt", name, "window-size", "latest")
 
 	// Enable remain-on-exit BEFORE command runs so we can inspect exit status
 	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "on")
@@ -279,6 +320,10 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	if _, err := t.run(args...); err != nil {
 		return err
 	}
+	// tmux 3.3+ sets window-size=manual on detached sessions (no client present),
+	// which locks the window at 80x24 even after a client attaches. Override to
+	// "latest" so the window auto-resizes to the attaching client's terminal size.
+	_, _ = t.run("set-option", "-wt", name, "window-size", "latest")
 
 	// Enable remain-on-exit BEFORE command runs so we can inspect exit status
 	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "on")
@@ -1087,6 +1132,13 @@ func (t *Tmux) WakePane(target string) {
 	_, _ = t.run("resize-window", "-t", target, "-x", fmt.Sprintf("%d", w+1))
 	time.Sleep(50 * time.Millisecond)
 	_, _ = t.run("resize-window", "-t", target, "-x", width)
+
+	// Reset window-size to "latest" after the resize dance. tmux automatically
+	// sets window-size to "manual" whenever resize-window is called, which
+	// permanently locks the window at the current dimensions. This prevents
+	// the window from auto-sizing to a client when a human later attaches,
+	// causing dots around the edges as if another smaller client is viewing.
+	_, _ = t.run("set-option", "-w", "-t", target, "window-size", "latest")
 }
 
 // WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
@@ -1444,12 +1496,12 @@ func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {
-	// Use display-message targeting pane 0 explicitly (:0.0) to avoid
-	// returning the active pane's command in multi-pane sessions.
-	// Agent processes always run in pane 0; without explicit targeting,
-	// a user-created split pane (running a shell) could cause health
+	// Use display-message targeting the first window explicitly (:^) to avoid
+	// returning the active pane's command when a non-agent window is focused.
+	// Agent processes always run in the first window; without explicit targeting,
+	// a user-created window or split pane (running a shell) could cause health
 	// checks to falsely report the agent as dead.
-	out, err := t.run("display-message", "-t", session+":0.0", "-p", "#{pane_current_command}")
+	out, err := t.run("display-message", "-t", session+":^", "-p", "#{pane_current_command}")
 	if err != nil {
 		return "", err
 	}
@@ -1461,9 +1513,10 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 }
 
 // FindAgentPane finds the pane running an agent process within a session.
-// In multi-pane sessions, send-keys -t <session> targets the active/focused pane,
-// which may not be the agent pane. This method enumerates all panes and returns
-// the pane ID (e.g., "%5") of the one running the agent.
+// In multi-window/multi-pane sessions, send-keys -t <session> targets the
+// active/focused pane, which may not be the agent pane. This method enumerates
+// all panes across all windows (-s) and returns the pane ID (e.g., "%5") of
+// the one running the agent.
 //
 // Detection checks pane_current_command, then falls back to process tree inspection
 // (same logic as IsRuntimeRunning) to handle agents started via shell wrappers.
@@ -1471,8 +1524,8 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 // Returns ("", nil) if the session has only one pane (no disambiguation needed),
 // or if no agent pane can be identified (caller should fall back to session targeting).
 func (t *Tmux) FindAgentPane(session string) (string, error) {
-	// List all panes with ID, command, and PID
-	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
+	// List all panes across all windows with ID, command, and PID
+	out, err := t.run("list-panes", "-s", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
 	if err != nil {
 		return "", err
 	}
@@ -1552,13 +1605,13 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 }
 
 // GetPanePID returns the PID of the pane's main process.
-// When target is a session name, explicitly targets pane 0 (:0.0) to avoid
-// returning the active pane's PID in multi-pane sessions. When target is
+// When target is a session name, explicitly targets the first window (:^) to avoid
+// returning the active pane's PID when a non-agent window is focused. When target is
 // a pane ID (e.g., "%5"), uses it directly.
 func (t *Tmux) GetPanePID(target string) (string, error) {
 	tmuxTarget := target
 	if !strings.HasPrefix(target, "%") {
-		tmuxTarget = target + ":0.0"
+		tmuxTarget = target + ":^"
 	}
 	out, err := t.run("display-message", "-t", tmuxTarget, "-p", "#{pane_pid}")
 	if err != nil {
@@ -1823,6 +1876,27 @@ func (t *Tmux) GetEnvironment(session, key string) (string, error) {
 	return parts[1], nil
 }
 
+// SetGlobalEnvironment sets an environment variable in the tmux global environment.
+// Unlike SetEnvironment, this is not scoped to a session — it applies server-wide.
+func (t *Tmux) SetGlobalEnvironment(key, value string) error {
+	_, err := t.run("set-environment", "-g", key, value)
+	return err
+}
+
+// GetGlobalEnvironment gets an environment variable from the tmux global environment.
+func (t *Tmux) GetGlobalEnvironment(key string) (string, error) {
+	out, err := t.run("show-environment", "-g", key)
+	if err != nil {
+		return "", err
+	}
+	// Output format: KEY=value
+	parts := strings.SplitN(out, "=", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("unexpected global environment format for %s: %q", key, out)
+	}
+	return parts[1], nil
+}
+
 // GetAllEnvironment returns all environment variables for a session.
 func (t *Tmux) GetAllEnvironment(session string) (map[string]string, error) {
 	out, err := t.run("show-environment", "-t", session)
@@ -1930,28 +2004,55 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 }
 
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
-// Checks both pane command and child processes (for agents started via shell).
+// First checks the first window (where the agent is started) via GetPaneCommand/GetPanePID.
+// Falls back to scanning all panes across all windows for multi-window sessions.
 // This is the unified agent detection method for all agent types.
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false
 	}
+	// Fast path: check first window (agent's expected location)
+	if t.checkPaneForRuntime(session, processNames) {
+		return true
+	}
+	// Fallback: scan all panes across all windows. The agent is almost always
+	// in the first window, but if it isn't, we scan everything before declaring dead.
+	out, err := t.run("list-panes", "-s", "-t", session, "-F", "#{pane_current_command}\t#{pane_pid}")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		cmd, pid := parts[0], parts[1]
+		if matchesPaneRuntime(cmd, pid, processNames) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPaneForRuntime checks if the first window's pane is running a matching process.
+func (t *Tmux) checkPaneForRuntime(session string, processNames []string) bool {
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
 		return false
 	}
-	// Check direct pane command match
+	pid, _ := t.GetPanePID(session)
+	return matchesPaneRuntime(cmd, pid, processNames)
+}
+
+// matchesPaneRuntime checks if a pane with the given command and PID is running a matching process.
+func matchesPaneRuntime(cmd, pid string, processNames []string) bool {
+	// Direct command match
 	for _, name := range processNames {
 		if cmd == name {
 			return true
 		}
 	}
-	// Check for child processes if pane command is a shell or unrecognized.
-	// This handles:
-	// - Agents started with "bash -c 'export ... && agent ...'"
-	// - Claude Code showing version as argv[0] (e.g., "2.1.29")
-	pid, err := t.GetPanePID(session)
-	if err != nil || pid == "" {
+	if pid == "" {
 		return false
 	}
 	// If pane command is a shell, check descendants
@@ -1960,9 +2061,7 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 			return hasDescendantWithNames(pid, processNames, 0)
 		}
 	}
-	// If pane command is unrecognized (not in processNames, not a shell),
-	// check if the process ITSELF matches (handles version-as-argv[0] like "2.1.30")
-	// before checking descendants.
+	// Unrecognized command: check if process itself matches (version-as-argv[0])
 	if processMatchesNames(pid, processNames) {
 		return true
 	}
@@ -1994,6 +2093,12 @@ func (t *Tmux) resolveSessionProcessNames(session string) []string {
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
 // Useful for waiting until a shell has started a new process (e.g., claude).
 // Returns nil when a non-excluded command is detected, or error on timeout.
+//
+// Fallback: when the pane command IS a shell (e.g., bash), also checks
+// IsAgentAlive to detect agents wrapped in shell scripts (e.g., c2claude wrapping
+// claude-original). This handles cases where exec env does not replace the shell
+// as the pane foreground process. GT_PROCESS_NAMES must be set in the session
+// environment (via SetEnvironment) before calling for this fallback to work.
 func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -2011,6 +2116,14 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 			}
 		}
 		if !excluded {
+			return nil
+		}
+		// Fallback: if the pane is running a shell, check whether the agent is
+		// alive as a descendant process. This handles agents wrapped in shell
+		// scripts (e.g., c2claude -> claude-original) where exec env does not
+		// replace the shell as pane_current_command. GT_PROCESS_NAMES in the
+		// tmux session environment determines which process names are expected.
+		if t.IsAgentAlive(session) {
 			return nil
 		}
 		time.Sleep(constants.PollInterval)
@@ -2487,18 +2600,27 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 	return t.SetCycleBindings(session)
 }
 
-// isGTBinding checks if the given key already has a Gas Town if-shell binding.
-// Used to skip redundant re-binding on repeated ConfigureGasTownSession calls,
-// preserving the user's original fallback captured on the first call.
+// isGTBinding checks if the given key already has a Gas Town binding.
+// Used to skip redundant re-binding on repeated ConfigureGasTownSession /
+// EnsureBindingsOnSocket calls, preserving the user's original fallback.
+//
+// Two forms are recognised:
+//  1. Guarded form (set by SetAgentsBinding/SetFeedBinding): uses if-shell
+//     with a "gt " command — detects both old and new guarded bindings.
+//  2. Unguarded form (set by EnsureBindingsOnSocket): direct run-shell
+//     invoking "gt agents menu" or "gt feed --window".
 func (t *Tmux) isGTBinding(table, key string) bool {
 	output, err := t.run("list-keys", "-T", table, key)
 	if err != nil || output == "" {
 		return false
 	}
-	// GT bindings use if-shell with a run-shell/display-popup invoking "gt ".
-	// Require both "if-shell" and "gt " to avoid false positives on user
-	// bindings that happen to contain "gt " without the if-shell guard.
-	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ")
+	// Guarded form: if-shell + "gt ".
+	if strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") {
+		return true
+	}
+	// Unguarded form: direct GT commands set by EnsureBindingsOnSocket.
+	return strings.Contains(output, "gt agents menu") ||
+		strings.Contains(output, "gt feed --window")
 }
 
 // isGTBindingWithClient checks if the given key has a GT binding that includes
@@ -2538,11 +2660,14 @@ func (t *Tmux) getKeyBinding(table, key string) string {
 		return ""
 	}
 
-	// If this is already a Gas Town binding (from a previous ConfigureGasTownSession call),
-	// don't capture it — we'd end up wrapping our own if-shell in another if-shell.
-	// We check for both "if-shell" and "gt " to avoid false-positiving on user
-	// bindings that happen to contain the substring "gt ".
+	// Don't capture existing GT bindings as "user bindings to preserve" —
+	// that would wrap our own command in another layer.
+	// Check both guarded (if-shell) and unguarded (direct run-shell) forms.
 	if strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") {
+		return ""
+	}
+	if strings.Contains(output, "gt agents menu") ||
+		strings.Contains(output, "gt feed --window") {
 		return ""
 	}
 
@@ -2723,32 +2848,49 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 // specific tmux socket. This is used during gt up to ensure the bindings work
 // even when the user is on a different socket than the town socket.
 //
+// townSocket is the socket name where GT agents live (e.g. "gt"). When
+// non-empty it is embedded in the binding command as GT_TOWN_SOCKET=<name>
+// so that gt agents menu can locate agent sessions even when invoked from a
+// directory outside the town root (e.g. a personal tmux session where
+// workspace.FindFromCwd fails and InitRegistry is never called).
+// Pass "" for test-socket use where InitRegistry is already called.
+//
 // Unlike SetAgentsBinding/SetFeedBinding (called during gt prime), this method:
 //   - Targets a specific socket regardless of the Tmux instance's default
-//   - Skips the session-name guard when there's no pre-existing user binding,
+//   - Skips the session-name guard when there is no pre-existing user binding,
 //     since the user may be in a personal session (not matching GT prefixes)
 //     and still wants the agent menu for cross-socket navigation
 //
 // Safe to call multiple times; skips if bindings already exist.
-func EnsureBindingsOnSocket(socket string) error {
+func EnsureBindingsOnSocket(socket, townSocket string) error {
 	t := NewTmuxWithSocket(socket)
+
+	// Build the command strings, optionally prefixed with GT_TOWN_SOCKET so
+	// gt agents menu / gt feed can find the right tmux server even when called
+	// from a non-town directory.
+	agentsCmd := "gt agents menu"
+	feedCmd := "gt feed --window"
+	if townSocket != "" {
+		agentsCmd = fmt.Sprintf("GT_TOWN_SOCKET=%s gt agents menu", townSocket)
+		feedCmd = fmt.Sprintf("GT_TOWN_SOCKET=%s gt feed --window", townSocket)
+	}
 
 	// Agents binding (prefix + g)
 	if !t.isGTBinding("prefix", "g") {
 		ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
 		fallback := t.getKeyBinding("prefix", "g")
 		if fallback == "" || fallback == ":" {
-			// No user binding to preserve -- always show the GT agent menu.
+			// No user binding to preserve — always show the GT agent menu.
 			// This is critical for cross-socket use: on the default socket,
-			// no session names match GT prefixes, so the if-shell guard would
+			// no session names match GT prefixes, so an if-shell guard would
 			// prevent the menu from ever appearing.
 			_, _ = t.run("bind-key", "-T", "prefix", "g",
-				"run-shell", "gt agents menu")
+				"run-shell", agentsCmd)
 		} else {
-			// User has a custom binding -- guard it
+			// User has a custom binding — guard with GT pattern, preserve theirs.
 			_, _ = t.run("bind-key", "-T", "prefix", "g",
 				"if-shell", ifShell,
-				"run-shell 'gt agents menu'",
+				"run-shell '"+agentsCmd+"'",
 				fallback)
 		}
 	}
@@ -2759,11 +2901,11 @@ func EnsureBindingsOnSocket(socket string) error {
 		fallback := t.getKeyBinding("prefix", "a")
 		if fallback == "" || fallback == ":" {
 			_, _ = t.run("bind-key", "-T", "prefix", "a",
-				"run-shell", "gt feed --window")
+				"run-shell", feedCmd)
 		} else {
 			_, _ = t.run("bind-key", "-T", "prefix", "a",
 				"if-shell", ifShell,
-				"run-shell 'gt feed --window'",
+				"run-shell '"+feedCmd+"'",
 				fallback)
 		}
 	}
@@ -2803,16 +2945,14 @@ func SocketFromEnv() string {
 }
 
 // CurrentSessionName returns the tmux session name for the current process.
-// It parses the TMUX environment variable (format: socket,pid,session_index)
-// and queries tmux for the session name. Returns empty string if not in tmux.
+// Uses TMUX_PANE to target the caller's actual pane, avoiding tmux picking
+// a random session when multiple sessions exist. Returns empty string if not in tmux.
 func CurrentSessionName() string {
-	tmuxEnv := os.Getenv("TMUX")
-	if tmuxEnv == "" {
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
 		return ""
 	}
-	// TMUX format: /path/to/socket,server_pid,session_index
-	// We can use display-message to get the session name directly
-	out, err := BuildCommand("display-message", "-p", "#{session_name}").Output()
+	out, err := BuildCommand("display-message", "-t", pane, "-p", "#{session_name}").Output()
 	if err != nil {
 		return ""
 	}
@@ -2962,4 +3102,3 @@ func buildAutoRespawnHookCmd(tmuxCmd, session string) string {
 		`run-shell -b "sleep 3 && %s list-panes -t '%s' -F '##{pane_dead}' 2>/dev/null | grep -q 1 && %s respawn-pane -k -t '%s' && %s set-option -t '%s' remain-on-exit on || true"`,
 		tmuxCmd, session, tmuxCmd, session, tmuxCmd, session)
 }
-

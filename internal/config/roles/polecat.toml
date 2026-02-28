@@ -3,6 +3,8 @@
 
 role = "polecat"
 scope = "rig"
+autonomous = true
+emoji = "😺"
 nudge = "Check your hook for work assignments."
 prompt_template = "polecat.md.tmpl"
 

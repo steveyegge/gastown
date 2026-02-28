@@ -33,21 +33,35 @@ type Formula struct {
 	Version     int         `toml:"version"`
 
 	// Convoy-specific
-	Inputs    map[string]Input `toml:"inputs"`
+	Inputs    map[string]Input  `toml:"inputs"`
 	Prompts   map[string]string `toml:"prompts"`
 	Output    *Output           `toml:"output"`
 	Legs      []Leg             `toml:"legs"`
 	Synthesis *Synthesis        `toml:"synthesis"`
 
 	// Workflow-specific
-	Steps []Step           `toml:"steps"`
-	Vars  map[string]Var   `toml:"vars"`
+	Steps []Step         `toml:"steps"`
+	Vars  map[string]Var `toml:"vars"`
 
 	// Expansion-specific
 	Template []Template `toml:"template"`
 
 	// Aspect-specific (similar to convoy but for analysis)
 	Aspects []Aspect `toml:"aspects"`
+
+	// Composition
+	Extends []string `toml:"extends"`
+	Compose *Compose `toml:"compose"`
+
+	// Aspect-oriented (AOP)
+	Advice    []Advice    `toml:"advice"`
+	Pointcuts []Pointcut  `toml:"pointcuts"`
+
+	// Completion behavior
+	Squash *Squash `toml:"squash"`
+
+	// Configurable presets (e.g., for convoy leg selection)
+	Presets map[string]Preset `toml:"presets"`
 }
 
 // Aspect represents a parallel analysis aspect in an aspect formula.
@@ -97,6 +111,7 @@ type Step struct {
 	Needs       []string `toml:"needs"`
 	Parallel    bool     `toml:"parallel"`   // If true, this step can run concurrently with other parallel steps that share the same needs
 	Acceptance  string   `toml:"acceptance"` // Exit criteria for this step (used by Ralph loop mode)
+	Gate        *Gate    `toml:"gate"`       // Conditional gate for step execution
 }
 
 // Template represents a template step in an expansion formula.
@@ -105,6 +120,61 @@ type Template struct {
 	Title       string   `toml:"title"`
 	Description string   `toml:"description"`
 	Needs       []string `toml:"needs"`
+}
+
+// Compose represents composition rules for extending formulas.
+type Compose struct {
+	Aspects []string        `toml:"aspects"` // Aspect formulas to weave in
+	Expand  []ComposeExpand `toml:"expand"`  // Expansion rules to apply
+}
+
+// ComposeExpand represents an expansion rule applied during composition.
+type ComposeExpand struct {
+	Target string `toml:"target"` // Step ID to expand
+	With   string `toml:"with"`   // Expansion formula to apply
+}
+
+// Advice represents an AOP-style advice definition.
+type Advice struct {
+	Target string       `toml:"target"` // Step ID pattern to advise
+	Around *AdviceAround `toml:"around"` // Before/after step injection
+}
+
+// AdviceAround holds before/after steps to inject around a target step.
+type AdviceAround struct {
+	Before []AdviceStep `toml:"before"`
+	After  []AdviceStep `toml:"after"`
+}
+
+// AdviceStep represents a step injected by advice.
+type AdviceStep struct {
+	ID          string `toml:"id"`
+	Title       string `toml:"title"`
+	Description string `toml:"description"`
+}
+
+// Pointcut defines which steps an aspect's advice applies to.
+type Pointcut struct {
+	Glob string `toml:"glob"` // Glob pattern matching step IDs
+}
+
+// Squash configures commit squashing behavior on formula completion.
+type Squash struct {
+	Trigger        string `toml:"trigger"`
+	TemplateType   string `toml:"template_type"`
+	IncludeMetrics bool   `toml:"include_metrics"`
+}
+
+// Gate represents a conditional gate on a step.
+type Gate struct {
+	Type      string `toml:"type"`
+	Condition string `toml:"condition"`
+}
+
+// Preset represents a named preset configuration (e.g., for selecting convoy legs).
+type Preset struct {
+	Description string   `toml:"description"`
+	Legs        []string `toml:"legs"`
 }
 
 // Var represents a variable definition for formulas.

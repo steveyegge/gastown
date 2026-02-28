@@ -90,16 +90,24 @@ func (r *PrefixRegistry) Prefixes() []string {
 }
 
 // defaultRegistry is the package-level registry used by convenience functions.
-var defaultRegistry = NewPrefixRegistry()
+// Access is protected by defaultRegistryMu for concurrent test safety.
+var (
+	defaultRegistry   = NewPrefixRegistry()
+	defaultRegistryMu sync.RWMutex
+)
 
 // DefaultRegistry returns the package-level prefix registry.
 func DefaultRegistry() *PrefixRegistry {
+	defaultRegistryMu.RLock()
+	defer defaultRegistryMu.RUnlock()
 	return defaultRegistry
 }
 
 // SetDefaultRegistry replaces the package-level prefix registry.
 func SetDefaultRegistry(r *PrefixRegistry) {
+	defaultRegistryMu.Lock()
 	defaultRegistry = r
+	defaultRegistryMu.Unlock()
 }
 
 // InitRegistry populates the default registry from the town's rigs.json and
@@ -111,18 +119,12 @@ func SetDefaultRegistry(r *PrefixRegistry) {
 func InitRegistry(townRoot string) error {
 	var errs []error
 
-	// Set tmux socket to isolate this town's sessions on a dedicated server.
-	// The socket name is derived from the town directory name (e.g. "gt" for
-	// /home/user/gt), NOT from the $TMUX environment variable.
-	//
-	// Previous behavior parsed $TMUX to inherit the caller's socket, but this
-	// caused all sessions to land on the "default" server when gt up was run
-	// from an interactive terminal — defeating multi-town isolation. (gt-qkekp)
-	//
-	// By always using the town name, sessions are created on -L <town> regardless
-	// of whether the caller is inside tmux, outside tmux (daemon), or on a
-	// different tmux server.
-	tmux.SetDefaultSocket(sanitizeTownName(filepath.Base(townRoot)))
+	// Use the default tmux socket so all sessions are visible via prefix+s
+	// from any terminal. Multi-town isolation (which would need per-town
+	// sockets) already requires containers/VMs due to singleton mayor/deacon
+	// session names, so a dedicated socket provides no real benefit while
+	// causing cross-socket bugs and split session visibility.
+	tmux.SetDefaultSocket("default")
 
 	r, err := BuildPrefixRegistryFromTown(townRoot)
 	if err != nil {
@@ -158,7 +160,7 @@ func sanitizeTownName(name string) string {
 // PrefixFor returns the beads prefix for a rig, using the default registry.
 // Returns DefaultPrefix if the rig is unknown.
 func PrefixFor(rigName string) string {
-	return defaultRegistry.PrefixForRig(rigName)
+	return DefaultRegistry().PrefixForRig(rigName)
 }
 
 // BuildPrefixRegistryFromTown reads rigs.json from a town root directory
@@ -215,7 +217,7 @@ var LegacyPrefixes = []string{"gt", "bd", "hq", "gthq"}
 // followed by "-". Use this instead of hand-rolling prefix checks so that
 // all call-sites agree on what constitutes a valid prefix.
 func HasKnownPrefix(s string) bool {
-	if defaultRegistry.HasPrefix(s) {
+	if DefaultRegistry().HasPrefix(s) {
 		return true
 	}
 	for _, p := range LegacyPrefixes {
@@ -244,7 +246,7 @@ func IsKnownSession(sess string) bool {
 	if strings.HasPrefix(sess, HQPrefix) {
 		return true
 	}
-	return defaultRegistry.HasPrefix(sess)
+	return DefaultRegistry().HasPrefix(sess)
 }
 
 // matchPrefix finds the prefix in a session name suffix using the registry.

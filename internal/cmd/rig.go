@@ -216,8 +216,9 @@ Examples:
 }
 
 var rigStatusCmd = &cobra.Command{
-	Use:   "status [rig]",
-	Short: "Show detailed status for a specific rig",
+	Use:        "status [rig]",
+	SuggestFor: []string{"health", "health-check", "healthcheck"},
+	Short:      "Show detailed status for a specific rig",
 	Long: `Show detailed status for a specific rig including all workers.
 
 If no rig is specified, infers the rig from the current directory.
@@ -480,7 +481,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	gitURL := args[1]
 
 	if !isGitRemoteURL(gitURL) {
-		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
 	}
 
 	// Ensure beads (bd) is available before proceeding
@@ -518,7 +519,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// Validate push URL if provided
 	rigAddPushURL = strings.TrimSpace(rigAddPushURL)
 	if rigAddPushURL != "" && !isGitRemoteURL(rigAddPushURL) {
-		return fmt.Errorf("invalid push URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddPushURL)
+		return fmt.Errorf("invalid push URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddPushURL)
 	}
 
 	startTime := time.Now()
@@ -897,13 +898,13 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 
 	// Validate --url if provided
 	if rigAddAdoptURL != "" && !isGitRemoteURL(rigAddAdoptURL) {
-		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddAdoptURL)
 	}
 
 	// Validate --push-url if provided
 	rigAddPushURL = strings.TrimSpace(rigAddPushURL)
 	if rigAddPushURL != "" && !isGitRemoteURL(rigAddPushURL) {
-		return fmt.Errorf("invalid push URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddPushURL)
+		return fmt.Errorf("invalid push URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddPushURL)
 	}
 
 	// Register the existing rig
@@ -1294,6 +1295,11 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("rig '%s' not found", rigName)
 	}
 
+	// Check if rig is parked or docked (uses bead labels + wisp state)
+	if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+		return fmt.Errorf("rig '%s' is %s - use 'gt rig unpark' or 'gt rig undock' first", rigName, reason)
+	}
+
 	fmt.Printf("Booting rig %s...\n", style.Bold.Render(rigName))
 
 	var started []string
@@ -1376,12 +1382,10 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Check if rig is parked or docked
-		cfg := wisp.NewConfig(townRoot, rigName)
-		status := cfg.GetString("status")
-		if status == "parked" || status == "docked" {
+		// Check if rig is parked or docked (uses bead labels + wisp state)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
 			fmt.Printf("%s Rig '%s' is %s - skipping (use 'gt rig unpark' or 'gt rig undock' first)\n",
-				style.Warning.Render("⚠"), rigName, status)
+				style.Warning.Render("⚠"), rigName, reason)
 			continue
 		}
 
@@ -2043,8 +2047,9 @@ func findRigSessions(t *tmux.Tmux, rigName string) ([]string, error) {
 	return matches, nil
 }
 
-// isGitRemoteURL returns true if s looks like a remote git URL
-// (https, http, ssh, git protocol, or SCP-style) rather than a local path.
+// isGitRemoteURL returns true if s looks like a remote git URL rather than a
+// local path. Accepts any scheme:// URL (git delegates to git-remote-<scheme>
+// helpers, e.g. git-remote-s3 for s3:// URLs) as well as SCP-style SSH URLs.
 func isGitRemoteURL(s string) bool {
 	// Reject flag-like strings (defense-in-depth against argument injection)
 	if strings.HasPrefix(s, "-") {
@@ -2070,11 +2075,17 @@ func isGitRemoteURL(s string) bool {
 	if strings.HasPrefix(s, "file://") {
 		return false
 	}
-	// Accept known remote URL schemes
-	if strings.HasPrefix(s, "https://") ||
-		strings.HasPrefix(s, "http://") ||
-		strings.HasPrefix(s, "ssh://") ||
-		strings.HasPrefix(s, "git://") {
+	// Accept any scheme:// URL where scheme is alphanumeric (plus + - .).
+	// This covers https://, ssh://, git://, s3://, codecommit://, etc.
+	// Git invokes git-remote-<scheme> for non-builtin schemes.
+	if idx := strings.Index(s, "://"); idx > 0 {
+		scheme := s[:idx]
+		for _, c := range scheme {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.') {
+				return false
+			}
+		}
 		return true
 	}
 	// Accept SCP-style SSH URLs (user@host:path) where user and host are non-empty

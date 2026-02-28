@@ -901,10 +901,9 @@ func identityToBDActor(identity string) string {
 	}
 }
 
-// GUPPViolationTimeout is how long an agent can have work on hook without
-// progressing before it's considered a GUPP (Gas Town Universal Propulsion
-// Principle) violation. GUPP states: if you have work on your hook, you run it.
-const GUPPViolationTimeout = 30 * time.Minute
+// GUPPViolationTimeout is the canonical GUPP violation threshold.
+// Defined in constants package — this alias avoids updating all call sites.
+const GUPPViolationTimeout = constants.GUPPViolationTimeout
 
 // listAgentBeadsJSON queries both the issues and wisps tables for agent beads
 // and unmarshals the combined results into the provided slice pointer.

@@ -57,15 +57,13 @@ func parseRigSlashName(input string) (rigName, name string, ok bool) {
 
 // isInTmuxSession checks if we're currently inside the target tmux session.
 func isInTmuxSession(targetSession string) bool {
-	// TMUX env var format: /tmp/tmux-501/default,12345,0
-	// We need to get the current session name via tmux display-message
-	tmuxEnv := os.Getenv("TMUX")
-	if tmuxEnv == "" {
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
 		return false // Not in tmux at all
 	}
 
-	// Get current session name
-	cmd := tmux.BuildCommand("display-message", "-p", "#{session_name}")
+	// Get current session name, targeting our specific pane
+	cmd := tmux.BuildCommand("display-message", "-t", pane, "-p", "#{session_name}")
 	out, err := cmd.Output()
 	if err != nil {
 		return false

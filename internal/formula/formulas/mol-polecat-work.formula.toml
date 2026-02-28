@@ -407,26 +407,35 @@ git status
 git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
 ```
 
-**3. If working tree is already clean, skip.**
+**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
 
-**4. VERIFY:**
+**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+
+This MUST show at least 1 commit. If it shows NOTHING:
+- You have NOT completed your implementation. Do NOT close this step.
+- Go back to the implement step and do the work.
+- If the task genuinely requires no code changes (already fixed upstream, etc.),
+  run `gt done --status DEFERRED` and skip remaining steps.
+- Do NOT proceed to cleanup or submit with zero commits.
+
+**5. VERIFY clean working tree:**
 ```bash
 git status
 ```
 Must show "nothing to commit, working tree clean".
 
-**5. Verify you have commits:**
+**Report-only tasks (audits, reviews, research — no code changes):**
+If your task produced no code changes, verify your findings are persisted to the bead:
 ```bash
-git log origin/{{base_branch}}..HEAD --oneline
+bd show {{issue}}    # Check notes/design fields have your findings
 ```
-If you made code changes during implementation, this MUST show at least 1 commit.
+If findings are persisted, proceed to cleanup. `gt done --cleanup-status clean`
+handles the no-commit case for report-only tasks.
 
-**Report-only tasks (no code changes):** If your task was an audit, review, or
-research with no code changes, verify your findings are persisted to the bead
-(`bd show {{issue}}` — check notes/design fields). Then proceed — `gt done`
-handles the no-commit case.
-
-**Exit criteria:** All changes committed (or findings persisted for report tasks). Working tree clean."""
+**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
 
 [[steps]]
 id = "cleanup-workspace"
@@ -437,6 +446,15 @@ Ensure workspace is pristine before handoff.
 
 **IMPORTANT: Do NOT run `git push`. That is `gt done`'s job (next step).**
 **IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
+
+**0. GATE: Verify no uncommitted changes exist (HARD GATE):**
+```bash
+git diff --stat
+git diff --cached --stat
+```
+If EITHER shows output, you have uncommitted changes. Do NOT proceed.
+Go back to the commit-changes step and commit them. NEVER discard implementation
+work with `git checkout -- .` or `git restore .` during cleanup.
 
 **1. Check for untracked files:**
 ```bash
@@ -455,17 +473,21 @@ Should be empty. If not:
 - Pop and commit: `git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"`
 - Or drop if truly garbage: `git stash drop`
 
-**3. Verify clean state and commits:**
+**3. Verify clean state and commits (HARD GATE):**
 ```bash
 git status                  # Must show "working tree clean"
 git stash list              # Must be empty
-git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
+git log origin/{{base_branch}}..HEAD --oneline  # MUST show at least 1 commit
 ```
 
-If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
-something went wrong. Do NOT proceed — mail Witness for help.
+If `git log origin/{{base_branch}}..HEAD` shows NOTHING:
+- For code tasks: Do NOT close this step. Go back to implement step.
+- For report-only tasks (audits, reviews, research): Verify findings are persisted
+  to bead (`bd show {{issue}}`). If findings exist, proceed — `gt done --cleanup-status clean`
+  handles no-commit report tasks.
+- If neither code nor findings exist: run `gt done --status DEFERRED`.
 
-**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gt done` handles that."""
+**Exit criteria:** Workspace clean, no cruft, all work committed, AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings on bead. Do NOT push — `gt done` handles that."""
 
 [[steps]]
 id = "prepare-for-review"
@@ -514,6 +536,13 @@ Once you run `gt done`, you're gone. The command:
 2. Creates an MR bead in the merge queue
 3. Nukes your sandbox (worktree removal)
 4. Exits your session immediately
+
+**Pre-flight: Verify you have actual work to submit (HARD GATE):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
+`gt done` will reject zero-commit branches for polecats.
 
 **Run gt done:**
 ```bash

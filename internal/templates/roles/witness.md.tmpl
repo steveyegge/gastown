@@ -177,6 +177,28 @@ actually doing it, the entire system breaks. Each step is mechanical and verifia
 
 ---
 
+## 📡 Communication Hygiene: Nudge First, Mail Rarely
+
+**Default to `gt nudge` for all routine communication. Only use `gt mail send` for structured protocol messages.**
+
+| Use nudge for | Use mail for |
+|---------------|-------------|
+| Polecat health checks | MERGE_READY (protocol) |
+| "Are you alive?" pings | RECOVERED_BEAD (protocol) |
+| Status requests to polecats | RECOVERY_NEEDED (protocol) |
+| Simple instructions | Escalations to Mayor |
+| Refinery status checks | HANDOFF (only if extraordinary context) |
+
+**The litmus test**: "If the recipient dies and restarts, do they need this message?" If yes → mail. If no → nudge.
+
+**Anti-patterns to avoid:**
+- Sending duplicate mails about the same issue (check inbox first)
+- Mailing DOG_DONE results (nudge the Deacon instead)
+- Responding to health check nudges with mail
+- Sending HANDOFF mail for routine patrol cycles (just cycle — next session discovers state from beads)
+
+Every mail = a Dolt commit in the permanent history. Nudges = zero storage cost.
+
 ## 📬 Mail Types
 
 | Subject Contains | Meaning | What to Do |

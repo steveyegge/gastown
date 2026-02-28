@@ -172,6 +172,8 @@ func (b *Beads) CreateEscalationBead(title string, fields *EscalationFields) (*I
 		"--title=" + title,
 		"--description=" + description,
 		"--type=task",
+		"--ephemeral",
+		"--wisp-type=escalation",
 		"--labels=gt:escalation",
 	}
 

@@ -384,7 +384,13 @@ If any check or test FAILED:
    - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on the target branch:
-   - File a bead: bd create --type=bug --priority=1 --title="..."
+   - **DUPLICATE CHECK (MANDATORY)**: Before filing a new bug, search for existing open bugs:
+     ```bash
+     bd search "<failure description>" --status open --label gt:bug --limit 5
+     ```
+     If an existing open bug covers the same failure, do NOT create a duplicate.
+     Instead, note the existing bead ID and proceed.
+   - Only if NO existing bug matches: bd create --type=bug --priority=1 --title="Pre-existing failure: <description>"
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
@@ -397,7 +403,7 @@ If any check or test FAILED:
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - All quality checks and tests passing, OR
-- Bead filed for the pre-existing failure
+- Bead filed (or existing duplicate confirmed) for the pre-existing failure
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
 re-implementing fixes. You are a mechanical merge processor.
@@ -458,20 +464,13 @@ Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
 POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
 
-**Step 3: Close MR Bead (REQUIRED - DO THIS IMMEDIATELY)**
+**Step 3: Post-merge cleanup (REQUIRED — single command)**
 
-⚠️ **VERIFICATION BEFORE CLOSING**: Confirm the work is actually on the merge target:
-```bash
-# Get the commit message/issue from the branch
-git log origin/<merge-target> --oneline | grep "<issue-id>"
-# OR verify the commit SHA is on the target:
-git branch --contains <commit-sha> | grep <merge-target>
-```
-
-If work is NOT on the merge target, DO NOT close the MR bead. Investigate first.
+This single command handles closing the MR bead, closing the source issue, and
+deleting the remote polecat branch (respects delete_merged_branches config):
 
 ```bash
-bd close <mr-bead-id> --reason "Merged to <merge-target> at $(git rev-parse --short HEAD)"
+gt mq post-merge <rig> <mr-bead-id>
 ```
 
 The MR bead ID was in the MERGE_READY message or find via:
@@ -479,33 +478,7 @@ The MR bead ID was in the MERGE_READY message or find via:
 bd list --type=merge-request --status=open | grep <polecat-name>
 ```
 
-**VALIDATION**: The MR bead's source_issue should be a valid bead ID (gt-xxxxx),
-not a branch name. If source_issue contains a branch name, flag for investigation.
-
-**Step 3.5: Close source issue (REQUIRED)**
-
-The source issue is the original work bead that the polecat was assigned. Closing it
-signals convoy completion — without this, the convoy stays open indefinitely and the
-Mayor is never notified. This mirrors the Go Engineer behavior (engineer.go:896-904).
-
-```bash
-# The source issue ID was in the MERGE_READY message body (Issue: <id>)
-# You tracked it during inbox-check
-bd close <source-issue-id> --reason "Merged in <mr-bead-id>"
-```
-
-**If the source issue ID is not available** from your tracked data, extract it from the MR bead:
-```bash
-bd show <mr-bead-id> --json | jq -r '.[0].source_issue'
-```
-
-**VALIDATION**: Verify the close succeeded:
-```bash
-bd show <source-issue-id> --json | jq -r '.[0].status'
-# Must show "closed"
-```
-
-If close fails, log the warning but continue — do not block the rest of the pipeline.
+Verify the command output shows all steps succeeded (✓ for each).
 
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
@@ -513,24 +486,14 @@ gt mail archive <merge-ready-message-id>
 ```
 The message ID was tracked when you processed inbox-check.
 
-**Step 5: Cleanup (only after Steps 2-4 confirmed)**
+**Step 5: Cleanup temp branch**
 ```bash
 git branch -d temp
 ```
 
-delete_merged_branches (see config above) controls whether to delete the remote source branch.
-
-If delete_merged_branches is "true":
-```bash
-git push origin --delete <polecat-branch>
-```
-
-If delete_merged_branches is "false": Leave the remote branch intact.
-
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
-- [x] MR bead closed
-- [x] Source issue closed
+- [x] Post-merge cleanup completed (MR closed, source issue closed, branch deleted)
 - [x] MERGE_READY mail archived
 
 If you skipped notifications or archiving, GO BACK AND DO THEM NOW.

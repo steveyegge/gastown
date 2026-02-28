@@ -8,14 +8,14 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// TestInitRegistry_SocketFromTownName verifies that InitRegistry derives the
-// tmux socket name from the town directory name, NOT from $TMUX.
+// TestInitRegistry_SocketFromTownName verifies that InitRegistry always uses
+// the "default" tmux socket, regardless of town name or $TMUX environment.
 //
-// This is the regression test for gt-qkekp: when gt up is run from a terminal
-// attached to the default tmux server ($TMUX=/tmp/tmux-1000/default,...),
-// InitRegistry used to parse "default" from $TMUX and set that as the socket.
-// This caused all sessions to land on the default server instead of a
-// town-specific socket (e.g., -L gt).
+// Previously (gt-qkekp), the socket was derived from the town directory name
+// for multi-town isolation. Commit 635916ab changed this to always use
+// "default" because per-town sockets caused cross-socket bugs and split
+// session visibility, while providing no real isolation benefit (multi-town
+// already requires containers/VMs due to singleton session names).
 func TestInitRegistry_SocketFromTownName(t *testing.T) {
 	// Save and restore $TMUX and the default socket
 	origTMUX := os.Getenv("TMUX")
@@ -35,31 +35,31 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 			name:       "inside default tmux, town=gt",
 			tmuxEnv:    "/tmp/tmux-1000/default,12345,0",
 			townDir:    "gt",
-			wantSocket: "gt",
+			wantSocket: "default",
 		},
 		{
 			name:       "inside gt tmux, town=gt",
 			tmuxEnv:    "/tmp/tmux-1000/gt,12345,0",
 			townDir:    "gt",
-			wantSocket: "gt",
+			wantSocket: "default",
 		},
 		{
 			name:       "outside tmux (daemon), town=gt",
 			tmuxEnv:    "",
 			townDir:    "gt",
-			wantSocket: "gt",
+			wantSocket: "default",
 		},
 		{
 			name:       "town name with spaces",
 			tmuxEnv:    "/tmp/tmux-1000/default,99,0",
 			townDir:    "My Town",
-			wantSocket: "my-town",
+			wantSocket: "default",
 		},
 		{
 			name:       "town name with caps",
 			tmuxEnv:    "",
 			townDir:    "GasTown",
-			wantSocket: "gastown",
+			wantSocket: "default",
 		},
 	}
 

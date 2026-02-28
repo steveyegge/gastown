@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -678,6 +680,22 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Dog %s returned to kennel (idle)\n", name)
+
+	// Auto-terminate the tmux session after a short delay.
+	// Dogs run inside tmux sessions (hq-dog-<name>). Without this, the
+	// Claude agent idles at the prompt indefinitely after completing work,
+	// wasting resources until the stale-working detector kills it (2 hours).
+	// The delay lets the agent see the success output before termination.
+	sessionID := fmt.Sprintf("hq-dog-%s", name)
+	fmt.Printf("  Session %s will terminate in 3s\n", sessionID)
+	killCmd := exec.Command("bash", "-c",
+		fmt.Sprintf("sleep 3 && tmux kill-session -t '%s' 2>/dev/null", sessionID))
+	util.SetProcessGroup(killCmd)
+	if err := killCmd.Start(); err != nil {
+		// Non-fatal: session may not be tmux-based (e.g., manual testing).
+		fmt.Fprintf(os.Stderr, "warning: failed to schedule session termination: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -1043,6 +1061,20 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Ensure dog has an agent bead before sending mail.
+	// Dogs created before agent beads were added, or whose bead creation
+	// failed silently, won't have one. The mail router requires agent beads
+	// to validate recipients.
+	b := beads.New(townRoot)
+	if existing, _ := b.FindDogAgentBead(targetDog.Name); existing == nil {
+		location := filepath.Join("deacon", "dogs", targetDog.Name)
+		if _, beadErr := b.CreateDogAgentBead(targetDog.Name, location); beadErr != nil {
+			if !dogDispatchJSON {
+				fmt.Printf("  Warning: could not create agent bead: %v\n", beadErr)
+			}
+		}
+	}
+
 	// Assign work FIRST (before sending mail) to prevent race condition
 	// If this fails, we haven't sent any mail yet
 	if err := mgr.AssignWork(targetDog.Name, workDesc); err != nil {
@@ -1135,8 +1167,7 @@ func formatPluginMailBody(p *plugin.Plugin) string {
 	sb.WriteString("\n\n---\n\n")
 	sb.WriteString("After completion:\n")
 	sb.WriteString("1. Create a wisp to record the result (success/failure)\n")
-	sb.WriteString("2. Send DOG_DONE mail to deacon/\n")
-	sb.WriteString("3. Run `gt dog done`, then exit the session (do NOT idle at the prompt)\n")
+	sb.WriteString("2. Run `gt dog done` — this clears your work and auto-terminates the session\n")
 
 	return sb.String()
 }

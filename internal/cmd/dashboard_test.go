@@ -16,6 +16,14 @@ func TestDashboardCmd_FlagsExist(t *testing.T) {
 		t.Errorf("--port default should be 8080, got %s", portFlag.DefValue)
 	}
 
+	bindFlag := dashboardCmd.Flags().Lookup("bind")
+	if bindFlag == nil {
+		t.Fatal("--bind flag should exist")
+	}
+	if bindFlag.DefValue != "127.0.0.1" {
+		t.Errorf("--bind default should be 127.0.0.1, got %s", bindFlag.DefValue)
+	}
+
 	openFlag := dashboardCmd.Flags().Lookup("open")
 	if openFlag == nil {
 		t.Fatal("--open flag should exist")

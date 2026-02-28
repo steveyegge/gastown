@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -23,6 +24,13 @@ type RoleDefinition struct {
 
 	// Scope is "town" or "rig" - determines where the agent runs.
 	Scope string `toml:"scope"`
+
+	// Autonomous indicates the role runs without user input (e.g., polecat, witness).
+	// Non-autonomous (interactive) roles wait for user input (e.g., mayor, crew).
+	Autonomous bool `toml:"autonomous"`
+
+	// Emoji is the visual identifier for this role in TUI and status displays.
+	Emoji string `toml:"emoji,omitempty"`
 
 	// Session contains tmux session configuration.
 	Session RoleSessionConfig `toml:"session"`
@@ -113,6 +121,56 @@ func TownRoles() []string {
 // RigRoles returns roles that operate at rig scope.
 func RigRoles() []string {
 	return []string{"witness", "refinery", "polecat", "crew"}
+}
+
+// IsAutonomous returns whether a role runs without user input.
+// Autonomous roles (polecat, witness, refinery, deacon, boot, dog) are triggered
+// externally. Interactive roles (mayor, crew) wait for user input.
+// This reads from the embedded TOML role definitions (single source of truth).
+func IsAutonomous(role string) bool {
+	rolePropsOnce.Do(loadRoleProps)
+	if props, ok := roleProps[role]; ok {
+		return props.autonomous
+	}
+	return false
+}
+
+// RoleEmoji returns the emoji for a given role name from the TOML role definitions.
+// Returns "❓" for unknown roles.
+func RoleEmoji(role string) string {
+	rolePropsOnce.Do(loadRoleProps)
+	if props, ok := roleProps[role]; ok && props.emoji != "" {
+		return props.emoji
+	}
+	return "❓"
+}
+
+type roleProperties struct {
+	autonomous bool
+	emoji      string
+}
+
+var (
+	roleProps     map[string]roleProperties
+	rolePropsOnce sync.Once
+)
+
+func loadRoleProps() {
+	roleProps = make(map[string]roleProperties)
+	for _, role := range AllRoles() {
+		def, err := loadBuiltinRoleDefinition(role)
+		if err != nil {
+			continue
+		}
+		roleProps[role] = roleProperties{
+			autonomous: def.Autonomous,
+			emoji:      def.Emoji,
+		}
+	}
+	// "boot" is a deacon variant with no separate TOML — inherit from deacon.
+	if deacon, ok := roleProps["deacon"]; ok {
+		roleProps["boot"] = deacon
+	}
 }
 
 // isValidRoleName checks if the given name is a known role.

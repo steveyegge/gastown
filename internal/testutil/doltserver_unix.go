@@ -83,7 +83,7 @@ func parseElapsed(s string) time.Duration {
 
 func startDoltServer() error {
 	// Reap zombie test servers from previous crashed test runs.
-	reapStaleDoltServers(1 * time.Hour)
+	reapStaleDoltServers(10 * time.Minute)
 
 	// Determine port: use GT_DOLT_PORT if set externally, otherwise find a free one.
 	if p := os.Getenv("GT_DOLT_PORT"); p != "" {

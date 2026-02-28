@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,7 +36,8 @@ This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
 3. Notifies the Witness with the exit outcome
-4. Exits the Claude session (polecats don't stay alive after completion)
+4. Syncs worktree to main and transitions polecat to IDLE
+   (sandbox preserved, session stays alive for reuse)
 
 Exit statuses:
   COMPLETED      - Work done, MR submitted (default)
@@ -46,7 +45,7 @@ Exit statuses:
   DEFERRED       - Work paused, issue still open
 
 Examples:
-  gt done                              # Submit branch, notify COMPLETED, exit session
+  gt done                              # Submit branch, notify COMPLETED, transition to IDLE
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
@@ -96,52 +95,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
 	}
 
-	// Deferred session kill: ensures selfKillSession runs on ANY exit path for polecats.
-	// This is the backstop that prevents zombie sessions when push/MR failures cause
-	// early returns before the explicit selfKillSession call.
-	//
-	// Flags control behavior:
-	// - sessionCleanupNeeded: set true after role detection confirms polecat
-	// - sessionKilled: set true after explicit selfKillSession succeeds
-	//
-	// Validation errors (bad flags, wrong role) return BEFORE sessionCleanupNeeded is set,
-	// so the defer is a no-op. Operational errors (push fail, MR fail) return AFTER the
-	// flag is set, so the defer kills the session.
-	//
-	// The defer does NOT nuke worktree — only kills session. Worktree cleanup is the
-	// Witness's job.
-	var sessionCleanupNeeded bool
-	var sessionKilled bool
-	var deferredTownRoot string
-	var deferredRoleInfo RoleInfo
-	defer func() {
-		if sessionCleanupNeeded && !sessionKilled {
-			fmt.Printf("%s Deferred session cleanup (backstop)\n", style.Bold.Render("→"))
-			if err := selfKillSession(deferredTownRoot, deferredRoleInfo); err != nil {
-				style.PrintWarning("deferred session kill failed: %v", err)
-			}
-			retErr = NewSilentExit(0)
-		}
-	}()
-
-	// SIGTERM handler: Claude Code may kill this process via SIGTERM when context
-	// is exhausted. Without a handler, the deferred cleanup above doesn't run
-	// because the process is killed before defer can execute. This handler gives
-	// us a chance to run session cleanup even on external termination.
-	// Checkpoints (below) handle the harder case of SIGKILL where no handler runs.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n%s Received SIGTERM — running deferred cleanup\n", style.Bold.Render("→"))
-		if sessionCleanupNeeded && !sessionKilled {
-			if err := selfKillSession(deferredTownRoot, deferredRoleInfo); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: SIGTERM cleanup failed: %v\n", err)
-			}
-		}
-		os.Exit(1)
-	}()
-	defer signal.Stop(sigCh)
+	// Persistent polecat model (gt-hdf8): sessions stay alive after gt done.
+	// No deferred session kill — the polecat transitions to IDLE with sandbox
+	// preserved. The Witness handles any cleanup if the polecat gets stuck.
 
 	// Find workspace with fallback for deleted worktrees (hq-3xaxy)
 	// If the polecat's worktree was deleted by Witness before gt done finishes,
@@ -251,16 +207,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	if branch == "" {
 		if !cwdAvailable {
 			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch.
-			// Arm session cleanup before returning so the polecat doesn't get stranded.
-			if polecatEnv := os.Getenv("GT_POLECAT"); polecatEnv != "" {
-				sessionCleanupNeeded = true
-				deferredTownRoot = townRoot
-				deferredRoleInfo = RoleInfo{
-					Role:    RolePolecat,
-					Rig:     rigName,
-					Polecat: polecatEnv,
-				}
-			}
+			// Session stays alive (persistent polecat model) — Witness handles recovery.
 			return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
 		}
 		var err error
@@ -340,14 +287,8 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		agentBeadID = getAgentBeadID(ctx)
 
-		// Enable deferred session kill for polecats.
-		// From this point forward, any return/error will trigger the defer
-		// to kill the session, preventing zombie sessions.
-		if roleInfo.Role == RolePolecat {
-			sessionCleanupNeeded = true
-			deferredTownRoot = townRoot
-			deferredRoleInfo = roleInfo
-		}
+		// Persistent polecat model (gt-hdf8): no deferred session kill.
+		// Sessions stay alive after gt done — polecat transitions to IDLE.
 	}
 
 	// If issue ID not set by flag or branch name, try agent's hook_bead.
@@ -431,20 +372,24 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// If no commits ahead, work was likely pushed directly to main (or already merged)
-		// For polecats, zero commits usually means the polecat hallucinated completion
-		// (gastown#1484). Require --cleanup-status=clean as explicit acknowledgment
-		// that no code changes were expected (e.g., review or testing tasks).
+		// For polecats, zero commits usually means the polecat sleepwalked through
+		// implementation without writing code (gastown#1484, beads#emma).
+		// The --cleanup-status=clean escape is preserved for legitimate report-only
+		// tasks (audits, reviews) that the formula explicitly directs to use it.
+		// IMPORTANT: The error message must NOT mention --cleanup-status=clean.
+		// LLM agents read error messages and self-bypass (the original bug).
 		if aheadCount == 0 {
 			if os.Getenv("GT_POLECAT") != "" && doneCleanupStatus != "clean" {
-				return fmt.Errorf("cannot complete: no commits on branch\n" +
-					"If this task required no code changes (review, testing, triage),\n" +
-					"re-run with: gt done --cleanup-status clean\n" +
-					"Otherwise: --status ESCALATED (blocker) or --status DEFERRED (pause)")
+				return fmt.Errorf("cannot complete: no commits on branch ahead of %s\n"+
+					"Polecats must have at least 1 commit to submit.\n"+
+					"If the bug was already fixed upstream: gt done --status DEFERRED\n"+
+					"If you're blocked: gt done --status ESCALATED",
+					originDefault)
 			}
 
-			// Non-polecat (crew/mayor) or polecat with --cleanup-status=clean:
-			// zero commits is valid — work may have been pushed directly to main,
-			// already merged, or task required no code changes.
+			// Non-polecat (crew/mayor) or polecat with --cleanup-status=clean
+			// (report-only tasks like audits/reviews where no code changes expected):
+			// zero commits is valid.
 			fmt.Printf("%s Branch has no commits ahead of %s\n", style.Bold.Render("→"), originDefault)
 			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
 			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
@@ -778,8 +723,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 
+		// Pre-declare for checkpoint goto (gt-aufru)
+		var existingMR *beads.Issue
+
+		// Resume: skip MR creation if already completed in a previous run (gt-aufru).
+		// Mirrors the push checkpoint pattern above. Without this, every retry
+		// re-attempts bd.Create which hits unique constraints or creates duplicates.
+		if checkpoints[CheckpointMRCreated] != "" {
+			mrID = checkpoints[CheckpointMRCreated]
+			fmt.Printf("%s MR already created (resumed from checkpoint: %s)\n", style.Bold.Render("✓"), mrID)
+			goto afterMR
+		}
+
 		// Check if MR bead already exists for this branch (idempotency)
-		existingMR, err := bd.FindMRForBranch(branch)
+		existingMR, err = bd.FindMRForBranch(branch)
 		if err != nil {
 			style.PrintWarning("could not check for existing MR: %v", err)
 			// Continue with creation attempt - Create will fail if duplicate
@@ -826,6 +783,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			mrID = mrIssue.ID
 
+			// Guard against empty ID from bd create (observed in ephemeral/wisp mode).
+			// Fail fast with a clear message rather than passing "" to bd.Show.
+			if mrID == "" {
+				mrFailed = true
+				errMsg := "MR bead creation returned empty ID"
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nBranch is pushed but MR bead has no ID. Witness will be notified.", errMsg)
+				goto notifyWitness
+			}
+
 			// GH#1945: Verify MR bead is readable before considering it confirmed.
 			// bd.Create() succeeds when the bead is written locally, but if the write
 			// didn't persist (Dolt failure, corrupt state), we'd nuke the worktree
@@ -861,6 +828,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			writeDoneCheckpoint(cpBd, agentBeadID, CheckpointMRCreated, mrID)
 		}
 
+	afterMR:
 		fmt.Printf("  Source: %s\n", branch)
 		fmt.Printf("  Target: %s\n", target)
 		fmt.Printf("  Issue: %s\n", issueID)
@@ -885,72 +853,30 @@ notifyWitness:
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
-	// Notify Witness about completion
-	// Use town-level beads for cross-agent mail
-	townRouter := mail.NewRouter(townRoot)
-	defer townRouter.WaitPendingNotifications()
-	witnessAddr := fmt.Sprintf("%s/witness", rigName)
-
-	// Build notification body
-	var bodyLines []string
-	bodyLines = append(bodyLines, fmt.Sprintf("Exit: %s", exitType))
-	if issueID != "" {
-		bodyLines = append(bodyLines, fmt.Sprintf("Issue: %s", issueID))
-	}
-	if mrID != "" {
-		bodyLines = append(bodyLines, fmt.Sprintf("MR: %s", mrID))
-	}
-	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
-	// Include convoy ownership info so witness can skip merge flow registration
-	if convoyInfo != nil {
-		bodyLines = append(bodyLines, fmt.Sprintf("ConvoyID: %s", convoyInfo.ID))
-		if convoyInfo.Owned {
-			bodyLines = append(bodyLines, "ConvoyOwned: true")
-		}
-		if convoyInfo.MergeStrategy != "" {
-			bodyLines = append(bodyLines, fmt.Sprintf("MergeStrategy: %s", convoyInfo.MergeStrategy))
-		}
-	}
-	if pushFailed {
-		bodyLines = append(bodyLines, "PushFailed: true")
-	}
-	if mrFailed {
-		bodyLines = append(bodyLines, "MRFailed: true")
-	}
-	if len(doneErrors) > 0 {
-		bodyLines = append(bodyLines, fmt.Sprintf("Errors: %s", strings.Join(doneErrors, "; ")))
-	}
-
-	doneNotification := &mail.Message{
-		To:      witnessAddr,
-		From:    sender,
-		Subject: fmt.Sprintf("POLECAT_DONE %s", polecatName),
-		Body:    strings.Join(bodyLines, "\n"),
-	}
-
+	// Write completion metadata to agent bead (gt-a6gp: nudge-over-mail).
+	// The witness survey-workers step reads these fields from the agent bead
+	// instead of parsing POLECAT_DONE mail. This eliminates Dolt commits
+	// from mail sends — the highest-volume mail source.
 	fmt.Printf("\nNotifying Witness...\n")
-	if err := townRouter.Send(doneNotification); err != nil {
-		style.PrintWarning("could not notify witness: %v", err)
-	} else {
-		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
+	if agentBeadID != "" {
+		completionBd := beads.New(beads.ResolveBeadsDir(cwd))
+		meta := &beads.CompletionMetadata{
+			ExitType:       exitType,
+			MRID:           mrID,
+			Branch:         branch,
+			HookBead:       issueID,
+			MRFailed:       mrFailed,
+			CompletionTime: time.Now().UTC().Format(time.RFC3339),
+		}
+		if err := completionBd.UpdateAgentCompletion(agentBeadID, meta); err != nil {
+			style.PrintWarning("could not write completion metadata to agent bead: %v", err)
+		}
 	}
 
-	// Notify witness of work completion (witness is the polecat's direct supervisor).
-	// Previously this went to the dispatcher (often mayor), flooding mayor's inbox
-	// with routine operational mail. The witness handles polecat lifecycle.
-	if issueID != "" {
-		workDoneNotification := &mail.Message{
-			To:      witnessAddr,
-			From:    sender,
-			Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
-			Body:    strings.Join(bodyLines, "\n"),
-		}
-		if err := townRouter.Send(workDoneNotification); err != nil {
-			style.PrintWarning("could not notify witness of work done: %v", err)
-		} else {
-			fmt.Printf("%s Witness notified of WORK_DONE for %s\n", style.Bold.Render("✓"), issueID)
-		}
-	}
+	// Nudge witness via tmux instead of mail (gt-a6gp).
+	// Nudges are free (no Dolt commit) and wake the witness immediately.
+	nudgeWitness(rigName, fmt.Sprintf("POLECAT_DONE %s exit=%s", polecatName, exitType))
+	fmt.Printf("%s Witness notified of %s (via nudge)\n", style.Bold.Render("✓"), exitType)
 
 	// Write witness notification checkpoint for resume (gt-aufru)
 	if agentBeadID != "" {
@@ -969,49 +895,56 @@ notifyWitness:
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
-	// Persistent polecat model (gt-4ac): polecats keep their sandbox after completion.
-	// Session is killed but worktree is preserved for reuse by future gt sling.
-	// "done means idle" - session terminates, sandbox persists.
-	selfCleanAttempted := false
+	// Persistent polecat model (gt-hdf8): polecats transition to IDLE after completion.
+	// Session stays alive, sandbox preserved, worktree synced to main for reuse.
+	// "done means idle" - not "done means dead".
+	isPolecat := false
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
-		selfCleanAttempted = true
+		isPolecat = true
 
-		// Worktree is preserved for reuse — no self-nuke.
-		// The polecat's agent state was set to "idle" in updateAgentStateOnDone.
 		fmt.Printf("%s Sandbox preserved for reuse (persistent polecat)\n", style.Bold.Render("✓"))
 
-		// GH#1945: Do NOT kill session if push or MR submission failed.
-		// When MQ submission fails, keeping the session alive preserves the
-		// polecat so the Witness can investigate or the work can be retried.
-		// The Witness was already notified of the failure above.
 		if pushFailed || mrFailed {
-			fmt.Printf("%s Session preserved (push or MR failed — work needs recovery)\n", style.Bold.Render("⚠"))
-			// Set sessionKilled to prevent the deferred backstop from killing us.
-			// The session is intentionally preserved, not accidentally orphaned.
-			sessionKilled = true
-		} else {
-			// Kill our own session (this terminates Claude and the shell)
-			// This is the last thing we do - the process will be killed when tmux session dies
-			// All exit types kill the session - "done means idle"
-			fmt.Printf("%s Terminating session (done means idle)\n", style.Bold.Render("→"))
-			if err := selfKillSession(townRoot, roleInfo); err != nil {
-				// If session kill fails, fall through to normal exit
-				style.PrintWarning("session kill failed: %v", err)
-			} else {
-				sessionKilled = true // Prevent deferred kill from double-killing
-			}
-			// If selfKillSession succeeds, we won't reach here (process killed by tmux)
+			fmt.Printf("%s Work needs recovery (push or MR failed) — session preserved\n", style.Bold.Render("⚠"))
 		}
+
+		// Sync worktree to main so the polecat is ready for new assignments.
+		// Phase 3 of persistent-polecat-pool: DONE→IDLE syncs to main and deletes old branch.
+		// Non-fatal: if sync fails, the polecat is still IDLE and the Witness
+		// or next gt sling can handle the branch state.
+		if cwdAvailable && !pushFailed {
+			// Remember the old branch so we can delete it after switching
+			oldBranch := branch
+
+			fmt.Printf("%s Syncing worktree to %s...\n", style.Bold.Render("→"), defaultBranch)
+			if err := g.Checkout(defaultBranch); err != nil {
+				style.PrintWarning("could not checkout %s: %v (worktree stays on feature branch)", defaultBranch, err)
+			} else if err := g.Pull("origin", defaultBranch); err != nil {
+				style.PrintWarning("could not pull %s: %v (worktree on %s but may be stale)", defaultBranch, defaultBranch, err)
+			} else {
+				fmt.Printf("%s Worktree synced to %s\n", style.Bold.Render("✓"), defaultBranch)
+			}
+
+			// Delete the old polecat branch (non-fatal: cleanup only).
+			// This prevents stale branch accumulation from persistent polecats.
+			if oldBranch != "" && oldBranch != defaultBranch && oldBranch != "master" {
+				if err := g.DeleteBranch(oldBranch, true); err != nil {
+					style.PrintWarning("could not delete old branch %s: %v", oldBranch, err)
+				} else {
+					fmt.Printf("%s Deleted old branch %s\n", style.Bold.Render("✓"), oldBranch)
+				}
+			}
+		}
+
+		fmt.Printf("%s Polecat transitioned to IDLE — ready for new work\n", style.Bold.Render("✓"))
 	}
 
-	// Fallback exit for non-polecats or if self-clean failed
 	fmt.Println()
-	fmt.Printf("%s Session exiting\n", style.Bold.Render("→"))
-	if !selfCleanAttempted {
+	if !isPolecat {
+		fmt.Printf("%s Session exiting\n", style.Bold.Render("→"))
 		fmt.Printf("  Witness will handle cleanup.\n")
 	}
-	fmt.Printf("  Goodbye!\n")
-	return NewSilentExit(0)
+	return nil
 }
 
 // setDoneIntentLabel writes a done-intent:<type>:<unix-ts> label on the agent bead
@@ -1277,20 +1210,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		fmt.Fprintf(os.Stderr, "Warning: couldn't clear agent %s hook: %v\n", agentBeadID, err)
 	}
 
-	// Set agent state based on exit type.
-	// Persistent polecats (gt-4ac): set "idle" on completion so gt sling can find
-	// and reuse them. "stuck" for escalated exits (requesting help).
-	switch exitType {
-	case ExitCompleted, ExitDeferred:
-		// "idle" = work done, sandbox preserved, ready for reuse
-		if _, err := bd.Run("agent", "state", agentBeadID, "idle"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to idle: %v\n", agentBeadID, err)
-		}
-	case ExitEscalated:
-		// "stuck" = agent is requesting help - not observable from tmux
-		if _, err := bd.Run("agent", "state", agentBeadID, "stuck"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to stuck: %v\n", agentBeadID, err)
-		}
+	// Set agent state to "done" (gt-a6gp: nudge-over-mail).
+	// Completion metadata (exit_type, MR ID, branch) was already written to
+	// the agent bead by the notifyWitness section. Setting agent_state=done
+	// signals the witness survey-workers step to process completion from beads.
+	// The witness transitions the polecat to "idle" after processing.
+	// Exception: ESCALATED exits use "stuck" — the polecat needs help.
+	doneState := "done"
+	if exitType == ExitEscalated {
+		doneState = "stuck"
+	}
+	if _, err := bd.Run("agent", "state", agentBeadID, doneState); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to %s: %v\n", agentBeadID, doneState, err)
 	}
 
 	// ZFC #10: Self-report cleanup status
@@ -1405,7 +1336,9 @@ func isPolecatActor(actor string) bool {
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.
-// In the persistent model (gt-4ac): "done means idle" - session killed, sandbox preserved.
+// DEPRECATED (gt-hdf8): No longer called from gt done. Polecats now transition to
+// IDLE with session preserved instead of self-killing. Kept for explicit kill scenarios
+// (e.g., Witness-directed termination).
 //
 // The polecat determines its session from environment variables:
 // - GT_RIG: the rig name

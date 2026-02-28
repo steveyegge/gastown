@@ -374,6 +374,73 @@ Witness-N ──┘
             ALERT to Mayor (mail only on failure)
 ```
 
+## Communication Hygiene: Mail vs Nudge
+
+Agents overuse mail for routine communication, generating permanent beads and
+Dolt commits for messages that should be ephemeral. Every `gt mail send` creates
+a wisp bead in Dolt -- a permanent record with its own commit in the git-like
+history. This is a critical pollution source.
+
+### The Two Channels
+
+**`gt nudge` (ephemeral, preferred for routine comms)**
+- Sends a message directly to an agent's tmux session
+- No beads created. No Dolt commits. Zero storage cost.
+- Message appears as a `<system-reminder>` in the agent's context
+- Suitable for: health checks, status requests, simple instructions, "wake up" signals
+- Limitation: if the target session is dead, the nudge is lost
+
+**`gt mail send` (persistent, for structured protocol messages only)**
+- Creates a bead (wisp) in the Dolt database
+- Generates at least one Dolt commit (the write)
+- Persists across session restarts -- survives agent death
+- Suitable for: HANDOFF context, MERGE_READY/MERGED protocol, escalations, HELP
+  requests, anything that MUST survive session death
+
+### The Rule
+
+**Default to `gt nudge`. Only use `gt mail send` when the message MUST survive
+the recipient's session death.**
+
+The litmus test: "If the recipient's session dies and restarts, do they need this
+message?" If yes -> mail. If no -> nudge.
+
+### Role-Specific Guidance
+
+| Role | Mail Budget | When to Mail | When to Nudge |
+|------|-------------|-------------|---------------|
+| **Polecat** | 0-1 per session | HELP/ESCALATE only (gt escalate preferred) | Everything else |
+| **Witness** | Protocol msgs only | MERGE_READY, RECOVERED_BEAD, RECOVERY_NEEDED, escalations to Mayor | Polecat health checks, status pings, nudge-and-observe |
+| **Refinery** | Protocol msgs only | MERGED, MERGE_FAILED, REWORK_REQUEST | Status updates to Witness |
+| **Deacon** | Escalations only | Escalations to Mayor, HANDOFF to self | TIMER callbacks, HEALTH_CHECK, lifecycle pokes |
+| **Dogs** | Zero | Never (results go to event beads or logs) | Report completion to Deacon via nudge |
+| **Mayor** | Strategic only | Cross-rig coordination, HANDOFF to self | Instructions to Deacon/Witness |
+
+### Why This Matters (The Commit Graph)
+
+Dolt is git under the hood. Every mail creates a Dolt commit. Over a day of
+normal operations:
+- 4 agents x 15 patrol cycles x 2 mails per cycle = 120 commits just for routine chatter
+- These commits live in the git history forever, even after mail rows are deleted
+- Rebase can remove them, but prevention is always cheaper than cleanup
+
+### Anti-Patterns
+
+**DOG_DONE as mail** -- Dogs should not mail their completion status. Use
+`gt nudge deacon/ "DOG_DONE: plugin-name success"` instead.
+
+**Duplicate escalations** -- Witnesses sending 2+ mails about the same issue
+minutes apart. Check inbox before sending: if you already sent about this topic,
+don't send again.
+
+**HANDOFF for routine cycles** -- Patrol agents (Witness, Deacon) doing routine
+handoffs should use minimal mail. If there's nothing extraordinary, just cycle --
+the next session discovers state from beads, not from mail.
+
+**Health check responses via mail** -- When Deacon sends a health check nudge, do
+NOT respond with mail. The Deacon tracks health via session status, not mail
+responses.
+
 ## Implementation
 
 ### Sending Mail

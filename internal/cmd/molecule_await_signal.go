@@ -56,7 +56,10 @@ EXIT CODES:
   1 - Error opening events file
 
 EXAMPLES:
-  # Simple wait with 60s timeout
+  # Simple wait with 60s timeout (canonical form)
+  gt mol step await-signal --timeout 60s
+
+  # Short form (alias)
   gt mol await-signal --timeout 60s
 
   # Backoff mode with agent bead tracking:
@@ -69,6 +72,17 @@ EXAMPLES:
   # Quiet mode (no output, for scripting)
   gt mol await-signal --timeout 30s --quiet`,
 	RunE: runMoleculeAwaitSignal,
+}
+
+// moleculeAwaitSignalShortcutCmd is a separate command instance that allows
+// "gt mol await-signal" in addition to the canonical "gt mol step await-signal".
+// A separate instance is required because cobra does not support a single
+// command having two parents (AddCommand overwrites the parent pointer).
+var moleculeAwaitSignalShortcutCmd = &cobra.Command{
+	Use:   "await-signal",
+	Short: "Wait for activity feed signal with timeout (alias: gt mol step await-signal)",
+	Long:  moleculeAwaitSignalCmd.Long,
+	RunE:  runMoleculeAwaitSignal,
 }
 
 // AwaitSignalResult is the result of an await-signal operation.
@@ -96,6 +110,25 @@ func init() {
 		"Output as JSON")
 
 	moleculeStepCmd.AddCommand(moleculeAwaitSignalCmd)
+
+	// Register shortcut flags on the shortcut command (shares the same global vars)
+	moleculeAwaitSignalShortcutCmd.Flags().StringVar(&awaitSignalTimeout, "timeout", "60s",
+		"Maximum time to wait for signal (e.g., 30s, 5m)")
+	moleculeAwaitSignalShortcutCmd.Flags().StringVar(&awaitSignalBackoffBase, "backoff-base", "",
+		"Base interval for exponential backoff (e.g., 30s)")
+	moleculeAwaitSignalShortcutCmd.Flags().IntVar(&awaitSignalBackoffMult, "backoff-mult", 2,
+		"Multiplier for exponential backoff (default: 2)")
+	moleculeAwaitSignalShortcutCmd.Flags().StringVar(&awaitSignalBackoffMax, "backoff-max", "",
+		"Maximum interval cap for backoff (e.g., 10m)")
+	moleculeAwaitSignalShortcutCmd.Flags().StringVar(&awaitSignalAgentBead, "agent-bead", "",
+		"Agent bead ID for tracking idle cycles (reads/writes idle:N label)")
+	moleculeAwaitSignalShortcutCmd.Flags().BoolVar(&awaitSignalQuiet, "quiet", false,
+		"Suppress output (for scripting)")
+	moleculeAwaitSignalShortcutCmd.Flags().BoolVar(&moleculeJSON, "json", false,
+		"Output as JSON")
+
+	// alias: gt mol await-signal (in addition to gt mol step await-signal)
+	moleculeCmd.AddCommand(moleculeAwaitSignalShortcutCmd)
 }
 
 func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {

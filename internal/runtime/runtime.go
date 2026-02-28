@@ -117,7 +117,7 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 
 	role = strings.ToLower(role)
 	command := "gt prime"
-	if isAutonomousRole(role) {
+	if config.IsAutonomous(role) {
 		command += " && gt mail check --inject"
 	}
 	// NOTE: session-started nudge to deacon removed — it interrupted
@@ -136,22 +136,6 @@ func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.Runtime
 		}
 	}
 	return nil
-}
-
-// isAutonomousRole returns true if the given role should automatically
-// inject mail check on startup. Autonomous roles (polecat, witness,
-// refinery, deacon, boot) operate without human prompting and need mail injection
-// to receive work assignments.
-//
-// Non-autonomous roles (mayor, crew) are human-guided and should not
-// have automatic mail injection to avoid confusion.
-func isAutonomousRole(role string) bool {
-	switch role {
-	case "polecat", "witness", "refinery", "deacon", "boot":
-		return true
-	default:
-		return false
-	}
 }
 
 // DefaultPrimeWaitMs is the default wait time in milliseconds for non-hook agents

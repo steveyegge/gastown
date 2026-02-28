@@ -126,6 +126,8 @@ type PatrolsConfig struct {
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
 	JanitorDog     *JanitorDogConfig      `json:"janitor_dog,omitempty"`
+	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
+	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -224,6 +226,18 @@ func LoadPatrolConfig(townRoot string) *DaemonPatrolConfig {
 	return &config
 }
 
+// SavePatrolConfig saves patrol configuration to mayor/daemon.json.
+func SavePatrolConfig(townRoot string, config *DaemonPatrolConfig) error {
+	configFile := PatrolConfigFile(townRoot)
+
+	// Ensure mayor directory exists
+	if err := os.MkdirAll(filepath.Dir(configFile), 0755); err != nil {
+		return err
+	}
+
+	return util.AtomicWriteJSON(configFile, config)
+}
+
 // IsPatrolEnabled checks if a patrol is enabled in the config.
 // Returns true if the config doesn't exist (default enabled for backwards compatibility).
 // Exception: opt-in patrols (dolt_remotes) default to disabled.
@@ -266,6 +280,18 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.JanitorDog.Enabled
+	}
+	if patrol == "compactor_dog" {
+		if config == nil || config.Patrols == nil || config.Patrols.CompactorDog == nil {
+			return false
+		}
+		return config.Patrols.CompactorDog.Enabled
+	}
+	if patrol == "scheduled_maintenance" {
+		if config == nil || config.Patrols == nil || config.Patrols.ScheduledMaintenance == nil {
+			return false
+		}
+		return config.Patrols.ScheduledMaintenance.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

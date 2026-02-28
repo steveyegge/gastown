@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -36,7 +35,7 @@ func TestGetPatrolRigs_FiltersNonOperationalRigs(t *testing.T) {
 
 	d := &Daemon{
 		config: &Config{TownRoot: townRoot},
-		logger: log.New(io.Discard, "", 0),
+		logger: log.New(os.Stderr, "[test] ", 0),
 	}
 
 	got := d.getPatrolRigs("witness")

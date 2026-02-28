@@ -196,20 +196,13 @@ live processes.
 
 **1. Rogue dolt servers**
 
-Any `dolt sql-server` process NOT on port 3307 (the shared server) is a leaked
-test server. Kill and log.
+Any `dolt sql-server` process that holds this workspace's configured port
+(set via `GT_DOLT_PORT`, default 3307) but uses a different data directory
+is an "imposter" — a leaked server from another workspace. Kill and log.
 
 ```bash
-# Find all dolt sql-server processes
-ps aux | grep 'dolt sql-server' | grep -v grep | while read -r line; do
-  PID=$(echo "$line" | awk '{print $2}')
-  # Check if this is the shared server (port 3307)
-  if echo "$line" | grep -q -- '--port 3307'; then
-    continue  # Skip the shared server
-  fi
-  # Kill rogue server
-  kill "$PID" 2>/dev/null && echo "Killed rogue dolt server PID=$PID"
-done
+# Use gt dolt kill-imposters which checks data-dir — safe for multi-workspace setups
+gt dolt kill-imposters 2>/dev/null || true
 ```
 
 **2. Stale test temp dirs**
@@ -283,7 +276,7 @@ Test pollution cleanup: rogue_dolt=N stale_dirs=N stale_pids=N dead_worktrees=N
 If all counts are 0, log "Test pollution cleanup: clean" and move on.
 
 **Safety:**
-- NEVER kill the shared dolt server (port 3307)
+- NEVER kill this workspace's own legitimate dolt server (checked via data-dir)
 - NEVER remove dirs where lsof shows active file handles
 - NEVER remove PID files where the PID is still alive
 - NEVER prune worktrees for dogs with live tmux sessions

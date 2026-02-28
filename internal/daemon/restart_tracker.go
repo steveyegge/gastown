@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -200,4 +201,16 @@ func (rt *RestartTracker) ClearCrashLoop(agentID string) {
 		info.RestartCount = 0
 		info.BackoffUntil = time.Time{}
 	}
+}
+
+// ClearAgentBackoff clears the crash loop and backoff state for an agent on disk.
+// Used by 'gt daemon clear-backoff' to reset an agent stuck in crash loop.
+// The daemon reloads this on next heartbeat (or immediately on SIGUSR2).
+func ClearAgentBackoff(townRoot, agentID string) error {
+	rt := NewRestartTracker(townRoot)
+	if err := rt.Load(); err != nil {
+		return fmt.Errorf("loading restart state: %w", err)
+	}
+	rt.ClearCrashLoop(agentID)
+	return rt.Save()
 }

@@ -34,6 +34,10 @@ var testPollutionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^bd-[0-9]{1,2}$`),                              // id: bd-1, bd-99 (suspiciously short IDs)
 	regexp.MustCompile(`^bd-[a-z]{3,5}[0-9]{1,2}$`),                   // id: bd-abc12 (test-style IDs)
 	regexp.MustCompile(`^(testdb_|beads_t|beads_pt|doctest_)`),         // id prefixes from test databases
+	regexp.MustCompile(`(?i)^--help`),                                  // title: "--help" CLI artifacts
+	regexp.MustCompile(`(?i)^Usage:\s`),                                // title: "Usage: ..." CLI help output
+	regexp.MustCompile(`^offlinebrew-`),                                // id: offlinebrew-* test prefixes
+	regexp.MustCompile(`-wisp-`),                                       // id: wisp-pattern IDs leaked into issues table
 }
 
 // validDBName matches safe database names (alphanumeric + underscore only).
@@ -50,6 +54,9 @@ const scrubWhereClause = ` WHERE (ephemeral IS NULL OR ephemeral != 1)` +
 	` AND id NOT LIKE 'beads\_t%'` +
 	` AND id NOT LIKE 'beads\_pt%'` +
 	` AND id NOT LIKE 'doctest\_%'` +
+	` AND id NOT LIKE 'offlinebrew-%'` +
+	` AND title NOT LIKE '--%'` +
+	` AND title NOT LIKE 'Usage: %'` +
 	` ORDER BY id`
 
 // jsonlGitBackupInterval returns the configured interval, or the default (15m).
@@ -152,6 +159,12 @@ func (d *Daemon) syncJsonlGitBackup() {
 		recountAfterFilter(gitRepo, databases, counts)
 	}
 
+	// Post-scrub verification: re-scan output for any remaining pollution.
+	if remaining := d.verifyNoPollution(gitRepo, databases); remaining > 0 {
+		d.logger.Printf("jsonl_git_backup: WARNING: %d suspicious record(s) survived scrub+filter", remaining)
+		d.escalate("jsonl_git_backup", fmt.Sprintf("post-scrub verification found %d suspicious records — review JSONL exports", remaining))
+	}
+
 	// Phase D: Spike detection — compare current counts to previous commit.
 	threshold := spikeThreshold(config)
 	spikes := d.verifyExportCounts(gitRepo, databases, counts, threshold)
@@ -226,7 +239,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	} else {
 		query = "SELECT * FROM `" + db + "`.issues ORDER BY id"
 	}
-	n, err := d.exportTableToJsonl(db, "issues", query, dbDir, dataDir)
+	n, err := d.exportTableToJsonl("issues", query, dbDir, dataDir)
 	if err != nil {
 		return 0, fmt.Errorf("issues: %w", err)
 	}
@@ -243,7 +256,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	// 2. Export supplemental tables (no scrub, full export).
 	for _, table := range supplementalTables {
 		tQuery := fmt.Sprintf("SELECT * FROM `%s`.`%s` ORDER BY 1", db, table)
-		tn, err := d.exportTableToJsonl(db, table, tQuery, dbDir, dataDir)
+		tn, err := d.exportTableToJsonl(table, tQuery, dbDir, dataDir)
 		if err != nil {
 			// Non-fatal for supplemental tables — log and continue.
 			d.logger.Printf("jsonl_git_backup: %s/%s: export failed (non-fatal): %v", db, table, err)
@@ -258,7 +271,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 
 // exportTableToJsonl runs a query and writes the result as JSONL to {dir}/{table}.jsonl.
 // Returns the number of records exported.
-func (d *Daemon) exportTableToJsonl(db, table, query, dir, dataDir string) (int, error) {
+func (d *Daemon) exportTableToJsonl(table, query, dir, dataDir string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), jsonlExportTimeout)
 	defer cancel()
 
@@ -455,7 +468,7 @@ func previousCommitLineCount(gitRepo, relPath string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "show", "HEAD:"+relPath)
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "show", "HEAD:"+filepath.ToSlash(relPath))
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	// stderr intentionally not captured — "does not exist" is an expected case.
@@ -604,6 +617,39 @@ func (d *Daemon) applyPollutionFilter(gitRepo string, databases []string) int {
 		}
 	}
 	return totalRemoved
+}
+
+// verifyNoPollution re-scans all exported issues.jsonl files for any remaining
+// suspicious records that survived both the SQL scrub and the regex filter.
+// Returns the total number of suspicious records found across all databases.
+func (d *Daemon) verifyNoPollution(gitRepo string, databases []string) int {
+	total := 0
+	for _, db := range databases {
+		issuesPath := filepath.Join(gitRepo, db, "issues.jsonl")
+		data, err := os.ReadFile(issuesPath)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var record map[string]interface{}
+			if err := json.Unmarshal(line, &record); err != nil {
+				continue
+			}
+			if isTestPollution(record) {
+				id, _ := record["id"].(string)
+				title, _ := record["title"].(string)
+				d.logger.Printf("jsonl_git_backup: VERIFY FAIL: %s: suspicious record id=%q title=%q", db, id, title)
+				total++
+			}
+		}
+	}
+	return total
 }
 
 // parseLineCount parses a line count from `wc -l` style output or plain integer.

@@ -10,7 +10,8 @@ import (
 )
 
 // logUsagePath is the JSONL file where command usage is recorded.
-var logUsagePath = filepath.Join(os.Getenv("HOME"), ".gt", "cmd-usage.jsonl")
+// Location: $GT_HOME/.gt when GT_HOME is set, otherwise ~/.gt.
+var logUsagePath = filepath.Join(gtDataDir(), "cmd-usage.jsonl")
 
 // noLogCommands are top-level commands excluded from telemetry.
 // These fire per-tool-use and would dominate the log.
@@ -19,7 +20,8 @@ var noLogCommands = map[string]bool{
 	"signal": true,
 }
 
-// logCommandUsage appends one JSONL line to ~/.gt/cmd-usage.jsonl.
+// logCommandUsage appends one JSONL line to the cmd-usage.jsonl log.
+// Location: $GT_HOME/.gt/cmd-usage.jsonl when GT_HOME is set, else ~/.gt/.
 // Fire-and-forget: all errors are silently ignored.
 func logCommandUsage(cmd *cobra.Command, args []string) {
 	// Walk up to the first subcommand under root to check exclusions.

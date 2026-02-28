@@ -558,7 +558,13 @@ func getCurrentTmuxSession() (string, error) {
 		// Fall through to tmux detection if role resolution fails
 	}
 
-	out, err := tmux.BuildCommand("display-message", "-p", "#{session_name}").Output()
+	// Use TMUX_PANE for targeted display-message to avoid returning an
+	// arbitrary session when multiple sessions share the town socket.
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return "", fmt.Errorf("TMUX_PANE not set")
+	}
+	out, err := tmux.BuildCommand("display-message", "-t", pane, "-p", "#{session_name}").Output()
 	if err != nil {
 		return "", err
 	}
@@ -1049,6 +1055,21 @@ func detectTownRootFromCwd() string {
 		}
 	}
 
+	// Final fallback: read GT_TOWN_ROOT from tmux global environment.
+	// This handles the run-shell case where CWD is $HOME and process env
+	// vars aren't set — the daemon sets GT_TOWN_ROOT in tmux global env.
+	if socket := tmux.SocketFromEnv(); socket != "" {
+		t := tmux.NewTmuxWithSocket(socket)
+		if envRoot, err := t.GetGlobalEnvironment("GT_TOWN_ROOT"); err == nil && envRoot != "" {
+			if _, statErr := os.Stat(filepath.Join(envRoot, workspace.PrimaryMarker)); statErr == nil {
+				return envRoot
+			}
+			if info, statErr := os.Stat(filepath.Join(envRoot, workspace.SecondaryMarker)); statErr == nil && info.IsDir() {
+				return envRoot
+			}
+		}
+	}
+
 	return ""
 }
 
@@ -1524,10 +1545,12 @@ func cleanupMoleculeOnHandoff() {
 	}
 
 	// Detach molecule with audit trail
-	b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
+	if _, err := b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
 		Operation: "squash",
 		Reason:    "handoff: session cycling",
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "handoff: warning: detach molecule audit failed: %v\n", err)
+	}
 
 	// Force-close the molecule root wisp
 	if err := b.ForceCloseWithReason("handoff", molID); err != nil {

@@ -529,6 +529,7 @@ func init() {
 	mailCmd.AddCommand(mailClearCmd)
 	mailCmd.AddCommand(mailSearchCmd)
 	mailCmd.AddCommand(mailAnnouncesCmd)
+	mailCmd.AddCommand(mailDrainCmd)
 
 	rootCmd.AddCommand(mailCmd)
 }

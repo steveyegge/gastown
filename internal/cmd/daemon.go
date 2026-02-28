@@ -106,6 +106,23 @@ Examples:
 	RunE: runDaemonEnableSupervisor,
 }
 
+var daemonClearBackoffCmd = &cobra.Command{
+	Use:   "clear-backoff <agent>",
+	Short: "Clear crash loop backoff for an agent",
+	Long: `Clear the crash loop and restart backoff state for an agent.
+
+When an agent crashes repeatedly, the daemon enters crash loop mode and
+stops restarting it. Use this command to reset the crash loop counter so
+the daemon will resume restarting the agent.
+
+The agent name is the session identity (e.g., "deacon", "mayor").
+
+Examples:
+  gt daemon clear-backoff deacon   # Reset deacon crash loop`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDaemonClearBackoff,
+}
+
 var (
 	daemonLogLines  int
 	daemonLogFollow bool
@@ -118,6 +135,7 @@ func init() {
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
 	daemonCmd.AddCommand(daemonEnableSupervisorCmd)
+	daemonCmd.AddCommand(daemonClearBackoffCmd)
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
 	daemonLogsCmd.Flags().BoolVarP(&daemonLogFollow, "follow", "f", false, "Follow log output")
@@ -331,5 +349,40 @@ func runDaemonEnableSupervisor(cmd *cobra.Command, args []string) error {
 		fmt.Println("  systemctl --user stop gastown-daemon.service")
 		fmt.Println("  systemctl --user disable gastown-daemon.service")
 	}
+	return nil
+}
+
+func runDaemonClearBackoff(cmd *cobra.Command, args []string) error {
+	agentID := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Clear the crash loop state on disk
+	if err := daemon.ClearAgentBackoff(townRoot, agentID); err != nil {
+		return fmt.Errorf("clearing backoff for %s: %w", agentID, err)
+	}
+
+	// Signal the daemon to reload its in-memory restart tracker
+	running, pid, err := daemon.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking daemon status: %w", err)
+	}
+	if running {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return fmt.Errorf("finding daemon process: %w", err)
+		}
+		if err := signalDaemonReload(process); err != nil {
+			return fmt.Errorf("signaling daemon to reload: %w", err)
+		}
+		fmt.Printf("%s Cleared backoff for %s (daemon reloaded)\n", style.Bold.Render("✓"), agentID)
+	} else {
+		fmt.Printf("%s Cleared backoff for %s (daemon not running, will take effect on next start)\n",
+			style.Bold.Render("✓"), agentID)
+	}
+
 	return nil
 }

@@ -61,6 +61,14 @@ const (
 	// nudge if the agent appears idle after delivery. Each retry re-sends the
 	// nudge content and waits StartupNudgeVerifyDelay before checking again.
 	StartupNudgeMaxRetries = 3
+
+	// GUPPViolationTimeout is how long an agent can have work on hook without
+	// progressing before it's considered a GUPP (Gas Town Universal Propulsion
+	// Principle) violation. GUPP states: if you have work on your hook, you run it.
+	//
+	// Single source of truth — referenced by daemon lifecycle patrol,
+	// TUI feed stuck detection, and web fetcher worker status.
+	GUPPViolationTimeout = 30 * time.Minute
 )
 
 // Directory names within a Gas Town workspace.

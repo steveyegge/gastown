@@ -20,6 +20,9 @@ type daemonMetrics struct {
 	// restartTotal counts agent session restarts, labeled by agent type.
 	restartTotal metric.Int64Counter
 
+	// polecatSpawns counts polecat session spawns, labeled by rig name.
+	polecatSpawns metric.Int64Counter
+
 	// doltMu protects dolt gauge values written by the health check goroutine.
 	doltMu             sync.RWMutex
 	doltConnections    int64
@@ -47,6 +50,13 @@ func newDaemonMetrics() (*daemonMetrics, error) {
 
 	dm.restartTotal, err = m.Int64Counter("gastown.daemon.restart.total",
 		metric.WithDescription("Total number of agent session restarts"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	dm.polecatSpawns, err = m.Int64Counter("gastown.polecat.spawns.total",
+		metric.WithDescription("Total number of polecat session spawns"),
 	)
 	if err != nil {
 		return nil, err
@@ -124,6 +134,16 @@ func (dm *daemonMetrics) recordRestart(ctx context.Context, agentType string) {
 	}
 	dm.restartTotal.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("agent.type", agentType)),
+	)
+}
+
+// recordPolecatSpawn increments the polecat spawn counter, labeled with the rig name.
+func (dm *daemonMetrics) recordPolecatSpawn(ctx context.Context, rigName string) {
+	if dm == nil {
+		return
+	}
+	dm.polecatSpawns.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("rig", rigName)),
 	)
 }
 

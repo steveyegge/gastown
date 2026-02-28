@@ -91,6 +91,16 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		}
 	}
 
+	// Acquire per-bead flock to prevent concurrent dispatch races (TOCTOU).
+	// The CLI path (runSling) has its own flock; this closes the gap where
+	// batch sling and queue dispatch could race against each other or against
+	// a concurrent CLI invocation.
+	releaseLock, err := tryAcquireSlingBeadLock(townRoot, params.BeadID)
+	if err != nil {
+		return &SlingResult{BeadID: params.BeadID, ErrMsg: err.Error()}, err
+	}
+	defer releaseLock()
+
 	beadsDir := params.BeadsDir
 	if beadsDir == "" {
 		beadsDir = filepath.Join(townRoot, ".beads")

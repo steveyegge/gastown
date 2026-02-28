@@ -50,6 +50,35 @@ const (
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
+// AgentState constants define the lifecycle states for polecat agent beads.
+// These are written to the agent bead's agent_state field and read by the
+// witness survey-workers step to discover polecat status without mail.
+type AgentState string
+
+const (
+	AgentStateRunning   AgentState = "running"
+	AgentStateIdle      AgentState = "idle"
+	AgentStateDone      AgentState = "done"
+	AgentStateStuck     AgentState = "stuck"
+	AgentStateEscalated AgentState = "escalated"
+	AgentStateSpawning  AgentState = "spawning"
+	AgentStateWorking   AgentState = "working"
+	AgentStateNuked     AgentState = "nuked"
+)
+
+// ExitType constants define the completion outcome for polecat work.
+// These match the exit statuses used by `gt done` and are stored on the
+// agent bead's exit_type field so the witness can discover completion
+// outcomes from beads instead of POLECAT_DONE mail.
+type ExitType string
+
+const (
+	ExitTypeCompleted     ExitType = "COMPLETED"
+	ExitTypeEscalated     ExitType = "ESCALATED"
+	ExitTypeDeferred      ExitType = "DEFERRED"
+	ExitTypePhaseComplete ExitType = "PHASE_COMPLETE"
+)
+
 // PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
@@ -368,61 +397,27 @@ func SwarmWispLabels(swarmID string, total, completed int, startTime time.Time) 
 	}
 }
 
-// HelpAssessment represents the Witness's assessment of a help request.
-type HelpAssessment struct {
-	CanHelp     bool
-	HelpAction  string // What the Witness can do to help
-	NeedsEscalation bool
-	EscalationReason string
-}
-
-// AssessHelpRequest provides guidance for the Witness to assess a help request.
-// This is a template/guide - actual assessment is done by the Claude agent.
-func AssessHelpRequest(payload *HelpPayload) *HelpAssessment {
-	assessment := &HelpAssessment{}
-
-	// Heuristics for common help requests that Witness can handle
-	topic := strings.ToLower(payload.Topic)
-	problem := strings.ToLower(payload.Problem)
-
-	// Git issues - Witness can often help
-	if strings.Contains(topic, "git") || strings.Contains(problem, "git") {
-		if strings.Contains(problem, "conflict") {
-			assessment.CanHelp = false
-			assessment.NeedsEscalation = true
-			assessment.EscalationReason = "Git conflicts require human review"
-		} else if strings.Contains(problem, "push") || strings.Contains(problem, "fetch") {
-			assessment.CanHelp = true
-			assessment.HelpAction = "Check git remote status and network connectivity"
-		}
+// FormatHelpSummary formats a parsed HelpPayload into a human-readable summary
+// for the witness agent to triage. The agent decides whether to help directly,
+// escalate, and to whom — no Go-level judgment is made here.
+func FormatHelpSummary(payload *HelpPayload) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "HELP REQUEST from %s", payload.Agent)
+	if payload.IssueID != "" {
+		fmt.Fprintf(&b, " (issue: %s)", payload.IssueID)
 	}
-
-	// Test failures - usually need escalation
-	if strings.Contains(topic, "test") || strings.Contains(problem, "test fail") {
-		assessment.CanHelp = false
-		assessment.NeedsEscalation = true
-		assessment.EscalationReason = "Test failures require investigation"
+	b.WriteString("\n")
+	if payload.Topic != "" {
+		fmt.Fprintf(&b, "Topic: %s\n", payload.Topic)
 	}
-
-	// Build issues - Witness can check basics
-	if strings.Contains(topic, "build") || strings.Contains(problem, "compile") {
-		assessment.CanHelp = true
-		assessment.HelpAction = "Verify dependencies and build configuration"
+	if payload.Problem != "" {
+		fmt.Fprintf(&b, "Problem: %s\n", payload.Problem)
 	}
-
-	// Requirements unclear - always escalate
-	if strings.Contains(topic, "unclear") || strings.Contains(problem, "requirement") ||
-		strings.Contains(problem, "don't understand") {
-		assessment.CanHelp = false
-		assessment.NeedsEscalation = true
-		assessment.EscalationReason = "Requirements clarification needed from Mayor"
+	if payload.Tried != "" {
+		fmt.Fprintf(&b, "Tried: %s\n", payload.Tried)
 	}
-
-	// Default: escalate if we don't recognize the pattern
-	if !assessment.CanHelp && !assessment.NeedsEscalation {
-		assessment.NeedsEscalation = true
-		assessment.EscalationReason = "Unknown help request type"
+	if !payload.RequestedAt.IsZero() {
+		fmt.Fprintf(&b, "Requested: %s\n", payload.RequestedAt.Format(time.RFC3339))
 	}
-
-	return assessment
+	return b.String()
 }

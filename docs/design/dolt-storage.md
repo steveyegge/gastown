@@ -1,7 +1,7 @@
 # Dolt Storage Architecture
 
 > **Status**: Current reference for Gas Town agents
-> **Updated**: 2026-02-16
+> **Updated**: 2026-02-28
 > **Context**: Dolt is the sole storage backend for Beads and Gas Town
 
 ---
@@ -11,7 +11,9 @@
 Gas Town uses [Dolt](https://github.com/dolthub/dolt), an open-source
 SQL database with Git-like versioning (Apache 2.0). One Dolt SQL server
 per town serves all databases via MySQL protocol on port 3307. There is
-no embedded mode, no SQLite, and no JSONL.
+no embedded mode and no SQLite. JSONL is used only for disaster-recovery
+backups (the JSONL Dog exports scrubbed snapshots every 15 minutes to a
+git-backed archive), not as a primary storage format.
 
 The `gt daemon` manages the server lifecycle (auto-start, health checks
 every 30s, crash restart with exponential backoff).
@@ -23,10 +25,11 @@ Dolt SQL Server (one per town, port 3307)
 ├── hq/       town-level beads  (hq-* prefix)
 ├── gastown/  rig beads         (gt-* prefix)
 ├── beads/    rig beads         (bd-* prefix)
-└── ...       additional rigs
+├── wyvern/   rig beads         (wy-* prefix)
+└── sky/      rig beads         (sky-* prefix)
 ```
 
-**Data directory**: `~/.dolt-data/` — each subdirectory is a database
+**Data directory**: `~/gt/.dolt-data/` — each subdirectory is a database
 accessible via `USE <name>` in SQL.
 
 **Connection**: `root@tcp(127.0.0.1:3307)/<database>` (no password for
@@ -74,42 +77,76 @@ transaction to maintain atomicity.
 
 ## Schema
 
+Schema version 6. The full schema lives in `beads/.../storage/dolt/schema.go`.
+Key tables shown below; see source for indexes and full column lists.
+
 ```sql
+-- Core: every bead is a row in issues (tasks, messages, agents, gates, etc.)
 CREATE TABLE issues (
-    id VARCHAR(64) PRIMARY KEY,
-    type VARCHAR(32),
-    title TEXT,
-    description TEXT,
-    status VARCHAR(32),
-    priority INT,
-    owner VARCHAR(255),
+    id VARCHAR(255) PRIMARY KEY,
+    title VARCHAR(500) NOT NULL,
+    description TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'open',
+    priority INT NOT NULL DEFAULT 2,
+    issue_type VARCHAR(32) NOT NULL DEFAULT 'task',
     assignee VARCHAR(255),
-    labels JSON,
-    parent VARCHAR(64),
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    closed_at TIMESTAMP
+    owner VARCHAR(255) DEFAULT '',
+    sender VARCHAR(255) DEFAULT '',          -- messaging
+    mol_type VARCHAR(32) DEFAULT '',         -- molecule type
+    work_type VARCHAR(32) DEFAULT 'mutex',   -- mutex vs open_competition
+    hook_bead VARCHAR(255) DEFAULT '',       -- agent hook
+    role_bead VARCHAR(255) DEFAULT '',       -- agent role
+    agent_state VARCHAR(32) DEFAULT '',      -- agent lifecycle
+    wisp_type VARCHAR(32) DEFAULT '',        -- TTL-based compaction class
+    metadata JSON DEFAULT (JSON_OBJECT()),   -- extensible metadata
+    created_at DATETIME, updated_at DATETIME, closed_at DATETIME
+    -- ... plus ~20 more columns (see schema.go)
 );
 
-CREATE TABLE mail (
-    id VARCHAR(64) PRIMARY KEY,
-    thread_id VARCHAR(64),
-    from_addr VARCHAR(255),
-    to_addrs JSON,
-    subject TEXT,
-    body TEXT,
-    sent_at TIMESTAMP,
-    read_at TIMESTAMP
+-- Relationships between beads
+CREATE TABLE dependencies (
+    issue_id VARCHAR(255) NOT NULL,
+    depends_on_id VARCHAR(255) NOT NULL,
+    type VARCHAR(32) NOT NULL DEFAULT 'blocks',   -- blocks, parent-child, thread
+    PRIMARY KEY (issue_id, depends_on_id)
 );
 
-CREATE TABLE channels (
-    id VARCHAR(64) PRIMARY KEY,
-    name VARCHAR(255),
-    type VARCHAR(32),
-    config JSON,
-    created_at TIMESTAMP
+-- Labels (many-to-many)
+CREATE TABLE labels (
+    issue_id VARCHAR(255) NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    PRIMARY KEY (issue_id, label)
 );
+
+-- Audit trail
+CREATE TABLE comments (id BIGINT AUTO_INCREMENT PRIMARY KEY, issue_id, author, text, created_at);
+CREATE TABLE events   (id BIGINT AUTO_INCREMENT PRIMARY KEY, issue_id, event_type, actor, old_value, new_value, created_at);
+
+-- Agent interaction log
+CREATE TABLE interactions (id, kind, actor, issue_id, model, prompt, response, created_at);
+
+-- Infrastructure
+CREATE TABLE config          (key PRIMARY KEY, value);       -- runtime config knobs
+CREATE TABLE metadata        (key PRIMARY KEY, value);       -- schema version, etc.
+CREATE TABLE routes          (prefix PRIMARY KEY, path);     -- prefix→database routing
+CREATE TABLE issue_counter   (prefix PRIMARY KEY, last_id);  -- sequential ID generation
+CREATE TABLE child_counters  (parent_id PRIMARY KEY, last_child);
+CREATE TABLE federation_peers (name PRIMARY KEY, remote_url, sovereignty, last_sync);
+
+-- Compaction
+CREATE TABLE issue_snapshots     (id, issue_id, compaction_level, original_content, ...);
+CREATE TABLE compaction_snapshots (id, issue_id, compaction_level, snapshot_json, ...);
+CREATE TABLE repo_mtimes         (repo_path PRIMARY KEY, mtime_ns, last_checked);
 ```
+
+**Wisps** (ephemeral patrol data) reuse the same `issues` table with
+`wisp_type` set. They are Dolt-ignored (`dolt_ignore` table) so wisp
+mutations don't generate Dolt commits — only structural changes to the
+ignore config itself are committed.
+
+**Mail** is implemented as beads with `issue_type='message'` in the
+issues table — there is no separate mail table. The `sender` field and
+`dependencies` (type='thread') provide threading.
 
 ## Dolt-Specific Capabilities
 
@@ -135,75 +172,157 @@ Arrays (labels): `union` merge. Counters: `max`.
 
 Beads data falls into three planes with different characteristics:
 
-| Plane | What | Mutation | Durability | Transport |
-|-------|------|----------|------------|-----------|
-| **Operational** | Work in progress, status, assignments, heartbeats | High (seconds) | Days–weeks | Dolt SQL server (local) |
-| **Ledger** | Completed work, permanent record, skill vectors | Low (completion boundaries) | Permanent | DoltHub remotes + federation |
-| **Design** | Epics, RFCs, specs — ideas not yet claimed | Conversational | Until crystallized | DoltHub commons (shared) |
+| Plane | What | Mutation | Durability | Transport | Status |
+|-------|------|----------|------------|-----------|--------|
+| **Operational** | Work in progress, status, assignments, heartbeats | High (seconds) | Days–weeks | Dolt SQL server (local) | **Live** |
+| **Ledger** | Completed work, permanent record | Low (completion boundaries) | Permanent | JSONL export → git push to GitHub | **Live** |
+| **Design** | Epics, RFCs, specs — ideas not yet claimed | Conversational | Until crystallized | DoltHub commons (shared) | **Planned** |
 
 The operational plane lives entirely in the local Dolt server. The ledger
-and design planes federate via DoltHub using the Highway Operations
-Protocol — Gas Town's public federation layer built on Dolt's native
-push/pull remotes.
+plane is currently served by the JSONL Dog, which exports scrubbed snapshots
+to a git-backed archive every 15 minutes — this is the durable record that
+survives disasters (proven in Clown Show #13). The design plane will
+federate via DoltHub as part of the Wasteland commons (in progress).
 
-## Ephemeral Data Lifecycle (CRITICAL)
+## Data Lifecycle: Think Git, Not SQL (CRITICAL)
 
-Dolt is sensitive to row volume and versioning overhead. Every row change
-creates a new chunk in Dolt's content-addressed storage. Without active
-garbage collection, databases bloat rapidly.
+Dolt is git under the hood. **The commit graph IS the storage cost, not the
+rows.** Every `bd create`, `bd update`, `bd close` generates a Dolt commit.
+DELETE a row and the commit that wrote it still exists in history. `dolt gc`
+reclaims unreferenced chunks, but the commit graph itself grows forever.
+
+This is the key insight from Tim Sehn (Dolt founder, 2026-02-27):
+
+> "Your Beads databases are small but your commit history is big."
+>
+> "If you delete a bead you want to rebase with the commit that wrote it
+> so it just isn't there any more in history."
+
+**Rebase** (`CALL DOLT_REBASE()`, available since v1.81.2) rewrites the
+commit graph — it's the real cleanup mechanism. DELETE + gc is necessary
+but insufficient. DELETE + rebase + gc is the full pipeline.
+
+Reference: https://www.dolthub.com/blog/2026-01-28-everybody-rebase/
+
+### The Six-Stage Lifecycle
+
+```
+CREATE → LIVE → CLOSE → DECAY → COMPACT → FLATTEN
+  │        │       │        │        │          │
+  Dolt   active   done   DELETE   REBASE     SQUASH
+  commit  work    bead    rows    commits    all history
+                         >7-30d  together   to 1 commit
+```
+
+| Stage | Owner | Frequency | Mechanism |
+|-------|-------|-----------|-----------|
+| CREATE | Any agent | Continuous | `bd create`, `bd mol wisp create` |
+| CLOSE | Agent or patrol | Per-task | `bd close`, `gt done` |
+| DECAY | Reaper Dog | Daily | `DELETE FROM wisps WHERE status='closed' AND age > 7d` |
+| COMPACT | Compactor Dog | Daily | `CALL DOLT_REBASE()` — squash old commits together |
+| FLATTEN | Mayor or manual | Monthly | Branch, soft-reset to initial commit, commit, swap main |
+
+All six stages are implemented. DECAY runs in the Reaper Dog (wisp_reaper.go),
+COMPACT/FLATTEN run in the Compactor Dog (compactor_dog.go).
 
 ### Two Data Streams
 
 ```
-EPHEMERAL (wisps, patrol data)          SACRED (issues, molecules, mail, agents)
+EPHEMERAL (wisps, patrol data)          PERMANENT (issues, molecules, agents)
   CREATE                                  CREATE
   → work                                  → work
   → CLOSE (>24h)                          → CLOSE
-  → SQUASH to digest summary              → JSONL export (scrubbed)
-  → DELETE original rows                  → git push to GitHub
-  → digest into git                       → never delete from Dolt
+  → DELETE rows (Reaper)                  → JSONL export (scrubbed)
+  → REBASE history (Compactor)            → git push to GitHub
+  → gc unreferenced chunks (Compactor)    → COMPACT history periodically
+                                          → FLATTEN history quarterly
 ```
 
 **Ephemeral data** (wisps, wisp_events, wisp_labels, wisp_deps) is
-high-volume patrol exhaust. It's valuable in real-time but worthless
-after 24 hours. The Reaper Dog squashes it into digest summaries
-(aggregate stats per cycle), then DELETES the original rows. Without
-this, wisp tables grow without bound and Dolt performance degrades.
+high-volume patrol exhaust. Valuable in real-time, worthless after 24h.
+The Reaper Dog DELETES the rows. The Compactor Dog REBASES the commits
+that wrote them out of history. Without both, storage grows without bound.
 
-**Sacred data** (issues, molecules, agents, mail, dependencies, labels)
-is the permanent ledger. It's backed up via JSONL exports (scrubbed of
-test artifacts and pollution) and pushed to GitHub. Never deleted from
-Dolt unless corrupted.
+**Permanent data** (issues, molecules, agents, dependencies, labels) is
+the ledger. Even permanent data benefits from history compaction — a bead
+that was created, updated 5 times, and closed generates 7 commits that
+can be rebased into 1. The data survives; the intermediate history doesn't.
 
-### Dolt GC (Non-Negotiable)
+### History Compaction Operations
 
-`dolt gc` compacts old chunk data. Without it, databases bloat by 10-50x.
-The Doctor Dog runs gc at least daily. This is the single most important
-maintenance operation.
+**Daily compaction** (Compactor Dog):
+```sql
+-- Squash recent commits on a feature branch, then merge
+CALL DOLT_CHECKOUT('-b', 'compact-temp');
+CALL DOLT_REBASE('--interactive', 'main~50', 'HEAD');
+-- Agent resolves: squash old commits, keep recent ones
+CALL DOLT_CHECKOUT('main');
+CALL DOLT_MERGE('compact-temp');
+CALL DOLT_BRANCH('-d', 'compact-temp');
+```
+
+**Monthly flatten** (nuclear option from Tim Sehn):
+```bash
+# Squash ALL history to a single commit
+cd ~/gt/.dolt-data/<db>
+dolt checkout -b fresh-start
+dolt reset --soft $(dolt log --oneline | tail -1 | awk '{print $1}')
+dolt commit -m "Flatten: squash history to single commit"
+dolt branch -D main
+dolt branch -m fresh-start main
+dolt gc
+```
+
+### Dolt GC
+
+`dolt gc` compacts old chunk data AFTER rebase removes commits from the
+graph. Run gc after rebase, not instead of it. The Compactor Dog runs gc
+automatically after each successful compaction. Order matters: rebase
+first, gc second.
 
 ```bash
 # Manual gc (stop server first for exclusive access)
 gt dolt stop
-cd ~/.dolt-data/<db> && dolt gc
+cd ~/gt/.dolt-data/<db> && dolt gc
 gt dolt start
-
-# Or: Doctor Dog runs it automatically via daemon
 ```
 
 ### Pollution Prevention
 
-Pollution enters Dolt via:
-1. **Test artifacts**: test code creates issues on production server
-2. **Wisp accumulation**: wisps closed but never deleted
-3. **Orphan databases**: test DBs that survive cleanup
-4. **Zombie servers**: test dolt-server processes in /tmp
+Pollution enters Dolt via four vectors:
+
+1. **Commit graph growth**: Every mutation = a commit. Rebase compacts.
+2. **Mail pollution**: Agents overuse `gt mail send` for routine comms.
+   Use `gt nudge` (ephemeral, zero Dolt cost) instead. See mail-protocol.md.
+3. **Test artifacts**: Test code creating issues on production server.
+   Firewall in store.go refuses test-prefixed CREATE DATABASE on port 3307.
+4. **Zombie processes**: Test dolt-server processes that outlive tests.
+   Doctor Dog kills these. 45 zombies (7GB RAM) found and killed 2026-02-27.
 
 Prevention is layered:
+- **Prompting**: Agents prefer `gt nudge` over `gt mail send` (zero commits)
 - **Firewall** (store.go): refuses test-prefixed CREATE DATABASE on port 3307
-- **Reaper Dog**: deletes closed wisps, auto-closes stale issues
-- **Doctor Dog**: runs gc, kills zombie servers, detects orphan DBs
+- **Reaper Dog**: DELETEs closed wisps, auto-closes stale issues
+- **Compactor Dog**: REBASEs old commits to compress history, runs gc after
+- **Doctor Dog**: kills zombie servers, detects orphan DBs, monitors health
 - **JSONL Dog**: scrubs exports, rejects pollution, spike-detects before commit
 - **Janitor Dog**: cleans test server (port 3308)
+
+### Communication Hygiene (Reducing Commit Volume)
+
+Every `gt mail send` creates a bead + Dolt commit. Every `gt nudge`
+creates nothing. The rule:
+
+**Default to `gt nudge`. Only use `gt mail send` when the message MUST
+survive the recipient's session death.**
+
+| Role | Mail budget | Nudge for everything else |
+|------|-------------|--------------------------|
+| Polecat | 0-1 per session (HELP only) | Status, questions, updates |
+| Witness | Protocol messages only | Health checks, polecat pokes |
+| Refinery | Protocol messages only | Status to Witness |
+| Deacon | Escalations only | Timer callbacks, health pokes |
+| Dogs | Zero (never mail) | DOG_DONE via nudge to Deacon |
 
 ## Standalone Beads Note
 
@@ -219,7 +338,7 @@ protocol.
 
 ### Git Remote Cache
 
-Dolt maintains a cache at `.dolt-data/<db>/.dolt/git-remote-cache/` that
+Dolt maintains a cache at `~/gt/.dolt-data/<db>/.dolt/git-remote-cache/` that
 stores git objects built from Dolt's internal format. Per the Dolt team
 (Dustin Brown, 2026-02-26):
 
@@ -255,11 +374,14 @@ remote with local state. Subsequent pushes should work without `--force`.
 - **Server downtime**: Push requires exclusive access to the data directory,
   so the server must be stopped during push. This creates a maintenance window.
 
-### Future: DoltHub Remotes
+### DoltHub Remotes (In Progress)
 
 DoltHub's native protocol (`https://doltremoteapi.dolthub.com/...`) avoids
-the git-remote-cache entirely and is much faster. Migration requires DoltHub
-accounts and reconfiguring remotes with `dolt remote set-url`.
+the git-remote-cache entirely and is much faster. Julian Knutsen is
+implementing DoltHub-based federation as part of the Wasteland commons —
+this will replace git-protocol remotes for the design and ledger planes.
+Migration requires DoltHub accounts and reconfiguring remotes with
+`dolt remote set-url`.
 
 ## File Layout
 
@@ -269,10 +391,11 @@ accounts and reconfiguring remotes with `dolt remote set-url`.
 │   ├── hq/                      Town beads (hq-*)
 │   ├── gastown/                 Gastown rig (gt-*)
 │   ├── beads/                   Beads rig (bd-*)
-│   └── wyvern/                  Wyvern rig (wy-*)
+│   ├── wyvern/                  Wyvern rig (wy-*)
+│   └── sky/                     Sky rig (sky-*)
 ├── daemon/
 │   ├── dolt.pid                 Server PID (daemon-managed)
-│   ├── dolt-server.log          Server log
+│   ├── dolt.log                 Server log
 │   └── dolt-state.json          Server state
 └── mayor/
     └── daemon.json              Daemon config (dolt_server section)

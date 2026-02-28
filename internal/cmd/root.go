@@ -68,6 +68,7 @@ var beadsExemptCommands = map[string]bool{
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
+	"health":              true, // Health check doesn't require beads
 }
 
 // Commands exempt from the town root branch warning.
@@ -103,8 +104,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	logCommandUsage(cmd, args)
 
 	// Initialize session prefix registry and agent registry from town root.
-	// Best-effort: if town root not found, the default "gt" prefix is used.
-	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+	// Try CWD detection first, then fall back to GT_TOWN_ROOT / GT_ROOT env vars.
+	// Env var fallback ensures commands invoked from outside the town directory
+	// (e.g., "gt agents menu" via a cross-socket tmux binding) still connect to
+	// the correct town socket rather than silently using the wrong server.
+	if townRoot := detectTownRootFromCwd(); townRoot != "" {
 		if err := session.InitRegistry(townRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: failed to initialize town registry: %v\n", err)
 		}
@@ -308,8 +312,22 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("requires a subcommand\n\nRun '%s --help' for usage", buildCommandPath(cmd))
 	}
-	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
-		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
+	unknown := args[0]
+	errMsg := fmt.Sprintf("unknown command %q for %q", unknown, buildCommandPath(cmd))
+	// Use cobra's suggestion engine (Levenshtein + SuggestFor lists)
+	if suggestions := cmd.SuggestionsFor(unknown); len(suggestions) > 0 {
+		errMsg += "\n\nDid you mean"
+		if len(suggestions) == 1 {
+			errMsg += " this?\n"
+		} else {
+			errMsg += " one of these?\n"
+		}
+		for _, s := range suggestions {
+			errMsg += fmt.Sprintf("\t%s %s\n", buildCommandPath(cmd), s)
+		}
+	}
+	errMsg += fmt.Sprintf("\nRun '%s --help' for available commands", buildCommandPath(cmd))
+	return fmt.Errorf("%s", errMsg)
 }
 
 // checkHelpFlag checks if --help or -h is the first argument and shows help if so.
