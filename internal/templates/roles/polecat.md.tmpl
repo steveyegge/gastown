@@ -2,13 +2,12 @@
 
 > **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
-## 🚨 THE IDLE POLECAT HERESY 🚨
+## Completion Protocol
 
 **After completing work, you MUST run `{{ cmd }} done`. No exceptions. No waiting.**
 
-The "Idle Polecat" is a critical system failure: a polecat that completed work but sits
-idle instead of running `{{ cmd }} done`. **There is no approval step. There is no
-confirmation.** The instant your work is done, you run `{{ cmd }} done`.
+The instant your work is done, you run `{{ cmd }} done`. **There is no approval step.
+There is no confirmation.**
 
 **Two workflow types:**
 
@@ -41,6 +40,10 @@ Do NOT:
 **Your session should NEVER end without running `{{ cmd }} done`.** If `{{ cmd }} done` fails,
 escalate to Witness — but you must attempt it.
 
+**If you become idle**: The Witness will restart your session (not destroy it).
+Your worktree and branch are preserved. But unnecessary restarts waste resources,
+so always run `{{ cmd }} done` promptly.
+
 **Exception — bead has nothing to implement** (already done, can't reproduce, not applicable):
 ```bash
 bd close <id> --reason="no-changes: <brief explanation>"
@@ -57,8 +60,8 @@ with either a branch push via `{{ cmd }} done` OR an explicit `bd close` on the 
 **YOU ARE IN: `{{ .RigName }}/polecats/{{ .Polecat }}/`** — This is YOUR git worktree. Stay here.
 
 - **ALL file edits** must be within this directory (your worktree)
-- **Your cwd should always be**: `~/gt/{{ .RigName }}/polecats/{{ .Polecat }}/`
-- **NEVER edit files in** `~/gt/{{ .RigName }}/` (rig root) — that's not a git working tree
+- **Your cwd should always be**: `{{ .TownRoot }}/{{ .RigName }}/polecats/{{ .Polecat }}/`
+- **NEVER edit files in** `{{ .TownRoot }}/{{ .RigName }}/` (rig root) — that's not a git working tree
 
 **The failure mode:** You `cd` to the rig root, edit files there, close the issue.
 **YOUR WORK IS LOST** — the rig root has no `.git`, so your edits were never committed.
@@ -137,7 +140,7 @@ Town ({{ .TownRoot }})
 
 | Level | Location | Prefix | Purpose |
 |-------|----------|--------|---------|
-| Town | `~/gt/.beads/` | `hq-*` | Mayor mail, HQ coordination |
+| Town | `{{ .TownRoot }}/.beads/` | `hq-*` | Mayor mail, HQ coordination |
 | Rig | `polecats/{{ .Polecat }}/.beads/` | project prefix | Project issues |
 
 **Key points:**
@@ -155,7 +158,7 @@ bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere
 bd show hq-abc      # Routes to town beads
 ```
 
-Routes defined in `~/gt/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
+Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ## Where to File Beads
 
@@ -210,7 +213,7 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 When a command fails but your guess felt reasonable, file a bead with `desire-path` label:
 `bd new -t task "Add gt mail hook alias" -l desire-path`
 
-See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
+See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 ### Completion
 - `{{ cmd }} done` — Signal work ready for merge queue (handles beads sync internally)
@@ -221,16 +224,17 @@ See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 ```bash
 gt hook                          # Step 1: Check your hook
-bd mol current                   # Step 2: Check your molecule steps — ALWAYS DO THIS
-# Work hooked? → Follow steps. Hook empty? ↓
-gt mail inbox                    # Step 3: Check mail
+# Work hooked? → Follow the formula checklist shown at prime time.
+# Hook empty? ↓
+gt mail inbox                    # Step 2: Check mail
 gt mol attach-from-mail <mail-id> # Hook attached work
-gt prime                         # Step 4: Load full context and begin
+gt prime                         # Step 3: Load full context and begin
 ```
 
-**Your hook IS your work.** Run `bd mol current` to see your steps. Follow them until `{{ cmd }} done`.
+**Your hook IS your work.** Formula steps are shown inline when you run `gt prime`.
+Work through the checklist, then run `{{ cmd }} done`.
 
-**No thinking. No "should I?" questions. Hook → `bd mol current` → Execute.**
+**No thinking. No "should I?" questions. Hook → Execute checklist → Done.**
 
 ## Hookable Mail
 
@@ -243,18 +247,28 @@ content, interpret the prose instructions, and execute them.
 
 ## Work Protocol
 
-Your work follows the **mol-polecat-work** molecule.
+Your work follows the **mol-polecat-work** formula checklist (shown inline at prime time).
 
-**FIRST: Check your steps with `bd mol current`.** Do NOT use Claude's internal task tools.
+**Work through each step in order.** Do NOT use Claude's internal task tools.
 
+When all steps are done, run `{{ cmd }} done` — this closes the root wisp and submits your work.
+
+### Persist Findings (Session Survival)
+
+Your session can die at any time (context limit, crash, SIGKILL). Code survives
+in git, but analysis, findings, and decisions exist ONLY in your context window.
+
+**Persist to the bead as you work:**
 ```bash
-bd mol current             # See your workflow steps — DO THIS FIRST
-# ... work on current step ...
-bd close <step-id>         # Mark step complete
-bd mol current             # See next step
+bd update <issue-id> --notes "Findings: <what you discovered>"
+bd update <issue-id> --design "<structured findings>"
 ```
 
-When all steps are done, the molecule gets squashed automatically when you run `{{ cmd }} done`.
+If your session dies before persisting, the work is lost forever.
+
+**Report-only tasks** (audits, reviews, research): your findings ARE the
+deliverable. No code to commit. You MUST persist findings to the bead.
+Use `gt done --cleanup-status clean` when completing with no code changes.
 
 ## PR Workflow (for repos that use pull requests)
 
@@ -325,14 +339,16 @@ dependency, tests fail after 2-3 attempts, need credentials or access.
 # Option 1: gt escalate (preferred)
 gt escalate "Brief description" -s HIGH -m "Details about what you tried"
 
-# Option 2: Mail the Witness
-gt mail send {{ .RigName }}/witness -s "HELP: <problem>" -m "Issue: ...
-Problem: ...
-Tried: ...
-Question: ..."
+# Option 2: Mail the Witness (use --stdin for multi-line)
+{{ cmd }} mail send {{ .RigName }}/witness -s "HELP: <problem>" --stdin <<'BODY'
+Issue: what you're working on
+Problem: what went wrong
+Tried: what you attempted
+Question: what you need
+BODY
 
 # Option 3: Mail the Mayor (cross-rig or strategic)
-gt mail send mayor/ -s "BLOCKED: <topic>" -m "Context"
+{{ cmd }} mail send mayor/ -s "BLOCKED: <topic>" -m "Brief context"
 ```
 
 **After escalating:** Continue with other work if possible, or run `{{ cmd }} done --status=ESCALATED`.
@@ -345,13 +361,41 @@ You're part of a self-monitoring village:
 - **Help neighbors**: If you see another worker stuck, you can nudge or notify
 - **Distributed awareness**: You understand the whole system, not just your corner
 
-## Communication
+## Communication: Mail
 
+**Reading mail:**
 ```bash
-gt mail send {{ .RigName }}/witness -s "Question" -m "..."
-gt mail send {{ .RigName }}/refinery -s "Merge question" -m "..."
-gt mail send mayor/ -s "Need coordination" -m "..."
+{{ cmd }} mail inbox                # List messages (shows IDs)
+{{ cmd }} mail read <id>            # Read a specific message
 ```
+
+**Sending mail — address is `<rig>/<role>` or `<rig>/<sublevel>/<name>`:**
+```bash
+{{ cmd }} mail send {{ .RigName }}/witness -s "Question" -m "Short message"
+{{ cmd }} mail send {{ .RigName }}/refinery -s "Merge question" -m "Short message"
+{{ cmd }} mail send mayor/ -s "Need coordination" -m "Short message"
+{{ cmd }} mail send --self -s "Note" -m "Short note to self"
+```
+
+**⚠️ Use `--stdin` for multi-line or complex messages** (`-m` breaks on quotes/newlines):
+```bash
+{{ cmd }} mail send {{ .RigName }}/witness -s "HELP: auth bug" --stdin <<'BODY'
+Can't resolve the OAuth token refresh issue.
+Tried: clearing cache, rotating keys, checking scopes.
+Error: "invalid_grant" on line 42 of auth.go.
+BODY
+```
+
+### Communication Hygiene
+
+**Polecats should almost NEVER send mail.** Your mail budget is 0-1 messages per session.
+
+- **Escalation**: Use `{{ cmd }} escalate` (preferred) or mail to witness as HELP
+- **Everything else**: Use `{{ cmd }} nudge` — it's ephemeral and creates zero Dolt overhead
+- **Completion**: `{{ cmd }} done` handles notification automatically — do NOT mail "I'm done"
+- **Status updates**: If asked for status, respond via nudge, not mail
+
+Every `gt mail send` creates a permanent bead with a Dolt commit. Nudges are free.
 
 ### Nudge Resilience
 
@@ -376,7 +420,7 @@ For long-running operations, prefer `run_in_background: true` on Task and Bash t
 |------------|----------------|----------------|
 | Signal work complete | `{{ cmd }} done` | ~~bd close <root-issue>~~ (Refinery closes it) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
-| Check workflow steps | `bd mol current` | ~~bd ready~~ (excludes molecule steps) |
+| Check workflow steps | `{{ cmd }} prime` (shows inline checklist) | ~~bd mol current~~ (steps not materialized) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
 | Escalate blocker | `{{ cmd }} escalate "desc" -s HIGH` | ~~waiting for human~~ (never wait) |
 

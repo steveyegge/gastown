@@ -793,6 +793,22 @@ func TestLoadSettings(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsIntegrityError(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"hooks":{"SessionStart":"bad"}}`), 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	_, err := LoadSettings(path)
+	if err == nil {
+		t.Fatal("expected integrity error for malformed settings")
+	}
+	if !IsSettingsIntegrityError(err) {
+		t.Fatalf("expected SettingsIntegrityError, got %T: %v", err, err)
+	}
+}
+
 func TestDiscoverTargets(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -834,7 +850,7 @@ func TestDiscoverTargets_RoleNames(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "rig1", "crew", "alice"), 0755)
 	os.MkdirAll(filepath.Join(tmpDir, "rig1", "polecats", "toast"), 0755)
 	os.MkdirAll(filepath.Join(tmpDir, "rig1", "witness"), 0755)
-	os.MkdirAll(filepath.Join(tmpDir, "rig1", "refinery", "rig"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "refinery"), 0755)
 
 	targets, err := DiscoverTargets(tmpDir)
 	if err != nil {

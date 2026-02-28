@@ -65,9 +65,9 @@ func EnsureGitignorePatterns(worktreePath string) error {
 
 	// Required patterns for Gas Town worktrees.
 	// DO NOT add ".beads/" here. Beads manages its own .beads/.gitignore
-	// (created by bd init) which selectively ignores runtime files while
-	// tracking issues.jsonl. Adding .beads/ here overrides that and breaks
-	// bd sync. This has regressed twice (PR #753 added it, #891 removed it,
+	// (created by bd init) which selectively ignores runtime files.
+	// Adding .beads/ here overrides that and breaks bd sync.
+	// This has regressed twice (PR #753 added it, #891 removed it,
 	// #966 re-added it). See overlay_test.go for a regression guard.
 	//
 	// NOTE: .claude/settings.json is NOT listed here because settings are now

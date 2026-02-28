@@ -1,9 +1,10 @@
 # Design: Claude Code Hooks Registry and Management
 
 **Bead:** gt-gow8b
-**Status:** Design complete
+**Status:** Design complete, implementation in progress
 **Author:** gastown/crew/gus
 **Date:** 2026-02-06
+**Updated:** 2026-02-26 by gastown/polecats/nux (gap closure)
 
 ## Executive Summary
 
@@ -28,7 +29,8 @@ gaps, and proposes targeted work to close them.
 | Install from registry | Done | `gt hooks install` |
 | Per-matcher merge | Done | Same matcher = replace, different = coexist, empty = disable |
 | Settings roundtrip | Done | Unknown JSON fields preserved on write |
-| gt tap guard | Done | `gt tap guard pr-workflow` |
+| gt tap guard | Done | `gt tap guard pr-workflow`, `gt tap guard dangerous-command` |
+| gt tap list | Done | `gt tap list` — lists available handlers |
 
 ### Architecture
 
@@ -51,7 +53,7 @@ available hooks. The base/overrides system is the active configuration that
 generates settings.json files. `gt hooks install` bridges the two by copying
 a registry entry into the base or override config.
 
-### Current Registry Hooks (7 defined, 5 enabled)
+### Current Registry Hooks (11 defined, 9 enabled)
 
 | Hook | Event | Enabled | Roles |
 |---|---|---|---|
@@ -60,19 +62,12 @@ a registry entry into the base or override config.
 | pre-compact-prime | PreCompact | Yes | all |
 | mail-check | UserPromptSubmit | Yes | all |
 | costs-record | Stop | Yes | crew, polecat, witness, refinery |
+| legacy-beads-guard | PreToolUse | Yes | all |
+| bd-init-guard | PreToolUse | Yes | crew, polecat |
+| patrol-formula-guard | PreToolUse | Yes | witness |
+| task-dispatch-guard | PreToolUse | Yes | mayor |
 | clone-guard | PreToolUse | No | crew, polecat |
-| dangerous-command-guard | PreToolUse | No | crew, polecat |
-
-### Current Settings Hooks (in actual settings.json files)
-
-The 20+ settings.json files have additional hooks not yet in the registry:
-
-- **bd init guard** (gastown/crew, beads/crew) - blocks `bd init*` inside `.beads/`
-- **mol patrol guards** (gastown/crew, witness, polecats, refinery) - blocks persistent
-  patrol molecules (requires wisps): `*bd mol pour*patrol*`, `*bd mol pour*mol-witness*`,
-  `*bd mol pour*mol-deacon*`, `*bd mol pour*mol-refinery*`
-- **tmux clear-history** (gastown root) - clears terminal history on session start
-- **SessionStart .beads/ validation** (gastown/crew, beads/crew) - validates CWD
+| dangerous-command-guard | PreToolUse | Yes | crew, polecat |
 
 ## Gaps and Proposed Work
 
@@ -89,51 +84,40 @@ update hooks across the workspace.
 **Risk:** Low. `gt hooks init --dry-run` previews first. The init extracts
 common hooks as the base and per-target differences as overrides.
 
-### Gap 2: Registry doesn't cover all active hooks
+### Gap 2: Registry doesn't cover all active hooks — **RESOLVED**
 
-Several hooks in the settings.json files are not in registry.toml:
+Previously missing hooks have been added to registry.toml:
+- **bd-init-guard** — now in registry (enabled)
+- **patrol-formula-guard** — now in registry (enabled)
+- **legacy-beads-guard** — now in registry (enabled)
+- **task-dispatch-guard** — now in registry (enabled)
 
-| Missing Hook | Event | Where Used |
-|---|---|---|
-| bd-init-guard | PreToolUse | gastown/crew, beads/crew |
-| mol-patrol-guard | PreToolUse | gastown roles |
-| tmux-clear | SessionStart | gastown root |
-| cwd-validation | SessionStart | crew roles |
+Remaining environment-specific hooks (tmux-clear, cwd-validation) are
+intentionally kept as inline scripts, not registry entries, since they
+depend on the local environment.
 
-**Proposal:** Add these to registry.toml so `gt hooks install` can manage them.
-Some (like tmux-clear) are environment-specific and should be marked with
-`scope = "local"` to indicate they belong in settings.local.json, not the
-committed settings.json.
+### Gap 3: No `gt tap` commands beyond pr-workflow — **PARTIALLY RESOLVED**
 
-### Gap 3: No `gt tap` commands beyond pr-workflow
+Implemented:
+- `gt tap guard dangerous-command` — blocks rm -rf /, force push, hard reset, git clean -f
+  - Full test coverage in `tap_guard_dangerous_test.go`
+  - Enabled in registry.toml
 
-The tap framework has only one guard implemented. The registry references
-`gt tap guard dangerous-command` which doesn't exist yet.
+Remaining (lower priority, currently handled by inline scripts):
+- `gt tap guard bd-init` — inline script works, Go port optional
+- `gt tap guard mol-patrol` — handled by DefaultOverrides() in hooks/config.go
+- `gt tap audit git-push` — PostToolUse logging, future enhancement
 
-**Proposal:** Implement in priority order:
-1. `gt tap guard dangerous-command` - blocks rm -rf, force push
-2. `gt tap guard bd-init` - blocks bd init (currently inline script)
-3. `gt tap guard mol-patrol` - blocks persistent patrol molecules
-4. `gt tap audit git-push` - PostToolUse logging for git push (observability)
+### Gap 4: No `gt tap list` / `gt tap enable` / `gt tap disable` — **PARTIALLY RESOLVED**
 
-Moving inline scripts to `gt tap` commands makes them testable, versionable,
-and listed by `gt tap list`.
+Implemented:
+- `gt tap list` — lists all tap handlers (guards, audits, etc.) with their
+  status, event types, and matchers. Supports `--guards` filter.
 
-### Gap 4: No `gt tap list` / `gt tap enable` / `gt tap disable`
-
-The bead requested per-worktree enable/disable controls. Currently:
-- `gt hooks registry` lists available hooks
-- `gt hooks install` adds hooks
-- No `gt tap disable <hook>` to suppress a hook for a specific worktree
-
-**Proposal:** Implement disable via the existing override mechanism:
-- `gt hooks override gastown/crew` can set an empty hooks list for a matcher,
-  which the merge logic already treats as "explicit disable"
-- A convenience command `gt tap disable <hook-name> [--target <role>]` would
-  generate the correct override entry
-- Similarly `gt tap enable` would remove the override
-
-This leverages the existing merge semantics rather than adding new machinery.
+Remaining:
+- `gt tap disable/enable` — deferred. The existing override mechanism
+  (`gt hooks override`) provides this functionality. A convenience wrapper
+  can be added if agents need simpler syntax.
 
 ### Gap 5: Private vs public hooks (settings.local.json)
 

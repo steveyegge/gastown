@@ -498,7 +498,9 @@ func TestRunCmd_SuccessAndTimeout(t *testing.T) {
 		t.Fatalf("runCmd output = %q, want %q", got, "ok")
 	}
 
-	_, err = runCmd(30*time.Millisecond, "sh", "-c", "sleep 1")
+	// Use "exec sleep" so sleep replaces the shell process — avoids orphan child
+	// holding stdout open. Use 200ms timeout (not 30ms) for stability under load.
+	_, err = runCmd(200*time.Millisecond, "sh", "-c", "exec sleep 10")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -514,6 +516,8 @@ func TestRunBdCmd_ReturnsStdoutOnNonZeroAndTimeout(t *testing.T) {
 
 	binDir := t.TempDir()
 	bdPath := filepath.Join(binDir, "bd")
+	// Use "exec sleep" so the sleep process replaces the shell — no orphan
+	// child processes that hold stdout open after the parent is killed.
 	script := `#!/bin/sh
 case "$1" in
   warn)
@@ -521,8 +525,7 @@ case "$1" in
     exit 1
     ;;
   sleep)
-    sleep 1
-    exit 0
+    exec sleep 10
     ;;
   *)
     echo "ok"
@@ -534,26 +537,31 @@ esac
 		t.Fatalf("write fake bd: %v", err)
 	}
 
-	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	// Use bdBin with full path instead of t.Setenv("PATH", ...) to avoid
+	// process-wide PATH mutation that can race under concurrent test suites.
+	f := &LiveConvoyFetcher{cmdTimeout: 2 * time.Second, bdBin: bdPath}
 
-	f := &LiveConvoyFetcher{cmdTimeout: 2 * time.Second}
+	t.Run("non-zero exit with stdout returns output", func(t *testing.T) {
+		stdout, err := f.runBdCmd(t.TempDir(), "warn")
+		if err != nil {
+			t.Fatalf("runBdCmd warn returned error: %v", err)
+		}
+		if got := strings.TrimSpace(stdout.String()); got != "partial output" {
+			t.Fatalf("runBdCmd warn output = %q, want %q", got, "partial output")
+		}
+	})
 
-	// Non-zero exit with stdout should return stdout and nil error.
-	stdout, err := f.runBdCmd(t.TempDir(), "warn")
-	if err != nil {
-		t.Fatalf("runBdCmd warn returned error: %v", err)
-	}
-	if got := strings.TrimSpace(stdout.String()); got != "partial output" {
-		t.Fatalf("runBdCmd warn output = %q, want %q", got, "partial output")
-	}
-
-	// Timeout path should return explicit timeout error.
-	f.cmdTimeout = 20 * time.Millisecond
-	_, err = f.runBdCmd(t.TempDir(), "sleep")
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("expected timeout error, got: %v", err)
-	}
+	t.Run("timeout returns explicit error", func(t *testing.T) {
+		// Use 200ms timeout (not 20ms) to avoid flakiness from process startup
+		// overhead under system load. The script sleeps for 10s so the timeout
+		// always fires first with wide margin.
+		tf := &LiveConvoyFetcher{cmdTimeout: 200 * time.Millisecond, bdBin: bdPath}
+		_, err := tf.runBdCmd(t.TempDir(), "sleep")
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("expected timeout error, got: %v", err)
+		}
+	})
 }

@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,13 +65,17 @@ func (b *Beads) GetOrCreateHandoffBead(role string) (*Issue, error) {
 		return nil, fmt.Errorf("creating handoff bead: %w", err)
 	}
 
-	// Update to pinned status
+	// Update to pinned status. If this fails, clean up the orphaned bead
+	// to prevent duplicates on retry (FindHandoffBead only searches pinned beads).
 	status := StatusPinned
 	if err := b.Update(issue.ID, UpdateOptions{Status: &status}); err != nil {
+		// Best-effort cleanup — ignore delete error since pin failure is the real problem
+		_ = b.CloseWithReason("orphaned: failed to pin", issue.ID)
 		return nil, fmt.Errorf("setting handoff bead to pinned: %w", err)
 	}
 
-	// Re-fetch to get updated status
+	// Re-fetch to get updated status. If this fails, the bead is already
+	// created and pinned — a retry of GetOrCreateHandoffBead will find it.
 	return b.Show(issue.ID)
 }
 
@@ -140,13 +145,20 @@ func (b *Beads) ClearMail(reason string) (*ClearMailResult, error) {
 		result.Closed = len(toClose)
 	}
 
-	// Clear pinned messages
+	// Clear pinned messages — continue on error so partial progress isn't lost
 	empty := ""
+	var clearErrs []error
 	for _, issue := range toClear {
 		if err := b.Update(issue.ID, UpdateOptions{Description: &empty}); err != nil {
-			return nil, fmt.Errorf("clearing pinned message %s: %w", issue.ID, err)
+			clearErrs = append(clearErrs, fmt.Errorf("clearing pinned message %s: %w", issue.ID, err))
+			continue
 		}
 		result.Cleared++
+	}
+
+	if len(clearErrs) > 0 {
+		return result, fmt.Errorf("partial failure clearing %d/%d pinned messages: %w",
+			len(clearErrs), len(toClear), errors.Join(clearErrs...))
 	}
 
 	return result, nil

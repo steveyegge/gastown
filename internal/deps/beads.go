@@ -4,8 +4,11 @@ package deps
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -20,10 +23,10 @@ const BeadsInstallPath = "github.com/steveyegge/beads/cmd/bd@latest"
 type BeadsStatus int
 
 const (
-	BeadsOK          BeadsStatus = iota // bd found, version compatible
-	BeadsNotFound                       // bd not in PATH
-	BeadsTooOld                         // bd found but version too old
-	BeadsUnknown                        // bd found but couldn't parse version
+	BeadsOK       BeadsStatus = iota // bd found, version compatible
+	BeadsNotFound                    // bd not in PATH
+	BeadsTooOld                      // bd found but version too old
+	BeadsUnknown                     // bd found but couldn't parse version
 )
 
 // CheckBeads checks if bd is installed and compatible.
@@ -89,10 +92,13 @@ func EnsureBeads(autoInstall bool) error {
 }
 
 // installBeads runs go install to install the latest beads.
+// GOBIN is set to ~/.local/bin so the binary lands in the canonical
+// location rather than the default $GOPATH/bin (~/go/bin/).
 func installBeads() error {
 	fmt.Printf("   beads (bd) not found. Installing...\n")
 
 	cmd := exec.Command("go", "install", BeadsInstallPath)
+	cmd.Env = appendGOBIN(cmd.Environ())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to install beads: %s\n%s", err, string(output))
@@ -111,6 +117,25 @@ func installBeads() error {
 	return nil
 }
 
+// appendGOBIN returns env with GOBIN set to ~/.local/bin so that
+// `go install` places binaries in the canonical location instead of
+// the default $GOPATH/bin (which creates a stale shadow copy).
+func appendGOBIN(env []string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return env // fall back to default
+	}
+	gobin := filepath.Join(home, ".local", "bin")
+	// Replace existing GOBIN if present, otherwise append.
+	for i, e := range env {
+		if strings.HasPrefix(e, "GOBIN=") {
+			env[i] = "GOBIN=" + gobin
+			return env
+		}
+	}
+	return append(env, "GOBIN="+gobin)
+}
+
 // parseBeadsVersion extracts version from "bd version X.Y.Z ..." output.
 func parseBeadsVersion(output string) string {
 	// Match patterns like "bd version 0.52.0" or "bd version 0.52.0 (dev: ...)"
@@ -121,4 +146,3 @@ func parseBeadsVersion(output string) string {
 	}
 	return ""
 }
-

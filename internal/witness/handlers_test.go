@@ -18,7 +18,7 @@ func TestZombieResult_Types(t *testing.T) {
 		PolecatName:   "nux",
 		AgentState:    "working",
 		HookBead:      "gt-abc123",
-		Action:        "auto-nuked",
+		Action:        "restarted",
 		BeadRecovered: true,
 		Error:         nil,
 	}
@@ -32,8 +32,8 @@ func TestZombieResult_Types(t *testing.T) {
 	if z.HookBead != "gt-abc123" {
 		t.Errorf("HookBead = %q, want %q", z.HookBead, "gt-abc123")
 	}
-	if z.Action != "auto-nuked" {
-		t.Errorf("Action = %q, want %q", z.Action, "auto-nuked")
+	if z.Action != "restarted" {
+		t.Errorf("Action = %q, want %q", z.Action, "restarted")
 	}
 	if !z.BeadRecovered {
 		t.Error("BeadRecovered = false, want true")
@@ -437,6 +437,7 @@ func TestExtractDoneIntent_AllExitTypes(t *testing.T) {
 
 func TestDetectZombie_DoneIntentDeadSession(t *testing.T) {
 	// Verify the logic: dead session + done-intent older than 30s → should be treated as zombie
+	// gt-dsgp: action is restart (not nuke), but detection logic is the same
 	doneIntent := &DoneIntent{
 		ExitType:  "COMPLETED",
 		Timestamp: time.Now().Add(-60 * time.Second), // 60s old
@@ -444,15 +445,16 @@ func TestDetectZombie_DoneIntentDeadSession(t *testing.T) {
 	sessionAlive := false
 	age := time.Since(doneIntent.Timestamp)
 
-	// Dead session + old intent → auto-nuke path
-	shouldAutoNuke := !sessionAlive && doneIntent != nil && age >= 30*time.Second
-	if !shouldAutoNuke {
-		t.Errorf("expected auto-nuke for dead session + old done-intent (age=%v)", age)
+	// Dead session + old intent → restart path (gt-dsgp: was auto-nuke)
+	shouldRestart := !sessionAlive && doneIntent != nil && age >= 30*time.Second
+	if !shouldRestart {
+		t.Errorf("expected restart for dead session + old done-intent (age=%v)", age)
 	}
 }
 
 func TestDetectZombie_DoneIntentLiveStuck(t *testing.T) {
-	// Verify the logic: live session + done-intent older than 60s → should kill session
+	// Verify the logic: live session + done-intent older than 60s → should restart session
+	// gt-dsgp: restart instead of kill
 	doneIntent := &DoneIntent{
 		ExitType:  "COMPLETED",
 		Timestamp: time.Now().Add(-90 * time.Second), // 90s old
@@ -460,10 +462,10 @@ func TestDetectZombie_DoneIntentLiveStuck(t *testing.T) {
 	sessionAlive := true
 	age := time.Since(doneIntent.Timestamp)
 
-	// Live session + old intent → kill stuck session
-	shouldKill := sessionAlive && doneIntent != nil && age > 60*time.Second
-	if !shouldKill {
-		t.Errorf("expected kill for live session + old done-intent (age=%v)", age)
+	// Live session + old intent → restart stuck session (gt-dsgp: was kill)
+	shouldRestart := sessionAlive && doneIntent != nil && age > 60*time.Second
+	if !shouldRestart {
+		t.Errorf("expected restart for live session + old done-intent (age=%v)", age)
 	}
 }
 

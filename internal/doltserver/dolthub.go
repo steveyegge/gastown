@@ -139,8 +139,8 @@ func SetupDoltHubRemote(dbDir, org, dbName, token string) error {
 		return fmt.Errorf("adding remote for %s/%s: %w", org, repo, err)
 	}
 
-	// Step 3: Initial push
-	if err := PushDatabase(dbDir, false); err != nil {
+	// Step 3: Initial push (AddRemote creates "origin")
+	if err := PushDatabase(dbDir, "origin", false); err != nil {
 		return fmt.Errorf("initial push to %s/%s: %w", org, repo, err)
 	}
 

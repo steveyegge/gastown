@@ -1,0 +1,215 @@
+description = """
+Probe Dolt server health and inspect resource conditions.
+
+The Doctor Dog performs comprehensive health checks on the Dolt SQL server:
+connectivity, latency, connection count, disk usage, database count (orphan
+detection), and backup freshness.
+
+Current behavior (from dolt.go checkHealthLocked):
+1. Connectivity + latency: SELECT active_branch() with timing
+2. Connection count: warn if approaching limit (80% of 50)
+3. Disk usage: warn if data dir exceeds threshold
+4. Database count: detect orphan test databases
+5. Backup freshness: warn if backups are stale
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Probe Dolt server connectivity and latency
+2. Inspect resource conditions (connections, disk, orphans)
+3. Report findings to Deacon
+4. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| port | config | Dolt server port (default 3307) |
+| latency_threshold | config | Latency warning threshold (default 1s) |
+
+## Safety
+
+All checks are read-only. The Doctor Dog never modifies data.
+It only observes and reports."""
+formula = "mol-dog-doctor"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "probe"
+title = "Probe Dolt server connectivity"
+description = """
+Check basic server health and measure latency.
+
+**1. Connectivity check:**
+```bash
+dolt sql -q "SELECT active_branch()"
+```
+Use active_branch() — lightweight probe that won't block behind queued queries
+(per Dolt CEO recommendation).
+
+**2. Measure latency:**
+Time the probe query. Warn if > {{latency_threshold}}.
+
+**3. Record results:**
+- Server reachable: yes/no
+- Latency: <duration>
+- Warning: if latency exceeds threshold
+
+**If server unreachable:**
+This is a critical failure. Escalate immediately:
+```bash
+gt escalate -s CRITICAL "Dolt: server unreachable on port {{port}}"
+```
+
+**Exit criteria:** Server connectivity confirmed (or escalated)."""
+
+[[steps]]
+id = "inspect"
+title = "Inspect resource conditions"
+needs = ["probe"]
+description = """
+Check resource usage and detect anomalies.
+
+**1. Connection count:**
+```sql
+SELECT COUNT(*) FROM information_schema.PROCESSLIST;
+```
+Warn if >= 80% of max connections (1000).
+
+**2. Disk usage:**
+Check data directory size. Warn if exceeding configured threshold.
+
+**3. Database count (orphan detection):**
+```sql
+SHOW DATABASES;
+```
+Count databases matching orphan patterns: testdb_*, beads_t*, beads_pt*, doctest_*.
+If orphan count > threshold, recommend cleanup:
+```bash
+gt dolt cleanup
+```
+
+**4. Backup freshness:**
+Check modification time of backup files. Warn if backups are stale
+(older than 2x the configured backup interval).
+
+**5. Record all findings:**
+- Connection count and utilization percentage
+- Disk usage
+- Orphan database count and names
+- Backup freshness per database
+
+**Exit criteria:** All inspections complete."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["inspect"]
+description = """
+Generate health report and signal completion.
+
+**1. Generate report:**
+```markdown
+## Doctor Dog Report
+
+**Server**: {{server_status}} (latency: {{latency}})
+**Connections**: {{conn_count}}/{{conn_max}} ({{conn_pct}}%)
+**Disk usage**: {{disk_usage}}
+**Orphan databases**: {{orphan_count}}
+**Backup freshness**: {{backup_status}}
+
+### Warnings
+{{#if warnings}}
+{{#each warnings}}
+- {{category}}: {{message}}
+{{/each}}
+{{else}}
+None — server is healthy.
+{{/if}}
+
+### Orphan Databases
+{{#if orphans}}
+{{#each orphans}}
+- {{name}}
+{{/each}}
+Run `gt dolt cleanup` to remove.
+{{else}}
+None detected.
+{{/if}}
+```
+
+**2. Escalate if critical:**
+```bash
+# If server unreachable or critically degraded
+gt escalate -s CRITICAL "Dolt: <condition>"
+```
+
+**3. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: doctor" -m "Task: dolt-doctor
+Server: {{server_status}}
+Latency: {{latency}}
+Connections: {{conn_count}}/{{conn_max}}
+Orphans: {{orphan_count}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.port]
+description = "Dolt server port"
+default = "3307"
+
+[vars.latency_threshold]
+description = "Latency warning threshold"
+default = "1s"
+
+[vars.server_status]
+description = "Server status: 'healthy', 'degraded', or 'unreachable' (computed during execution)"
+default = ""
+
+[vars.latency]
+description = "Measured query latency (computed during execution)"
+default = ""
+
+[vars.conn_count]
+description = "Current connection count (computed during execution)"
+default = ""
+
+[vars.conn_max]
+description = "Maximum connection count"
+default = "50"
+
+[vars.conn_pct]
+description = "Connection utilization percentage (computed during execution)"
+default = ""
+
+[vars.disk_usage]
+description = "Data directory disk usage (computed during execution)"
+default = ""
+
+[vars.orphan_count]
+description = "Number of orphan databases detected (computed during execution)"
+default = ""
+
+[vars.backup_status]
+description = "Backup freshness status (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database or orphan name (computed during iteration)"
+default = ""
+
+[vars.category]
+description = "Warning category (computed during iteration)"
+default = ""
+
+[vars.message]
+description = "Warning message (computed during iteration)"
+default = ""

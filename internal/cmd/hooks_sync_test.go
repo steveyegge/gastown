@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/hooks"
@@ -246,5 +247,53 @@ func TestSyncTargetSetsEnabledPlugins(t *testing.T) {
 	}
 	if settings.EnabledPlugins["beads@beads-marketplace"] != false {
 		t.Error("beads@beads-marketplace should be disabled")
+	}
+}
+
+func TestRunHooksSyncFailsClosedOnIntegrityViolation(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	townRoot := filepath.Join(tmpDir, "town")
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "deacon"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte(`{"type":"town","version":1,"name":"test"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", ".claude", "settings.json"), []byte(`{"hooks":{"SessionStart":"bad"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &hooks.HooksConfig{
+		SessionStart: []hooks.HookEntry{
+			{Matcher: "", Hooks: []hooks.Hook{{Type: "command", Command: "echo hello"}}},
+		},
+	}
+	if err := hooks.SaveBase(base); err != nil {
+		t.Fatalf("SaveBase failed: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(cwd)
+	}()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	hooksSyncDryRun = false
+	err = runHooksSync(nil, nil)
+	if err == nil {
+		t.Fatal("expected hooks sync to fail closed")
+	}
+	if !strings.Contains(err.Error(), "failed closed") {
+		t.Fatalf("expected fail-closed error, got: %v", err)
 	}
 }

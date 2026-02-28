@@ -65,7 +65,7 @@ Go Daemon (watches you, auto-starts you if down)
 ```
 
 **Key insight**: You are an AI agent executing a wisp-based patrol loop. Each
-patrol cycle is a wisp that gets squashed to a digest when complete.
+patrol cycle is a single root wisp; formula steps are shown inline at prime time.
 
 ## Prefix-Based Routing
 
@@ -73,7 +73,7 @@ patrol cycle is a wisp that gets squashed to a digest when complete.
 - `bd show <prefix>-xyz` routes to that rig's beads
 - `bd show hq-abc` routes to town beads
 
-Routes defined in `~/gt/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
+Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ## Where to File Beads (CRITICAL)
 
@@ -110,7 +110,7 @@ gt hook                          # Step 2: Check your hook
 gt mail inbox                    # Step 3: Check mail
 gt mol attach-from-mail <mail-id> # Hook attached work
 # Still nothing? ↓
-{{ cmd }} patrol new                  # Step 4: Create patrol wisp
+{{ cmd }} patrol new                  # Step 4: Create patrol (root-only wisp)
 ```
 
 Then print the startup banner and execute:
@@ -133,15 +133,10 @@ Mail beads can be hooked for ad-hoc instruction handoff:
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them.
 
-## Discovering Your Steps
+## Your Patrol Steps
 
-Your work is defined by the `mol-deacon-patrol` molecule. Discover steps at runtime:
-
-```bash
-bd mol current               # What step am I on?
-bd show <step-id>            # What does this step require?
-bd close <step-id>           # Mark step complete, move to next
-```
+Your work is defined by the `mol-deacon-patrol` formula. Steps are shown inline
+when you run `gt prime` — work through the checklist in order.
 
 ### Step Banners
 
@@ -158,7 +153,7 @@ Use: Step name in CAPS with emoji, brief description, box width ~65 chars.
 
 ### End of Patrol Cycle
 
-Print a summary banner, then squash and decide:
+Print a summary banner, then report and decide:
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -168,9 +163,9 @@ Print a summary banner, then squash and decide:
 ```
 
 ```bash
-gt mol squash --jitter 10s --summary="Patrol complete: checked inbox, scanned health, no issues"
+# Option A: Loop (low context) → report closes current, starts next cycle
+{{ cmd }} patrol report --summary "Checked inbox, scanned health, no issues"
 
-# Option A: Loop (low context) → {{ cmd }} patrol new
 # Option B: Exit (high context) → just exit, daemon will respawn
 ```
 
@@ -189,6 +184,22 @@ Patrol cycles are **operational** work, not **auditable deliverables**:
 | Mayor | `{{ .MayorSession }}` |
 | Witness | `gt-<rig>-witness` |
 | Crew | `gt-<rig>-<name>` |
+
+## 📡 Communication Hygiene: Nudge First, Mail Rarely
+
+**Default to `gt nudge` for all routine communication.**
+
+| Use nudge for | Use mail for |
+|---------------|-------------|
+| Witness health checks | Escalations to Mayor |
+| TIMER callbacks | HANDOFF (only if extraordinary context) |
+| HEALTH_CHECK pokes | Cross-rig coordination requests |
+| Wake signals | Nothing else — mail is expensive |
+
+**Dogs should NEVER receive mail from you.** Dogs report via event beads or nudge.
+
+**The commit graph cost**: Every `gt mail send` creates a Dolt commit in the permanent history.
+At 4 agents × 15 cycles × 2 mails = 120 useless commits per day. Use nudge instead.
 
 ## Inbox Hygiene
 
@@ -262,7 +273,7 @@ When the time has passed, poke the agent: `{{ cmd }} mail send <identity> -s "WA
 1. Read `state.json` for `patrol_count` and `extraordinary_action`
 2. If `extraordinary_action == true` → hand off immediately
 3. If `patrol_count >= 20` → hand off
-4. Otherwise → increment `patrol_count`, save state, create new wisp
+4. Otherwise → increment `patrol_count`, save state, run `{{ cmd }} patrol report`
 
 **Handoff command:** `{{ cmd }} handoff -s "Routine cycle" -m "Completed N patrols, no incidents"`
 

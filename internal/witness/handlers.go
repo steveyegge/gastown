@@ -38,6 +38,15 @@ func initRegistryFromWorkDir(workDir string) {
 	}
 }
 
+// workDirToTownRoot resolves a workDir to the Gas Town root directory.
+// Falls back to workDir itself if workspace.Find fails.
+func workDirToTownRoot(workDir string) string {
+	if townRoot, err := workspace.Find(workDir); err == nil && townRoot != "" {
+		return townRoot
+	}
+	return workDir
+}
+
 // initRegistryFromTownRoot initializes registries from a known town root,
 // logging any errors so that misconfiguration is observable.
 func initRegistryFromTownRoot(townRoot string) {
@@ -58,10 +67,9 @@ type HandlerResult struct {
 }
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
-// For ESCALATED/DEFERRED exits (no pending MR), auto-nukes if clean.
 // For PHASE_COMPLETE exits, recycles the polecat (session ends, worktree kept).
-// For COMPLETED exits with MR and clean state, auto-nukes immediately (ephemeral model).
-// For exits with pending MR but dirty state, creates cleanup wisp for manual intervention.
+// For exits with pending MR, creates cleanup wisp and sends MERGE_READY to Refinery.
+// For exits without MR, acknowledges completion (polecat goes idle).
 //
 // When a pending MR exists, sends MERGE_READY to the Refinery to trigger
 // immediate merge queue processing. This ensures work flows through the system
@@ -767,15 +775,42 @@ func extractPolecatFromJSON(output string) string {
 	return ""
 }
 
+// RestartPolecatSession restarts a polecat's tmux session without destroying
+// the worktree or branch. This preserves the polecat's work (commits, branches)
+// while giving it a fresh agent process.
+//
+// Used by the witness instead of NukePolecat when a polecat is stuck, hung, or
+// has a dead agent process but still has work worth preserving (gt-dsgp).
+//
+// The restart flow:
+//  1. Kill the existing tmux session (if alive)
+//  2. Start a fresh session via `gt session restart`
+//  3. The new session picks up the polecat's existing hook and continues
+func RestartPolecatSession(workDir, rigName, polecatName string) error {
+	address := fmt.Sprintf("%s/%s", rigName, polecatName)
+	if err := util.ExecRun(workDir, "gt", "session", "restart", address, "--force"); err != nil {
+		return fmt.Errorf("session restart failed: %w", err)
+	}
+	return nil
+}
+
 // NukePolecat executes the actual nuke operation for a polecat.
 // This kills the tmux session, removes the worktree, and cleans up beads.
-// Should only be called after all safety checks pass.
+// Refuses to nuke polecats with pending MRs in the refinery queue (gt-6a9d).
 func NukePolecat(workDir, rigName, polecatName string) error {
+	// Safety gate (gt-6a9d): refuse to nuke if MR is pending in refinery.
+	// Nuking deletes the remote branch, which the refinery needs to merge.
+	initRegistryFromWorkDir(workDir)
+	prefix := beads.GetPrefixForRig(workDirToTownRoot(workDir), rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	if hasPendingMR(workDir, rigName, polecatName, agentBeadID) {
+		return fmt.Errorf("refusing to nuke %s/%s: MR pending in refinery (gt-6a9d)", rigName, polecatName)
+	}
+
 	// CRITICAL: Kill the tmux session FIRST and unconditionally.
 	// We do this explicitly here because gt polecat nuke may fail to kill the
 	// session due to rig loading issues or race conditions with IsRunning checks.
 	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
-	initRegistryFromWorkDir(workDir)
 	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
 	t := tmux.NewTmux()
 
@@ -899,7 +934,7 @@ type ZombieResult struct {
 	PolecatName   string
 	AgentState    string
 	HookBead      string
-	Action        string // "auto-nuked", "escalated", "cleanup-wisp-created"
+	Action        string // "restarted", "escalated", "cleanup-wisp-created", "auto-nuked" (explicit nuke only)
 	BeadRecovered bool   // true if hooked bead was reset to open for re-dispatch
 	Error         error
 }
@@ -922,15 +957,22 @@ type DetectZombiePolecatsResult struct {
 // by the reactive signal-based patrol. This function provides proactive detection.
 //
 // Race safety: Records the detection timestamp before checking session liveness.
-// Before taking any destructive action (nuke), re-verifies that the session
-// hasn't been recreated since detection. This prevents killing newly-spawned
-// sessions that reuse the same name.
+// Before taking any action, re-verifies that the session hasn't been recreated
+// since detection. This prevents killing newly-spawned sessions that reuse the
+// same name.
 //
 // Dedup: Checks for existing cleanup wisps before escalating, preventing
 // infinite escalation loops on subsequent patrol cycles.
 //
+// gt-dsgp: Restart-first policy. For each zombie found, we RESTART the session
+// instead of nuking. This preserves the polecat's worktree and branch, preventing
+// work loss. Nuking only happens via explicit `gt polecat nuke` command.
+//
 // For each zombie found:
-//   - If git state is clean (no unpushed work): auto-nuke
+//   - If polecat has a pending MR: skip (not a zombie, waiting for refinery)
+//   - If session is dead but state is working: restart the session
+//   - If agent is dead inside live session: restart the session
+//   - If agent is hung (no output for 30+ min): restart the session
 //   - If git state is dirty (unpushed/uncommitted work): escalate to Mayor via
 //     EscalateRecoveryNeeded, create cleanup wisp
 func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZombiePolecatsResult {
@@ -978,41 +1020,44 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 				result.Zombies = append(result.Zombies, zombie)
 			}
 
+			// gt-dsgp: Restart-first policy. Instead of nuking polecats with dead
+			// agents or hung sessions, restart them to preserve worktrees and branches.
+
 			// Tmux session exists but agent process may have died inside it.
 			// This catches the "tmux-alive-but-agent-dead" zombie class that
 			// status.go detects but DetectZombiePolecats previously missed.
 			// See: gt-kj6r6
 			if !t.IsAgentAlive(sessionName) {
-				// Read hook bead before nuke (nuke may clean up agent bead)
 				_, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
 				zombie := ZombieResult{
 					PolecatName: polecatName,
 					AgentState:  "agent-dead-in-session",
 					HookBead:    deadAgentHookBead,
-					Action:      "killed-agent-dead-session",
+					Action:      "restarted-agent-dead-session",
 				}
-				if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+				// gt-dsgp: Restart instead of nuke — preserve worktree and branch
+				if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 					zombie.Error = err
-					zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
+					zombie.Action = fmt.Sprintf("restart-agent-dead-session-failed: %v", err)
 				}
-				// Reset abandoned bead for re-dispatch (gt-c3lgp)
-				zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, deadAgentHookBead, polecatName, router)
 				result.Zombies = append(result.Zombies, zombie)
 			} else {
 				// Agent is alive. Check if the hooked bead has been closed.
 				// A polecat that closed its bead but didn't run gt done is
 				// occupying a slot without doing work. See: gt-h1l6i
+				// gt-dsgp: Restart instead of nuke — the fresh session will
+				// pick up its hook and run gt done properly.
 				_, hookBead := getAgentBeadState(workDir, agentBeadID)
 				if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
 					zombie := ZombieResult{
 						PolecatName: polecatName,
 						AgentState:  "bead-closed-still-running",
 						HookBead:    hookBead,
-						Action:      "nuke-bead-closed-polecat",
+						Action:      "restarted-bead-closed-polecat",
 					}
-					if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+					if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 						zombie.Error = err
-						zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
+						zombie.Action = fmt.Sprintf("restart-bead-closed-failed: %v", err)
 					}
 					result.Zombies = append(result.Zombies, zombie)
 				} else {
@@ -1020,6 +1065,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 					// A session where Claude is alive but has produced no tmux output
 					// for a long time is likely hung (infinite loop, crashed mid-call,
 					// or waiting for something that will never arrive). See: gt-tr3d
+					// gt-dsgp: Restart instead of nuke — give the polecat a fresh start.
 					lastActivity, actErr := t.GetSessionActivity(sessionName)
 					if actErr == nil && !lastActivity.IsZero() {
 						inactiveMinutes := int(time.Since(lastActivity).Minutes())
@@ -1029,13 +1075,12 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 								PolecatName: polecatName,
 								AgentState:  "agent-hung",
 								HookBead:    hungHookBead,
-								Action:      fmt.Sprintf("killed-hung-session (inactive %dm)", inactiveMinutes),
+								Action:      fmt.Sprintf("restarted-hung-session (inactive %dm)", inactiveMinutes),
 							}
-							if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+							if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 								zombie.Error = err
-								zombie.Action = fmt.Sprintf("kill-hung-session-failed: %v", err)
+								zombie.Action = fmt.Sprintf("restart-hung-session-failed: %v", err)
 							}
-							zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, hungHookBead, polecatName, router)
 							result.Zombies = append(result.Zombies, zombie)
 						}
 					}
@@ -1054,53 +1099,59 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 
 // detectZombieLiveSession checks a polecat with a live tmux session for zombie indicators:
 // stuck done-intent, dead agent process, or closed bead while still running.
+//
+// gt-dsgp: Uses restart-first policy. Instead of nuking polecats, restarts their
+// sessions to preserve worktrees and branches.
 func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent, router *mail.Router) (ZombieResult, bool) {
 	// Check for done-intent stuck too long (polecat hung in gt done).
+	// gt-dsgp: Restart instead of nuke — the session is stuck trying to exit,
+	// a fresh start will let it retry or pick up its hook cleanly.
 	if doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second {
 		_, stuckHookBead := getAgentBeadState(workDir, agentBeadID)
 		zombie := ZombieResult{
 			PolecatName: polecatName,
 			AgentState:  "stuck-in-done",
 			HookBead:    stuckHookBead,
-			Action:      fmt.Sprintf("killed-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
+			Action:      fmt.Sprintf("restarted-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
 		}
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
-			zombie.Action = fmt.Sprintf("kill-stuck-session-failed: %v", err)
+			zombie.Action = fmt.Sprintf("restart-stuck-session-failed: %v", err)
 		}
-		zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, stuckHookBead, polecatName, router)
 		return zombie, true
 	}
 
 	// Tmux alive but agent process dead (gt-kj6r6).
+	// gt-dsgp: Restart instead of nuke — preserve worktree and branch.
 	if !t.IsAgentAlive(sessionName) {
 		_, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
 		zombie := ZombieResult{
 			PolecatName: polecatName,
 			AgentState:  "agent-dead-in-session",
 			HookBead:    deadAgentHookBead,
-			Action:      "killed-agent-dead-session",
+			Action:      "restarted-agent-dead-session",
 		}
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
-			zombie.Action = fmt.Sprintf("kill-agent-dead-session-failed: %v", err)
+			zombie.Action = fmt.Sprintf("restart-agent-dead-session-failed: %v", err)
 		}
-		zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, deadAgentHookBead, polecatName, router)
 		return zombie, true
 	}
 
 	// Agent alive but hooked bead closed — occupying slot without work (gt-h1l6i).
+	// gt-dsgp: Restart instead of nuke — the fresh session will pick up its hook
+	// and run gt done properly, or go idle waiting for new work.
 	_, hookBead := getAgentBeadState(workDir, agentBeadID)
 	if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
 		zombie := ZombieResult{
 			PolecatName: polecatName,
 			AgentState:  "bead-closed-still-running",
 			HookBead:    hookBead,
-			Action:      "nuke-bead-closed-polecat",
+			Action:      "restarted-bead-closed-polecat",
 		}
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
-			zombie.Action = fmt.Sprintf("nuke-bead-closed-failed: %v", err)
+			zombie.Action = fmt.Sprintf("restart-bead-closed-failed: %v", err)
 		}
 		return zombie, true
 	}
@@ -1110,6 +1161,9 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 
 // detectZombieDeadSession checks a polecat with a dead tmux session for zombie indicators:
 // stale done-intent, or active agent state / hooked bead with no session.
+//
+// gt-dsgp: Uses restart-first policy. Instead of nuking polecats with dead sessions,
+// restarts them to preserve worktrees and branches.
 func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent, detectedAt time.Time, router *mail.Router) (ZombieResult, bool) {
 	// Done-intent: polecat was trying to exit.
 	if doneIntent != nil {
@@ -1120,22 +1174,33 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 		_, diHookBead := getAgentBeadState(workDir, agentBeadID)
 
 		// If bead is already closed, the polecat completed successfully.
-		// Just nuke the dead session; don't trigger re-dispatch. (gt-sy8)
+		// The dead session is expected (gt done kills it). Leave it alone. (gt-sy8)
 		beadAlreadyClosed := diHookBead != "" && getBeadStatus(workDir, diHookBead) == "closed"
+		if beadAlreadyClosed {
+			// gt-dsgp: Polecat completed its work. Don't nuke, don't restart.
+			// The sandbox is preserved for reuse by future slings.
+			return ZombieResult{}, false
+		}
 
+		// Persistent polecat model (gt-6a9d): Do NOT touch if there's a pending MR.
+		// The polecat completed normally (gt done → session exit). Its MR is in the
+		// refinery queue. Nuking would delete the remote branch before the refinery
+		// can merge it. The dead session is expected, not a zombie.
+		if hasPendingMR(workDir, rigName, polecatName, agentBeadID) {
+			return ZombieResult{}, false
+		}
+
+		// gt-dsgp: Restart instead of nuke — the session died during gt done,
+		// restart it so it can retry the exit sequence or pick up new work.
 		zombie := ZombieResult{
 			PolecatName: polecatName,
 			AgentState:  "done-intent-dead",
 			HookBead:    diHookBead,
-			Action:      fmt.Sprintf("auto-nuked (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
+			Action:      fmt.Sprintf("restarted (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
 		}
-		if err := NukePolecat(workDir, rigName, polecatName); err != nil {
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
-			zombie.Action = fmt.Sprintf("nuke-failed (done-intent): %v", err)
-		}
-		// Only attempt bead recovery if the bead isn't already closed. (gt-sy8)
-		if !beadAlreadyClosed {
-			zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, diHookBead, polecatName, router)
+			zombie.Action = fmt.Sprintf("restart-failed (done-intent): %v", err)
 		}
 		return zombie, true
 	}
@@ -1149,6 +1214,7 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 	// A polecat whose hook bead is already CLOSED completed its work
 	// successfully. The dead session is expected (gt done kills it).
 	// Don't flag as zombie or trigger re-dispatch. (gt-sy8)
+	// gt-dsgp: Don't nuke — sandbox preserved for reuse.
 	if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
 		return ZombieResult{}, false
 	}
@@ -1164,9 +1230,9 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 		HookBead:    hookBead,
 	}
 
+	// gt-dsgp: Restart instead of nuking. For dirty state, escalate AND restart.
 	cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
-	handleZombieCleanup(workDir, rigName, polecatName, hookBead, cleanupStatus, router, &zombie)
-	zombie.BeadRecovered = resetAbandonedBead(workDir, rigName, hookBead, polecatName, router)
+	handleZombieRestart(workDir, rigName, polecatName, hookBead, cleanupStatus, router, &zombie)
 	return zombie, true
 }
 
@@ -1178,8 +1244,58 @@ func isZombieState(agentState, hookBead string) bool {
 	return agentState == "working" || agentState == "running" || agentState == "spawning"
 }
 
+// handleZombieRestart determines the restart action for a confirmed zombie (gt-dsgp).
+// Clean or empty status → restart session. Dirty status → escalate AND restart.
+// This replaces the old handleZombieCleanup nuke behavior.
+func handleZombieRestart(workDir, rigName, polecatName, hookBead, cleanupStatus string, router *mail.Router, zombie *ZombieResult) {
+	switch cleanupStatus {
+	case "clean", "":
+		// Clean state or no cleanup info — restart session.
+		zombie.Action = "restarted"
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
+			zombie.Error = err
+			zombie.Action = fmt.Sprintf("restart-failed: %v", err)
+		}
+
+	case "has_uncommitted", "has_stash", "has_unpushed":
+		// Dirty state — escalate for visibility, but still restart.
+		// The escalation notifies that the polecat has unsaved work,
+		// but restarting preserves the worktree so nothing is lost.
+		existingWisp := findAnyCleanupWisp(workDir, polecatName)
+		if existingWisp != "" {
+			zombie.Action = fmt.Sprintf("already-tracked (cleanup_status=%s, existing-wisp=%s)", cleanupStatus, existingWisp)
+		} else {
+			if router != nil {
+				_, escErr := EscalateRecoveryNeeded(router, rigName, &RecoveryPayload{
+					PolecatName:   polecatName,
+					Rig:           rigName,
+					CleanupStatus: cleanupStatus,
+					IssueID:       hookBead,
+					DetectedAt:    time.Now(),
+				})
+				if escErr != nil {
+					zombie.Error = escErr
+				}
+			}
+			wispID, wispErr := createCleanupWisp(workDir, polecatName, hookBead, "")
+			if wispErr != nil && zombie.Error == nil {
+				zombie.Error = wispErr
+			}
+			zombie.Action = fmt.Sprintf("escalated-and-restarted (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
+		}
+		// Restart regardless of escalation — the worktree is preserved
+		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
+			if zombie.Error == nil {
+				zombie.Error = err
+			}
+		}
+	}
+}
+
 // handleZombieCleanup determines the cleanup action for a confirmed zombie based on
 // its cleanup_status. Clean or empty status → auto-nuke. Dirty status → escalate.
+// DEPRECATED (gt-dsgp): Use handleZombieRestart instead. This function is preserved
+// for backward compatibility with any callers that still reference it.
 func handleZombieCleanup(workDir, rigName, polecatName, hookBead, cleanupStatus string, router *mail.Router, zombie *ZombieResult) {
 	switch cleanupStatus {
 	case "clean", "":
@@ -1908,4 +2024,40 @@ func findAnyCleanupWisp(workDir, polecatName string) string {
 		return ""
 	}
 	return items[0].ID
+}
+
+// hasPendingMR checks if a polecat has work waiting in the refinery merge queue.
+// Returns true if either:
+//  1. A cleanup wisp exists for this polecat (HandlePolecatDone created it for a pending MR)
+//  2. The agent bead has an active_mr field set
+//
+// Used to prevent zombie detection from nuking polecats whose MR is still being
+// processed by the refinery. Nuking would delete the remote branch and orphan the MR.
+// See: gt-6a9d
+func hasPendingMR(workDir, _, polecatName, agentBeadID string) bool {
+	// Check 1: Cleanup wisp with merge-requested state (created by HandlePolecatDone)
+	wispID, _ := findCleanupWisp(workDir, polecatName)
+	if wispID != "" {
+		return true
+	}
+
+	// Check 2: active_mr on agent bead (set by gt done when MR is created)
+	activeMR := getAgentActiveMR(workDir, agentBeadID)
+	return activeMR != ""
+}
+
+// getAgentActiveMR retrieves the active_mr field from a polecat's agent bead.
+// Returns empty string if the bead doesn't exist or has no active_mr.
+func getAgentActiveMR(workDir, agentBeadID string) string {
+	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
+	if err != nil || output == "" {
+		return ""
+	}
+	var issues []struct {
+		ActiveMR string `json:"active_mr"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+	return issues[0].ActiveMR
 }

@@ -125,6 +125,9 @@ Displays comprehensive information including:
   - Session creation time
   - Last activity time
 
+NOTE: The argument is <rig>/<polecat> — a single argument with a slash
+separator, NOT two separate arguments. For example: greenplace/Toast
+
 Examples:
   gt polecat status greenplace/Toast
   gt polecat status greenplace/Toast --json`,
@@ -1278,23 +1281,27 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
 	}
 
-	// Step 3.5: Reject any open MRs for this branch before deleting it.
-	// Prevents MQ/git sync inconsistency where MR exists but branch is gone.
+	// Step 3.5: Check for pending MR before touching the branch.
+	// If an open MR exists for this branch, the refinery still needs the remote
+	// branch to complete the merge. Preserve both the MR and remote branch;
+	// the refinery will delete the remote branch after a successful merge.
+	// Fixes: https://github.com/steveyegge/gastown/issues/2028
+	hasPendingMR := false
 	if branchToDelete != "" {
 		bd := beads.New(r.Path)
 		mr, findErr := bd.FindMRForBranch(branchToDelete)
 		if findErr != nil {
 			fmt.Printf("  %s MR lookup failed: %v\n", style.Dim.Render("○"), findErr)
 		} else if mr != nil {
-			if err := bd.CloseWithReason("rejected: polecat nuked", mr.ID); err != nil {
-				fmt.Printf("  %s MR close failed for %s: %v\n", style.Warning.Render("⚠"), mr.ID, err)
-			} else {
-				fmt.Printf("  %s rejected MR %s (polecat nuked)\n", style.Warning.Render("⚠"), mr.ID)
-			}
+			hasPendingMR = true
+			fmt.Printf("  %s preserving MR %s and remote branch for refinery merge\n", style.Success.Render("✓"), mr.ID)
 		}
 	}
 
-	// Step 4: Delete branch (if we know it) — local and remote
+	// Step 4: Delete branch (if we know it)
+	// Local branch can always be deleted (worktree is already gone).
+	// Remote branch is only deleted when there is NO pending MR — otherwise
+	// the refinery would find the source branch missing and fail to merge.
 	if branchToDelete != "" {
 		var repoGit *git.Git
 		bareRepoPath := filepath.Join(r.Path, ".repo.git")
@@ -1308,11 +1315,15 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		} else {
 			fmt.Printf("  %s deleted local branch %s\n", style.Success.Render("✓"), branchToDelete)
 		}
-		// Also delete remote branch if it exists
-		if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
-			fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+		if hasPendingMR {
+			fmt.Printf("  %s skipped remote branch delete (MR pending in merge queue)\n", style.Dim.Render("○"))
 		} else {
-			fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+			// No pending MR — safe to delete remote branch
+			if err := repoGit.DeleteRemoteBranch("origin", branchToDelete); err != nil {
+				fmt.Printf("  %s remote branch delete: %v\n", style.Dim.Render("○"), err)
+			} else {
+				fmt.Printf("  %s deleted remote branch %s\n", style.Success.Render("✓"), branchToDelete)
+			}
 		}
 	}
 

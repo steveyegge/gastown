@@ -113,6 +113,13 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		return result, fmt.Errorf("could not get bead info: %w", err)
 	}
 
+	// Guard against dispatching closed/tombstone beads (defense-in-depth).
+	// Not bypassed by --force — if you need to re-dispatch, reopen the bead first.
+	if info.Status == "closed" || info.Status == "tombstone" {
+		result.ErrMsg = "already " + info.Status
+		return result, fmt.Errorf("bead %s is %s (work already completed)", params.BeadID, info.Status)
+	}
+
 	// Save explicit force state before dead-agent auto-force, so the deferred
 	// gate below still requires an explicit --force for deferred beads.
 	explicitForce := params.Force
@@ -298,6 +305,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		Dispatcher:       actor,
 		Args:             params.Args,
 		AttachedMolecule: attachedMoleculeID,
+		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,
 		Mode:             params.Mode,
 	}

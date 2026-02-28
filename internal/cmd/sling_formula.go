@@ -149,7 +149,7 @@ func runSlingFormula(args []string) error {
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
-	wispArgs = append(wispArgs, "--json")
+	wispArgs = append(wispArgs, "--root-only", "--json")
 
 	wispOut, err := BdCmd(wispArgs...).
 		Dir(formulaWorkDir).
@@ -194,8 +194,9 @@ func runSlingFormula(args []string) error {
 	// is meaningless). attached_molecule is only meaningful when a formula-on-bead
 	// creates a wisp that's bonded to a separate base bead.
 	fieldUpdates := beadFieldUpdates{
-		Dispatcher: actor,
-		Args:       slingArgs,
+		Dispatcher:      actor,
+		Args:            slingArgs,
+		AttachedFormula: formulaName,
 	}
 	if err := storeFieldsInBead(wispRootID, fieldUpdates); err != nil {
 		fmt.Printf("%s Could not store fields in bead: %v\n", style.Dim.Render("Warning:"), err)

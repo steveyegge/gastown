@@ -20,10 +20,12 @@ import (
 
 // cleanSchedulerTestEnv returns os.Environ() with GT_* variables removed and HOME
 // overridden to tmpHome. This isolates gt/bd processes from the host.
+// GT_DOLT_PORT is preserved so that gt subprocesses can connect to the
+// ephemeral Dolt test server started by TestMain.
 func cleanSchedulerTestEnv(tmpHome string) []string {
 	var clean []string
 	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "GT_") {
+		if strings.HasPrefix(env, "GT_") && !strings.HasPrefix(env, "GT_DOLT_PORT=") {
 			continue
 		}
 		if strings.HasPrefix(env, "HOME=") {

@@ -251,8 +251,7 @@ bd mol show <id>             # Proto details
 bd mol pour <proto>          # Create mol
 bd mol wisp <proto>          # Create wisp
 bd mol bond <proto> <parent> # Attach to existing mol
-bd mol squash <id>           # Condense to digest (explicit ID)
-bd mol burn <id>             # Discard wisp (explicit ID)
+bd mol bond <proto> <parent> # Attach to existing mol
 ```
 
 ### Agent Operations (gt)
@@ -260,33 +259,29 @@ bd mol burn <id>             # Discard wisp (explicit ID)
 ```bash
 # Hook management (operates on current agent's hook)
 gt hook                    # What's on MY hook
-gt mol current               # What should I work on next
-gt mol progress <id>         # Execution progress of molecule
+gt prime                   # Shows inline formula checklist
 gt mol attach <bead> <mol>   # Pin molecule to bead
 gt mol detach <bead>         # Unpin molecule from bead
 gt mol attach-from-mail <id> # Attach from mail message
 
-# Agent lifecycle (operates on agent's attached molecule)
-gt mol burn                  # Burn attached molecule (no ID needed)
-gt mol squash                # Squash attached molecule (no ID needed)
-gt mol step done <step>      # Complete a molecule step
-```
+# Patrol lifecycle
+gt patrol new              # Create root-only patrol wisp
+gt patrol report --summary "..."  # Close current patrol, start next cycle
 
-**Key distinction**: `bd mol burn/squash <id>` take explicit molecule IDs.
-`gt mol burn/squash` operate on the current agent's attached molecule
-(auto-detected from working directory).
+# Legacy (still functional)
+gt mol burn                  # Burn attached molecule
+gt mol squash                # Squash attached molecule
+```
 
 ## Agent Lifecycle
 
 ### Polecat Shutdown
 
 ```
-1. Complete work steps
-2. gt mol squash (create digest)
-3. Submit to merge queue
-4. gt handoff (request shutdown)
-5. Wait for Witness to kill session
-6. Witness removes worktree + branch
+1. Work through formula checklist (shown inline by gt prime)
+2. Submit to merge queue via gt done
+3. gt done nukes sandbox and exits
+4. Witness removes worktree + branch
 ```
 
 ### Session Cycling
@@ -687,10 +682,10 @@ Deacon, Witness, and Refinery run continuous patrol loops using wisps:
 | **Refinery** | `mol-refinery-patrol` | Process merge queue, review MRs, check integration branches |
 
 ```
-1. bd mol wisp mol-<role>-patrol
-2. Execute steps (check workers, process queue, run plugins)
-3. gt mol squash --jitter 10s (or burn if routine)
-4. Loop
+1. gt patrol new               # Create root-only wisp
+2. gt prime                    # Shows patrol checklist inline
+3. Work through each step
+4. gt patrol report --summary "..."  # Close + start next cycle
 ```
 
 ## Plugin Molecules

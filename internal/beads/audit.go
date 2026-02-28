@@ -83,7 +83,7 @@ func (b *Beads) DetachMoleculeWithAudit(pinnedBeadID string, opts DetachOptions)
 // LogDetachAudit appends an audit entry to the audit log file.
 // The audit log is stored in the resolved .beads directory as audit.log in JSONL format.
 // This follows any beads redirect so audit entries go to the correct location.
-func (b *Beads) LogDetachAudit(entry DetachAuditEntry) error {
+func (b *Beads) LogDetachAudit(entry DetachAuditEntry) (retErr error) {
 	auditPath := filepath.Join(b.getResolvedBeadsDir(), "audit.log")
 
 	// Marshal entry to JSON
@@ -97,10 +97,18 @@ func (b *Beads) LogDetachAudit(entry DetachAuditEntry) error {
 	if err != nil {
 		return fmt.Errorf("opening audit log: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("closing audit log: %w", err)
+		}
+	}()
 
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("writing audit entry: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("syncing audit log: %w", err)
 	}
 
 	return nil

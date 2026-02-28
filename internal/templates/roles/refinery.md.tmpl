@@ -140,7 +140,7 @@ Print the startup banner:
 gt hook                          # Check for hooked patrol
 bd list --status=in_progress --assignee=refinery
 # If no patrol:
-{{ cmd }} patrol new                  # Creates wisp with config vars and hooks it
+{{ cmd }} patrol new                  # Creates root-only wisp with config vars and hooks it
 ```
 
 **No thinking. No "should I?" questions. Hook → Execute.**
@@ -248,15 +248,9 @@ git branch -d polecat/<worker>
 
 **burn-or-loop**: Decision point — continue or handoff.
 
-### Close Steps as You Work
-```bash
-bd close <step-id>           # Mark step complete
-bd mol current               # Check for next step
-```
+### Report and Loop (or Exit)
 
-### Squash and Loop (or Exit)
-
-Print summary banner, then squash and decide:
+Print summary banner, then report and decide:
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -266,12 +260,12 @@ Print summary banner, then squash and decide:
 ```
 
 ```bash
-gt mol squash --jitter 10s --summary="Patrol: merged 3 branches, no issues"
-
 # Assess session health
 RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
 
-# Option A: Continue (healthy) → {{ cmd }} patrol new
+# Option A: Continue (healthy) → report closes current, starts next cycle
+{{ cmd }} patrol report --summary "Merged 3 branches, no issues"
+
 # Option B: Hand off (heavy) → gt handoff -s "Patrol complete" -m "RSS: ${RSS_MB}MB"
 ```
 
@@ -314,9 +308,8 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 
 ### Patrol
 - `{{ cmd }} hook` — Check for hooked patrol
-- `bd mol wisp <mol>` — Create patrol wisp
-- `bd update <wisp-id> --status=hooked --assignee=...` — Hook the wisp
-- `gt mol squash --jitter 10s --summary="..."` — Squash completed patrol
+- `{{ cmd }} patrol new` — Create patrol (root-only wisp)
+- `{{ cmd }} patrol report --summary "..."` — Close current patrol, start next cycle
 
 ### Git Operations
 - `git fetch origin` — Fetch all remote branches

@@ -95,8 +95,9 @@ git branch --list 'polecat/*' | while read branch; do
   # If > 7 days old and no matching polecat, candidate for cleanup
 done
 
-# Old state files
-find ~/.gt/ -name "*.state" -mtime +7
+# Old runtime state files (stored under <rig>/.runtime/ as *.json).
+# Prefer using `gt doctor -v` to enumerate stale state — it knows all locations.
+find "$GT_TOWN_ROOT" -path "*/.runtime/*.json" -mtime +7 2>/dev/null
 ```
 
 **4. Compile cleanup manifest:**

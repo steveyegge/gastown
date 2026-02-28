@@ -1,0 +1,175 @@
+description = """
+Clean up orphan test databases on the Dolt test server.
+
+The Janitor Dog cleans up orphan test databases (testdb_*, beads_t*, beads_pt*,
+doctest_*, doctortest_*, beads_vr*) that accumulate on the Dolt TEST server
+(port 3308) when tests leak or cleanup fails.
+
+Current behavior: gt dolt cleanup handles production server cleanup. The Janitor
+Dog focuses specifically on the TEST server, which is the primary source of
+orphan accumulation from continuous test runs.
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Scan the test server for orphan databases
+2. Clean up orphans via DROP DATABASE
+3. Verify production server has zero test databases (read-only)
+4. Report findings to Deacon
+5. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| test_port | config | Dolt test server port (default 3308) |
+| prod_port | config | Dolt production server port (default 3307) |
+
+## Safety
+
+NEVER touch production (port 3307) except read-only SHOW DATABASES verification.
+All mutations target the test server (port 3308) only. Production databases are
+identified by rig metadata.json references and are never touched."""
+formula = "mol-dog-janitor"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "scan"
+title = "Scan test server for orphan databases"
+description = """
+Identify orphan test databases on the test server.
+
+**1. Connect to the test server (port {{test_port}}):**
+```sql
+SHOW DATABASES;
+```
+Filter out Dolt internals (information_schema, mysql).
+
+**2. Classify each database:**
+
+Known test/orphan patterns:
+- `testdb_*` — test harness databases
+- `beads_t*` — beads test databases
+- `beads_pt*` — beads patrol test databases
+- `beads_vr*` — beads version test databases
+- `doctest_*` — documentation test databases
+- `doctortest_*` — doctor test databases
+
+**3. Record findings:**
+- Total database count on test server
+- Orphan database count and names
+- Prune candidates: branches older than 1 hour
+
+**Exit criteria:** All test server databases classified."""
+
+[[steps]]
+id = "clean"
+title = "Clean up orphan databases on test server"
+needs = ["scan"]
+description = """
+Remove orphan databases from the test server (port {{test_port}}).
+
+**1. If no orphans found:**
+Skip — nothing to clean.
+
+**2. For each orphan database:**
+```sql
+DROP DATABASE IF EXISTS `<orphan_name>`;
+```
+
+**3. Prune stale branches:**
+For remaining databases on the test server, prune branches older than 1 hour
+that are not 'main':
+```bash
+dolt branch -d <branch>
+```
+
+**4. Record results:**
+- Orphans removed (count)
+- Branches pruned (count)
+- Any errors during cleanup
+
+**Safety:** Only targets databases on the TEST server (port {{test_port}}).
+Never connects to production for mutations.
+
+**Exit criteria:** Orphans cleaned on test server."""
+
+[[steps]]
+id = "verify"
+title = "Verify production server is clean"
+needs = ["clean"]
+description = """
+Read-only check that production server (port {{prod_port}}) has ZERO test databases.
+
+**1. Connect to production server (port {{prod_port}}) — READ ONLY:**
+```sql
+SHOW DATABASES;
+```
+
+**2. Check for test database patterns:**
+Look for any databases matching orphan patterns (testdb_*, beads_t*, beads_pt*,
+doctest_*, doctortest_*, beads_vr*).
+
+**3. If test databases found on production:**
+This is anomalous — escalate immediately:
+```bash
+gt escalate -s HIGH "Dolt: test databases found on production server (port {{prod_port}}): <names>"
+```
+
+**4. Record findings:**
+- Production database count
+- Test databases found on production (should be zero)
+
+**Safety:** This step is READ-ONLY. No mutations to production.
+
+**Exit criteria:** Production server verified clean (or escalated)."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["verify"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## Janitor Dog Report
+
+**Test server (port {{test_port}})**:
+- Total databases: <count>
+- Orphans found: <count>
+- Orphans removed: <count>
+- Branches pruned: <count>
+
+**Production server (port {{prod_port}})**:
+- Test databases found: <count> (should be 0)
+
+### Action Taken
+Removed <count> orphan(s) from test server.
+```
+
+**2. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: janitor" -m "Task: test-server-cleanup
+Test server orphans: <orphan_count>
+Removed: <removed_count>
+Branches pruned: <pruned_count>
+Prod test DBs: <prod_test_count>
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.test_port]
+description = "Dolt test server port"
+default = "3308"
+
+[vars.prod_port]
+description = "Dolt production server port"
+default = "3307"

@@ -437,12 +437,9 @@ func TestEnsureAllMetadata(t *testing.T) {
 	townRoot := t.TempDir()
 
 	// Create two databases in .dolt-data
-	for _, name := range []string{"hq", "myrig"} {
-		doltDir := filepath.Join(townRoot, ".dolt-data", name, ".dolt")
-		if err := os.MkdirAll(doltDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "myrig")
 
 	// Create beads dirs
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
@@ -1479,12 +1476,9 @@ func TestEnsureAllMetadata_RepairsAllCorrupt(t *testing.T) {
 	townRoot := t.TempDir()
 
 	// Create two databases in .dolt-data
-	for _, name := range []string{"hq", "corruptrig"} {
-		doltDir := filepath.Join(townRoot, ".dolt-data", name, ".dolt")
-		if err := os.MkdirAll(doltDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "corruptrig")
 
 	// Create beads dirs with corrupt metadata
 	hqBeads := filepath.Join(townRoot, ".beads")
@@ -1598,8 +1592,8 @@ func TestDefaultConfig_MaxConnections(t *testing.T) {
 	if config.MaxConnections != DefaultMaxConnections {
 		t.Errorf("MaxConnections = %d, want %d", config.MaxConnections, DefaultMaxConnections)
 	}
-	if config.MaxConnections != 200 {
-		t.Errorf("DefaultMaxConnections = %d, want 200", config.MaxConnections)
+	if config.MaxConnections != 1000 {
+		t.Errorf("DefaultMaxConnections = %d, want 1000", config.MaxConnections)
 	}
 }
 
@@ -1628,13 +1622,17 @@ func TestHasConnectionCapacity_ZeroMax(t *testing.T) {
 func TestFindAndMigrateAll_Idempotent(t *testing.T) {
 	townRoot := t.TempDir()
 
-	// Create 2 rigs
+	// Create 2 rigs with valid noms/manifest so ListDatabases recognizes them post-migration
 	for _, rig := range []string{"idm-a", "idm-b"} {
 		sourceDolt := filepath.Join(townRoot, rig, ".beads", "dolt", "beads_"+rig, ".dolt")
-		if err := os.MkdirAll(sourceDolt, 0755); err != nil {
+		nomsDir := filepath.Join(sourceDolt, "noms")
+		if err := os.MkdirAll(nomsDir, 0755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(sourceDolt, "config.json"), []byte(`{"rig":"`+rig+`"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nomsDir, "manifest"), []byte("test"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		beadsDir := filepath.Join(townRoot, rig, "mayor", "rig", ".beads")
@@ -1861,18 +1859,14 @@ func TestListDatabases_MixedContent(t *testing.T) {
 	townRoot := t.TempDir()
 	dataDir := filepath.Join(townRoot, ".dolt-data")
 
-	if err := os.MkdirAll(filepath.Join(dataDir, "hq", ".dolt"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	setupDoltDB(t, dataDir, "hq")
 	if err := os.MkdirAll(filepath.Join(dataDir, "not-a-db"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dataDir, "somefile.txt"), []byte("hi"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "myrig", ".dolt"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	setupDoltDB(t, dataDir, "myrig")
 
 	databases, err := ListDatabases(townRoot)
 	if err != nil {
@@ -2703,12 +2697,12 @@ func TestVerifyDatabases_NoServer(t *testing.T) {
 func setupDoltDB(t *testing.T, dataDir, dbName string) string {
 	t.Helper()
 	dbPath := filepath.Join(dataDir, dbName)
-	doltDir := filepath.Join(dbPath, ".dolt")
-	if err := os.MkdirAll(doltDir, 0755); err != nil {
-		t.Fatalf("creating dolt dir for %s: %v", dbName, err)
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	if err := os.MkdirAll(nomsDir, 0755); err != nil {
+		t.Fatalf("creating noms dir for %s: %v", dbName, err)
 	}
-	// Write a small file so dirSize returns non-zero
-	if err := os.WriteFile(filepath.Join(doltDir, "manifest"), []byte("test"), 0644); err != nil {
+	// Write manifest so ListDatabases recognizes this as a valid Dolt database
+	if err := os.WriteFile(filepath.Join(nomsDir, "manifest"), []byte("test"), 0644); err != nil {
 		t.Fatalf("writing manifest for %s: %v", dbName, err)
 	}
 	return dbPath
@@ -2974,7 +2968,7 @@ func TestRemoveDatabase_RemovesDirectory(t *testing.T) {
 		t.Fatalf("setup failed: orphan_db should exist: %v", err)
 	}
 
-	err := RemoveDatabase(townRoot, "orphan_db")
+	err := RemoveDatabase(townRoot, "orphan_db", true)
 	if err != nil {
 		t.Fatalf("RemoveDatabase: %v", err)
 	}
@@ -2992,7 +2986,7 @@ func TestRemoveDatabase_ErrorOnMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := RemoveDatabase(townRoot, "nonexistent")
+	err := RemoveDatabase(townRoot, "nonexistent", true)
 	if err == nil {
 		t.Error("expected error for nonexistent database")
 	}
@@ -3081,7 +3075,7 @@ func TestFindOrphanedDatabases_EndToEnd(t *testing.T) {
 	}
 
 	// Step 2: Remove the orphan
-	if err := RemoveDatabase(townRoot, "beads_wy"); err != nil {
+	if err := RemoveDatabase(townRoot, "beads_wy", true); err != nil {
 		t.Fatalf("RemoveDatabase: %v", err)
 	}
 

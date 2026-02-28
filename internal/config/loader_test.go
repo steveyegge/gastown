@@ -1698,7 +1698,7 @@ func TestRoleSettingsDir(t *testing.T) {
 	}{
 		{"crew", filepath.Join(rigPath, "crew")},
 		{"witness", filepath.Join(rigPath, "witness")},
-		{"refinery", filepath.Join(rigPath, "refinery", "rig")},
+		{"refinery", filepath.Join(rigPath, "refinery")},
 		{"polecat", filepath.Join(rigPath, "polecats")},
 		{"mayor", ""},
 		{"deacon", ""},

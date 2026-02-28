@@ -1035,6 +1035,14 @@ func TestValidateRecipient(t *testing.T) {
 	createAgent("gt-testrig-crew-alice", "Test crew alice")
 	createAgent("gt-testrig-polecat-bob", "Test polecat bob")
 
+	// Create dog directory for workspace fallback validation (deacon/dogs/fido).
+	// The workspace fallback handles cases where agent beads are missing or
+	// the bead DB is unavailable (e.g., after Dolt reset).
+	dogDir := filepath.Join(townRoot, "deacon", "dogs", "fido")
+	if err := os.MkdirAll(dogDir, 0755); err != nil {
+		t.Fatalf("creating dog dir: %v", err)
+	}
+
 	r := NewRouterWithTownRoot(townRoot, townRoot)
 
 	tests := []struct {
@@ -1054,6 +1062,9 @@ func TestValidateRecipient(t *testing.T) {
 		{"witness", "testrig/witness", false, ""},
 		{"crew member", "testrig/alice", false, ""},
 		{"polecat", "testrig/bob", false, ""},
+
+		// Dog agents (validated via workspace fallback: deacon/dogs/<name> directory)
+		{"dog agent", "deacon/dogs/fido", false, ""},
 
 		// Invalid addresses - should fail
 		{"bare name", "ruby", true, "no agent found"},
@@ -1075,6 +1086,37 @@ func TestValidateRecipient(t *testing.T) {
 				if err != nil {
 					t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateAgentWorkspaceDog(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create dog directory structure: deacon/dogs/fido
+	dogDir := filepath.Join(tmpDir, "deacon", "dogs", "fido")
+	if err := os.MkdirAll(dogDir, 0755); err != nil {
+		t.Fatalf("creating dog dir: %v", err)
+	}
+
+	r := &Router{townRoot: tmpDir}
+
+	tests := []struct {
+		name     string
+		identity string
+		want     bool
+	}{
+		{"dog exists", "deacon/dogs/fido", true},
+		{"dog not exists", "deacon/dogs/ghost", false},
+		{"not a dog path", "deacon/cats/fido", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.validateAgentWorkspace(tt.identity)
+			if got != tt.want {
+				t.Errorf("validateAgentWorkspace(%q) = %v, want %v", tt.identity, got, tt.want)
 			}
 		})
 	}

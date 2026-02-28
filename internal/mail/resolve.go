@@ -1,19 +1,27 @@
 // Package mail provides address resolution for beads-native messaging.
 // This module implements the resolution order:
-// 1. Contains '/' → agent address or pattern
+// 1. Explicit prefix (group:, queue:, channel:, list:, announce:)
 // 2. Starts with '@' → special pattern (@town, @crew, @rig/X, @role/X)
-// 3. Otherwise → lookup by name: group → queue → channel
-// 4. If conflict, require prefix (group:X, queue:X, channel:X)
+// 3. Contains '/' → agent address or pattern (validated against known agents)
+// 4. Otherwise → lookup by name: group → queue → channel
+// 5. If conflict, require prefix (group:X, queue:X, channel:X)
 package mail
 
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
+
+// ErrUnknownRecipient indicates the address does not match any known agent.
+// Callers should NOT fall back to legacy routing on this error — the address
+// is definitively invalid, not just unresolvable by the new resolver.
+var ErrUnknownRecipient = errors.New("unknown recipient")
 
 // RecipientType indicates the type of resolved recipient.
 type RecipientType string
@@ -77,14 +85,14 @@ func (r *Resolver) resolveWithVisited(address string, visited map[string]bool) (
 		return []Recipient{{Address: address, Type: RecipientAgent}}, nil
 	}
 
-	// 2. Contains '/' → agent address or pattern
-	if strings.Contains(address, "/") {
-		return r.resolveAgentAddress(address)
-	}
-
-	// 3. Starts with '@' → special pattern
+	// 2. Starts with '@' → special pattern (check before '/' since @rig/X contains '/')
 	if strings.HasPrefix(address, "@") {
 		return r.resolveAtPatternWithVisited(address, visited)
+	}
+
+	// 3. Contains '/' → agent address or pattern
+	if strings.Contains(address, "/") {
+		return r.resolveAgentAddress(address)
 	}
 
 	// 4. Name lookup: group → queue → channel
@@ -99,11 +107,98 @@ func (r *Resolver) resolveAgentAddress(address string) ([]Recipient, error) {
 		return r.resolvePattern(address)
 	}
 
+	// Validate that the address refers to a known agent before accepting.
+	// Without this check, typos like "laser/mayor" (instead of "mayor/")
+	// silently deliver to a dead inbox with no error.
+	// See: https://github.com/steveyegge/gastown/issues/2038
+	if err := r.validateAgentAddress(address); err != nil {
+		return nil, err
+	}
+
 	// Direct address - single recipient
 	return []Recipient{{
 		Address: address,
 		Type:    RecipientAgent,
 	}}, nil
+}
+
+// validateAgentAddress checks that a slash-containing address corresponds to
+// a known agent. It checks well-known singletons, agent beads, and workspace
+// directories. Returns nil if the agent exists, or an error with suggestions.
+// If neither beads nor townRoot is available, validation is skipped (graceful
+// degradation) and downstream validation in sendToSingle handles it.
+func (r *Resolver) validateAgentAddress(address string) error {
+	// Skip validation when we have no data sources to check against.
+	// This preserves backward compatibility when the Resolver is used
+	// without a fully configured environment.
+	if r.beads == nil && r.townRoot == "" {
+		return nil
+	}
+
+	normalized := normalizeAddress(strings.TrimSuffix(address, "/"))
+
+	// Well-known town-level singletons always valid
+	switch normalized {
+	case "mayor/", "mayor", "deacon/", "deacon", "overseer":
+		return nil
+	}
+
+	parts := strings.SplitN(normalized, "/", 3)
+	if len(parts) < 2 || parts[1] == "" {
+		return fmt.Errorf("%w: %s", ErrUnknownRecipient, address)
+	}
+
+	// Well-known rig-level singletons (rig/witness, rig/refinery)
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "witness", "refinery":
+			return nil
+		}
+	}
+
+	// Check agent beads if available
+	if r.beads != nil {
+		agents, err := r.beads.ListAgentBeads()
+		if err == nil {
+			for id := range agents {
+				addr := AgentBeadIDToAddress(id)
+				if addr != "" && normalizeAddress(addr) == normalized {
+					return nil
+				}
+			}
+		}
+	}
+
+	// Check workspace directories as fallback
+	if r.townRoot != "" {
+		switch len(parts) {
+		case 2:
+			rig, name := parts[0], parts[1]
+			// Singleton role: rig/name (e.g., gastown/witness)
+			if dirExistsAt(filepath.Join(r.townRoot, rig, name)) {
+				return nil
+			}
+			// Named agent (normalized, could be crew or polecat)
+			for _, role := range []string{"crew", "polecats"} {
+				if dirExistsAt(filepath.Join(r.townRoot, rig, role, name)) {
+					return nil
+				}
+			}
+		case 3:
+			// Explicit: rig/crew/name or rig/polecats/name
+			if dirExistsAt(filepath.Join(r.townRoot, parts[0], parts[1], parts[2])) {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("%w: %s (no matching agent or workspace found)", ErrUnknownRecipient, address)
+}
+
+// dirExistsAt returns true if path exists and is a directory.
+func dirExistsAt(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // resolvePattern expands a wildcard pattern to matching agents.

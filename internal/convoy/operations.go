@@ -5,6 +5,7 @@ package convoy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -174,11 +175,17 @@ var blockingDepTypes = map[string]bool{
 	"blocks":             true,
 	"conditional-blocks": true,
 	"waits-for":          true,
+	"merge-blocks":       true,
 }
 
 // isIssueBlocked checks if an issue has unclosed blocking dependencies.
-// Returns true if any blocks, conditional-blocks, or waits-for dependency
-// targets an issue that is not closed/tombstone.
+// Returns true if any blocks, conditional-blocks, waits-for, or merge-blocks
+// dependency targets an issue that is not closed/tombstone.
+//
+// For merge-blocks dependencies, "closed" alone is not sufficient — the
+// blocker must have a CloseReason starting with "Merged in " to confirm
+// that the code was actually integrated. This prevents dispatching work
+// against un-merged code (see #1893).
 //
 // Note: this uses the hq store's dependency metadata snapshot. For cross-rig
 // issues, the blocking issue's status may be stale (see Discovery #11 in
@@ -198,8 +205,15 @@ func isIssueBlocked(ctx context.Context, store beadsdk.Storage, issueID string) 
 			continue
 		}
 		status := string(d.Status)
-		if status != "closed" && status != "tombstone" {
-			return true
+		if status == "tombstone" {
+			continue // always unblocked
+		}
+		if status != "closed" {
+			return true // not closed = blocked
+		}
+		// For merge-blocks: "closed" alone is not enough — need merge confirmation
+		if depType == "merge-blocks" && !strings.HasPrefix(d.CloseReason, "Merged in ") {
+			return true // closed but not merged = still blocked
 		}
 	}
 	return false
@@ -214,7 +228,7 @@ func isIssueBlocked(ctx context.Context, store beadsdk.Storage, issueID string) 
 // next close event triggers another feed cycle.
 // gtPath is the resolved path to the gt binary.
 func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, convoyID, caller string, logger func(format string, args ...interface{}), gtPath string, isRigParked func(string) bool) {
-	tracked := getConvoyTrackedIssues(ctx, store, convoyID)
+	tracked := getConvoyTrackedIssues(ctx, store, convoyID, townRoot)
 	if len(tracked) == 0 {
 		return
 	}
@@ -274,7 +288,8 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 
 // getConvoyTrackedIssues returns issues tracked by a convoy with fresh status.
 // Uses SDK GetDependenciesWithMetadata filtered by tracks, then GetIssuesByIDs for current status.
-func getConvoyTrackedIssues(ctx context.Context, store beadsdk.Storage, convoyID string) []trackedIssue {
+// For cross-rig beads not found in the local store, falls back to bd show via fetchCrossRigBeadStatus.
+func getConvoyTrackedIssues(ctx context.Context, store beadsdk.Storage, convoyID, townRoot string) []trackedIssue {
 	deps, err := store.GetDependenciesWithMetadata(ctx, convoyID)
 	if err != nil || len(deps) == 0 {
 		return nil
@@ -318,6 +333,25 @@ func getConvoyTrackedIssues(ctx context.Context, store beadsdk.Storage, convoyID
 		}
 	}
 
+	// Cross-rig fallback: for beads not found in the local store (e.g., oag-*
+	// beads when convoys live in hq), fetch fresh status via bd show in the
+	// bead's home rig. Without this, stale dependency metadata snapshots are
+	// used, which still show status:"open" after the bead was closed.
+	if townRoot != "" {
+		var missingIDs []string
+		for _, id := range ids {
+			if _, ok := freshMap[id]; !ok {
+				missingIDs = append(missingIDs, id)
+			}
+		}
+		if len(missingIDs) > 0 {
+			crossRigFresh := fetchCrossRigBeadStatus(townRoot, missingIDs)
+			for id, fresh := range crossRigFresh {
+				freshMap[id] = fresh
+			}
+		}
+	}
+
 	result := make([]trackedIssue, 0, len(ids))
 	for _, id := range ids {
 		t := trackedIssue{ID: id}
@@ -357,6 +391,63 @@ func rigForIssue(townRoot, issueID string) string {
 		return ""
 	}
 	return beads.GetRigNameForPrefix(townRoot, prefix)
+}
+
+// fetchCrossRigBeadStatus fetches fresh status for beads that live in other rigs.
+// Groups IDs by prefix, resolves each prefix to its rig directory via routes,
+// and runs `bd show --json <ids>` per rig. Pattern from batchFetchBeadInfoByIDs
+// in capacity_dispatch.go.
+func fetchCrossRigBeadStatus(townRoot string, ids []string) map[string]*beadsdk.Issue {
+	result := make(map[string]*beadsdk.Issue)
+	if len(ids) == 0 {
+		return result
+	}
+
+	// Group IDs by prefix
+	byPrefix := make(map[string][]string)
+	for _, id := range ids {
+		prefix := beads.ExtractPrefix(id)
+		if prefix != "" {
+			byPrefix[prefix] = append(byPrefix[prefix], id)
+		}
+	}
+
+	for prefix, prefixIDs := range byPrefix {
+		rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+		if rigPath == "" {
+			continue
+		}
+
+		args := append([]string{"show", "--json"}, prefixIDs...)
+		cmd := exec.Command("bd", args...)
+		cmd.Dir = rigPath
+		out, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var items []struct {
+			ID       string `json:"id"`
+			Status   string `json:"status"`
+			Assignee string `json:"assignee"`
+			Priority int    `json:"priority"`
+			Type     string `json:"issue_type"`
+		}
+		if err := json.Unmarshal(out, &items); err != nil {
+			continue
+		}
+		for _, item := range items {
+			result[item.ID] = &beadsdk.Issue{
+				ID:        item.ID,
+				Status:    beadsdk.Status(item.Status),
+				Assignee:  item.Assignee,
+				Priority:  item.Priority,
+				IssueType: beadsdk.IssueType(item.Type),
+			}
+		}
+	}
+
+	return result
 }
 
 // dispatchIssue dispatches an issue to a rig via gt sling.

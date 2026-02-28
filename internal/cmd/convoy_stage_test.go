@@ -1439,6 +1439,11 @@ func TestRenderWarnings_Format(t *testing.T) {
 
 // Test detectWarnings clean DAG — no warnings
 func TestDetectWarnings_Clean(t *testing.T) {
+	// Override isRigParkedFn so the test doesn't depend on real rig state.
+	origFn := isRigParkedFn
+	isRigParkedFn = func(townRoot, rigName string) bool { return false }
+	t.Cleanup(func() { isRigParkedFn = origFn })
+
 	// All tasks on same rig, all have deps between them, epic input.
 	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
 		"epic-1": {ID: "epic-1", Type: "epic", Children: []string{"gt-a", "gt-b", "gt-c"}},
@@ -1695,22 +1700,22 @@ func TestCreateStagedConvoy_IDFormat(t *testing.T) {
 		t.Fatalf("createStagedConvoy: %v", err)
 	}
 
-	// Convoy ID must be non-empty and follow hq-cv-xxxxx format.
+	// Convoy ID must be non-empty and follow hq-cv-xxxxxxxx format.
 	if convoyID == "" {
 		t.Fatal("convoy ID should not be empty")
 	}
 	if !strings.HasPrefix(convoyID, "hq-cv-") {
 		t.Errorf("convoy ID should start with 'hq-cv-', got %q", convoyID)
 	}
-	// The suffix should be 5 chars.
+	// The suffix should be 5 chars of base36 (matching generateShortID).
 	suffix := strings.TrimPrefix(convoyID, "hq-cv-")
 	if len(suffix) != 5 {
 		t.Errorf("convoy ID suffix should be 5 chars, got %d: %q", len(suffix), suffix)
 	}
-	// All suffix chars should be lowercase alphanumeric.
+	// All suffix chars should be base36 (lowercase alphanumeric).
 	for _, ch := range suffix {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= '2' && ch <= '7')) {
-			t.Errorf("convoy ID suffix should be base32 lowercase chars, got %q in %q", string(ch), suffix)
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			t.Errorf("convoy ID suffix should be base36 chars, got %q in %q", string(ch), suffix)
 		}
 	}
 }

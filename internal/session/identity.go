@@ -256,7 +256,11 @@ func (a *AgentIdentity) Address() string {
 }
 
 // GTRole returns the GT_ROLE environment variable format.
-// This is the same as Address() for most roles.
+// This is the same as Address() for most roles, except boot
+// which is a deacon variant with its own role identity.
 func (a *AgentIdentity) GTRole() string {
+	if a.Role == RoleDeacon && a.Name == "boot" {
+		return "boot"
+	}
 	return a.Address()
 }

@@ -1,0 +1,370 @@
+{
+  "uid": "gastown-polecat-work",
+  "title": "Polecat Work",
+  "tags": ["gastown", "polecats", "convoy", "ops"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-7d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "type": "custom",
+        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "includeAll": false,
+        "current": { "text": "hq", "value": "hq" }
+      },
+      {
+        "name": "convoy_id",
+        "label": "Convoy",
+        "type": "query",
+        "datasource": { "uid": "dolt-beads" },
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', CASE WHEN status = 'open' THEN 'launched' WHEN status LIKE 'staged%' THEN status ELSE status END, ']') AS __text FROM hq.issues WHERE issue_type = 'convoy' AND status NOT IN ('closed') ORDER BY CASE WHEN status = 'open' THEN 0 WHEN status = 'in_progress' THEN 1 WHEN status LIKE 'staged%' THEN 2 ELSE 3 END, created_at DESC",
+        "refresh": 1,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "options": { "mode": "markdown", "content": "## Convoy Execution" }
+    },
+    {
+      "id": 1,
+      "title": "Convoy Status",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT c.id, LEFT(c.title, 80) AS title, c.status, c.priority, COALESCE(NULLIF(c.owner,''),'—') AS owner, JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.merge_strategy')) AS merge_strategy, JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.integration_branch')) AS branch, c.created_at, c.updated_at, (SELECT COUNT(*) FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks') AS tracked_beads FROM hq.issues c WHERE c.id = '${convoy_id}'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 2,
+      "title": "Wave Progress",
+      "description": "Completion status of tracked beads grouped by dependency wave",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM hq.dependencies b WHERE b.depends_on_id = i.id AND b.type = 'blocks' AND b.issue_id IN (SELECT depends_on_id FROM hq.dependencies WHERE issue_id = '${convoy_id}' AND type = 'tracks')) THEN 'Has dependents' ELSE 'No blockers' END AS wave_hint, i.id, LEFT(i.title, 60) AS title, i.status, COALESCE(NULLIF(i.assignee,''),'—') AS assignee, COALESCE(NULLIF(i.rig,''),'—') AS rig, TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) AS mins_since_update FROM hq.dependencies d JOIN hq.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' UNION ALL SELECT CASE WHEN EXISTS (SELECT 1 FROM sfgastown.dependencies b WHERE b.depends_on_id = i.id AND b.type = 'blocks') THEN 'Has dependents' ELSE 'No blockers' END, i.id, LEFT(i.title, 60), i.status, COALESCE(NULLIF(i.assignee,''),'—'), 'sfgastown', TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) FROM hq.dependencies d JOIN sfgastown.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' ORDER BY CASE status WHEN 'hooked' THEN 0 WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Bead Detail", "url": "/d/gastown-bead-detail/bead-detail?var-database=${database}&var-bead_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 3,
+      "title": "Completion Stats",
+      "type": "piechart",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 6 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT i.status, COUNT(*) AS count FROM hq.dependencies d JOIN hq.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' GROUP BY i.status UNION ALL SELECT i.status, COUNT(*) FROM hq.dependencies d JOIN sfgastown.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' GROUP BY i.status UNION ALL SELECT i.status, COUNT(*) FROM hq.dependencies d JOIN lora_forge.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' GROUP BY i.status UNION ALL SELECT i.status, COUNT(*) FROM hq.dependencies d JOIN sf_workflows.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks' GROUP BY i.status",
+          "format": "table"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "reduceOptions": { "calcs": ["sum"] } }
+    },
+    {
+      "id": 4,
+      "title": "Convoy Age",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 6, "x": 18, "y": 6 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT CONCAT(TIMESTAMPDIFF(HOUR, created_at, NOW()), 'h') AS age FROM hq.issues WHERE id = '${convoy_id}'",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 5,
+      "title": "Last Activity",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 6, "x": 18, "y": 9 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT CONCAT(TIMESTAMPDIFF(MINUTE, MAX(i.updated_at), NOW()), 'm ago') AS last_activity FROM hq.dependencies d JOIN hq.issues i ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = i.id WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks'",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 101,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 12 },
+      "options": { "mode": "markdown", "content": "## Active Polecats" }
+    },
+    {
+      "id": 10,
+      "title": "Hooked Beads (all rigs)",
+      "description": "All beads currently hooked to an agent across all rigs",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT 'hq' AS rig, i.id, LEFT(i.title, 60) AS title, i.issue_type, i.assignee AS agent, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—') AS feature_branch, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.integration_branch')),'null'),'—') AS integration_branch, i.updated_at, TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) AS idle_mins FROM hq.issues i WHERE i.status = 'hooked' UNION ALL SELECT 'sfgastown', i.id, LEFT(i.title, 60), i.issue_type, i.assignee, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—'), COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.integration_branch')),'null'),'—'), i.updated_at, TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) FROM sfgastown.issues i WHERE i.status = 'hooked' UNION ALL SELECT 'lora_forge', i.id, LEFT(i.title, 60), i.issue_type, i.assignee, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—'), COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.integration_branch')),'null'),'—'), i.updated_at, TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) FROM lora_forge.issues i WHERE i.status = 'hooked' UNION ALL SELECT 'sf_workflows', i.id, LEFT(i.title, 60), i.issue_type, i.assignee, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—'), COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.integration_branch')),'null'),'—'), i.updated_at, TIMESTAMPDIFF(MINUTE, i.updated_at, NOW()) FROM sf_workflows.issues i WHERE i.status = 'hooked' ORDER BY idle_mins ASC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Bead Detail", "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 11,
+      "title": "Agent Assignments (by assignee)",
+      "description": "All hooked beads grouped by agent, showing branch info when available",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 22 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT 'hq' AS rig, i.assignee AS agent, COUNT(*) AS hooked_beads, GROUP_CONCAT(i.id ORDER BY i.updated_at DESC SEPARATOR ', ') AS bead_ids, GROUP_CONCAT(DISTINCT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—') SEPARATOR ', ') AS branches FROM hq.issues i WHERE i.status = 'hooked' AND i.assignee IS NOT NULL GROUP BY i.assignee UNION ALL SELECT 'sfgastown', i.assignee, COUNT(*), GROUP_CONCAT(i.id ORDER BY i.updated_at DESC SEPARATOR ', '), GROUP_CONCAT(DISTINCT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—') SEPARATOR ', ') FROM sfgastown.issues i WHERE i.status = 'hooked' AND i.assignee IS NOT NULL GROUP BY i.assignee UNION ALL SELECT 'lora_forge', i.assignee, COUNT(*), GROUP_CONCAT(i.id ORDER BY i.updated_at DESC SEPARATOR ', '), GROUP_CONCAT(DISTINCT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—') SEPARATOR ', ') FROM lora_forge.issues i WHERE i.status = 'hooked' AND i.assignee IS NOT NULL GROUP BY i.assignee UNION ALL SELECT 'sf_workflows', i.assignee, COUNT(*), GROUP_CONCAT(i.id ORDER BY i.updated_at DESC SEPARATOR ', '), GROUP_CONCAT(DISTINCT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, '$.feature_branch')),'null'),'—') SEPARATOR ', ') FROM sf_workflows.issues i WHERE i.status = 'hooked' AND i.assignee IS NOT NULL GROUP BY i.assignee ORDER BY hooked_beads DESC",
+          "format": "table"
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 102,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 28 },
+      "options": { "mode": "markdown", "content": "## Wisp Activity" }
+    },
+    {
+      "id": 20,
+      "title": "Wisp Counts by Type",
+      "type": "piechart",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 30 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(NULLIF(wisp_type,''), 'untyped') AS type, COUNT(*) AS count FROM ${database}.issues WHERE ephemeral = 1 AND status != 'closed' GROUP BY wisp_type ORDER BY count DESC",
+          "format": "table"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "reduceOptions": { "calcs": ["sum"] } }
+    },
+    {
+      "id": 21,
+      "title": "Open Wisps",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 30 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS open_wisps FROM ${database}.issues WHERE ephemeral = 1 AND status = 'open'",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 22,
+      "title": "Hooked Wisps",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 30 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS hooked_wisps FROM ${database}.issues WHERE ephemeral = 1 AND status = 'hooked'",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 23,
+      "title": "Wisps Table (issues)",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 30 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS wisps_table FROM ${database}.wisps WHERE status = 'open'",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 24,
+      "title": "Closed Today",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 20, "y": 30 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS closed_today FROM ${database}.issues WHERE ephemeral = 1 AND status = 'closed' AND closed_at >= CURDATE()",
+          "format": "table"
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "background" }
+    },
+    {
+      "id": 25,
+      "title": "Recent Wisps (ephemeral beads)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT i.id, LEFT(i.title, 60) AS title, i.status, COALESCE(NULLIF(i.wisp_type,''),'—') AS wisp_type, COALESCE(NULLIF(i.assignee,''),'—') AS assignee, COALESCE(NULLIF(i.mol_type,''),'—') AS mol_type, i.created_at, TIMESTAMPDIFF(MINUTE, i.created_at, NOW()) AS age_mins FROM ${database}.issues i WHERE i.ephemeral = 1 ORDER BY i.created_at DESC LIMIT 50",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Bead Detail", "url": "/d/gastown-bead-detail/bead-detail?var-database=${database}&var-bead_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 103,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 44 },
+      "options": { "mode": "markdown", "content": "## All Active Convoys" }
+    },
+    {
+      "id": 30,
+      "title": "Active Convoys",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT c.id, LEFT(c.title, 60) AS title, c.status, c.priority, COALESCE(NULLIF(c.owner,''),'—') AS owner, c.created_at, TIMESTAMPDIFF(HOUR, c.created_at, NOW()) AS age_hours, (SELECT COUNT(*) FROM hq.dependencies d WHERE d.issue_id = c.id AND d.type = 'tracks') AS tracked, (SELECT COUNT(*) FROM (SELECT t.status FROM hq.dependencies d JOIN hq.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN sfgastown.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN lora_forge.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN sf_workflows.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks') x WHERE x.status = 'closed') AS done, (SELECT COUNT(*) FROM (SELECT t.status FROM hq.dependencies d JOIN hq.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN sfgastown.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN lora_forge.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks' UNION ALL SELECT t.status FROM hq.dependencies d JOIN sf_workflows.issues t ON SUBSTRING_INDEX(d.depends_on_id, ':', -1) = t.id WHERE d.issue_id = c.id AND d.type = 'tracks') x WHERE x.status = 'hooked') AS in_flight FROM hq.issues c WHERE c.issue_type = 'convoy' AND c.status NOT IN ('closed') ORDER BY CASE c.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'staged_ready' THEN 2 WHEN 'staged_warnings' THEN 3 ELSE 4 END, c.created_at DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}" },
+                  { "title": "View Execution", "url": "/d/gastown-polecat-work/polecat-work?var-database=${database}&var-convoy_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 104,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 54 },
+      "options": { "mode": "markdown", "content": "## Event Timeline" }
+    },
+    {
+      "id": 40,
+      "title": "Recent Events (convoy beads)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 56 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT e.created_at, e.issue_id AS bead, e.event_type, COALESCE(NULLIF(e.actor,''),'—') AS actor, e.old_value, e.new_value, LEFT(e.comment, 200) AS comment FROM ${database}.events e WHERE e.issue_id IN (SELECT SUBSTRING_INDEX(d.depends_on_id, ':', -1) FROM hq.dependencies d WHERE d.issue_id = '${convoy_id}' AND d.type = 'tracks') OR e.issue_id = '${convoy_id}' ORDER BY e.created_at DESC LIMIT 100",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "bead" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  { "title": "Bead Detail", "url": "/d/gastown-bead-detail/bead-detail?var-database=${database}&var-bead_id=${__value.raw}" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    }
+  ],
+  "schemaVersion": 39
+}

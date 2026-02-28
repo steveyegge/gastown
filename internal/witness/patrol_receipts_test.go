@@ -11,14 +11,14 @@ func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
 		PolecatName: "atlas",
 		AgentState:  "idle",
 		HookBead:    "gt-abc123",
-		Action:      "auto-nuked",
+		Action:      "restarted",
 	})
 
 	if receipt.Verdict != PatrolVerdictStale {
 		t.Fatalf("Verdict = %q, want %q", receipt.Verdict, PatrolVerdictStale)
 	}
-	if receipt.RecommendedAction != "auto-nuked" {
-		t.Fatalf("RecommendedAction = %q, want %q", receipt.RecommendedAction, "auto-nuked")
+	if receipt.RecommendedAction != "restarted" {
+		t.Fatalf("RecommendedAction = %q, want %q", receipt.RecommendedAction, "restarted")
 	}
 }
 
@@ -113,7 +113,7 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
-				Action:      "auto-nuked",
+				Action:      "restarted",
 			},
 		},
 	})
@@ -134,8 +134,8 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 	if decoded["verdict"] != string(PatrolVerdictStale) {
 		t.Fatalf("decoded verdict = %v, want %q", decoded["verdict"], PatrolVerdictStale)
 	}
-	if decoded["recommended_action"] != "auto-nuked" {
-		t.Fatalf("decoded recommended_action = %v, want %q", decoded["recommended_action"], "auto-nuked")
+	if decoded["recommended_action"] != "restarted" {
+		t.Fatalf("decoded recommended_action = %v, want %q", decoded["recommended_action"], "restarted")
 	}
 	evidence, ok := decoded["evidence"].(map[string]any)
 	if !ok {
@@ -153,7 +153,7 @@ func TestBuildPatrolReceipts_DeterministicStaleOrphanOrdering(t *testing.T) {
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
-				Action:      "auto-nuked",
+				Action:      "restarted",
 			},
 			{
 				PolecatName: "echo",

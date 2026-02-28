@@ -281,6 +281,29 @@ func detectSessionState(ctx RoleContext) SessionState {
 			state.HookedBead = inProgressBeads[0].ID
 			return state
 		}
+		// Town-level fallback: rig-level agents may have hooked HQ beads
+		// stored in townRoot/.beads. Matches prime.go and molecule_status.go. (gt-dtq7)
+		if !isTownLevelRole(agentID) && ctx.TownRoot != "" {
+			townB := beads.New(filepath.Join(ctx.TownRoot, ".beads"))
+			if townHooked, err := townB.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Assignee: agentID,
+				Priority: -1,
+			}); err == nil && len(townHooked) > 0 {
+				state.State = "autonomous"
+				state.HookedBead = townHooked[0].ID
+				return state
+			}
+			if townIP, err := townB.List(beads.ListOptions{
+				Status:   "in_progress",
+				Assignee: agentID,
+				Priority: -1,
+			}); err == nil && len(townIP) > 0 {
+				state.State = "autonomous"
+				state.HookedBead = townIP[0].ID
+				return state
+			}
+		}
 	}
 
 	return state

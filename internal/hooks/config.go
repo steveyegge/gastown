@@ -6,6 +6,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,6 +45,28 @@ type SettingsJSON struct {
 	Hooks          HooksConfig     `json:"-"`
 	// Extra holds all raw fields for roundtrip preservation.
 	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// SettingsIntegrityError indicates a malformed settings.json that should be
+// treated as a fail-closed integrity violation by callers.
+type SettingsIntegrityError struct {
+	Path string
+	Err  error
+}
+
+func (e *SettingsIntegrityError) Error() string {
+	return fmt.Sprintf("settings integrity violation at %s: %v", e.Path, e.Err)
+}
+
+func (e *SettingsIntegrityError) Unwrap() error {
+	return e.Err
+}
+
+// IsSettingsIntegrityError reports whether an error chain contains a
+// SettingsIntegrityError.
+func IsSettingsIntegrityError(err error) bool {
+	var integrityErr *SettingsIntegrityError
+	return errors.As(err, &integrityErr)
 }
 
 // UnmarshalSettings parses a settings.json file, preserving all fields.
@@ -120,7 +143,14 @@ func LoadSettings(path string) (*SettingsJSON, error) {
 		}
 		return nil, err
 	}
-	return UnmarshalSettings(data)
+	settings, err := UnmarshalSettings(data)
+	if err != nil {
+		return nil, &SettingsIntegrityError{
+			Path: path,
+			Err:  err,
+		}
+	}
+	return settings, nil
 }
 
 // HooksEqual returns true if two HooksConfigs are structurally equal.
@@ -423,11 +453,11 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			})
 		}
 
-		// Refinery — settings in the refinery working directory (refinery/rig/)
-		refineryRigDir := filepath.Join(rigPath, "refinery", "rig")
-		if info, err := os.Stat(refineryRigDir); err == nil && info.IsDir() {
+		// Refinery — settings in the refinery parent directory
+		refineryDir := filepath.Join(rigPath, "refinery")
+		if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
 			targets = append(targets, Target{
-				Path: filepath.Join(refineryRigDir, ".claude", "settings.json"),
+				Path: filepath.Join(refineryDir, ".claude", "settings.json"),
 				Key:  rigName + "/refinery",
 				Rig:  rigName,
 				Role: "refinery",
@@ -523,8 +553,14 @@ func (c *HooksConfig) AddEntry(eventType string, entry HookEntry) bool {
 	return true
 }
 
-// gtDir returns the ~/.gt directory path.
-func gtDir() string {
+// gtPrimaryDir returns the highest-priority .gt config directory.
+// If GT_HOME is set, returns $GT_HOME/.gt; otherwise returns ~/.gt.
+// This is the target for all write operations and the first location checked
+// during cascaded reads.
+func gtPrimaryDir() string {
+	if h := os.Getenv("GT_HOME"); h != "" {
+		return filepath.Join(h, ".gt")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), ".gt")
@@ -532,41 +568,92 @@ func gtDir() string {
 	return filepath.Join(home, ".gt")
 }
 
-// BasePath returns the path to the base hooks config file.
-func BasePath() string {
-	return filepath.Join(gtDir(), "hooks-base.json")
+// gtConfigDirs returns the ordered list of directories to search for hook
+// configs, from highest to lowest priority:
+//
+//  1. $GT_HOME/.gt  (only when GT_HOME is set and differs from $HOME)
+//  2. ~/.gt
+//
+// The binary's built-in defaults act as the implicit final fallback and are
+// NOT represented here — callers handle them separately.
+func gtConfigDirs() []string {
+	primary := gtPrimaryDir()
+	dirs := []string{primary}
+
+	// Add ~/.gt as a lower-priority fallback only when GT_HOME redirects
+	// the primary dir away from the user's home directory.
+	if os.Getenv("GT_HOME") != "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			fallback := filepath.Join(home, ".gt")
+			if fallback != primary {
+				dirs = append(dirs, fallback)
+			}
+		}
+	}
+	return dirs
 }
 
-// OverridePath returns the path to the override config for a given target.
+// BasePath returns the path to the base hooks config file in the primary dir.
+func BasePath() string {
+	return filepath.Join(gtPrimaryDir(), "hooks-base.json")
+}
+
+// OverridePath returns the path to the override config for a given target in
+// the primary dir.
 func OverridePath(target string) string {
 	// Replace "/" with "__" for filesystem safety (e.g., "gastown/crew" -> "gastown__crew")
 	safe := strings.ReplaceAll(target, "/", "__")
-	return filepath.Join(gtDir(), "hooks-overrides", safe+".json")
+	return filepath.Join(gtPrimaryDir(), "hooks-overrides", safe+".json")
 }
 
-// OverridesDir returns the path to the overrides directory.
+// OverridesDir returns the path to the overrides directory in the primary dir.
 func OverridesDir() string {
-	return filepath.Join(gtDir(), "hooks-overrides")
+	return filepath.Join(gtPrimaryDir(), "hooks-overrides")
 }
 
-// LoadBase loads the base hooks configuration from ~/.gt/hooks-base.json.
-// Returns an error if the file doesn't exist or can't be parsed.
+// LoadBase loads the base hooks configuration using cascading directory search.
+// Directories are tried in priority order (gtConfigDirs): the first file found
+// wins. Returns os.ErrNotExist if no file exists in any location; callers
+// should fall back to DefaultBase() in that case.
 func LoadBase() (*HooksConfig, error) {
-	return loadConfig(BasePath())
+	for _, dir := range gtConfigDirs() {
+		cfg, err := loadConfig(filepath.Join(dir, "hooks-base.json"))
+		if err == nil {
+			return cfg, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, err // Parse error — surface it immediately.
+		}
+	}
+	return nil, os.ErrNotExist
 }
 
-// LoadOverride loads an override configuration for the given target.
-// Returns an error if the file doesn't exist or can't be parsed.
+// LoadOverride loads an override configuration for the given target using
+// cascading directory search. The first file found across gtConfigDirs wins.
+// Returns os.ErrNotExist if no override exists in any location.
 func LoadOverride(target string) (*HooksConfig, error) {
-	return loadConfig(OverridePath(target))
+	safe := strings.ReplaceAll(target, "/", "__")
+	for _, dir := range gtConfigDirs() {
+		cfg, err := loadConfig(filepath.Join(dir, "hooks-overrides", safe+".json"))
+		if err == nil {
+			return cfg, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return nil, os.ErrNotExist
 }
 
-// SaveBase writes the base hooks configuration to ~/.gt/hooks-base.json.
+// SaveBase writes the base hooks configuration to the primary .gt directory
+// ($GT_HOME/.gt if set, otherwise ~/.gt).
 func SaveBase(cfg *HooksConfig) error {
 	return saveConfig(BasePath(), cfg)
 }
 
-// SaveOverride writes an override configuration for the given target.
+// SaveOverride writes an override configuration for the given target to the
+// primary .gt directory.
 func SaveOverride(target string, cfg *HooksConfig) error {
 	return saveConfig(OverridePath(target), cfg)
 }
@@ -647,6 +734,27 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{{
 					Type:    "command",
 					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(rm -rf /*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git push --force*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
+				}},
+			},
+			{
+				Matcher: "Bash(git push -f*)",
+				Hooks: []Hook{{
+					Type:    "command",
+					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
 				}},
 			},
 		},

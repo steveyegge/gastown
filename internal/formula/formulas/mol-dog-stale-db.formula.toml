@@ -1,0 +1,215 @@
+description = """
+Detect stale and test databases accumulating in the Dolt server.
+
+Stale databases are orphaned test databases (testdb_*, beads_t*, beads_pt*,
+doctest_*, doctortest_*, beads_vr*) that accumulate on the production Dolt
+server when tests leak or cleanup fails. These consume disk space, degrade
+server performance, and inflate SHOW DATABASES output.
+
+The Dog already kills zombie processes; detecting zombie databases is the
+same domain — infrastructure hygiene.
+
+Current behavior (from doltserver.go FindOrphanedDatabases + gt dolt cleanup):
+- FindOrphanedDatabases: checks databases against rig metadata.json references
+- gt dolt cleanup: removes orphans via DROP DATABASE or filesystem cleanup
+
+This molecule adds continuous monitoring: detect orphan accumulation before
+it reaches crisis levels (Clown Show #18: 245 orphans at 27s latency).
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Query SHOW DATABASES and identify stale/test databases
+2. Count and classify orphans
+3. Clean up if count is manageable, escalate if excessive
+4. Report findings to Deacon
+5. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| port | config | Dolt server port (default 3307) |
+| max_orphans_for_sql | config | Max orphans for SQL-based cleanup (default 50) |
+| warn_threshold | config | Orphan count to trigger warning (default 5) |
+
+## Safety
+
+Only removes databases matching known test/orphan patterns. Production databases
+are identified by rig metadata.json references and are never touched.
+Uses the same safety logic as gt dolt cleanup."""
+formula = "mol-dog-stale-db"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "scan"
+title = "Scan for stale and test databases"
+description = """
+Query the Dolt server and identify orphaned databases.
+
+**1. Query SHOW DATABASES:**
+```sql
+SHOW DATABASES;
+```
+Filter out Dolt internals (information_schema, mysql).
+
+**2. Classify each database:**
+
+Known test/orphan patterns:
+- `testdb_*` — test harness databases
+- `beads_t*` — beads test databases
+- `beads_pt*` — beads patrol test databases
+- `beads_vr*` — beads version test databases
+- `doctest_*` — documentation test databases
+- `doctortest_*` — doctor test databases
+
+Production databases are those referenced by any rig's metadata.json
+(use the same logic as FindOrphanedDatabases in doltserver.go).
+
+**3. Record findings:**
+- Total database count
+- Production database count and names
+- Orphan database count and names
+- Orphan total size (check filesystem)
+
+**Exit criteria:** All databases classified."""
+
+[[steps]]
+id = "cleanup"
+title = "Clean up orphan databases"
+needs = ["scan"]
+description = """
+Remove orphan databases if count is manageable.
+
+**1. If no orphans found:**
+Skip — nothing to clean.
+
+**2. If orphan count <= {{max_orphans_for_sql}}:**
+Clean up via SQL:
+```sql
+DROP DATABASE IF EXISTS `<orphan_name>`;
+```
+
+Handle potential read-only mode after DROP (gt-r1cyd):
+If DROP puts server into read-only, attempt recovery before continuing.
+
+**3. If orphan count > {{max_orphans_for_sql}}:**
+SQL cleanup would take too long (each DROP is ~27s under load).
+Escalate instead of attempting cleanup:
+```bash
+gt escalate -s HIGH "Dolt: {{orphan_count}} orphan databases detected (too many for SQL cleanup)"
+```
+
+Recommend filesystem cleanup:
+```
+gt dolt stop
+cd ~/gt/.dolt-data && rm -rf testdb_* beads_t* beads_pt* beads_vr* doctest_* doctortest_*
+gt dolt start
+```
+
+**4. Record results:**
+- Orphans removed (count)
+- Orphans remaining (count)
+- Any errors during cleanup
+
+**Exit criteria:** Orphans cleaned (or escalated if too many)."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["cleanup"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## Stale DB Dog Report
+
+**Total databases**: {{total_count}}
+**Production databases**: {{prod_count}}
+**Orphan databases**: {{orphan_count}}
+**Orphans removed**: {{removed_count}}
+**Orphans remaining**: {{remaining_count}}
+
+### Orphan Databases
+{{#if orphans}}
+{{#each orphans}}
+- {{name}} ({{size}})
+{{/each}}
+{{else}}
+None detected — database list is clean.
+{{/if}}
+
+### Action Taken
+{{#if cleaned}}
+Removed {{removed_count}} orphan(s) via SQL DROP DATABASE.
+{{else if escalated}}
+Too many orphans ({{orphan_count}}) for SQL cleanup — escalated.
+{{else}}
+No action needed.
+{{/if}}
+```
+
+**2. Warn if above threshold:**
+If orphan count >= {{warn_threshold}}, this is early warning:
+```bash
+gt mail send deacon/ -s "WARN: {{orphan_count}} orphan databases detected" -m "..."
+```
+
+**3. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: stale-db" -m "Task: stale-db-scan
+Total DBs: {{total_count}}
+Production: {{prod_count}}
+Orphans: {{orphan_count}}
+Removed: {{removed_count}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.port]
+description = "Dolt server port"
+default = "3307"
+
+[vars.max_orphans_for_sql]
+description = "Maximum orphan count for SQL-based cleanup (above this, escalate instead)"
+default = "50"
+
+[vars.warn_threshold]
+description = "Orphan count that triggers a warning"
+default = "5"
+
+[vars.total_count]
+description = "Total database count from SHOW DATABASES (computed during execution)"
+default = ""
+
+[vars.prod_count]
+description = "Production database count (computed during execution)"
+default = ""
+
+[vars.orphan_count]
+description = "Orphan database count (computed during execution)"
+default = ""
+
+[vars.removed_count]
+description = "Orphans successfully removed (computed during execution)"
+default = ""
+
+[vars.remaining_count]
+description = "Orphans remaining after cleanup (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database name (computed during iteration)"
+default = ""
+
+[vars.size]
+description = "Database size on disk (computed during iteration)"
+default = ""

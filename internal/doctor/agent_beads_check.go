@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -80,7 +79,7 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	// backward compatibility. The wisps list doesn't include type/labels, so we
 	// track wisp IDs separately for existence checks.
 	allAgentBeads := make(map[string]*beads.Issue) // from issues table (has labels)
-	allWispIDs := make(map[string]bool)             // from wisps table (ID only)
+	allWispIDs := make(map[string]bool)            // from wisps table (ID only)
 
 	// Load global agents from town beads
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
@@ -205,7 +204,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// Pre-load all known agent bead IDs (from both issues and wisps tables)
 	// so we can check existence without per-bead Show() calls that miss ephemeral wisps.
 	allAgentBeads := make(map[string]*beads.Issue) // from issues table
-	allWispIDs := make(map[string]bool)             // from wisps table
+	allWispIDs := make(map[string]bool)            // from wisps table
 
 	// Collect errors instead of failing on first — one broken rig shouldn't
 	// block fixes for all other rigs.
@@ -233,9 +232,13 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// dereference when wisps table doesn't exist on fresh rigs).
 	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields) error {
 		if issue, exists := allAgentBeads[id]; exists {
-			// In issues table — ensure it has the gt:agent label
+			// In issues table — ensure it has the gt:agent label.
+			// Use the scoped Beads instance (bd) so the update targets the
+			// correct database (town beads for hq-* agents, rig beads for
+			// rig-prefixed agents) instead of relying on CLI prefix routing
+			// which can send writes to the wrong database.
 			if !beads.HasLabel(issue, "gt:agent") {
-				if err := addLabelToBead(ctx.TownRoot, id, "gt:agent"); err != nil {
+				if err := bd.Update(id, beads.UpdateOptions{AddLabels: []string{"gt:agent"}}); err != nil {
 					return fmt.Errorf("adding gt:agent label to %s: %w", id, err)
 				}
 			}
@@ -344,16 +347,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return errors.Join(errs...)
-}
-
-// addLabelToBead adds a label to an existing bead via bd update.
-func addLabelToBead(townRoot, id, label string) error {
-	cmd := exec.Command("bd", "update", id, "--add-label="+label)
-	cmd.Dir = townRoot
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 // listCrewWorkers returns the names of all crew workers in a rig.

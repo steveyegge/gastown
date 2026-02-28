@@ -29,8 +29,8 @@ gt daemon status || gt daemon start
 ```
 
 ## Verify
-1. Daemon PID file exists: `~/.gt/daemon.pid`
-2. Process is alive: `kill -0 $(cat ~/.gt/daemon.pid)`
+1. Daemon PID file exists: `$GT_TOWN_ROOT/daemon/daemon.pid`
+2. Process is alive: `kill -0 $(cat $GT_TOWN_ROOT/daemon/daemon.pid)`
 3. Daemon responds: `gt daemon status` returns success
 
 ## OnFail

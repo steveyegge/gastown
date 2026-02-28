@@ -12,7 +12,79 @@ import (
 	"time"
 )
 
+// reapStaleDoltServers finds and kills dolt sql-server processes that:
+//   - Have a --data-dir containing "dolt-test-server" (test servers, not production)
+//   - Have been running for longer than maxAge
+//
+// This prevents zombie test servers from accumulating when test processes
+// are SIGKILL'd (e.g., go test -timeout expiration) and CleanupDoltServer
+// never runs.
+func reapStaleDoltServers(maxAge time.Duration) {
+	// Use ps to find dolt sql-server processes with test data dirs.
+	// Format: PID ELAPSED ARGS
+	out, err := exec.Command("ps", "-eo", "pid,etime,args").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "dolt sql-server") || !strings.Contains(line, "dolt-test-server") {
+			continue
+		}
+		// Don't kill ourselves (port 3307 = production)
+		if strings.Contains(line, "--port 3307") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		elapsed := parseElapsed(fields[1])
+		if elapsed < maxAge {
+			continue
+		}
+		// Kill the stale test server
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
+	}
+}
+
+// parseElapsed converts ps etime format (HH:MM:SS or MM:SS or DD-HH:MM:SS) to duration.
+func parseElapsed(s string) time.Duration {
+	var days, hours, mins, secs int
+
+	// Handle DD-HH:MM:SS format
+	if idx := strings.Index(s, "-"); idx >= 0 {
+		fmt.Sscanf(s[:idx], "%d", &days)
+		s = s[idx+1:]
+	}
+
+	parts := strings.Split(s, ":")
+	switch len(parts) {
+	case 3:
+		fmt.Sscanf(parts[0], "%d", &hours)
+		fmt.Sscanf(parts[1], "%d", &mins)
+		fmt.Sscanf(parts[2], "%d", &secs)
+	case 2:
+		fmt.Sscanf(parts[0], "%d", &mins)
+		fmt.Sscanf(parts[1], "%d", &secs)
+	}
+
+	return time.Duration(days)*24*time.Hour +
+		time.Duration(hours)*time.Hour +
+		time.Duration(mins)*time.Minute +
+		time.Duration(secs)*time.Second
+}
+
 func startDoltServer() error {
+	// Reap zombie test servers from previous crashed test runs.
+	reapStaleDoltServers(1 * time.Hour)
+
 	// Determine port: use GT_DOLT_PORT if set externally, otherwise find a free one.
 	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
 		doltTestPort = p

@@ -43,6 +43,20 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Install Dolt
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod 'https://api.github.com/repos/dolthub/dolt/releases/latest'
+          $asset = $release.assets | Where-Object { $_.name -like 'dolt-windows-amd64.zip' }
+          $zip = "$env:RUNNER_TEMP\dolt.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\dolt"
+          $bin = Get-ChildItem -Path "$env:RUNNER_TEMP\dolt" -Recurse -Filter 'dolt.exe' | Select-Object -First 1
+          $gopathBin = "$(go env GOPATH)\bin"
+          New-Item -ItemType Directory -Force -Path $gopathBin | Out-Null
+          Copy-Item $bin.FullName "$gopathBin\dolt.exe"
+          & "$gopathBin\dolt.exe" version
+
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
 

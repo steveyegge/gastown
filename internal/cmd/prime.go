@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -46,6 +47,7 @@ const (
 	RoleRefinery Role = "refinery"
 	RolePolecat  Role = "polecat"
 	RoleCrew     Role = "crew"
+	RoleDog      Role = "dog"
 	RoleUnknown  Role = "unknown"
 )
 
@@ -506,12 +508,34 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err != nil || len(inProgressBeads) == 0 {
-			return nil
+		if err == nil && len(inProgressBeads) > 0 {
+			hookedBeads = inProgressBeads
 		}
-		hookedBeads = inProgressBeads
 	}
 
+	// Town-level fallback: rig-level agents (polecats, crew) may have hooked
+	// HQ beads (hq-* prefix) stored in townRoot/.beads, not the rig's database.
+	// Matches the fallback in molecule_status.go and unsling.go. (gt-dtq7)
+	if len(hookedBeads) == 0 && !isTownLevelRole(agentID) && ctx.TownRoot != "" {
+		townB := beads.New(filepath.Join(ctx.TownRoot, ".beads"))
+		if townHooked, err := townB.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: agentID,
+			Priority: -1,
+		}); err == nil && len(townHooked) > 0 {
+			hookedBeads = townHooked
+		} else if townIP, err := townB.List(beads.ListOptions{
+			Status:   "in_progress",
+			Assignee: agentID,
+			Priority: -1,
+		}); err == nil && len(townIP) > 0 {
+			hookedBeads = townIP
+		}
+	}
+
+	if len(hookedBeads) == 0 {
+		return nil
+	}
 	return hookedBeads[0]
 }
 
@@ -534,9 +558,9 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 	fmt.Println("1. Announce: \"" + roleAnnounce + "\" (ONE line, no elaboration)")
 
 	if hasMolecule {
-		fmt.Println("2. This bead has an ATTACHED MOLECULE (formula workflow)")
-		fmt.Println("3. Work through molecule steps in order - see CURRENT STEP below")
-		fmt.Println("4. Close each step with `bd close <step-id>`, then check `bd mol current` for next step")
+		fmt.Println("2. This bead has an ATTACHED FORMULA (workflow checklist)")
+		fmt.Println("3. Work through formula steps in order — see checklist below")
+		fmt.Println("4. When all steps complete, run `" + cli.Name() + " done`")
 	} else {
 		fmt.Printf("2. Then IMMEDIATELY run: `bd show %s`\n", hookedBead.ID)
 		fmt.Println("3. Begin execution - no waiting for user input")
@@ -548,7 +572,7 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 	fmt.Println("- Describe what you're going to do")
 	fmt.Println("- Check mail first (hook takes priority)")
 	if hasMolecule {
-		fmt.Println("- Skip molecule steps or work on the base bead directly")
+		fmt.Println("- Skip formula steps or work on the base bead directly")
 	}
 	fmt.Println()
 }
@@ -575,8 +599,13 @@ func outputHookedBeadDetails(hookedBead *beads.Issue) {
 
 // outputMoleculeWorkflow displays attached molecule context with current step.
 func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields) {
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED MOLECULE (FORMULA WORKFLOW)"))
-	fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
+	fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED FORMULA (WORKFLOW CHECKLIST)"))
+	if attachment.AttachedFormula != "" {
+		fmt.Printf("Formula: %s\n", attachment.AttachedFormula)
+	}
+	if attachment.AttachedMolecule != "" {
+		fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
+	}
 	if attachment.AttachedArgs != "" {
 		fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
 		fmt.Printf("  %s\n", attachment.AttachedArgs)
@@ -589,10 +618,19 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 		return
 	}
 
-	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+	// Show inline formula steps from the embedded binary (root-only: no child wisps to query).
+	if attachment.AttachedFormula != "" {
+		showFormulaStepsFull(attachment.AttachedFormula)
+		fmt.Println()
+		fmt.Printf("%s\n", style.Bold.Render("Work through the checklist above. When all steps complete, run `"+cli.Name()+" done`."))
+		fmt.Println("The base bead is your assignment. The formula steps define your workflow.")
+		return
+	}
 
+	// Legacy path: no formula name stored, fall back to bd mol current
+	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
 	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
+	fmt.Printf("%s\n", style.Bold.Render("Follow the molecule steps above, NOT the base bead."))
 	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
 }
 

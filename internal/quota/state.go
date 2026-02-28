@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -203,4 +205,93 @@ func (m *Manager) EnsureAccountsTracked(state *config.QuotaState, accounts map[s
 			}
 		}
 	}
+}
+
+// ClearExpired checks all limited accounts and marks them available if their
+// ResetsAt time has passed. Returns the number of accounts cleared.
+// The caller is responsible for persisting state if changes were made.
+func (m *Manager) ClearExpired(state *config.QuotaState) int {
+	return clearExpiredAt(m, state, time.Now())
+}
+
+// clearExpiredAt is the testable core of ClearExpired, accepting a reference time.
+func clearExpiredAt(_ *Manager, state *config.QuotaState, now time.Time) int {
+	cleared := 0
+	for handle, acctState := range state.Accounts {
+		if acctState.Status != config.QuotaStatusLimited {
+			continue
+		}
+		if acctState.ResetsAt == "" {
+			continue
+		}
+		resetTime, err := ParseResetTime(acctState.ResetsAt, now)
+		if err != nil {
+			continue // can't parse — leave as-is
+		}
+		if now.After(resetTime) {
+			state.Accounts[handle] = config.AccountQuotaState{
+				Status:   config.QuotaStatusAvailable,
+				LastUsed: acctState.LastUsed,
+			}
+			cleared++
+		}
+	}
+	return cleared
+}
+
+// parseResetTimePattern matches formats like "7pm", "11am", "3:30pm", "7:00pm"
+var parseResetTimePattern = regexp.MustCompile(`(?i)^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b`)
+
+// ParseResetTime parses a human-readable reset time string into a time.Time.
+// Supported formats:
+//
+//	"7pm (America/Los_Angeles)" → today at 7pm in that timezone
+//	"11am (America/Los_Angeles)" → today at 11am in that timezone
+//	"3:30pm (America/Los_Angeles)" → today at 3:30pm in that timezone
+//	"7pm" → today at 7pm in local timezone
+//
+// The reference time is used to determine "today".
+func ParseResetTime(resetsAt string, reference time.Time) (time.Time, error) {
+	resetsAt = strings.TrimSpace(resetsAt)
+
+	// Extract timezone if present: "7pm (America/Los_Angeles)" or "7pm"
+	loc := reference.Location()
+	if idx := strings.Index(resetsAt, "("); idx != -1 {
+		end := strings.Index(resetsAt, ")")
+		if end > idx {
+			tzName := strings.TrimSpace(resetsAt[idx+1 : end])
+			parsed, err := time.LoadLocation(tzName)
+			if err == nil {
+				loc = parsed
+			}
+			resetsAt = strings.TrimSpace(resetsAt[:idx])
+		}
+	}
+
+	// Parse the time portion: "7pm", "11am", "3:30pm"
+	m := parseResetTimePattern.FindStringSubmatch(resetsAt)
+	if len(m) < 4 {
+		return time.Time{}, fmt.Errorf("cannot parse reset time: %q", resetsAt)
+	}
+
+	hour := 0
+	fmt.Sscanf(m[1], "%d", &hour)
+	minute := 0
+	if m[2] != "" {
+		fmt.Sscanf(m[2], "%d", &minute)
+	}
+
+	ampm := strings.ToLower(m[3])
+	if ampm == "pm" && hour != 12 {
+		hour += 12
+	} else if ampm == "am" && hour == 12 {
+		hour = 0
+	}
+
+	// Build the reset time using today's date in the target timezone
+	refInLoc := reference.In(loc)
+	resetTime := time.Date(refInLoc.Year(), refInLoc.Month(), refInLoc.Day(),
+		hour, minute, 0, 0, loc)
+
+	return resetTime, nil
 }

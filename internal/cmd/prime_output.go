@@ -46,6 +46,8 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		roleName = "crew"
 	case RoleBoot:
 		roleName = "boot"
+	case RoleDog:
+		roleName = "dog"
 	default:
 		// Unknown role - use fallback
 		outputPrimeContextFallback(ctx)
@@ -73,6 +75,7 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		WorkDir:       ctx.WorkDir,
 		DefaultBranch: defaultBranch,
 		Polecat:       ctx.Polecat,
+		DogName:       ctx.Polecat, // ctx.Polecat holds the dog name for RoleDog
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
 	}
@@ -521,8 +524,12 @@ func outputAttachmentStatus(ctx RoleContext) {
 	}
 	fmt.Println()
 
-	// Show current step from molecule
-	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+	// Show inline formula steps if formula name is known, else fall back to bd mol current
+	if attachment.AttachedFormula != "" {
+		showFormulaStepsFull(attachment.AttachedFormula)
+	} else {
+		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+	}
 }
 
 // outputContinuationDirective displays a brief continuation prompt for post-compact/resume.

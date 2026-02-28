@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gofrs/flock"
 
@@ -177,7 +175,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// This is cached (sentinel file + in-memory) so repeated calls are fast.
 	// On fresh rigs, this may fail if the database can't be initialized.
 	// Don't bail out — try the bd create calls anyway (GH#1769).
-	ensureErr := EnsureCustomTypes(targetDir)
+	_ = EnsureCustomTypes(targetDir)
 
 	description := FormatAgentDescription(title, fields)
 
@@ -210,17 +208,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	if err != nil {
 		out, err = b.run(buildArgs()...)
 		if err != nil {
-			// Both bd create attempts failed. If EnsureCustomTypes also failed,
-			// the database may be completely uninitialized. Fall back to writing
-			// the agent bead directly as a JSONL entry (GH#1769 workaround).
-			if ensureErr != nil || isSubprocessCrash(err) {
-				issue, jsonlErr := createAgentBeadViaJSONL(targetDir, id, title, description)
-				if jsonlErr != nil {
-					return nil, fmt.Errorf("creating %s: bd create failed (%w), JSONL fallback also failed (%w)", id, err, jsonlErr)
-				}
-				return issue, nil
-			}
-			return nil, err
+			// Both bd create attempts failed. Dolt server is required —
+			// no JSONL fallback. Surface the error directly.
+			return nil, fmt.Errorf("creating %s: bd create failed: %w", id, err)
 		}
 	}
 
@@ -247,52 +237,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	}
 
 	return &issue, nil
-}
-
-// createAgentBeadViaJSONL writes an agent bead directly to the issues.jsonl file
-// as a fallback when all bd create attempts fail (GH#1769). This bypasses the
-// Dolt database entirely and creates a JSONL entry that bd import can pick up.
-// The bead will be properly imported on the next bd init or bd import.
-func createAgentBeadViaJSONL(beadsDir, id, title, description string) (*Issue, error) {
-	jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	issue := &Issue{
-		ID:          id,
-		Title:       title,
-		Description: description,
-		Status:      "open",
-		Type:        "agent",
-		Labels:      []string{"gt:agent"},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	data, err := json.Marshal(issue)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling agent bead JSON: %w", err)
-	}
-
-	// Append to JSONL file (create if needed). Use O_APPEND for atomicity.
-	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G304: path is constructed internally
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", jsonlPath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return nil, fmt.Errorf("writing to %s: %w", jsonlPath, err)
-	}
-
-	// Try to import the JSONL file into the database (best effort).
-	// This may fail if the database is truly uninitialized, but the JSONL
-	// file is now on disk for manual or future import.
-	importCmd := exec.Command("bd", "import", "-i", jsonlPath)
-	importCmd.Dir = filepath.Dir(beadsDir)
-	importCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
-	_, _ = importCmd.CombinedOutput() // Best effort
-
-	return issue, nil
 }
 
 // CreateOrReopenAgentBead creates an agent bead or reopens an existing one.
@@ -377,9 +321,9 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Migrate any existing ephemeral (wisp) beads to the issues table
 	// by removing the ephemeral flag. This ensures agent state persists
 	// across polecat lifecycles for idle detection and reuse.
-	if _, err := target.run("update", id, "--no-ephemeral"); err != nil {
+	if _, err := target.run("update", id, "--persistent"); err != nil {
 		// Non-fatal: the bead is functional either way
-		// --no-ephemeral may not be supported in all bd versions
+		// --persistent promotes wisp to issues table (bd update --help)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -667,7 +611,9 @@ func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	}
 
 	// Also query issues table (backward compat during migration).
-	out, err := b.run("list", "--label=gt:agent", "--json")
+	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
+	// Use --include-infra so they appear in results.
+	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json")
 	if err != nil && len(result) == 0 {
 		return nil, err
 	}
@@ -719,15 +665,21 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 }
 
 // isAgentBeadByID detects agent beads by their ID naming convention.
-// Agent bead IDs follow the pattern: prefix-rig-role[-name]
+// Agent bead IDs follow two patterns:
+//   - Full form (prefix != rig): prefix-rig-role[-name] (e.g., gt-gastown-witness)
+//   - Collapsed form (prefix == rig): prefix-role[-name] (e.g., bcc-witness)
+//
 // where role is one of: witness, refinery, crew, polecat, deacon, mayor.
+// The collapsed form has only 2 parts for role-only IDs, so we must check
+// from parts[1:] not parts[2:].
 func isAgentBeadByID(id string) bool {
 	parts := strings.Split(id, "-")
-	if len(parts) < 3 {
+	if len(parts) < 2 {
 		return false
 	}
-	// Check if any part matches an agent role keyword
-	for _, part := range parts[2:] {
+	// Check parts[1:] to handle both full-form (role at parts[2]) and
+	// collapsed-form (role at parts[1]) agent bead IDs.
+	for _, part := range parts[1:] {
 		switch part {
 		case "witness", "refinery", "crew", "polecat", "deacon", "mayor":
 			return true

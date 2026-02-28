@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,11 +26,16 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// generateShortID generates a short random ID (5 lowercase chars).
+// generateShortID generates a convoy ID suffix using base36 (matching beads' ID scheme).
+// 5 chars of base36 supports ~60M possible values — more than enough for convoys.
 func generateShortID() string {
-	b := make([]byte, 3)
+	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+	b := make([]byte, 5)
 	_, _ = rand.Read(b)
-	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b)
 }
 
 // looksLikeIssueID checks if a string looks like a beads issue ID.

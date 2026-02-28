@@ -1,0 +1,118 @@
+description = """
+Flatten Dolt commit history on production databases.
+
+Every bd mutation creates a Dolt commit. Over time, this builds an enormous
+commit graph (5,000-10,000 commits/day from wisp churn). The commit graph IS
+the storage cost — deleting rows without compaction leaves ghost commits forever.
+
+The Compactor Dog periodically flattens each database's history to a single
+commit containing all current data. This is the "Think Git, Not SQL" principle:
+treat commit history as a resource to manage, not an append-only log.
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Inspect all production databases for commit count
+2. Compact (flatten) databases exceeding the threshold
+3. Verify data integrity after compaction
+4. Report findings
+5. Return to kennel
+
+## Order of Operations
+
+Reaper (deletes rows) → Compactor (flattens history) → Doctor (runs gc)
+
+## Safety
+
+Flattening is irreversible — all commit history is replaced by a single commit.
+Data is preserved (all rows intact), only the commit graph changes.
+Concurrency check: aborts if main branch moves during compaction.
+JSONL backups and Dolt filesystem backups provide recovery points."""
+formula = "mol-dog-compactor"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "inspect"
+title = "Inspect databases for commit count"
+description = """
+Check each production database's commit count against the threshold.
+
+**For each database:**
+```sql
+SELECT COUNT(*) FROM (SELECT 1 FROM dolt_log LIMIT 10000) AS t;
+```
+
+**Record:**
+- Database name
+- Current commit count
+- Whether it exceeds threshold (default 500)
+
+**Exit criteria:** All databases inspected, candidates identified."""
+
+[[steps]]
+id = "compact"
+title = "Compact databases exceeding threshold"
+needs = ["inspect"]
+description = """
+Flatten commit history on databases above the commit threshold.
+
+**Algorithm per database:**
+1. Record main HEAD hash (concurrency safety)
+2. Get root (initial) commit hash
+3. Clean up any leftover gt-compaction branch
+4. Create temp branch: CALL DOLT_CHECKOUT('-b', 'gt-compaction')
+5. Soft reset to root: CALL DOLT_RESET('--soft', '<root>')
+6. Commit all data: CALL DOLT_COMMIT('-Am', 'compaction: flatten history')
+7. Switch to main: CALL DOLT_CHECKOUT('main')
+8. Verify main hasn't moved (abort if it has)
+9. Hard reset main: CALL DOLT_RESET('--hard', '<new_hash>')
+10. Delete temp branch: CALL DOLT_BRANCH('-D', 'gt-compaction')
+
+**Safety:** If main moves during compaction, abort and retry next cycle.
+
+**Exit criteria:** All candidate databases flattened or safely skipped."""
+
+[[steps]]
+id = "verify"
+title = "Verify data integrity"
+needs = ["compact"]
+description = """
+Post-compaction health check on all databases.
+
+**For each database:**
+```sql
+SELECT COUNT(*) FROM issues;
+```
+
+Verify the count is > 0 and the table is readable. Escalate if any check fails.
+
+**Exit criteria:** All databases pass health check."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["verify"]
+description = """
+Generate summary of compaction cycle.
+
+**Report includes:**
+- Databases inspected
+- Databases compacted (with before/after commit counts)
+- Databases skipped (below threshold)
+- Any failures or escalations
+
+**Exit criteria:** Report logged, dog returned to kennel."""
+
+[vars]
+[vars.commit_threshold]
+description = "Minimum commit count before flattening (default 500)"
+default = "500"
+
+[vars.databases]
+description = "Comma-separated list of databases to compact"
+default = "hq,beads,gastown"

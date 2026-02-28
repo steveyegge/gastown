@@ -32,25 +32,22 @@ memorize steps or wait for instructions - discover them:
 
 ```bash
 gt hook              # What's on my hook?
-bd mol current         # Where am I in the molecule?
-bd mol current         # What step is next?
-bd show <step-id>      # What does this step require?
+gt prime             # Shows inline formula checklist
+bd show <issue-id>   # What's my assigned issue?
 ```
 
-### Before/After: Step Transitions
+### The New Workflow: Inline Formula Steps
 
-**The old workflow (friction):**
+Formula steps are shown inline at prime time — no step beads to manage:
+
 ```bash
-# Finish step 3
-bd close gt-abc.3
-# Figure out what's next
-bd mol current
-# Manually claim it
-bd update gt-abc.4 --status=in_progress
-# Now finally work on it
+gt prime             # See your checklist
+# Work through each step in order
+gt done              # Submit and self-clean (polecats)
+gt patrol report     # Close + next cycle (patrol agents)
 ```
 
-Three commands. Context switches. Momentum lost.
+No step closures, no `bd mol current`, no momentum-killing transitions.
 
 **The new workflow (propulsion):**
 ```bash

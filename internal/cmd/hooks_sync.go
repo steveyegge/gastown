@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/hooks"
@@ -58,12 +59,26 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 	unchanged := 0
 	created := 0
 	errors := 0
+	integrityErrors := 0
+	var failedTargets []string
 
 	for _, target := range targets {
 		result, err := syncTarget(target, hooksSyncDryRun)
 		if err != nil {
-			fmt.Printf("  %s %s: %v\n", style.Error.Render("✖"), target.DisplayKey(), err)
+			label := "sync error"
+			if hooks.IsSettingsIntegrityError(err) {
+				label = "integrity violation"
+				integrityErrors++
+			}
+			fmt.Printf(
+				"  %s %s (%s): %v\n",
+				style.Error.Render("✖"),
+				target.DisplayKey(),
+				label,
+				err,
+			)
 			errors++
+			failedTargets = append(failedTargets, target.DisplayKey())
 			continue
 		}
 
@@ -107,6 +122,21 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 		fmt.Printf(", %s", style.Error.Render(fmt.Sprintf("%d errors", errors)))
 	}
 	fmt.Println(")")
+
+	if errors > 0 {
+		if integrityErrors > 0 {
+			return fmt.Errorf(
+				"hooks sync failed closed: %d integrity violation(s) across %s",
+				integrityErrors,
+				strings.Join(failedTargets, ", "),
+			)
+		}
+		return fmt.Errorf(
+			"hooks sync failed: %d target(s) failed (%s)",
+			errors,
+			strings.Join(failedTargets, ", "),
+		)
+	}
 
 	return nil
 }

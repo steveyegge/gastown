@@ -1,0 +1,426 @@
+description = """
+Full pipeline from vague idea to approved, beads-ready implementation plan.
+
+Start by describing your idea conversationally to your crew worker.
+They'll pour this formula and it takes over from there.
+
+## Pipeline
+
+```
+[You → Crew]     Describe your idea (natural language, no structure needed)
+      ↓
+[intake]         Agent structures it into a draft PRD
+      ↓
+[prd-review]     6 polecats review PRD in parallel (mol-prd-review convoy)
+                 → requirements, gaps, ambiguity, feasibility, scope, stakeholders
+      ↓
+[human-clarify]  Agent presents consolidated questions, you answer
+      ↓
+[generate-plan]  6 polecats design the implementation in parallel (design convoy)
+                 → api, data, ux, scale, security, integration
+      ↓
+[plan-review]    5 polecats review the plan in parallel (mol-plan-review convoy)
+                 → completeness, sequencing, risk, scope-creep, testability
+      ↓
+[human-approve]  You review the go/no-go verdict and greenlight
+      ↓
+[create-beads]   Agent converts the approved plan into beads with dependencies
+```
+
+## Human Gates
+
+There are two human gates built in:
+1. **After PRD review**: You answer clarifying questions before plan generation
+2. **After plan review**: You approve the plan before bead creation
+
+These are the only steps requiring your input. Everything else runs autonomously.
+
+## Orchestration Model
+
+This is a workflow formula. The orchestrating crew worker runs through
+steps sequentially. The parallel review steps kick off convoy sub-workflows
+(separate polecats for each review dimension) and await their synthesis reports
+via mail before proceeding.
+
+## Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| problem | yes | Your idea / feature / problem statement |
+| context | no | Additional context: constraints, related code, prior decisions |
+"""
+formula = "mol-idea-to-plan"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "intake"
+title = "Structure idea into draft PRD"
+description = """
+Read the conversation context and produce a structured PRD draft.
+
+**Your input:**
+- The `{{problem}}` variable (human's raw idea description)
+- Any prior conversation context (messages, notes, sketches)
+- `{{context}}` if provided
+
+**Your task:**
+Pick a short slug for this review (e.g., "notification-levels", "merge-queue-v2") and use it
+as `{{review_id}}` in all paths below. This ID is reused by downstream steps.
+
+Write a structured PRD draft to `.prd-reviews/{{review_id}}/prd-draft.md`
+
+Use this structure:
+```markdown
+# PRD: <feature name>
+
+## Problem Statement
+(What problem are we solving? For whom? Why now?)
+
+## Goals
+(What success looks like — specific, measurable where possible)
+
+## Non-Goals
+(Explicitly out of scope — prevents scope creep)
+
+## User Stories / Scenarios
+(How will this be used? Who are the actors?)
+
+## Constraints
+(Technical, business, timeline, or resource constraints)
+
+## Open Questions
+(Things you already know are unknown — the review will find more)
+
+## Rough Approach
+(Initial thinking on how to solve this — not a plan, just direction)
+```
+
+Don't polish this. Breadth over depth. The review phase will find the gaps.
+A draft that exposes uncertainty is more useful than one that hides it.
+
+**After writing:**
+```bash
+# Store the draft path for downstream steps
+echo "prd_draft=.prd-reviews/{{review_id}}/prd-draft.md" >> .prd-reviews/{{review_id}}/state.env
+```
+
+**Exit criteria:** Draft PRD file exists. Rough but readable."""
+
+[[steps]]
+id = "prd-review"
+title = "Run parallel PRD review (6 legs)"
+needs = ["intake"]
+description = """
+Pour the mol-prd-review convoy to run 6 parallel PRD reviewers.
+
+**1. Pour the convoy:**
+```bash
+gt formula run mol-prd-review \\
+  --problem="{{problem}}" \\
+  --context="See .prd-reviews/{{review_id}}/prd-draft.md. {{context}}"
+```
+
+This spawns 6 polecats in parallel:
+- requirements — success criteria and acceptance conditions
+- gaps — missing requirements nobody thought of
+- ambiguity — unclear or contradictory language
+- feasibility — hard technical problems and prerequisites
+- scope — MVP definition and scope creep risk
+- stakeholders — unconsidered actors and conflicting needs
+
+**2. Await synthesis:**
+The convoy's synthesis step will mail you when complete. Check your inbox:
+```bash
+gt mail inbox
+```
+
+The mail subject will be: `PRD Review Complete: {{problem}}`
+The review file will be at: `.prd-reviews/<review-id>/prd-review.md`
+
+**3. Read the synthesis:**
+```bash
+cat .prd-reviews/<review-id>/prd-review.md
+```
+
+**Exit criteria:** You have received the PRD review synthesis mail and read the report."""
+
+[[steps]]
+id = "human-clarify"
+title = "Gather human clarifications on PRD"
+needs = ["prd-review"]
+description = """
+Present the consolidated questions to the human and capture their answers.
+
+This is a human gate. The molecule pauses here until you have answers.
+
+**1. Read the synthesis report:**
+```bash
+cat .prd-reviews/<review-id>/prd-review.md
+```
+
+**2. Mail the human with the critical questions:**
+```bash
+gt mail send --human -s "PRD Questions: {{problem}}" -m "
+I've completed a 6-leg parallel review of the PRD for: {{problem}}
+
+Full report: .prd-reviews/<review-id>/prd-review.md
+
+## Overall PRD Health
+<paste executive summary from synthesis>
+
+## Questions Needing Your Input Before We Proceed
+
+<paste the 'Before You Build: Critical Questions' section from synthesis>
+
+---
+Reply with numbered answers matching the questions above.
+I'll incorporate your answers and kick off implementation plan generation.
+"
+```
+
+**3. Await reply:**
+Monitor your inbox for the human's response:
+```bash
+gt mail inbox
+```
+
+**4. Incorporate answers:**
+Update the PRD draft at `.prd-reviews/{{review_id}}/prd-draft.md` with the
+human's answers. Add an "Answers and Clarifications" section at the bottom:
+
+```markdown
+## Clarifications from Human Review
+
+**Q: <question>**
+A: <human's answer>
+...
+```
+
+**Exit criteria:** Human has answered the critical questions. Updated PRD draft exists."""
+
+[[steps]]
+id = "generate-plan"
+title = "Generate implementation plan (6 design dimensions)"
+needs = ["human-clarify"]
+description = """
+Pour the design convoy to generate an implementation plan from the refined PRD.
+
+**1. Pour the design convoy:**
+```bash
+gt formula run design \\
+  --problem="{{problem}}" \\
+  --context="PRD with clarifications: .prd-reviews/{{review_id}}/prd-draft.md. {{context}}"
+```
+
+This spawns 6 polecats in parallel, each exploring a different dimension:
+- api — interface design and developer ergonomics
+- data — data model, storage, migrations
+- ux — user experience and CLI/UI ergonomics
+- scale — performance and bottlenecks at scale
+- security — threat model and attack surface
+- integration — how it fits the existing system
+
+**2. Await synthesis:**
+The synthesis step will produce a design document. Check for it:
+```bash
+gt mail inbox  # synthesis notifies when done
+ls .designs/   # find the design output directory
+```
+
+**3. Read the design doc:**
+```bash
+cat .designs/<design-id>/design-doc.md
+```
+
+Pay attention to:
+- "Open Questions" sections — are these answered by our PRD clarifications?
+- "Implementation Plan" section — does it align with requirements?
+- Trade-offs listed — do they match the human's priorities?
+
+**Exit criteria:** Design synthesis complete. Design doc exists and covers the requirements."""
+
+[[steps]]
+id = "plan-review"
+title = "Run parallel plan review (5 legs)"
+needs = ["generate-plan"]
+description = """
+Pour the mol-plan-review convoy to run 5 parallel plan reviewers.
+
+**1. Pour the convoy:**
+```bash
+gt formula run mol-plan-review \\
+  --plan=".designs/<design-id>/design-doc.md" \\
+  --problem="{{problem}}" \\
+  --prd_review=".prd-reviews/<review-id>/prd-review.md"
+```
+
+This spawns 5 polecats in parallel:
+- completeness — are all requirements covered?
+- sequencing — is the order right and are dependencies correct?
+- risk — what could go wrong or is still unknown?
+- scope-creep — is there unnecessary work to cut?
+- testability — can we verify this plan worked?
+
+**2. Await synthesis:**
+```bash
+gt mail inbox  # synthesis mails when complete
+```
+
+Mail subject: `Plan Review Complete: {{problem}}`
+Review file: `.plan-reviews/<review-id>/plan-review.md`
+
+**3. Read the verdict:**
+```bash
+cat .plan-reviews/<review-id>/plan-review.md
+```
+
+Note the overall verdict: GO / GO WITH FIXES / NO-GO
+
+If NO-GO: The plan needs significant revision before proceeding.
+Go back to `generate-plan` with the must-fix items as additional context.
+
+**Exit criteria:** Plan review synthesis received. Verdict is GO or GO WITH FIXES."""
+
+[[steps]]
+id = "human-approve"
+title = "Human reviews plan and approves"
+needs = ["plan-review"]
+description = """
+Present the plan review verdict to the human for final approval.
+
+This is the second human gate. The molecule pauses here until approved.
+
+**1. Summarize for the human:**
+```bash
+gt mail send --human -s "Plan Ready for Approval: {{problem}}" -m "
+The implementation plan for '{{problem}}' is ready for your review.
+
+## Plan Review Verdict
+<paste overall verdict from plan-review.md>
+
+## Full Reports
+- PRD Review: .prd-reviews/<review-id>/prd-review.md
+- Design / Implementation Plan: .designs/<design-id>/design-doc.md
+- Plan Review: .plan-reviews/<review-id>/plan-review.md
+
+## Must-Fix Items (if any)
+<paste from plan-review.md — or 'None'>
+
+## What Happens Next
+If you approve, I'll convert this plan into beads with full dependency graph.
+
+Reply:
+- APPROVE — proceed to bead creation
+- APPROVE WITH NOTES — proceed but note changes to make during bead creation
+- REVISE — explain what needs to change and I'll redo the plan generation
+"
+```
+
+**2. Await approval:**
+```bash
+gt mail inbox
+```
+
+**3. If REVISE:**
+Return to generate-plan step with the human's revision notes as added context.
+You may re-pour the design convoy with additional constraints.
+
+**Exit criteria:** Human has replied APPROVE or APPROVE WITH NOTES."""
+
+[[steps]]
+id = "create-beads"
+title = "Convert approved plan to beads"
+needs = ["human-approve"]
+description = """
+Convert the approved implementation plan into beads with dependencies.
+
+**1. Read the approved plan:**
+```bash
+cat .designs/<design-id>/design-doc.md
+```
+
+**2. Identify work items from the Implementation Plan section:**
+
+For each task/phase in the plan, create a bead:
+```bash
+bd create "Task title" --type=task --description="
+## Context
+From: {{problem}} implementation plan
+
+## What
+<task description>
+
+## Acceptance Criteria
+<how we know this is done>
+
+## Notes
+<anything relevant from the design doc>
+"
+```
+
+**3. Set up dependencies:**
+
+After creating all beads, wire up the dependencies based on the plan's
+sequencing (from the mol-plan-review 'sequencing' leg):
+
+```bash
+# X needs Y means Y blocks X:
+bd dep add <task-x-id> <task-y-id>  # x depends on y (y blocks x)
+```
+
+**4. Create a tracking epic:**
+```bash
+bd create "{{problem}}" --type=epic --description="
+Implementation of: {{problem}}
+
+## Planning Artifacts
+- PRD Review: .prd-reviews/<review-id>/prd-review.md
+- Design Doc: .designs/<design-id>/design-doc.md
+- Plan Review: .plan-reviews/<review-id>/plan-review.md
+"
+```
+
+**5. Verify the dependency graph:**
+```bash
+bd blocked  # should show clean topological order
+bv --robot-mode  # if available: graph visualization
+```
+
+**6. Notify the human:**
+```bash
+gt mail send --human -s "Beads Ready: {{problem}}" -m "
+Bead graph created for: {{problem}}
+
+## Summary
+<list of created beads with IDs>
+
+## Next Steps
+- Review beads: bd list --type=task
+- Start work: bd ready (shows unblocked tasks)
+- Kick off agent swarm: gt sling <first-bead-id> gastown
+"
+```
+
+**Exit criteria:** All plan tasks exist as beads. Dependencies are correctly wired.
+Epic created. Human notified."""
+
+[vars]
+[vars.review_id]
+description = "Short slug for the review (e.g. notification-levels) — computed by the agent"
+required = false
+default = ""
+
+[vars.problem]
+description = "Your idea, feature, or problem statement"
+required = true
+
+[vars.context]
+description = "Additional context: constraints, related code, prior decisions, linked beads"
+required = false
+default = ""
+
+[vars.review_id]
+description = "Short slug for this review, generated by the intake step (e.g. notification-levels)"
+required = false
+default = ""

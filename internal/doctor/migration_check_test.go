@@ -10,11 +10,11 @@ import (
 // setupDoltDB creates a fake Dolt database directory under .dolt-data/.
 func setupDoltDB(t *testing.T, townRoot, dbName string) {
 	t.Helper()
-	doltDir := filepath.Join(townRoot, ".dolt-data", dbName, ".dolt")
-	if err := os.MkdirAll(doltDir, 0755); err != nil {
-		t.Fatalf("creating dolt dir for %s: %v", dbName, err)
+	nomsDir := filepath.Join(townRoot, ".dolt-data", dbName, ".dolt", "noms")
+	if err := os.MkdirAll(nomsDir, 0755); err != nil {
+		t.Fatalf("creating noms dir for %s: %v", dbName, err)
 	}
-	if err := os.WriteFile(filepath.Join(doltDir, "manifest"), []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(nomsDir, "manifest"), []byte("test"), 0644); err != nil {
 		t.Fatalf("writing manifest for %s: %v", dbName, err)
 	}
 }

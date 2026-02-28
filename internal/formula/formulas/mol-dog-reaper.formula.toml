@@ -1,0 +1,238 @@
+description = """
+Reap stale wisps across all Dolt databases.
+
+The Reaper Dog closes wisps past their retention age and purges closed wisps
+older than the purge threshold. This keeps the wisp tables from growing unbounded.
+
+Current behavior (from wisp_reaper.go):
+- Closes open/hooked/in_progress wisps older than max_age (default 24h)
+- Alerts if open wisp count exceeds threshold (500)
+
+This molecule adds a purge step: DELETE closed wisps older than 7 days.
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Scan all production databases for stale wisps
+2. Reap (close) wisps past max_age
+3. Purge (delete) closed wisps past purge_age
+4. Report findings to Deacon
+5. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| max_age | config | Max wisp age before reaping (default 24h) |
+| purge_age | config | Max closed wisp age before purging (default 7d) |
+
+## Safety
+
+Reaping closes wisps — reversible (can reopen). Purging deletes rows — irreversible
+but only targets already-closed wisps past retention."""
+formula = "mol-dog-reaper"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "scan"
+title = "Scan databases for stale wisps"
+description = """
+Discover databases and count stale wisps.
+
+**1. Determine databases to scan:**
+Use configured databases list, or auto-discover from Dolt server.
+
+**2. For each database, count wisps by status and age:**
+```sql
+-- Open wisps past max_age (reap candidates)
+SELECT COUNT(*) FROM wisps
+WHERE status IN ('open', 'hooked', 'in_progress')
+AND created_at < NOW() - INTERVAL {{max_age}};
+
+-- Closed wisps past purge_age (purge candidates)
+SELECT COUNT(*) FROM wisps
+WHERE status = 'closed'
+AND closed_at < NOW() - INTERVAL {{purge_age}};
+
+-- Total open wisps (for alert threshold)
+SELECT COUNT(*) FROM wisps
+WHERE status IN ('open', 'hooked', 'in_progress');
+```
+
+**3. Record scan results:**
+- Databases scanned
+- Reap candidates per database
+- Purge candidates per database
+- Total open wisp count
+
+**Exit criteria:** Scan complete, candidates identified."""
+
+[[steps]]
+id = "reap"
+title = "Reap stale wisps"
+needs = ["scan"]
+description = """
+Close wisps past max_age.
+
+**1. For each database with reap candidates:**
+```sql
+UPDATE wisps SET status='closed', closed_at=NOW()
+WHERE status IN ('open', 'hooked', 'in_progress')
+AND created_at < ?;
+```
+
+**2. Record results:**
+- Count reaped per database
+- Any errors encountered
+
+**3. Alert check:**
+If total open wisps exceed alert threshold (500), log warning.
+
+**Exit criteria:** All stale wisps closed."""
+
+[[steps]]
+id = "purge"
+title = "Purge old closed wisps"
+needs = ["reap"]
+description = """
+Delete closed wisps past purge_age (default 7 days).
+
+**1. For each database with purge candidates:**
+```sql
+DELETE FROM wisps
+WHERE status = 'closed'
+AND closed_at < NOW() - INTERVAL {{purge_age}};
+```
+
+**2. Record results:**
+- Count purged per database
+- Any errors encountered
+
+**Safety:** Only deletes wisps that are already closed AND past the purge
+retention window. Active wisps are never touched.
+
+**Exit criteria:** Old closed wisps purged."""
+
+[[steps]]
+id = "auto-close"
+title = "Auto-close stale issues"
+needs = ["purge"]
+description = """
+Close issues that have been open with no status change for >30 days.
+
+**1. For each production database, find stale issues:**
+```sql
+-- Candidates: open >30 days, not updated, not P0/P1, not epic
+SELECT id, title, updated_at FROM issues
+WHERE status IN ('open', 'in_progress')
+AND updated_at < NOW() - INTERVAL {{stale_issue_age}}
+AND priority > 1
+AND issue_type != 'epic'
+AND id NOT IN (
+  -- Exclude issues with active dependencies (blocking or blocked-by open issues)
+  SELECT DISTINCT d.issue_id FROM dependencies d
+  INNER JOIN issues i ON d.depends_on_id = i.id
+  WHERE i.status IN ('open', 'in_progress')
+  UNION
+  SELECT DISTINCT d.depends_on_id FROM dependencies d
+  INNER JOIN issues i ON d.issue_id = i.id
+  WHERE i.status IN ('open', 'in_progress')
+)
+```
+
+**2. Close each candidate with reason 'stale:auto-closed by reaper'.**
+
+**3. Log each closure:** issue ID, title, age, database.
+
+**4. Record total closed for report.**
+
+**Exit criteria:** All eligible stale issues auto-closed."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["auto-close"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## Reaper Dog Report
+
+**Databases scanned**: {{db_count}}
+**Wisps reaped**: {{reap_count}} (closed stale open wisps)
+**Wisps purged**: {{purge_count}} (deleted old closed wisps)
+**Issues auto-closed**: {{issues_closed}} (stale >30 days, excl. epics/P0-P1/deps)
+**Open wisps remaining**: {{open_count}}
+
+### Per Database
+{{#each db}}
+- {{name}}: reaped={{reaped}}, purged={{purged}}, open={{open}}
+{{/each}}
+```
+
+**2. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: reaper" -m "Task: wisp-reaper
+Reaped: {{reap_count}}
+Purged: {{purge_count}}
+Issues auto-closed: {{issues_closed}}
+Open remaining: {{open_count}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.max_age]
+description = "Max wisp age before reaping (e.g., '24h')"
+default = "24h"
+
+[vars.purge_age]
+description = "Max closed wisp age before purging (e.g., '168h' = 7 days)"
+default = "168h"
+
+[vars.stale_issue_age]
+description = "Max issue staleness before auto-close (e.g., '720h' = 30 days)"
+default = "720h"
+
+[vars.db_count]
+description = "Number of databases scanned (computed during execution)"
+default = ""
+
+[vars.reap_count]
+description = "Total wisps reaped (computed during execution)"
+default = ""
+
+[vars.purge_count]
+description = "Total wisps purged (computed during execution)"
+default = ""
+
+[vars.issues_closed]
+description = "Total issues auto-closed (computed during execution)"
+default = ""
+
+[vars.open_count]
+description = "Total open wisps remaining (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database name (computed during iteration)"
+default = ""
+
+[vars.reaped]
+description = "Wisps reaped for a single database (computed during iteration)"
+default = ""
+
+[vars.purged]
+description = "Wisps purged for a single database (computed during iteration)"
+default = ""
+
+[vars.open]
+description = "Open wisps remaining for a single database (computed during iteration)"
+default = ""

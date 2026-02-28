@@ -251,8 +251,9 @@ Example:
 }
 
 var deaconZombieScanCmd = &cobra.Command{
-	Use:   "zombie-scan",
-	Short: "Find and clean zombie Claude processes not in active tmux sessions",
+	Use:        "zombie-scan",
+	SuggestFor: []string{"orphan-scan", "orphan_scan", "orphan"},
+	Short:      "Find and clean zombie Claude processes not in active tmux sessions",
 	Long: `Find and clean zombie Claude processes not in active tmux sessions.
 
 Unlike cleanup-orphans (which uses TTY detection), zombie-scan uses tmux

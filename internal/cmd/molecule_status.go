@@ -17,7 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// Note: Agent field parsing is now in internal/beads/fields.go (AgentFields, ParseAgentFieldsFromDescription)
+// Note: Agent field parsing is now in internal/beads/fields.go (AgentFields, ParseAgentFields)
 
 // buildAgentBeadID constructs the agent bead ID from an agent identity.
 // Uses canonical naming: prefix-rig-role-name
@@ -388,7 +388,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 
 			// Read hook_bead from the agent bead's database field (not description!)
 			// The hook_bead column is updated by `bd slot set` in UpdateAgentState.
-			// IMPORTANT: Don't use ParseAgentFieldsFromDescription - the description
+			// IMPORTANT: Don't use ParseAgentFields on description - the description
 			// field may contain stale data, causing the wrong issue to be hooked.
 			if agentBead.HookBead != "" {
 				// The hooked bead may be in a different database than the agent bead.

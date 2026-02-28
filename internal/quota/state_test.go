@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -386,5 +387,126 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	var loaded config.QuotaState
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		t.Fatalf("parsing saved file: %v", err)
+	}
+}
+
+// --- ParseResetTime tests ---
+
+func TestParseResetTime_SimpleAMPM(t *testing.T) {
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	ref := time.Date(2026, 2, 18, 10, 0, 0, 0, la)
+
+	tests := []struct {
+		input    string
+		wantHour int
+		wantMin  int
+	}{
+		{"7pm (America/Los_Angeles)", 19, 0},
+		{"11am (America/Los_Angeles)", 11, 0},
+		{"2pm (America/Los_Angeles)", 14, 0},
+		{"12pm (America/Los_Angeles)", 12, 0},
+		{"12am (America/Los_Angeles)", 0, 0},
+		{"3:30pm (America/Los_Angeles)", 15, 30},
+		{"7:00pm (America/Los_Angeles)", 19, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseResetTime(tt.input, ref)
+			if err != nil {
+				t.Fatalf("ParseResetTime(%q) error: %v", tt.input, err)
+			}
+			gotInLA := got.In(la)
+			if gotInLA.Hour() != tt.wantHour || gotInLA.Minute() != tt.wantMin {
+				t.Errorf("ParseResetTime(%q) = %v, want %02d:%02d",
+					tt.input, gotInLA, tt.wantHour, tt.wantMin)
+			}
+		})
+	}
+}
+
+func TestParseResetTime_NoTimezone(t *testing.T) {
+	// Without timezone, should use local time
+	ref := time.Now()
+	got, err := ParseResetTime("7pm", ref)
+	if err != nil {
+		t.Fatalf("ParseResetTime(\"7pm\") error: %v", err)
+	}
+	if got.Hour() != 19 {
+		t.Errorf("expected hour 19, got %d", got.Hour())
+	}
+}
+
+func TestParseResetTime_InvalidInput(t *testing.T) {
+	ref := time.Now()
+	_, err := ParseResetTime("garbage", ref)
+	if err == nil {
+		t.Error("expected error for invalid input")
+	}
+}
+
+// --- ClearExpired tests ---
+
+func TestClearExpired_ClearsPassedResetTime(t *testing.T) {
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	// Set reference time to 3pm LA time
+	now := time.Date(2026, 2, 18, 15, 0, 0, 0, la)
+
+	mgr := NewManager("/tmp/unused")
+	state := &config.QuotaState{
+		Accounts: map[string]config.AccountQuotaState{
+			"expired": {
+				Status:   config.QuotaStatusLimited,
+				ResetsAt: "11am (America/Los_Angeles)", // 11am < 3pm = expired
+				LastUsed: "2026-02-18T10:00:00Z",
+			},
+			"still_limited": {
+				Status:   config.QuotaStatusLimited,
+				ResetsAt: "7pm (America/Los_Angeles)", // 7pm > 3pm = still limited
+				LastUsed: "2026-02-18T10:00:00Z",
+			},
+			"available": {
+				Status: config.QuotaStatusAvailable,
+			},
+		},
+	}
+
+	// Override now for testing by calling ClearExpiredAt
+	cleared := clearExpiredAt(mgr, state, now)
+
+	if cleared != 1 {
+		t.Errorf("expected 1 cleared, got %d", cleared)
+	}
+	if state.Accounts["expired"].Status != config.QuotaStatusAvailable {
+		t.Errorf("expected expired account to be available, got %s", state.Accounts["expired"].Status)
+	}
+	if state.Accounts["expired"].LastUsed != "2026-02-18T10:00:00Z" {
+		t.Errorf("expected LastUsed preserved, got %q", state.Accounts["expired"].LastUsed)
+	}
+	if state.Accounts["still_limited"].Status != config.QuotaStatusLimited {
+		t.Errorf("expected still_limited to remain limited, got %s", state.Accounts["still_limited"].Status)
+	}
+	if state.Accounts["available"].Status != config.QuotaStatusAvailable {
+		t.Errorf("expected available to remain available, got %s", state.Accounts["available"].Status)
+	}
+}
+
+func TestClearExpired_NoResetsAt(t *testing.T) {
+	mgr := NewManager("/tmp/unused")
+	state := &config.QuotaState{
+		Accounts: map[string]config.AccountQuotaState{
+			"no_reset": {
+				Status: config.QuotaStatusLimited,
+				// No ResetsAt — should not be cleared
+			},
+		},
+	}
+
+	cleared := mgr.ClearExpired(state)
+	if cleared != 0 {
+		t.Errorf("expected 0 cleared, got %d", cleared)
+	}
+	if state.Accounts["no_reset"].Status != config.QuotaStatusLimited {
+		t.Errorf("expected no_reset to remain limited")
 	}
 }

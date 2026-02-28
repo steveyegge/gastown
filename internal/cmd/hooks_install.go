@@ -15,8 +15,8 @@ import (
 var (
 	installRole    string
 	installAllRigs bool
-	installDryRun    bool
-	hooksInstForce   bool
+	installDryRun  bool
+	hooksInstForce bool
 )
 
 var hooksInstallCmd = &cobra.Command{
@@ -94,9 +94,19 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 
 	// Install to each target
 	installed := 0
+	errors := 0
+	integrityErrors := 0
+	var failedTargets []string
 	for _, target := range targets {
 		if err := installHookTo(target, hookDef, installDryRun); err != nil {
-			fmt.Printf("%s Failed to install to %s: %v\n", style.Error.Render("Error:"), target, err)
+			label := "install error"
+			if hooks.IsSettingsIntegrityError(err) {
+				label = "integrity violation"
+				integrityErrors++
+			}
+			fmt.Printf("%s Failed to install to %s (%s): %v\n", style.Error.Render("Error:"), target, label, err)
+			errors++
+			failedTargets = append(failedTargets, target)
 			continue
 		}
 		installed++
@@ -106,6 +116,21 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n%s Would install %q to %d worktree(s)\n", style.Dim.Render("Dry run:"), hookName, installed)
 	} else {
 		fmt.Printf("\n%s Installed %q to %d worktree(s)\n", style.Success.Render("Done:"), hookName, installed)
+	}
+
+	if errors > 0 {
+		if integrityErrors > 0 {
+			return fmt.Errorf(
+				"hook install failed closed: %d integrity violation(s) (%s)",
+				integrityErrors,
+				strings.Join(failedTargets, ", "),
+			)
+		}
+		return fmt.Errorf(
+			"hook install failed: %d target(s) failed (%s)",
+			errors,
+			strings.Join(failedTargets, ", "),
+		)
 	}
 
 	return nil
@@ -182,9 +207,9 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 				targets = append(targets, witnessDir)
 			}
 		case "refinery":
-			refineryRigDir := filepath.Join(rigPath, "refinery", "rig")
-			if info, err := os.Stat(refineryRigDir); err == nil && info.IsDir() {
-				targets = append(targets, refineryRigDir)
+			refineryDir := filepath.Join(rigPath, "refinery")
+			if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
+				targets = append(targets, refineryDir)
 			}
 		}
 	}
@@ -208,10 +233,8 @@ func resolveSettingsTarget(townRoot, cwd string) string {
 	// parts[0] = rig name (or mayor/deacon), parts[1] = role dir
 	roleDir := parts[1]
 	switch roleDir {
-	case "crew", "polecats", "witness":
+	case "crew", "polecats", "witness", "refinery":
 		return filepath.Join(townRoot, parts[0], roleDir)
-	case "refinery":
-		return filepath.Join(townRoot, parts[0], "refinery", "rig")
 	default:
 		return cwd
 	}

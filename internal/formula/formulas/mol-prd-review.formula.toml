@@ -1,0 +1,334 @@
+description = """
+Parallel PRD review via specialized analysts. Uncovers missing requirements,
+ambiguities, feasibility risks, and scope issues before implementation begins.
+
+Each leg examines the PRD from a different perspective. Findings are
+synthesized into a prioritized list of clarifying questions for the human.
+
+## Legs (parallel execution)
+- **requirements**: Are success criteria defined? What does done look like?
+- **gaps**: What's missing? What hasn't been thought through?
+- **ambiguity**: What's unclear, contradictory, or underspecified?
+- **feasibility**: Is this buildable? What are the hard technical problems?
+- **scope**: What's in/out? Where is scope creep risk?
+- **stakeholders**: Who's affected? Are there conflicting needs?
+
+## Execution Model
+1. Each leg spawns as a separate polecat
+2. Polecats work in parallel
+3. Each writes analysis to their designated output file
+4. Synthesis step combines all findings into consolidated questions for the human
+
+## Output
+A .prd-reviews/<review-id>/ directory containing:
+- Individual dimension analyses
+- prd-review.md with consolidated questions and confidence assessment
+"""
+formula = "mol-prd-review"
+type = "convoy"
+version = 1
+
+[inputs]
+[inputs.problem]
+description = "The idea, feature, or problem statement to review"
+type = "string"
+required = true
+
+[inputs.context]
+description = "Additional context: existing code, constraints, prior decisions, related beads"
+type = "string"
+required = false
+
+[prompts]
+base = """
+# PRD Review Assignment
+
+You are a specialized analyst participating in a parallel PRD review convoy.
+
+## Context
+- **Formula**: {{.formula_name}}
+- **Problem / Feature**: {{.problem}}
+- **Your dimension**: {{.leg.focus}}
+- **Leg ID**: {{.leg.id}}
+
+{{if .context}}
+## Additional Context
+{{.context}}
+{{end}}
+
+## Your Task
+{{.leg.description}}
+
+## Output Requirements
+Write your analysis to: **{{.output_path}}**
+
+Structure your output as follows:
+```markdown
+# {{.leg.title}}
+
+## Summary
+(1-2 paragraph overview of what you found)
+
+## Findings
+
+### Critical Gaps / Questions
+(Things that MUST be answered before implementation can start)
+- Finding description
+- Why this matters
+- Suggested clarifying question for the human
+
+### Important Considerations
+(Things that should be addressed but aren't blockers)
+- ...
+
+### Observations
+(Non-blocking notes, suggestions, things to watch)
+- ...
+
+## Confidence Assessment
+(How complete does this dimension look? High/Medium/Low + rationale)
+```
+
+Be specific. Flag unknowns explicitly. Your job is to surface what's missing
+or unclear — not to fill in the gaps yourself.
+"""
+
+[output]
+directory = ".prd-reviews/{{.review_id}}"
+leg_pattern = "{{.leg.id}}.md"
+synthesis = "prd-review.md"
+
+# ============================================================================
+# LEGS
+# ============================================================================
+
+[[legs]]
+id = "requirements"
+title = "Requirements Completeness"
+focus = "Success criteria and acceptance conditions"
+description = """
+Analyze whether the requirements are complete enough to build from.
+
+**Look for:**
+- Missing success criteria: how will we know this is done?
+- Undefined acceptance conditions: what does "working" mean?
+- Unmeasured outcomes: are there metrics or thresholds?
+- Missing non-functional requirements: performance, scale, reliability?
+- No definition of failure modes or error states
+- Happy path only: what happens when things go wrong?
+- Missing rollback / undo / recovery requirements
+- No mention of monitoring, alerting, or observability
+
+**Questions to answer:**
+- Can someone write a test from this PRD? If not, what's missing?
+- Is "done" clearly defined and verifiable?
+- Are there implicit requirements that haven't been stated?
+- What would a QA engineer flag as untestable?
+"""
+
+[[legs]]
+id = "gaps"
+title = "Missing Requirements"
+focus = "What hasn't been thought through yet"
+description = """
+Identify requirements that are completely absent from the PRD.
+
+**Look for:**
+- Authentication / authorization: who can do this?
+- Multi-tenancy: does this work for all tenant types?
+- Data migration: what happens to existing data?
+- Backwards compatibility: does this break anything existing?
+- Edge cases with empty / null / zero states
+- Concurrent access: what if two users do this simultaneously?
+- Rate limiting and abuse prevention
+- Audit logging and compliance requirements
+- Internationalization / localization needs
+- Accessibility requirements
+- Mobile / offline behavior (if applicable)
+- Admin tooling: how will support teams debug issues?
+- Deprecation / cleanup: how does old behavior get removed?
+
+**Questions to answer:**
+- What completely unaddressed scenarios could cause a production incident?
+- What will the next engineer touching this code wish had been specified?
+- What will ops ask about at launch that nobody thought about?
+"""
+
+[[legs]]
+id = "ambiguity"
+title = "Ambiguity Analysis"
+focus = "What's unclear, contradictory, or underspecified"
+description = """
+Find statements in the PRD that are ambiguous or open to multiple interpretations.
+
+**Look for:**
+- Vague language: "fast", "simple", "reasonable", "appropriate", "as needed"
+- Undefined terms: domain concepts used without definition
+- Contradictions: two requirements that can't both be true
+- Implicit assumptions: things assumed true that might not be
+- Conditional requirements without defined conditions: "when X, do Y" but X isn't specified
+- Scope boundaries stated unclearly: "similar to X" without defining similarity
+- User/persona confusion: mixing different user types without distinguishing them
+- "Should" vs "must" vs "could": what's actually required vs nice-to-have?
+- Undefined ordering: when multiple things need to happen, what order?
+
+**Questions to answer:**
+- Which sentences could reasonably be interpreted two different ways?
+- What would two engineers disagree on when implementing this?
+- What will cause a PR review debate because the spec doesn't say?
+"""
+
+[[legs]]
+id = "feasibility"
+title = "Technical Feasibility"
+focus = "Is this buildable? What are the hard problems?"
+description = """
+Assess the technical feasibility and identify hard engineering challenges.
+
+**Look for:**
+- Features that assume capabilities the system doesn't have
+- Third-party dependencies that may not support this use case
+- Performance requirements that may be fundamentally hard to meet
+- Consistency guarantees that conflict with the distributed architecture
+- Real-time requirements that require architectural changes
+- Privacy / security requirements with significant implementation cost
+- Scale requirements that would require substantial infrastructure work
+- Implicit coupling: does this require changing things the PRD doesn't mention?
+- Missing prerequisite work: what has to be built first?
+
+**Questions to answer:**
+- What's the hardest technical problem in this PRD?
+- Are there requirements that are technically impossible or very expensive?
+- What unstated technical constraints or prerequisites exist?
+- What would double the implementation effort if discovered mid-build?
+"""
+
+[[legs]]
+id = "scope"
+title = "Scope Analysis"
+focus = "What's in/out and where scope creep will happen"
+description = """
+Analyze scope boundaries and identify scope creep risk.
+
+**Look for:**
+- Missing explicit out-of-scope statements
+- Features that will inevitably be asked for given what's being built
+- Overlap with existing features that will cause confusion
+- Minimum viable definition: what's the smallest version that delivers value?
+- Requirements that are really phase 2 in disguise
+- Dependencies on other teams or systems that aren't scoped
+- "While we're in there" refactors that aren't actually required
+- Unclear prioritization between requirements if tradeoffs arise
+- Missing phasing: should this be incremental or big bang?
+
+**Questions to answer:**
+- What's the MVP here? What could be cut without losing core value?
+- What will stakeholders ask for the day after launch?
+- Where are the natural seams for future phases?
+- Are there requirements that belong in a separate project entirely?
+"""
+
+[[legs]]
+id = "stakeholders"
+title = "Stakeholder Analysis"
+focus = "Who's affected and whether needs conflict"
+description = """
+Identify all affected stakeholders and assess whether their needs conflict.
+
+**Look for:**
+- Unstated users: are there actors the PRD doesn't mention?
+- Operator / admin perspective: what do ops / support teams need?
+- Developer experience: will this make other engineers' lives harder?
+- Security team requirements not mentioned
+- Compliance / legal requirements not mentioned
+- Third-party integrators who will be affected
+- Conflicting user needs: what's good for user A may hurt user B
+- Internal team dependencies: who else needs to be involved in design/build?
+- Launch coordination: who needs to be notified at launch?
+
+**Questions to answer:**
+- Who is NOT mentioned in this PRD who will care about it?
+- Are there conflicting needs between user types that the PRD glosses over?
+- What will the support team need to handle issues post-launch?
+"""
+
+# ============================================================================
+# SYNTHESIS
+# ============================================================================
+
+[synthesis]
+title = "PRD Review Synthesis"
+description = """
+Combine all leg analyses into a consolidated PRD review with prioritized questions.
+
+**Your input:**
+All leg analyses from: {{.output.directory}}/
+
+**Your task:**
+1. Read all leg analyses
+2. Identify overlapping findings across legs (these are higher-confidence gaps)
+3. Deduplicate and prioritize
+4. Group into must-answer-before-build vs important-but-not-blocking
+5. Write the synthesized review
+6. Mail the human overseer with the questions
+
+**Output file:** {{.output.directory}}/{{.output.synthesis}}
+
+**Structure:**
+```markdown
+# PRD Review: {{.problem}}
+
+## Executive Summary
+(2-3 sentences: overall PRD health, biggest risks, confidence in current state)
+
+## Before You Build: Critical Questions
+(Must be answered before implementation starts)
+
+### [Category: e.g. Requirements / Scope / Feasibility]
+**Q: <specific question>**
+- Why this matters: <impact if unknown>
+- Found by: <which legs flagged this>
+- Suggested answer options: <if applicable>
+
+...
+
+## Important But Non-Blocking
+(Should be answered; implementation can start but these need resolution)
+- ...
+
+## Observations and Suggestions
+(Non-blocking notes from reviewers worth considering)
+- ...
+
+## Confidence Assessment
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| Requirements completeness | H/M/L | |
+| Technical feasibility | H/M/L | |
+| Scope clarity | H/M/L | |
+| Ambiguity level | H/M/L | |
+| Overall readiness | H/M/L | |
+
+## Next Steps
+- [ ] Human answers critical questions above
+- [ ] Updated PRD bead with answers
+- [ ] Pour `design` convoy to generate implementation plan
+```
+
+**After writing the file, mail the human overseer:**
+```bash
+gt mail send --human -s "PRD Review Complete: {{.problem}}" -m "
+Review is ready: {{.output.directory}}/prd-review.md
+
+## Summary
+<paste executive summary here>
+
+## Critical Questions Needing Your Input
+<paste the critical questions section here>
+
+Reply with answers (numbered list matching questions) and I'll kick off
+implementation plan generation.
+"
+```
+"""
+depends_on = ["requirements", "gaps", "ambiguity", "feasibility", "scope", "stakeholders"]

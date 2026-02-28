@@ -10,11 +10,14 @@ Formula (source TOML) ─── "Ice-9"
     ▼ bd cook
 Protomolecule (frozen template) ─── Solid
     │
-    ├─▶ bd mol pour ──▶ Mol (persistent) ─── Liquid ──▶ bd squash ──▶ Digest
+    ├─▶ bd mol pour ──▶ Mol (persistent) ─── Liquid
     │
-    └─▶ bd mol wisp ──▶ Wisp (ephemeral) ─── Vapor ──┬▶ bd squash ──▶ Digest
-                                                     └▶ bd burn ──▶ (gone)
+    └─▶ bd mol wisp --root-only ──▶ Root Wisp (ephemeral) ─── Vapor
 ```
+
+**Root-only wisps**: Formula steps are NOT materialized as database rows. Only a
+single root wisp is created. Agents read steps inline from the embedded formula
+at prime time. This prevents wisp accumulation (~6,000+ rows/day → ~400/day).
 
 ## Core Concepts
 
@@ -22,101 +25,27 @@ Protomolecule (frozen template) ─── Solid
 |------|-------------|
 | **Formula** | Source TOML template defining workflow steps |
 | **Protomolecule** | Frozen template ready for instantiation |
-| **Molecule** | Active workflow instance with trackable steps |
-| **Wisp** | Ephemeral molecule for patrol cycles (never synced) |
-| **Digest** | Squashed summary of completed molecule |
-| **Shiny Workflow** | Canonical polecat formula: design → implement → review → test → submit |
+| **Molecule** | Active workflow instance (root wisp only) |
+| **Wisp** | Ephemeral molecule for patrols and polecat work (never synced) |
+| **Root-only** | Only root wisp created; steps read from embedded formula |
 
-## Common Mistake: Reading Formulas Directly
+## How Agents See Steps
 
-**WRONG:**
-```bash
-# Reading a formula file and manually creating beads for each step
-cat .beads/formulas/mol-polecat-work.formula.toml
-bd create --title "Step 1: Load context" --type task
-bd create --title "Step 2: Branch setup" --type task
-# ... creating beads from formula prose
-```
-
-**RIGHT:**
-```bash
-# Cook the formula into a proto, pour into a molecule
-bd cook mol-polecat-work
-bd mol pour mol-polecat-work --var issue=gt-xyz
-# Now work through the step beads that were created
-bd mol current              # Find next step
-bd close <step-id>          # Complete it
-```
-
-**Key insight:** Formulas are source templates (like source code). You never read
-them directly during work. The `cook` → `pour` pipeline creates step beads for you.
-Your molecule already has steps - use `bd mol current` to find them.
-
-## Navigating Molecules
-
-Molecules help you track where you are in multi-step workflows.
-
-### Finding Your Place
-
-```bash
-bd mol current              # Where am I?
-bd mol current gt-abc       # Status of specific molecule
-```
-
-Output:
-```
-You're working on molecule gt-abc (Feature X)
-
-  ✓ gt-abc.1: Design
-  ✓ gt-abc.2: Scaffold
-  ✓ gt-abc.3: Implement
-  → gt-abc.4: Write tests [in_progress] <- YOU ARE HERE
-  ○ gt-abc.5: Documentation
-  ○ gt-abc.6: Exit decision
-
-Progress: 3/6 steps complete
-```
-
-### Seamless Transitions
-
-Close a step and advance in one command:
-
-```bash
-bd close gt-abc.3 --continue   # Close and advance to next step
-bd close gt-abc.3 --no-auto    # Close but don't auto-claim next
-```
-
-**The old way (3 commands):**
-```bash
-bd close gt-abc.3
-bd mol current
-bd update gt-abc.4 --status=in_progress
-```
-
-**The new way (1 command):**
-```bash
-bd close gt-abc.3 --continue
-```
-
-### Transition Output
+Agents do NOT use `bd mol current` or `bd close <step-id>` for formula workflows.
+Instead, formula steps are rendered inline when the agent runs `gt prime`:
 
 ```
-✓ Closed gt-abc.3: Implement feature
+**Formula Checklist** (10 steps from mol-polecat-work):
 
-Next ready in molecule:
-  gt-abc.4: Write tests
+### Step 1: Load context and verify assignment
+Initialize your session and understand your assignment...
 
-→ Marked in_progress (use --no-auto to skip)
+### Step 2: Set up working branch
+Ensure you're on a clean feature branch...
 ```
 
-### When Molecule Completes
-
-```
-✓ Closed gt-abc.6: Exit decision
-
-Molecule gt-abc complete! All steps closed.
-Consider: gt mol squash --summary '...'
-```
+The agent works through the checklist and runs `gt done` (polecats) or
+`gt patrol report` (patrol agents) when complete.
 
 ## Molecule Commands
 
@@ -131,78 +60,66 @@ bd cook <formula>            # Formula → Proto
 # Molecules (data operations)
 bd mol list                  # Available protos
 bd mol show <id>             # Proto details
-bd mol pour <proto>          # Create mol
-bd mol wisp <proto>          # Create wisp
+bd mol wisp <proto>          # Create wisp (root-only by default)
 bd mol bond <proto> <parent> # Attach to existing mol
-bd mol squash <id>           # Condense to digest
-bd mol burn <id>             # Discard wisp
-bd mol current               # Where am I in the current molecule?
 ```
 
 ### Agent Operations (gt)
 
 ```bash
 # Hook management
-gt hook                    # What's on MY hook
-gt mol current               # What should I work on next
-gt mol progress <id>         # Execution progress of molecule
+gt hook                    # What's on MY hook?
+gt prime                   # Shows inline formula checklist
 gt mol attach <bead> <mol>   # Pin molecule to bead
 gt mol detach <bead>         # Unpin molecule from bead
 
-# Agent lifecycle
-gt mol burn                  # Burn attached molecule
-gt mol squash                # Squash attached molecule
-gt mol step done <step>      # Complete a molecule step
+# Patrol lifecycle
+gt patrol new              # Create patrol wisp and hook it
+gt patrol report --summary "..."  # Close current patrol, start next cycle
 ```
 
 ## Polecat Workflow
 
-Polecats receive work via their hook - a pinned molecule attached to an issue.
-They execute molecule steps sequentially, closing each step as they complete it.
-
-### Molecule Types for Polecats
-
-| Type | Storage | Use Case |
-|------|---------|----------|
-| **Regular Molecule** | `.beads/` (synced) | Discrete deliverables, audit trail |
-| **Wisp** | `.beads/` (ephemeral) | Patrol cycles, operational loops |
-
-Polecats typically use **regular molecules** because each assignment has audit value.
-Patrol agents (Witness, Refinery, Deacon) use **wisps** to prevent accumulation.
-
-### Hook Management
-
-```bash
-gt hook                        # What's on MY hook?
-gt mol attach-from-mail <id>   # Attach work from mail message
-gt done                        # Signal completion (syncs, submits to MQ, notifies Witness)
-```
+Polecats receive work via their hook — a root wisp attached to an issue.
+They see the formula checklist inline when they run `gt prime` and work
+through each step in order.
 
 ### Polecat Workflow Summary
 
 ```
 1. Spawn with work on hook
-2. gt hook                 # What's hooked?
-3. bd mol current          # Where am I?
-4. Execute current step
-5. bd close <step> --continue
-6. If more steps: GOTO 3
-7. gt done                 # Signal completion
+2. gt prime               # Shows formula checklist inline
+3. Work through each step
+4. Persist findings: bd update <issue> --notes "..."
+5. gt done                # Submit, nuke sandbox, exit
 ```
 
-### Wisp vs Molecule Decision
+### Molecule Types
 
-| Question | Molecule | Wisp |
-|----------|----------|------|
-| Does it need audit trail? | Yes | No |
-| Will it repeat continuously? | No | Yes |
-| Is it discrete deliverable? | Yes | No |
-| Is it operational routine? | No | Yes |
+| Type | Storage | Use Case |
+|------|---------|----------|
+| **Root-only Wisp** | `.beads/` (ephemeral) | Polecat work, patrols |
+
+All formula-based work uses root-only wisps. Steps are read from the
+embedded binary, not materialized as database rows.
+
+## Patrol Workflow
+
+Patrol agents (Deacon, Witness, Refinery) cycle through patrol formulas:
+
+```
+1. gt patrol new          # Create root-only patrol wisp
+2. gt prime               # Shows patrol checklist inline
+3. Work through each step
+4. gt patrol report --summary "..."  # Close + start next cycle
+```
+
+`gt patrol report` atomically closes the current patrol root and spawns
+a new one for the next cycle.
 
 ## Best Practices
 
-1. **CRITICAL: Close steps in real-time** - Mark `in_progress` BEFORE starting, `closed` IMMEDIATELY after completing. Never batch-close steps at the end. Molecules ARE the ledger - each step closure is a timestamped CV entry. Batch-closing corrupts the timeline and violates HOP's core promise.
-2. **Use `--continue` for propulsion** - Keep momentum by auto-advancing
-3. **Check progress with `bd mol current`** - Know where you are before resuming
-4. **Squash completed molecules** - Create digests for audit trail
-5. **Burn routine wisps** - Don't accumulate ephemeral patrol data
+1. **Persist findings early** — `bd update <issue> --notes "..."` before session death
+2. **Run `gt done` when complete** — mandatory for polecats (pushes, submits to MQ, nukes)
+3. **Use `gt patrol report`** — for patrol agents to cycle (replaces squash+new pattern)
+4. **File discovered work** — `bd create` for bugs found, don't fix them yourself

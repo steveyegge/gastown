@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -163,7 +164,15 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
+	// Use a socket-aware Tmux for pane operations. The calling process may be
+	// on a different tmux server than the town socket (e.g., default socket).
+	// For self-handoff, pane operations (clear-history, respawn-pane) must target
+	// the caller's own server. SocketFromEnv() reads $TMUX to find the right one.
+	callerSocket := tmux.SocketFromEnv()
+	t := tmux.NewTmuxWithSocket(callerSocket)
+	// Town-socket Tmux for session-level queries (getSessionPane, etc.)
+	townTmux := tmux.NewTmux()
+	_ = townTmux // used later for remote handoff
 
 	// Verify we're in tmux
 	if !tmux.IsInsideTmux() {
@@ -175,7 +184,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TMUX_PANE not set - cannot hand off")
 	}
 
-	// Get current session name
+	// Get current session name from GT_ROLE (preferred) or tmux display-message.
 	currentSession, err := getCurrentTmuxSession()
 	if err != nil {
 		return fmt.Errorf("getting session name: %w", err)
@@ -220,12 +229,17 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// If handing off a different session, we need to find its pane and respawn there
+	// If handing off a different session, we need to find its pane and respawn there.
+	// Remote sessions live on the town socket, so use townTmux for their operations.
 	if targetSession != currentSession {
 		// Update tmux session env before respawn (not during dry-run — see below)
-		updateSessionEnvForHandoff(t, targetSession, "")
-		return handoffRemoteSession(t, targetSession, restartCmd)
+		updateSessionEnvForHandoff(townTmux, targetSession, "")
+		return handoffRemoteSession(townTmux, targetSession, restartCmd)
 	}
+
+	// Close any in-progress molecule steps before cycling (gt-e26g).
+	// Without this, patrol agents that handoff mid-cycle leak orphaned wisps.
+	cleanupMoleculeOnHandoff()
 
 	// Handing off ourselves - print feedback then respawn
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
@@ -347,6 +361,9 @@ func runHandoffAuto() error {
 		return nil
 	}
 
+	// Close any in-progress molecule steps before state save (gt-e26g).
+	cleanupMoleculeOnHandoff()
+
 	// Send handoff mail to self
 	beadID, err := sendHandoffMail(subject, message)
 	if err != nil {
@@ -440,7 +457,9 @@ func runHandoffCycle() error {
 		return runHandoffAuto()
 	}
 
-	t := tmux.NewTmux()
+	// Use the caller's socket for pane operations (same as runHandoff).
+	callerSocket := tmux.SocketFromEnv()
+	t := tmux.NewTmuxWithSocket(callerSocket)
 
 	if handoffDryRun {
 		fmt.Printf("[cycle] Would send handoff mail: subject=%q\n", subject)
@@ -449,6 +468,9 @@ func runHandoffCycle() error {
 		fmt.Printf("[cycle] Would execute: tmux respawn-pane -k -t %s <restart-cmd>\n", pane)
 		return nil
 	}
+
+	// Close any in-progress molecule steps before cycling (gt-e26g).
+	cleanupMoleculeOnHandoff()
 
 	// Send handoff mail to self (auto-hooked for successor)
 	beadID, err := sendHandoffMail(subject, message)
@@ -484,8 +506,12 @@ func runHandoffCycle() error {
 		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(subject, true))
 	}
 
-	// Build restart command for fresh session
-	restartCmd, err := buildRestartCommand(currentSession)
+	// Build restart command with --continue so the new session resumes
+	// the previous conversation (preserves context across compaction cycles).
+	restartCmd, err := buildRestartCommandWithOpts(currentSession, buildRestartCommandOpts{
+		ContinueSession: true,
+		ContinuePrompt:  "Context compacted. Continue your previous task.",
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "handoff --cycle: could not build restart command: %v\n", err)
 		return err
@@ -519,7 +545,26 @@ func runHandoffCycle() error {
 
 // getCurrentTmuxSession returns the current tmux session name.
 func getCurrentTmuxSession() (string, error) {
-	out, err := tmux.BuildCommand("display-message", "-p", "#{session_name}").Output()
+	// Prefer GT_ROLE for session resolution. BuildCommand uses -L <town-socket>,
+	// but the calling process may live on the default socket (e.g., Claude Code
+	// spawned by tmux on the default server). In that case, display-message on
+	// the town socket returns an arbitrary session (often hq-boot) instead of
+	// the caller's actual session.
+	if role := os.Getenv("GT_ROLE"); role != "" {
+		resolved, err := resolveRoleToSession(role)
+		if err == nil && resolved != "" {
+			return resolved, nil
+		}
+		// Fall through to tmux detection if role resolution fails
+	}
+
+	// Use TMUX_PANE for targeted display-message to avoid returning an
+	// arbitrary session when multiple sessions share the town socket.
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return "", fmt.Errorf("TMUX_PANE not set")
+	}
+	out, err := tmux.BuildCommand("display-message", "-t", pane, "-p", "#{session_name}").Output()
 	if err != nil {
 		return "", err
 	}
@@ -678,7 +723,23 @@ var claudeEnvVars = []string{
 // buildRestartCommand creates the command to run when respawning a session's pane.
 // This needs to be the actual command to execute (e.g., claude), not a session attach command.
 // The command includes a cd to the correct working directory for the role.
+//
+// buildRestartCommandOpts controls restart command generation.
+type buildRestartCommandOpts struct {
+	// ContinueSession adds --continue and omits the beacon prompt,
+	// so the agent resumes its previous conversation silently.
+	ContinueSession bool
+	// ContinuePrompt overrides the default continuation prompt when
+	// ContinueSession is true. If empty, falls back to a generic
+	// continuation message.
+	ContinuePrompt string
+}
+
 func buildRestartCommand(sessionName string) (string, error) {
+	return buildRestartCommandWithOpts(sessionName, buildRestartCommandOpts{})
+}
+
+func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpts) (string, error) {
 	// Detect town root from current directory
 	townRoot := detectTownRootFromCwd()
 	if townRoot == "" {
@@ -705,14 +766,23 @@ func buildRestartCommand(sessionName string) (string, error) {
 		rigPath = filepath.Join(townRoot, identity.Rig)
 	}
 
-	// Build startup beacon for predecessor discovery via /resume
-	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
-	// The SessionStart hook handles context injection (gt prime --hook)
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: identity.BeaconAddress(),
-		Sender:    "self",
-		Topic:     "handoff",
-	})
+	// Build startup beacon for predecessor discovery via /resume.
+	// When ContinueSession is set, use a continuation prompt instead of
+	// the full handoff beacon — the agent resumes its previous context.
+	beacon := ""
+	if opts.ContinueSession {
+		if opts.ContinuePrompt != "" {
+			beacon = opts.ContinuePrompt
+		} else {
+			beacon = "Your account was rotated to avoid a rate limit. Continue your previous task."
+		}
+	} else {
+		beacon = session.FormatStartupBeacon(session.BeaconConfig{
+			Recipient: identity.BeaconAddress(),
+			Sender:    "self",
+			Topic:     "handoff",
+		})
+	}
 
 	// For respawn-pane, we:
 	// 1. cd to the right directory (role's canonical home)
@@ -747,6 +817,13 @@ func buildRestartCommand(sessionName string) (string, error) {
 		runtimeCmd = config.ResolveRoleAgentConfig(simpleRole, townRoot, rigPath).BuildCommandWithPrompt(beacon)
 	} else {
 		runtimeCmd = config.GetRuntimeCommandWithPrompt(rigPath, beacon)
+	}
+
+	// Add --continue flag to resume the most recent session.
+	// Note: runtimeCmd starts with the command name (e.g., "claude --settings ..."),
+	// not "exec claude" — the "exec" prefix is added later in the Sprintf.
+	if opts.ContinueSession {
+		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
 	}
 
 	// Build environment exports - role vars first, then Claude vars
@@ -892,11 +969,18 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
 
+	bootSession := session.BootSessionName()
+
 	switch {
 	case sessionName == mayorSession:
 		// Mayor runs from ~/gt/mayor/, not town root.
 		// Tools use workspace.FindFromCwd() which walks UP to find town root.
 		return townRoot + "/mayor", nil
+
+	case sessionName == bootSession:
+		// Boot watchdog runs from ~/gt/deacon/dogs/boot/, not ~/gt/deacon/.
+		// Boot is ephemeral (fresh each daemon tick) with its own CLAUDE.md.
+		return townRoot + "/deacon/dogs/boot", nil
 
 	case sessionName == deaconSession:
 		return townRoot + "/deacon", nil
@@ -916,6 +1000,12 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 			return "", fmt.Errorf("unknown session type: %s (%w)", sessionName, err)
 		}
 		switch identity.Role {
+		case session.RoleMayor:
+			return townRoot + "/mayor", nil
+		case session.RoleDeacon:
+			return townRoot + "/deacon", nil
+		case session.RoleOverseer:
+			return townRoot + "/deacon", nil
 		case session.RoleWitness:
 			return fmt.Sprintf("%s/%s/witness", townRoot, identity.Rig), nil
 		case session.RoleRefinery:
@@ -1372,4 +1462,83 @@ func collectGitState() string {
 	}
 
 	return "## Workspace State\n" + strings.Join(lines, "\n")
+}
+
+// cleanupMoleculeOnHandoff closes any in-progress molecule steps before session
+// handoff, preventing orphaned wisps from accumulating. (gt-e26g)
+//
+// Without this, patrol agents (witness, refinery, deacon) that handoff mid-cycle
+// leave unfinished molecule steps open forever. The next session pours a new
+// molecule, so the old steps are never completed.
+//
+// All errors are non-fatal — handoff must succeed even if cleanup fails.
+func cleanupMoleculeOnHandoff() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return
+	}
+
+	// Detect agent identity
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return
+	}
+	roleCtx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	agentID := buildAgentIdentity(roleCtx)
+	if agentID == "" {
+		return
+	}
+
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return
+	}
+
+	b := beads.New(workDir)
+
+	// Extract the role name for FindHandoffBead
+	parts := strings.Split(agentID, "/")
+	role := parts[len(parts)-1]
+
+	handoffBead, err := b.FindHandoffBead(role)
+	if err != nil || handoffBead == nil {
+		return
+	}
+
+	// Check for attached molecule on the handoff bead
+	attachment := beads.ParseAttachmentFields(handoffBead)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		return
+	}
+
+	molID := attachment.AttachedMolecule
+
+	// Close descendant steps (the leaked wisps)
+	if n := closeDescendants(b, molID); n > 0 {
+		fmt.Fprintf(os.Stderr, "handoff: closed %d molecule step(s) for %s\n", n, molID)
+	}
+
+	// Detach molecule with audit trail
+	if _, err := b.DetachMoleculeWithAudit(handoffBead.ID, beads.DetachOptions{
+		Operation: "squash",
+		Reason:    "handoff: session cycling",
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "handoff: warning: detach molecule audit failed: %v\n", err)
+	}
+
+	// Force-close the molecule root wisp
+	if err := b.ForceCloseWithReason("handoff", molID); err != nil {
+		fmt.Fprintf(os.Stderr, "handoff: warning: couldn't close molecule %s: %v\n", molID, err)
+	}
 }

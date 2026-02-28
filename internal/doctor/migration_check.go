@@ -417,7 +417,7 @@ func (c *DoltOrphanedDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 // Fix removes orphaned databases.
 func (c *DoltOrphanedDatabaseCheck) Fix(ctx *CheckContext) error {
 	for _, name := range c.orphanNames {
-		if err := doltserver.RemoveDatabase(ctx.TownRoot, name); err != nil {
+		if err := doltserver.RemoveDatabase(ctx.TownRoot, name, true); err != nil {
 			return fmt.Errorf("removing orphaned database %s: %w", name, err)
 		}
 	}

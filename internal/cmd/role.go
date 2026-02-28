@@ -117,7 +117,7 @@ var roleDefCmd = &cobra.Command{
 
 Role configuration is layered:
   1. Built-in defaults (embedded in binary)
-  2. Town-level overrides (~/.gt/roles/<role>.toml)
+  2. Town-level overrides (<town>/roles/<role>.toml)
   3. Rig-level overrides (<rig>/roles/<role>.toml)
 
 Examples:
@@ -208,7 +208,7 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 		// If env is incomplete (missing rig/polecat for roles that need them),
 		// fill gaps from cwd detection and mark as incomplete
 		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew
-		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew
+		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleDog
 
 		if needsRig && info.Rig == "" && cwdCtx.Rig != "" {
 			info.Rig = cwdCtx.Rig
@@ -276,6 +276,14 @@ func detectRole(cwd, townRoot string) RoleInfo {
 		return ctx
 	}
 
+	// Check for dog role: deacon/dogs/<name>/
+	// Must check before deacon since dogs are under deacon directory
+	if len(parts) >= 3 && parts[0] == "deacon" && parts[1] == "dogs" {
+		ctx.Role = RoleDog
+		ctx.Polecat = parts[2] // dog name stored in Polecat field
+		return ctx
+	}
+
 	// Check for deacon role: deacon/
 	if len(parts) >= 1 && parts[0] == "deacon" {
 		ctx.Role = RoleDeacon
@@ -337,6 +345,8 @@ func parseRoleString(s string) (Role, string, string) {
 		return RoleDeacon, "", ""
 	case "boot":
 		return RoleBoot, "", ""
+	case "dog":
+		return RoleDog, "", ""
 	}
 
 	// Compound roles: rig/role or rig/polecats/name or rig/crew/name
@@ -443,6 +453,11 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 		return filepath.Join(townRoot, rig, "crew", polecat)
 	case RoleBoot:
 		return filepath.Join(townRoot, "deacon", "dogs", "boot")
+	case RoleDog:
+		if polecat == "" {
+			return ""
+		}
+		return filepath.Join(townRoot, "deacon", "dogs", polecat)
 	default:
 		return ""
 	}

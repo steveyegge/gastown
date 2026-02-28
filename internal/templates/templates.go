@@ -61,6 +61,7 @@ type RoleData struct {
 	DefaultBranch  string   // default branch for merges (e.g., "main", "develop")
 	Polecat        string   // polecat name (for polecat role)
 	Polecats       []string // list of polecats (for witness role)
+	DogName        string   // dog name (for dog role)
 	BeadsDir       string   // BEADS_DIR path
 	IssuePrefix    string   // beads issue prefix
 	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name

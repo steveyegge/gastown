@@ -19,7 +19,8 @@ is violated. They're called before the tool runs, preventing the
 forbidden operation entirely.
 
 Available guards:
-  pr-workflow      - Block PR creation and feature branches
+  pr-workflow        - Block PR creation and feature branches
+  dangerous-command  - Block rm -rf, force push, hard reset, git clean
 
 Example hook configuration:
   {

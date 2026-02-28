@@ -49,7 +49,11 @@ func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Bu
 	ctx, cancel := context.WithTimeout(context.Background(), f.cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bd", args...)
+	bin := f.bdBin
+	if bin == "" {
+		bin = "bd"
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -72,6 +76,9 @@ func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Bu
 type LiveConvoyFetcher struct {
 	townRoot  string
 	townBeads string
+
+	// bdBin is the bd binary name or path. Defaults to "bd" if empty.
+	bdBin string
 
 	// Configurable timeouts (from TownSettings.WebTimeouts)
 	cmdTimeout     time.Duration

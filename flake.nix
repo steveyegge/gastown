@@ -10,8 +10,15 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, beads }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      beads,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         beads = self.inputs.beads.packages.${system};
@@ -20,9 +27,14 @@
         packages = {
           gt = pkgs.buildGoModule {
             pname = "gt";
-            version = "0.6.0";
+            version = "0.8.0";
             src = ./.;
-            vendorHash = "sha256-ripY9vrYgVW8bngAyMLh0LkU/Xx1UUaLgmAA7/EmWQU=";
+            vendorHash = "sha256-XWv/slFm796AO928eqzVHms0uUX4ZMJk0I4mZz+kp54=";
+
+            ldflags = [
+              "-X github.com/steveyegge/gastown/internal/cmd.Build=nix"
+              "-X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1"
+            ];
 
             subPackages = [ "cmd/gt" ];
 

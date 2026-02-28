@@ -36,7 +36,6 @@ state.json
 # Beads runtime state (not tracked)
 # Formulas ARE tracked for `go install @latest` - see bottom of file
 .beads/redirect
-.beads/issues.jsonl
 .beads/interactions.jsonl
 .beads/metadata.json
 .beads/mq/

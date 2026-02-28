@@ -54,16 +54,27 @@ func TestSquashJitterNegativeDuration(t *testing.T) {
 // TestSquashJitterZeroDuration verifies that --jitter 0s proceeds without
 // sleeping (the jitterMax > 0 guard skips the sleep block).
 // This tests the parse path only — the command will fail at workspace lookup
-// since we're not in a gastown workspace, but the jitter parsing should succeed.
+// since we run from a temp directory outside any gastown workspace.
 func TestSquashJitterZeroDuration(t *testing.T) {
 	prev := moleculeJitter
 	t.Cleanup(func() { moleculeJitter = prev })
+
+	// Run from a temp dir so workspace.FindFromCwd() fails
+	tmpDir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
 
 	moleculeJitter = "0s"
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	err := runMoleculeSquash(cmd, nil)
+	err = runMoleculeSquash(cmd, nil)
 	// Should fail at workspace lookup, NOT at jitter parsing
 	if err == nil {
 		t.Fatal("expected workspace error, got nil")
@@ -79,6 +90,17 @@ func TestSquashJitterContextCancellation(t *testing.T) {
 	prev := moleculeJitter
 	t.Cleanup(func() { moleculeJitter = prev })
 
+	// Run from a temp dir so workspace.FindFromCwd() fails
+	tmpDir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
 	// Use a long jitter so the sleep would block if cancellation didn't work
 	moleculeJitter = "10m"
 	cmd := &cobra.Command{}
@@ -89,7 +111,7 @@ func TestSquashJitterContextCancellation(t *testing.T) {
 	cmd.SetContext(ctx)
 
 	start := time.Now()
-	err := runMoleculeSquash(cmd, nil)
+	err = runMoleculeSquash(cmd, nil)
 	elapsed := time.Since(start)
 
 	// Should return quickly (the workspace lookup might fail first on some systems,

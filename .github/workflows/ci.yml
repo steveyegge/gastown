@@ -7,31 +7,29 @@ on:
     branches: [ main ]
 
 jobs:
-  # Fast check to catch accidental .beads/issues.jsonl changes from contributors
-  check-no-beads-changes:
-    name: Check for .beads changes
+  # Guard: gastown no longer supports issues.jsonl — Dolt server is the only backend.
+  check-no-issues-jsonl:
+    name: Reject issues.jsonl
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
 
-      - name: Check for .beads/issues.jsonl changes
+      - name: Reject issues.jsonl if present
         run: |
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^\.beads/issues\.jsonl$"; then
-            echo "This PR includes changes to .beads/issues.jsonl"
+          if [ -f .beads/issues.jsonl ]; then
+            echo "ERROR: .beads/issues.jsonl must not exist in the repository."
             echo ""
-            echo "This file is the project's issue database and should not be modified in PRs."
+            echo "Gastown requires a Dolt server — issues.jsonl is no longer supported."
             echo ""
             echo "To fix, run:"
-            echo "  git checkout origin/main -- .beads/issues.jsonl"
+            echo "  git rm .beads/issues.jsonl"
             echo "  git commit --amend"
             echo "  git push --force"
             echo ""
             exit 1
           fi
-          echo "No .beads/issues.jsonl changes detected"
+          echo "OK: no issues.jsonl found"
 
   test:
     name: Test
@@ -54,6 +52,10 @@ jobs:
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
+
+      - name: Install Dolt
+        run: |
+          curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | sudo bash
 
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
@@ -150,6 +152,10 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Install Dolt
+        run: |
+          curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | sudo bash
+
       - name: Cache beads (bd)
         id: cache-beads-int
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
@@ -173,7 +179,7 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Integration Tests
-        run: gotestsum --format testname --junitfile junit-integration.xml -- -tags=integration -timeout=5m -v ./internal/cmd/...
+        run: gotestsum --format testname --junitfile junit-integration.xml -- -tags=integration -timeout=15m -v ./internal/cmd/...
 
       - name: Test Report
         if: always()

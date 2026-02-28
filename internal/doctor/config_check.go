@@ -532,8 +532,8 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 			files = append(files, witnessSettings)
 		}
 
-		// Refinery - settings in working directory (refinery/rig/)
-		refinerySettings := filepath.Join(rig, "refinery", "rig", ".claude", "settings.json")
+		// Refinery - settings in parent directory (refinery/)
+		refinerySettings := filepath.Join(rig, "refinery", ".claude", "settings.json")
 		if _, err := os.Stat(refinerySettings); err == nil {
 			files = append(files, refinerySettings)
 		}

@@ -1,0 +1,156 @@
+description = """
+Sync Dolt database backups to local and offsite storage.
+
+The Backup Dog runs `dolt backup sync` for each production database, then
+rsyncs the local backup directory to iCloud Drive for offsite replication.
+
+Current behavior (from dolt_backup.go):
+- Discovers databases with backup remotes configured
+- Runs `dolt backup sync <name>-backup` per database
+- Rsyncs .dolt-backup/ to iCloud Drive
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Sync each production database to its backup remote
+2. Rsync local backups to offsite (iCloud Drive)
+3. Report results to Deacon
+4. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| databases | config | List of databases to back up (or auto-discover) |
+
+## Safety
+
+Backups are additive — they never modify production data. Backup sync
+overwrites the backup destination, but that is the intended behavior."""
+formula = "mol-dog-backup"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "sync"
+title = "Sync databases to backup remotes"
+description = """
+Run dolt backup sync for each production database.
+
+**1. Determine databases:**
+Use configured databases list, or auto-discover databases with
+`<name>-backup` remotes configured.
+
+**2. For each database:**
+```bash
+cd <data_dir>/<db>
+dolt backup sync <db>-backup
+```
+
+**3. Record results:**
+- Databases synced successfully
+- Databases that failed (with error)
+- Duration per database
+
+**Exit criteria:** All databases attempted, results recorded."""
+
+[[steps]]
+id = "offsite"
+title = "Sync backups to offsite storage"
+needs = ["sync"]
+description = """
+Rsync local backups to iCloud Drive for offsite replication.
+
+**1. Check prerequisites:**
+- .dolt-backup/ directory exists
+- iCloud Drive path is accessible
+
+**2. Run offsite sync:**
+```bash
+rsync -a --delete .dolt-backup/ ~/Library/Mobile\\ Documents/com~apple~CloudDocs/gt-dolt-backup/
+```
+
+**3. Record results:**
+- Success/failure
+- Duration
+
+**Note:** This is a stopgap until proper dolt remote push is configured.
+If iCloud is unavailable, log and continue — not a fatal error.
+
+**Exit criteria:** Offsite sync attempted."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["offsite"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## Backup Dog Report
+
+**Databases synced**: {{synced_count}}/{{total_count}}
+**Offsite sync**: {{offsite_status}}
+
+### Per Database
+{{#each db}}
+- {{name}}: {{status}} ({{duration}})
+{{/each}}
+
+### Failures
+{{#if failures}}
+{{#each failures}}
+- {{name}}: {{error}}
+{{/each}}
+{{else}}
+None
+{{/if}}
+```
+
+**2. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: backup" -m "Task: dolt-backup
+Synced: {{synced_count}}/{{total_count}}
+Offsite: {{offsite_status}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.databases]
+description = "List of databases to back up (comma-separated, or empty for auto-discover)"
+default = ""
+
+[vars.synced_count]
+description = "Number of databases synced successfully (computed during execution)"
+default = ""
+
+[vars.total_count]
+description = "Total number of databases attempted (computed during execution)"
+default = ""
+
+[vars.offsite_status]
+description = "Offsite sync status: 'ok', 'failed', or 'skipped' (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database name (computed during iteration)"
+default = ""
+
+[vars.status]
+description = "Sync status for a single database (computed during iteration)"
+default = ""
+
+[vars.duration]
+description = "Sync duration for a single database (computed during iteration)"
+default = ""
+
+[vars.error]
+description = "Error message for a failed sync (computed during iteration)"
+default = ""

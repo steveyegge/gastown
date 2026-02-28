@@ -579,6 +579,272 @@ exit /b 0
 	}
 }
 
+// TestIsMalformedWispID verifies detection of doubled "-wisp-" in wisp IDs (gt-4gjd).
+func TestIsMalformedWispID(t *testing.T) {
+	tests := []struct {
+		name       string
+		wispID     string
+		wantMalformed bool
+	}{
+		{"normal wisp ID", "gt-wisp-abc", false},
+		{"normal with long random", "oag-wisp-gm7c", false},
+		{"doubled wisp marker", "oag-wisp-wisp-rsia", true},
+		{"triple wisp marker", "gt-wisp-wisp-wisp-x", true},
+		{"empty", "", false},
+		{"no wisp marker", "gt-abc", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMalformedWispID(tt.wispID)
+			if got != tt.wantMalformed {
+				t.Errorf("isMalformedWispID(%q) = %v, want %v", tt.wispID, got, tt.wantMalformed)
+			}
+		})
+	}
+}
+
+// TestInstantiateFormulaOnBead_MalformedWispIDSkipsLegacyBond verifies that
+// when bd mol wisp returns a malformed ID (doubled "-wisp-"), the legacy bond
+// attempt is skipped and the direct-bond fallback is used immediately (gt-4gjd).
+func TestInstantiateFormulaOnBead_MalformedWispIDSkipsLegacyBond(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(`{"prefix":"oag-","path":"."}`), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+
+	// bd mol wisp returns a malformed ID with doubled "-wisp-".
+	// Legacy bond should be SKIPPED (never called with the malformed ID).
+	// Direct-bond fallback should succeed.
+	bdScript := `#!/bin/sh
+set -e
+echo "CMD:$*" >> "${BD_LOG}"
+cmd="$1"; shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"; shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"oag-wisp-wisp-rsia"}'
+        exit 0
+        ;;
+      bond)
+        left="$1"; shift || true
+        if [ "$left" = "oag-wisp-wisp-rsia" ]; then
+          echo "ERROR: legacy bond should not be called with malformed ID" >&2
+          exit 1
+        fi
+        if [ "$left" = "mol-polecat-work" ]; then
+          echo '{"result_id":"oag-npeat","id_mapping":{"mol-polecat-work":"oag-wisp-gm7c"}}'
+          exit 0
+        fi
+        echo "Error: unexpected bond target: $left" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  close)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo CMD:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+set "left=%3"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"oag-wisp-wisp-rsia^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    if "%left%"=="oag-wisp-wisp-rsia" (
+      echo ERROR: legacy bond should not be called with malformed ID 1>&2
+      exit /b 1
+    )
+    if "%left%"=="mol-polecat-work" (
+      echo {^"result_id^":^"oag-npeat^",^"id_mapping^":{^"mol-polecat-work^":^"oag-wisp-gm7c^"}}
+      exit /b 0
+    )
+    echo Error: unexpected bond target: %left% 1>&2
+    exit /b 1
+  )
+)
+if "%cmd%"=="close" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	_ = os.Chdir(townRoot)
+
+	result, err := InstantiateFormulaOnBead("mol-polecat-work", "oag-npeat", "Fix formula bug", "", townRoot, false, nil)
+	if err != nil {
+		t.Fatalf("InstantiateFormulaOnBead: %v", err)
+	}
+	if result.WispRootID != "oag-wisp-gm7c" {
+		t.Fatalf("WispRootID = %q, want %q", result.WispRootID, "oag-wisp-gm7c")
+	}
+	if result.BeadToHook != "oag-npeat" {
+		t.Fatalf("BeadToHook = %q, want %q", result.BeadToHook, "oag-npeat")
+	}
+
+	// Verify the legacy bond was NEVER called with the malformed ID.
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logContent := string(logBytes)
+	if strings.Contains(logContent, "mol bond oag-wisp-wisp-rsia") {
+		t.Fatalf("legacy bond should not have been called with malformed wisp ID:\n%s", logContent)
+	}
+	// Verify fallback was used (direct bond with formula name)
+	if !strings.Contains(logContent, "mol bond mol-polecat-work oag-npeat") {
+		t.Fatalf("direct-bond fallback should have been called:\n%s", logContent)
+	}
+}
+
+// TestInstantiateFormulaOnBead_FallbackCleansUpOrphanedWisp verifies that when
+// the legacy bond fails and fallback is used, the orphaned wisp from bd mol wisp
+// is cleaned up (gt-4gjd).
+func TestInstantiateFormulaOnBead_FallbackCleansUpOrphanedWisp(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(`{"prefix":"gt-","path":"."}`), 0644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+
+	// Legacy path: mol wisp succeeds, mol bond <wisp-id> fails.
+	// After fallback succeeds, a close command should be issued for the orphaned wisp.
+	bdScript := `#!/bin/sh
+set -e
+echo "CMD:$*" >> "${BD_LOG}"
+cmd="$1"; shift || true
+case "$cmd" in
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"; shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-orphan"}'
+        exit 0
+        ;;
+      bond)
+        left="$1"; shift || true
+        if [ "$left" = "gt-wisp-orphan" ]; then
+          echo "Error: 'gt-wisp-orphan' not found (not an issue ID or formula name)" >&2
+          exit 1
+        fi
+        if [ "$left" = "mol-polecat-work" ]; then
+          echo '{"result_id":"gt-test","id_mapping":{"mol-polecat-work":"gt-wisp-clean"}}'
+          exit 0
+        fi
+        echo "Error: unexpected bond target: $left" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  close)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo CMD:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+set "left=%3"
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-orphan^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    if "%left%"=="gt-wisp-orphan" (
+      echo Error: 'gt-wisp-orphan' not found 1>&2
+      exit /b 1
+    )
+    if "%left%"=="mol-polecat-work" (
+      echo {^"result_id^":^"gt-test^",^"id_mapping^":{^"mol-polecat-work^":^"gt-wisp-clean^"}}
+      exit /b 0
+    )
+    echo Error: unexpected bond target: %left% 1>&2
+    exit /b 1
+  )
+)
+if "%cmd%"=="close" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	_ = os.Chdir(townRoot)
+
+	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test cleanup", "", townRoot, false, nil)
+	if err != nil {
+		t.Fatalf("InstantiateFormulaOnBead: %v", err)
+	}
+	if result.WispRootID != "gt-wisp-clean" {
+		t.Fatalf("WispRootID = %q, want %q", result.WispRootID, "gt-wisp-clean")
+	}
+
+	// Verify a close command was issued for the orphaned wisp
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "close") || !strings.Contains(logContent, "gt-wisp-orphan") {
+		t.Fatalf("expected close command for orphaned wisp gt-wisp-orphan in log:\n%s", logContent)
+	}
+}
+
 // TestInstantiateFormulaOnBead_ParseFailureFallbackFailure verifies that when
 // legacy bond exits 0 with non-JSON output AND the direct-bond fallback also
 // fails, InstantiateFormulaOnBead returns an error instead of silent success.

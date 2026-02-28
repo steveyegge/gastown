@@ -9,16 +9,11 @@ import (
 
 // Note: AgentFields, ParseAgentFields, FormatAgentDescription, and CreateAgentBead are in beads.go
 
-// ParseAgentFieldsFromDescription is an alias for ParseAgentFields.
-// Used by daemon for compatibility.
-func ParseAgentFieldsFromDescription(description string) *AgentFields {
-	return ParseAgentFields(description)
-}
-
 // AttachmentFields holds the attachment info for pinned beads.
 // These fields track which molecule is attached to a handoff/pinned bead.
 type AttachmentFields struct {
 	AttachedMolecule string // Root issue ID of the attached molecule
+	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
@@ -61,6 +56,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		switch strings.ToLower(key) {
 		case "attached_molecule", "attached-molecule", "attachedmolecule":
 			fields.AttachedMolecule = value
+			hasFields = true
+		case "attached_formula", "attached-formula", "attachedformula":
+			fields.AttachedFormula = value
 			hasFields = true
 		case "attached_at", "attached-at", "attachedat":
 			fields.AttachedAt = value
@@ -107,6 +105,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.AttachedMolecule != "" {
 		lines = append(lines, "attached_molecule: "+fields.AttachedMolecule)
 	}
+	if fields.AttachedFormula != "" {
+		lines = append(lines, "attached_formula: "+fields.AttachedFormula)
+	}
 	if fields.AttachedAt != "" {
 		lines = append(lines, "attached_at: "+fields.AttachedAt)
 	}
@@ -144,6 +145,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"attached_molecule": true,
 		"attached-molecule": true,
 		"attachedmolecule":  true,
+		"attached_formula":  true,
+		"attached-formula":  true,
+		"attachedformula":   true,
 		"attached_at":       true,
 		"attached-at":       true,
 		"attachedat":        true,

@@ -944,13 +944,10 @@ type CostLogEntry struct {
 	WorkItem  string    `json:"work_item,omitempty"`
 }
 
-// getCostsLogPath returns the path to the costs log file (~/.gt/costs.jsonl).
+// getCostsLogPath returns the path to the costs log file.
+// Location: $GT_HOME/.gt/costs.jsonl when GT_HOME is set, otherwise ~/.gt/.
 func getCostsLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/gt-costs.jsonl" // Fallback
-	}
-	return filepath.Join(home, ".gt", "costs.jsonl")
+	return filepath.Join(gtDataDir(), "costs.jsonl")
 }
 
 // runCostsRecord captures the final cost from a session and appends it to a local log file.
@@ -1112,10 +1109,14 @@ func deriveSessionName() string {
 
 // detectCurrentTmuxSession returns the current tmux session name if running inside tmux.
 // Uses `tmux display-message -p '#S'` which prints the session name.
-// Note: We don't check TMUX env var because it may not be inherited when Claude Code
-// runs bash commands, even though we are inside a tmux session.
+// Note: TMUX_PANE may not be inherited when Claude Code runs bash commands,
+// so we return "" as a safe fallback.
 func detectCurrentTmuxSession() string {
-	cmd := tmux.BuildCommand("display-message", "-p", "#S")
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return ""
+	}
+	cmd := tmux.BuildCommand("display-message", "-t", pane, "-p", "#S")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""

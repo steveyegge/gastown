@@ -1,7 +1,6 @@
 package doctor
 
 import (
-	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -74,7 +72,7 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 		if _, statErr := os.Stat(rigPath); os.IsNotExist(statErr) {
 			rigPath = ctx.TownRoot
 		}
-		missing := c.checkPatrolFormulas(rigPath)
+		missing := c.checkPatrolFormulas(rigPath, ctx.TownRoot)
 		if len(missing) > 0 {
 			c.missingFormulas[rigName] = missing
 			details = append(details, fmt.Sprintf("%s: missing %v", rigName, missing))
@@ -99,15 +97,33 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // checkPatrolFormulas returns missing patrol formula names for a rig.
-func (c *PatrolMoleculesExistCheck) checkPatrolFormulas(rigPath string) []string {
+func (c *PatrolMoleculesExistCheck) checkPatrolFormulas(rigPath string, townRoot string) []string {
 	// Check for formula files directly on the filesystem rather than shelling
 	// out to `bd formula list`, which may not be available in all environments
 	// (e.g., CI). Formulas are provisioned as .formula.toml files in .beads/formulas/.
-	formulasDir := filepath.Join(rigPath, ".beads", "formulas")
+	//
+	// Search the full formula path: rig-level → town-level → user-level,
+	// matching the beads SDK's formula resolution order.
+	homeDir, _ := os.UserHomeDir()
+	searchDirs := []string{
+		filepath.Join(rigPath, ".beads", "formulas"),
+		filepath.Join(townRoot, ".beads", "formulas"),
+	}
+	if homeDir != "" {
+		searchDirs = append(searchDirs, filepath.Join(homeDir, ".beads", "formulas"))
+	}
+
 	var missing []string
 	for _, formulaName := range patrolFormulas {
-		formulaPath := filepath.Join(formulasDir, formulaName+".formula.toml")
-		if _, err := os.Stat(formulaPath); os.IsNotExist(err) {
+		found := false
+		for _, dir := range searchDirs {
+			formulaPath := filepath.Join(dir, formulaName+".formula.toml")
+			if _, err := os.Stat(formulaPath); err == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
 			missing = append(missing, formulaName)
 		}
 	}
@@ -232,14 +248,12 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 	for _, rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 
-		// Try Dolt database first (canonical source in server mode),
-		// fall back to issues.jsonl for non-Dolt rigs or when Dolt is unavailable.
+		// Query Dolt database (the only supported backend).
 		stuck, err := c.checkStuckWispsDolt(rigPath, rigName)
 		if err != nil {
-			// Dolt query failed — fall back to JSONL
-			beadsDir := beads.ResolveBeadsDir(rigPath)
-			beadsPath := filepath.Join(beadsDir, "issues.jsonl")
-			stuck = c.checkStuckWisps(beadsPath, rigName)
+			// Dolt query failed — report as error rather than silently skipping.
+			stuckWisps = append(stuckWisps, fmt.Sprintf("%s: Dolt query failed: %v", rigName, err))
+			continue
 		}
 		stuckWisps = append(stuckWisps, stuck...)
 	}
@@ -311,44 +325,6 @@ func (c *PatrolNotStuckCheck) checkStuckWispsDolt(rigPath string, rigName string
 	}
 
 	return stuck, nil
-}
-
-// checkStuckWisps returns descriptions of stuck wisps in a rig (JSONL fallback).
-func (c *PatrolNotStuckCheck) checkStuckWisps(issuesPath string, rigName string) []string {
-	file, err := os.Open(issuesPath)
-	if err != nil {
-		return nil // No issues file
-	}
-	defer file.Close()
-
-	var stuck []string
-	cutoff := time.Now().Add(-c.stuckThreshold)
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var issue struct {
-			ID        string    `json:"id"`
-			Title     string    `json:"title"`
-			Status    string    `json:"status"`
-			UpdatedAt time.Time `json:"updated_at"`
-		}
-		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			continue
-		}
-
-		// Check for in_progress issues older than threshold
-		if issue.Status == "in_progress" && !issue.UpdatedAt.IsZero() && issue.UpdatedAt.Before(cutoff) {
-			stuck = append(stuck, fmt.Sprintf("%s: %s (%s) - stale since %s",
-				rigName, issue.ID, issue.Title, issue.UpdatedAt.Format("2006-01-02 15:04")))
-		}
-	}
-
-	return stuck
 }
 
 // PatrolPluginsAccessibleCheck verifies plugin directories exist and are readable.

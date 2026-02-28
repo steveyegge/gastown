@@ -263,11 +263,11 @@ func TestSetAttachmentFieldsPreservesConvoy(t *testing.T) {
 	}
 }
 
-// --- ParseAgentFieldsFromDescription alias (not covered in beads_test.go) ---
+// --- ParseAgentFields (not covered in beads_test.go) ---
 
-func TestParseAgentFieldsFromDescription(t *testing.T) {
+func TestParseAgentFields_AllFields(t *testing.T) {
 	desc := "role_type: polecat\nrig: gastown\nagent_state: working\nhook_bead: gt-abc\ncleanup_status: clean\nactive_mr: gt-mr1\nnotification_level: verbose"
-	got := ParseAgentFieldsFromDescription(desc)
+	got := ParseAgentFields(desc)
 	if got.RoleType != "polecat" {
 		t.Errorf("RoleType = %q, want %q", got.RoleType, "polecat")
 	}

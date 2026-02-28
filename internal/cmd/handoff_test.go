@@ -174,6 +174,93 @@ func TestBuildRestartCommand_UsesRoleAgentsWhenNoAgentOverride(t *testing.T) {
 	}
 }
 
+func TestBuildRestartCommandWithOpts_ContinuePrompt(t *testing.T) {
+	setupHandoffTestRegistry(t)
+
+	origCwd, _ := os.Getwd()
+	origGTAgent := os.Getenv("GT_AGENT")
+	origTownRoot := os.Getenv("GT_TOWN_ROOT")
+	origRoot := os.Getenv("GT_ROOT")
+
+	townRoot := t.TempDir()
+
+	t.Cleanup(func() {
+		_ = os.Chdir(origCwd)
+		_ = os.Setenv("GT_AGENT", origGTAgent)
+		_ = os.Setenv("GT_TOWN_ROOT", origTownRoot)
+		_ = os.Setenv("GT_ROOT", origRoot)
+	})
+	rigPath := filepath.Join(townRoot, "gastown")
+	crewDir := filepath.Join(rigPath, "crew", "bear")
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte(`{"name":"gastown"}`), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		t.Fatalf("mkdir crew dir: %v", err)
+	}
+
+	townSettings := config.NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := config.SaveRigSettings(config.RigSettingsPath(rigPath), config.NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	_ = os.Setenv("GT_AGENT", "")
+	_ = os.Setenv("GT_TOWN_ROOT", "")
+	_ = os.Setenv("GT_ROOT", "")
+	_ = os.Chdir(crewDir)
+
+	t.Run("custom ContinuePrompt overrides default", func(t *testing.T) {
+		cmd, err := buildRestartCommandWithOpts("gt-crew-bear", buildRestartCommandOpts{
+			ContinueSession: true,
+			ContinuePrompt:  "Context compacted. Continue your previous task.",
+		})
+		if err != nil {
+			t.Fatalf("buildRestartCommandWithOpts: %v", err)
+		}
+		if !strings.Contains(cmd, "--continue") {
+			t.Errorf("expected --continue flag in restart command, got: %q", cmd)
+		}
+		if !strings.Contains(cmd, "Context compacted") {
+			t.Errorf("expected custom prompt in restart command, got: %q", cmd)
+		}
+	})
+
+	t.Run("empty ContinuePrompt falls back to default", func(t *testing.T) {
+		cmd, err := buildRestartCommandWithOpts("gt-crew-bear", buildRestartCommandOpts{
+			ContinueSession: true,
+		})
+		if err != nil {
+			t.Fatalf("buildRestartCommandWithOpts: %v", err)
+		}
+		if !strings.Contains(cmd, "--continue") {
+			t.Errorf("expected --continue flag in restart command, got: %q", cmd)
+		}
+		if !strings.Contains(cmd, "Continue your previous task") {
+			t.Errorf("expected default continuation message when ContinuePrompt is empty, got: %q", cmd)
+		}
+	})
+
+	t.Run("ContinueSession false uses beacon", func(t *testing.T) {
+		cmd, err := buildRestartCommandWithOpts("gt-crew-bear", buildRestartCommandOpts{
+			ContinueSession: false,
+		})
+		if err != nil {
+			t.Fatalf("buildRestartCommandWithOpts: %v", err)
+		}
+		if strings.Contains(cmd, "--continue") {
+			t.Errorf("expected no --continue flag when ContinueSession is false, got: %q", cmd)
+		}
+	})
+}
+
 func TestDetectTownRootFromCwd_EnvFallback(t *testing.T) {
 	// Save original env vars and restore after test
 	origTownRoot := os.Getenv("GT_TOWN_ROOT")

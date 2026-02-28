@@ -45,31 +45,40 @@ type SyncResult struct {
 	Remote string
 }
 
-// HasRemote checks whether a Dolt database directory has an "origin" remote configured.
-// Returns the push URL if found, or empty string if no origin remote exists.
-func HasRemote(dbDir string) (string, error) {
+// FindRemote returns the name and URL of the first configured remote in a Dolt database.
+// Returns ("", "", nil) if no remotes are configured.
+func FindRemote(dbDir string) (name, url string, err error) {
 	cmd := exec.Command("dolt", "remote", "-v")
 	cmd.Dir = dbDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("dolt remote -v: %w (%s)", err, strings.TrimSpace(string(output)))
+		return "", "", fmt.Errorf("dolt remote -v: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
 
-	// Parse output lines looking for origin remote URL.
+	// Parse output lines looking for any remote URL.
 	// Dolt format: "origin https://doltremoteapi.dolthub.com/org/repo {}"
 	// Git format:  "origin  https://... (push)"
+	// Remote names may be "origin", "github", or any user-defined name.
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "origin") {
+		if line == "" {
 			continue
 		}
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			return parts[1], nil
+			return parts[0], parts[1], nil
 		}
 	}
 
-	return "", nil
+	return "", "", nil
+}
+
+// HasRemote checks whether a Dolt database directory has any remote configured.
+// Returns the push URL if found, or empty string if no remote exists.
+// Deprecated: use FindRemote for both the remote name and URL.
+func HasRemote(dbDir string) (string, error) {
+	_, url, err := FindRemote(dbDir)
+	return url, err
 }
 
 // CommitWorkingSet stages and commits any uncommitted changes in a Dolt database directory.
@@ -99,10 +108,10 @@ func CommitWorkingSet(dbDir string) error {
 	return nil
 }
 
-// PushDatabase pushes a Dolt database directory to origin main.
+// PushDatabase pushes a Dolt database directory to the specified remote's main branch.
 // If force is true, uses --force.
-func PushDatabase(dbDir string, force bool) error {
-	args := []string{"push", "origin", "main"}
+func PushDatabase(dbDir, remote string, force bool) error {
+	args := []string{"push", remote, "main"}
 	if force {
 		args = append(args, "--force")
 	}
@@ -139,16 +148,16 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 		dbDir := RigDatabaseDir(townRoot, db)
 		result := SyncResult{Database: db}
 
-		// Check for remote
-		remote, err := HasRemote(dbDir)
+		// Check for remote (any name — "origin", "github", etc.)
+		remoteName, remoteURL, err := FindRemote(dbDir)
 		if err != nil {
 			result.Error = fmt.Errorf("checking remote: %w", err)
 			results = append(results, result)
 			continue
 		}
-		result.Remote = remote
+		result.Remote = remoteURL
 
-		if remote == "" {
+		if remoteURL == "" {
 			// Auto-setup DoltHub remote if credentials are available.
 			token := DoltHubToken()
 			org := DoltHubOrg()
@@ -160,13 +169,13 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 					continue
 				}
 				// Remote is now configured; re-read it.
-				remote, err = HasRemote(dbDir)
-				if err != nil || remote == "" {
+				remoteName, remoteURL, err = FindRemote(dbDir)
+				if err != nil || remoteURL == "" {
 					result.Error = fmt.Errorf("remote not found after auto-setup")
 					results = append(results, result)
 					continue
 				}
-				result.Remote = remote
+				result.Remote = remoteURL
 			} else {
 				result.Skipped = true
 				results = append(results, result)
@@ -188,7 +197,7 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 		}
 
 		// Push
-		if err := PushDatabase(dbDir, opts.Force); err != nil {
+		if err := PushDatabase(dbDir, remoteName, opts.Force); err != nil {
 			result.Error = err
 			results = append(results, result)
 			continue

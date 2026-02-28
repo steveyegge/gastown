@@ -8,17 +8,17 @@ crash after any step and resume from the last completed step.
 ## Polecat Contract (Self-Cleaning Model)
 
 You are a self-cleaning worker. You:
-1. Receive work via your hook (pinned molecule + issue)
-2. Work through molecule steps using `bd mol current` / `bd close <step>`
+1. Receive work via your hook (formula checklist + issue)
+2. Work through formula steps in order (shown inline at prime time)
 3. Complete and self-clean via `gt done` (submit + nuke yourself)
 4. You are GONE - Refinery merges from MQ
 
 **Self-cleaning:** When you run `gt done`, you push your work, submit to MQ,
 nuke your sandbox, and exit. There is no idle state. Done means gone.
 
-**Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `gt hook` to find your pinned molecule, then `bd show`
-for step details — do NOT read this file directly.
+**Important:** This formula defines the workflow template. Steps are shown inline
+when you run `gt prime` — there are no separate step beads to close. Work through
+the checklist, then run `gt done`.
 
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
@@ -47,7 +47,7 @@ for step details — do NOT read this file directly.
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 5
+version = 6
 
 [[steps]]
 id = "load-context"
@@ -169,7 +169,25 @@ Do the actual implementation work.
 - Keep changes scoped to the assigned issue
 - Don't gold-plate or scope-creep
 
-**Commit frequently:**
+**Persist findings as you go (CRITICAL for session survival):**
+Your session can die at any time (context limit, crash, SIGKILL). Code changes
+survive in git, but analysis, findings, and decisions exist only in your context
+window. Persist them to the bead so they survive session death:
+```bash
+# After completing significant analysis or reaching conclusions:
+bd update {{issue}} --notes "Findings so far: <what you discovered>"
+# For detailed reports, use --design:
+bd update {{issue}} --design "<structured findings>"
+```
+Do this BEFORE closing molecule steps, not after. If your session dies between
+persisting and closing, the findings survive. If you close first, they're lost.
+
+**For report-only tasks** (audits, reviews, research): your findings ARE the
+deliverable. There are no code changes to commit. You MUST persist all findings
+to the bead via --notes or --design. Without this, your entire work product is
+lost when the session ends.
+
+**Commit frequently (for code tasks):**
 ```bash
 # After each logical unit of work:
 git add <files>
@@ -196,7 +214,7 @@ Problem: <what's blocking you>
 Tried: <what you've attempted>"
 ```
 
-**Exit criteria:** Implementation complete, all changes committed."""
+**Exit criteria:** Implementation complete. Code tasks: all changes committed. Report tasks: all findings persisted to bead."""
 
 [[steps]]
 id = "self-review"
@@ -256,21 +274,35 @@ git status
 git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
 ```
 
-**3. If working tree is already clean, skip.**
+**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
 
-**4. VERIFY:**
+**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+
+This MUST show at least 1 commit. If it shows NOTHING:
+- You have NOT completed your implementation. Do NOT close this step.
+- Go back to the implement step and do the work.
+- If the task genuinely requires no code changes (already fixed upstream, etc.),
+  run `gt done --status DEFERRED` and skip remaining steps.
+- Do NOT proceed to cleanup or submit with zero commits.
+
+**5. VERIFY clean working tree:**
 ```bash
 git status
 ```
 Must show "nothing to commit, working tree clean".
 
-**5. Verify you have commits:**
+**Report-only tasks (audits, reviews, research — no code changes):**
+If your task produced no code changes, verify your findings are persisted to the bead:
 ```bash
-git log origin/{{base_branch}}..HEAD --oneline
+bd show {{issue}}    # Check notes/design fields have your findings
 ```
-If you made changes during implementation, this MUST show at least 1 commit.
+If findings are persisted, proceed to cleanup. `gt done --cleanup-status clean`
+handles the no-commit case for report-only tasks.
 
-**Exit criteria:** All changes committed. Working tree clean."""
+**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
 
 [[steps]]
 id = "cleanup-workspace"
@@ -281,6 +313,15 @@ Ensure workspace is pristine before handoff.
 
 **IMPORTANT: Do NOT run `git push`. That is `gt done`'s job (next step).**
 **IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
+
+**0. GATE: Verify no uncommitted changes exist (HARD GATE):**
+```bash
+git diff --stat
+git diff --cached --stat
+```
+If EITHER shows output, you have uncommitted changes. Do NOT proceed.
+Go back to the commit-changes step and commit them. NEVER discard implementation
+work with `git checkout -- .` or `git restore .` during cleanup.
 
 **1. Check for untracked files:**
 ```bash
@@ -299,17 +340,21 @@ Should be empty. If not:
 - Pop and commit: `git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"`
 - Or drop if truly garbage: `git stash drop`
 
-**3. Verify clean state and commits:**
+**3. Verify clean state and commits (HARD GATE):**
 ```bash
 git status                  # Must show "working tree clean"
 git stash list              # Must be empty
-git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
+git log origin/{{base_branch}}..HEAD --oneline  # MUST show at least 1 commit
 ```
 
-If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
-something went wrong. Do NOT proceed — mail Witness for help.
+If `git log origin/{{base_branch}}..HEAD` shows NOTHING:
+- For code tasks: Do NOT close this step. Go back to implement step.
+- For report-only tasks (audits, reviews, research): Verify findings are persisted
+  to bead (`bd show {{issue}}`). If findings exist, proceed — `gt done --cleanup-status clean`
+  handles no-commit report tasks.
+- If neither code nor findings exist: run `gt done --status DEFERRED`.
 
-**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gt done` handles that."""
+**Exit criteria:** Workspace clean, no cruft, all work committed, AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings on bead. Do NOT push — `gt done` handles that."""
 
 [[steps]]
 id = "prepare-for-review"
@@ -327,10 +372,16 @@ bd show {{issue}}
 # Status should still be 'in_progress' (you're working on it)
 ```
 
-**2. Add completion notes:**
+**2. Add completion notes (if not already persisted during implementation):**
 ```bash
 bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
 ```
+
+For report-only tasks, verify your findings are already on the bead:
+```bash
+bd show {{issue}}    # Check that --notes or --design has your findings
+```
+If not, persist them NOW — this is your last chance before `gt done`.
 
 **3. Sync beads:**
 ```bash
@@ -353,9 +404,20 @@ Once you run `gt done`, you're gone. The command:
 3. Nukes your sandbox (worktree removal)
 4. Exits your session immediately
 
+**Pre-flight: Verify you have actual work to submit (HARD GATE):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
+`gt done` will reject zero-commit branches for polecats.
+
 **Run gt done:**
 ```bash
+# For code tasks (has commits):
 gt done
+
+# For report-only tasks (no commits — audits, reviews, research):
+gt done --cleanup-status clean
 ```
 
 You should see output like:

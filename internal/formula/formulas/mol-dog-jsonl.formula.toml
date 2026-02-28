@@ -1,0 +1,229 @@
+description = """
+Export Dolt databases to JSONL and push to git archive.
+
+The JSONL Dog exports each production database's issues table (scrubbed of
+ephemeral data) plus supplemental tables to JSONL files, commits them to a
+git repository, and pushes to origin. This provides a human-readable,
+git-versioned backup of all durable work product.
+
+Current behavior (from jsonl_git_backup.go):
+- Exports issues table with scrub filter (excludes messages, events, wisps, etc.)
+- Exports supplemental tables (comments, config, dependencies, labels, metadata)
+- Writes per-database subdirectories + legacy flat files
+- Commits with counts and pushes to git remote
+- Escalates after 3 consecutive push failures
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Export each database to JSONL files (with scrub)
+2. Commit and push to git archive
+3. Report results to Deacon
+4. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| databases | config | List of databases to export |
+| scrub | config | Whether to filter ephemeral data (default true) |
+
+## Safety
+
+Exports are read-only against Dolt. Git operations are append-only
+(commit + push). The archive repo is a separate repository from
+the main codebase."""
+formula = "mol-dog-jsonl"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "export"
+title = "Export databases to JSONL"
+description = """
+Export each database's tables to JSONL files.
+
+**1. Determine databases:**
+Use configured databases list.
+
+**2. For each database, export:**
+- issues table (with scrub filter to exclude ephemeral data)
+- supplemental tables: comments, config, dependencies, labels, metadata
+
+**3. Write output:**
+- Per-database subdirectory: `<git_repo>/<db>/issues.jsonl`, etc.
+- Legacy flat file: `<git_repo>/<db>.jsonl`
+
+**4. Record results:**
+- Records exported per database per table
+- Any export failures
+
+```bash
+dolt sql -r json -q "SELECT * FROM <db>.issues <scrub_filter>" > <output>
+```
+
+**Exit criteria:** All databases exported to JSONL."""
+
+[[steps]]
+id = "verify"
+title = "Verify export counts and filter pollution"
+needs = ["export"]
+description = """
+Verify export integrity before committing.
+
+**1. Filter test pollution:**
+Remove records matching test patterns from exported JSONL:
+- Titles starting with "Test Issue" or "test_"
+- IDs matching test patterns: bd-1, bd-abc12, testdb_*, beads_t*, etc.
+
+```go
+applyPollutionFilter(gitRepo, databases)
+```
+
+**2. Spike detection:**
+Compare current export record counts against previous commit:
+```go
+verifyExportCounts(gitRepo, databases, counts, threshold)
+```
+
+**3. Evaluate results:**
+- If delta > {{spike_threshold}} (default 20%) for ANY database → HALT
+- Log anomalies: sudden jumps = pollution, sudden drops = data loss
+- Escalate to Mayor with spike report
+- Do NOT proceed to commit/push
+
+**4. First export:**
+Skip verification when no baseline exists (previous commit has no file).
+
+**Exit criteria:** All databases within threshold, or halted with escalation."""
+
+[[steps]]
+id = "push"
+title = "Commit and push to git archive"
+needs = ["verify"]
+description = """
+Stage, commit, and push JSONL files to the archive repository.
+
+**1. Stage changes:**
+```bash
+git -C <git_repo> add -A *.jsonl */
+```
+
+**2. Check for changes:**
+```bash
+git -C <git_repo> diff --cached --quiet
+# If no changes, skip commit
+```
+
+**3. Commit with counts:**
+```bash
+git -C <git_repo> commit -m "backup <timestamp>: <db>=<count> ..." \
+  --author="Gas Town Daemon <daemon@gastown.local>"
+```
+
+Include failed databases in commit message so staleness is visible.
+
+**4. Push to origin:**
+```bash
+git -C <git_repo> push origin main
+```
+
+**5. Handle push failures:**
+Track consecutive failures. After {{max_push_failures}} consecutive failures,
+escalate to Mayor.
+
+**Exit criteria:** Changes committed and pushed (or no changes to commit)."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["push"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## JSONL Dog Report
+
+**Databases exported**: {{exported_count}}/{{total_count}}
+**Total records**: {{record_count}}
+**Git push**: {{push_status}}
+
+### Per Database
+{{#each db}}
+- {{name}}: {{records}} records ({{tables}} tables)
+{{/each}}
+
+### Failures
+{{#if failures}}
+{{#each failures}}
+- {{name}}: {{error}}
+{{/each}}
+{{else}}
+None
+{{/if}}
+```
+
+**2. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: jsonl" -m "Task: jsonl-git-backup
+Exported: {{exported_count}}/{{total_count}}
+Records: {{record_count}}
+Push: {{push_status}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.databases]
+description = "List of databases to export (comma-separated)"
+default = ""
+
+[vars.scrub]
+description = "Whether to filter ephemeral data from exports"
+default = "true"
+
+[vars.spike_threshold]
+description = "Maximum allowed percentage change in record counts between exports (0.0-1.0)"
+default = "0.20"
+
+[vars.max_push_failures]
+description = "Consecutive push failures before escalation"
+default = "3"
+
+[vars.exported_count]
+description = "Number of databases exported (computed during execution)"
+default = ""
+
+[vars.total_count]
+description = "Total databases attempted (computed during execution)"
+default = ""
+
+[vars.record_count]
+description = "Total records exported across all databases (computed during execution)"
+default = ""
+
+[vars.push_status]
+description = "Git push status: 'ok', 'no-changes', or 'failed' (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database name (computed during iteration)"
+default = ""
+
+[vars.records]
+description = "Records exported for a single database (computed during iteration)"
+default = ""
+
+[vars.tables]
+description = "Tables exported for a single database (computed during iteration)"
+default = ""
+
+[vars.error]
+description = "Error message for a failed export (computed during iteration)"
+default = ""

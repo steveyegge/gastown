@@ -1,0 +1,172 @@
+description = """
+Detect phantom databases in .dolt-data/ that can crash the Dolt server.
+
+A phantom database is a directory in .dolt-data/ that has a .dolt/ subdirectory
+but is missing the noms/manifest file. When Dolt auto-discovers these dirs at
+startup, the broken noms store crashes INFORMATION_SCHEMA and can take down
+the entire server. (GH#2051, gt-hs1i2)
+
+Current behavior (from doltserver.go StartServer):
+- Quarantines phantom dirs found during startup (removes them)
+- ListDatabases() skips them with a warning
+
+This molecule adds continuous monitoring: detect phantoms that appear between
+server restarts (e.g., from DROP DATABASE + branch_control re-materialization),
+and escalate before the next restart hits them.
+
+## Dog Contract
+
+This is infrastructure work. You:
+1. Scan the .dolt-data/ directory for phantom databases
+2. Report findings to Deacon
+3. Quarantine any phantoms found (remove corrupted dirs)
+4. Return to kennel
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| data_dir | config | Dolt data directory (default .dolt-data/) |
+
+## Safety
+
+Phantom database directories have NO valid data (missing noms/manifest).
+Removing them is safe and prevents server crashes. The quarantine step
+mirrors the existing startup quarantine in doltserver.go."""
+formula = "mol-dog-phantom-db"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "scan"
+title = "Scan for phantom databases"
+description = """
+Scan the .dolt-data/ directory for phantom database directories.
+
+**1. List all directories in .dolt-data/:**
+```bash
+ls -d ~/gt/.dolt-data/*/
+```
+
+**2. For each directory, check for phantom condition:**
+A phantom database has:
+- A `.dolt/` subdirectory (looks like a database)
+- But NO `noms/manifest` file (broken/corrupted)
+
+```bash
+# For each dir in .dolt-data/:
+#   if <dir>/.dolt/ exists AND <dir>/.dolt/noms/manifest does NOT exist:
+#     → phantom detected
+```
+
+**3. Record findings:**
+- Total directories scanned
+- Phantom databases found (names and paths)
+- Valid databases found
+
+**Exit criteria:** Scan complete, phantoms identified."""
+
+[[steps]]
+id = "quarantine"
+title = "Quarantine phantom databases"
+needs = ["scan"]
+description = """
+Remove phantom database directories to prevent server crashes.
+
+**1. If no phantoms found:**
+Skip this step — nothing to quarantine.
+
+**2. For each phantom database:**
+Remove the corrupted directory:
+```bash
+rm -rf ~/gt/.dolt-data/<phantom-name>
+```
+
+This is safe because:
+- The directory has no valid noms store (no manifest)
+- It contains no recoverable data
+- Leaving it would crash the server on next restart
+
+**3. Record results:**
+- Count of phantoms quarantined
+- Any errors during removal
+
+**4. Escalate if phantoms were found:**
+```bash
+gt escalate -s HIGH "Dolt: quarantined {{phantom_count}} phantom database(s): {{phantom_names}}"
+```
+
+Phantom databases indicate a Dolt bug (DROP DATABASE + catalog re-materialization)
+that should be investigated.
+
+**Exit criteria:** All phantoms quarantined (or none found)."""
+
+[[steps]]
+id = "report"
+title = "Report findings and return to kennel"
+needs = ["quarantine"]
+description = """
+Generate summary and signal completion.
+
+**1. Generate report:**
+```markdown
+## Phantom DB Dog Report
+
+**Directories scanned**: {{scan_count}}
+**Phantoms found**: {{phantom_count}}
+**Phantoms quarantined**: {{quarantined_count}}
+**Valid databases**: {{valid_count}}
+
+### Phantom Databases
+{{#if phantoms}}
+{{#each phantoms}}
+- {{name}} (quarantined)
+{{/each}}
+{{else}}
+None detected — .dolt-data/ is clean.
+{{/if}}
+```
+
+**2. Signal completion to Deacon:**
+```bash
+gt mail send deacon/ -s "DOG_DONE: phantom-db" -m "Task: phantom-db-scan
+Scanned: {{scan_count}}
+Phantoms: {{phantom_count}}
+Quarantined: {{quarantined_count}}
+Status: COMPLETE"
+```
+
+**Exit criteria:** Report sent, dog returned to kennel."""
+
+[vars]
+[vars.data_dir]
+description = "Dolt data directory path"
+default = ".dolt-data"
+
+[vars.scan_count]
+description = "Total directories scanned (computed during execution)"
+default = ""
+
+[vars.phantom_count]
+description = "Number of phantom databases detected (computed during execution)"
+default = ""
+
+[vars.quarantined_count]
+description = "Number of phantoms successfully quarantined (computed during execution)"
+default = ""
+
+[vars.valid_count]
+description = "Number of valid databases found (computed during execution)"
+default = ""
+
+[vars.phantom_names]
+description = "Comma-separated names of phantom databases (computed during execution)"
+default = ""
+
+[vars.name]
+description = "Database name (computed during iteration)"
+default = ""

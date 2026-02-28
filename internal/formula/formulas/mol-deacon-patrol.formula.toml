@@ -43,8 +43,26 @@ description = "Type of wisp created for this molecule"
 default = "patrol"
 
 [[steps]]
+id = "heartbeat"
+title = "Refresh heartbeat"
+description = """
+Signal liveness to the daemon.
+
+The daemon monitors `deacon/heartbeat.json` and kills the Deacon if it goes stale
+(>15 minutes without update). Refresh the heartbeat at the start of every patrol cycle
+so the daemon knows we are alive.
+
+```bash
+gt deacon heartbeat "starting patrol cycle"
+```
+
+This MUST run before any other step. Skipping it risks the daemon killing a healthy
+Deacon mid-cycle."""
+
+[[steps]]
 id = "inbox-check"
 title = "Handle callbacks from agents"
+needs = ["heartbeat"]
 description = """
 First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
@@ -178,20 +196,13 @@ live processes.
 
 **1. Rogue dolt servers**
 
-Any `dolt sql-server` process NOT on port 3307 (the shared server) is a leaked
-test server. Kill and log.
+Any `dolt sql-server` process that holds this workspace's configured port
+(set via `GT_DOLT_PORT`, default 3307) but uses a different data directory
+is an "imposter" — a leaked server from another workspace. Kill and log.
 
 ```bash
-# Find all dolt sql-server processes
-ps aux | grep 'dolt sql-server' | grep -v grep | while read -r line; do
-  PID=$(echo "$line" | awk '{print $2}')
-  # Check if this is the shared server (port 3307)
-  if echo "$line" | grep -q -- '--port 3307'; then
-    continue  # Skip the shared server
-  fi
-  # Kill rogue server
-  kill "$PID" 2>/dev/null && echo "Killed rogue dolt server PID=$PID"
-done
+# Use gt dolt kill-imposters which checks data-dir — safe for multi-workspace setups
+gt dolt kill-imposters 2>/dev/null || true
 ```
 
 **2. Stale test temp dirs**
@@ -265,7 +276,7 @@ Test pollution cleanup: rogue_dolt=N stale_dirs=N stale_pids=N dead_worktrees=N
 If all counts are 0, log "Test pollution cleanup: clean" and move on.
 
 **Safety:**
-- NEVER kill the shared dolt server (port 3307)
+- NEVER kill this workspace's own legitimate dolt server (checked via data-dir)
 - NEVER remove dirs where lsof shows active file handles
 - NEVER remove PID files where the PID is still alive
 - NEVER prune worktrees for dogs with live tmux sessions
@@ -313,7 +324,7 @@ The molecule state IS the waiter - patrol discovers reality each cycle.
 
 **Step 1: Find gate-ready molecules**
 ```bash
-bd mol ready --gated --json
+bd ready --gated --json
 ```
 
 This returns molecules where:
@@ -453,9 +464,20 @@ gt mail send gastown/witness -s "Dependency resolved: <bd-xxx>" \\
 Keep notifications brief and actionable. The recipient can run bd show for details."""
 
 [[steps]]
+id = "heartbeat-mid"
+title = "Mid-cycle heartbeat refresh"
+needs = ["orphan-process-cleanup", "test-pollution-cleanup", "dispatch-gated-molecules", "fire-notifications"]
+description = """
+Refresh the heartbeat mid-cycle to prevent the daemon from killing us during long patrols.
+
+```bash
+gt deacon heartbeat "mid-cycle checkpoint"
+```"""
+
+[[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["orphan-process-cleanup", "test-pollution-cleanup", "dispatch-gated-molecules", "fire-notifications"]
+needs = ["heartbeat-mid"]
 description = """
 Check Witness and Refinery health for each rig.
 
@@ -654,9 +676,8 @@ gt dog add <name>
 **Step 3: Retire stale dogs (optional)**
 Dogs that have been idle for >24 hours can be removed to save resources:
 ```bash
-gt dog status <name>
-# Check last_active timestamp
-# If idle > 24h: gt dog remove <name>
+gt dogs list --json
+# Check last_active in each entry; if idle > 24h: gt dog remove <name>
 ```
 
 **Pool sizing guidelines:**
@@ -1055,50 +1076,15 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
 
 After await-signal returns (either by signal or timeout):
-1. Generate a brief summary of this patrol cycle
-2. Squash the current wisp:
+1. Generate a brief summary of this patrol cycle's observations
+2. Close current patrol and start next cycle:
 ```bash
-gt mol squash --jitter 10s --summary "<patrol-summary>"
+gt patrol report --summary "<brief summary of patrol observations>"
 ```
-3. Create and hook a new patrol wisp:
-```bash
-NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
-bd update "$NEW_WISP" --status=hooked --assignee=deacon
-```
-4. Continue executing from the inbox-check step of the new wisp
+This closes the current patrol wisp and automatically creates a new one.
+3. Continue executing from the first step of the new patrol cycle
 
 **If context HIGH** (approaching limit):
 
-**DO NOT exit directly** - the Deacon has an auto-respawn hook that will
-immediately restart Claude, causing wisp tracking to get out of sync.
-
-Instead, request a lifecycle restart from the daemon:
-
-1. Send a LIFECYCLE restart request to the daemon:
-```bash
-gt mail send deacon/ -s "LIFECYCLE: context limit" \
-  -m '{"action": "restart"}'
-```
-
-2. The daemon will:
-   - Delete the lifecycle message (claim it)
-   - Kill the current session cleanly
-   - Restart a fresh Deacon session
-   - The new session will find no active patrol and create a fresh wisp
-
-3. Wait for the daemon to process the request:
-```bash
-# Give daemon ~10 seconds to process
-sleep 10
-```
-
-4. Exit cleanly - the daemon has already killed the session:
-```bash
-# Session will be killed by daemon, just exit
-exit
-```
-
-**IMPORTANT**: Never exit directly without sending the LIFECYCLE request first.
-The auto-respawn hook will restart Claude in the same session, causing
-patrol wisp accumulation. Always use the daemon lifecycle mechanism for
-clean session termination."""
+**IMPORTANT**: You must either report and loop (context LOW) or exit (context HIGH).
+Never leave the session idle without work on your hook."""

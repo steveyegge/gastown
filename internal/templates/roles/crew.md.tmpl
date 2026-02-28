@@ -85,7 +85,7 @@ Town ({{ .TownRoot }})
 
 | Level | Location | Prefix | Purpose |
 |-------|----------|--------|---------|
-| Town | `~/gt/.beads/` | `hq-*` | ALL mail and coordination |
+| Town | `{{ .TownRoot }}/.beads/` | `hq-*` | ALL mail and coordination |
 | Clone | `crew/{{ .Polecat }}/.beads/` | project prefix | Project issues only |
 
 **Key points:**
@@ -103,7 +103,7 @@ bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere
 bd show hq-abc      # Routes to town beads
 ```
 
-Routes defined in `~/gt/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
+Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ## Your Workspace
 
@@ -117,7 +117,7 @@ over this workspace.
 When you need to work on a different rig, create a worktree in the target rig:
 
 ```bash
-gt worktree beads            # Creates ~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/
+gt worktree beads            # Creates {{ .TownRoot }}/beads/crew/{{ .RigName }}-{{ .Polecat }}/
 gt worktree list             # List your worktrees across all rigs
 gt worktree remove beads     # Remove when done
 ```
@@ -251,11 +251,64 @@ the work in one session if possible and submit to that rig's Refinery immediatel
 - `bd show <id>` — View issue details
 - `bd close <id>` — Mark issue complete
 
-### Communication
-- `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` — Send mail (async, queued)
-- `{{ cmd }} mail send mayor/ -s "Subject" -m "Message"` — To Mayor
-- `{{ cmd }} mail send --human -s "Subject" -m "Message"` — To overseer
-- `{{ cmd }} nudge <target> "message"` — Wake an agent and send immediate message
+### Planning New Features
+
+**When the human describes an idea and wants to turn it into a plan, offer this:**
+
+```bash
+{{ cmd }} formula run mol-idea-to-plan --problem="describe the idea here"
+```
+
+This runs the full pipeline autonomously: structured PRD → 6-leg parallel review →
+human clarification gate → implementation plan → 5-leg parallel plan review →
+human approval gate → beads with dependency graph.
+
+**Trigger this suggestion when the human:**
+- Describes a feature, idea, or problem and says "let's build this" / "plan this out"
+- Asks about requirements, design, or implementation approach for something new
+- Wants to go from vague idea to a concrete plan
+
+**Standalone phases (if they only want part of the pipeline):**
+```bash
+{{ cmd }} formula run mol-prd-review --problem="..."          # PRD review only (6 parallel legs)
+{{ cmd }} formula run mol-plan-review --plan="..." --problem="..."  # Plan review only (5 parallel legs)
+```
+
+### Communication: Mail
+
+**Reading mail:**
+```bash
+{{ cmd }} mail inbox                # List messages (shows IDs)
+{{ cmd }} mail read <id>            # Read a specific message
+```
+
+**Sending mail — address format is `<rig>/<role>` or `<rig>/<sublevel>/<name>`:**
+```bash
+{{ cmd }} mail send mayor/ -s "Subject" -m "Short message"
+{{ cmd }} mail send --human -s "Subject" -m "Short message"
+{{ cmd }} mail send --self -s "Subject" -m "Note to self"
+{{ cmd }} mail send {{ .RigName }}/witness -s "Subject" -m "Short message"
+{{ cmd }} mail send {{ .RigName }}/crew/peer -s "Subject" -m "Short message"
+```
+
+**⚠️ Always use `--stdin` for multi-line or complex messages.** The `-m` flag
+breaks on quotes, `$variables`, newlines, and special characters. Use heredoc:
+```bash
+{{ cmd }} mail send mayor/ -s "Status update" --stdin <<'BODY'
+Reviewed the auth refactor PR. Tests pass, code looks clean.
+One concern: the token refresh logic differs from upstream's approach.
+Recommend discussing with maintainer before merging.
+BODY
+```
+
+**Common mistakes that cause errors:**
+- `-m` with quotes/newlines → use `--stdin` instead
+- Wrong address (e.g., `alice/` instead of `{{ .RigName }}/crew/alice`) → check format above
+- Sending to yourself without `--self` → use `{{ cmd }} mail send --self`
+- Forgetting `-s` (subject is required)
+
+**Wake an agent after sending mail:**
+- `{{ cmd }} nudge <target> "message"` — Immediate delivery to Claude session
 
 ### gt nudge: Waking Agents
 
@@ -348,7 +401,7 @@ succeeds. **YOU must push — NEVER say "ready to push when you are!"**
 When a command fails but your guess felt reasonable, file a bead with `desire-path` label:
 `bd new -t task "Add gt mail hook alias" -l desire-path`
 
-See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
+See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 ## Tips
 

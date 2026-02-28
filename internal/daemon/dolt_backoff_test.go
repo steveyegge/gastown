@@ -462,14 +462,14 @@ func TestWriteAndClearUnhealthySignal(t *testing.T) {
 	}
 
 	// Initially no signal
-	if IsDoltUnhealthy(tmpDir) {
+	if _, err := os.Stat(m.unhealthySignalFile()); err == nil {
 		t.Error("expected no unhealthy signal initially")
 	}
 
 	// Write signal
 	m.writeUnhealthySignal("server_dead", "PID 12345 is dead")
 
-	if !IsDoltUnhealthy(tmpDir) {
+	if _, err := os.Stat(m.unhealthySignalFile()); err != nil {
 		t.Error("expected unhealthy signal after write")
 	}
 
@@ -486,14 +486,17 @@ func TestWriteAndClearUnhealthySignal(t *testing.T) {
 	// Clear signal
 	m.clearUnhealthySignal()
 
-	if IsDoltUnhealthy(tmpDir) {
+	if _, err := os.Stat(m.unhealthySignalFile()); err == nil {
 		t.Error("expected no unhealthy signal after clear")
 	}
 }
 
 func TestUnhealthySignalFile_Path(t *testing.T) {
+	// Port 3307 (production) uses canonical DOLT_UNHEALTHY path
+	prodConfig := DefaultDoltServerConfig("/tmp/test-town")
+	prodConfig.Port = 3307
 	m := &DoltServerManager{
-		config:   DefaultDoltServerConfig("/tmp/test-town"),
+		config:   prodConfig,
 		townRoot: "/tmp/test-town",
 		logger:   func(format string, v ...interface{}) {},
 	}
@@ -501,6 +504,20 @@ func TestUnhealthySignalFile_Path(t *testing.T) {
 	expected := filepath.Join("/tmp", "test-town", "daemon", "DOLT_UNHEALTHY")
 	if got := m.unhealthySignalFile(); got != expected {
 		t.Errorf("expected %s, got %s", expected, got)
+	}
+
+	// Non-3307 ports get a port-suffixed path
+	testConfig := DefaultDoltServerConfig("/tmp/test-town")
+	testConfig.Port = 3308
+	m2 := &DoltServerManager{
+		config:   testConfig,
+		townRoot: "/tmp/test-town",
+		logger:   func(format string, v ...interface{}) {},
+	}
+
+	expected2 := filepath.Join("/tmp", "test-town", "daemon", "DOLT_UNHEALTHY_3308")
+	if got := m2.unhealthySignalFile(); got != expected2 {
+		t.Errorf("expected %s, got %s", expected2, got)
 	}
 }
 
@@ -1082,9 +1099,8 @@ func TestEnsureRunning_ReadOnlyWritesUnhealthySignal(t *testing.T) {
 
 	_ = m.EnsureRunning()
 
-	// Check the DOLT_UNHEALTHY signal file was written
-	signalFile := filepath.Join(m.townRoot, "daemon", "DOLT_UNHEALTHY")
-	data, err := os.ReadFile(signalFile)
+	// Check the DOLT_UNHEALTHY signal file was written (port-specific path)
+	data, err := os.ReadFile(m.unhealthySignalFile())
 	if err != nil {
 		t.Fatalf("expected DOLT_UNHEALTHY signal file: %v", err)
 	}
@@ -1137,7 +1153,7 @@ func TestEnsureRunning_HealthyAfterReadOnlyRecovery(t *testing.T) {
 	}
 
 	// Unhealthy signal should be cleared
-	if IsDoltUnhealthy(m.townRoot) {
+	if _, err := os.Stat(m.unhealthySignalFile()); err == nil {
 		t.Error("expected DOLT_UNHEALTHY signal to be cleared after recovery")
 	}
 }

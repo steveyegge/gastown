@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -378,40 +378,32 @@ func filterFormulaScaffolds(issues []*beads.Issue, formulaNames map[string]bool)
 	return filtered
 }
 
-// getWispIDs reads issues.jsonl and returns a set of IDs that are wisps.
-// Wisps are ephemeral issues (wisp: true flag) that shouldn't appear in ready work.
+// getWispIDs queries Dolt for wisp IDs that shouldn't appear in ready work.
+// Wisps are ephemeral issues (wisp/ephemeral flag) used for operational workflows.
 // This is a defense-in-depth exclusion - bd ready should already filter wisps,
 // but we double-check at the display layer to ensure operational work doesn't leak.
 func getWispIDs(beadsPath string) map[string]bool {
-	beadsDir := beads.ResolveBeadsDir(beadsPath)
-	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
-	file, err := os.Open(issuesPath)
+	cmd := exec.Command("bd", "mol", "wisp", "list", "--json")
+	cmd.Dir = beadsPath
+	output, err := cmd.Output()
 	if err != nil {
-		return nil // No issues file
-	}
-	defer file.Close()
-
-	wispIDs := make(map[string]bool)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var issue struct {
-			ID   string `json:"id"`
-			Wisp bool   `json:"wisp"`
-		}
-		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			continue
-		}
-
-		if issue.Wisp {
-			wispIDs[issue.ID] = true
-		}
+		return nil // Wisp table may not exist or Dolt unavailable
 	}
 
+	// bd mol wisp list --json returns {"wisps": [...], "count": N, ...}
+	var wrapper struct {
+		Wisps []struct {
+			ID string `json:"id"`
+		} `json:"wisps"`
+	}
+	if err := json.Unmarshal(output, &wrapper); err != nil {
+		return nil
+	}
+
+	wispIDs := make(map[string]bool, len(wrapper.Wisps))
+	for _, w := range wrapper.Wisps {
+		wispIDs[w.ID] = true
+	}
 	return wispIDs
 }
 
