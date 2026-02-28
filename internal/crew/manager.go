@@ -676,6 +676,16 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
 
+	// Sync remotes (especially pushurl) on every start so that existing crew
+	// clones pick up config changes made after initial creation.
+	if err := m.syncRemotesFromRig(worker.ClonePath); err != nil {
+		// Non-fatal for existing clones: pushurl may not be configured.
+		// Only log when a push URL is expected but sync failed.
+		if m.rig.PushURL != "" {
+			style.PrintWarning("could not sync remotes to crew %s: %v", name, err)
+		}
+	}
+
 	// Ensure runtime settings exist in the shared crew parent directory.
 	// Settings are passed to Claude Code via --settings flag.
 	townRoot := filepath.Dir(m.rig.Path)

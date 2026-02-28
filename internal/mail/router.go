@@ -1036,9 +1036,10 @@ func (r *Router) resolveCrewShorthand(identity string) string {
 
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
-	// Ensure message has an ID (callers may omit it; bd create doesn't generate one)
+	// Ensure message has an ID — we pass it explicitly via --id to bd create
+	// because the ephemeral insert path may not read the prefix from config.yaml.
 	if msg.ID == "" {
-		msg.ID = generateID()
+		msg.ID = GenerateID()
 	}
 
 	// Validate message before sending
@@ -1073,10 +1074,13 @@ func (r *Router) sendToSingle(msg *Message) error {
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
-	// Build command: bd create --assignee=<recipient> -d <body> --labels=gt:message,... -- <subject>
+	// Build command: bd create --id=<id> --assignee=<recipient> -d <body> --labels=gt:message,... -- <subject>
 	// Flags go first, then -- to end flag parsing, then the positional subject.
 	// This prevents subjects like "--help" from being parsed as flags (see web/api.go).
+	// Pass --id explicitly: the ephemeral (wisp) insert path in bd may not read the
+	// prefix from config.yaml, producing empty IDs and UNIQUE constraint failures.
 	args := []string{"create",
+		"--id", msg.ID,
 		"--assignee", toIdentity,
 		"-d", msg.Body,
 	}

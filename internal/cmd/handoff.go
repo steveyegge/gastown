@@ -1205,6 +1205,7 @@ func sendHandoffMail(subject, message string) (string, error) {
 	// This prevents subjects like "--help" from being parsed as flags.
 	args := []string{
 		"create",
+		"--id", mail.GenerateID(), // explicit ID: ephemeral path may not read prefix from config
 		"--assignee", agentID,
 		"-d", message,
 		"--priority", "1", // high — handoffs should float above normal mail

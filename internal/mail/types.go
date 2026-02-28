@@ -139,7 +139,7 @@ type Message struct {
 // NewMessage creates a new message with a generated ID and thread ID.
 func NewMessage(from, to, subject, body string) *Message {
 	return &Message{
-		ID:        generateID(),
+		ID:        GenerateID(),
 		From:      from,
 		To:        to,
 		Subject:   subject,
@@ -155,7 +155,7 @@ func NewMessage(from, to, subject, body string) *Message {
 // NewReplyMessage creates a reply message that inherits the thread from the original.
 func NewReplyMessage(from, to, subject, body string, original *Message) *Message {
 	return &Message{
-		ID:        generateID(),
+		ID:        GenerateID(),
 		From:      from,
 		To:        to,
 		Subject:   subject,
@@ -173,7 +173,7 @@ func NewReplyMessage(from, to, subject, body string, original *Message) *Message
 // Queue messages have no direct recipient - they are claimed by eligible agents.
 func NewQueueMessage(from, queue, subject, body string) *Message {
 	return &Message{
-		ID:        generateID(),
+		ID:        GenerateID(),
 		From:      from,
 		Queue:     queue,
 		Subject:   subject,
@@ -190,7 +190,7 @@ func NewQueueMessage(from, queue, subject, body string) *Message {
 // Channel messages are visible to all readers of the channel.
 func NewChannelMessage(from, channel, subject, body string) *Message {
 	return &Message{
-		ID:        generateID(),
+		ID:        GenerateID(),
 		From:      from,
 		Channel:   channel,
 		Subject:   subject,
@@ -267,9 +267,11 @@ func (m *Message) Validate() error {
 	return nil
 }
 
-// generateID creates a random message ID.
+// GenerateID creates a random message ID.
 // Falls back to time-based ID if crypto/rand fails (extremely rare).
-func generateID() string {
+// Exported so callers that bypass the mail router (e.g., handoff) can
+// pass an explicit --id to bd create, avoiding the ephemeral empty-ID bug.
+func GenerateID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback to time-based ID instead of panicking

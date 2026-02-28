@@ -699,6 +699,21 @@ func (g *Git) ListRemoteRefs(remote, prefix string) ([]string, error) {
 	return refs, nil
 }
 
+// ListPushRemoteRefs lists remote refs from the push URL when it differs from
+// the fetch URL. With a fork-based workflow (pushurl configured), branches are
+// pushed to the fork but ls-remote reads from the fetch URL (upstream). This
+// method queries the push URL so cleanup can find branches that were pushed.
+// Falls back to ListRemoteRefs if no custom push URL is configured.
+func (g *Git) ListPushRemoteRefs(remote, prefix string) ([]string, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		return g.ListRemoteRefs(remote, prefix)
+	}
+	// Query the push URL directly
+	return g.ListRemoteRefs(pushURL, prefix)
+}
+
 // Rebase rebases the current branch onto the given ref.
 func (g *Git) Rebase(onto string) error {
 	_, err := g.run("rebase", onto)

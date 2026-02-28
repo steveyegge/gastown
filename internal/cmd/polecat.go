@@ -1610,7 +1610,7 @@ func runPolecatPrune(cmd *cobra.Command, args []string) error {
 		fmt.Println("Pruning remote polecat branches...")
 
 		defaultBranch := repoGit.RemoteDefaultBranch()
-		remoteRefs, lsErr := repoGit.ListRemoteRefs("origin", "refs/heads/polecat/")
+		remoteRefs, lsErr := repoGit.ListPushRemoteRefs("origin", "refs/heads/polecat/")
 		if lsErr != nil {
 			return fmt.Errorf("listing remote refs: %w", lsErr)
 		}
