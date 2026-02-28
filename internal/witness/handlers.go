@@ -1016,7 +1016,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 		doneIntent := extractDoneIntent(labels)
 
 		if sessionAlive {
-			if zombie, found := detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent, router); found {
+			if zombie, found := detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName, t, doneIntent); found {
 				result.Zombies = append(result.Zombies, zombie)
 			}
 
@@ -1102,7 +1102,7 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 //
 // gt-dsgp: Uses restart-first policy. Instead of nuking polecats, restarts their
 // sessions to preserve worktrees and branches.
-func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent, router *mail.Router) (ZombieResult, bool) {
+func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, sessionName string, t *tmux.Tmux, doneIntent *DoneIntent) (ZombieResult, bool) {
 	// Check for done-intent stuck too long (polecat hung in gt done).
 	// gt-dsgp: Restart instead of nuke — the session is stuck trying to exit,
 	// a fresh start will let it retry or pick up its hook cleanly.
@@ -1497,11 +1497,12 @@ func getBeadStatus(workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 1. Records the respawn in the witness spawn-count ledger
-// 2. Resets status to open
-// 3. Clears assignee
-// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
-//    prefix and Urgent priority when count exceeds defaultMaxBeadRespawns)
+//  1. Records the respawn in the witness spawn-count ledger
+//  2. Resets status to open
+//  3. Clears assignee
+//  4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//     prefix and Urgent priority when count exceeds defaultMaxBeadRespawns)
+//
 // Returns true if the bead was recovered.
 func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
 	if hookBead == "" {
