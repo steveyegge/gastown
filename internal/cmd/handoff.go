@@ -824,7 +824,15 @@ func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpt
 	// Note: runtimeCmd starts with the command name (e.g., "claude --settings ..."),
 	// not "exec claude" — the "exec" prefix is added later in the Sprintf.
 	if opts.ContinueSession {
-		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
+		// Look up the current agent's preset to get its ContinueFlag.
+		// Fall back to DefaultAgentPreset if no explicit agent is set.
+		agentName := currentAgent
+		if agentName == "" {
+			agentName = string(config.DefaultAgentPreset())
+		}
+		if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.ContinueFlag != "" {
+			runtimeCmd = strings.Replace(runtimeCmd, preset.Command+" ", preset.Command+" "+preset.ContinueFlag+" ", 1)
+		}
 	}
 
 	// Build environment exports - role vars first, then Claude vars

@@ -314,6 +314,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ProcessNames:        []string{"copilot"}, // Copilot CLI binary (Node.js but reports as "copilot")
 		SessionIDEnv:        "",                   // Session IDs stored on disk, not in env
 		ResumeFlag:          "--resume",
+		ContinueFlag:        "--continue",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true, // Copilot CLI native lifecycle hooks (.github/hooks/gastown.json)
 		SupportsForkSession: false,
