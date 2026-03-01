@@ -246,7 +246,7 @@ func (e *Engineer) ProcessBatch(ctx context.Context, batch []*MRInfo, target str
 		_, _ = fmt.Fprintln(e.output, "[Batch] Gates failed, retrying full batch (flaky test check)...")
 
 		// Rebuild the stack from scratch for a clean retry
-		if resetErr := e.resetAndRebuildStack(ctx, stacked, target); resetErr != nil {
+		if resetErr := e.resetAndRebuildStack(stacked, target); resetErr != nil {
 			result.Error = fmt.Errorf("rebuild for retry: %w", resetErr)
 			return result
 		}
@@ -268,7 +268,7 @@ func (e *Engineer) ProcessBatch(ctx context.Context, batch []*MRInfo, target str
 	// Step 6: If we found good MRs, merge them
 	if len(good) > 0 {
 		_, _ = fmt.Fprintf(e.output, "[Batch] Merging %d good MRs after bisection\n", len(good))
-		if resetErr := e.resetAndRebuildStack(ctx, good, target); resetErr != nil {
+		if resetErr := e.resetAndRebuildStack(good, target); resetErr != nil {
 			result.Error = fmt.Errorf("rebuild good MRs: %w", resetErr)
 			return result
 		}
@@ -407,7 +407,7 @@ func (e *Engineer) bisectBatch(ctx context.Context, batch []*MRInfo, target stri
 	_, _ = fmt.Fprintf(e.output, "[Bisect] Testing left half (%d MRs)...\n", len(left))
 
 	// Test the left half
-	if resetErr := e.resetAndRebuildStack(ctx, left, target); resetErr != nil {
+	if resetErr := e.resetAndRebuildStack(left, target); resetErr != nil {
 		_, _ = fmt.Fprintf(e.output, "[Bisect] Error rebuilding left half: %v, treating all as culprits\n", resetErr)
 		return nil, batch
 	}
@@ -419,7 +419,7 @@ func (e *Engineer) bisectBatch(ctx context.Context, batch []*MRInfo, target stri
 		_, _ = fmt.Fprintf(e.output, "[Bisect] Left half passed, bisecting right half (%d MRs)...\n", len(right))
 
 		// Test right half in context of left (cumulative)
-		if resetErr := e.resetAndRebuildStack(ctx, batch, target); resetErr != nil {
+		if resetErr := e.resetAndRebuildStack(batch, target); resetErr != nil {
 			_, _ = fmt.Fprintf(e.output, "[Bisect] Error rebuilding full stack: %v\n", resetErr)
 			return left, right // Assume left good, right bad
 		}
@@ -437,7 +437,7 @@ func (e *Engineer) bisectBatch(ctx context.Context, batch []*MRInfo, target stri
 	// Test right half in context of leftGood
 	if len(leftGood) > 0 {
 		combined := append(leftGood, right...)
-		if resetErr := e.resetAndRebuildStack(ctx, combined, target); resetErr != nil {
+		if resetErr := e.resetAndRebuildStack(combined, target); resetErr != nil {
 			_, _ = fmt.Fprintf(e.output, "[Bisect] Error testing right with good left: %v\n", resetErr)
 			return leftGood, append(leftCulprits, right...)
 		}
@@ -451,7 +451,7 @@ func (e *Engineer) bisectBatch(ctx context.Context, batch []*MRInfo, target stri
 	}
 
 	// No good MRs in left half, test right half alone
-	if resetErr := e.resetAndRebuildStack(ctx, right, target); resetErr != nil {
+	if resetErr := e.resetAndRebuildStack(right, target); resetErr != nil {
 		return nil, batch
 	}
 	rightResult := e.runBatchGates(ctx)
@@ -476,7 +476,7 @@ func (e *Engineer) bisectRight(ctx context.Context, knownGood []*MRInfo, right [
 
 	// Test knownGood + rLeft
 	testBatch := append(append([]*MRInfo{}, knownGood...), rLeft...)
-	if resetErr := e.resetAndRebuildStack(ctx, testBatch, target); resetErr != nil {
+	if resetErr := e.resetAndRebuildStack(testBatch, target); resetErr != nil {
 		_, _ = fmt.Fprintf(e.output, "[Bisect] Error rebuilding for right bisection: %v\n", resetErr)
 		return nil, right
 	}
@@ -498,7 +498,7 @@ func (e *Engineer) bisectRight(ctx context.Context, knownGood []*MRInfo, right [
 	// Test rRight with knownGood + rLeftGood
 	_, _ = fmt.Fprintf(e.output, "[Bisect-R] Testing rRight=%v with knownGood+rLeftGood=%v\n", mrIDs(rRight), mrIDs(append(append([]*MRInfo{}, knownGood...), rLeftGood...)))
 	testBatch2 := append(append(append([]*MRInfo{}, knownGood...), rLeftGood...), rRight...)
-	if resetErr := e.resetAndRebuildStack(ctx, testBatch2, target); resetErr != nil {
+	if resetErr := e.resetAndRebuildStack(testBatch2, target); resetErr != nil {
 		return rLeftGood, append(rLeftCulprits, rRight...)
 	}
 	result2 := e.runBatchGates(ctx)
@@ -520,7 +520,7 @@ func mrIDs(mrs []*MRInfo) []string {
 }
 
 // resetAndRebuildStack resets the target branch and rebuilds the squash-merge stack.
-func (e *Engineer) resetAndRebuildStack(ctx context.Context, mrs []*MRInfo, target string) error {
+func (e *Engineer) resetAndRebuildStack(mrs []*MRInfo, target string) error {
 	// Reset target to origin
 	if err := e.git.Checkout(target); err != nil {
 		return fmt.Errorf("checkout %s: %w", target, err)

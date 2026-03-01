@@ -340,6 +340,7 @@ func rebaseCleanup(db *sql.DB, baseBranch, workBranch string) {
 }
 
 // rebaseAbortAndCleanup aborts an in-progress rebase then cleans up branches.
+//nolint:unparam // baseBranch always "compact-base" — API kept flexible for future callers
 func rebaseAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -350,6 +351,7 @@ func rebaseAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
 }
 
 // rebaseCleanupAll cleans up both branches after a failed rebase.
+//nolint:unparam // baseBranch always "compact-base" — API kept flexible for future callers
 func rebaseCleanupAll(db *sql.DB, baseBranch, workBranch string) {
 	rebaseCleanup(db, baseBranch, workBranch)
 }

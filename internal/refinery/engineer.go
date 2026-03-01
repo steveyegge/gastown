@@ -1361,7 +1361,7 @@ func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
 		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
 	}
 
-	return detectQueueAnomalies(issues, now, e.config.StaleClaimWarningAfter, e.config.StaleClaimCriticalAfter, func(branch string) (bool, bool, error) {
+	return detectQueueAnomalies(issues, now, e.config.StaleClaimWarningAfter, func(branch string) (bool, bool, error) {
 		localExists, err := e.git.BranchExists(branch)
 		if err != nil {
 			return false, false, err
@@ -1377,7 +1377,7 @@ func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
 func detectQueueAnomalies(
 	issues []*beads.Issue,
 	now time.Time,
-	warningAfter, criticalAfter time.Duration,
+	warningAfter time.Duration,
 	branchExistsFn func(branch string) (localExists bool, remoteTrackingExists bool, err error),
 ) []*MRAnomaly {
 	var anomalies []*MRAnomaly

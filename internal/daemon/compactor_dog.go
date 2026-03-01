@@ -484,6 +484,7 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 }
 
 // surgicalCleanup switches back to main and removes rebase branches.
+//nolint:unparam // baseBranch always "compact-base" — API kept flexible for future callers
 func (d *Daemon) surgicalCleanup(db *sql.DB, baseBranch, workBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
 	defer cancel()

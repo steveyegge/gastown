@@ -16,6 +16,7 @@ import (
 // which guards against PID reuse without fragile ps command-line matching.
 
 // writePIDFile writes a PID file with a unique nonce for ownership verification.
+//nolint:unparam // nonce return value is used by tests (excluded from lint)
 // Returns the nonce written, which is only needed for testing.
 func writePIDFile(path string, pid int) (string, error) {
 	nonce, err := generateNonce()

@@ -347,25 +347,34 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 // to already be enabled on the session. Checks the exit status after a brief delay.
 // Only returns an error for non-zero exits (command failures), not clean exits (status 0).
 func (t *Tmux) checkSessionAfterCreate(name, command string) error {
-	// Brief delay for immediate failures to manifest (binary not found, syntax errors).
-	time.Sleep(50 * time.Millisecond)
-
-	// Check if pane died
-	paneDead, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead}")
-	if strings.TrimSpace(paneDead) == "1" {
-		// Pane is dead — check exit status
+	checkPaneDead := func() (bool, error) {
+		paneDead, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead}")
+		if strings.TrimSpace(paneDead) != "1" {
+			return false, nil
+		}
 		exitStatus, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead_status}")
 		status := strings.TrimSpace(exitStatus)
 		if status != "" && status != "0" {
-			// Command failed (non-zero exit) — clean up and return error
 			_ = t.KillSession(name)
-			return fmt.Errorf("session %q: command exited with status %s: %s", name, status, command)
+			return true, fmt.Errorf("session %q: command exited with status %s: %s", name, status, command)
 		}
-		// Command exited cleanly (status 0) — clean up the dead session.
-		// This matches the default tmux behavior (no remain-on-exit) where
-		// sessions are destroyed when the pane process exits.
 		_ = t.KillSession(name)
-		return nil
+		return true, nil
+	}
+
+	// First check at 50ms: catches fast failures on lightly-loaded runners.
+	time.Sleep(50 * time.Millisecond)
+	if dead, err := checkPaneDead(); dead {
+		return err
+	}
+
+	// Second check at 250ms: catches exec failures on loaded CI runners where
+	// process startup takes longer than 50ms. This is the fix for CI getting
+	// false negatives on TestNewSessionWithCommand_ExecEnvBadBinary. Normal
+	// long-lived sessions (Claude, shell) will still be alive here and return nil.
+	time.Sleep(200 * time.Millisecond)
+	if dead, err := checkPaneDead(); dead {
+		return err
 	}
 
 	// Pane is alive — restore default (no need to keep dead sessions around)

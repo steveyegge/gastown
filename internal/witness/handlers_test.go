@@ -1550,7 +1550,7 @@ func TestProcessDiscoveredCompletion_PhaseComplete(t *testing.T) {
 		Exit:        "PHASE_COMPLETE",
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion("/tmp", "testrig", payload, nil, discovery)
+	processDiscoveredCompletion("/tmp", "testrig", payload, discovery)
 	if discovery.Action != "phase-complete" {
 		t.Errorf("Action = %q, want %q", discovery.Action, "phase-complete")
 	}
@@ -1564,7 +1564,7 @@ func TestProcessDiscoveredCompletion_NoMR(t *testing.T) {
 		MRFailed:    true, // Prevents fallback MR lookup
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion("/tmp", "testrig", payload, nil, discovery)
+	processDiscoveredCompletion("/tmp", "testrig", payload, discovery)
 	if !strings.Contains(discovery.Action, "acknowledged-idle") {
 		t.Errorf("Action = %q, want to contain %q", discovery.Action, "acknowledged-idle")
 	}
@@ -1577,7 +1577,7 @@ func TestProcessDiscoveredCompletion_EscalatedNoMR(t *testing.T) {
 		Exit:        "ESCALATED",
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion("/tmp", "testrig", payload, nil, discovery)
+	processDiscoveredCompletion("/tmp", "testrig", payload, discovery)
 	if !strings.Contains(discovery.Action, "acknowledged-idle") {
 		t.Errorf("Action = %q, want to contain %q for ESCALATED exit", discovery.Action, "acknowledged-idle")
 	}
