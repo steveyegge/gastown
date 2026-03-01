@@ -1783,7 +1783,7 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	// If gt sling crashed during spawn, the polecat would be stuck in 'spawning'
 	// indefinitely. The Witness patrol also catches spawning-as-zombie, but a
 	// time-bound here makes the daemon self-sufficient for this edge case.
-	if info.State == "spawning" {
+	if beads.AgentState(info.State) == beads.AgentStateSpawning {
 		if updatedAt, err := time.Parse(time.RFC3339, info.LastUpdate); err == nil {
 			if time.Since(updatedAt) < 5*time.Minute {
 				d.logger.Printf("Skipping restart for %s/%s: agent_state=spawning (gt sling in progress, updated %s ago)",

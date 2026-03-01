@@ -858,16 +858,51 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	return false, nil
 }
 
+// ZombieClassification categorizes why a polecat was classified as a zombie.
+// These are distinct from AgentState — they describe the zombie detection
+// reason, not the agent's lifecycle state. See gt-tsut.
+type ZombieClassification string
+
+const (
+	// ZombieStuckInDone: polecat hung in gt done (>60s with done-intent label).
+	ZombieStuckInDone ZombieClassification = "stuck-in-done"
+	// ZombieAgentDeadInSession: tmux session alive but agent process died.
+	ZombieAgentDeadInSession ZombieClassification = "agent-dead-in-session"
+	// ZombieBeadClosedStillRunning: agent alive but hooked bead already closed.
+	ZombieBeadClosedStillRunning ZombieClassification = "bead-closed-still-running"
+	// ZombieDoneIntentDead: session died while executing gt done.
+	ZombieDoneIntentDead ZombieClassification = "done-intent-dead"
+	// ZombieIdleDirtySandbox: idle polecat with uncommitted changes.
+	ZombieIdleDirtySandbox ZombieClassification = "idle-dirty-sandbox"
+	// ZombieSessionDeadActive: session dead but agent state indicates active work.
+	ZombieSessionDeadActive ZombieClassification = "session-dead-active"
+)
+
+// ImpliesActiveWork returns true if this classification indicates the polecat
+// had evidence of recent work (active state or hooked bead). Used by
+// receiptVerdictForZombie to derive patrol verdicts from the typed classification
+// rather than a separately-computed boolean. See gt-tsut.
+func (c ZombieClassification) ImpliesActiveWork() bool {
+	switch c {
+	case ZombieStuckInDone, ZombieAgentDeadInSession, ZombieBeadClosedStillRunning,
+		ZombieDoneIntentDead, ZombieSessionDeadActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // ZombieResult describes a detected zombie polecat and the action taken.
 type ZombieResult struct {
-	PolecatName   string
-	AgentState    string
-	HookBead      string
-	CleanupStatus string // Observed cleanup_status (ZFC: report data, agent decides policy)
-	WasActive     bool   // true if evidence of recent work (active state or hooked bead)
-	Action        string // "restarted", "escalated", "cleanup-wisp-created", "auto-nuked" (explicit nuke only)
-	BeadRecovered bool   // true if hooked bead was reset to open for re-dispatch
-	Error         error
+	PolecatName    string
+	AgentState     string               // Real agent state from DB (e.g., "working", "idle")
+	Classification ZombieClassification // Why this polecat is classified as a zombie (gt-tsut)
+	HookBead       string
+	CleanupStatus  string // Observed cleanup_status (ZFC: report data, agent decides policy)
+	WasActive      bool   // true if evidence of recent work (active state or hooked bead)
+	Action         string // "restarted", "escalated", "cleanup-wisp-created", "auto-nuked" (explicit nuke only)
+	BeadRecovered  bool   // true if hooked bead was reset to open for re-dispatch
+	Error          error
 }
 
 // DetectZombiePolecatsResult contains the results of a zombie detection sweep.
@@ -952,17 +987,18 @@ func DetectZombiePolecats(workDir, rigName string, router *mail.Router) *DetectZ
 			// for reuse. Skip them entirely during patrol. Only report if the
 			// sandbox is dirty (uncommitted changes in idle state).
 			agentState, _ := getAgentBeadState(workDir, agentBeadID)
-			if agentState == string(AgentStateIdle) {
+			if beads.AgentState(agentState) == AgentStateIdle {
 				cleanupStatus := getCleanupStatus(workDir, rigName, polecatName)
 				if cleanupStatus == "dirty" {
 					// ZFC (gt-5rne): Report data, don't escalate. The witness agent
 					// decides whether dirty idle state warrants escalation.
 					zombie := ZombieResult{
-						PolecatName:   polecatName,
-						AgentState:    "idle-dirty-sandbox",
-						CleanupStatus: cleanupStatus,
-						WasActive:     false,
-						Action:        "detected-dirty-idle-polecat",
+						PolecatName:    polecatName,
+						AgentState:     agentState,
+						Classification: ZombieIdleDirtySandbox,
+						CleanupStatus:  cleanupStatus,
+						WasActive:      false,
+						Action:         "detected-dirty-idle-polecat",
 					}
 					result.Zombies = append(result.Zombies, zombie)
 				}
@@ -994,13 +1030,14 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 	// gt-dsgp: Restart instead of nuke — the session is stuck trying to exit,
 	// a fresh start will let it retry or pick up its hook cleanly.
 	if doneIntent != nil && time.Since(doneIntent.Timestamp) > 60*time.Second {
-		_, stuckHookBead := getAgentBeadState(workDir, agentBeadID)
+		stuckAgentState, stuckHookBead := getAgentBeadState(workDir, agentBeadID)
 		zombie := ZombieResult{
-			PolecatName: polecatName,
-			AgentState:  "stuck-in-done",
-			HookBead:    stuckHookBead,
-			WasActive:   true,
-			Action:      fmt.Sprintf("restarted-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
+			PolecatName:    polecatName,
+			AgentState:     stuckAgentState,
+			Classification: ZombieStuckInDone,
+			HookBead:       stuckHookBead,
+			WasActive:      true,
+			Action:         fmt.Sprintf("restarted-stuck-session (done-intent age=%v)", time.Since(doneIntent.Timestamp).Round(time.Second)),
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
@@ -1012,13 +1049,14 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 	// Tmux alive but agent process dead (gt-kj6r6).
 	// gt-dsgp: Restart instead of nuke — preserve worktree and branch.
 	if !t.IsAgentAlive(sessionName) {
-		_, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
+		deadAgentState, deadAgentHookBead := getAgentBeadState(workDir, agentBeadID)
 		zombie := ZombieResult{
-			PolecatName: polecatName,
-			AgentState:  "agent-dead-in-session",
-			HookBead:    deadAgentHookBead,
-			WasActive:   true,
-			Action:      "restarted-agent-dead-session",
+			PolecatName:    polecatName,
+			AgentState:     deadAgentState,
+			Classification: ZombieAgentDeadInSession,
+			HookBead:       deadAgentHookBead,
+			WasActive:      true,
+			Action:         "restarted-agent-dead-session",
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
@@ -1030,14 +1068,15 @@ func detectZombieLiveSession(workDir, rigName, polecatName, agentBeadID, session
 	// Agent alive but hooked bead closed — occupying slot without work (gt-h1l6i).
 	// gt-dsgp: Restart instead of nuke — the fresh session will pick up its hook
 	// and run gt done properly, or go idle waiting for new work.
-	_, hookBead := getAgentBeadState(workDir, agentBeadID)
+	closedCheckState, hookBead := getAgentBeadState(workDir, agentBeadID)
 	if hookBead != "" && getBeadStatus(workDir, hookBead) == "closed" {
 		zombie := ZombieResult{
-			PolecatName: polecatName,
-			AgentState:  "bead-closed-still-running",
-			HookBead:    hookBead,
-			WasActive:   true,
-			Action:      "restarted-bead-closed-polecat",
+			PolecatName:    polecatName,
+			AgentState:     closedCheckState,
+			Classification: ZombieBeadClosedStillRunning,
+			HookBead:       hookBead,
+			WasActive:      true,
+			Action:         "restarted-bead-closed-polecat",
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
@@ -1061,7 +1100,7 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 		if age < 30*time.Second {
 			return ZombieResult{}, false // Recent — still working through gt done
 		}
-		_, diHookBead := getAgentBeadState(workDir, agentBeadID)
+		diAgentState, diHookBead := getAgentBeadState(workDir, agentBeadID)
 
 		// If bead is already closed, the polecat completed successfully.
 		// The dead session is expected (gt done kills it). Leave it alone. (gt-sy8)
@@ -1083,11 +1122,12 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 		// gt-dsgp: Restart instead of nuke — the session died during gt done,
 		// restart it so it can retry the exit sequence or pick up new work.
 		zombie := ZombieResult{
-			PolecatName: polecatName,
-			AgentState:  "done-intent-dead",
-			HookBead:    diHookBead,
-			WasActive:   true,
-			Action:      fmt.Sprintf("restarted (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
+			PolecatName:    polecatName,
+			AgentState:     diAgentState,
+			Classification: ZombieDoneIntentDead,
+			HookBead:       diHookBead,
+			WasActive:      true,
+			Action:         fmt.Sprintf("restarted (done-intent age=%v, type=%s)", age.Round(time.Second), doneIntent.ExitType),
 		}
 		if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
 			zombie.Error = err
@@ -1098,7 +1138,8 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 
 	// Standard zombie detection: active state or hooked bead with dead session.
 	agentState, hookBead := getAgentBeadState(workDir, agentBeadID)
-	if !isZombieState(agentState, hookBead) {
+	typedState := beads.AgentState(agentState)
+	if !isZombieState(typedState, hookBead) {
 		return ZombieResult{}, false
 	}
 
@@ -1116,10 +1157,11 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 	}
 
 	zombie := ZombieResult{
-		PolecatName: polecatName,
-		AgentState:  agentState,
-		HookBead:    hookBead,
-		WasActive:   hookBead != "" || beads.AgentState(agentState).IsActive(),
+		PolecatName:    polecatName,
+		AgentState:     agentState,
+		Classification: ZombieSessionDeadActive,
+		HookBead:       hookBead,
+		WasActive:      hookBead != "" || typedState.IsActive(),
 	}
 
 	// gt-dsgp: Restart instead of nuking. For dirty state, escalate AND restart.
@@ -1129,11 +1171,13 @@ func detectZombieDeadSession(workDir, rigName, polecatName, agentBeadID, session
 }
 
 // isZombieState returns true if the agent state or hook bead indicates a zombie.
-func isZombieState(agentState, hookBead string) bool {
+// Uses typed AgentState to leverage IsActive() metadata rather than hardcoded
+// string comparisons. See gt-tsut.
+func isZombieState(agentState beads.AgentState, hookBead string) bool {
 	if hookBead != "" {
 		return true
 	}
-	return beads.AgentState(agentState).IsActive()
+	return agentState.IsActive()
 }
 
 // handleZombieRestart determines the restart action for a confirmed zombie (gt-dsgp).
