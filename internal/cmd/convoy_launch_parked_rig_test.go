@@ -9,9 +9,9 @@ import (
 	"github.com/steveyegge/gastown/internal/wisp"
 )
 
-// TestCheckParkedRigsForLaunch_NoParkedRigs verifies that checkParkedRigsForLaunch
+// TestCheckBlockedRigsForLaunch_NoParkedRigs verifies that checkBlockedRigsForLaunch
 // returns nil when no rigs are parked.
-func TestCheckParkedRigsForLaunch_NoParkedRigs(t *testing.T) {
+func TestCheckBlockedRigsForLaunch_NoParkedRigs(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -22,15 +22,15 @@ func TestCheckParkedRigsForLaunch_NoParkedRigs(t *testing.T) {
 		"gt-b": {ID: "gt-b", Type: "task", Rig: "beads"},
 	}}
 
-	err := checkParkedRigsForLaunch(dag, townRoot, false)
+	err := checkBlockedRigsForLaunch(dag, townRoot, false)
 	if err != nil {
 		t.Fatalf("expected no error when no rigs are parked, got: %v", err)
 	}
 }
 
-// TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce verifies that
-// checkParkedRigsForLaunch returns an error when a rig is parked and force is false.
-func TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
+// TestCheckBlockedRigsForLaunch_ParkedRig_BlocksWithoutForce verifies that
+// checkBlockedRigsForLaunch returns an error when a rig is parked and force is false.
+func TestCheckBlockedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -56,7 +56,7 @@ func TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
 		"gt-b": {ID: "gt-b", Type: "task", Rig: "gastown"},
 	}}
 
-	err := checkParkedRigsForLaunch(dag, townRoot, false)
+	err := checkBlockedRigsForLaunch(dag, townRoot, false)
 	if err == nil {
 		t.Fatal("expected error when rig is parked without force, got nil")
 	}
@@ -68,9 +68,9 @@ func TestCheckParkedRigsForLaunch_ParkedRig_BlocksWithoutForce(t *testing.T) {
 	}
 }
 
-// TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce verifies that
-// checkParkedRigsForLaunch allows proceeding when a rig is parked but force is true.
-func TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
+// TestCheckBlockedRigsForLaunch_ParkedRig_AllowedWithForce verifies that
+// checkBlockedRigsForLaunch allows proceeding when a rig is parked but force is true.
+func TestCheckBlockedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -96,15 +96,15 @@ func TestCheckParkedRigsForLaunch_ParkedRig_AllowedWithForce(t *testing.T) {
 		"gt-b": {ID: "gt-b", Type: "task", Rig: "gastown"},
 	}}
 
-	err := checkParkedRigsForLaunch(dag, townRoot, true)
+	err := checkBlockedRigsForLaunch(dag, townRoot, true)
 	if err != nil {
 		t.Fatalf("expected no error when force=true, got: %v", err)
 	}
 }
 
-// TestCollectParkedRigsInDAG verifies that collectParkedRigsInDAG correctly
+// TestCollectBlockedRigsInDAG verifies that collectBlockedRigsInDAG correctly
 // identifies beads targeting parked rigs.
-func TestCollectParkedRigsInDAG(t *testing.T) {
+func TestCollectBlockedRigsInDAG(t *testing.T) {
 	townRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
 		t.Fatalf("failed to create .beads: %v", err)
@@ -132,7 +132,7 @@ func TestCollectParkedRigsInDAG(t *testing.T) {
 		"epic-1": {ID: "epic-1", Type: "epic", Rig: parkedRig}, // epics should be ignored
 	}}
 
-	result := collectParkedRigsInDAG(dag, townRoot)
+	result := collectBlockedRigsInDAG(dag, townRoot)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 parked rig, got %d: %v", len(result), result)

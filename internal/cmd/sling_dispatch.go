@@ -91,6 +91,16 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		}
 	}
 
+	// Acquire per-bead flock to prevent concurrent dispatch races (TOCTOU).
+	// The CLI path (runSling) has its own flock; this closes the gap where
+	// batch sling and queue dispatch could race against each other or against
+	// a concurrent CLI invocation.
+	releaseLock, err := tryAcquireSlingBeadLock(townRoot, params.BeadID)
+	if err != nil {
+		return &SlingResult{BeadID: params.BeadID, ErrMsg: err.Error()}, err
+	}
+	defer releaseLock()
+
 	beadsDir := params.BeadsDir
 	if beadsDir == "" {
 		beadsDir = filepath.Join(townRoot, ".beads")
@@ -100,10 +110,16 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		BeadID: params.BeadID,
 	}
 
-	// 0. Check if rig is parked before dispatching (gt-4owfd.1)
-	if params.RigName != "" && IsRigParked(townRoot, params.RigName) {
-		result.ErrMsg = "rig parked"
-		return result, fmt.Errorf("cannot sling to parked rig %q\nUnpark with: gt rig unpark %s", params.RigName, params.RigName)
+	// 0. Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
+	if params.RigName != "" {
+		if blocked, reason := IsRigParkedOrDocked(townRoot, params.RigName); blocked {
+			result.ErrMsg = "rig " + reason
+			undoCmd := "gt rig unpark"
+			if reason == "docked" {
+				undoCmd = "gt rig undock"
+			}
+			return result, fmt.Errorf("cannot sling to %s rig %q\n%s %s", reason, params.RigName, undoCmd, params.RigName)
+		}
 	}
 
 	// 1. Get bead info + status check
@@ -221,10 +237,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	hookWorkDir := spawnInfo.ClonePath
 
 	// 4. Auto-convoy (if !NoConvoy)
+	convoyID := ""
 	if !params.NoConvoy {
 		existingConvoy := isTrackedByConvoy(params.BeadID)
 		if existingConvoy == "" {
-			convoyID, err := createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge)
+			var err error
+			convoyID, err = createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge)
 			if err != nil {
 				fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {
@@ -242,7 +260,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		if err := CookFormula(params.FormulaName, workDir, townRoot); err != nil {
 			if params.FormulaFailFatal {
 				// Rollback spawned polecat on fatal cook failure
-				rollbackSlingArtifactsFn(spawnInfo, params.BeadID, hookWorkDir)
+				rollbackSlingArtifactsFn(spawnInfo, params.BeadID, hookWorkDir, convoyID)
 				result.ErrMsg = fmt.Sprintf("cook failed: %v", err)
 				return result, fmt.Errorf("cooking formula %s: %w", params.FormulaName, err)
 			}
@@ -267,7 +285,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		if err != nil {
 			if params.FormulaFailFatal {
 				// Rollback spawned polecat on fatal formula failure
-				rollbackSlingArtifactsFn(spawnInfo, params.BeadID, hookWorkDir)
+				rollbackSlingArtifactsFn(spawnInfo, params.BeadID, hookWorkDir, convoyID)
 				result.ErrMsg = fmt.Sprintf("formula failed: %v", err)
 				return result, fmt.Errorf("instantiating formula %s: %w", params.FormulaName, err)
 			}
@@ -286,7 +304,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	hookDir := beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 	if err := hookBeadWithRetry(beadToHook, targetAgent, hookDir); err != nil {
 		// Clean up orphaned polecat to avoid leaving spawned-but-unhookable polecats
-		cleanupSpawnedPolecat(spawnInfo, params.RigName)
+		cleanupSpawnedPolecat(spawnInfo, params.RigName, convoyID)
 		result.ErrMsg = "hook failed"
 		return result, fmt.Errorf("failed to hook bead: %w", err)
 	}
@@ -323,7 +341,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	pane, err := spawnInfo.StartSession()
 	if err != nil {
 		fmt.Printf("  %s Could not start session: %v, cleaning up partial state...\n", style.Dim.Render("✗"), err)
-		rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir)
+		rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir, convoyID)
 		result.ErrMsg = fmt.Sprintf("session failed: %v", err)
 		return result, fmt.Errorf("starting polecat session: %w", err)
 	}

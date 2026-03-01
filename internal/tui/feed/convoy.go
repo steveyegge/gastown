@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -232,10 +233,11 @@ func renderConvoyLine(c Convoy, landed bool) string {
 	// Format: "  hq-xyz  Title       2/4 ●●○○" or "  hq-xyz  Title       ✓ 2h ago"
 	id := ConvoyIDStyle.Render(c.ID)
 
-	// Truncate title if too long
+	// Truncate title if too long (rune-safe to avoid splitting multi-byte UTF-8)
 	title := c.Title
-	if len(title) > 20 {
-		title = title[:17] + "..."
+	if utf8.RuneCountInString(title) > 20 {
+		runes := []rune(title)
+		title = string(runes[:17]) + "..."
 	}
 	title = ConvoyNameStyle.Render(title)
 

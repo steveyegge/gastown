@@ -18,9 +18,9 @@ func testRegistry() *PrefixRegistry {
 func TestParseSessionName(t *testing.T) {
 	reg := testRegistry()
 	// Also set as default for ParseSessionName (no-registry variant)
-	old := defaultRegistry
-	defaultRegistry = reg
-	defer func() { defaultRegistry = old }()
+	old := DefaultRegistry()
+	SetDefaultRegistry(reg)
+	defer func() { SetDefaultRegistry(old) }()
 
 	tests := []struct {
 		name       string
@@ -303,9 +303,9 @@ func TestAgentIdentity_Address(t *testing.T) {
 
 func TestParseSessionName_RoundTrip(t *testing.T) {
 	reg := testRegistry()
-	old := defaultRegistry
-	defaultRegistry = reg
-	defer func() { defaultRegistry = old }()
+	old := DefaultRegistry()
+	SetDefaultRegistry(reg)
+	defer func() { SetDefaultRegistry(old) }()
 
 	// Test that parsing then reconstructing gives the same result
 	sessions := []string{

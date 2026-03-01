@@ -143,6 +143,57 @@ func TestWrapError(t *testing.T) {
 	}
 }
 
+// TestNormalizeBugTitle tests title normalization for duplicate detection.
+func TestNormalizeBugTitle(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool // should they match?
+	}{
+		// Exact match after normalization
+		{"test_foo fails", "test_foo fails", true},
+		{"Test_foo Fails", "test_foo fails", true},
+		{" test_foo fails ", "test_foo fails", true},
+
+		// Common prefix stripping
+		{"Pre-existing failure: test_foo fails", "test_foo fails", true},
+		{"Pre-existing failure: test_foo fails", "Pre-existing: test_foo fails", true},
+		{"Test failure: test_foo fails", "test_foo fails", true},
+
+		// Different failures should NOT match
+		{"test_foo fails", "test_bar fails", false},
+		{"lint error in main.go", "test_foo fails", false},
+	}
+
+	for _, tt := range tests {
+		na := normalizeBugTitle(tt.a)
+		nb := normalizeBugTitle(tt.b)
+		got := na == nb
+		if got != tt.want {
+			t.Errorf("normalizeBugTitle(%q) == normalizeBugTitle(%q): got %v, want %v (normalized: %q vs %q)",
+				tt.a, tt.b, got, tt.want, na, nb)
+		}
+	}
+}
+
+// TestSearchOptions verifies SearchOptions fields.
+func TestSearchOptions(t *testing.T) {
+	opts := SearchOptions{
+		Query:  "test failure",
+		Status: "open",
+		Label:  "gt:bug",
+		Limit:  5,
+	}
+	if opts.Query != "test failure" {
+		t.Errorf("Query = %q, want 'test failure'", opts.Query)
+	}
+	if opts.Status != "open" {
+		t.Errorf("Status = %q, want 'open'", opts.Status)
+	}
+	if opts.Label != "gt:bug" {
+		t.Errorf("Label = %q, want 'gt:bug'", opts.Label)
+	}
+}
+
 // Integration test that runs against real bd if available
 func TestIntegration(t *testing.T) {
 	if testing.Short() {

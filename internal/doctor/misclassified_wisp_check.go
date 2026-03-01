@@ -398,7 +398,9 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 
 	for rigName, batch := range rigBatches {
 		var workDir string
-		if rigName == "town" {
+		if rigName == "town" || rigName == "hq" {
+			// Both "town" (JSONL path) and "hq" (Dolt path) refer to
+			// town-level beads which live at the town root, not townRoot/hq.
 			workDir = ctx.TownRoot
 		} else {
 			workDir = filepath.Join(ctx.TownRoot, rigName)

@@ -144,6 +144,11 @@ func formatBeadLine(issue *beads.Issue) string {
 // autoSpawnPatrol creates and pins a new patrol wisp.
 // Returns the patrol ID or an error.
 func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
+	// Resolve the beads directory following redirects.
+	// This ensures bd targets the correct database (e.g., rig database
+	// instead of HQ) regardless of inherited BEADS_DIR. See gt-ctir.
+	resolvedBeadsDir := beads.ResolveBeadsDir(cfg.BeadsDir)
+
 	// Find the proto ID for the patrol molecule
 	cmdCatalog := exec.Command("gt", "formula", "list")
 	cmdCatalog.Dir = cfg.BeadsDir
@@ -177,13 +182,15 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
 	}
 
-	// Create the patrol wisp (root-only: no child step wisps, steps inlined at prime time)
-	spawnArgs := []string{"mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--root-only"}
+	// Create root-only patrol wisp (steps are read inline from the formula).
+	// This avoids ~10 child wisps per cycle hitting Dolt.
+	spawnArgs := []string{"mol", "wisp", "create", protoID, "--root-only", "--actor", cfg.RoleName}
 	for _, v := range cfg.ExtraVars {
 		spawnArgs = append(spawnArgs, "--var", v)
 	}
 	cmdSpawn := BdCmd(spawnArgs...).
 		WithAutoCommit().
+		WithBeadsDir(resolvedBeadsDir).
 		Dir(cfg.BeadsDir).
 		Build()
 	var stdoutSpawn, stderrSpawn bytes.Buffer
@@ -227,6 +234,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Hook the wisp to the agent so gt mol status sees it
 	if err := BdCmd("update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee).
 		WithAutoCommit().
+		WithBeadsDir(resolvedBeadsDir).
 		Dir(cfg.BeadsDir).
 		Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)

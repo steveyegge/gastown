@@ -445,7 +445,7 @@ exit /b 0
 	}
 
 	rollbackCalled := false
-	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 		rollbackCalled = true
 		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
 			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)
@@ -547,7 +547,7 @@ exit /b 0
 	rollbackSlingArtifacts(&SpawnedPolecatInfo{
 		RigName:     "gastown",
 		PolecatName: "Toast",
-	}, "gt-abc123", "")
+	}, "gt-abc123", "", "")
 
 	if !burnCalled {
 		t.Fatalf("expected rollbackSlingArtifacts to burn attached molecules")
@@ -674,7 +674,7 @@ exit /b 0
 	}
 
 	rollbackCalled := false
-	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 		rollbackCalled = true
 		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
 			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)

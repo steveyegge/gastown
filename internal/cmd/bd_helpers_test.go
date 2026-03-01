@@ -400,6 +400,71 @@ func TestBdCmd_EnvImmutability(t *testing.T) {
 	}
 }
 
+func TestBdCmd_WithBeadsDir_SetsEnv(t *testing.T) {
+	// WithBeadsDir should set BEADS_DIR in the environment
+	bdc := BdCmd("show", "id").
+		WithBeadsDir("/town/rig/mayor/rig/.beads")
+	cmd := bdc.Build()
+	envMap := parseEnv(cmd.Env)
+
+	if envMap["BEADS_DIR"] != "/town/rig/mayor/rig/.beads" {
+		t.Errorf("BEADS_DIR = %q, want %q", envMap["BEADS_DIR"], "/town/rig/mayor/rig/.beads")
+	}
+}
+
+func TestBdCmd_WithBeadsDir_OverridesInherited(t *testing.T) {
+	// WithBeadsDir should override an inherited BEADS_DIR from the parent
+	// process. This is the core fix for gt-ctir: without overriding,
+	// bd could write to the wrong database (HQ instead of rig).
+	baseEnv := []string{"PATH=/usr/bin", "BEADS_DIR=/town/.beads", "HOME=/home/user"}
+
+	bdc := &bdCmd{
+		args:   []string{"mol", "wisp", "create", "proto-id"},
+		env:    baseEnv,
+		stderr: os.Stderr,
+	}
+	bdc.WithBeadsDir("/town/rig/mayor/rig/.beads")
+	cmd := bdc.Build()
+	envMap := parseEnv(cmd.Env)
+
+	if envMap["BEADS_DIR"] != "/town/rig/mayor/rig/.beads" {
+		t.Errorf("BEADS_DIR = %q, want %q (should override inherited)", envMap["BEADS_DIR"], "/town/rig/mayor/rig/.beads")
+	}
+
+	// Verify exactly one BEADS_DIR entry (deduplication)
+	count := 0
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("found %d BEADS_DIR entries, want 1 (dedup must remove old)", count)
+	}
+}
+
+func TestBdCmd_EmptyBeadsDir_Skipped(t *testing.T) {
+	// Empty WithBeadsDir should not add BEADS_DIR to env
+	bdc := BdCmd("show", "id").
+		WithBeadsDir("")
+	bdc.env = filterEnv(bdc.env, "BEADS_DIR")
+	cmd := bdc.Build()
+
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Errorf("BEADS_DIR should not be added when empty, found: %s", e)
+		}
+	}
+}
+
+func TestBdCmd_WithBeadsDir_Chaining(t *testing.T) {
+	// WithBeadsDir should return receiver for chaining
+	bdc := BdCmd("test")
+	if bdc.WithBeadsDir("/test") != bdc {
+		t.Error("WithBeadsDir() should return receiver for chaining")
+	}
+}
+
 // filterEnv returns env with all entries matching the given key prefix removed.
 func filterEnv(env []string, key string) []string {
 	prefix := key + "="

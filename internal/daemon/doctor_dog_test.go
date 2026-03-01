@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"encoding/json"
-	"io"
 	"log"
 	"strings"
 	"testing"
@@ -160,67 +159,157 @@ func TestDoctorDogReportOmitsNilFields(t *testing.T) {
 	if _, ok := raw["databases"]; ok {
 		t.Error("expected databases to be omitted when nil")
 	}
-	if _, ok := raw["gc"]; ok {
-		t.Error("expected gc to be omitted when nil")
+	if _, ok := raw["zombies"]; ok {
+		t.Error("expected zombies to be omitted when nil")
+	}
+	if _, ok := raw["recommendations"]; ok {
+		t.Error("expected recommendations to be omitted when nil")
 	}
 }
 
-func TestDoctorDogRespondThresholds(t *testing.T) {
-	// Verify that response thresholds are sane
-	if doctorDogLatencyAlertMs <= 0 {
+func TestDoctorDogDefaultThresholds(t *testing.T) {
+	// Verify default thresholds are sane
+	if defaultDoctorDogLatencyAlertMs <= 0 {
 		t.Error("latency alert threshold must be positive")
 	}
-	if doctorDogOrphanAlertCount <= 0 {
+	if defaultDoctorDogOrphanAlertCount <= 0 {
 		t.Error("orphan alert count must be positive")
 	}
-	if doctorDogBackupStaleSeconds <= 0 {
+	if defaultDoctorDogBackupStaleSeconds <= 0 {
 		t.Error("backup stale threshold must be positive")
 	}
-	if doctorDogActionCooldown <= 0 {
-		t.Error("action cooldown must be positive")
-	}
 
-	// Verify thresholds match spec: latency > 5s, orphans > 20, backup > 1hr
-	if doctorDogLatencyAlertMs != 5000.0 {
-		t.Errorf("expected latency alert at 5000ms, got %.0f", doctorDogLatencyAlertMs)
+	// Verify defaults match spec: latency > 5s, orphans > 20, backup > 1hr
+	if defaultDoctorDogLatencyAlertMs != 5000.0 {
+		t.Errorf("expected latency alert at 5000ms, got %.0f", defaultDoctorDogLatencyAlertMs)
 	}
-	if doctorDogOrphanAlertCount != 20 {
-		t.Errorf("expected orphan alert at 20, got %d", doctorDogOrphanAlertCount)
+	if defaultDoctorDogOrphanAlertCount != 20 {
+		t.Errorf("expected orphan alert at 20, got %d", defaultDoctorDogOrphanAlertCount)
 	}
-	if doctorDogBackupStaleSeconds != 3600.0 {
-		t.Errorf("expected backup stale at 3600s, got %.0f", doctorDogBackupStaleSeconds)
+	if defaultDoctorDogBackupStaleSeconds != 3600.0 {
+		t.Errorf("expected backup stale at 3600s, got %.0f", defaultDoctorDogBackupStaleSeconds)
 	}
 }
 
-func TestDoctorDogRespondCooldown(t *testing.T) {
-	// Verify cooldown logic: daemon that already acted recently should not act again.
-	d := &Daemon{
-		config: &Config{TownRoot: t.TempDir()},
-		logger: log.New(io.Discard, "", 0),
-		// Set recent action times (within cooldown window)
-		lastDoctorRestart:  time.Now(),
-		lastDoctorEscalate: time.Now(),
-		lastDoctorJanitor:  time.Now(),
-		lastDoctorBackup:   time.Now(),
+func TestDoctorDogThresholds(t *testing.T) {
+	// Nil config returns defaults
+	lat, orphan, backup := doctorDogThresholds(nil)
+	if lat != defaultDoctorDogLatencyAlertMs {
+		t.Errorf("expected default latency %.0f, got %.0f", defaultDoctorDogLatencyAlertMs, lat)
+	}
+	if orphan != defaultDoctorDogOrphanAlertCount {
+		t.Errorf("expected default orphan %d, got %d", defaultDoctorDogOrphanAlertCount, orphan)
+	}
+	if backup != defaultDoctorDogBackupStaleSeconds {
+		t.Errorf("expected default backup %.0f, got %.0f", defaultDoctorDogBackupStaleSeconds, backup)
 	}
 
-	// Report with all thresholds exceeded
+	// Custom config overrides
+	config := &DaemonPatrolConfig{
+		Patrols: &PatrolsConfig{
+			DoctorDog: &DoctorDogConfig{
+				Enabled:            true,
+				LatencyAlertMs:     3000.0,
+				OrphanAlertCount:   10,
+				BackupStaleSeconds: 1800.0,
+			},
+		},
+	}
+	lat, orphan, backup = doctorDogThresholds(config)
+	if lat != 3000.0 {
+		t.Errorf("expected custom latency 3000, got %.0f", lat)
+	}
+	if orphan != 10 {
+		t.Errorf("expected custom orphan 10, got %d", orphan)
+	}
+	if backup != 1800.0 {
+		t.Errorf("expected custom backup 1800, got %.0f", backup)
+	}
+
+	// Partial override: only latency, rest use defaults
+	config.Patrols.DoctorDog = &DoctorDogConfig{
+		Enabled:        true,
+		LatencyAlertMs: 2000.0,
+	}
+	lat, orphan, backup = doctorDogThresholds(config)
+	if lat != 2000.0 {
+		t.Errorf("expected custom latency 2000, got %.0f", lat)
+	}
+	if orphan != defaultDoctorDogOrphanAlertCount {
+		t.Errorf("expected default orphan, got %d", orphan)
+	}
+	if backup != defaultDoctorDogBackupStaleSeconds {
+		t.Errorf("expected default backup, got %.0f", backup)
+	}
+}
+
+func TestDoctorDogRespondGeneratesRecommendations(t *testing.T) {
+	// Report with all thresholds exceeded should generate recommendations
+	var buf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&buf, "", 0),
+	}
+
 	report := &DoctorDogReport{
 		Timestamp:    time.Now(),
 		Host:         "127.0.0.1",
 		Port:         3307,
-		TCPReachable: false, // would trigger restart
-		Latency:      &DoctorDogLatencyReport{DurationMs: 10000}, // would trigger escalate
-		Databases:    &DoctorDogDatabasesReport{Count: 30},       // would trigger janitor
-		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 7200},   // would trigger backup
+		TCPReachable: false,                                           // triggers restart_server
+		Latency:      &DoctorDogLatencyReport{DurationMs: 10000},      // triggers escalate_latency
+		Databases:    &DoctorDogDatabasesReport{Count: 30},            // triggers run_cleanup
+		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 7200},        // triggers sync_backup
 	}
 
-	// Should NOT panic or take actions (all cooldowns active)
 	d.doctorDogRespond(report)
+
+	// Verify recommendations were generated
+	if len(report.Recommendations) != 4 {
+		t.Fatalf("expected 4 recommendations, got %d", len(report.Recommendations))
+	}
+
+	// Verify specific recommendations
+	actions := make(map[string]DoctorDogRecommendation)
+	for _, r := range report.Recommendations {
+		actions[r.Action] = r
+	}
+
+	if r, ok := actions["restart_server"]; !ok {
+		t.Error("expected restart_server recommendation")
+	} else if r.Severity != "critical" {
+		t.Errorf("restart_server severity: expected critical, got %s", r.Severity)
+	}
+
+	if r, ok := actions["escalate_latency"]; !ok {
+		t.Error("expected escalate_latency recommendation")
+	} else if r.Severity != "high" {
+		t.Errorf("escalate_latency severity: expected high, got %s", r.Severity)
+	}
+
+	if r, ok := actions["run_cleanup"]; !ok {
+		t.Error("expected run_cleanup recommendation")
+	} else if r.Severity != "warning" {
+		t.Errorf("run_cleanup severity: expected warning, got %s", r.Severity)
+	}
+
+	if r, ok := actions["sync_backup"]; !ok {
+		t.Error("expected sync_backup recommendation")
+	} else if r.Severity != "warning" {
+		t.Errorf("sync_backup severity: expected warning, got %s", r.Severity)
+	}
+
+	// Verify RECOMMEND logs (not ACTION)
+	logged := buf.String()
+	if strings.Contains(logged, "ACTION:") {
+		t.Errorf("expected no ACTION logs, but got: %s", logged)
+	}
+	if !strings.Contains(logged, "RECOMMEND:") {
+		t.Errorf("expected RECOMMEND logs, but got: %s", logged)
+	}
 }
 
-func TestDoctorDogRespondNoActionOnHealthy(t *testing.T) {
-	// A healthy report should trigger no actions
+func TestDoctorDogRespondNoRecommendationsOnHealthy(t *testing.T) {
+	// A healthy report should generate no recommendations
 	var buf strings.Builder
 	d := &Daemon{
 		config: &Config{TownRoot: t.TempDir()},
@@ -232,22 +321,26 @@ func TestDoctorDogRespondNoActionOnHealthy(t *testing.T) {
 		Host:         "127.0.0.1",
 		Port:         3307,
 		TCPReachable: true,
-		Latency:      &DoctorDogLatencyReport{DurationMs: 1.5},                                        // well under 5s
-		Databases:    &DoctorDogDatabasesReport{Names: []string{"hq", "beads"}, Count: 2},              // well under 20
-		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 300},                                          // 5 min, well under 1hr
+		Latency:      &DoctorDogLatencyReport{DurationMs: 1.5},
+		Databases:    &DoctorDogDatabasesReport{Names: []string{"hq", "beads"}, Count: 2},
+		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 300},
 	}
 
 	d.doctorDogRespond(report)
 
-	// Verify no ACTION logs were generated
+	if len(report.Recommendations) != 0 {
+		t.Errorf("expected no recommendations on healthy report, got %d: %+v",
+			len(report.Recommendations), report.Recommendations)
+	}
+
 	logged := buf.String()
-	if strings.Contains(logged, "ACTION:") {
-		t.Errorf("expected no actions on healthy report, but got: %s", logged)
+	if strings.Contains(logged, "RECOMMEND:") {
+		t.Errorf("expected no RECOMMEND logs on healthy report, but got: %s", logged)
 	}
 }
 
 func TestDoctorDogRespondBelowThresholds(t *testing.T) {
-	// Reports at exactly the threshold boundary should NOT trigger
+	// Reports at exactly the threshold boundary should NOT trigger recommendations
 	var buf strings.Builder
 	d := &Daemon{
 		config: &Config{TownRoot: t.TempDir()},
@@ -260,21 +353,21 @@ func TestDoctorDogRespondBelowThresholds(t *testing.T) {
 		Host:         "127.0.0.1",
 		Port:         3307,
 		TCPReachable: true,
-		Latency:      &DoctorDogLatencyReport{DurationMs: doctorDogLatencyAlertMs}, // exactly at, not over
-		Databases:    &DoctorDogDatabasesReport{Count: doctorDogOrphanAlertCount},  // exactly at, not over
-		BackupAge:    &DoctorDogBackupReport{AgeSeconds: doctorDogBackupStaleSeconds}, // exactly at, not over
+		Latency:      &DoctorDogLatencyReport{DurationMs: defaultDoctorDogLatencyAlertMs},
+		Databases:    &DoctorDogDatabasesReport{Count: defaultDoctorDogOrphanAlertCount},
+		BackupAge:    &DoctorDogBackupReport{AgeSeconds: defaultDoctorDogBackupStaleSeconds},
 	}
 
 	d.doctorDogRespond(report)
 
-	logged := buf.String()
-	if strings.Contains(logged, "ACTION:") {
-		t.Errorf("expected no actions at exact threshold, but got: %s", logged)
+	if len(report.Recommendations) != 0 {
+		t.Errorf("expected no recommendations at exact threshold, got %d: %+v",
+			len(report.Recommendations), report.Recommendations)
 	}
 }
 
 func TestDoctorDogRespondSkipsOnError(t *testing.T) {
-	// Reports with errors in check results should not trigger actions
+	// Reports with errors in check results should not generate recommendations
 	var buf strings.Builder
 	d := &Daemon{
 		config: &Config{TownRoot: t.TempDir()},
@@ -284,16 +377,100 @@ func TestDoctorDogRespondSkipsOnError(t *testing.T) {
 	report := &DoctorDogReport{
 		Timestamp:    time.Now(),
 		TCPReachable: true,
-		Latency:      &DoctorDogLatencyReport{DurationMs: 10000, Error: "connection reset"}, // error present
-		Databases:    &DoctorDogDatabasesReport{Count: 30, Error: "query timeout"},           // error present
-		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 7200, Error: "walk error"},           // error present
+		Latency:      &DoctorDogLatencyReport{DurationMs: 10000, Error: "connection reset"},
+		Databases:    &DoctorDogDatabasesReport{Count: 30, Error: "query timeout"},
+		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 7200, Error: "walk error"},
 	}
 
 	d.doctorDogRespond(report)
 
-	logged := buf.String()
-	if strings.Contains(logged, "ACTION:") {
-		t.Errorf("expected no actions when checks have errors, but got: %s", logged)
+	if len(report.Recommendations) != 0 {
+		t.Errorf("expected no recommendations when checks have errors, got %d: %+v",
+			len(report.Recommendations), report.Recommendations)
+	}
+}
+
+func TestDoctorDogRespondWithCustomThresholds(t *testing.T) {
+	// Custom thresholds should be respected
+	var buf strings.Builder
+	config := &DaemonPatrolConfig{
+		Patrols: &PatrolsConfig{
+			DoctorDog: &DoctorDogConfig{
+				Enabled:            true,
+				LatencyAlertMs:     100.0,  // Very low threshold
+				OrphanAlertCount:   5,      // Very low threshold
+				BackupStaleSeconds: 60.0,   // Very low threshold
+			},
+		},
+	}
+	d := &Daemon{
+		config:       &Config{TownRoot: t.TempDir()},
+		logger:       log.New(&buf, "", 0),
+		patrolConfig: config,
+	}
+
+	// Values that exceed custom thresholds but are under defaults
+	report := &DoctorDogReport{
+		Timestamp:    time.Now(),
+		Host:         "127.0.0.1",
+		Port:         3307,
+		TCPReachable: true,
+		Latency:      &DoctorDogLatencyReport{DurationMs: 200},   // > 100 custom, < 5000 default
+		Databases:    &DoctorDogDatabasesReport{Count: 10},        // > 5 custom, < 20 default
+		BackupAge:    &DoctorDogBackupReport{AgeSeconds: 120},     // > 60 custom, < 3600 default
+	}
+
+	d.doctorDogRespond(report)
+
+	// Should generate 3 recommendations (latency, janitor, backup) using custom thresholds
+	if len(report.Recommendations) != 3 {
+		t.Fatalf("expected 3 recommendations with custom thresholds, got %d: %+v",
+			len(report.Recommendations), report.Recommendations)
+	}
+
+	actions := make(map[string]bool)
+	for _, r := range report.Recommendations {
+		actions[r.Action] = true
+	}
+	if !actions["escalate_latency"] {
+		t.Error("expected escalate_latency recommendation")
+	}
+	if !actions["run_cleanup"] {
+		t.Error("expected run_cleanup recommendation")
+	}
+	if !actions["sync_backup"] {
+		t.Error("expected sync_backup recommendation")
+	}
+}
+
+func TestDoctorDogRecommendationJSON(t *testing.T) {
+	// Verify recommendations serialize/deserialize correctly
+	report := &DoctorDogReport{
+		Timestamp:    time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC),
+		Host:         "127.0.0.1",
+		Port:         3307,
+		TCPReachable: false,
+		Recommendations: []DoctorDogRecommendation{
+			{Action: "restart_server", Reason: "TCP unreachable", Severity: "critical"},
+		},
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var decoded DoctorDogReport
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(decoded.Recommendations) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(decoded.Recommendations))
+	}
+	r := decoded.Recommendations[0]
+	if r.Action != "restart_server" || r.Severity != "critical" {
+		t.Errorf("unexpected recommendation: %+v", r)
 	}
 }
 
@@ -312,5 +489,25 @@ func TestDoctorDogConfigBackwardsCompat(t *testing.T) {
 	}
 	if config.IntervalStr != "3m" {
 		t.Errorf("expected interval=3m, got %s", config.IntervalStr)
+	}
+}
+
+func TestDoctorDogConfigThresholdFields(t *testing.T) {
+	// Verify new threshold fields parse from JSON correctly
+	jsonData := `{"enabled": true, "latency_alert_ms": 3000, "orphan_alert_count": 15, "backup_stale_seconds": 1800}`
+
+	var config DoctorDogConfig
+	if err := json.Unmarshal([]byte(jsonData), &config); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if config.LatencyAlertMs != 3000.0 {
+		t.Errorf("expected latency_alert_ms=3000, got %.0f", config.LatencyAlertMs)
+	}
+	if config.OrphanAlertCount != 15 {
+		t.Errorf("expected orphan_alert_count=15, got %d", config.OrphanAlertCount)
+	}
+	if config.BackupStaleSeconds != 1800.0 {
+		t.Errorf("expected backup_stale_seconds=1800, got %.0f", config.BackupStaleSeconds)
 	}
 }

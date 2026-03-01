@@ -1295,6 +1295,11 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("rig '%s' not found", rigName)
 	}
 
+	// Check if rig is parked or docked (uses bead labels + wisp state)
+	if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+		return fmt.Errorf("rig '%s' is %s - use 'gt rig unpark' or 'gt rig undock' first", rigName, reason)
+	}
+
 	fmt.Printf("Booting rig %s...\n", style.Bold.Render(rigName))
 
 	var started []string
@@ -1377,12 +1382,10 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Check if rig is parked or docked
-		cfg := wisp.NewConfig(townRoot, rigName)
-		status := cfg.GetString("status")
-		if status == "parked" || status == "docked" {
+		// Check if rig is parked or docked (uses bead labels + wisp state)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
 			fmt.Printf("%s Rig '%s' is %s - skipping (use 'gt rig unpark' or 'gt rig undock' first)\n",
-				style.Warning.Render("⚠"), rigName, status)
+				style.Warning.Render("⚠"), rigName, reason)
 			continue
 		}
 

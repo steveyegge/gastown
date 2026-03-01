@@ -97,7 +97,7 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 // The rig name is resolved from the default PrefixRegistry. If the prefix is
 // not in the registry, the prefix itself is used as the rig name.
 func ParseSessionName(session string) (*AgentIdentity, error) {
-	return ParseSessionNameWithRegistry(session, defaultRegistry)
+	return ParseSessionNameWithRegistry(session, DefaultRegistry())
 }
 
 // ParseSessionNameWithRegistry parses a tmux session name using a specific registry.

@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -1055,6 +1056,21 @@ func detectTownRootFromCwd() string {
 		}
 	}
 
+	// Final fallback: read GT_TOWN_ROOT from tmux global environment.
+	// This handles the run-shell case where CWD is $HOME and process env
+	// vars aren't set — the daemon sets GT_TOWN_ROOT in tmux global env.
+	if socket := tmux.SocketFromEnv(); socket != "" {
+		t := tmux.NewTmuxWithSocket(socket)
+		if envRoot, err := t.GetGlobalEnvironment("GT_TOWN_ROOT"); err == nil && envRoot != "" {
+			if _, statErr := os.Stat(filepath.Join(envRoot, workspace.PrimaryMarker)); statErr == nil {
+				return envRoot
+			}
+			if info, statErr := os.Stat(filepath.Join(envRoot, workspace.SecondaryMarker)); statErr == nil && info.IsDir() {
+				return envRoot
+			}
+		}
+	}
+
 	return ""
 }
 
@@ -1195,8 +1211,9 @@ func sendHandoffMail(subject, message string) (string, error) {
 		"--priority", "1", // high — handoffs should float above normal mail
 		"--labels", labels + ",gt:message",
 		"--actor", agentID,
-		"--ephemeral", // Handoff mail is ephemeral
-		"--silent",    // Output only the bead ID
+		// NOT ephemeral: handoff mail must be in issues table so gt hook can find it.
+		// Ephemeral wisps are invisible to hook queries and may be reaped before successor reads.
+		"--silent", // Output only the bead ID
 		"--", subject,
 	}
 
@@ -1256,17 +1273,17 @@ func warnHandoffGitStatus() {
 	if err != nil || status.CleanExcludingBeads() {
 		return
 	}
-	style.PrintWarning("workspace has uncommitted work: %s", status.String())
+	fmt.Fprintf(os.Stderr, "%s workspace has uncommitted work: %s\n", ui.IconWarn, status.String())
 	if len(status.ModifiedFiles) > 0 {
-		style.PrintWarning("  modified: %s", strings.Join(status.ModifiedFiles, ", "))
+		fmt.Fprintf(os.Stderr, "%s   modified: %s\n", ui.IconWarn, strings.Join(status.ModifiedFiles, ", "))
 	}
 	if len(status.UntrackedFiles) > 0 {
-		style.PrintWarning("  untracked: %s", strings.Join(status.UntrackedFiles, ", "))
+		fmt.Fprintf(os.Stderr, "%s   untracked: %s\n", ui.IconWarn, strings.Join(status.UntrackedFiles, ", "))
 	}
 	if status.UnpushedCommits > 0 {
-		style.PrintWarning("  %d unpushed commit(s) — run 'git push' before handoff", status.UnpushedCommits)
+		fmt.Fprintf(os.Stderr, "%s   %d unpushed commit(s) — run 'git push' before handoff\n", ui.IconWarn, status.UnpushedCommits)
 	}
-	fmt.Println("  (use --no-git-check to suppress this warning)")
+	fmt.Fprintln(os.Stderr, "  (use --no-git-check to suppress this warning)")
 }
 
 // looksLikeBeadID checks if a string looks like a bead ID.
@@ -1536,6 +1553,10 @@ func cleanupMoleculeOnHandoff() {
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "handoff: warning: detach molecule audit failed: %v\n", err)
 	}
+
+	// Close all descendant wisps first, then the molecule root.
+	// Without this, handoff leaks orphan wisps into the DB.
+	forceCloseDescendants(b, molID)
 
 	// Force-close the molecule root wisp
 	if err := b.ForceCloseWithReason("handoff", molID); err != nil {

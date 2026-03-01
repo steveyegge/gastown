@@ -384,7 +384,13 @@ If any check or test FAILED:
    - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on the target branch:
-   - File a bead: bd create --type=bug --priority=1 --title="..."
+   - **DUPLICATE CHECK (MANDATORY)**: Before filing a new bug, search for existing open bugs:
+     ```bash
+     bd search "<failure description>" --status open --label gt:bug --limit 5
+     ```
+     If an existing open bug covers the same failure, do NOT create a duplicate.
+     Instead, note the existing bead ID and proceed.
+   - Only if NO existing bug matches: bd create --type=bug --priority=1 --title="Pre-existing failure: <description>"
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
@@ -397,7 +403,7 @@ If any check or test FAILED:
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - All quality checks and tests passing, OR
-- Bead filed for the pre-existing failure
+- Bead filed (or existing duplicate confirmed) for the pre-existing failure
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
 re-implementing fixes. You are a mechanical merge processor.

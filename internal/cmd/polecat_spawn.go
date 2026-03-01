@@ -27,7 +27,8 @@ type SpawnedPolecatInfo struct {
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
 	Pane        string // Tmux pane ID (empty until StartSession is called)
-	BaseBranch string // Effective base branch (e.g., "main", "integration/epic-id")
+	BaseBranch  string // Effective base branch (e.g., "main", "integration/epic-id")
+	Branch      string // Git branch name (for cleanup on rollback)
 
 	// Internal fields for deferred session start
 	account string
@@ -127,19 +128,30 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			baseBranch = "origin/" + baseBranch
 		}
 
-		// Repair the idle polecat's worktree for fresh work
+		// Reuse the idle polecat with branch-only operations (no worktree add/remove).
+		// Phase 3 of persistent-polecat-pool: eliminates ~5s worktree creation overhead.
+		// Falls back to full worktree repair if branch-only reuse fails.
 		addOpts := polecat.AddOptions{
 			HookBead:   opts.HookBead,
 			BaseBranch: baseBranch,
 		}
-		if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
-			// Repair failed — fall through to allocate a new polecat
-			fmt.Printf("  Repair failed for idle polecat %s: %v, allocating new...\n", polecatName, err)
+		reuseOK := false
+		if _, err := polecatMgr.ReuseIdlePolecat(polecatName, addOpts); err != nil {
+			// Branch-only reuse failed — try full worktree repair as fallback
+			fmt.Printf("  Branch-only reuse failed for idle polecat %s: %v, trying full repair...\n", polecatName, err)
+			if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
+				fmt.Printf("  Full repair also failed for %s: %v, allocating new...\n", polecatName, err)
+			} else {
+				reuseOK = true
+			}
 		} else {
-			// Reuse successful
+			reuseOK = true
+		}
+
+		if reuseOK {
 			polecatObj, err := polecatMgr.Get(polecatName)
 			if err != nil {
-				return nil, fmt.Errorf("getting idle polecat after repair: %w", err)
+				return nil, fmt.Errorf("getting idle polecat after reuse: %w", err)
 			}
 			if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
 				return nil, fmt.Errorf("worktree verification failed for reused %s: %w", polecatName, err)
@@ -163,6 +175,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 				SessionName: sessionName,
 				Pane:        "",
 				BaseBranch:  effectiveBranch,
+				Branch:      polecatObj.Branch,
 				account:     opts.Account,
 				agent:       opts.Agent,
 			}, nil
@@ -284,7 +297,8 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		ClonePath:   polecatObj.ClonePath,
 		SessionName: sessionName,
 		Pane:        "", // Empty until StartSession is called
-		BaseBranch: effectiveBranch,
+		BaseBranch:  effectiveBranch,
+		Branch:      polecatObj.Branch,
 		account:     opts.Account,
 		agent:       opts.Agent,
 	}, nil

@@ -164,6 +164,7 @@ func TestWaitForCommand_Timeout(t *testing.T) {
 
 // TestSanitizeNudgeMessage verifies control character stripping.
 func TestSanitizeNudgeMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string

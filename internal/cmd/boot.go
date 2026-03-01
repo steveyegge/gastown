@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,10 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
-
-// deaconRestartThreshold is how long a Deacon heartbeat must be stale before
-// the boot command kills and restarts the session (vs. just nudging it).
-const deaconRestartThreshold = 30 * time.Minute
 
 var (
 	bootStatusJSON    bool
@@ -279,8 +274,13 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runDegradedTriage performs basic Deacon health check without AI reasoning.
-// This is a mechanical fallback when full Claude sessions aren't available.
+// runDegradedTriage performs mechanical Deacon health checks without AI reasoning.
+//
+// ZFC principle: "Agent decides. Go transports." Complex triage decisions
+// (heartbeat staleness, idle detection, backoff awareness, molecule progress)
+// belong in the Boot agent's mol-boot-triage formula, not in Go code.
+// This function handles only mechanical safety checks that must work even
+// when no AI agent is available.
 func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 	// Abort triage if a shutdown is in progress. Without this check, Boot could
 	// detect Deacon as "down" during the graceful shutdown window and restart it,
@@ -299,7 +299,9 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 		executeWarrants(filepath.Join(townRoot, "warrants"), tm)
 	}
 
-	// Check if Deacon session exists
+	// Check if Deacon session exists — the only mechanical check degraded
+	// triage needs. All deeper reasoning (staleness, idle, backoff, progress)
+	// is the Boot agent's job via mol-boot-triage.
 	deaconSession := getDeaconSessionName()
 	hasDeacon, err := tm.HasSession(deaconSession)
 	if err != nil {
@@ -310,7 +312,6 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 		// Deacon not running - start it immediately rather than waiting
 		// for the next daemon heartbeat cycle (up to 3 minutes away).
 		fmt.Println("Deacon session missing - starting Deacon")
-		townRoot, _ := workspace.FindFromCwd()
 		if townRoot != "" {
 			mgr := deacon.NewManager(townRoot)
 			if err := mgr.Start(""); err != nil && err != deacon.ErrAlreadyRunning {
@@ -322,157 +323,9 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 		return "error", "deacon-missing", fmt.Errorf("cannot find town root to start deacon")
 	}
 
-	// Deacon exists - check heartbeat to detect stuck sessions
-	// A session can exist but be stuck (not making progress)
-	if townRoot != "" {
-		hb := deacon.ReadHeartbeat(townRoot)
-		if hb.IsVeryStale() {
-			// Heartbeat is stale (>15 min) - Deacon is stuck
-			// Nudge the session to try to wake it up
-			age := hb.Age()
-			if age > deaconRestartThreshold {
-				// Very stuck - restart the session.
-				// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))
-				if err := tm.KillSessionWithProcesses(deaconSession); err == nil {
-					return "restart", "deacon-stuck", nil
-				}
-				// Kill failed - report it (daemon will retry next tick)
-				fmt.Printf("Failed to kill session: %v\n", err)
-				return "restart-failed", "deacon-stuck", nil
-			} else {
-				// Stuck but not critically - try nudging first
-				fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
-				_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
-				return "nudge", "deacon-stale", nil
-			}
-		} else {
-			// Heartbeat is fresh - but is Deacon actually working?
-			// Check for idle state (no work on hook, or work not progressing)
-
-			// First: if deacon is in backoff mode (await-signal), skip
-			// idle checks entirely. The idle:N label indicates the deacon
-			// is legitimately waiting for signals, not stuck.
-			if isDeaconInBackoff() {
-				// Deacon is in await-signal with backoff - this is expected.
-				// Don't interrupt; it will wake on beads activity.
-				return "nothing", "", nil
-			}
-
-			hookBead := getDeaconHookBead()
-			if hookBead == "" {
-				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, start patrol: gt deacon patrol")
-				return "nudge", "deacon-idle", nil
-			}
-
-			// Has work on hook - check if it's actually progressing
-			// by looking at when the last molecule step was closed.
-			lastActivity, err := getMoleculeLastActivity(hookBead)
-			if err == nil && !lastActivity.IsZero() && time.Since(lastActivity) > 15*time.Minute {
-				fmt.Printf("Deacon has hooked work but no progress in %s - nudging\n", time.Since(lastActivity).Round(time.Minute))
-				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: Hooked work not progressing. Continue work or restart patrol: gt deacon patrol")
-				return "nudge", "deacon-stale-work", nil
-			}
-		}
-	}
-
+	// Deacon session exists — in degraded mode, that's all we can check
+	// mechanically. The Boot agent handles deeper health assessment.
 	return "nothing", "", nil
-}
-
-// isDeaconInBackoff checks if the Deacon is in await-signal backoff mode.
-// When in backoff mode, the deacon bead has an "idle:N" label where N >= 0.
-// This indicates the deacon is legitimately waiting for beads activity signals
-// and should not be interrupted for "stale work" - it's supposed to be idle.
-func isDeaconInBackoff() bool {
-	cmd := exec.Command("bd", "show", "hq-deacon", "--json")
-	output, err := cmd.Output()
-	if err != nil {
-		// Can't check - assume not in backoff (conservative)
-		return false
-	}
-
-	var result []struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil || len(result) == 0 {
-		return false
-	}
-
-	// Check for idle:N label (any value means await-signal is/was running)
-	for _, label := range result[0].Labels {
-		if len(label) >= 5 && label[:5] == "idle:" {
-			return true
-		}
-	}
-	return false
-}
-
-// getDeaconHookBead returns the bead ID hooked to Deacon, or "" if none.
-// Uses bd slot show to check the hook slot on the deacon agent bead.
-func getDeaconHookBead() string {
-	// The deacon agent bead is hq-deacon (town-level)
-	cmd := exec.Command("bd", "slot", "show", "hq-deacon", "--json")
-	output, err := cmd.Output()
-	if err != nil {
-		// If we can't check, assume no hook (may false-positive nudge on bd failure)
-		return ""
-	}
-
-	// Parse JSON to get hook slot value
-	var result struct {
-		Slots struct {
-			Hook *string `json:"hook"`
-		} `json:"slots"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return "" // Parse error - assume no hook
-	}
-
-	if result.Slots.Hook == nil {
-		return ""
-	}
-	return *result.Slots.Hook
-}
-
-// getMoleculeLastActivity returns the most recent closed_at timestamp among
-// a molecule's steps. This indicates when the molecule last made progress.
-// Returns zero time if unable to determine (caller should assume working).
-//
-// TODO(steveyegge/beads#1456): Replace with `bd mol last-activity` when available.
-func getMoleculeLastActivity(molID string) (time.Time, error) {
-	cmd := exec.Command("bd", "mol", "current", molID, "--json")
-	output, err := cmd.Output()
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	// bd mol current returns an array of molecules (usually one)
-	// Each has a steps array with issue details including closed_at
-	var molecules []struct {
-		Steps []struct {
-			Status string `json:"status"`
-			Issue  struct {
-				ClosedAt *time.Time `json:"closed_at"`
-			} `json:"issue"`
-		} `json:"steps"`
-	}
-	if err := json.Unmarshal(output, &molecules); err != nil {
-		return time.Time{}, err
-	}
-
-	// Find the most recent closed_at among all done steps
-	var latest time.Time
-	for _, mol := range molecules {
-		for _, step := range mol.Steps {
-			if step.Status == "done" && step.Issue.ClosedAt != nil {
-				if step.Issue.ClosedAt.After(latest) {
-					latest = *step.Issue.ClosedAt
-				}
-			}
-		}
-	}
-	return latest, nil
 }
 
 // executeWarrants scans the warrants directory and executes any pending warrants.

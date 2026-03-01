@@ -2,9 +2,12 @@ package doctor
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // BeadsRedirectTargetCheck validates that .beads/redirect files in crew/polecat/refinery
@@ -156,11 +159,28 @@ func (c *BeadsRedirectTargetCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix attempts to repair broken redirect targets by recomputing redirects.
 // If the canonical beads location exists, SetupRedirect will point to it.
+// If a target directory exists but is missing config.yaml, it is created
+// from metadata.json defaults (this handles partial rig setups where the
+// dolt database was initialized but config.yaml was not written).
 // If no canonical location exists, the fix cannot proceed automatically.
 func (c *BeadsRedirectTargetCheck) Fix(ctx *CheckContext) error {
 	var unfixable []string
 
 	for _, bt := range c.brokenTargets {
+		// If the redirect target directory exists but lacks beads setup,
+		// try to create config.yaml from metadata.json before giving up.
+		// This handles the case where gt rig add partially completed: the
+		// dolt database and metadata.json exist but config.yaml was never
+		// written (e.g., due to a crash or interrupted setup).
+		if strings.Contains(bt.reason, "no beads setup") && dirExists(bt.resolvedPath) {
+			rigName := extractRigName(ctx.TownRoot, bt.worktreePath)
+			if err := beads.EnsureConfigYAMLFromMetadataIfMissing(bt.resolvedPath, rigName); err != nil {
+				log.Printf("[doctor] beads-redirect-target: could not create config.yaml from metadata in %s: %v", bt.resolvedPath, err)
+			} else if hasBeadsSetup(bt.resolvedPath) {
+				continue // Fixed — config.yaml created successfully
+			}
+		}
+
 		// Check if the rig's canonical beads location exists
 		relPath, err := filepath.Rel(ctx.TownRoot, bt.worktreePath)
 		if err != nil {
@@ -204,6 +224,20 @@ func (c *BeadsRedirectTargetCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return nil
+}
+
+// extractRigName derives the rig name from a worktree path within a town.
+// For example, "/town/myrig/refinery/rig" returns "myrig".
+func extractRigName(townRoot, worktreePath string) string {
+	relPath, err := filepath.Rel(townRoot, worktreePath)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
 }
 
 // hasBeadsSetup checks whether a .beads directory has a working setup.

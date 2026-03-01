@@ -1,5 +1,7 @@
 # Plugin System Design
 
+> **Status: Design proposal -- not yet implemented**
+>
 > Design document for the Gas Town plugin system.
 > Written 2026-01-11, crew/george session.
 
@@ -216,142 +218,11 @@ Standard sections:
 
 ---
 
-## Escalation System
-
-### Problem
-
-Current escalation is ad-hoc "mail Mayor". Issues:
-- Mayor gets backlogged easily
-- No severity differentiation
-- No alternative channels (email, SMS, etc.)
-- No tracking of stale escalations
-
-### Solution: Unified Escalation API
-
-New command:
-
-```bash
-gt escalate \
-  --severity=<low|medium|high|critical> \
-  --subject="Plugin FAILED: rebuild-gt" \
-  --body="Build failed: make returned exit code 2" \
-  --source="plugin:rebuild-gt"
-```
-
-### Escalation Routing
-
-The command reads town config (`~/gt/config.json` or similar) for routing rules:
-
-```json
-{
-  "escalation": {
-    "routes": {
-      "low": ["bead"],
-      "medium": ["bead", "mail:mayor"],
-      "high": ["bead", "mail:mayor", "email:human"],
-      "critical": ["bead", "mail:mayor", "email:human", "sms:human"]
-    },
-    "contacts": {
-      "human_email": "steve@example.com",
-      "human_sms": "+1234567890"
-    },
-    "stale_threshold": "4h"
-  }
-}
-```
-
-### Escalation Actions
-
-| Action | Behavior |
-|--------|----------|
-| `bead` | Create escalation bead with severity label |
-| `mail:mayor` | Send mail to mayor/ |
-| `email:human` | Send email via configured service |
-| `sms:human` | Send SMS via configured service |
-
-### Escalation Beads
-
-Every escalation creates a bead:
-
-```yaml
-type: escalation
-status: open
-labels:
-  - severity:high
-  - source:plugin:rebuild-gt
-  - acknowledged:false
-```
-
-### Stale Escalation Patrol
-
-A patrol step (or plugin!) checks for unacknowledged escalations:
-
-```bash
-bd list --type=escalation --label=acknowledged:false --older-than=4h
-```
-
-Stale escalations get re-escalated at higher severity.
-
-### Acknowledging Escalations
-
-```bash
-gt escalate ack <bead-id>
-# Sets label acknowledged:true
-```
-
----
-
 ## New Commands Required
 
-### gt stale
-
-Expose binary staleness check:
-
-```bash
-gt stale              # Human-readable output
-gt stale --json       # Machine-readable
-gt stale --quiet      # Exit code only (0=stale, 1=fresh)
-```
-
-### gt dog dispatch
-
-Formalized plugin dispatch to dogs:
-
-```bash
-gt dog dispatch --plugin <name> [--rig <rig>]
-```
-
-This:
-1. Finds the plugin definition
-2. Slinga a standardized work unit to an idle dog
-3. Returns immediately (non-blocking)
-
-### gt escalate
-
-Unified escalation API:
-
-```bash
-gt escalate \
-  --severity=<level> \
-  --subject="..." \
-  --body="..." \
-  [--source="..."]
-
-gt escalate ack <bead-id>
-gt escalate list [--severity=...] [--stale]
-```
-
-### gt plugin
-
-Plugin management:
-
-```bash
-gt plugin list                    # List all plugins
-gt plugin show <name>             # Show plugin details
-gt plugin run <name> [--force]    # Manual trigger
-gt plugin digest [--yesterday]    # Squash wisps to digest
-gt plugin history <name>          # Show execution history
-```
+- **`gt stale`** -- Expose binary staleness check (human-readable, `--json`, `--quiet` exit code)
+- **`gt dog dispatch --plugin <name>`** -- Dispatch plugin execution to an idle dog (non-blocking)
+- **`gt plugin list|show|run|digest|history`** -- Plugin management and execution history
 
 ---
 
@@ -385,84 +256,6 @@ gt plugin history <name>          # Show execution history
 
 13. **`rebuild-gt` plugin** - The actual gastown plugin
 14. **Documentation** - So Beads/Wyvern can create theirs
-
----
-
-## Example: rebuild-gt Plugin
-
-```markdown
-+++
-name = "rebuild-gt"
-description = "Rebuild stale gt binary from gastown source"
-version = 1
-
-[gate]
-type = "cooldown"
-duration = "1h"
-
-[tracking]
-labels = ["plugin:rebuild-gt", "rig:gastown", "category:maintenance"]
-digest = true
-
-[execution]
-timeout = "5m"
-notify_on_failure = true
-severity = "medium"
-+++
-
-# Rebuild gt Binary
-
-Checks if the gt binary is stale (built from older commit than HEAD) and rebuilds.
-
-## Gate Check
-
-The Deacon evaluates this before dispatch. If gate closed, skip.
-
-## Detection
-
-Check binary staleness:
-
-```bash
-gt stale --json
-```
-
-If `"stale": false`, record success wisp and exit early.
-
-## Action
-
-Rebuild from source:
-
-```bash
-cd ~/gt/gastown/crew/george && make build && make install
-```
-
-## Record Result
-
-On success:
-```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:success \
-  --body "Rebuilt gt: $OLD → $NEW ($N commits)"
-```
-
-On failure:
-```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:failure \
-  --body "Build failed: $ERROR"
-
-gt escalate --severity=medium \
-  --subject="Plugin FAILED: rebuild-gt" \
-  --body="$ERROR" \
-  --source="plugin:rebuild-gt"
-```
-```
 
 ---
 

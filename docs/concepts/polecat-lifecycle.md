@@ -19,6 +19,26 @@ Polecats have four operating states:
 | **Stalled** | Session stopped mid-work | Interrupted, crashed, or timed out without being nudged |
 | **Zombie** | Completed work but failed to exit | `gt done` failed during cleanup |
 
+**State cycle (happy path):**
+
+```
+         ┌──────────┐
+    ┌───>│  IDLE    │<──── sync sandbox to main, clear hook
+    │    └────┬─────┘
+    │         │ gt sling
+    │         v
+    │    ┌──────────┐
+    │    │ WORKING  │<──── session active, hook set
+    │    └────┬─────┘
+    │         │ gt done
+    │         v
+    │    ┌──────────┐
+    └────┤  IDLE    │──── push branch, submit MR, go idle
+         └──────────┘
+```
+
+No `nuke` in the happy path. Polecats cycle: IDLE -> WORKING -> IDLE.
+
 **Key distinctions:**
 
 - **Working** = actively executing. Session alive, hook set, doing work.
@@ -56,6 +76,22 @@ The Refinery owns the merge queue. Once `gt done` submits work:
 - The idle polecat can be reused for the conflict resolution work
 
 ## The Three Layers
+
+### The Problem: Three Concepts Were Conflated
+
+Early designs treated polecats as monolithic. This caused recurring issues:
+
+| Concept | Lifecycle | Old behavior |
+|---------|-----------|-----------------|
+| **Identity** | Long-lived (name, CV, ledger) | Destroyed on nuke |
+| **Sandbox** | Per-assignment (worktree, branch) | Destroyed on nuke |
+| **Session** | Ephemeral (Claude context window) | = polecat lifetime |
+
+Separating these three layers resolved the "Idle Polecat Heresy" (treating idle
+polecats as waste), eliminated unnecessary worktree creation overhead, and
+preserved capability records (CV, completion history) across assignments.
+
+### Layer Summary
 
 | Layer | Component | Lifecycle | Persistence |
 |-------|-----------|-----------|-------------|
@@ -110,6 +146,28 @@ This worktree:
 - Contains uncommitted work, staged changes, branch state during active work
 
 The Witness never destroys sandboxes. Only explicit `gt polecat nuke` removes them.
+
+#### Sandbox Sync (Between Assignments)
+
+When work completes and the polecat goes idle, the sandbox is synced to main:
+
+```bash
+# In the polecat's worktree (done automatically by gt done / gt sling)
+git checkout main
+git pull origin main
+git branch -D polecat/<name>/<old-issue>@<timestamp>
+# Worktree is now clean, on main, ready for next assignment
+```
+
+When new work is slung:
+```bash
+# Create fresh branch from current main
+git checkout -b polecat/<name>/<new-issue>@<timestamp>
+# Start working
+```
+
+No worktree add/remove between assignments. Just branch operations on an
+existing worktree. This avoids the ~5s overhead of creating fresh worktrees.
 
 ### Slot Layer
 

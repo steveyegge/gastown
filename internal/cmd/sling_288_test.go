@@ -582,8 +582,8 @@ exit /b 0
 // TestIsMalformedWispID verifies detection of doubled "-wisp-" in wisp IDs (gt-4gjd).
 func TestIsMalformedWispID(t *testing.T) {
 	tests := []struct {
-		name       string
-		wispID     string
+		name          string
+		wispID        string
 		wantMalformed bool
 	}{
 		{"normal wisp ID", "gt-wisp-abc", false},
@@ -603,10 +603,10 @@ func TestIsMalformedWispID(t *testing.T) {
 	}
 }
 
-// TestInstantiateFormulaOnBead_MalformedWispIDSkipsLegacyBond verifies that
-// when bd mol wisp returns a malformed ID (doubled "-wisp-"), the legacy bond
-// attempt is skipped and the direct-bond fallback is used immediately (gt-4gjd).
-func TestInstantiateFormulaOnBead_MalformedWispIDSkipsLegacyBond(t *testing.T) {
+// TestInstantiateFormulaOnBead_MalformedWispIDProceedsWithBond verifies that
+// when bd mol wisp returns a malformed ID (doubled "-wisp-"), a warning is logged
+// but the legacy bond is still attempted and succeeds (gt-4gjd).
+func TestInstantiateFormulaOnBead_MalformedWispIDProceedsWithBond(t *testing.T) {
 	townRoot := t.TempDir()
 
 	// Minimal workspace
@@ -627,8 +627,7 @@ func TestInstantiateFormulaOnBead_MalformedWispIDSkipsLegacyBond(t *testing.T) {
 	logPath := filepath.Join(townRoot, "bd.log")
 
 	// bd mol wisp returns a malformed ID with doubled "-wisp-".
-	// Legacy bond should be SKIPPED (never called with the malformed ID).
-	// Direct-bond fallback should succeed.
+	// Legacy bond SHOULD be called with the malformed ID and succeed.
 	bdScript := `#!/bin/sh
 set -e
 echo "CMD:$*" >> "${BD_LOG}"
@@ -647,20 +646,13 @@ case "$cmd" in
       bond)
         left="$1"; shift || true
         if [ "$left" = "oag-wisp-wisp-rsia" ]; then
-          echo "ERROR: legacy bond should not be called with malformed ID" >&2
-          exit 1
-        fi
-        if [ "$left" = "mol-polecat-work" ]; then
-          echo '{"result_id":"oag-npeat","id_mapping":{"mol-polecat-work":"oag-wisp-gm7c"}}'
+          echo '{"root_id":"oag-wisp-wisp-rsia"}'
           exit 0
         fi
         echo "Error: unexpected bond target: $left" >&2
         exit 1
         ;;
     esac
-    ;;
-  close)
-    exit 0
     ;;
 esac
 exit 0
@@ -679,18 +671,13 @@ if "%cmd%"=="mol" (
   )
   if "%sub%"=="bond" (
     if "%left%"=="oag-wisp-wisp-rsia" (
-      echo ERROR: legacy bond should not be called with malformed ID 1>&2
-      exit /b 1
-    )
-    if "%left%"=="mol-polecat-work" (
-      echo {^"result_id^":^"oag-npeat^",^"id_mapping^":{^"mol-polecat-work^":^"oag-wisp-gm7c^"}}
+      echo {^"root_id^":^"oag-wisp-wisp-rsia^"}
       exit /b 0
     )
     echo Error: unexpected bond target: %left% 1>&2
     exit /b 1
   )
 )
-if "%cmd%"=="close" exit /b 0
 exit /b 0
 `
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
@@ -706,25 +693,21 @@ exit /b 0
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
-	if result.WispRootID != "oag-wisp-gm7c" {
-		t.Fatalf("WispRootID = %q, want %q", result.WispRootID, "oag-wisp-gm7c")
+	if result.WispRootID != "oag-wisp-wisp-rsia" {
+		t.Fatalf("WispRootID = %q, want %q", result.WispRootID, "oag-wisp-wisp-rsia")
 	}
 	if result.BeadToHook != "oag-npeat" {
 		t.Fatalf("BeadToHook = %q, want %q", result.BeadToHook, "oag-npeat")
 	}
 
-	// Verify the legacy bond was NEVER called with the malformed ID.
+	// Verify the legacy bond WAS called with the malformed ID.
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	logContent := string(logBytes)
-	if strings.Contains(logContent, "mol bond oag-wisp-wisp-rsia") {
-		t.Fatalf("legacy bond should not have been called with malformed wisp ID:\n%s", logContent)
-	}
-	// Verify fallback was used (direct bond with formula name)
-	if !strings.Contains(logContent, "mol bond mol-polecat-work oag-npeat") {
-		t.Fatalf("direct-bond fallback should have been called:\n%s", logContent)
+	if !strings.Contains(logContent, "mol bond oag-wisp-wisp-rsia") {
+		t.Fatalf("legacy bond should have been called with malformed wisp ID:\n%s", logContent)
 	}
 }
 

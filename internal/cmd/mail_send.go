@@ -57,10 +57,12 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		if to == "" {
 			return fmt.Errorf("cannot determine identity (role: %s)", ctx.Role)
 		}
+	} else if mailTo != "" {
+		to = mailTo
 	} else if len(args) > 0 {
 		to = args[0]
 	} else {
-		return fmt.Errorf("address required (or use --self)")
+		return fmt.Errorf("address required (use positional arg, --to, or --self)")
 	}
 
 	// All mail uses town beads (two-level architecture)

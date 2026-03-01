@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -216,9 +218,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	return nil
 }
 
-// cleanupSpawnedPolecat removes a polecat that was spawned but whose hook failed,
-// preventing orphaned polecats from accumulating.
-func cleanupSpawnedPolecat(spawnInfo *SpawnedPolecatInfo, rigName string) {
+// cleanupSpawnedPolecat removes a polecat that was spawned but whose session/hook failed,
+// preventing orphaned polecats from accumulating. Cleans up worktree, agent bead, git branch,
+// and optionally the associated auto-convoy.
+func cleanupSpawnedPolecat(spawnInfo *SpawnedPolecatInfo, rigName, convoyID string) {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return
@@ -243,6 +246,17 @@ func cleanupSpawnedPolecat(spawnInfo *SpawnedPolecatInfo, rigName string) {
 	} else {
 		fmt.Printf("  %s Cleaned up orphaned polecat %s\n",
 			style.Dim.Render("○"), spawnInfo.PolecatName)
+	}
+
+	// Delete the git branch if we know it (following nukePolecatFull pattern)
+	if spawnInfo.Branch != "" {
+		repoGit := getRepoGitForRig(r.Path)
+		deletePolecatBranch(spawnInfo.Branch, repoGit, false)
+	}
+
+	// Close the auto-convoy if one was created
+	if convoyID != "" {
+		closeConvoy(convoyID, "Sling rollback - hook failed")
 	}
 }
 
@@ -314,4 +328,46 @@ func resolveRigFromBeadIDs(beadIDs []string, townRoot string) (string, error) {
 	}
 
 	return resolvedRig, nil
+}
+
+// getRepoGitForRig creates a Git client for the rig's repository.
+// It tries the bare repo first, then falls back to the mayor/rig directory.
+func getRepoGitForRig(rigPath string) *git.Git {
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+		return git.NewGitWithDir(bareRepoPath, "")
+	}
+	return git.NewGit(filepath.Join(rigPath, "mayor", "rig"))
+}
+
+// deletePolecatBranch deletes a local git branch for a polecat.
+// Remote branch is never deleted during nuke — the refinery owns remote
+// branch cleanup after successful merge (gt mq post-merge). (gt-v5ku)
+func deletePolecatBranch(branchName string, repoGit *git.Git, hasPendingMR bool) {
+	_ = hasPendingMR // preserved for API compat, no longer consulted
+	if err := repoGit.DeleteBranch(branchName, true); err != nil {
+		fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
+	} else {
+		fmt.Printf("  %s deleted local branch %s\n", style.Success.Render("✓"), branchName)
+	}
+	fmt.Printf("  %s remote branch preserved for refinery merge\n", style.Dim.Render("○"))
+}
+
+// closeConvoy closes a convoy with the given reason.
+// It is a best-effort operation that logs warnings on failure.
+func closeConvoy(convoyID, reason string) {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		fmt.Printf("  %s Could not find workspace to close convoy %s: %v\n", style.Dim.Render("Warning:"), convoyID, err)
+		return
+	}
+	townBeads := filepath.Join(townRoot, ".beads")
+	closeArgs := []string{"close", convoyID, "-r", reason}
+	closeCmd := exec.Command("bd", closeArgs...)
+	closeCmd.Dir = townBeads
+	if err := closeCmd.Run(); err != nil {
+		fmt.Printf("  %s Could not close convoy %s: %v\n", style.Dim.Render("Warning:"), convoyID, err)
+	} else {
+		fmt.Printf("  %s Closed convoy %s\n", style.Dim.Render("○"), convoyID)
+	}
 }

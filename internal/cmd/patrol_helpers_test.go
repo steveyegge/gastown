@@ -428,8 +428,8 @@ func requireBd(t *testing.T) {
 
 func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	t.Helper()
-	testutil.RequireDoltServer(t)
-	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
 	tmpDir := t.TempDir()
 	b := beads.NewIsolatedWithPort(tmpDir, port)
 	// Use a unique prefix per test run to avoid cross-run contamination
@@ -447,7 +447,7 @@ func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	// beads_pt* databases on the shared Dolt server.
 	dbName := "beads_" + prefix
 	t.Cleanup(func() {
-		dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/", testutil.DoltTestPort())
+		dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/", testutil.DoltContainerPort())
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
 			t.Logf("cleanup: failed to connect to dolt server to drop %s: %v", dbName, err)

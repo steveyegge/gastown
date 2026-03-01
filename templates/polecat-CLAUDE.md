@@ -255,6 +255,18 @@ Your pinned molecule and hook persist — you'll continue from where you left of
 
 ---
 
+## Dolt Health: Your Part
+
+Dolt is git, not Postgres. Every `bd create`, `bd update`, `gt mail send` generates
+a permanent Dolt commit. You contribute to Dolt health by:
+
+- **Nudge, don't mail.** `gt nudge` costs zero. `gt mail send` costs 1 commit forever.
+  Only mail when the message must survive session death (HELP to Witness).
+- **Don't create unnecessary beads.** File real work, not scratchpads.
+- **Close your beads.** Open beads that linger become pollution.
+
+See `docs/dolt-health-guide.md` for the full picture.
+
 ## Do NOT
 
 - Push to main (Refinery does this)

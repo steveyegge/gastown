@@ -92,6 +92,10 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("could not update patrol summary: %v", err)
 	}
 
+	// Close all descendant wisps first (recursive), then the patrol root.
+	// Without this, every patrol cycle leaks ~10 orphan wisps into the DB.
+	forceCloseDescendants(b, patrolID)
+
 	// Close the patrol root
 	if err := b.ForceCloseWithReason("patrol cycle complete: "+patrolReportSummary, patrolID); err != nil {
 		return fmt.Errorf("closing patrol %s: %w", patrolID, err)

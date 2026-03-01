@@ -819,7 +819,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			if newPolecatInfo != nil {
 				fmt.Printf("%s Formula instantiation failed, rolling back spawned polecat %s...\n",
 					style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
-				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, "")
 				// Under --force, if this bead was previously pinned, rollback's unhook would otherwise
 				// clear the pinned state. Restore pinned state so we don't lose the original hook.
 				if force && originalStatus == "pinned" {
@@ -912,7 +912,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			// Rollback: session failed, clean up zombie artifacts (worktree, hooked bead).
 			// Without rollback, next sling attempt fails with "bead already hooked" (gt-jn40ft).
 			fmt.Printf("%s Session failed, rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
-			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane
@@ -1031,7 +1031,7 @@ func tryAcquireSlingBeadLock(townRoot, beadID string) (func(), error) {
 // rollbackSlingArtifacts cleans up artifacts left by a partial sling when session start fails.
 // This prevents zombie polecats that block subsequent sling attempts with "bead already hooked".
 // Cleanup is best-effort: each step logs warnings but continues to clean as much as possible.
-func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 	townRoot, err := workspace.FindFromCwdOrError()
 
 	// 1. Burn any attached molecules from partial formula instantiation.
@@ -1069,6 +1069,6 @@ func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir s
 		}
 	}
 
-	// 2. Clean up the spawned polecat (worktree, agent bead, etc.)
-	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName)
+	// 3. Clean up the spawned polecat (worktree, agent bead, convoy, etc.)
+	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName, convoyID)
 }

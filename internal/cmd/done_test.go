@@ -857,9 +857,9 @@ func TestConvoyMergeStrategyNotification(t *testing.T) {
 	}
 }
 
-// TestParseConvoyMergeStrategy verifies that parseConvoyMergeStrategy correctly
-// extracts the merge strategy from convoy descriptions.
-func TestParseConvoyMergeStrategy(t *testing.T) {
+// TestConvoyMergeFromFields verifies that convoyMergeFromFields correctly
+// extracts the merge strategy from convoy descriptions using typed ConvoyFields.
+func TestConvoyMergeFromFields(t *testing.T) {
 	tests := []struct {
 		name        string
 		description string
@@ -899,9 +899,9 @@ func TestParseConvoyMergeStrategy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseConvoyMergeStrategy(tt.description)
+			got := convoyMergeFromFields(tt.description)
 			if got != tt.want {
-				t.Errorf("parseConvoyMergeStrategy() = %q, want %q", got, tt.want)
+				t.Errorf("convoyMergeFromFields() = %q, want %q", got, tt.want)
 			}
 		})
 	}

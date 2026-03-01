@@ -490,7 +490,9 @@ func TestRunCmd_SuccessAndTimeout(t *testing.T) {
 		t.Skip("shell-based command test")
 	}
 
-	out, err := runCmd(500*time.Millisecond, "sh", "-c", "printf 'ok'")
+	// Use generous timeout for success case — not testing timeout behavior here.
+	// 500ms was flaky under CI load where process startup can take >1s.
+	out, err := runCmd(30*time.Second, "sh", "-c", "printf 'ok'")
 	if err != nil {
 		t.Fatalf("runCmd success case failed: %v", err)
 	}
@@ -539,7 +541,10 @@ esac
 
 	// Use bdBin with full path instead of t.Setenv("PATH", ...) to avoid
 	// process-wide PATH mutation that can race under concurrent test suites.
-	f := &LiveConvoyFetcher{cmdTimeout: 2 * time.Second, bdBin: bdPath}
+	// Use generous 30s timeout — this fetcher tests exit-code behavior, not
+	// timeouts. The 2s value was flaky under CI load (process startup alone
+	// can take >1s under heavy contention).
+	f := &LiveConvoyFetcher{cmdTimeout: 30 * time.Second, bdBin: bdPath}
 
 	t.Run("non-zero exit with stdout returns output", func(t *testing.T) {
 		stdout, err := f.runBdCmd(t.TempDir(), "warn")

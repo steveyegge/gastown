@@ -135,7 +135,13 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
-	cmd := exec.Command("bd", "init", "--quiet", "--prefix", prefix)
+	args := []string{"init", "--quiet", "--prefix", prefix}
+	// Forward GT_DOLT_PORT so bd connects to the ephemeral test server
+	// instead of defaulting to port 3307.
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		args = append(args, "--server-port", p)
+	}
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)

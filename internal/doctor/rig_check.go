@@ -111,7 +111,7 @@ func NewGitExcludeConfiguredCheck() *GitExcludeConfiguredCheck {
 
 // requiredExcludes returns the directories that should be excluded.
 func (c *GitExcludeConfiguredCheck) requiredExcludes() []string {
-	return []string{"polecats/", "witness/", "refinery/", "mayor/"}
+	return []string{"/polecats/", "/witness/", "/refinery/", "/mayor/"}
 }
 
 // Run checks if .git/info/exclude contains required entries.
@@ -174,10 +174,13 @@ func (c *GitExcludeConfiguredCheck) Run(ctx *CheckContext) *CheckResult {
 		_ = file.Close() //nolint:gosec // G104: best-effort close
 	}
 
-	// Check for missing entries
+	// Check for missing entries. Accept either anchored (/refinery/) or
+	// legacy un-anchored (refinery/) forms — the un-anchored form is overly
+	// broad but still covers the required directory.
 	c.missingEntries = nil
 	for _, required := range c.requiredExcludes() {
-		if !existing[required] {
+		unanchored := strings.TrimPrefix(required, "/")
+		if !existing[required] && !existing[unanchored] {
 			c.missingEntries = append(c.missingEntries, required)
 		}
 	}

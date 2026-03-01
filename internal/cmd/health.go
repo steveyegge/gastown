@@ -117,12 +117,12 @@ func runHealth(cmd *cobra.Command, args []string) error {
 
 	// 2. Databases (only if server is running)
 	if report.Server.Running {
-		report.Databases = checkDatabaseHealth(townRoot, report.Server.Port)
+		report.Databases = checkDatabaseHealth(report.Server.Port)
 	}
 
 	// 3. Pollution scan
 	if report.Server.Running {
-		report.Pollution = checkPollution(townRoot, report.Server.Port)
+		report.Pollution = checkPollution(report.Server.Port)
 	}
 
 	// 4. Backups
@@ -171,7 +171,7 @@ func checkServerHealth(townRoot string) *ServerHealth {
 	return sh
 }
 
-func checkDatabaseHealth(townRoot string, port int) []DatabaseHealth {
+func checkDatabaseHealth(port int) []DatabaseHealth {
 	productionDBs := []string{"hq", "beads", "gastown"}
 	var results []DatabaseHealth
 
@@ -207,7 +207,7 @@ func checkDatabaseHealth(townRoot string, port int) []DatabaseHealth {
 	return results
 }
 
-func checkPollution(townRoot string, port int) []PollutionRecord {
+func checkPollution(port int) []PollutionRecord {
 	productionDBs := []string{"hq", "beads", "gastown"}
 	var records []PollutionRecord
 
@@ -236,7 +236,7 @@ func checkPollution(townRoot string, port int) []PollutionRecord {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
 		for _, c := range checks {
-			query := fmt.Sprintf("SELECT id, COALESCE(title,'') FROM issues WHERE %s LIMIT 10", c.where)
+			query := fmt.Sprintf("SELECT id, COALESCE(title,'') FROM issues WHERE (%s) AND status != 'closed' LIMIT 10", c.where)
 			rows, err := db.QueryContext(ctx, query)
 			if err != nil {
 				continue
@@ -334,11 +334,9 @@ func checkProcessHealth(expectedPort int) *ProcessHealth {
 			continue
 		}
 
-		// Skip expected servers (prod port + test port 3308).
+		// Skip expected servers (prod port).
 		if strings.Contains(cmdline, "--port "+expectedPortStr) ||
-			strings.Contains(cmdline, "--port="+expectedPortStr) ||
-			strings.Contains(cmdline, "--port 3308") ||
-			strings.Contains(cmdline, "--port=3308") {
+			strings.Contains(cmdline, "--port="+expectedPortStr) {
 			continue
 		}
 

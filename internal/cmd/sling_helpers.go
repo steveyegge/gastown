@@ -181,7 +181,10 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 		}
 	}
 
-	// Step 4: Force-close the orphaned wisp roots so they don't linger.
+	// Step 4: Close descendants, then force-close the orphaned wisp roots.
+	for _, molID := range molecules {
+		forceCloseDescendants(bd, molID)
+	}
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
 			style.Dim.Render("Warning:"), err)
@@ -615,6 +618,38 @@ func wakeRigAgents(rigName string) {
 	}
 }
 
+// nudgeWitness wakes the witness after polecat completion (gt-a6gp).
+// Replaces POLECAT_DONE mail — nudges are free (no Dolt commit).
+// Uses immediate delivery: sends directly to the tmux pane.
+func nudgeWitness(rigName, message string) {
+	witnessSession := session.WitnessSessionName(session.PrefixFor(rigName))
+
+	// Test hook: log nudge for test observability
+	if logPath := os.Getenv("GT_TEST_NUDGE_LOG"); logPath != "" {
+		entry := fmt.Sprintf("nudge:%s:%s\n", witnessSession, message)
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			_, _ = f.WriteString(entry)
+			_ = f.Close()
+		}
+		return // Don't actually nudge tmux in tests
+	}
+
+	// Emit a file event so the witness's await-event unblocks instantly.
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		_, _ = EmitEventToTown(townRoot, "witness", "POLECAT_DONE", []string{
+			"source=polecat",
+			"message=" + message,
+		})
+	}
+
+	t := tmux.NewTmux()
+	if err := t.NudgeSession(witnessSession, message); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to nudge witness %s: %v\n", witnessSession, err)
+	}
+}
+
 // nudgeRefinery wakes the refinery after an MR is created.
 // Uses immediate delivery: sends directly to the tmux pane.
 // No cooperative queue — idle agents never call Drain(), so queued
@@ -727,7 +762,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
 	}
-	wispArgs = append(wispArgs, "--root-only", "--json")
+	wispArgs = append(wispArgs, "--json")
 	wispOut, err := BdCmd(wispArgs...).
 		Dir(formulaWorkDir).
 		WithAutoCommit().
@@ -750,40 +785,26 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// ("<id> not found"), while direct formula->bead bond still works. If legacy
 	// wisp->bead bond fails, retry with direct formula bond in ephemeral mode.
 	//
-	// gt-4gjd: Detect malformed wisp IDs (e.g., doubled "-wisp-" like "oag-wisp-wisp-rsia")
-	// and skip directly to fallback. This avoids the noisy error from a doomed bond attempt
-	// and prevents creating orphaned wisps from the failed path.
-	skipLegacyBond := isMalformedWispID(wispRootID)
-	if skipLegacyBond {
-		fmt.Fprintf(os.Stderr, "Warning: bd mol wisp returned malformed ID %q, using direct bond fallback\n", wispRootID)
+	// gt-4gjd: Warn about malformed wisp IDs (e.g., doubled "-wisp-" like "oag-wisp-wisp-rsia")
+	// but proceed — they are valid in the DB and bond correctly. The bd-side fix is ef57293e
+	// (not yet released).
+	if isMalformedWispID(wispRootID) {
+		fmt.Fprintf(os.Stderr, "Warning: bd mol wisp returned malformed ID %q (known bd bug, proceeding with bond)\n", wispRootID)
 	}
 
-	var bondOut []byte
-	legacyBondFailed := skipLegacyBond
-	if !skipLegacyBond {
-		bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
-		bondOut, err = BdCmd(bondArgs...).
-			Dir(formulaWorkDir).
-			WithAutoCommit().
-			WithGTRoot(townRoot).
-			Output()
-		if err != nil {
-			legacyBondFailed = true
-		}
-	}
-
-	if legacyBondFailed {
-		// gt-4gjd: Clean up orphaned wisp from the failed legacy path.
-		// bd mol wisp may have created a wisp that we can't bond (bad ID or
-		// ephemeral storage issue). Best-effort cleanup to prevent wisp accumulation.
+	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
+	bondOut, err := BdCmd(bondArgs...).
+		Dir(formulaWorkDir).
+		WithAutoCommit().
+		WithGTRoot(townRoot).
+		Output()
+	if err != nil {
+		// Clean up orphaned wisp from the failed legacy path.
 		cleanupOrphanedWisp(wispRootID, formulaWorkDir)
 
 		fallbackRootID, fallbackErr := bondFormulaDirect(resolvedFormula, beadID, formulaWorkDir, townRoot, formulaVars)
 		if fallbackErr != nil {
-			if err != nil {
-				return nil, fmt.Errorf("bonding formula to bead: %w (direct formula bond fallback failed: %v)", err, fallbackErr)
-			}
-			return nil, fmt.Errorf("bonding formula to bead (malformed wisp ID %q): direct formula bond fallback failed: %v", wispRootID, fallbackErr)
+			return nil, fmt.Errorf("bonding formula to bead: %w (direct formula bond fallback failed: %v)", err, fallbackErr)
 		}
 		return &FormulaOnBeadResult{
 			WispRootID: fallbackRootID,

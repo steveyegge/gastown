@@ -28,20 +28,10 @@ type PatrolReceipt struct {
 }
 
 func receiptVerdictForZombie(z ZombieResult) PatrolVerdict {
-	if strings.TrimSpace(z.HookBead) != "" {
+	if z.WasActive {
 		return PatrolVerdictStale
 	}
-	// All states from DetectZombiePolecats that indicate a polecat was recently
-	// active are classified as stale. States without evidence of recent work
-	// (e.g. "idle") fall through to orphan.
-	switch z.AgentState {
-	case "working", "running", "spawning",
-		"stuck-in-done", "agent-dead-in-session",
-		"bead-closed-still-running", "done-intent-dead":
-		return PatrolVerdictStale
-	default:
-		return PatrolVerdictOrphan
-	}
+	return PatrolVerdictOrphan
 }
 
 // BuildPatrolReceipt projects a zombie patrol result into a stable JSON-ready receipt.

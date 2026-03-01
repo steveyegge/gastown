@@ -21,26 +21,14 @@ const (
 	defaultDoctorDogInterval = 5 * time.Minute
 	doctorDogTCPTimeout      = 5 * time.Second
 	doctorDogQueryTimeout    = 10 * time.Second
-	doctorDogGCTimeout       = 5 * time.Minute
 )
 
-// Response thresholds — when to take automated action.
+// Default advisory thresholds — used for recommendations in the report.
+// These are defaults; override via DoctorDogConfig fields.
 const (
-	// doctorDogLatencyAlertMs is the latency threshold (in ms) that triggers
-	// an escalation to the Mayor. 5 seconds indicates severe degradation.
-	doctorDogLatencyAlertMs = 5000.0
-
-	// doctorDogOrphanAlertCount is the database count threshold that triggers
-	// a janitor run. More than 10 is concerning; > 20 triggers cleanup.
-	doctorDogOrphanAlertCount = 20
-
-	// doctorDogBackupStaleSeconds is the backup age (in seconds) that triggers
-	// an immediate backup sync. 1 hour = 3600 seconds.
-	doctorDogBackupStaleSeconds = 3600.0
-
-	// doctorDogActionCooldown prevents repeated actions within this window.
-	// Each action type has its own cooldown tracker.
-	doctorDogActionCooldown = 10 * time.Minute
+	defaultDoctorDogLatencyAlertMs      = 5000.0
+	defaultDoctorDogOrphanAlertCount    = 20
+	defaultDoctorDogBackupStaleSeconds  = 3600.0
 )
 
 // DoctorDogConfig holds configuration for the doctor_dog patrol.
@@ -54,6 +42,40 @@ type DoctorDogConfig struct {
 	// Databases lists the expected production databases.
 	// If empty, uses the default set.
 	Databases []string `json:"databases,omitempty"`
+
+	// Advisory thresholds — when exceeded, recommendations are added to the report.
+	// Agents (Mayor/Deacon) read the report and decide what actions to take.
+	// Zero values mean "use default".
+
+	// LatencyAlertMs: latency threshold in ms. Default: 5000 (5s).
+	LatencyAlertMs float64 `json:"latency_alert_ms,omitempty"`
+
+	// OrphanAlertCount: database count threshold. Default: 20.
+	OrphanAlertCount int `json:"orphan_alert_count,omitempty"`
+
+	// BackupStaleSeconds: backup age threshold in seconds. Default: 3600 (1hr).
+	BackupStaleSeconds float64 `json:"backup_stale_seconds,omitempty"`
+}
+
+// doctorDogThresholds returns the effective thresholds, using config overrides or defaults.
+func doctorDogThresholds(config *DaemonPatrolConfig) (latencyMs float64, orphanCount int, backupStaleSec float64) {
+	latencyMs = defaultDoctorDogLatencyAlertMs
+	orphanCount = defaultDoctorDogOrphanAlertCount
+	backupStaleSec = defaultDoctorDogBackupStaleSeconds
+
+	if config != nil && config.Patrols != nil && config.Patrols.DoctorDog != nil {
+		cfg := config.Patrols.DoctorDog
+		if cfg.LatencyAlertMs > 0 {
+			latencyMs = cfg.LatencyAlertMs
+		}
+		if cfg.OrphanAlertCount > 0 {
+			orphanCount = cfg.OrphanAlertCount
+		}
+		if cfg.BackupStaleSeconds > 0 {
+			backupStaleSec = cfg.BackupStaleSeconds
+		}
+	}
+	return
 }
 
 // --- Report types: structured data for agent consumption ---
@@ -61,17 +83,31 @@ type DoctorDogConfig struct {
 // DoctorDogReport is the complete output of a doctor dog health check cycle.
 // Agents (Deacon/Mayor) consume this to make escalation decisions.
 type DoctorDogReport struct {
-	Timestamp      time.Time                  `json:"timestamp"`
-	Host           string                     `json:"host"`
-	Port           int                        `json:"port"`
-	TCPReachable   bool                       `json:"tcp_reachable"`
-	Latency        *DoctorDogLatencyReport    `json:"latency,omitempty"`
-	Databases      *DoctorDogDatabasesReport  `json:"databases,omitempty"`
-	GC             []DoctorDogGCReport        `json:"gc,omitempty"`
-	Zombies        []DoctorDogZombieReport    `json:"zombies,omitempty"`
-	BackupAge      *DoctorDogBackupReport     `json:"backup_age,omitempty"`
-	JsonlBackupAge *DoctorDogBackupReport     `json:"jsonl_backup_age,omitempty"`
-	DiskUsage      []DoctorDogDiskReport      `json:"disk_usage,omitempty"`
+	Timestamp       time.Time                    `json:"timestamp"`
+	Host            string                       `json:"host"`
+	Port            int                          `json:"port"`
+	TCPReachable    bool                         `json:"tcp_reachable"`
+	Latency         *DoctorDogLatencyReport      `json:"latency,omitempty"`
+	Databases       *DoctorDogDatabasesReport    `json:"databases,omitempty"`
+	Zombies         []DoctorDogZombieReport      `json:"zombies,omitempty"`
+	BackupAge       *DoctorDogBackupReport       `json:"backup_age,omitempty"`
+	JsonlBackupAge  *DoctorDogBackupReport       `json:"jsonl_backup_age,omitempty"`
+	DiskUsage       []DoctorDogDiskReport        `json:"disk_usage,omitempty"`
+	Recommendations []DoctorDogRecommendation    `json:"recommendations,omitempty"`
+}
+
+// DoctorDogRecommendation is an advisory finding for agents to act on.
+// The daemon reports what it observed; agents decide what to do.
+type DoctorDogRecommendation struct {
+	// Action is the suggested action (e.g., "restart_server", "escalate_latency",
+	// "run_cleanup", "sync_backup").
+	Action string `json:"action"`
+
+	// Reason explains why this recommendation was generated.
+	Reason string `json:"reason"`
+
+	// Severity: "critical" (server down), "high" (degraded), "warning" (maintenance).
+	Severity string `json:"severity"`
 }
 
 // DoctorDogLatencyReport records SELECT 1 latency.
@@ -85,15 +121,6 @@ type DoctorDogDatabasesReport struct {
 	Names []string `json:"names"`
 	Count int      `json:"count"`
 	Error string   `json:"error,omitempty"`
-}
-
-// DoctorDogGCReport records the result of dolt gc on one database.
-type DoctorDogGCReport struct {
-	Database   string  `json:"database"`
-	DurationMs float64 `json:"duration_ms"`
-	Success    bool    `json:"success"`
-	TimedOut   bool    `json:"timed_out,omitempty"`
-	Error      string  `json:"error,omitempty"`
 }
 
 // DoctorDogZombieReport records a detected zombie dolt sql-server process.
@@ -128,7 +155,7 @@ func doctorDogInterval(config *DaemonPatrolConfig) time.Duration {
 	return defaultDoctorDogInterval
 }
 
-// doctorDogDatabases returns the list of production databases for gc.
+// doctorDogDatabases returns the list of production databases for health checks.
 func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 	if config != nil && config.Patrols != nil && config.Patrols.DoctorDog != nil {
 		if len(config.Patrols.DoctorDog.Databases) > 0 {
@@ -138,10 +165,9 @@ func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 	return []string{"hq", "beads", "gastown", "sky", "wyvern", "beads_hop"}
 }
 
-// runDoctorDog performs all health checks, writes a structured report, and
-// takes automated response actions when thresholds are exceeded.
-// Actions: restart server if unreachable, trigger janitor if orphans > 20,
-// trigger backup if stale > 1hr, escalate to Mayor if latency > 5s.
+// runDoctorDog performs all health checks, generates recommendations when
+// configurable thresholds are exceeded, and writes a structured report.
+// Agents (Mayor/Deacon) read the report and decide what actions to take.
 func (d *Daemon) runDoctorDog() {
 	if !IsPatrolEnabled(d.patrolConfig, "doctor_dog") {
 		return
@@ -169,30 +195,24 @@ func (d *Daemon) runDoctorDog() {
 		report.Databases = d.doctorDogDatabasesReport(host, port)
 	}
 
-	// 4. Dolt GC on each production database (filesystem-based)
-	report.GC = d.doctorDogRunGC()
-
-	// 5. Zombie server detection
+	// 4. Zombie server detection
 	expectedPorts := []int{port}
-	if d.doltTestServer != nil && d.doltTestServer.IsEnabled() {
-		expectedPorts = append(expectedPorts, d.doltTestServer.config.Port)
-	}
 	report.Zombies = d.doctorDogZombieReport(expectedPorts)
 
-	// 6. Backup staleness (Dolt filesystem)
+	// 5. Backup staleness (Dolt filesystem)
 	report.BackupAge = d.doctorDogBackupAgeReport()
 
-	// 6b. JSONL git backup freshness
+	// 5b. JSONL git backup freshness
 	report.JsonlBackupAge = d.doctorDogJsonlBackupAgeReport()
 
-	// 7. Disk usage per DB
+	// 6. Disk usage per DB
 	report.DiskUsage = d.doctorDogDiskUsageReport()
 
-	// Write structured report for agent consumption
-	d.writeDoctorDogReport(report)
-
-	// Evaluate report and take automated response actions
+	// Evaluate report and generate recommendations (before writing)
 	d.doctorDogRespond(report)
+
+	// Write structured report (with recommendations) for agent consumption
+	d.writeDoctorDogReport(report)
 
 	d.logger.Printf("doctor_dog: health check cycle complete")
 }
@@ -266,63 +286,6 @@ func (d *Daemon) doctorDogDatabasesReport(host string, port int) *DoctorDogDatab
 
 	d.logger.Printf("doctor_dog: databases: %d found", len(databases))
 	return &DoctorDogDatabasesReport{Names: databases, Count: len(databases)}
-}
-
-// doctorDogRunGC runs dolt gc on each production database from the filesystem.
-// GC is maintenance, not a judgment call — the doctor runs it and reports results.
-func (d *Daemon) doctorDogRunGC() []DoctorDogGCReport {
-	var dataDir string
-	if d.doltServer != nil && d.doltServer.IsEnabled() && d.doltServer.config.DataDir != "" {
-		dataDir = d.doltServer.config.DataDir
-	} else {
-		dataDir = filepath.Join(d.config.TownRoot, ".dolt-data")
-	}
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		d.logger.Printf("doctor_dog: gc: data dir %s does not exist, skipping", dataDir)
-		return nil
-	}
-
-	databases := doctorDogDatabases(d.patrolConfig)
-	d.logger.Printf("doctor_dog: gc: running on %d databases", len(databases))
-
-	var results []DoctorDogGCReport
-	for _, dbName := range databases {
-		dbDir := filepath.Join(dataDir, dbName)
-		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
-			d.logger.Printf("doctor_dog: gc: %s: directory not found, skipping", dbName)
-			continue
-		}
-
-		results = append(results, d.doctorDogGCDatabase(dbDir, dbName))
-	}
-	return results
-}
-
-// doctorDogGCDatabase runs dolt gc on a single database directory and reports result.
-func (d *Daemon) doctorDogGCDatabase(dbDir, dbName string) DoctorDogGCReport {
-	ctx, cancel := context.WithTimeout(context.Background(), doctorDogGCTimeout)
-	defer cancel()
-
-	start := time.Now()
-	cmd := exec.CommandContext(ctx, "dolt", "gc")
-	cmd.Dir = dbDir
-
-	output, err := cmd.CombinedOutput()
-	elapsed := time.Since(start)
-	durationMs := float64(elapsed.Microseconds()) / 1000.0
-
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			d.logger.Printf("doctor_dog: gc: %s: TIMEOUT after %v", dbName, elapsed)
-			return DoctorDogGCReport{Database: dbName, DurationMs: durationMs, TimedOut: true, Error: "timeout"}
-		}
-		errMsg := strings.TrimSpace(string(output))
-		d.logger.Printf("doctor_dog: gc: %s: failed after %v: %v (%s)", dbName, elapsed, err, errMsg)
-		return DoctorDogGCReport{Database: dbName, DurationMs: durationMs, Error: fmt.Sprintf("%v: %s", err, errMsg)}
-	}
-
-	d.logger.Printf("doctor_dog: gc: %s: completed in %v", dbName, elapsed)
-	return DoctorDogGCReport{Database: dbName, DurationMs: durationMs, Success: true}
 }
 
 // doctorDogZombieReport scans for dolt sql-server processes NOT on any expected port.
@@ -530,57 +493,60 @@ func dirSize(path string) (int64, error) {
 	return size, err
 }
 
-// doctorDogRespond evaluates the health report and takes automated actions:
-// - Restart server if TCP unreachable
-// - Trigger janitor if database count > 20 (orphan accumulation)
-// - Trigger backup if backup stale > 1 hour
-// - Escalate to Mayor if query latency > 5 seconds
-// Each action has a cooldown to prevent action storms.
+// doctorDogRespond evaluates the health report and generates recommendations.
+// The daemon does NOT take automated actions — it reports what it observed and
+// suggests actions. Agents (Mayor/Deacon) read the report and decide what to do.
+// This follows ZFC: daemons collect metrics, agents make decisions.
 func (d *Daemon) doctorDogRespond(report *DoctorDogReport) {
-	now := time.Now()
+	latencyThreshold, orphanThreshold, backupThreshold := doctorDogThresholds(d.patrolConfig)
 
-	// Action 1: Restart server if unreachable
+	var recs []DoctorDogRecommendation
+
+	// Recommendation 1: Server unreachable
 	if !report.TCPReachable {
-		if now.Sub(d.lastDoctorRestart) >= doctorDogActionCooldown {
-			d.lastDoctorRestart = now
-			d.logger.Printf("doctor_dog: ACTION: server unreachable, triggering restart")
-			d.ensureDoltServerRunning()
-		} else {
-			d.logger.Printf("doctor_dog: server unreachable but restart cooldown active")
-		}
+		d.logger.Printf("doctor_dog: RECOMMEND: server unreachable, recommend restart")
+		recs = append(recs, DoctorDogRecommendation{
+			Action:   "restart_server",
+			Reason:   "Dolt server TCP unreachable",
+			Severity: "critical",
+		})
 	}
 
-	// Action 2: Escalate to Mayor if latency > 5s
-	if report.Latency != nil && report.Latency.Error == "" && report.Latency.DurationMs > doctorDogLatencyAlertMs {
-		if now.Sub(d.lastDoctorEscalate) >= doctorDogActionCooldown {
-			d.lastDoctorEscalate = now
-			d.logger.Printf("doctor_dog: ACTION: latency %.0fms > %.0fms threshold, escalating",
-				report.Latency.DurationMs, doctorDogLatencyAlertMs)
-			d.escalate("doctor_dog", fmt.Sprintf("Dolt query latency %.0fms exceeds %ds threshold",
-				report.Latency.DurationMs, int(doctorDogLatencyAlertMs/1000)))
-		}
+	// Recommendation 2: High latency
+	if report.Latency != nil && report.Latency.Error == "" && report.Latency.DurationMs > latencyThreshold {
+		d.logger.Printf("doctor_dog: RECOMMEND: latency %.0fms > %.0fms threshold",
+			report.Latency.DurationMs, latencyThreshold)
+		recs = append(recs, DoctorDogRecommendation{
+			Action:   "escalate_latency",
+			Reason:   fmt.Sprintf("Dolt query latency %.0fms exceeds %.0fms threshold", report.Latency.DurationMs, latencyThreshold),
+			Severity: "high",
+		})
 	}
 
-	// Action 3: Trigger janitor if orphan databases > 20
-	if report.Databases != nil && report.Databases.Error == "" && report.Databases.Count > doctorDogOrphanAlertCount {
-		if now.Sub(d.lastDoctorJanitor) >= doctorDogActionCooldown {
-			d.lastDoctorJanitor = now
-			d.logger.Printf("doctor_dog: ACTION: %d databases (> %d threshold), triggering janitor",
-				report.Databases.Count, doctorDogOrphanAlertCount)
-			go d.runJanitorDog()
-		}
+	// Recommendation 3: Orphan database accumulation
+	if report.Databases != nil && report.Databases.Error == "" && report.Databases.Count > orphanThreshold {
+		d.logger.Printf("doctor_dog: RECOMMEND: %d databases (> %d threshold), recommend cleanup",
+			report.Databases.Count, orphanThreshold)
+		recs = append(recs, DoctorDogRecommendation{
+			Action:   "run_cleanup",
+			Reason:   fmt.Sprintf("%d databases exceeds %d threshold — run gt dolt cleanup", report.Databases.Count, orphanThreshold),
+			Severity: "warning",
+		})
 	}
 
-	// Action 4: Trigger backup if stale > 1 hour
+	// Recommendation 4: Stale backup
 	if report.BackupAge != nil && report.BackupAge.Error == "" && !report.BackupAge.Missing &&
-		report.BackupAge.AgeSeconds > doctorDogBackupStaleSeconds {
-		if now.Sub(d.lastDoctorBackup) >= doctorDogActionCooldown {
-			d.lastDoctorBackup = now
-			d.logger.Printf("doctor_dog: ACTION: backup %.0fs stale (> %.0fs threshold), triggering backup",
-				report.BackupAge.AgeSeconds, doctorDogBackupStaleSeconds)
-			go d.syncDoltBackups()
-		}
+		report.BackupAge.AgeSeconds > backupThreshold {
+		d.logger.Printf("doctor_dog: RECOMMEND: backup %.0fs stale (> %.0fs threshold), recommend sync",
+			report.BackupAge.AgeSeconds, backupThreshold)
+		recs = append(recs, DoctorDogRecommendation{
+			Action:   "sync_backup",
+			Reason:   fmt.Sprintf("Backup %.0fs old exceeds %.0fs threshold", report.BackupAge.AgeSeconds, backupThreshold),
+			Severity: "warning",
+		})
 	}
+
+	report.Recommendations = recs
 }
 
 // writeDoctorDogReport writes the report as JSON to a well-known location.

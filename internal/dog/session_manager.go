@@ -2,13 +2,14 @@
 package dog
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -95,12 +96,21 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 	}
 
-	// Build instructions for the dog
+	// Build instructions for the dog.
+	// For plugin work, explicitly direct the dog to read mail for the full
+	// plugin instructions rather than trying to locate the plugin locally.
+	// This prevents dogs from scanning their worktree's plugins/ directory
+	// and escalating "plugin not found" when the plugin is town-level.
 	workInfo := ""
 	if opts.WorkDesc != "" {
-		workInfo = fmt.Sprintf(" Work assigned: %s.", opts.WorkDesc)
+		if strings.HasPrefix(opts.WorkDesc, "plugin:") {
+			pluginName := strings.TrimPrefix(opts.WorkDesc, "plugin:")
+			workInfo = fmt.Sprintf(" Plugin %s dispatched — full instructions are in your mail. Do NOT look for the plugin locally; read mail instead.", pluginName)
+		} else {
+			workInfo = fmt.Sprintf(" Work assigned: %s.", opts.WorkDesc)
+		}
 	}
-	instructions := fmt.Sprintf("I am Dog %s.%s Check mail for work: `"+cli.Name()+" mail inbox`. Execute assigned formula/bead. When done, run `"+cli.Name()+" dog done` — this clears your work and auto-terminates the session.", dogName, workInfo)
+	instructions := fmt.Sprintf("I am Dog %s.%s Check mail for work: `"+cli.Name()+" mail inbox`. Execute the instructions from your mail. When done, run `"+cli.Name()+" dog done` — this clears your work and auto-terminates the session.", dogName, workInfo)
 
 	// Use unified session lifecycle.
 	theme := tmux.DogTheme()

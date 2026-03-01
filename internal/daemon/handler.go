@@ -12,24 +12,28 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// Constants for idle dog reaping.
-const (
+// Dog lifecycle defaults — now config-driven via operational.daemon thresholds.
+// These vars are still used as fallbacks and for tests; production code
+// should prefer d.daemonCfg() accessors loaded from TownSettings.
+var (
 	// dogIdleSessionTimeout is how long a dog can be idle with a live tmux
-	// session before the session is killed.
-	dogIdleSessionTimeout = 1 * time.Hour
+	// session before the session is killed (default 1h).
+	// Configurable via operational.daemon.dog_idle_session_timeout.
+	dogIdleSessionTimeout = config.DefaultDogIdleSessionTimeout
 
 	// dogIdleRemoveTimeout is how long a dog can be idle before it is removed
-	// from the kennel entirely (only when pool is oversized).
-	dogIdleRemoveTimeout = 4 * time.Hour
+	// from the kennel entirely (only when pool is oversized, default 4h).
+	// Configurable via operational.daemon.dog_idle_remove_timeout.
+	dogIdleRemoveTimeout = config.DefaultDogIdleRemoveTimeout
 
 	// staleWorkingTimeout is how long a dog can be in state=working with no
-	// activity updates before it is considered stuck. Covers the gap where
-	// a tmux session is alive but sitting at an idle prompt.
-	staleWorkingTimeout = 2 * time.Hour
+	// activity updates before it is considered stuck (default 2h).
+	// Configurable via operational.daemon.stale_working_timeout.
+	staleWorkingTimeout = config.DefaultStaleWorkingTimeout
 
-	// maxDogPoolSize is the target pool size. Dogs idle beyond
-	// dogIdleRemoveTimeout are removed when the pool exceeds this count.
-	maxDogPoolSize = 4
+	// maxDogPoolSize is the target pool size (default 4).
+	// Configurable via operational.daemon.max_dog_pool_size.
+	maxDogPoolSize = config.DefaultMaxDogPoolSize
 )
 
 // handleDogs manages Dog lifecycle: cleanup stuck dogs, reap idle dogs, then dispatch plugins.
@@ -41,13 +45,15 @@ func (d *Daemon) handleDogs() {
 		return
 	}
 
+	opCfg := d.loadOperationalConfig().GetDaemonConfig()
+
 	mgr := dog.NewManager(d.config.TownRoot, rigsConfig)
 	t := tmux.NewTmux()
 	sm := dog.NewSessionManager(t, d.config.TownRoot, mgr)
 
 	d.cleanupStuckDogs(mgr, sm)
-	d.detectStaleWorkingDogs(mgr, sm)
-	d.reapIdleDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, opCfg)
+	d.reapIdleDogs(mgr, sm, opCfg)
 	d.dispatchPlugins(mgr, sm, rigsConfig)
 }
 
@@ -87,13 +93,14 @@ func (d *Daemon) cleanupStuckDogs(mgr *dog.Manager, sm *dog.SessionManager) {
 // staleWorkingTimeout. These dogs have live tmux sessions sitting idle at a
 // prompt — neither cleanupStuckDogs (needs dead session) nor reapIdleDogs
 // (needs state=idle) will catch them.
-func (d *Daemon) detectStaleWorkingDogs(mgr *dog.Manager, sm *dog.SessionManager) {
+func (d *Daemon) detectStaleWorkingDogs(mgr *dog.Manager, sm *dog.SessionManager, daemonCfg *config.DaemonThresholds) {
 	dogs, err := mgr.List()
 	if err != nil {
 		d.logger.Printf("Handler: failed to list dogs for stale-working check: %v", err)
 		return
 	}
 
+	threshold := daemonCfg.StaleWorkingTimeoutD()
 	now := time.Now()
 	for _, dg := range dogs {
 		if dg.State != dog.StateWorking {
@@ -101,7 +108,7 @@ func (d *Daemon) detectStaleWorkingDogs(mgr *dog.Manager, sm *dog.SessionManager
 		}
 
 		staleDuration := now.Sub(dg.LastActive)
-		if staleDuration < staleWorkingTimeout {
+		if staleDuration < threshold {
 			continue
 		}
 
@@ -129,12 +136,16 @@ func (d *Daemon) detectStaleWorkingDogs(mgr *dog.Manager, sm *dog.SessionManager
 
 // reapIdleDogs kills tmux sessions for dogs that have been idle too long, and
 // removes long-idle dogs from the kennel when the pool is oversized.
-func (d *Daemon) reapIdleDogs(mgr *dog.Manager, sm *dog.SessionManager) {
+func (d *Daemon) reapIdleDogs(mgr *dog.Manager, sm *dog.SessionManager, daemonCfg *config.DaemonThresholds) {
 	dogs, err := mgr.List()
 	if err != nil {
 		d.logger.Printf("Handler: failed to list dogs for reaping: %v", err)
 		return
 	}
+
+	idleSessionTimeout := daemonCfg.DogIdleSessionTimeoutD()
+	idleRemoveTimeout := daemonCfg.DogIdleRemoveTimeoutD()
+	poolMax := daemonCfg.MaxDogPoolSizeV()
 
 	now := time.Now()
 	poolSize := len(dogs)
@@ -147,7 +158,7 @@ func (d *Daemon) reapIdleDogs(mgr *dog.Manager, sm *dog.SessionManager) {
 		idleDuration := now.Sub(dg.LastActive)
 
 		// Phase 1: kill stale tmux sessions for idle dogs.
-		if idleDuration >= dogIdleSessionTimeout {
+		if idleDuration >= idleSessionTimeout {
 			running, err := sm.IsRunning(dg.Name)
 			if err != nil {
 				d.logger.Printf("Handler: error checking session for idle dog %s: %v", dg.Name, err)
@@ -162,9 +173,9 @@ func (d *Daemon) reapIdleDogs(mgr *dog.Manager, sm *dog.SessionManager) {
 		}
 
 		// Phase 2: remove long-idle dogs when pool is oversized.
-		if poolSize > maxDogPoolSize && idleDuration >= dogIdleRemoveTimeout {
+		if poolSize > poolMax && idleDuration >= idleRemoveTimeout {
 			d.logger.Printf("Handler: removing long-idle dog %s from kennel (idle %v, pool %d/%d)",
-				dg.Name, idleDuration.Truncate(time.Minute), poolSize, maxDogPoolSize)
+				dg.Name, idleDuration.Truncate(time.Minute), poolSize, poolMax)
 
 			// Ensure session is dead before removing.
 			running, _ := sm.IsRunning(dg.Name)
@@ -256,9 +267,9 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 		// Send mail with plugin instructions.
 		msg := mail.NewMessage(
 			"daemon",
-			fmt.Sprintf("dog/%s", idleDog.Name),
+			fmt.Sprintf("deacon/dogs/%s", idleDog.Name),
 			fmt.Sprintf("Plugin: %s", p.Name),
-			p.Instructions,
+			p.FormatMailBody(),
 		)
 		msg.Type = mail.TypeTask
 		msg.Timestamp = time.Now()
@@ -275,4 +286,10 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 func (d *Daemon) loadRigsConfig() (*config.RigsConfig, error) {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
 	return config.LoadRigsConfig(rigsPath)
+}
+
+// loadOperationalConfig loads operational thresholds from town settings.
+// Returns a valid (never nil) config — accessors return defaults for nil fields.
+func (d *Daemon) loadOperationalConfig() *config.OperationalConfig {
+	return config.LoadOperationalConfig(d.config.TownRoot)
 }

@@ -89,6 +89,12 @@ linters:
         linters:
           - gosec
         text: 'G117'
+      # G201: SQL string formatting with backtick-quoted identifiers (dbName, table names)
+      # Internal code builds queries with database/table names from internal config, not user input
+      - path: 'internal/'
+        linters:
+          - gosec
+        text: 'G201'
       # G702/G703/G704/G705: Taint analysis false positives in internal tooling
       # Internal code uses trusted inputs (constructed paths, internal APIs, validated args)
       - path: 'internal/'

@@ -950,7 +950,7 @@ func stopDaemonIfRunning(townRoot string) {
 	}
 
 	// Fallback: Search for orphaned daemon processes
-	orphaned, err := daemon.FindOrphanedDaemons()
+	orphaned, err := daemon.FindOrphanedDaemons(townRoot)
 	if err != nil {
 		fmt.Printf("  %s Warning: failed to search for orphaned daemons: %v\n",
 			style.Dim.Render("○"), err)
@@ -961,7 +961,7 @@ func stopDaemonIfRunning(townRoot string) {
 		fmt.Printf("  %s Found %d orphaned daemon process(es): %v\n",
 			style.Bold.Render("⚠"), len(orphaned), orphaned)
 
-		killed, err := daemon.KillOrphanedDaemons()
+		killed, err := daemon.KillOrphanedDaemons(townRoot)
 		if err != nil {
 			fmt.Printf("  %s Failed to kill orphaned daemons: %v\n",
 				style.Bold.Render("✗"), err)

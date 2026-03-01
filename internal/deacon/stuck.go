@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 // Default parameters for stuck-session detection.
-// These are fallbacks when no role bead config exists.
-// Per ZFC: "Let agents decide thresholds. 'Stuck' is a judgment call."
+// These are fallbacks when no config override exists.
+// Configurable via operational.deacon in settings/config.json.
 const (
 	DefaultPingTimeout         = 30 * time.Second // How long to wait for response
 	DefaultConsecutiveFailures = 3                // Failures before force-kill
@@ -35,11 +37,17 @@ func DefaultStuckConfig() *StuckConfig {
 	}
 }
 
-// LoadStuckConfig returns the default stuck detection config.
-// Role beads are deprecated as of Phase 2 (config-based roles); thresholds
-// are no longer loaded from hq-deacon-role. Tune via config instead.
-func LoadStuckConfig(_ string) *StuckConfig {
-	return DefaultStuckConfig()
+// LoadStuckConfig loads stuck detection config from town settings, falling
+// back to compiled-in defaults. The townRoot parameter is used to locate
+// the settings/config.json file.
+func LoadStuckConfig(townRoot string) *StuckConfig {
+	opCfg := config.LoadOperationalConfig(townRoot)
+	deaconCfg := opCfg.GetDeaconConfig()
+	return &StuckConfig{
+		PingTimeout:         deaconCfg.PingTimeoutD(),
+		ConsecutiveFailures: deaconCfg.ConsecutiveFailuresV(),
+		Cooldown:            deaconCfg.CooldownD(),
+	}
 }
 
 // AgentHealthState tracks the health check state for a single agent.

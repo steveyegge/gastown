@@ -77,6 +77,8 @@ on similar tasks, track their completion rates and quality, make informed decisi
 
 ## Feature: Capability-Based Routing
 
+> **Status: Planned** — Skill tracking and automatic routing are not yet implemented. Work assignment is currently manual via `gt sling`.
+
 **The problem:** You have work in Go, Python, TypeScript, Rust. You have agents
 with varying capabilities. Manual assignment doesn't scale.
 
@@ -149,6 +151,8 @@ depends_on:
 ---
 
 ## Feature: Federation
+
+> **Status: Planned** — Federation via the Highway Operations Protocol (HOP) is designed but not yet implemented. Gas Town currently operates as a single-town system.
 
 **The problem:** Enterprise projects span multiple repositories, multiple teams,
 sometimes multiple organizations (contractors, partners). Visibility is fragmented.

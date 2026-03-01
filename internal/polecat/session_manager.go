@@ -452,6 +452,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	_ = session.TrackSessionPID(townRoot, sessionID, m.tmux)
 
+	// Touch initial heartbeat so liveness detection works from the start (gt-qjtq).
+	// Subsequent touches happen on every gt command via persistentPreRun.
+	TouchSessionHeartbeat(townRoot, sessionID)
+
 	return nil
 }
 
@@ -460,7 +464,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 // This happens when the agent crashes during startup but tmux keeps the dead pane.
 // Delegates to isSessionProcessDead to avoid duplicating process-check logic (gt-qgzj1h).
 func (m *SessionManager) isSessionStale(sessionID string) bool {
-	return isSessionProcessDead(m.tmux, sessionID)
+	return isSessionProcessDead(m.tmux, sessionID, filepath.Dir(m.rig.Path))
 }
 
 // Stop terminates a polecat session.
@@ -690,7 +694,7 @@ func (m *SessionManager) resolveBeadsDir(issueID, fallbackDir string) string {
 	return beads.ResolveHookDir(townRoot, issueID, fallbackDir)
 }
 
-// validateIssue checks that an issue exists and is not tombstoned.
+// validateIssue checks that an issue exists and is not in a terminal state.
 // This must be called before starting a session to avoid CPU spin loops
 // from agents retrying work on invalid issues.
 func (m *SessionManager) validateIssue(issueID, workDir string) error {
@@ -714,8 +718,8 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 	if len(issues) == 0 {
 		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
 	}
-	if issues[0].Status == "tombstone" {
-		return fmt.Errorf("%w: %s is tombstoned", ErrIssueInvalid, issueID)
+	if beads.IssueStatus(issues[0].Status).IsTerminal() {
+		return fmt.Errorf("%w: %s has terminal status %s", ErrIssueInvalid, issueID, issues[0].Status)
 	}
 	return nil
 }

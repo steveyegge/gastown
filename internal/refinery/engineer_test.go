@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -675,12 +676,10 @@ func TestConvoyInfoDescriptionParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			fields := beads.ParseConvoyFields(&beads.Issue{Description: tt.description})
 			var moleculeID string
-			for _, line := range strings.Split(tt.description, "\n") {
-				if strings.HasPrefix(line, "Molecule: ") {
-					moleculeID = strings.TrimPrefix(line, "Molecule: ")
-					break
-				}
+			if fields != nil {
+				moleculeID = fields.Molecule
 			}
 			if moleculeID != tt.wantMolID {
 				t.Errorf("got molecule ID %q, want %q", moleculeID, tt.wantMolID)
@@ -690,7 +689,7 @@ func TestConvoyInfoDescriptionParsing(t *testing.T) {
 }
 
 func TestNotifyConvoyCompletionParsing(t *testing.T) {
-	// Test that notifyConvoyCompletion correctly parses Owner/Notify from description
+	// Test that ParseConvoyFields.NotificationAddresses correctly extracts Owner/Notify
 	tests := []struct {
 		name        string
 		description string
@@ -720,22 +719,8 @@ func TestNotifyConvoyCompletionParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			notified := make(map[string]bool)
-			var addrs []string
-
-			for _, line := range strings.Split(tt.description, "\n") {
-				var addr string
-				if strings.HasPrefix(line, "Owner: ") {
-					addr = strings.TrimPrefix(line, "Owner: ")
-				} else if strings.HasPrefix(line, "Notify: ") {
-					addr = strings.TrimPrefix(line, "Notify: ")
-				}
-
-				if addr != "" && !notified[addr] {
-					addrs = append(addrs, addr)
-					notified[addr] = true
-				}
-			}
+			fields := beads.ParseConvoyFields(&beads.Issue{Description: tt.description})
+			addrs := fields.NotificationAddresses()
 
 			if len(addrs) != len(tt.wantAddrs) {
 				t.Errorf("got %d addresses, want %d", len(addrs), len(tt.wantAddrs))

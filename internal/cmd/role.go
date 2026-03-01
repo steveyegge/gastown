@@ -738,6 +738,9 @@ func runRoleDef(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  consecutive_failures = %d\n", def.Health.ConsecutiveFailures)
 	fmt.Printf("  kill_cooldown        = %q\n", def.Health.KillCooldown.String())
 	fmt.Printf("  stuck_threshold      = %q\n", def.Health.StuckThreshold.String())
+	if def.Health.HungSessionThreshold.Duration != 0 {
+		fmt.Printf("  hung_session_threshold = %q\n", def.Health.HungSessionThreshold.String())
+	}
 	fmt.Println()
 
 	// Prompts

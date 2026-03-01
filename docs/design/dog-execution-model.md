@@ -8,16 +8,20 @@ Created: 2026-02-27
 Gas Town dogs (daemon patrol routines) use two execution models:
 
 1. **Imperative Go** (ticker fires → Go code runs): Doctor, Reaper, JSONL backup, Dolt backup
-2. **Formula-only** (ticker fires → molecule poured → ... nothing): Compactor (was stub), Janitor
+2. **Formula-only** (ticker fires → molecule poured → ... nothing): Compactor (was stub), ~~Janitor~~ (removed)
 
 The formula-only dogs were broken because no agent interprets their molecules from
 ticker context. The molecule system requires an idle dog to execute the formula, but
 the ticker fires regardless of dog availability.
 
-After the Beads Flows work, the Compactor has been upgraded to imperative Go. This
-document captures the target execution model going forward.
+After the Beads Flows work, the Compactor has been upgraded to imperative Go.
+The Janitor dog was removed entirely — test infrastructure migrated from a
+dedicated port-3308 Dolt test server to testcontainers-go (Docker), eliminating
+the orphan test database problem at its source.
 
-## Current State (Post Beads Flows)
+This document captures the target execution model going forward.
+
+## Current State (Post Testcontainers Migration)
 
 | Dog | Model | Works? | Notes |
 |-----|-------|--------|-------|
@@ -26,7 +30,6 @@ document captures the target execution model going forward.
 | JSONL Backup | Imperative Go (619 lines) | Yes | Export, scrub, filter, spike detect, push |
 | Dolt Backup | Imperative Go | Yes | Filesystem backup sync |
 | Compactor | Imperative Go (new) | Yes | Flatten + GC when commits > threshold |
-| Janitor | Formula-only (stub) | No | Pours mol-dog-janitor, nothing executes it |
 
 ## Target Model
 
@@ -46,7 +49,6 @@ Dogs that MUST run on schedule, unattended, with no agent dependency:
 
 Dogs whose failure is merely inconvenient, not catastrophic:
 
-- **Janitor**: Test server orphan cleanup. Nice to have, not critical.
 - Future: cosmetic cleanup, metrics collection, log rotation.
 
 ### Plugin dispatch model
@@ -63,17 +65,7 @@ The issue is that ticker-based dogs bypass it. Plugin dogs use it correctly.
 
 ## Migration Path
 
-### Phase 1: Janitor (prototype)
-- Move from ticker → plugin dispatch
-- Create `plugins/janitor/plugin.md`
-- Verify cleanup still happens when dog is idle
-
-### Phase 2: Evaluate results
-- Did the janitor run often enough?
-- Did the formula+agent model add latency?
-- Any reliability concerns?
-
-### Phase 3: Future dogs default to plugin
+### Future dogs default to plugin
 - New dogs should start as plugins unless reliability-critical
 - Existing imperative dogs stay as Go (working, tested, reliable)
 
@@ -88,5 +80,4 @@ Migrating them to formula+agent would:
 4. Gain nothing — they already work
 
 **The only dogs that should use formula dispatch are ones where agent intelligence
-adds value** (e.g., the janitor deciding which orphans are safe to remove based on
-context) or where the dog's task is inherently non-critical.
+adds value** or where the dog's task is inherently non-critical.

@@ -239,6 +239,54 @@ Enter to confirm · Esc to cancel`
 	}
 }
 
+// TestScanAll_DetectsAPIError429 verifies detection of mid-stream API 429
+// errors that appear as "API Error: Rate limit reached" — distinct from the
+// interactive TUI prompt which only shows on prompt-submission rate limits.
+func TestScanAll_DetectsAPIError429(t *testing.T) {
+	setupTestRegistry(t)
+
+	apiErrorContent := `  ◆ Update(src/fallback/redis_tracker.py)
+  └ Added 4 lines, removed 1 line
+  └ API Error: Rate limit reached
+
+  ✻ Cogitated for 4m 51s
+
+❯ `
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": apiErrorContent,
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work": {ConfigDir: "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !results[0].RateLimited {
+		t.Error("expected rate-limited when API Error: Rate limit reached is visible")
+	}
+}
+
 func TestScanAll_CustomPatterns(t *testing.T) {
 	setupTestRegistry(t)
 

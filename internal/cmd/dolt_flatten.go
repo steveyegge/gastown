@@ -27,12 +27,13 @@ var doltFlattenCmd = &cobra.Command{
 This is the NUCLEAR OPTION for compaction. It destroys all history.
 Use only when automated compaction is insufficient.
 
+All operations run via SQL on the running server — no downtime needed.
+
 Safety protocol:
   1. Pre-flight: verifies backup freshness and records row counts
-  2. Creates a temporary branch, soft-resets to root, commits all data
-  3. Verifies row counts match (integrity check)
-  4. Moves main to the flattened commit
-  5. Cleans up and runs gc
+  2. Soft-resets to root commit on main (keeps all data staged)
+  3. Commits all data as single commit
+  4. Verifies row counts match (integrity check)
 
 Requires --yes-i-am-sure flag as safety interlock.`,
 	Args: cobra.ExactArgs(1),
@@ -122,13 +123,6 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    %s: %d rows\n", table, count)
 	}
 
-	// Get HEAD hash for concurrency check.
-	preHead, err := flattenGetHead(db, dbName)
-	if err != nil {
-		return fmt.Errorf("getting HEAD: %w", err)
-	}
-	fmt.Printf("  HEAD: %s\n", preHead[:12])
-
 	// Get root commit.
 	var rootHash string
 	if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT commit_hash FROM `%s`.dolt_log ORDER BY date ASC LIMIT 1", dbName)).Scan(&rootHash); err != nil {
@@ -136,26 +130,16 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  Root: %s\n", rootHash[:12])
 
-	fmt.Printf("\n%s Flattening %s...\n", style.Bold.Render("●"), dbName)
+	fmt.Printf("\n%s Flattening %s (direct SQL — no downtime)...\n", style.Bold.Render("●"), dbName)
 
-	// USE database.
+	// USE database for session-scoped operations.
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbName)); err != nil {
 		return fmt.Errorf("use database: %w", err)
 	}
 
-	// Clean up any leftover compaction branch.
-	const branchName = "gt-compaction"
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", branchName))
-
-	// Create temp branch and checkout.
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_CHECKOUT('-b', '%s')", branchName)); err != nil {
-		return fmt.Errorf("create compaction branch: %w", err)
-	}
-	fmt.Printf("  Created branch %s\n", branchName)
-
-	// Soft-reset to root.
+	// Soft-reset to root on main — all data remains staged.
+	// This is trivially cheap: just moves the parent pointer (Tim Sehn).
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_RESET('--soft', '%s')", rootHash)); err != nil {
-		flattenCleanup(db, branchName)
 		return fmt.Errorf("soft reset: %w", err)
 	}
 	fmt.Printf("  Soft-reset to root %s\n", rootHash[:12])
@@ -163,7 +147,6 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 	// Commit flattened data.
 	commitMsg := fmt.Sprintf("flatten: compact %s history to single commit", dbName)
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil {
-		flattenCleanup(db, branchName)
 		return fmt.Errorf("commit: %w", err)
 	}
 	fmt.Printf("  Committed flattened data\n")
@@ -171,53 +154,19 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 	// Verify integrity.
 	postCounts, err := flattenGetRowCounts(db, dbName)
 	if err != nil {
-		flattenCleanup(db, branchName)
 		return fmt.Errorf("post-compact row counts: %w", err)
 	}
 
 	for table, preCount := range preCounts {
 		postCount, ok := postCounts[table]
 		if !ok {
-			flattenCleanup(db, branchName)
 			return fmt.Errorf("integrity FAIL: table %q missing after flatten", table)
 		}
 		if preCount != postCount {
-			flattenCleanup(db, branchName)
 			return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
 		}
 	}
 	fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))
-
-	// Concurrency check.
-	currentHead, err := flattenGetHead(db, dbName)
-	if err != nil {
-		flattenCleanup(db, branchName)
-		return fmt.Errorf("concurrency check: %w", err)
-	}
-	if currentHead != preHead {
-		flattenCleanup(db, branchName)
-		return fmt.Errorf("ABORT: main HEAD moved during flatten (%s → %s)", preHead[:8], currentHead[:8])
-	}
-
-	// Get compacted HEAD.
-	var compactedHead string
-	if err := db.QueryRowContext(ctx, "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&compactedHead); err != nil {
-		flattenCleanup(db, branchName)
-		return fmt.Errorf("get compacted HEAD: %w", err)
-	}
-
-	// Switch to main and reset.
-	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
-		flattenCleanup(db, branchName)
-		return fmt.Errorf("checkout main: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_RESET('--hard', '%s')", compactedHead)); err != nil {
-		return fmt.Errorf("reset main: %w", err)
-	}
-	fmt.Printf("  Main reset to compacted commit\n")
-
-	// Delete temp branch.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", branchName))
 
 	// Verify final state.
 	var finalCount int
@@ -228,18 +177,6 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n%s Flatten complete: %d → %d commits\n",
 		style.Bold.Render("✓"), commitCount, finalCount)
 	return nil
-}
-
-// flattenGetHead returns the HEAD commit hash via dolt_log.
-func flattenGetHead(db *sql.DB, dbName string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var hash string
-	query := fmt.Sprintf("SELECT commit_hash FROM `%s`.dolt_log ORDER BY date DESC LIMIT 1", dbName)
-	if err := db.QueryRowContext(ctx, query).Scan(&hash); err != nil {
-		return "", err
-	}
-	return hash, nil
 }
 
 // flattenGetRowCounts returns table -> row count for all user tables.
@@ -274,14 +211,6 @@ func flattenGetRowCounts(db *sql.DB, dbName string) (map[string]int, error) {
 	return counts, nil
 }
 
-// flattenCleanup tries to switch back to main and delete the temp branch.
-func flattenCleanup(db *sql.DB, branchName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')")
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", branchName))
-}
-
 // findNewestFile walks a directory and returns the most recent file mtime.
 func findNewestFile(dir string) time.Time {
 	var newest time.Time
@@ -295,4 +224,16 @@ func findNewestFile(dir string) time.Time {
 		return nil
 	})
 	return newest
+}
+
+// flattenGetHead returns the HEAD commit hash via dolt_log.
+func flattenGetHead(db *sql.DB, dbName string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var hash string
+	query := fmt.Sprintf("SELECT commit_hash FROM `%s`.dolt_log ORDER BY date DESC LIMIT 1", dbName)
+	if err := db.QueryRowContext(ctx, query).Scan(&hash); err != nil {
+		return "", err
+	}
+	return hash, nil
 }

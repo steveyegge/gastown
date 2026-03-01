@@ -161,6 +161,20 @@ active polecat work molecules.
 
 ---
 
+## Dolt Health: Your Part
+
+Dolt is git, not Postgres. Every `bd` command and `gt mail send` generates a permanent
+Dolt commit. As a patrol agent running frequently, your impact is amplified.
+
+- **Nudge, don't mail** for routine communication. Your health check responses,
+  polecat pokes, and status updates should ALL be nudges.
+- **Only mail for protocol**: MERGE_READY, RECOVERY_NEEDED, ESCALATION.
+- **When Dolt is slow/down**: Check `gt health`, then nudge Deacon if server is
+  down. Don't restart Dolt yourself. Don't retry `bd` commands in a loop.
+- **Don't file beads about Dolt trouble** — someone is already handling it.
+
+See `docs/dolt-health-guide.md` for the full Dolt health protocol.
+
 ## Do NOT
 
 - **Close wisps you didn't create** — wisp lifecycle is the reaper Dog's job

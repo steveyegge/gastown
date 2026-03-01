@@ -176,9 +176,17 @@ func unparkOneRig(rigName string) error {
 	return nil
 }
 
-// IsRigParked checks if a rig is parked in the wisp layer.
-// This function is exported for use by the daemon.
+// IsRigParked checks if a rig is parked.
+// Checks the wisp layer (ephemeral) first, then falls back to the rig
+// identity bead's status:parked label (persistent). This ensures parked
+// state survives wisp cleanup. (Fixes upstream #2079)
 func IsRigParked(townRoot, rigName string) bool {
+	// Check wisp layer first (fast, local)
 	wispCfg := wisp.NewConfig(townRoot, rigName)
-	return wispCfg.GetString(RigStatusKey) == RigStatusParked
+	if wispCfg.GetString(RigStatusKey) == RigStatusParked {
+		return true
+	}
+
+	// Fall back to persistent bead label
+	return hasRigBeadLabel(townRoot, rigName, "status:parked")
 }

@@ -14,6 +14,8 @@ import (
 )
 
 // Default parameters for re-dispatch rate-limiting.
+// Configurable via operational.deacon.max_redispatches and
+// operational.deacon.redispatch_cooldown in settings/config.json.
 const (
 	// DefaultMaxRedispatches is the number of times a bead can be re-dispatched
 	// before escalating to Mayor instead of re-slinging.

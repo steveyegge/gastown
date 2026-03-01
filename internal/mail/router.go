@@ -29,7 +29,7 @@ var ErrUnknownAnnounce = errors.New("unknown announce channel")
 
 // DefaultIdleNotifyTimeout is how long the router waits for a recipient's
 // session to become idle before falling back to a queued nudge.
-const DefaultIdleNotifyTimeout = 1 * time.Second
+const DefaultIdleNotifyTimeout = 3 * time.Second
 
 // Router handles message delivery via beads.
 // It routes messages to the correct beads database based on address:
@@ -789,7 +789,7 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 	if msg.Wisp {
 		return true
 	}
-	// Auto-detect lifecycle messages by subject prefix
+	// Auto-detect protocol/lifecycle messages by subject prefix
 	subjectLower := strings.ToLower(msg.Subject)
 	wispPrefixes := []string{
 		"polecat_started",
@@ -797,6 +797,10 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 		"work_done",
 		"start_work",
 		"nudge",
+		"lifecycle:",
+		"merged",
+		"merge_ready",
+		"merge_failed",
 	}
 	for _, prefix := range wispPrefixes {
 		if strings.HasPrefix(subjectLower, prefix) {
@@ -889,6 +893,23 @@ func (r *Router) validateRecipient(identity string) error {
 		return nil
 	}
 
+	// Well-known town-level singletons always valid
+	switch identity {
+	case "mayor", "mayor/", "deacon", "deacon/":
+		return nil
+	}
+
+	// Well-known rig-level singletons (rig/witness, rig/refinery) always
+	// valid — these agents are ephemeral and may not have an active session,
+	// but mail queues for the next session that starts.
+	parts := strings.SplitN(identity, "/", 3)
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "witness", "refinery":
+			return nil
+		}
+	}
+
 	// Query agents from town-level beads
 	agents := r.queryAgents("")
 
@@ -974,11 +995,68 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// resolveCrewShorthand expands "crew/name" or "polecats/name" shorthand addresses
+// to fully-qualified "rig/name" form by scanning the town filesystem.
+//
+// When gt agents displays crew workers, it shows them as "crew/bob" (without rig).
+// This function enables "gt mail send crew/bob" to work by finding the rig.
+//
+// Returns the normalized identity if exactly one rig contains the crew member,
+// or the original identity unchanged if zero or multiple rigs match (to let
+// validation fail with an informative error).
+func (r *Router) resolveCrewShorthand(identity string) string {
+	if r.townRoot == "" {
+		return identity
+	}
+
+	parts := strings.Split(identity, "/")
+	if len(parts) != 2 {
+		return identity
+	}
+
+	roleDir, name := parts[0], parts[1]
+	// Only handle crew and polecats shorthand (not real rig names)
+	if roleDir != "crew" && roleDir != "polecats" {
+		return identity
+	}
+
+	// Check if "crew" or "polecats" is actually a real rig directory
+	if fi, err := os.Stat(filepath.Join(r.townRoot, roleDir)); err == nil && fi.IsDir() {
+		// It's a real rig, not a shorthand - let normal validation handle it
+		return identity
+	}
+
+	// Scan rig directories for a crew/polecats member with this name
+	entries, err := os.ReadDir(r.townRoot)
+	if err != nil {
+		return identity
+	}
+
+	var matches []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		rig := entry.Name()
+		agentDir := filepath.Join(r.townRoot, rig, roleDir, name)
+		if fi, err2 := os.Stat(agentDir); err2 == nil && fi.IsDir() {
+			matches = append(matches, rig+"/"+name)
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0] // Unambiguous: expand to rig/name
+	}
+
+	return identity // Ambiguous or not found: let validation handle it
+}
+
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
-	// Ensure message has an ID (callers may omit it; bd create doesn't generate one)
+	// Ensure message has an ID for in-memory tracking (notifications, logging).
+	// We no longer pass --id to bd create; bd auto-generates the correct prefix.
 	if msg.ID == "" {
-		msg.ID = generateID()
+		msg.ID = GenerateID()
 	}
 
 	// Validate message before sending
@@ -988,6 +1066,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
+	// Expand crew/polecats shorthand (e.g., "crew/bob" → "pata/bob")
+	toIdentity = r.resolveCrewShorthand(toIdentity)
 
 	// Validate recipient exists
 	if err := r.validateRecipient(toIdentity); err != nil {
@@ -1014,6 +1094,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Build command: bd create --assignee=<recipient> -d <body> --labels=gt:message,... -- <subject>
 	// Flags go first, then -- to end flag parsing, then the positional subject.
 	// This prevents subjects like "--help" from being parsed as flags (see web/api.go).
+	// Let bd auto-generate the ID with the correct database prefix.
 	args := []string{"create",
 		"--assignee", toIdentity,
 		"-d", msg.Body,
@@ -1494,24 +1575,14 @@ func (r *Router) notifyRecipient(msg *Message) error {
 
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
-		// Always enqueue mail notifications for cooperative delivery.
-		// Mail is not urgent enough to justify immediate NudgeSession,
-		// which risks a TOCTOU race: WaitForIdle may detect a brief
-		// inter-tool-call idle flash, then NudgeSession's Escape key
-		// disrupts the session that has resumed Cerebrating, leaving
-		// the notification text stuck in the input buffer with Enter
-		// never firing. See: https://github.com/steveyegge/gastown/issues/2032
-		if r.townRoot != "" {
-			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
-				Sender:  msg.From,
-				Message: notification,
-			})
-		}
-		// Fallback to idle-aware nudge if town root unavailable.
-		// This preserves the original behavior for edge cases where
-		// cooperative delivery isn't possible.
+		// Wait-idle-first delivery: try direct nudge if the agent is idle,
+		// fall back to cooperative queue if busy. The 3s timeout with 200ms
+		// polling (~15 polls) distinguishes a genuine idle prompt (persists
+		// indefinitely) from brief inter-tool-call gaps (~500ms).
+		// See: https://github.com/steveyegge/gastown/issues/2032
 		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
 		if waitErr == nil {
+			// Agent is idle — deliver directly for immediate wakeup.
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
 				return nil
 			} else if errors.Is(err, tmux.ErrSessionNotFound) {
@@ -1519,11 +1590,19 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			} else if errors.Is(err, tmux.ErrNoServer) {
 				return nil
 			}
-		} else if errors.Is(waitErr, tmux.ErrNoServer) {
-			return nil
 		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
 			continue
+		} else if errors.Is(waitErr, tmux.ErrNoServer) {
+			return nil
+		} else if r.townRoot != "" {
+			// Timeout (agent busy) — queue for cooperative delivery
+			// at the next turn boundary.
+			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+				Sender:  msg.From,
+				Message: notification,
+			})
 		}
+		// No town root available — last resort direct delivery.
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 

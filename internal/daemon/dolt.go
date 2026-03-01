@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -135,6 +136,12 @@ type DoltServerManager struct {
 	// Populated by checkHealthLocked(), consumed by Daemon.ensureDoltServerRunning().
 	lastWarnings []string // Warnings from the most recent health check
 
+	// onRecoveryFn is called (in a goroutine) when the Dolt server transitions
+	// from unhealthy back to healthy, i.e., when the DOLT_UNHEALTHY signal file
+	// is cleared after having been present. Set by SetRecoveryCallback.
+	// Protected by mu.
+	onRecoveryFn func()
+
 	// Test hooks (nil = use real implementations; set only in tests)
 	healthCheckFn      func() error
 	writeProbeCheckFn  func() error
@@ -161,6 +168,15 @@ func NewDoltServerManager(townRoot string, config *DoltServerConfig, logger func
 		townRoot: townRoot,
 		logger:   logger,
 	}
+}
+
+// SetRecoveryCallback registers fn to be called (in a goroutine) whenever Dolt
+// transitions from unhealthy back to healthy. Only the most recently registered
+// callback is used. Pass nil to clear the callback.
+func (m *DoltServerManager) SetRecoveryCallback(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onRecoveryFn = fn
 }
 
 func (m *DoltServerManager) now() time.Time {
@@ -303,51 +319,43 @@ func (m *DoltServerManager) isRunning() (int, bool) {
 		m.process = nil
 	}
 
-	// Check PID file
-	data, err := os.ReadFile(m.pidFile())
-	if err != nil {
+	// Check PID file with nonce-based ownership verification
+	pid, alive, err := verifyPIDOwnership(m.pidFile())
+	if err != nil || pid == 0 {
 		return 0, false
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, false
-	}
-
-	// Verify process is alive and is dolt
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return 0, false
-	}
-
-	if !isProcessAlive(process) {
+	if !alive {
 		// Process not running, clean up stale PID file
 		_ = os.Remove(m.pidFile())
 		return 0, false
 	}
 
-	// Verify it's actually dolt sql-server
-	if !isDoltSqlServer(pid) {
+	// Verify it's actually our dolt server by checking port connectivity.
+	// More reliable than ps string matching (ZFC fix: gt-utuk).
+	if !m.isDoltServerOnPort() {
 		_ = os.Remove(m.pidFile())
 		return 0, false
 	}
 
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return 0, false
+	}
 	m.process = process
 	return pid, true
 }
 
-// isDoltSqlServer checks if a PID is actually a dolt sql-server process.
-func isDoltSqlServer(pid int) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	output, err := cmd.Output()
+// isDoltServerOnPort checks if the configured dolt port is accepting connections.
+// More reliable than ps string matching for process identity verification.
+func (m *DoltServerManager) isDoltServerOnPort() bool {
+	addr := net.JoinHostPort(m.config.Host, strconv.Itoa(m.config.Port))
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return false
 	}
-
-	cmdline := strings.TrimSpace(string(output))
-	return strings.Contains(cmdline, "dolt") && strings.Contains(cmdline, "sql-server")
+	conn.Close()
+	return true
 }
 
 // EnsureRunning ensures the Dolt server is running.
@@ -726,8 +734,18 @@ func (m *DoltServerManager) writeUnhealthySignal(reason, detail string) {
 }
 
 // clearUnhealthySignal removes the DOLT_UNHEALTHY signal file when the server is healthy.
+// If the signal file was present (meaning Dolt was previously unhealthy), it fires the
+// onRecoveryFn callback in a goroutine to trigger a convoy recovery sweep.
+// Must be called with mu held (onRecoveryFn is protected by mu).
 func (m *DoltServerManager) clearUnhealthySignal() {
-	_ = os.Remove(m.unhealthySignalFile())
+	signalFile := m.unhealthySignalFile()
+	_, wasUnhealthy := os.Stat(signalFile)
+	_ = os.Remove(signalFile)
+	// Transition detected: was unhealthy, now healthy — fire recovery callback.
+	if wasUnhealthy == nil && m.onRecoveryFn != nil {
+		fn := m.onRecoveryFn
+		go fn()
+	}
 }
 
 // IsDoltUnhealthy checks if the DOLT_UNHEALTHY signal file exists.
@@ -810,8 +828,8 @@ func (m *DoltServerManager) startLocked() error {
 	m.process = cmd.Process
 	m.startedAt = time.Now()
 
-	// Write PID file
-	if err := os.WriteFile(m.pidFile(), []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {
+	// Write PID file with nonce for ownership verification
+	if _, err := writePIDFile(m.pidFile(), cmd.Process.Pid); err != nil {
 		m.logger("Warning: failed to write PID file: %v", err)
 	}
 

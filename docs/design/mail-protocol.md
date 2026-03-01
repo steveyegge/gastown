@@ -181,18 +181,6 @@ Detected: <timestamp>
 **Handler**: Deacon coordinates recovery (push branch, save work) before
 authorizing cleanup. Only escalates to Mayor if Deacon cannot resolve.
 
-### WITNESS_PING (deprecated)
-
-**Status**: Removed. Witnesses no longer send WITNESS_PING mail.
-
-**Previous behavior**: Witnesses sent heartbeat mail to the Deacon every patrol
-cycle, which spammed inboxes with routine noise.
-
-**Current behavior**: Witnesses passively check the Deacon's agent bead
-`last_activity` timestamp. If stale (>5 minutes), they escalate directly to
-the Mayor with an `ALERT: Deacon appears unresponsive` message. No routine
-heartbeat mail is sent — only escalations when a problem is detected.
-
 ### HELP
 
 **Route**: Any → escalation target (usually Mayor)
@@ -488,6 +476,86 @@ New message types follow the pattern:
 
 The protocol is intentionally simple - structured enough for parsing,
 flexible enough for human debugging.
+
+## Beads-Native Messaging
+
+Beyond direct agent-to-agent mail, the messaging system supports three bead-backed
+primitives for group and broadcast communication. All use the `hq-` prefix
+(town-level entities that span rigs).
+
+### Groups (`gt:group`)
+
+Named collections of addresses for mail distribution. Sending to a group
+delivers to all members.
+
+**Bead ID format:** `hq-group-<name>`
+
+**Member types:** direct addresses (`gastown/crew/max`), wildcard patterns
+(`*/witness`, `gastown/crew/*`), special patterns (`@town`, `@crew`,
+`@witnesses`), or nested group names.
+
+### Queues (`gt:queue`)
+
+Work queues where each message goes to exactly one claimant (unlike groups).
+
+**Bead ID format:** `hq-q-<name>` (town-level) or `gt-q-<name>` (rig-level)
+
+Fields: `status` (active/paused/closed), `max_concurrency`, `processing_order`
+(fifo/priority), plus count fields (available, processing, completed, failed).
+
+### Channels (`gt:channel`)
+
+Pub/sub broadcast streams with configurable message retention.
+
+**Bead ID format:** `hq-channel-<name>`
+
+Fields: `subscribers`, `status` (active/closed), `retention_count`,
+`retention_hours`.
+
+### Group and Channel CLI Commands
+
+```bash
+# Groups
+gt mail group list
+gt mail group show <name>
+gt mail group create <name> [members...]
+gt mail group add <name> <member>
+gt mail group remove <name> <member>
+gt mail group delete <name>
+
+# Channels
+gt mail channel list
+gt mail channel show <name>
+gt mail channel create <name> [--retain-count=N] [--retain-hours=N]
+gt mail channel delete <name>
+```
+
+### Sending to Groups, Queues, and Channels
+
+```bash
+gt mail send my-group -s "Subject" -m "Body"           # group (expands to members)
+gt mail send queue:my-queue -s "Work item" -m "Details" # queue (single claimant)
+gt mail send channel:alerts -s "Alert" -m "Content"     # channel (broadcast)
+```
+
+### Address Resolution Order
+
+When sending mail, addresses are resolved in this order:
+
+1. **Explicit prefix** -- `group:`, `queue:`, or `channel:` uses that type directly
+2. **Contains `/`** -- Treat as agent address or pattern (direct delivery)
+3. **Starts with `@`** -- Special pattern (`@town`, `@crew`, etc.) or group
+4. **Name lookup** -- Search group -> queue -> channel by name
+
+If a name matches multiple types, the resolver returns an error requiring an
+explicit prefix.
+
+### Retention Policy
+
+Channels support count-based (`--retain-count=N`) and time-based
+(`--retain-hours=N`) retention. Retention is enforced on-write (after posting)
+and on-patrol (Deacon runs `PruneAllChannels()` with a 10% buffer to avoid
+thrashing).
 
 ## Related Documents
 

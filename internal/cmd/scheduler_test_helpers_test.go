@@ -9,32 +9,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 // --- Environment helpers ---
 
-// cleanSchedulerTestEnv returns os.Environ() with GT_* variables removed and HOME
-// overridden to tmpHome. This isolates gt/bd processes from the host.
-// GT_DOLT_PORT is preserved so that gt subprocesses can connect to the
-// ephemeral Dolt test server started by TestMain.
+// cleanSchedulerTestEnv returns os.Environ() with GT_*/BD_* variables removed
+// (except GT_DOLT_PORT and BEADS_DOLT_PORT) and HOME overridden to tmpHome.
+// This isolates gt/bd processes from the host while preserving test Dolt routing.
 func cleanSchedulerTestEnv(tmpHome string) []string {
-	var clean []string
-	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "GT_") && !strings.HasPrefix(env, "GT_DOLT_PORT=") {
-			continue
-		}
-		if strings.HasPrefix(env, "HOME=") {
-			continue
-		}
-		clean = append(clean, env)
-	}
-	clean = append(clean, "HOME="+tmpHome)
-	return clean
+	return testutil.CleanGTEnv("HOME=" + tmpHome)
 }
 
 // --- File helpers ---

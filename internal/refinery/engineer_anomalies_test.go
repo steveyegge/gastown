@@ -7,7 +7,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
-func TestDetectQueueAnomalies_StaleClaimSeverity(t *testing.T) {
+func TestDetectQueueAnomalies_StaleClaim(t *testing.T) {
 	now := time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC)
 	issues := []*beads.Issue{
 		{
@@ -30,7 +30,7 @@ worker: nux`,
 		},
 	}
 
-	anomalies := detectQueueAnomalies(issues, now, func(branch string) (bool, bool, error) {
+	anomalies := detectQueueAnomalies(issues, now, 2*time.Hour, func(branch string) (bool, bool, error) {
 		return true, false, nil
 	})
 
@@ -41,15 +41,17 @@ worker: nux`,
 		t.Fatalf("expected stale-claim anomalies, got %+v", anomalies)
 	}
 
-	got := map[string]string{}
+	// ZFC: anomalies report raw data (type + age), no severity classification.
+	// Agents classify severity from the age field.
+	got := map[string]time.Duration{}
 	for _, a := range anomalies {
-		got[a.ID] = a.Severity
+		got[a.ID] = a.Age
 	}
-	if got["gt-warn"] != "warning" {
-		t.Fatalf("gt-warn severity = %q, want warning", got["gt-warn"])
+	if got["gt-warn"] < 3*time.Hour {
+		t.Fatalf("gt-warn age = %v, want >= 3h", got["gt-warn"])
 	}
-	if got["gt-critical"] != "critical" {
-		t.Fatalf("gt-critical severity = %q, want critical", got["gt-critical"])
+	if got["gt-critical"] < 7*time.Hour {
+		t.Fatalf("gt-critical age = %v, want >= 7h", got["gt-critical"])
 	}
 }
 
@@ -74,7 +76,7 @@ worker: nux`,
 		},
 	}
 
-	anomalies := detectQueueAnomalies(issues, now, func(branch string) (bool, bool, error) {
+	anomalies := detectQueueAnomalies(issues, now, 2*time.Hour, func(branch string) (bool, bool, error) {
 		if branch == "polecat/orphan" {
 			return false, false, nil
 		}
@@ -87,9 +89,7 @@ worker: nux`,
 	if anomalies[0].Type != "orphaned-branch" {
 		t.Fatalf("anomaly type = %q, want orphaned-branch", anomalies[0].Type)
 	}
-	if anomalies[0].Severity != "critical" {
-		t.Fatalf("anomaly severity = %q, want critical", anomalies[0].Severity)
-	}
+	// ZFC: no severity field — agent classifies from type + context.
 	if anomalies[0].ID != "gt-orphan" {
 		t.Fatalf("anomaly ID = %q, want gt-orphan", anomalies[0].ID)
 	}

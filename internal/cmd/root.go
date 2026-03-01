@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -69,6 +70,7 @@ var beadsExemptCommands = map[string]bool{
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
 	"health":              true, // Health check doesn't require beads
+	"upgrade":             true, // Post-install migration orchestrator
 }
 
 // Commands exempt from the town root branch warning.
@@ -80,6 +82,7 @@ var branchCheckExemptCommands = map[string]bool{
 	"doctor":     true, // Used to fix the problem
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
+	"upgrade":    true, // Post-install migration
 }
 
 // persistentPreRun runs before every command.
@@ -127,6 +130,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		warnIfTownRootOffMain()
 	}
 
+	// Touch polecat session heartbeat on every gt command (gt-qjtq: ZFC liveness fix).
+	// This is best-effort and non-blocking — the heartbeat file signals that the agent
+	// is alive and actively running gt commands. Used by isSessionProcessDead to
+	// determine liveness without PID signal probing.
+	touchPolecatHeartbeat()
+
 	// Skip beads check for exempt commands
 	if beadsExemptCommands[cmdName] {
 		return nil
@@ -155,6 +164,34 @@ func initCLITheme() {
 	// Initialize theme with config value (env var takes precedence inside InitTheme)
 	ui.InitTheme(configTheme)
 	ui.ApplyThemeMode()
+}
+
+// touchPolecatHeartbeat touches the session heartbeat file for polecat agents.
+// Called from persistentPreRun on every gt command. The heartbeat signals that
+// the agent process is alive and actively running gt commands. Used by
+// isSessionProcessDead to determine liveness without PID signal probing (gt-qjtq).
+//
+// This is best-effort: errors are silently ignored. Non-polecat sessions and
+// sessions without GT_SESSION are skipped silently.
+func touchPolecatHeartbeat() {
+	sessionName := os.Getenv("GT_SESSION")
+	if sessionName == "" {
+		return
+	}
+
+	// Only polecats, crew, and dogs need heartbeats — they're the ones checked
+	// by isSessionProcessDead for stale session detection.
+	role := os.Getenv("GT_ROLE")
+	if !strings.Contains(role, "polecat") && !strings.Contains(role, "crew") && !strings.Contains(role, "dog") {
+		return
+	}
+
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return
+	}
+
+	polecat.TouchSessionHeartbeat(townRoot, sessionName)
 }
 
 // warnIfTownRootOffMain prints a warning if the town root is not on main branch.

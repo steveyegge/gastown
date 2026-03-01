@@ -21,6 +21,42 @@ import (
 // processes and avoids killing legitimate short-lived subagents.
 const minOrphanAge = 60
 
+// buildChildMap builds a parent→children map from a single ps call.
+// This replaces per-PID pgrep calls, reducing O(N) process spawns to O(1).
+func buildChildMap() map[int][]int {
+	children := make(map[int][]int)
+	out, err := exec.Command("ps", "-eo", "pid,ppid").Output()
+	if err != nil {
+		return children
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(fields[0])
+		ppid, err2 := strconv.Atoi(fields[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if pid > 0 {
+			children[ppid] = append(children[ppid], pid)
+		}
+	}
+	return children
+}
+
+// addDescendants adds all descendant PIDs of a process to the set using
+// a pre-built child map (no additional process spawns).
+func addDescendants(parentPID int, childMap map[int][]int, pids map[int]bool) {
+	for _, pid := range childMap[parentPID] {
+		if !pids[pid] {
+			pids[pid] = true
+			addDescendants(pid, childMap, pids)
+		}
+	}
+}
+
 // getTmuxSessionPIDs returns a set of PIDs belonging to ANY tmux session.
 // This prevents killing Claude processes that are running in tmux sessions,
 // even if they temporarily show TTY "?" during startup or session transitions.
@@ -38,6 +74,9 @@ func getTmuxSessionPIDs() map[int]bool {
 		return pids // tmux not available or no sessions
 	}
 
+	// Build process tree once, used for all pane PIDs
+	childMap := buildChildMap()
+
 	// Protect ALL sessions - user's personal sessions are just as important
 	sessions := strings.Split(strings.TrimSpace(string(out)), "\n")
 
@@ -54,64 +93,12 @@ func getTmuxSessionPIDs() map[int]bool {
 			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
 				pids[pid] = true
 				// Also add child processes of the pane shell
-				addChildPIDs(pid, pids)
+				addDescendants(pid, childMap, pids)
 			}
 		}
 	}
 
 	return pids
-}
-
-// addChildPIDs adds all descendant PIDs of a process to the set.
-// This catches Claude processes spawned by the shell in a tmux pane.
-func addChildPIDs(parentPID int, pids map[int]bool) {
-	childPIDs := getChildPIDs(parentPID)
-	for _, pid := range childPIDs {
-		pids[pid] = true
-		// Recurse to get grandchildren
-		addChildPIDs(pid, pids)
-	}
-}
-
-// getChildPIDs returns direct child PIDs of a process.
-// Tries pgrep first, falls back to parsing ps output.
-func getChildPIDs(parentPID int) []int {
-	var childPIDs []int
-
-	// Try pgrep first (faster, more reliable when available)
-	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID)).Output()
-	if err == nil {
-		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-				childPIDs = append(childPIDs, pid)
-			}
-		}
-		return childPIDs
-	}
-
-	// Fallback: parse ps output to find children
-	// ps -eo pid,ppid gives us all processes with their parent PIDs
-	out, err = exec.Command("ps", "-eo", "pid,ppid").Output()
-	if err != nil {
-		return childPIDs
-	}
-
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err1 := strconv.Atoi(fields[0])
-		ppid, err2 := strconv.Atoi(fields[1])
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if ppid == parentPID && pid > 0 {
-			childPIDs = append(childPIDs, pid)
-		}
-	}
-
-	return childPIDs
 }
 
 // sigkillGracePeriod is how long (in seconds) we wait after sending SIGTERM

@@ -62,6 +62,7 @@ func getPanePID(t *testing.T, socket, session string) string {
 // TestAutoRespawnHookCmd_Format is a fast unit test verifying the hook command
 // string contains all required safety measures.
 func TestAutoRespawnHookCmd_Format(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		tmuxCmd  string

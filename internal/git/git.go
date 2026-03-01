@@ -368,6 +368,13 @@ func (g *Git) Checkout(ref string) error {
 	return err
 }
 
+// CheckoutNewBranch creates a new branch from startPoint and checks it out.
+// Equivalent to: git checkout -b <branch> <startPoint>
+func (g *Git) CheckoutNewBranch(branch, startPoint string) error {
+	_, err := g.run("checkout", "-b", branch, startPoint)
+	return err
+}
+
 // Fetch fetches from the remote.
 func (g *Git) Fetch(remote string) error {
 	_, err := g.run("fetch", remote)
@@ -633,6 +640,14 @@ func (g *Git) MergeNoFF(branch, message string) error {
 	return err
 }
 
+// MergeFFOnly performs a fast-forward-only merge of the given ref into the current branch.
+// This ensures what you tested is exactly what lands — no merge commits are created.
+// Returns an error if the merge cannot be performed as a fast-forward.
+func (g *Git) MergeFFOnly(ref string) error {
+	_, err := g.run("merge", "--ff-only", ref)
+	return err
+}
+
 // MergeSquash performs a squash merge of the given branch and commits with the provided message.
 // This stages all changes from the branch without creating a merge commit, then commits them
 // as a single commit with the given message. This eliminates redundant merge commits while
@@ -690,6 +705,21 @@ func (g *Git) ListRemoteRefs(remote, prefix string) ([]string, error) {
 		}
 	}
 	return refs, nil
+}
+
+// ListPushRemoteRefs lists remote refs from the push URL when it differs from
+// the fetch URL. With a fork-based workflow (pushurl configured), branches are
+// pushed to the fork but ls-remote reads from the fetch URL (upstream). This
+// method queries the push URL so cleanup can find branches that were pushed.
+// Falls back to ListRemoteRefs if no custom push URL is configured.
+func (g *Git) ListPushRemoteRefs(remote, prefix string) ([]string, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		return g.ListRemoteRefs(remote, prefix)
+	}
+	// Query the push URL directly
+	return g.ListRemoteRefs(pushURL, prefix)
 }
 
 // Rebase rebases the current branch onto the given ref.

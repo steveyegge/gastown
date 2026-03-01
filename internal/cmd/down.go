@@ -45,7 +45,7 @@ Shutdown levels (progressively more aggressive):
   gt down                    Stop infrastructure (default)
   gt down --polecats         Also stop all polecat sessions
   gt down --all              Full shutdown with orphan cleanup
-  gt down --nuke             Also kill this town's tmux server
+  gt down --nuke             Also kill the shared tmux server
 
 Infrastructure agents stopped:
   • Refineries - Per-rig work processors
@@ -80,7 +80,7 @@ func init() {
 	downCmd.Flags().BoolVarP(&downForce, "force", "f", false, "Force kill without graceful shutdown")
 	downCmd.Flags().BoolVarP(&downPolecats, "polecats", "p", false, "Also stop all polecat sessions")
 	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Full shutdown with orphan cleanup and verification")
-	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill this town's tmux server and all its sessions")
+	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill the shared tmux server (default socket) and all its sessions")
 	downCmd.Flags().BoolVar(&downDryRun, "dry-run", false, "Preview what would be stopped without taking action")
 	rootCmd.AddCommand(downCmd)
 }
@@ -256,6 +256,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 4c: Sweep sessions on the legacy "-L gt" tmux socket.
+	// After the socket migration to "default" (registry.go:InitRegistry), new
+	// sessions are created on the "default" socket.  But sessions that were
+	// started before the migration still live on the old "-L gt" socket.
+	// Without this sweep, gt down leaves those sessions running, causing
+	// duplicate agent spawns on the next gt start.
+	sweepLegacySocketSessions(downDryRun, downForce)
+
 	// Phase 5: Orphan cleanup and verification (--all or --force)
 	if (downAll || downForce) && !downDryRun {
 		fmt.Println()
@@ -291,9 +299,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Nuke tmux server (--nuke only)
-	// With per-town tmux sockets, this only kills this town's tmux server,
-	// not other towns or the default socket. However, users may have opened
-	// custom windows/panes in this server, so we still require confirmation.
+	// All towns share the "default" tmux socket (see registry.go InitRegistry),
+	// so --nuke kills the shared server and all sessions on it. Users may also
+	// have opened custom windows/panes, so we require confirmation.
 	if downNuke {
 		socket := tmux.GetDefaultSocket()
 		socketLabel := "default"
@@ -304,9 +312,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 			printDownStatus("Tmux server", true, fmt.Sprintf("would kill (socket: %s)", socketLabel))
 		} else if os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
 			fmt.Println()
-			fmt.Printf("%s The --nuke flag kills the tmux server for this town (socket: %s).\n",
+			fmt.Printf("%s The --nuke flag kills the shared tmux server (socket: %s).\n",
 				style.Bold.Render("⚠ BLOCKED:"), socketLabel)
-			fmt.Printf("This will destroy all sessions on this socket, including any custom windows you opened.\n")
+			fmt.Printf("All towns share this socket — this will destroy all tmux sessions, including any custom windows you opened.\n")
 			fmt.Println()
 			fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
 			allOK = false
@@ -545,3 +553,64 @@ func findOrphanedClaudeProcesses(townRoot string) []int {
 	return orphaned
 }
 
+// legacySocket is the old tmux socket name used before the migration to "default".
+// Sessions created before the migration live on this socket and must be swept
+// during shutdown to prevent duplicate agents.
+const legacySocket = "gt"
+
+// sweepLegacySocketSessions kills Gas Town sessions on the legacy "-L gt" socket.
+// The current town socket is "default" (set by InitRegistry), but sessions
+// created before the migration remain on the old "gt" socket. If left running,
+// they cause duplicate agent spawns on the next gt start.
+func sweepLegacySocketSessions(dryRun, force bool) {
+	currentSocket := tmux.GetDefaultSocket()
+	if currentSocket == legacySocket || currentSocket == "" {
+		// Already on the legacy socket (or no socket configured) — nothing to sweep.
+		return
+	}
+
+	legacy := tmux.NewTmuxWithSocket(legacySocket)
+	sessions, err := legacy.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		return // No server on old socket or no sessions — nothing to do.
+	}
+
+	// Filter to only Gas Town sessions (those with known prefixes).
+	var gtSessions []string
+	for _, s := range sessions {
+		if session.IsKnownSession(s) {
+			gtSessions = append(gtSessions, s)
+		}
+	}
+
+	if len(gtSessions) == 0 {
+		return
+	}
+
+	if dryRun {
+		printDownStatus("Legacy socket (gt)", true,
+			fmt.Sprintf("%d session(s) would be swept", len(gtSessions)))
+		for _, s := range gtSessions {
+			fmt.Printf("  %s %s\n", style.Dim.Render("○"), s)
+		}
+		return
+	}
+
+	swept := 0
+	for _, s := range gtSessions {
+		var killErr error
+		if force {
+			killErr = legacy.KillSessionWithProcesses(s)
+		} else {
+			killErr = legacy.KillSession(s)
+		}
+		if killErr == nil {
+			swept++
+		}
+	}
+
+	if swept > 0 {
+		printDownStatus("Legacy socket (gt)", true,
+			fmt.Sprintf("swept %d session(s)", swept))
+	}
+}

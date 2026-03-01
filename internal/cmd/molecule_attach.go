@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -60,15 +59,14 @@ func runMoleculeAttach(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
 		}
 
-		parts := strings.Split(target, "/")
-		role := parts[len(parts)-1]
+		role := extractRoleFromIdentity(target)
 
 		handoff, err := b.FindHandoffBead(role)
 		if err != nil {
 			return fmt.Errorf("finding handoff bead: %w", err)
 		}
 		if handoff == nil {
-			return fmt.Errorf("no handoff bead found for %s - create one first", target)
+			return fmt.Errorf("no handoff bead found for %s (looked for %q with pinned status)", target, beads.HandoffBeadTitle(role))
 		}
 		pinnedBeadID = handoff.ID
 	}

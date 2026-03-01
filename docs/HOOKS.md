@@ -127,6 +127,65 @@ gt hooks registry                  # List available hooks
 gt hooks install <hook-id>         # Install a hook to base config
 ```
 
+## Current Registry Hooks
+
+The registry (`~/gt/hooks/registry.toml`) defines 7 hooks, 5 enabled by default:
+
+| Hook | Event | Enabled | Roles |
+|---|---|---|---|
+| pr-workflow-guard | PreToolUse | Yes | crew, polecat |
+| session-prime | SessionStart | Yes | all |
+| pre-compact-prime | PreCompact | Yes | all |
+| mail-check | UserPromptSubmit | Yes | all |
+| costs-record | Stop | Yes | crew, polecat, witness, refinery |
+| clone-guard | PreToolUse | No | crew, polecat |
+| dangerous-command-guard | PreToolUse | No | crew, polecat |
+
+Additional hooks exist in settings.json files but are not yet in the registry:
+
+- **bd init guard** (gastown/crew, beads/crew) - blocks `bd init*` inside `.beads/`
+- **mol patrol guards** (gastown roles) - blocks persistent patrol molecules
+- **tmux clear-history** (gastown root) - clears terminal history on session start
+- **SessionStart .beads/ validation** (gastown/crew, beads/crew) - validates CWD
+
+## Design Decision: Registry as Catalog vs Source of Truth
+
+> **Decision: The registry is a catalog, not the source of truth.**
+>
+> The registry (`registry.toml`) lists available hooks. The base/overrides system
+> (`~/.gt/hooks-base.json` + `~/.gt/hooks-overrides/`) defines what is active.
+> `gt hooks install` copies from the registry into the base/overrides config.
+>
+> This separation provides:
+> - Per-machine customization (PATH differences across machines)
+> - Per-role overrides without polluting the shared registry
+> - Clear distinction between "what hooks exist" and "what hooks are active where"
+>
+> The registry is the menu. The base/overrides are the order.
+
+## Known Gaps
+
+1. **Registry doesn't cover all active hooks** — Several hooks in settings.json
+   files are not in `registry.toml` (bd-init-guard, mol-patrol-guard, tmux-clear,
+   cwd-validation). These should be added so `gt hooks install` can manage them.
+
+2. **No `gt tap` commands beyond pr-workflow** — The tap framework has only one
+   guard implemented. `gt tap guard dangerous-command` is referenced in the
+   registry but does not exist yet. Priority order: dangerous-command, bd-init,
+   mol-patrol, then audit git-push.
+
+3. **No `gt tap disable/enable` convenience commands** — Per-worktree
+   enable/disable is possible via the override mechanism (`gt hooks override`
+   with empty hooks list), but there is no convenience wrapper yet.
+
+4. **Private hooks (settings.local.json)** — Claude Code supports
+   `settings.local.json` for personal overrides. Gas Town doesn't manage
+   these yet. Low priority since Gas Town is primarily agent-operated.
+
+5. **Hook ordering** — No action needed currently. The merge chain
+   (base -> override) produces deterministic order, and per-matcher merge
+   ensures one entry per event type.
+
 ## Integration
 
 ### `gt rig add`

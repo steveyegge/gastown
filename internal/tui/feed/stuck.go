@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -103,11 +104,11 @@ func (s AgentState) Label() string {
 	}
 }
 
-// GUPP threshold constants
-const (
-	GUPPViolationMinutes    = 30
-	StalledThresholdMinutes = 15
-)
+// GUPP threshold constants.
+// GUPPViolationMinutes derives from the canonical constants.GUPPViolationTimeout.
+var GUPPViolationMinutes = int(constants.GUPPViolationTimeout.Minutes())
+
+const StalledThresholdMinutes = 15
 
 // ProblemAgent represents an agent that needs attention.
 type ProblemAgent struct {

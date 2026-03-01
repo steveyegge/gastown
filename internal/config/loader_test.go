@@ -1607,6 +1607,121 @@ func TestResolveRoleAgentConfigFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+func TestResolveWorkerAgentConfig_WorkerSpecificOverridesRole(t *testing.T) {
+	// Cannot use t.Parallel — uses t.Setenv
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+
+	// Create a fake codex binary so ValidateAgentConfig passes
+	binDir := t.TempDir()
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write codex stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	settings := NewRigSettings()
+	settings.RoleAgents = map[string]string{constants.RoleCrew: "claude"}
+	settings.WorkerAgents = map[string]string{"denali": "codex"}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	rc := ResolveWorkerAgentConfig("denali", townRoot, rigPath)
+	if rc.Provider != "codex" && !strings.Contains(rc.Command, "codex") {
+		t.Errorf("expected codex for worker denali, got provider=%q command=%q", rc.Provider, rc.Command)
+	}
+}
+
+func TestResolveWorkerAgentConfig_FallsBackToRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+
+	settings := NewRigSettings()
+	settings.RoleAgents = map[string]string{constants.RoleCrew: "claude"}
+	settings.WorkerAgents = map[string]string{"denali": "codex"} // only denali is overridden
+	if err := SaveRigSettings(RigSettingsPath(rigPath), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	// "glacier" is not in worker_agents — should fall through to role_agents["crew"] = claude
+	rc := ResolveWorkerAgentConfig("glacier", townRoot, rigPath)
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("expected claude fallback for glacier (not in worker_agents), got command=%q", rc.Command)
+	}
+}
+
+func TestResolveWorkerAgentConfig_EmptyWorkerNameFallsBackToRole(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+
+	settings := NewRigSettings()
+	settings.WorkerAgents = map[string]string{"denali": "codex"}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	// Empty worker name should fall back to crew role resolution (claude default)
+	rc := ResolveWorkerAgentConfig("", townRoot, rigPath)
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("expected claude for empty worker name, got command=%q", rc.Command)
+	}
+}
+
+func TestBuildStartupCommand_WorkerAgentsViaCrew(t *testing.T) {
+	// Cannot use t.Parallel — uses t.Setenv
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+
+	// Create a fake codex binary
+	binDir := t.TempDir()
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write codex stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	settings := NewRigSettings()
+	settings.WorkerAgents = map[string]string{"denali": "codex"}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), settings); err != nil {
+		t.Fatalf("saving settings: %v", err)
+	}
+
+	t.Run("crew worker with worker_agents entry uses codex", func(t *testing.T) {
+		envVars := map[string]string{
+			"GT_ROLE": constants.RoleCrew,
+			"GT_CREW": "denali",
+		}
+		cmd := BuildStartupCommand(envVars, rigPath, "")
+		if !strings.Contains(cmd, "codex") {
+			t.Errorf("expected codex for crew worker denali, got: %q", cmd)
+		}
+	})
+
+	t.Run("crew worker without worker_agents entry falls back to default", func(t *testing.T) {
+		envVars := map[string]string{
+			"GT_ROLE": constants.RoleCrew,
+			"GT_CREW": "glacier",
+		}
+		cmd := BuildStartupCommand(envVars, rigPath, "")
+		if strings.Contains(cmd, "codex") {
+			t.Errorf("expected non-codex for crew worker glacier (not in worker_agents), got: %q", cmd)
+		}
+	})
+
+	t.Run("crew role without GT_CREW falls back to role resolution", func(t *testing.T) {
+		envVars := map[string]string{
+			"GT_ROLE": constants.RoleCrew,
+		}
+		cmd := BuildStartupCommand(envVars, rigPath, "")
+		if strings.Contains(cmd, "codex") {
+			t.Errorf("expected non-codex when GT_CREW not set, got: %q", cmd)
+		}
+	})
+}
+
 func TestIsClaudeAgent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

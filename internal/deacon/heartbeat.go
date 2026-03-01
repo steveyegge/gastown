@@ -10,9 +10,11 @@ import (
 	"time"
 )
 
+// Heartbeat age thresholds — these are compiled-in defaults.
+// Configurable via operational.deacon.heartbeat_stale_threshold and
+// operational.deacon.heartbeat_very_stale_threshold in settings/config.json.
 const (
-	// HeartbeatStaleThreshold is the age at which a heartbeat is considered stale,
-	// meaning the Deacon may be doing a long operation.
+	// HeartbeatStaleThreshold is the age at which a heartbeat is considered stale.
 	HeartbeatStaleThreshold = 5 * time.Minute
 
 	// HeartbeatVeryStaleThreshold is the age at which a heartbeat is considered

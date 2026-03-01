@@ -529,6 +529,15 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	return outputMoleculeStatus(status)
 }
 
+// extractRoleFromIdentity extracts the role name from an agent identity string
+// for handoff bead lookup. Handles trailing slashes (e.g. "mayor/" → "mayor")
+// and compound paths (e.g. "gastown/crew/jack" → "jack").
+func extractRoleFromIdentity(target string) string {
+	target = strings.TrimRight(target, "/")
+	parts := strings.Split(target, "/")
+	return parts[len(parts)-1]
+}
+
 // buildAgentIdentity constructs the agent identity string from role context.
 // Town-level agents (mayor, deacon) use trailing slash to match the format
 // used when setting assignee on hooked beads (see resolveSelfTarget in sling.go).
@@ -965,8 +974,7 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 	b := beads.New(workDir)
 
 	// Extract role from target for handoff bead lookup
-	parts := strings.Split(target, "/")
-	role := parts[len(parts)-1]
+	role := extractRoleFromIdentity(target)
 
 	// Find handoff bead for this identity
 	handoff, err := b.FindHandoffBead(role)

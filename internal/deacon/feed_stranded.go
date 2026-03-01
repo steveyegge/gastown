@@ -10,6 +10,8 @@ import (
 )
 
 // Default parameters for feed-stranded rate limiting.
+// Configurable via operational.deacon.max_feeds_per_cycle and
+// operational.deacon.feed_cooldown in settings/config.json.
 const (
 	// DefaultMaxFeedsPerCycle is the maximum number of convoys to feed in one invocation.
 	// Prevents spawning too many dogs at once.
@@ -44,10 +46,11 @@ type ConvoyFeedState struct {
 
 // StrandedConvoy holds info about a stranded convoy from `gt convoy stranded --json`.
 type StrandedConvoy struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	ReadyCount  int      `json:"ready_count"`
-	ReadyIssues []string `json:"ready_issues"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	TrackedCount int      `json:"tracked_count"`
+	ReadyCount   int      `json:"ready_count"`
+	ReadyIssues  []string `json:"ready_issues"`
 }
 
 // FeedResult describes the outcome of a feed-stranded invocation.
@@ -226,8 +229,20 @@ func FeedStranded(townRoot string, maxPerCycle int, cooldown time.Duration) *Fee
 	fedCount := 0
 
 	for _, convoy := range stranded {
-		// Handle empty convoys (auto-close) — no rate limit needed
+		// Handle convoys with no ready issues.
 		if convoy.ReadyCount == 0 {
+			// Stuck convoy: has tracked issues but none are ready.
+			// Don't close — the convoy is waiting, not empty.
+			if convoy.TrackedCount > 0 {
+				result.Details = append(result.Details, FeedConvoyResult{
+					ConvoyID: convoy.ID,
+					Action:   "stuck",
+					Message:  fmt.Sprintf("stuck convoy (%d tracked issues, 0 ready) — skipping", convoy.TrackedCount),
+				})
+				continue
+			}
+
+			// Truly empty convoy (0 tracked issues) — auto-close
 			if err := closeEmptyConvoy(townRoot, convoy.ID); err != nil {
 				result.Errors++
 				result.Details = append(result.Details, FeedConvoyResult{

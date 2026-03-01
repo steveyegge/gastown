@@ -951,31 +951,22 @@ needs = ["patrol-digest"]
 description = """
 Maintain daemon logs and state files.
 
-**Step 1: Check daemon.log size**
+**Step 1: Rotate oversized logs**
+
+The daemon automatically rotates logs every heartbeat (3 min), but the deacon
+can trigger a force-rotation to ensure cleanup happens during patrol:
 ```bash
-# Get log file size
-ls -la ~/.beads/daemon*.log 2>/dev/null || ls -la $GT_ROOT/.beads/daemon*.log 2>/dev/null
+gt daemon rotate-logs
 ```
 
-If daemon.log exceeds 10MB:
-```bash
-# Rotate with date suffix and gzip
-LOGFILE="$GT_ROOT/.beads/daemon.log"
-if [ -f "$LOGFILE" ] && [ $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]; then
-    DATE=$(date +%Y-%m-%dT%H-%M-%S)
-    mv "$LOGFILE" "${LOGFILE%.log}-${DATE}.log"
-    gzip "${LOGFILE%.log}-${DATE}.log"
-fi
-```
+This rotates Dolt server logs (dolt.log, dolt-server.log, rig-level dolt-server.log)
+using copytruncate (safe for child processes with open fds). daemon.log uses
+lumberjack for automatic rotation and is handled separately.
 
-**Step 2: Archive old daemon logs**
+Log locations: $GT_ROOT/daemon/dolt.log, $GT_ROOT/daemon/dolt-server.log,
+and per-rig .beads/dolt-server.log files.
 
-Clean up daemon logs older than 7 days:
-```bash
-find $GT_ROOT/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
-```
-
-**Step 3: Prune state.json of dead sessions**
+**Step 2: Prune state.json of dead sessions**
 
 The state.json tracks active sessions. Prune entries for sessions that no longer exist:
 ```bash

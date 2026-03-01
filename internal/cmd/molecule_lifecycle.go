@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -62,15 +61,14 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 	b := beads.New(workDir)
 
 	// Find agent's pinned bead (handoff bead)
-	parts := strings.Split(target, "/")
-	role := parts[len(parts)-1]
+	role := extractRoleFromIdentity(target)
 
 	handoff, err := b.FindHandoffBead(role)
 	if err != nil {
 		return fmt.Errorf("finding handoff bead: %w", err)
 	}
 	if handoff == nil {
-		return fmt.Errorf("no handoff bead found for %s", target)
+		return fmt.Errorf("no handoff bead found for %s (looked for %q with pinned status)", target, beads.HandoffBeadTitle(role))
 	}
 
 	// Check for attached molecule
@@ -190,15 +188,14 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 	b := beads.New(workDir)
 
 	// Find agent's pinned bead (handoff bead)
-	parts := strings.Split(target, "/")
-	role := parts[len(parts)-1]
+	role := extractRoleFromIdentity(target)
 
 	handoff, err := b.FindHandoffBead(role)
 	if err != nil {
 		return fmt.Errorf("finding handoff bead: %w", err)
 	}
 	if handoff == nil {
-		return fmt.Errorf("no handoff bead found for %s", target)
+		return fmt.Errorf("no handoff bead found for %s (looked for %q with pinned status)", target, beads.HandoffBeadTitle(role))
 	}
 
 	// Check for attached molecule

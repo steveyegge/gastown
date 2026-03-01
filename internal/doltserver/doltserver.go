@@ -29,6 +29,7 @@ package doltserver
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
@@ -174,7 +176,7 @@ type Config struct {
 	MaxConnections int
 
 	// LogLevel is the Dolt server log level (trace, debug, info, warn, error, fatal).
-	// Empty or unset uses the Dolt default ("info").
+	// Default is "info". Override with GT_DOLT_LOGLEVEL=debug for diagnostics.
 	LogLevel string
 }
 
@@ -195,6 +197,7 @@ func DefaultConfig(townRoot string) *Config {
 		LogFile:        filepath.Join(daemonDir, "dolt.log"),
 		PidFile:        filepath.Join(daemonDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
+		LogLevel:       "info",
 	}
 
 	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
@@ -213,6 +216,11 @@ func DefaultConfig(townRoot string) *Config {
 	}
 	if ll := os.Getenv("GT_DOLT_LOGLEVEL"); ll != "" {
 		config.LogLevel = ll
+	}
+
+	// Default to info logging. Use GT_DOLT_LOGLEVEL=debug for diagnostics.
+	if config.LogLevel == "" {
+		config.LogLevel = "info"
 	}
 
 	return config
@@ -393,6 +401,19 @@ func IsRunning(townRoot string) (bool, int, error) {
 			return true, pid, nil
 		}
 		// Port is used by a different town's Dolt — not ours
+	}
+
+	// Last resort: TCP reachability check. This handles Docker containers
+	// and other setups where no local dolt process is visible (e.g., the
+	// port is forwarded by a Docker proxy). Only used when GT_DOLT_PORT
+	// overrides the default port, to avoid false positives from other
+	// services on 3307.
+	if config.Port != DefaultPort {
+		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return true, 0, nil
+		}
 	}
 
 	return false, 0, nil
@@ -2492,17 +2513,31 @@ func doltSQLWithRecovery(townRoot, rigDB, query string) error {
 // MeasureQueryLatency times a SELECT active_branch() query against the Dolt server.
 // Per Tim Sehn (Dolt CEO): active_branch() is a lightweight probe that won't block
 // behind queued queries, unlike SELECT 1 which goes through the full query executor.
+// Uses a direct TCP connection via the Go MySQL driver to measure actual query
+// latency, not subprocess startup time.
 func MeasureQueryLatency(townRoot string) (time.Duration, error) {
 	config := DefaultConfig(townRoot)
 
+	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%d)/", config.User, config.Port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return 0, fmt.Errorf("opening mysql connection: %w", err)
+	}
+	defer db.Close()
+
+	db.SetConnMaxLifetime(5 * time.Second)
+	db.SetMaxOpenConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	start := time.Now()
-	ctx := context.Background()
-	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT active_branch()")
-	output, err := cmd.CombinedOutput()
+	var branch string
+	err = db.QueryRowContext(ctx, "SELECT active_branch()").Scan(&branch)
 	elapsed := time.Since(start)
 
 	if err != nil {
-		return 0, fmt.Errorf("SELECT active_branch() failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		return 0, fmt.Errorf("SELECT active_branch() failed: %w", err)
 	}
 
 	return elapsed, nil

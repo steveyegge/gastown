@@ -22,7 +22,6 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
-	"github.com/steveyegge/gastown/internal/protocol"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -112,20 +111,40 @@ type MergeQueueConfig struct {
 	// GatesParallel controls whether gates run concurrently.
 	// When true, all gates start simultaneously; any failure = overall failure.
 	GatesParallel bool `json:"gates_parallel"`
+
+	// StaleClaimWarningAfter is how long a claimed MR can sit without updates
+	// before it triggers a "warning" severity anomaly.
+	StaleClaimWarningAfter time.Duration `json:"stale_claim_warning_after"`
+
+	// StaleClaimCriticalAfter is how long a claimed MR can sit without updates
+	// before it triggers a "critical" severity anomaly.
+	StaleClaimCriticalAfter time.Duration `json:"stale_claim_critical_after"`
+
+	// MaxRetryCount is the maximum number of conflict resolution retries
+	// before escalation to Mayor.
+	MaxRetryCount int `json:"max_retry_count"`
+
+	// Batch holds configuration for the batch-then-bisect merge queue.
+	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
+	Batch *BatchConfig `json:"batch,omitempty"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
-		Enabled:              true,
-		OnConflict:           "assign_back",
-		RunTests:             true,
-		TestCommand:          "",
-		DeleteMergedBranches: true,
-		RetryFlakyTests:      1,
-		PollInterval:         30 * time.Second,
-		MaxConcurrent:        1,
-		StaleClaimTimeout:    DefaultStaleClaimTimeout,
+		Enabled:                 true,
+		OnConflict:              "assign_back",
+		RunTests:                true,
+		TestCommand:             "",
+		DeleteMergedBranches:    true,
+		GatesParallel:           true, // gt-8b2i: run gates concurrently (~2x speedup)
+		RetryFlakyTests:         1,
+		PollInterval:            30 * time.Second,
+		MaxConcurrent:           1,
+		StaleClaimTimeout:       DefaultStaleClaimTimeout,
+		StaleClaimWarningAfter:  2 * time.Hour,
+		StaleClaimCriticalAfter: 6 * time.Hour,
+		MaxRetryCount:           5,
 	}
 }
 
@@ -158,17 +177,12 @@ type MRInfo struct {
 type MRAnomaly struct {
 	ID       string        `json:"id"`
 	Branch   string        `json:"branch"`
-	Type     string        `json:"type"`     // stale-claim | orphaned-branch
-	Severity string        `json:"severity"` // warning | critical
+	Type     string        `json:"type"` // stale-claim | orphaned-branch
 	Assignee string        `json:"assignee,omitempty"`
 	Age      time.Duration `json:"age,omitempty"`
 	Detail   string        `json:"detail"`
 }
 
-const (
-	staleClaimWarningAfter  = 2 * time.Hour
-	staleClaimCriticalAfter = 6 * time.Hour
-)
 
 // errMergeSlotTimeout is returned by acquireMainPushSlot when retries are
 // exhausted due to slot contention. Infrastructure errors (beads down,
@@ -960,19 +974,26 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		return
 	}
 
-	// Notify Witness of the failure so polecat can be alerted
-	// Determine failure type from result
+	// Nudge polecat directly about the merge failure.
+	// Previously sent MERGE_FAILED mail to witness (which relayed to polecat),
+	// but that created permanent Dolt commits for routine protocol signals.
+	// The witness discovers merge failures from MR bead status during patrol.
 	failureType := "build"
 	if result.Conflict {
 		failureType = "conflict"
 	} else if result.TestsFailed {
 		failureType = "tests"
 	}
-	msg := protocol.NewMergeFailedMessage(e.rig.Name, mr.Worker, mr.Branch, mr.SourceIssue, mr.Target, failureType, result.Error)
-	if err := e.router.Send(msg); err != nil {
-		fmt.Fprintf(e.output, "[Engineer] Warning: failed to send MERGE_FAILED to witness: %v\n", err)
+	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
+	nudgeTarget := fmt.Sprintf("%s/%s", e.rig.Name, polecatName)
+	nudgeMsg := fmt.Sprintf("MERGE_FAILED: branch=%s issue=%s type=%s error=%s — fix and resubmit with 'gt done'",
+		mr.Branch, mr.SourceIssue, failureType, result.Error)
+	nudgeCmd := exec.Command("gt", "nudge", nudgeTarget, nudgeMsg)
+	nudgeCmd.Dir = e.workDir
+	if err := nudgeCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge %s about merge failure: %v\n", polecatName, err)
 	} else {
-		fmt.Fprintf(e.output, "[Engineer] Notified witness of merge failure for %s\n", mr.Worker)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Nudged %s about merge failure (%s)\n", polecatName, failureType)
 	}
 
 	// If this was a conflict, create a conflict-resolution task for dispatch
@@ -1009,7 +1030,7 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 //
 //	Title: Resolve merge conflicts: <original-issue-title>
 //	Type: task
-//	Priority: inherit from original + boost (P2 -> P1)
+//	Priority: inherit from original (ZFC: agent decides boost strategy)
 //	Parent: original MR bead
 //	Description: metadata including branch, conflict SHA, etc.
 //
@@ -1068,12 +1089,7 @@ func (e *Engineer) createConflictResolutionTaskForMR(mr *MRInfo, _ ProcessResult
 		}
 	}
 
-	// Priority boost: decrease priority number (lower = higher priority)
-	// P2 -> P1, P1 -> P0, P0 stays P0
-	boostedPriority := mr.Priority - 1
-	if boostedPriority < 0 {
-		boostedPriority = 0
-	}
+	// ZFC: pass raw priority. Agent decides boost strategy.
 
 	// Increment retry count for tracking
 	retryCount := mr.RetryCount + 1
@@ -1112,7 +1128,7 @@ The Refinery will automatically retry the merge after you force-push.`,
 	task, err := e.beads.Create(beads.CreateOptions{
 		Title:       taskTitle,
 		Type:        "task",
-		Priority:    boostedPriority,
+		Priority:    mr.Priority,
 		Description: description,
 		Actor:       e.rig.Name + "/refinery",
 	})
@@ -1358,7 +1374,7 @@ func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
 		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
 	}
 
-	return detectQueueAnomalies(issues, now, func(branch string) (bool, bool, error) {
+	return detectQueueAnomalies(issues, now, e.config.StaleClaimWarningAfter, func(branch string) (bool, bool, error) {
 		localExists, err := e.git.BranchExists(branch)
 		if err != nil {
 			return false, false, err
@@ -1374,6 +1390,7 @@ func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
 func detectQueueAnomalies(
 	issues []*beads.Issue,
 	now time.Time,
+	warningAfter time.Duration,
 	branchExistsFn func(branch string) (localExists bool, remoteTrackingExists bool, err error),
 ) []*MRAnomaly {
 	var anomalies []*MRAnomaly
@@ -1392,16 +1409,11 @@ func detectQueueAnomalies(
 			updatedAt, err := time.Parse(time.RFC3339, issue.UpdatedAt)
 			if err == nil {
 				age := now.Sub(updatedAt)
-				if age >= staleClaimWarningAfter {
-					severity := "warning"
-					if age >= staleClaimCriticalAfter {
-						severity = "critical"
-					}
+				if age >= warningAfter {
 					anomalies = append(anomalies, &MRAnomaly{
 						ID:       issue.ID,
 						Branch:   fields.Branch,
 						Type:     "stale-claim",
-						Severity: severity,
 						Assignee: issue.Assignee,
 						Age:      age,
 						Detail:   "MR is claimed but not progressing",
@@ -1411,14 +1423,14 @@ func detectQueueAnomalies(
 		}
 
 		// 2) Orphaned branch detection.
+		// ZFC: report raw anomaly data. Agent decides severity.
 		localExists, remoteTrackingExists, err := branchExistsFn(fields.Branch)
 		if err == nil && !localExists && !remoteTrackingExists {
 			anomalies = append(anomalies, &MRAnomaly{
-				ID:       issue.ID,
-				Branch:   fields.Branch,
-				Type:     "orphaned-branch",
-				Severity: "critical",
-				Detail:   "MR branch is missing locally and in origin/* tracking refs",
+				ID:     issue.ID,
+				Branch: fields.Branch,
+				Type:   "orphaned-branch",
+				Detail: "MR branch is missing locally and in origin/* tracking refs",
 			})
 		}
 	}
@@ -1496,15 +1508,19 @@ func (e *Engineer) notifyDeaconConvoyFeeding(mr *MRInfo) {
 		return
 	}
 
-	msg := protocol.NewConvoyNeedsFeedingMessage(e.rig.Name, mr.ConvoyID, mr.SourceIssue)
-	if err := e.router.Send(msg); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to notify deacon of convoy feeding for %s: %v\n", mr.ConvoyID, err)
+	// Nudge deacon about convoy feeding instead of sending permanent mail.
+	// The deacon discovers convoy state from beads on next patrol cycle;
+	// this nudge just accelerates discovery.
+	nudgeMsg := fmt.Sprintf("CONVOY_NEEDS_FEEDING: convoy=%s issue=%s", mr.ConvoyID, mr.SourceIssue)
+	nudgeCmd := exec.Command("gt", "nudge", "deacon", nudgeMsg)
+	nudgeCmd.Dir = e.workDir
+	if err := nudgeCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge deacon about convoy feeding for %s: %v\n", mr.ConvoyID, err)
 	} else {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Notified deacon: CONVOY_NEEDS_FEEDING %s\n", mr.ConvoyID)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Nudged deacon: CONVOY_NEEDS_FEEDING %s\n", mr.ConvoyID)
 	}
 
-	// Emit event to wake deacon from await-signal (router.Send doesn't write
-	// to .events.jsonl, but await-signal watches the events file).
+	// Emit event to wake deacon from await-signal.
 	_ = events.LogFeed(events.TypeMail, e.rig.Name+"/refinery", events.MailPayload("deacon/", "CONVOY_NEEDS_FEEDING "+mr.ConvoyID))
 }
 
@@ -1633,25 +1649,15 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 
 // notifyConvoyCompletion sends notifications to convoy owner and notify addresses.
 func (e *Engineer) notifyConvoyCompletion(townRoot, convoyID, title, description string) {
-	notified := make(map[string]bool)
-
-	for _, line := range strings.Split(description, "\n") {
-		var addr string
-		if strings.HasPrefix(line, "Owner: ") {
-			addr = strings.TrimPrefix(line, "Owner: ")
-		} else if strings.HasPrefix(line, "Notify: ") {
-			addr = strings.TrimPrefix(line, "Notify: ")
-		}
-
-		if addr != "" && !notified[addr] {
-			mailCmd := exec.Command("gt", "mail", "send", addr,
-				"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
-				"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.\n\nClosed by: %s/refinery", convoyID, e.rig.Name))
-			mailCmd.Dir = townRoot
-			if err := mailCmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify %s: %v\n", addr, err)
-			}
-			notified[addr] = true
+	// ZFC: Use typed accessor instead of parsing description text
+	fields := beads.ParseConvoyFields(&beads.Issue{Description: description})
+	for _, addr := range fields.NotificationAddresses() {
+		mailCmd := exec.Command("gt", "mail", "send", addr,
+			"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
+			"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.\n\nClosed by: %s/refinery", convoyID, e.rig.Name))
+		mailCmd.Dir = townRoot
+		if err := mailCmd.Run(); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify %s: %v\n", addr, err)
 		}
 	}
 }
@@ -1659,13 +1665,11 @@ func (e *Engineer) notifyConvoyCompletion(townRoot, convoyID, title, description
 // landConvoySwarm checks if a completed convoy has an associated swarm with an
 // integration branch, and triggers landing if so.
 func (e *Engineer) landConvoySwarm(townRoot string, convoy convoyInfo) {
-	// Check if convoy description mentions a molecule/swarm
+	// ZFC: Use typed accessor instead of parsing description text
+	fields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
 	var moleculeID string
-	for _, line := range strings.Split(convoy.Description, "\n") {
-		if strings.HasPrefix(line, "Molecule: ") {
-			moleculeID = strings.TrimPrefix(line, "Molecule: ")
-			break
-		}
+	if fields != nil {
+		moleculeID = fields.Molecule
 	}
 
 	if moleculeID == "" {

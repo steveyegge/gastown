@@ -7,10 +7,12 @@ import (
 )
 
 func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "atlas",
 		AgentState:  "idle",
 		HookBead:    "gt-abc123",
+		WasActive:   true,
 		Action:      "restarted",
 	})
 
@@ -23,6 +25,7 @@ func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
 }
 
 func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "echo",
 		AgentState:  "idle",
@@ -35,9 +38,11 @@ func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
 }
 
 func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
+	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
 		PolecatName: "nux",
 		AgentState:  "running",
+		WasActive:   true,
 		Error:       errors.New("nuke failed"),
 	})
 
@@ -47,54 +52,47 @@ func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
 }
 
 func TestReceiptVerdictForZombie_AllStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name     string
-		state    string
-		hookBead string
-		want     PatrolVerdict
+		name      string
+		state     string
+		hookBead  string
+		wasActive bool
+		want      PatrolVerdict
 	}{
-		// States from getAgentBeadState (active work indicators)
-		{name: "working without hook", state: "working", want: PatrolVerdictStale},
-		{name: "working with hook", state: "working", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "running without hook", state: "running", want: PatrolVerdictStale},
-		{name: "running with hook", state: "running", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "spawning without hook", state: "spawning", want: PatrolVerdictStale},
-		{name: "spawning with hook", state: "spawning", hookBead: "gt-1", want: PatrolVerdictStale},
+		// WasActive=true → stale (set by detection code for active/synthetic states)
+		{name: "active working", state: "working", wasActive: true, want: PatrolVerdictStale},
+		{name: "active with hook", state: "working", hookBead: "gt-1", wasActive: true, want: PatrolVerdictStale},
+		{name: "active running", state: "running", wasActive: true, want: PatrolVerdictStale},
+		{name: "active spawning", state: "spawning", wasActive: true, want: PatrolVerdictStale},
+		{name: "stuck-in-done", state: "stuck-in-done", wasActive: true, want: PatrolVerdictStale},
+		{name: "agent-dead-in-session", state: "agent-dead-in-session", wasActive: true, want: PatrolVerdictStale},
+		{name: "bead-closed-still-running", state: "bead-closed-still-running", wasActive: true, want: PatrolVerdictStale},
+		{name: "done-intent-dead", state: "done-intent-dead", wasActive: true, want: PatrolVerdictStale},
+		{name: "idle with hook (active)", state: "idle", hookBead: "gt-1", wasActive: true, want: PatrolVerdictStale},
 
-		// Synthetic states from DetectZombiePolecats early-return paths
-		{name: "stuck-in-done without hook", state: "stuck-in-done", want: PatrolVerdictStale},
-		{name: "stuck-in-done with hook", state: "stuck-in-done", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "agent-dead-in-session without hook", state: "agent-dead-in-session", want: PatrolVerdictStale},
-		{name: "agent-dead-in-session with hook", state: "agent-dead-in-session", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "bead-closed-still-running without hook", state: "bead-closed-still-running", want: PatrolVerdictStale},
-		{name: "bead-closed-still-running with hook", state: "bead-closed-still-running", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "done-intent-dead without hook", state: "done-intent-dead", want: PatrolVerdictStale},
-		{name: "done-intent-dead with hook", state: "done-intent-dead", hookBead: "gt-1", want: PatrolVerdictStale},
-
-		// Non-active states → orphan (no hook bead)
+		// WasActive=false → orphan (no evidence of recent work)
 		{name: "idle without hook", state: "idle", want: PatrolVerdictOrphan},
-		{name: "empty state without hook", state: "", want: PatrolVerdictOrphan},
-		{name: "unknown state without hook", state: "something-new", want: PatrolVerdictOrphan},
-
-		// Non-active states with hook bead → stale (hook bead overrides)
-		{name: "idle with hook", state: "idle", hookBead: "gt-1", want: PatrolVerdictStale},
-		{name: "empty state with hook", state: "", hookBead: "gt-1", want: PatrolVerdictStale},
+		{name: "empty state", state: "", want: PatrolVerdictOrphan},
+		{name: "unknown state", state: "something-new", want: PatrolVerdictOrphan},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := receiptVerdictForZombie(ZombieResult{
 				AgentState: tt.state,
 				HookBead:   tt.hookBead,
+				WasActive:  tt.wasActive,
 			})
 			if got != tt.want {
-				t.Errorf("receiptVerdictForZombie(state=%q, hookBead=%q) = %q, want %q",
-					tt.state, tt.hookBead, got, tt.want)
+				t.Errorf("receiptVerdictForZombie(wasActive=%v, state=%q) = %q, want %q",
+					tt.wasActive, tt.state, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestBuildPatrolReceipts_NilAndEmpty(t *testing.T) {
+	t.Parallel()
 	if got := BuildPatrolReceipts("rig", nil); got != nil {
 		t.Errorf("BuildPatrolReceipts(nil) = %v, want nil", got)
 	}
@@ -107,12 +105,14 @@ func TestBuildPatrolReceipts_NilAndEmpty(t *testing.T) {
 }
 
 func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
+	t.Parallel()
 	receipts := BuildPatrolReceipts("gastown", &DetectZombiePolecatsResult{
 		Zombies: []ZombieResult{
 			{
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
+				WasActive:   true,
 				Action:      "restarted",
 			},
 		},
@@ -147,12 +147,14 @@ func TestBuildPatrolReceipts_JSONShape(t *testing.T) {
 }
 
 func TestBuildPatrolReceipts_DeterministicStaleOrphanOrdering(t *testing.T) {
+	t.Parallel()
 	receipts := BuildPatrolReceipts("gastown", &DetectZombiePolecatsResult{
 		Zombies: []ZombieResult{
 			{
 				PolecatName: "atlas",
 				AgentState:  "working",
 				HookBead:    "gt-123",
+				WasActive:   true,
 				Action:      "restarted",
 			},
 			{

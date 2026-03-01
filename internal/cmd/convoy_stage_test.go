@@ -278,6 +278,66 @@ func TestComputeWaves_ExcludesNonSlingable(t *testing.T) {
 	}
 }
 
+// #2141: decision beads block downstream tasks even though decisions aren't slingable.
+// A task blocked by an open decision must NOT appear in Wave 1.
+func TestComputeWaves_DecisionBlocksTask(t *testing.T) {
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"d1":     {ID: "d1", Type: "decision", Status: "open", Blocks: []string{"task-1"}},
+		"task-1": {ID: "task-1", Type: "task", Status: "open", BlockedBy: []string{"d1"}},
+		"task-2": {ID: "task-2", Type: "task", Status: "open"},
+	}}
+	waves, err := computeWaves(dag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) < 1 {
+		t.Fatalf("expected at least 1 wave, got %d", len(waves))
+	}
+	wave1Tasks := waves[0].Tasks
+	for _, id := range wave1Tasks {
+		if id == "task-1" {
+			t.Errorf("task-1 should NOT be in Wave 1 — it's blocked by decision d1")
+		}
+		if id == "d1" {
+			t.Errorf("decision d1 should NOT appear in any wave (not slingable)")
+		}
+	}
+	found := false
+	for _, id := range wave1Tasks {
+		if id == "task-2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("task-2 should be in Wave 1, got: %v", wave1Tasks)
+	}
+	for _, w := range waves {
+		for _, id := range w.Tasks {
+			if id == "d1" {
+				t.Errorf("decision d1 should not appear in wave %d", w.Number)
+			}
+		}
+	}
+}
+
+// #2141: closed decision beads do NOT block downstream tasks.
+func TestComputeWaves_ClosedDecisionDoesNotBlock(t *testing.T) {
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"d1":     {ID: "d1", Type: "decision", Status: "closed", Blocks: []string{"task-1"}},
+		"task-1": {ID: "task-1", Type: "task", Status: "open", BlockedBy: []string{"d1"}},
+	}}
+	waves, err := computeWaves(dag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) != 1 {
+		t.Fatalf("expected 1 wave, got %d", len(waves))
+	}
+	if len(waves[0].Tasks) != 1 || waves[0].Tasks[0] != "task-1" {
+		t.Errorf("task-1 should be in Wave 1 (decision is closed), got: %v", waves[0].Tasks)
+	}
+}
+
 // U-13: parent-child deps don't create execution edges
 func TestComputeWaves_ParentChildNotExecution(t *testing.T) {
 	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
@@ -837,6 +897,41 @@ func TestRenderWaveTable_MultipleRigs(t *testing.T) {
 	}
 }
 
+// Test wave table preserves multi-byte UTF-8 characters during title truncation.
+// Regression test: byte-based truncation split em-dashes (U+2014, 3 bytes)
+// mid-character, producing mojibake like "â" in the wave table output.
+func TestRenderWaveTable_UTF8Truncation(t *testing.T) {
+	// Title with em-dash that would be split by byte-based title[:28]
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"gt-a": {ID: "gt-a", Title: "F.2: Beads for Optuna rig \u2014 extra", Type: "task", Rig: "gst"},
+	}}
+	waves := []Wave{
+		{Number: 1, Tasks: []string{"gt-a"}},
+	}
+	output := renderWaveTable(waves, dag)
+
+	// Must not contain the mojibake byte 0xE2 without its continuation bytes.
+	// If truncation splits the em-dash, the output will contain an isolated
+	// 0xE2 byte which displays as "â".
+	for i := 0; i < len(output); i++ {
+		if output[i] == 0xE2 {
+			// Verify the full 3-byte em-dash sequence is present
+			if i+2 >= len(output) || output[i+1] != 0x80 || output[i+2] != 0x94 {
+				// Could be a different 3-byte char (like box-drawing "─")
+				// Check if it's a valid UTF-8 start byte with proper continuation
+				if i+1 >= len(output) || (output[i+1]&0xC0) != 0x80 {
+					t.Errorf("found isolated 0xE2 byte at position %d — UTF-8 truncation bug", i)
+				}
+			}
+		}
+	}
+
+	// The truncated title should end with ".." and be valid UTF-8
+	if !strings.Contains(output, "..") {
+		t.Error("long title should be truncated with '..'")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Error detection + categorization tests (gt-csl.3.3)
 // ---------------------------------------------------------------------------
@@ -879,7 +974,7 @@ func TestChooseStatus_Ready(t *testing.T) {
 
 // U-26: Warnings only → staged_warnings
 func TestChooseStatus_Warnings(t *testing.T) {
-	warns := []StagingFinding{{Severity: "warning", Category: "parked-rig"}}
+	warns := []StagingFinding{{Severity: "warning", Category: "blocked-rig"}}
 	status := chooseStatus(nil, warns)
 	if status != "staged_warnings" {
 		t.Errorf("expected staged_warnings, got %q", status)
@@ -1196,12 +1291,15 @@ func TestDetectWarnings_ParkedRig(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
-	// Override isRigParkedFn to return true for "parkedrig"
-	origFn := isRigParkedFn
-	isRigParkedFn = func(townRoot, rigName string) bool {
-		return rigName == "parkedrig"
+	// Override isRigBlockedFn to return true for "parkedrig"
+	origFn := isRigBlockedFn
+	isRigBlockedFn = func(townRoot, rigName string) (bool, string) {
+		if rigName == "parkedrig" {
+			return true, "parked"
+		}
+		return false, ""
 	}
-	t.Cleanup(func() { isRigParkedFn = origFn })
+	t.Cleanup(func() { isRigBlockedFn = origFn })
 
 	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
 		"gt-a": {ID: "gt-a", Type: "task", Rig: "parkedrig"},
@@ -1212,12 +1310,12 @@ func TestDetectWarnings_ParkedRig(t *testing.T) {
 
 	var parkedFindings []StagingFinding
 	for _, f := range findings {
-		if f.Category == "parked-rig" {
+		if f.Category == "blocked-rig" {
 			parkedFindings = append(parkedFindings, f)
 		}
 	}
 	if len(parkedFindings) != 1 {
-		t.Fatalf("expected 1 parked-rig warning, got %d: %+v", len(parkedFindings), findings)
+		t.Fatalf("expected 1 blocked-rig warning, got %d: %+v", len(parkedFindings), findings)
 	}
 	f := parkedFindings[0]
 	if f.Severity != "warning" {
@@ -1225,6 +1323,59 @@ func TestDetectWarnings_ParkedRig(t *testing.T) {
 	}
 	if !sliceContains(f.BeadIDs, "gt-a") {
 		t.Errorf("BeadIDs should contain gt-a, got %v", f.BeadIDs)
+	}
+}
+
+// Regression test for #2120 review item #1: docked rigs should also be detected.
+func TestDetectWarnings_DockedRig(t *testing.T) {
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0o755); err != nil {
+		t.Fatalf("failed to create .beads: %v", err)
+	}
+	oldDir, _ := os.Getwd()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(oldDir) })
+
+	// Override isRigBlockedFn to return docked for "dockedrig"
+	origFn := isRigBlockedFn
+	isRigBlockedFn = func(townRoot, rigName string) (bool, string) {
+		if rigName == "dockedrig" {
+			return true, "docked"
+		}
+		return false, ""
+	}
+	t.Cleanup(func() { isRigBlockedFn = origFn })
+
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"gt-a": {ID: "gt-a", Type: "task", Rig: "dockedrig"},
+		"gt-b": {ID: "gt-b", Type: "task", Rig: "gastown"},
+	}}
+	input := &StageInput{Kind: StageInputTasks, IDs: []string{"gt-a", "gt-b"}}
+	findings := detectWarnings(dag, input)
+
+	var blockedFindings []StagingFinding
+	for _, f := range findings {
+		if f.Category == "blocked-rig" {
+			blockedFindings = append(blockedFindings, f)
+		}
+	}
+	if len(blockedFindings) != 1 {
+		t.Fatalf("expected 1 blocked-rig warning for docked rig, got %d: %+v", len(blockedFindings), findings)
+	}
+	f := blockedFindings[0]
+	if f.Severity != "warning" {
+		t.Errorf("severity = %q, want %q", f.Severity, "warning")
+	}
+	if !sliceContains(f.BeadIDs, "gt-a") {
+		t.Errorf("BeadIDs should contain gt-a, got %v", f.BeadIDs)
+	}
+	if !strings.Contains(f.Message, "docked") {
+		t.Errorf("message should mention 'docked', got: %s", f.Message)
+	}
+	if !strings.Contains(f.SuggestedFix, "undock") {
+		t.Errorf("suggested fix should mention 'undock', got: %s", f.SuggestedFix)
 	}
 }
 
@@ -1385,7 +1536,7 @@ func TestRenderWarnings_Format(t *testing.T) {
 	findings := []StagingFinding{
 		{
 			Severity:     "warning",
-			Category:     "parked-rig",
+			Category:     "blocked-rig",
 			BeadIDs:      []string{"gt-a"},
 			Message:      "task gt-a is assigned to parked rig \"gastown.parked\"",
 			SuggestedFix: "reassign gt-a to an active rig",
@@ -1413,7 +1564,7 @@ func TestRenderWarnings_Format(t *testing.T) {
 	}
 
 	// Must include categories
-	for _, cat := range []string{"parked-rig", "capacity", "cross-rig"} {
+	for _, cat := range []string{"blocked-rig", "capacity", "cross-rig"} {
 		if !strings.Contains(output, cat) {
 			t.Errorf("output should contain category %q, got:\n%s", cat, output)
 		}
@@ -1439,10 +1590,10 @@ func TestRenderWarnings_Format(t *testing.T) {
 
 // Test detectWarnings clean DAG — no warnings
 func TestDetectWarnings_Clean(t *testing.T) {
-	// Override isRigParkedFn so the test doesn't depend on real rig state.
-	origFn := isRigParkedFn
-	isRigParkedFn = func(townRoot, rigName string) bool { return false }
-	t.Cleanup(func() { isRigParkedFn = origFn })
+	// Override isRigBlockedFn so the test doesn't depend on real rig state.
+	origFn := isRigBlockedFn
+	isRigBlockedFn = func(townRoot, rigName string) (bool, string) { return false, "" }
+	t.Cleanup(func() { isRigBlockedFn = origFn })
 
 	// All tasks on same rig, all have deps between them, epic input.
 	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
@@ -1518,7 +1669,7 @@ func TestCreateStagedConvoy_CleanReady(t *testing.T) {
 		t.Fatalf("computeWaves: %v", err)
 	}
 
-	convoyID, err := createStagedConvoy(convoyDAG, waves, status)
+	convoyID, err := createStagedConvoy(convoyDAG, waves, status, "")
 	if err != nil {
 		t.Fatalf("createStagedConvoy: %v", err)
 	}
@@ -1580,7 +1731,7 @@ func TestCreateStagedConvoy_TracksOnlySlingable(t *testing.T) {
 		t.Fatalf("computeWaves: %v", err)
 	}
 
-	convoyID, err := createStagedConvoy(convoyDAG, waves, "staged_ready")
+	convoyID, err := createStagedConvoy(convoyDAG, waves, "staged_ready", "")
 	if err != nil {
 		t.Fatalf("createStagedConvoy: %v", err)
 	}
@@ -1633,7 +1784,7 @@ func TestCreateStagedConvoy_DescriptionFormat(t *testing.T) {
 		t.Fatalf("computeWaves: %v", err)
 	}
 
-	_, err = createStagedConvoy(convoyDAG, waves, "staged_ready")
+	_, err = createStagedConvoy(convoyDAG, waves, "staged_ready", "")
 	if err != nil {
 		t.Fatalf("createStagedConvoy: %v", err)
 	}
@@ -1695,24 +1846,20 @@ func TestCreateStagedConvoy_IDFormat(t *testing.T) {
 		t.Fatalf("computeWaves: %v", err)
 	}
 
-	convoyID, err := createStagedConvoy(convoyDAG, waves, "staged_ready")
+	convoyID, err := createStagedConvoy(convoyDAG, waves, "staged_ready", "")
 	if err != nil {
 		t.Fatalf("createStagedConvoy: %v", err)
 	}
 
-	// Convoy ID must be non-empty and follow hq-cv-xxxxxxxx format.
+	// Convoy ID must be non-empty and start with hq-cv-.
 	if convoyID == "" {
 		t.Fatal("convoy ID should not be empty")
 	}
 	if !strings.HasPrefix(convoyID, "hq-cv-") {
 		t.Errorf("convoy ID should start with 'hq-cv-', got %q", convoyID)
 	}
-	// The suffix should be 5 chars of base36 (matching generateShortID).
+	// The suffix should be base36 (lowercase alphanumeric).
 	suffix := strings.TrimPrefix(convoyID, "hq-cv-")
-	if len(suffix) != 5 {
-		t.Errorf("convoy ID suffix should be 5 chars, got %d: %q", len(suffix), suffix)
-	}
-	// All suffix chars should be base36 (lowercase alphanumeric).
 	for _, ch := range suffix {
 		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
 			t.Errorf("convoy ID suffix should be base36 chars, got %q in %q", string(ch), suffix)
@@ -1759,7 +1906,7 @@ func TestRestageConvoy_UpdatesInPlace(t *testing.T) {
 	}
 
 	// Call updateStagedConvoy — the re-stage path.
-	err = updateStagedConvoy("hq-cv-test1", convoyDAG, waves, "staged_ready")
+	err = updateStagedConvoy("hq-cv-test1", convoyDAG, waves, "staged_ready", "")
 	if err != nil {
 		t.Fatalf("updateStagedConvoy: %v", err)
 	}
@@ -1878,7 +2025,7 @@ func TestRestageConvoy_UpdatesStatusToWarnings(t *testing.T) {
 	}
 
 	// Call updateStagedConvoy with staged_warnings status.
-	err = updateStagedConvoy("hq-cv-warn", convoyDAG, waves, "staged_warnings")
+	err = updateStagedConvoy("hq-cv-warn", convoyDAG, waves, "staged_warnings", "")
 	if err != nil {
 		t.Fatalf("updateStagedConvoy: %v", err)
 	}

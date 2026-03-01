@@ -7,6 +7,7 @@ import (
 )
 
 func TestMessageDeduplicator_BasicDedup(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(100)
 
 	// First time: not a duplicate
@@ -26,6 +27,7 @@ func TestMessageDeduplicator_BasicDedup(t *testing.T) {
 }
 
 func TestMessageDeduplicator_EmptyID(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(100)
 
 	// Empty IDs should always return false (can't deduplicate)
@@ -38,6 +40,7 @@ func TestMessageDeduplicator_EmptyID(t *testing.T) {
 }
 
 func TestMessageDeduplicator_Size(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(100)
 
 	if d.Size() != 0 {
@@ -54,6 +57,7 @@ func TestMessageDeduplicator_Size(t *testing.T) {
 }
 
 func TestMessageDeduplicator_MaxSize(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(3)
 
 	d.AlreadyProcessed("msg-001")
@@ -72,6 +76,7 @@ func TestMessageDeduplicator_MaxSize(t *testing.T) {
 }
 
 func TestMessageDeduplicator_DefaultMaxSize(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(0)
 
 	if d.maxSize != 10000 {
@@ -85,6 +90,7 @@ func TestMessageDeduplicator_DefaultMaxSize(t *testing.T) {
 }
 
 func TestMessageDeduplicator_Concurrent(t *testing.T) {
+	t.Parallel()
 	d := NewMessageDeduplicator(1000)
 	var wg sync.WaitGroup
 

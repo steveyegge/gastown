@@ -7,23 +7,7 @@ workflows and fixing the reliability problems people actually hit.
 
 ## Current state
 
-The convoy-manager-rewrite landed on upstream/main (PR [#1615](https://github.com/steveyegge/gastown/pull/1615), merged).
-Safety-critical feeder guards are in PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (open, awaiting review).
-
-| Item | Status | What it does |
-|------|--------|-------------|
-| Convoy-manager-rewrite | **Merged** (upstream/main) | Multi-rig event polling, continuation feeding, stranded scan auto-dispatch, observer consolidation, process group isolation |
-| Feeder safety guards | **PR [#1759](https://github.com/steveyegge/gastown/pull/1759)** (open) | Type filtering (`IsSlingableType`), blocks dep checking (`isIssueBlocked`), dispatch failure iteration |
-| Capacity plumbing | Deferred | `isRigAtCapacity` callback — no runtime effect until Phase 2 commands exist |
-| Staged statuses | Deferred | `staged_ready`, `staged_warnings` — no command creates them yet |
-
-Three PRDs written:
-
-| PRD | Status | Scope |
-|-----|--------|-------|
-| Phase 1 (feeder redesign) | Safety items in PR [#1759](https://github.com/steveyegge/gastown/pull/1759), capacity/staged deferred | Type filtering, blocks deps, capacity, iteration, staged statuses |
-| Phase 2 (stage/launch) | Designed | `gt convoy stage`, `gt convoy launch`, epic status management, wave display |
-| Phase 3 (advanced dispatch) | Designed | FeederStrategy interface, coordinator polecat, depth validation, auto-formula |
+Milestone 0 complete -- all foundation PRs merged.
 
 ---
 
@@ -145,84 +129,11 @@ Fixing them benefits the entire system.
 
 ---
 
-## Merge decision (resolved)
-
-The rewrite (PR [#1615](https://github.com/steveyegge/gastown/pull/1615)) was merged to upstream/main by the maintainer with
-all 10 commits under l0g1x authorship. The maintainer added 2 review
-followup commits on top (high-water mark seeding, warm-up polling, error
-logging improvements).
-
-The 3 safety-critical Phase 1 items were extracted into a follow-up PR
-([#1759](https://github.com/steveyegge/gastown/pull/1759)) rather than merged into the rewrite:
-
-| Phase 1 item | Decision | PR |
-|-------------|----------|-----|
-| Type filtering (`IsSlingableType`) | Extracted into follow-up | [#1759](https://github.com/steveyegge/gastown/pull/1759) |
-| Blocks dep checking (`isIssueBlocked`) | Extracted into follow-up | [#1759](https://github.com/steveyegge/gastown/pull/1759) |
-| Iteration past dispatch failures | Extracted into follow-up | [#1759](https://github.com/steveyegge/gastown/pull/1759) |
-| Capacity callback plumbing | Deferred | — |
-| Staged statuses | Deferred | — |
-
-Capacity plumbing and staged statuses add parameter/validation surface
-with no runtime effect until Phase 2 commands exist. They will ship when
-Phase 2 work begins.
-
----
-
 ## Phased plan
 
 ### Milestone 0: Land the foundation
 
-**Goal:** Fix the convoy dispatch infrastructure so existing workflows
-work correctly.
-
-**Status: mostly complete.** The rewrite is merged. Safety guards are in
-PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (awaiting review).
-
-**What shipped (merged):**
-- Multi-rig event polling (fixes cross-rig blindness)
-- Continuation feeding after close events (fixes daemon-doesn't-feed)
-- Stranded scan auto-dispatch (fixes reporting-only limitation)
-- Observer consolidation (removes broken refinery call, removes witness
-  coupling)
-- Process group isolation (prevents orphaned subprocesses)
-- High-water mark seeding on startup (review followup)
-- Warm-up polling to prevent event replay burst (review followup)
-
-**What's in PR [#1759](https://github.com/steveyegge/gastown/pull/1759) (awaiting review):**
-- Type filtering (prevents slinging epics)
-- Blocks dep checking (prevents slinging blocked tasks)
-- Iteration past dispatch failures (prevents stuck convoys)
-- Batch sling single-convoy fix (one convoy per batch, not N)
-- Rig auto-resolution from bead prefixes (deprecates explicit rig arg)
-- ConvoyID/MergeStrategy storage on beads for `gt done` fast path
-
-**What it fixes for Workflow A:**
-- `gt sling <task1> <task2> <task3>` creates **one convoy** tracking all
-  tasks. Rig is auto-resolved from bead prefixes.
-- Blocks deps are respected by the daemon feeder: a blocked task won't
-  be fed until its blocker closes.
-- Type filtering prevents accidental epic slinging.
-- ConvoyID and merge strategy are stored on each bead, enabling `gt done`
-  fast-path convoy lookup.
-
-**What it does NOT fix for Workflow A:**
-- Initial dispatch still sends all tasks regardless of deps (only daemon
-  feeding respects blocks).
-- No convoy-level wave computation (see Milestone 2).
-
-**What it fixes for Workflow B:**
-- Same as Workflow A. design-to-beads creates blocks deps, which are now
-  respected by the feeder.
-
-**What it fixes for Workflow C:**
-- Manual convoys now get reliable daemon-driven feeding with blocks
-  checking. The witness removal doesn't matter because the daemon
-  now handles everything the witness did (and more).
-
-**Remaining action items:**
-1. Fix doc inaccuracies identified in audit (this pass)
-2. Get PR [#1759](https://github.com/steveyegge/gastown/pull/1759) reviewed and merged
+**Status: Complete.**
 
 ### Milestone 1: Pipeline reliability (independent of convoys)
 

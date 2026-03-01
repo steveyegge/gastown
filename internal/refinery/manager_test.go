@@ -102,8 +102,8 @@ func TestManager_Queue_NoBeads(t *testing.T) {
 
 func TestManager_Queue_FiltersClosedMergeRequests(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
-	testutil.RequireDoltServer(t)
-	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
 	b := beads.NewIsolatedWithPort(rigPath, port)
 	if err := b.Init("gt"); err != nil {
 		t.Skipf("bd init unavailable in test environment: %v", err)
@@ -217,8 +217,8 @@ func TestCompareScoredIssues_UsesDeterministicIDTieBreaker(t *testing.T) {
 
 func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
-	testutil.RequireDoltServer(t)
-	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
 	b := beads.NewIsolatedWithPort(rigPath, port)
 	if err := b.Init("gt"); err != nil {
 		t.Skipf("bd init unavailable: %v", err)
@@ -267,8 +267,8 @@ func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 
 func TestManager_PostMerge_AlreadyClosedMR(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
-	testutil.RequireDoltServer(t)
-	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
 	b := beads.NewIsolatedWithPort(rigPath, port)
 	if err := b.Init("gt"); err != nil {
 		t.Skipf("bd init unavailable: %v", err)

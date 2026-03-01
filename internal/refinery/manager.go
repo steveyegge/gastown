@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -568,47 +568,17 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 
 // notifyWorkerRejected sends a rejection notification to a polecat.
 func (m *Manager) notifyWorkerRejected(mr *MergeRequest, reason string) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Merge request rejected",
-		Body: fmt.Sprintf(`Your merge request has been rejected.
-
-Branch: %s
-Issue: %s
-Reason: %s
-
-Please review the feedback and address the issues before resubmitting.`,
-			mr.Branch, mr.IssueID, reason),
-		Priority: mail.PriorityNormal,
-	}
-	if err := router.Send(msg); err != nil {
-		log.Printf("warning: notifying worker of rejection for %s: %v", mr.IssueID, err)
+	// Nudge polecat about rejection instead of sending permanent mail.
+	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
+	target := fmt.Sprintf("%s/%s", m.rig.Name, polecatName)
+	nudgeMsg := fmt.Sprintf("MR rejected: branch=%s issue=%s reason=%s — review feedback and resubmit with 'gt done'",
+		mr.Branch, mr.IssueID, reason)
+	nudgeCmd := exec.Command("gt", "nudge", target, nudgeMsg)
+	nudgeCmd.Dir = m.workDir
+	if err := nudgeCmd.Run(); err != nil {
+		log.Printf("warning: nudging worker about rejection for %s: %v", mr.IssueID, err)
 	}
 }
 
-// findTownRoot walks up directories to find the town root.
-func findTownRoot(startPath string) string {
-	path := startPath
-	for {
-		// Check for mayor/ subdirectory (indicates town root)
-		if _, err := os.Stat(filepath.Join(path, "mayor")); err == nil {
-			return path
-		}
-		// Check for config.json with type: workspace
-		configPath := filepath.Join(path, "config.json")
-		if data, err := os.ReadFile(configPath); err == nil {
-			if strings.Contains(string(data), `"type": "workspace"`) {
-				return path
-			}
-		}
-
-		parent := filepath.Dir(path)
-		if parent == path {
-			break // Reached root
-		}
-		path = parent
-	}
-	return ""
-}
+// Town root is computed in Start() as filepath.Dir(m.rig.Path) and passed
+// through to callers — no filesystem-inference function needed (ZFC gt-qago).

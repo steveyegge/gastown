@@ -17,6 +17,7 @@ type bdCmd struct {
 	stderr     io.Writer
 	autoCommit bool
 	gtRoot     string
+	beadsDir   string
 }
 
 // BdCmd creates a new bd command builder with the given arguments.
@@ -47,6 +48,15 @@ func (b *bdCmd) WithAutoCommit() *bdCmd {
 // This is required for bd to find town-level formulas and configuration.
 func (b *bdCmd) WithGTRoot(root string) *bdCmd {
 	b.gtRoot = root
+	return b
+}
+
+// WithBeadsDir sets BEADS_DIR explicitly in the environment.
+// This prevents inherited BEADS_DIR from the parent process from causing
+// bd to write to the wrong database. The dir should be the resolved
+// .beads directory path (e.g., from beads.ResolveBeadsDir).
+func (b *bdCmd) WithBeadsDir(dir string) *bdCmd {
+	b.beadsDir = dir
 	return b
 }
 
@@ -94,6 +104,14 @@ func (b *bdCmd) buildEnv() []string {
 	if b.gtRoot != "" {
 		env = filterEnvKey(env, "GT_ROOT")
 		env = append(env, "GT_ROOT="+b.gtRoot)
+	}
+
+	// Add BEADS_DIR if specified.
+	// This prevents inherited BEADS_DIR from causing bd to target the wrong
+	// database (e.g., HQ instead of rig). See gt-ctir.
+	if b.beadsDir != "" {
+		env = filterEnvKey(env, "BEADS_DIR")
+		env = append(env, "BEADS_DIR="+b.beadsDir)
 	}
 
 	return env

@@ -67,38 +67,6 @@ func TestWispDeleteAge(t *testing.T) {
 	}
 }
 
-func TestStaleIssueAge(t *testing.T) {
-	// Default: 30 days
-	if got := staleIssueAge(nil); got != defaultStaleIssueAge {
-		t.Errorf("expected default %v, got %v", defaultStaleIssueAge, got)
-	}
-
-	// Custom: 60 days
-	config := &DaemonPatrolConfig{
-		Patrols: &PatrolsConfig{
-			WispReaper: &WispReaperConfig{
-				Enabled:          true,
-				StaleIssueAgeStr: "1440h",
-			},
-		},
-	}
-	if got := staleIssueAge(config); got != 60*24*time.Hour {
-		t.Errorf("expected 1440h (60 days), got %v", got)
-	}
-
-	// Invalid falls back to default
-	config.Patrols.WispReaper.StaleIssueAgeStr = "bad"
-	if got := staleIssueAge(config); got != defaultStaleIssueAge {
-		t.Errorf("expected default for invalid, got %v", got)
-	}
-
-	// Zero falls back to default
-	config.Patrols.WispReaper.StaleIssueAgeStr = "0s"
-	if got := staleIssueAge(config); got != defaultStaleIssueAge {
-		t.Errorf("expected default for zero, got %v", got)
-	}
-}
-
 func TestJoinStrings(t *testing.T) {
 	tests := []struct {
 		parts []string

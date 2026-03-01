@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+// newFastAPIHandler returns an APIHandler using "false" as the gt binary,
+// so command execution fails instantly instead of searching PATH for "gt".
+// Use in tests that verify validation wiring (expect 400 vs non-400) where
+// the gt binary is not needed.
+func newFastAPIHandler(t *testing.T) *APIHandler {
+	t.Helper()
+	return &APIHandler{
+		gtPath:            "false",
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
+		csrfToken:         "test-token",
+	}
+}
+
 func TestIsValidID(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -276,7 +292,7 @@ func TestHandler_MailSend_InvalidRecipient(t *testing.T) {
 }
 
 func TestHandler_MailSend_ValidAgentPath(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := newFastAPIHandler(t)
 
 	// rig/agent is a valid mail address — should NOT be rejected by validation.
 	// gt isn't available in test, so expect 500 (command failed), NOT 400 (validation).
@@ -357,7 +373,7 @@ func TestHandler_PRShow_InvalidURL(t *testing.T) {
 }
 
 func TestHandler_IssueShow_ExternalPrefixID(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := newFastAPIHandler(t)
 
 	// external:prefix:id format should pass validation (unwrapped to raw ID).
 	// Expect 500 (bd not available), NOT 400 (validation failure).
@@ -380,7 +396,7 @@ func TestHandler_IssueShow_ExternalPrefixID(t *testing.T) {
 }
 
 func TestHandler_PRShow_URLIgnoresRepoNumber(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := newFastAPIHandler(t)
 
 	// When url is provided, repo/number should be ignored (not validated).
 	// Expect 500 (gh not available), NOT 400 (validation failure).
@@ -550,7 +566,7 @@ func TestHandler_MailSend_NullByteSubject(t *testing.T) {
 }
 
 func TestHandler_IssueCreate_FlagTitle(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := newFastAPIHandler(t)
 
 	// A title of "--help" should pass validation (no control chars, no newlines)
 	// and reach bd create. The -- sentinel ensures it's treated as positional.
@@ -605,7 +621,7 @@ func TestHandler_SessionPreview_InvalidChars(t *testing.T) {
 }
 
 func TestHandler_SessionPreview_ValidName(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := newFastAPIHandler(t)
 
 	// A valid session name should pass validation and reach tmux capture-pane.
 	// tmux isn't available in test, so expect 500 (command failed), NOT 400 (validation).

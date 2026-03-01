@@ -75,6 +75,31 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.9.0",
+		Date:    "2026-03-01",
+		Changes: []string{
+			"NEW: Batch-then-bisect merge queue — Bors-style MQ with GatesParallel",
+			"NEW: Persistent polecats — identity survives across work assignments, gt done transitions to idle",
+			"NEW: Four maintenance Dogs — Compactor (flatten), Doctor (health), JSONL (backup), Reaper (GC)",
+			"NEW: Six-stage data lifecycle — CREATE/LIVE/CLOSE/DECAY/COMPACT/FLATTEN, all automated",
+			"NEW: Root-only wisps — formula steps not materialized in DB, cuts ~6k rows/day",
+			"NEW: gt maintain — one-command Dolt maintenance (flatten + gc)",
+			"NEW: gt vitals — unified health dashboard",
+			"NEW: gt upgrade — post-binary migration for config propagation",
+			"NEW: Log rotation for daemon and Dolt server logs",
+			"NEW: Town-root CLAUDE.md version check and lifecycle defaults doctor check",
+			"CHANGED: OperationalConfig replaces hardcoded thresholds (ZFC compliance)",
+			"CHANGED: Nudge-first communication — ~80% fewer Dolt commits for patrol traffic",
+			"CHANGED: Default Dolt log level debug→info, max connections 200→1000",
+			"FIX: Mail delivery — --id flag was breaking all mail creation paths",
+			"FIX: Witness stops nuking idle polecats, stops auto-closing permanent issues",
+			"FIX: Screen-scraping replaced with structured signals across witness/polecat",
+			"FIX: PID detection via heartbeat-based liveness instead of signal probing",
+			"FIX: Test isolation via testcontainers, dropped 45 zombie test servers",
+			"FIX: ~50 hardcoded state/status strings replaced with typed enums",
+		},
+	},
+	{
 		Version: "0.8.0",
 		Date:    "2026-02-23",
 		Changes: []string{

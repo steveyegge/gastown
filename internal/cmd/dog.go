@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -686,11 +686,16 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 	// Claude agent idles at the prompt indefinitely after completing work,
 	// wasting resources until the stale-working detector kills it (2 hours).
 	// The delay lets the agent see the success output before termination.
+	//
+	// We disable remain-on-exit first — otherwise kill-session leaves a
+	// dead pane that the deacon's health-check reports as an orphan.
 	sessionID := fmt.Sprintf("hq-dog-%s", name)
+	t := tmux.NewTmux()
+	_ = t.SetRemainOnExit(sessionID, false)
 	fmt.Printf("  Session %s will terminate in 3s\n", sessionID)
 	killCmd := exec.Command("bash", "-c",
 		fmt.Sprintf("sleep 3 && tmux kill-session -t '%s' 2>/dev/null", sessionID))
-	killCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	util.SetProcessGroup(killCmd)
 	if err := killCmd.Start(); err != nil {
 		// Non-fatal: session may not be tmux-based (e.g., manual testing).
 		fmt.Fprintf(os.Stderr, "warning: failed to schedule session termination: %v\n", err)
@@ -1084,7 +1089,7 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 	// Create and send mail message with plugin instructions
 	dogAddress := fmt.Sprintf("deacon/dogs/%s", targetDog.Name)
 	subject := fmt.Sprintf("Plugin: %s", p.Name)
-	body := formatPluginMailBody(p)
+	body := p.FormatMailBody()
 
 	router := mail.NewRouterWithTownRoot(townRoot, townRoot)
 	defer router.WaitPendingNotifications()
@@ -1148,26 +1153,3 @@ func ifStr(cond bool, ifTrue, ifFalse string) string {
 	return ifFalse
 }
 
-// formatPluginMailBody formats the plugin as instructions for the dog.
-func formatPluginMailBody(p *plugin.Plugin) string {
-	var sb strings.Builder
-
-	sb.WriteString("Execute the following plugin:\n\n")
-	sb.WriteString(fmt.Sprintf("**Plugin**: %s\n", p.Name))
-	sb.WriteString(fmt.Sprintf("**Description**: %s\n", p.Description))
-	if p.RigName != "" {
-		sb.WriteString(fmt.Sprintf("**Rig**: %s\n", p.RigName))
-	}
-	if p.Execution != nil && p.Execution.Timeout != "" {
-		sb.WriteString(fmt.Sprintf("**Timeout**: %s\n", p.Execution.Timeout))
-	}
-	sb.WriteString("\n---\n\n")
-	sb.WriteString("## Instructions\n\n")
-	sb.WriteString(p.Instructions)
-	sb.WriteString("\n\n---\n\n")
-	sb.WriteString("After completion:\n")
-	sb.WriteString("1. Create a wisp to record the result (success/failure)\n")
-	sb.WriteString("2. Run `gt dog done` — this clears your work and auto-terminates the session\n")
-
-	return sb.String()
-}
