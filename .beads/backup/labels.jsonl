@@ -82,16 +82,8 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
-{"issue_id":"sg-wisp-3upbbn","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-5ilac7","label":"cleanup"}
-{"issue_id":"sg-wisp-5ilac7","label":"polecat:quartz"}
-{"issue_id":"sg-wisp-5ilac7","label":"state:merge-requested"}
-{"issue_id":"sg-wisp-9lxscj","label":"gt:merge-request"}
 {"issue_id":"sg-wisp-gjlxd4","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-kww3o3","label":"gt:merge-request"}
 {"issue_id":"sg-wisp-p9uqrz","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-ptked3","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-vv8qo3","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
