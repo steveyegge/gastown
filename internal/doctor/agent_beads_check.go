@@ -112,15 +112,21 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// checkAgentBead verifies an agent bead exists (in issues or wisps table).
-	// Label checking only applies to beads found in the issues table (wisps
-	// don't expose labels in their list output).
+	// Label checking only applies to beads found in the issues table — wisps
+	// don't expose labels in their list output, so checking would always fail
+	// and produce unfixable warnings (GH#2127).
 	checkAgentBead := func(id string) {
+		if allWispIDs[id] {
+			// Exists as ephemeral wisp — skip label check (wisps don't expose labels).
+			checked++
+			return
+		}
 		if issue, exists := allAgentBeads[id]; exists {
 			// Found in issues table — check label
 			if !beads.HasLabel(issue, "gt:agent") {
 				missingLabel = append(missingLabel, id)
 			}
-		} else if !allWispIDs[id] {
+		} else {
 			// Not in issues or wisps
 			missing = append(missing, id)
 		}
@@ -231,6 +237,11 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// non-ephemeral if the subprocess crashes (GH#1769: Dolt nil pointer
 	// dereference when wisps table doesn't exist on fresh rigs).
 	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields) error {
+		if allWispIDs[id] {
+			// Exists as ephemeral wisp — skip. Wisps don't expose labels in
+			// their list output, so label checking/fixing is not applicable.
+			return nil
+		}
 		if issue, exists := allAgentBeads[id]; exists {
 			// In issues table — ensure it has the gt:agent label.
 			// Use the scoped Beads instance (bd) so the update targets the
@@ -242,10 +253,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 					return fmt.Errorf("adding gt:agent label to %s: %w", id, err)
 				}
 			}
-			return nil
-		}
-		if allWispIDs[id] {
-			// Already exists as ephemeral wisp — nothing to do
 			return nil
 		}
 		// Bead missing — create it (CreateAgentBead handles ephemeral fallback)
