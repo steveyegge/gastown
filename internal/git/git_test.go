@@ -767,6 +767,55 @@ func initTestRepoWithRemote(t *testing.T) (string, string, string) {
 	return localDir, remoteDir, mainBranch
 }
 
+func TestFilesChangedSince_NoChanges(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	files, err := g.FilesChangedSince("origin/"+mainBranch, "HEAD")
+	if err != nil {
+		t.Fatalf("FilesChangedSince: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected no changed files, got %v", files)
+	}
+}
+
+func TestFilesChangedSince_WithChanges(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	if err := g.CreateBranch("feature/scope-test"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("feature/scope-test"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "scope.txt"), []byte("scope\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("scope.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("add scope file"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	files, err := g.FilesChangedSince("origin/"+mainBranch, "HEAD")
+	if err != nil {
+		t.Fatalf("FilesChangedSince: %v", err)
+	}
+	found := false
+	for _, file := range files {
+		if file == "scope.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected scope.txt in changed files, got %v", files)
+	}
+}
+
 func TestPruneStaleBranches_MergedBranch(t *testing.T) {
 	localDir, _, mainBranch := initTestRepoWithRemote(t)
 	g := NewGit(localDir)

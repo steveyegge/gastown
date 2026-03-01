@@ -143,6 +143,9 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	if branch == defaultBranch || branch == "master" {
 		return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 	}
+	if err := runBranchScopePreflight(g, "origin/"+defaultBranch); err != nil {
+		return err
+	}
 
 	// Parse branch info
 	info := parseBranchName(branch)

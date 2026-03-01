@@ -335,9 +335,9 @@ func configureRefspec(repoPath string, singleBranch bool) error {
 			}
 			return nil
 		}
-		headRef := strings.TrimSpace(headOut.String())        // e.g. "refs/heads/main"
-		branch := strings.TrimPrefix(headRef, "refs/heads/")  // e.g. "main"
-		refspec := branch + ":refs/remotes/origin/" + branch   // e.g. "main:refs/remotes/origin/main"
+		headRef := strings.TrimSpace(headOut.String())       // e.g. "refs/heads/main"
+		branch := strings.TrimPrefix(headRef, "refs/heads/") // e.g. "main"
+		refspec := branch + ":refs/remotes/origin/" + branch // e.g. "main:refs/remotes/origin/main"
 
 		fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "--depth", "1", "origin", refspec)
 		fetchCmd.Stderr = &stderr
@@ -491,10 +491,10 @@ func (g *Git) CommitAll(message string) error {
 
 // GitStatus represents the status of the working directory.
 type GitStatus struct {
-	Clean    bool
-	Modified []string
-	Added    []string
-	Deleted  []string
+	Clean     bool
+	Modified  []string
+	Added     []string
+	Deleted   []string
 	Untracked []string
 }
 
@@ -1192,6 +1192,35 @@ func (g *Git) CountCommitsBehind(ref string) (int, error) {
 	return count, nil
 }
 
+// FilesChangedSince returns files changed between the merge-base of baseRef and
+// headRef. This uses `git diff --name-only <baseRef>...<headRef>`.
+func (g *Git) FilesChangedSince(baseRef, headRef string) ([]string, error) {
+	if strings.TrimSpace(baseRef) == "" {
+		return nil, fmt.Errorf("base ref is required")
+	}
+	if strings.TrimSpace(headRef) == "" {
+		return nil, fmt.Errorf("head ref is required")
+	}
+
+	out, err := g.run("diff", "--name-only", baseRef+"..."+headRef)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(out, "\n")
+	files := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			files = append(files, trimmed)
+		}
+	}
+	return files, nil
+}
+
 // StashCount returns the number of stashes belonging to the current branch.
 // Git stashes are stored in the main repo (.git/refs/stash) and shared across
 // all worktrees. Counting all stashes is incorrect for worktree-based polecats:
@@ -1272,8 +1301,8 @@ type UncommittedWorkStatus struct {
 	StashCount            int
 	UnpushedCommits       int
 	// Details for error messages
-	ModifiedFiles   []string
-	UntrackedFiles  []string
+	ModifiedFiles  []string
+	UntrackedFiles []string
 }
 
 // Clean returns true if there is no uncommitted work.

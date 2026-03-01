@@ -335,6 +335,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if branch == defaultBranch || branch == "master" {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
+		if err := runBranchScopePreflight(g, "origin/"+defaultBranch); err != nil {
+			return err
+		}
 
 		// CRITICAL: Verify work exists before completing (hq-xthqf)
 		// Polecats calling gt done without commits results in lost work.
