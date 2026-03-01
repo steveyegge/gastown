@@ -8,6 +8,5 @@
   },
   "license": "Apache-2.0",
   "repository": "https://github.com/steveyegge/gastown",
-  "keywords": ["gastown", "multi-agent", "orchestration", "hooks"],
-  "hooks": "hooks.json"
+  "keywords": ["gastown", "multi-agent", "orchestration", "hooks"]
 }

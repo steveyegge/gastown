@@ -1,33 +1,4 @@
 {
   "version": 1,
-  "hooks": {
-    "sessionStart": [
-      {
-        "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$HOME/bin:$PATH\" && gt prime --hook && gt mail check --inject",
-        "timeoutSec": 30
-      }
-    ],
-    "userPromptSubmitted": [
-      {
-        "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$HOME/bin:$PATH\" && gt mail check --inject",
-        "timeoutSec": 10
-      }
-    ],
-    "preToolUse": [
-      {
-        "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$HOME/bin:$PATH\" && if [ -x .github/hooks/gastown-pretool-guard.sh ]; then .github/hooks/gastown-pretool-guard.sh; fi",
-        "timeoutSec": 10
-      }
-    ],
-    "sessionEnd": [
-      {
-        "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$HOME/bin:$PATH\" && gt costs record",
-        "timeoutSec": 10
-      }
-    ]
-  }
+  "hooks": {}
 }
