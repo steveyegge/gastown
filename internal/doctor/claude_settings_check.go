@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -325,7 +326,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 					missing:       []string{"stale settings.local.json (settings now in witness/.claude/settings.json)"},
 				})
 			}
-			// STALE: old settings in workdir (rig/) — skip if tracked in customer repo
+			// STALE: old settings in workdir (rig/) — skip if tracked in customer repo,
+			// but still check tracked settings.json for relative hook paths.
 			for _, staleFile := range []string{"settings.json", "settings.local.json"} {
 				stalePath := filepath.Join(witnessDir, "rig", ".claude", staleFile)
 				if fileExists(stalePath) {
@@ -339,6 +341,17 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 							wrongLocation: true,
 							missing:       []string{"stale settings in workdir (settings now in witness/.claude/settings.json)"},
 						})
+					} else if staleFile == "settings.json" {
+						// Even for tracked customer-repo settings, warn about relative hook paths.
+						if relPaths := c.checkRelativeHookPaths(stalePath); len(relPaths) > 0 {
+							files = append(files, staleSettingsInfo{
+								path:      stalePath,
+								agentType: "witness",
+								rigName:   rigName,
+								gitStatus: gs,
+								missing:   relPaths,
+							})
+						}
 					}
 				}
 			}
@@ -377,7 +390,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 					missing:       []string{"stale settings.local.json (settings now in refinery/.claude/settings.json)"},
 				})
 			}
-			// STALE: old settings in workdir (rig/) — skip if tracked in customer repo
+			// STALE: old settings in workdir (rig/) — skip if tracked in customer repo,
+			// but still check tracked settings.json for relative hook paths.
 			for _, staleFile := range []string{"settings.json", "settings.local.json"} {
 				stalePath := filepath.Join(refineryDir, "rig", ".claude", staleFile)
 				if fileExists(stalePath) {
@@ -391,6 +405,17 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 							wrongLocation: true,
 							missing:       []string{"stale settings in workdir (settings now in refinery/.claude/settings.json)"},
 						})
+					} else if staleFile == "settings.json" {
+						// Even for tracked customer-repo settings, warn about relative hook paths.
+						if relPaths := c.checkRelativeHookPaths(stalePath); len(relPaths) > 0 {
+							files = append(files, staleSettingsInfo{
+								path:      stalePath,
+								agentType: "refinery",
+								rigName:   rigName,
+								gitStatus: gs,
+								missing:   relPaths,
+							})
+						}
 					}
 				}
 			}
@@ -432,7 +457,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				if !crewEntry.IsDir() || crewEntry.Name() == ".claude" {
 					continue
 				}
-				// Both settings.json and settings.local.json in workdirs are stale
+				// Both settings.json and settings.local.json in workdirs are stale;
+				// additionally, check tracked settings.json for relative hook paths.
 				for _, staleFile := range []string{"settings.json", "settings.local.json"} {
 					stalePath := filepath.Join(crewDir, crewEntry.Name(), ".claude", staleFile)
 					if fileExists(stalePath) {
@@ -446,6 +472,16 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 								wrongLocation: true,
 								missing:       []string{"stale settings in workdir (settings now in crew/.claude/settings.json)"},
 							})
+						} else if staleFile == "settings.json" {
+							if relPaths := c.checkRelativeHookPaths(stalePath); len(relPaths) > 0 {
+								files = append(files, staleSettingsInfo{
+									path:      stalePath,
+									agentType: "crew",
+									rigName:   rigName,
+									gitStatus: gs,
+									missing:   relPaths,
+								})
+							}
 						}
 					}
 				}
@@ -502,7 +538,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 						})
 					}
 				}
-				// Worktree-level (polecats/<name>/<rig>/) — skip if tracked
+				// Worktree-level (polecats/<name>/<rig>/) — skip if tracked,
+				// but still check tracked settings.json for relative hook paths.
 				for _, staleFile := range []string{"settings.json", "settings.local.json"} {
 					stalePath := filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude", staleFile)
 					if fileExists(stalePath) {
@@ -516,6 +553,18 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 								wrongLocation: true,
 								missing:       []string{"stale settings in workdir (settings now in polecats/.claude/settings.json)"},
 							})
+						} else if staleFile == "settings.json" {
+							// Even for tracked customer-repo settings, warn about relative hook paths
+							// which break when the polecat CWD changes to a subdirectory.
+							if relPaths := c.checkRelativeHookPaths(stalePath); len(relPaths) > 0 {
+								files = append(files, staleSettingsInfo{
+									path:      stalePath,
+									agentType: "polecat",
+									rigName:   rigName,
+									gitStatus: gs,
+									missing:   relPaths,
+								})
+							}
 						}
 					}
 				}
@@ -570,6 +619,21 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	}
 
 	return missing
+}
+
+// checkRelativeHookPaths checks a settings.json for hook commands using relative
+// file paths. Returns descriptions of any offending commands found.
+// Relative paths break when the agent's CWD changes to a subdirectory of the repo.
+func (c *ClaudeSettingsCheck) checkRelativeHookPaths(path string) []string {
+	settings, err := hooks.LoadSettings(path)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, r := range hooks.FindRelativeHookPaths(&settings.Hooks) {
+		found = append(found, "relative hook path (use $CLAUDE_PROJECT_DIR): "+r)
+	}
+	return found
 }
 
 // getGitFileStatus determines the git status of a file.

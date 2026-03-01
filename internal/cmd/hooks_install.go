@@ -255,6 +255,11 @@ func installHookTo(worktreePath string, hookDef HookDefinition, dryRun bool) err
 		settings.EnabledPlugins = make(map[string]bool)
 	}
 
+	// Warn if the hook command uses relative file paths (breaks when CWD changes)
+	if hooks.HasRelativeHookPath(hookDef.Command) {
+		fmt.Fprintf(os.Stderr, "  Warning: hook command has relative path (use $CLAUDE_PROJECT_DIR): %s\n", hookDef.Command)
+	}
+
 	// Build and add hook entries for each matcher
 	for _, matcher := range hookDef.Matchers {
 		entry := hooks.HookEntry{

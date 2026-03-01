@@ -805,6 +805,58 @@ func DefaultBase() *HooksConfig {
 	}
 }
 
+// HasRelativeHookPath returns true if a hook command contains a relative file path
+// that will break when the agent's working directory changes to a subdirectory.
+//
+// Safe patterns (not flagged):
+//   - Absolute paths: /home/user/script.sh
+//   - Environment variable paths: "$CLAUDE_PROJECT_DIR"/.claude/hooks/script.py
+//   - Home-relative paths: ~/scripts/hook.sh
+//   - Shell built-ins and gt commands: export PATH=..., gt tap guard, echo
+//
+// Unsafe patterns (flagged):
+//   - .claude/hooks/script.py  (relative, breaks in subdirectories)
+//   - ./scripts/hook.sh        (relative, breaks in subdirectories)
+func HasRelativeHookPath(command string) bool {
+	fields := strings.Fields(command)
+	for _, field := range fields {
+		// Remove surrounding quotes
+		field = strings.Trim(field, `"'`)
+		if len(field) < 2 {
+			continue
+		}
+		// Skip env var references and assignments (contains $ or =)
+		if strings.ContainsAny(field, "$=") {
+			continue
+		}
+		// Skip absolute and home-relative paths
+		if strings.HasPrefix(field, "/") || strings.HasPrefix(field, "~") {
+			continue
+		}
+		// Flag relative paths: starts with . and contains a path separator
+		if strings.HasPrefix(field, ".") && strings.ContainsRune(field, '/') {
+			return true
+		}
+	}
+	return false
+}
+
+// FindRelativeHookPaths returns descriptions of all hook commands with relative paths.
+// Each entry identifies the event type and the offending command.
+func FindRelativeHookPaths(cfg *HooksConfig) []string {
+	var found []string
+	for _, eventType := range EventTypes {
+		for _, entry := range cfg.GetEntries(eventType) {
+			for _, h := range entry.Hooks {
+				if HasRelativeHookPath(h.Command) {
+					found = append(found, fmt.Sprintf("%s: %s", eventType, h.Command))
+				}
+			}
+		}
+	}
+	return found
+}
+
 // GetApplicableOverrides returns the override keys in order of specificity
 // for a given target. More specific overrides are applied later (and win).
 //

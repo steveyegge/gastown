@@ -1018,3 +1018,63 @@ func TestMarshalConfig(t *testing.T) {
 		t.Errorf("round-trip lost SessionStart hooks")
 	}
 }
+
+func TestHasRelativeHookPath(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		// Relative paths — should be flagged
+		{`python3 .claude/hooks/block-production-commands.py`, true},
+		{`bash .claude/hooks/guard-migration.sh`, true},
+		{`.claude/hooks/guard-migration.sh`, true},
+		{`./scripts/hook.sh`, true},
+		{`./hook.py`, true},
+		// Safe commands — should not be flagged
+		{`export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH" && gt prime --hook`, false},
+		{`python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/block-production-commands.py`, false},
+		{`"$CLAUDE_PROJECT_DIR"/.claude/hooks/guard-migration.sh`, false},
+		{`gt tap guard pr-workflow`, false},
+		{`echo '❌ BLOCKED' && exit 2`, false},
+		{`/usr/local/bin/script.sh`, false},
+		{`~/scripts/hook.sh`, false},
+		{`export PATH="$HOME/go/bin:$PATH" && gt costs record`, false},
+	}
+
+	for _, tt := range tests {
+		got := HasRelativeHookPath(tt.command)
+		if got != tt.want {
+			t.Errorf("HasRelativeHookPath(%q) = %v, want %v", tt.command, got, tt.want)
+		}
+	}
+}
+
+func TestFindRelativeHookPaths(t *testing.T) {
+	cfg := &HooksConfig{
+		PreToolUse: []HookEntry{
+			{
+				Matcher: "Bash",
+				Hooks: []Hook{
+					{Type: "command", Command: `python3 .claude/hooks/block-production-commands.py`},
+					{Type: "command", Command: `export PATH="$HOME/go/bin:$PATH" && gt tap guard pr-workflow`},
+				},
+			},
+		},
+		SessionStart: []HookEntry{
+			{
+				Matcher: "",
+				Hooks: []Hook{
+					{Type: "command", Command: `python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/safe.py`},
+				},
+			},
+		},
+	}
+
+	found := FindRelativeHookPaths(cfg)
+	if len(found) != 1 {
+		t.Fatalf("FindRelativeHookPaths: got %d results, want 1: %v", len(found), found)
+	}
+	if !strings.Contains(found[0], "block-production-commands.py") {
+		t.Errorf("FindRelativeHookPaths: unexpected result: %s", found[0])
+	}
+}

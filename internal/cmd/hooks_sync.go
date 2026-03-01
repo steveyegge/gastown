@@ -180,6 +180,13 @@ func syncTarget(target hooks.Target, dryRun bool) (syncResult, error) {
 		return syncCreated, nil
 	}
 
+	// Warn if expected hooks contain relative file paths (breaks when CWD changes)
+	if relative := hooks.FindRelativeHookPaths(expected); len(relative) > 0 {
+		for _, r := range relative {
+			fmt.Fprintf(os.Stderr, "  Warning: hook has relative path (use $CLAUDE_PROJECT_DIR): %s\n", r)
+		}
+	}
+
 	// Update hooks section, preserving all other fields (including unknown ones)
 	current.Hooks = *expected
 
