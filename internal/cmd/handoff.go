@@ -586,13 +586,13 @@ func resolveRoleToSession(role string) (string, error) {
 	}
 
 	switch strings.ToLower(role) {
-	case "mayor", "may":
+	case constants.RoleMayor, "may":
 		return getMayorSessionName(), nil
 
-	case "deacon", "dea":
+	case constants.RoleDeacon, "dea":
 		return getDeaconSessionName(), nil
 
-	case "crew":
+	case constants.RoleCrew:
 		// Try to get rig and crew name from environment or cwd
 		rig := os.Getenv("GT_RIG")
 		crewName := os.Getenv("GT_CREW")
@@ -609,14 +609,14 @@ func resolveRoleToSession(role string) (string, error) {
 		}
 		return session.CrewSessionName(session.PrefixFor(rig), crewName), nil
 
-	case "witness", "wit":
+	case constants.RoleWitness, "wit":
 		rig := os.Getenv("GT_RIG")
 		if rig == "" {
 			return "", fmt.Errorf("cannot determine rig - set GT_RIG or run from rig context")
 		}
 		return session.WitnessSessionName(session.PrefixFor(rig)), nil
 
-	case "refinery", "ref":
+	case constants.RoleRefinery, "ref":
 		rig := os.Getenv("GT_RIG")
 		if rig == "" {
 			return "", fmt.Errorf("cannot determine rig - set GT_RIG or run from rig context")
@@ -640,7 +640,7 @@ func resolvePathToSession(path string) (string, error) {
 	parts := strings.Split(path, "/")
 
 	// Handle <rig>/crew/<name> format
-	if len(parts) == 3 && parts[1] == "crew" {
+	if len(parts) == 3 && parts[1] == constants.RoleCrew {
 		rig := parts[0]
 		name := parts[2]
 		return session.CrewSessionName(session.PrefixFor(rig), name), nil
@@ -661,11 +661,11 @@ func resolvePathToSession(path string) (string, error) {
 
 		// Check for known roles first
 		switch secondLower {
-		case "witness":
+		case constants.RoleWitness:
 			return session.WitnessSessionName(session.PrefixFor(rig)), nil
-		case "refinery":
+		case constants.RoleRefinery:
 			return session.RefinerySessionName(session.PrefixFor(rig)), nil
-		case "crew":
+		case constants.RoleCrew:
 			// Just "<rig>/crew" without a name - need more info
 			return "", fmt.Errorf("crew path requires name: %s/crew/<name>", rig)
 		case "polecats":

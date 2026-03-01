@@ -749,9 +749,9 @@ func (f *LiveConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
 
 		// Determine agent type and worker name
 		workerName := identity.Name
-		agentType := "polecat" // Default for ephemeral sessions (polecats, crew)
+		agentType := constants.RolePolecat // Default for ephemeral sessions (polecats, crew)
 		if identity.Role == session.RoleRefinery {
-			agentType = "refinery"
+			agentType = constants.RoleRefinery
 		}
 
 		// Parse activity timestamp

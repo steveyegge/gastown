@@ -767,13 +767,13 @@ func guessSessionFromWorkerDir(workerDir, townRoot string) string {
 	workerName := parts[2]
 
 	switch workerType {
-	case "crew":
+	case constants.RoleCrew:
 		return session.CrewSessionName(session.PrefixFor(rig), workerName)
 	case "polecats":
 		return session.PolecatSessionName(session.PrefixFor(rig), workerName)
-	case "witness":
+	case constants.RoleWitness:
 		return session.WitnessSessionName(session.PrefixFor(rig))
-	case "refinery":
+	case constants.RoleRefinery:
 		return session.RefinerySessionName(session.PrefixFor(rig))
 	}
 

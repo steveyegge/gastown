@@ -783,6 +783,92 @@ func TestRigAddCreatesRigConfig(t *testing.T) {
 	}
 }
 
+// TestRigAddWithUpstreamURL verifies that gt rig add --upstream-url
+// configures the upstream remote on both the bare repo and mayor clone,
+// and persists the URL to config.json and rigs.json.
+func TestRigAddWithUpstreamURL(t *testing.T) {
+	_ = mockBdCommand(t)
+	townRoot := setupTestTown(t)
+
+	// Create two repos: one acts as the fork (origin), one as the upstream.
+	forkURL := createTestGitRepo(t, "myfork")
+	upstreamURL := createTestGitRepo(t, "upstream_origin")
+
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		t.Fatalf("load rigs.json: %v", err)
+	}
+
+	g := git.NewGit(townRoot)
+	mgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	_, err = mgr.AddRig(rig.AddRigOptions{
+		Name:        "forkrig",
+		GitURL:      forkURL,
+		UpstreamURL: upstreamURL,
+		BeadsPrefix: "fr",
+	})
+	if err != nil {
+		t.Fatalf("AddRig: %v", err)
+	}
+
+	rigPath := filepath.Join(townRoot, "forkrig")
+
+	t.Run("bare repo has upstream remote", func(t *testing.T) {
+		bareGit := git.NewGitWithDir(filepath.Join(rigPath, ".repo.git"), "")
+		got, err := bareGit.GetUpstreamURL()
+		if err != nil {
+			t.Fatalf("GetUpstreamURL on bare repo: %v", err)
+		}
+		if got != upstreamURL {
+			t.Errorf("bare repo upstream = %q, want %q", got, upstreamURL)
+		}
+	})
+
+	t.Run("mayor clone has upstream remote", func(t *testing.T) {
+		mayorGit := git.NewGit(filepath.Join(rigPath, "mayor", "rig"))
+		got, err := mayorGit.GetUpstreamURL()
+		if err != nil {
+			t.Fatalf("GetUpstreamURL on mayor: %v", err)
+		}
+		if got != upstreamURL {
+			t.Errorf("mayor upstream = %q, want %q", got, upstreamURL)
+		}
+	})
+
+	t.Run("config.json persists upstream_url", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(rigPath, "config.json"))
+		if err != nil {
+			t.Fatalf("reading config.json: %v", err)
+		}
+		var rigCfg rig.RigConfig
+		if err := json.Unmarshal(data, &rigCfg); err != nil {
+			t.Fatalf("parsing config.json: %v", err)
+		}
+		if rigCfg.UpstreamURL != upstreamURL {
+			t.Errorf("config.json UpstreamURL = %q, want %q", rigCfg.UpstreamURL, upstreamURL)
+		}
+	})
+
+	t.Run("rigs.json persists upstream_url", func(t *testing.T) {
+		if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
+			t.Fatalf("save rigs.json: %v", err)
+		}
+		reloaded, err := config.LoadRigsConfig(rigsPath)
+		if err != nil {
+			t.Fatalf("reload rigs.json: %v", err)
+		}
+		entry, ok := reloaded.Rigs["forkrig"]
+		if !ok {
+			t.Fatal("rig 'forkrig' not found in rigs.json")
+		}
+		if entry.UpstreamURL != upstreamURL {
+			t.Errorf("rigs.json UpstreamURL = %q, want %q", entry.UpstreamURL, upstreamURL)
+		}
+	})
+}
+
 // TestRigAddCreatesAgentDirs verifies that agent state files are created.
 func TestRigAddCreatesAgentDirs(t *testing.T) {
 	requireDoltServer(t)

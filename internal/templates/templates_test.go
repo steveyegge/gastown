@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestNew(t *testing.T) {
@@ -118,7 +120,7 @@ func TestRenderRole_Deacon(t *testing.T) {
 	if !strings.Contains(output, "Startup Protocol: Propulsion") {
 		t.Error("output missing startup protocol section")
 	}
-	if !strings.Contains(output, "mol-deacon-patrol") {
+	if !strings.Contains(output, constants.MolDeaconPatrol) {
 		t.Error("output missing patrol molecule reference")
 	}
 }

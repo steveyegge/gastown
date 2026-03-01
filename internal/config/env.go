@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // AgentEnvConfig specifies the configuration for generating agent environment variables.
@@ -69,34 +71,34 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// GT_ROLE is set in compound format (e.g., "beads/crew/jane") so that
 	// beads can parse it without knowing about Gas Town role types.
 	switch cfg.Role {
-	case "mayor":
-		env["GT_ROLE"] = "mayor"
-		env["BD_ACTOR"] = "mayor"
-		env["GIT_AUTHOR_NAME"] = "mayor"
+	case constants.RoleMayor:
+		env["GT_ROLE"] = constants.RoleMayor
+		env["BD_ACTOR"] = constants.RoleMayor
+		env["GIT_AUTHOR_NAME"] = constants.RoleMayor
 
-	case "deacon":
-		env["GT_ROLE"] = "deacon"
-		env["BD_ACTOR"] = "deacon"
-		env["GIT_AUTHOR_NAME"] = "deacon"
+	case constants.RoleDeacon:
+		env["GT_ROLE"] = constants.RoleDeacon
+		env["BD_ACTOR"] = constants.RoleDeacon
+		env["GIT_AUTHOR_NAME"] = constants.RoleDeacon
 
 	case "boot":
 		env["GT_ROLE"] = "deacon/boot"
 		env["BD_ACTOR"] = "deacon-boot"
 		env["GIT_AUTHOR_NAME"] = "boot"
 
-	case "witness":
+	case constants.RoleWitness:
 		env["GT_ROLE"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/witness", cfg.Rig)
 
-	case "refinery":
+	case constants.RoleRefinery:
 		env["GT_ROLE"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 
-	case "polecat":
+	case constants.RolePolecat:
 		env["GT_ROLE"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_POLECAT"] = cfg.AgentName
@@ -108,7 +110,7 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		// contention leading to Dolt read-only mode (gt-5cc2p).
 		env["BD_DOLT_AUTO_COMMIT"] = "off"
 
-	case "crew":
+	case constants.RoleCrew:
 		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_CREW"] = cfg.AgentName
@@ -139,7 +141,7 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	}
 
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)
-	if cfg.Role == "polecat" || cfg.Role == "crew" {
+	if cfg.Role == constants.RolePolecat || cfg.Role == constants.RoleCrew {
 		env["BEADS_AGENT_NAME"] = fmt.Sprintf("%s/%s", cfg.Rig, cfg.AgentName)
 	}
 

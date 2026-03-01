@@ -301,6 +301,15 @@ type DaemonThresholds struct {
 
 	// DoctorMolCooldown is min interval between mol-dog-doctor molecules (default "5m").
 	DoctorMolCooldown string `json:"doctor_mol_cooldown,omitempty"`
+
+	// RecoveryHeartbeatInterval is the fixed interval for recovery-focused daemon heartbeat (default "3m").
+	RecoveryHeartbeatInterval string `json:"recovery_heartbeat_interval,omitempty"`
+
+	// BootSpawnCooldown prevents Boot from spawning on every daemon heartbeat (default "2m").
+	BootSpawnCooldown string `json:"boot_spawn_cooldown,omitempty"`
+
+	// DeaconGracePeriod is time to wait after starting Deacon before checking heartbeat (default "5m").
+	DeaconGracePeriod string `json:"deacon_grace_period,omitempty"`
 }
 
 // DeaconThresholds configures deacon health-check and dispatch thresholds.
@@ -505,6 +514,7 @@ type RigsConfig struct {
 type RigEntry struct {
 	GitURL      string       `json:"git_url"`
 	PushURL     string       `json:"push_url,omitempty"`
+	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
 	LocalRepo   string       `json:"local_repo,omitempty"`
 	AddedAt     time.Time    `json:"added_at"`
 	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
@@ -532,14 +542,15 @@ const CurrentRigSettingsVersion = 1
 // RigConfig represents per-rig identity (rig/config.json).
 // This contains only identity - behavioral config is in settings/config.json.
 type RigConfig struct {
-	Type      string       `json:"type"`    // "rig"
-	Version   int          `json:"version"` // schema version
-	Name      string       `json:"name"`    // rig name
-	GitURL    string       `json:"git_url"` // git repository URL
-	PushURL   string       `json:"push_url,omitempty"` // optional push URL (fork for read-only upstreams)
-	LocalRepo string       `json:"local_repo,omitempty"`
-	CreatedAt time.Time    `json:"created_at"` // when the rig was created
-	Beads     *BeadsConfig `json:"beads,omitempty"`
+	Type        string       `json:"type"`                   // "rig"
+	Version     int          `json:"version"`                // schema version
+	Name        string       `json:"name"`                   // rig name
+	GitURL      string       `json:"git_url"`                // git repository URL
+	PushURL     string       `json:"push_url,omitempty"`     // optional push URL (fork for read-only upstreams)
+	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
+	LocalRepo   string       `json:"local_repo,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"` // when the rig was created
+	Beads       *BeadsConfig `json:"beads,omitempty"`
 }
 
 // WorkflowConfig represents workflow settings for a rig.

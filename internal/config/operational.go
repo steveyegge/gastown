@@ -44,6 +44,9 @@ const (
 	DefaultMaxLifecycleMessageAge          = 6 * time.Hour
 	DefaultSyncFailureEscalationThreshold  = 3
 	DefaultDoctorMolCooldown               = 5 * time.Minute
+	DefaultRecoveryHeartbeatInterval       = 3 * time.Minute
+	DefaultBootSpawnCooldown               = 2 * time.Minute
+	DefaultDeaconGracePeriod               = 5 * time.Minute
 )
 
 // Deacon defaults.
@@ -334,6 +337,30 @@ func (d *DaemonThresholds) DoctorMolCooldownD() time.Duration {
 		return ParseDurationOrDefault(d.DoctorMolCooldown, DefaultDoctorMolCooldown)
 	}
 	return DefaultDoctorMolCooldown
+}
+
+// RecoveryHeartbeatIntervalD returns the configured or default recovery heartbeat interval.
+func (d *DaemonThresholds) RecoveryHeartbeatIntervalD() time.Duration {
+	if d != nil {
+		return ParseDurationOrDefault(d.RecoveryHeartbeatInterval, DefaultRecoveryHeartbeatInterval)
+	}
+	return DefaultRecoveryHeartbeatInterval
+}
+
+// BootSpawnCooldownD returns the configured or default boot spawn cooldown.
+func (d *DaemonThresholds) BootSpawnCooldownD() time.Duration {
+	if d != nil {
+		return ParseDurationOrDefault(d.BootSpawnCooldown, DefaultBootSpawnCooldown)
+	}
+	return DefaultBootSpawnCooldown
+}
+
+// DeaconGracePeriodD returns the configured or default deacon grace period.
+func (d *DaemonThresholds) DeaconGracePeriodD() time.Duration {
+	if d != nil {
+		return ParseDurationOrDefault(d.DeaconGracePeriod, DefaultDeaconGracePeriod)
+	}
+	return DefaultDeaconGracePeriod
 }
 
 // --- Deacon accessors ---

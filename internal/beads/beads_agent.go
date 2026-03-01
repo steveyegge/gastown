@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -795,7 +796,7 @@ func isAgentBeadByID(id string) bool {
 	// collapsed-form (role at parts[1]) agent bead IDs.
 	for _, part := range parts[1:] {
 		switch part {
-		case "witness", "refinery", "crew", "polecat", "deacon", "mayor":
+		case constants.RoleWitness, constants.RoleRefinery, constants.RoleCrew, constants.RolePolecat, constants.RoleDeacon, constants.RoleMayor:
 			return true
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -204,7 +205,7 @@ type DaemonPatrolConfig struct {
 
 // PatrolConfigFile returns the path to the patrol config file.
 func PatrolConfigFile(townRoot string) string {
-	return filepath.Join(townRoot, "mayor", "daemon.json")
+	return filepath.Join(townRoot, constants.RoleMayor, "daemon.json")
 }
 
 // LoadPatrolConfig loads patrol configuration from mayor/daemon.json.
@@ -292,15 +293,15 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 	}
 
 	switch patrol {
-	case "refinery":
+	case constants.RoleRefinery:
 		if config.Patrols.Refinery != nil {
 			return config.Patrols.Refinery.Enabled
 		}
-	case "witness":
+	case constants.RoleWitness:
 		if config.Patrols.Witness != nil {
 			return config.Patrols.Witness.Enabled
 		}
-	case "deacon":
+	case constants.RoleDeacon:
 		if config.Patrols.Deacon != nil {
 			return config.Patrols.Deacon.Enabled
 		}
@@ -319,11 +320,11 @@ func GetPatrolRigs(config *DaemonPatrolConfig, patrol string) []string {
 	}
 
 	switch patrol {
-	case "refinery":
+	case constants.RoleRefinery:
 		if config.Patrols.Refinery != nil {
 			return config.Patrols.Refinery.Rigs
 		}
-	case "witness":
+	case constants.RoleWitness:
 		if config.Patrols.Witness != nil {
 			return config.Patrols.Witness.Rigs
 		}

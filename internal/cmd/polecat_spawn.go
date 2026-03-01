@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -94,6 +95,52 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// capacity before spawning. Prevents connection storms during mass sling.
 	if err := polecatMgr.CheckDoltServerCapacity(); err != nil {
 		return nil, fmt.Errorf("admission control: %w", err)
+	}
+
+	// Polecat count cap (clown show #22): refuse to spawn if there are already
+	// too many active polecats. This is a safety net — the primary guard is the
+	// per-bead respawn limit in the witness. Default cap: 25 per town.
+	// TODO: make configurable via rig config (max_polecats already exists for scheduler)
+	const defaultMaxActivePolecats = 25
+	activeCount := countActivePolecats()
+	if activeCount >= defaultMaxActivePolecats {
+		return nil, fmt.Errorf("polecat cap reached: %d active polecats (max %d). "+
+			"This is a safety limit to prevent spawn storms. "+
+			"Investigate why polecats are accumulating before spawning more",
+			activeCount, defaultMaxActivePolecats)
+	}
+
+	// Per-bead respawn circuit breaker (clown show #22):
+	// Track how many times this bead has been slung. Block after N attempts
+	// to prevent witness→deacon→sling feedback loops.
+	if opts.HookBead != "" && !opts.Force {
+		if witness.ShouldBlockRespawn(townRoot, opts.HookBead) {
+			return nil, fmt.Errorf("respawn limit reached for %s (%d attempts). "+
+				"This bead keeps failing — investigate before re-dispatching.\n"+
+				"Override: gt sling %s %s --force\n"+
+				"Reset:    gt sling respawn-reset %s",
+				opts.HookBead, witness.DefaultMaxBeadRespawns,
+				opts.HookBead, rigName, opts.HookBead)
+		}
+		witness.RecordBeadRespawn(townRoot, opts.HookBead)
+	}
+
+	// Per-rig directory cap: prevent unbounded worktree accumulation even when
+	// polecats die quickly (tmux session count stays low).
+	const maxPolecatDirsPerRig = 30
+	rigPolecatDir := filepath.Join(townRoot, rigName, "polecats")
+	if entries, err := os.ReadDir(rigPolecatDir); err == nil {
+		dirCount := 0
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				dirCount++
+			}
+		}
+		if dirCount >= maxPolecatDirsPerRig {
+			return nil, fmt.Errorf("rig %s has %d polecat directories (max %d). "+
+				"Nuke idle polecats first: gt polecat nuke %s/<name> --force",
+				rigName, dirCount, maxPolecatDirsPerRig, rigName)
+		}
 	}
 
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
@@ -423,7 +470,7 @@ func IsRigName(target string) (string, bool) {
 
 	// Check known non-rig role names
 	switch strings.ToLower(target) {
-	case "mayor", "may", "deacon", "dea", "crew", "witness", "wit", "refinery", "ref":
+	case constants.RoleMayor, "may", constants.RoleDeacon, "dea", constants.RoleCrew, constants.RoleWitness, "wit", constants.RoleRefinery, "ref":
 		return "", false
 	}
 

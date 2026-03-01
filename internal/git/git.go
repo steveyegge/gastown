@@ -605,6 +605,60 @@ func (g *Git) SetRemoteURL(name, url string) (string, error) {
 	return g.run("remote", "set-url", name, url)
 }
 
+// AddUpstreamRemote adds or updates the 'upstream' git remote.
+// This is idempotent - if the remote already exists with the same URL, it's a no-op.
+// If the remote exists with a different URL, it's updated.
+func (g *Git) AddUpstreamRemote(upstreamURL string) error {
+	has, err := g.HasUpstreamRemote()
+	if err != nil {
+		return err
+	}
+	if has {
+		current, err := g.GetUpstreamURL()
+		if err != nil {
+			return err
+		}
+		if current == upstreamURL {
+			return nil
+		}
+		_, err = g.run("remote", "set-url", "upstream", upstreamURL)
+		return err
+	}
+	_, err = g.run("remote", "add", "upstream", upstreamURL)
+	return err
+}
+
+// GetUpstreamURL returns the URL of the upstream remote.
+// Returns empty string if upstream remote doesn't exist.
+func (g *Git) GetUpstreamURL() (string, error) {
+	out, err := g.run("remote", "get-url", "upstream")
+	if err != nil {
+		if strings.Contains(err.Error(), "No such remote") {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HasUpstreamRemote returns true if an upstream remote is configured.
+func (g *Git) HasUpstreamRemote() (bool, error) {
+	_, err := g.run("remote", "get-url", "upstream")
+	if err != nil {
+		if strings.Contains(err.Error(), "No such remote") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// FetchUpstream fetches from the upstream remote.
+func (g *Git) FetchUpstream() error {
+	_, err := g.run("fetch", "upstream")
+	return err
+}
+
 // Remotes returns the list of configured remote names.
 func (g *Git) Remotes() ([]string, error) {
 	out, err := g.run("remote")

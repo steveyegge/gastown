@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -164,7 +165,33 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 
+	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
+}
+
+var slingRespawnResetCmd = &cobra.Command{
+	Use:   "respawn-reset <bead-id>",
+	Short: "Reset the respawn counter for a bead",
+	Long: `Reset the per-bead respawn counter so it can be slung again.
+
+When a bead hits the respawn limit (3 attempts), gt sling blocks further
+dispatches to prevent spawn storms. After investigating the root cause,
+use this command to allow re-dispatch.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSlingRespawnReset,
+}
+
+func runSlingRespawnReset(_ *cobra.Command, args []string) error {
+	beadID := args[0]
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	if err := witness.ResetBeadRespawnCount(townRoot, beadID); err != nil {
+		return fmt.Errorf("resetting respawn count for %s: %w", beadID, err)
+	}
+	fmt.Printf("Reset respawn counter for %s. It can be slung again.\n", beadID)
+	return nil
 }
 
 func runSling(cmd *cobra.Command, args []string) (retErr error) {
@@ -763,10 +790,16 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	if formulaName != "" {
 		existingMolecules := collectExistingMolecules(info)
 		if len(existingMolecules) > 0 {
+			// Auto-burn when bead is unassigned (molecules are definitionally stale),
+			// or when the assigned agent's session is dead. `force` already includes
+			// dead-agent auto-force from the status check above.
+			stale := force ||
+				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
+				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
 			if slingDryRun {
 				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
 					len(existingMolecules), strings.Join(existingMolecules, ", "))
-			} else if force {
+			} else if stale {
 				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
 					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
 				if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {

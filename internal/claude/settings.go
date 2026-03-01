@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 //go:embed config/*.json
@@ -27,7 +29,7 @@ const (
 // RoleTypeFor returns the RoleType for a given role name.
 func RoleTypeFor(role string) RoleType {
 	switch role {
-	case "polecat", "witness", "refinery", "deacon", "boot":
+	case constants.RolePolecat, constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, "boot":
 		return Autonomous
 	default:
 		return Interactive

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 const (
@@ -80,7 +82,7 @@ func (d *Daemon) syncJsonlGitBackup() {
 	}
 
 	// Pour molecule for observability (nil-safe — all methods are no-ops on nil).
-	mol := d.pourDogMolecule("mol-dog-jsonl", nil)
+	mol := d.pourDogMolecule(constants.MolDogJSONL, nil)
 	defer mol.close()
 
 	config := d.patrolConfig.Patrols.JsonlGitBackup

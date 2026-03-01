@@ -9,6 +9,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -181,9 +182,9 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			role = string(identity.Role)
 			switch identity.Role {
 			case session.RoleWitness:
-				worker = "witness"
+				worker = constants.RoleWitness
 			case session.RoleRefinery:
-				worker = "refinery"
+				worker = constants.RoleRefinery
 			case session.RoleCrew:
 				worker = identity.Name
 			default:
@@ -256,7 +257,7 @@ func detectCurrentRig() string {
 	// Extract first path component (rig name)
 	// Patterns: <rig>/..., mayor/..., deacon/...
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) > 0 && parts[0] != "." && parts[0] != "mayor" && parts[0] != "deacon" {
+	if len(parts) > 0 && parts[0] != "." && parts[0] != constants.RoleMayor && parts[0] != constants.RoleDeacon {
 		return parts[0]
 	}
 

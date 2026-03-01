@@ -8,8 +8,8 @@ import (
 )
 
 // DoltDockerImage is the Docker image used for Dolt test containers.
-// Pinned to 1.43.0 to match Unix; see doltserver.go for details.
-const DoltDockerImage = "dolthub/dolt-sql-server:1.43.0"
+// Kept in sync with doltserver.go; see that file for details.
+const DoltDockerImage = "dolthub/dolt-sql-server:1.83.0"
 
 // StartIsolatedDoltContainer is not supported on Windows CI.
 func StartIsolatedDoltContainer(t *testing.T) string {

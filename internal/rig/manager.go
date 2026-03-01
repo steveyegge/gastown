@@ -86,6 +86,7 @@ type RigConfig struct {
 	Name          string       `json:"name"`                     // rig name
 	GitURL        string       `json:"git_url"`                  // repository URL (fetch/pull)
 	PushURL       string       `json:"push_url,omitempty"`       // optional push URL (fork for read-only upstreams)
+	UpstreamURL   string       `json:"upstream_url,omitempty"`   // optional upstream URL (for fork workflows)
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
@@ -228,6 +229,7 @@ type AddRigOptions struct {
 	Name          string // Rig name (directory name)
 	GitURL        string // Repository URL (fetch/pull)
 	PushURL       string // Optional push URL (fork for read-only upstreams)
+	UpstreamURL   string // Optional upstream URL (for fork workflows)
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
@@ -341,13 +343,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	// Create rig config
 	rigConfig := &RigConfig{
-		Type:      "rig",
-		Version:   CurrentRigConfigVersion,
-		Name:      opts.Name,
-		GitURL:    opts.GitURL,
-		PushURL:   opts.PushURL,
-		LocalRepo: localRepo,
-		CreatedAt: time.Now(),
+		Type:        "rig",
+		Version:     CurrentRigConfigVersion,
+		Name:        opts.Name,
+		GitURL:      opts.GitURL,
+		PushURL:     opts.PushURL,
+		UpstreamURL: opts.UpstreamURL,
+		LocalRepo:   localRepo,
+		CreatedAt:   time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
@@ -393,6 +396,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			return nil, fmt.Errorf("configuring push URL: %w", err)
 		}
 		fmt.Printf("   ✓ Configured push URL (fork: %s)\n", util.RedactURL(opts.PushURL)) // fmt.Printf matches AddRig's established success output pattern
+	}
+
+	// Configure upstream remote if provided (for fork workflows)
+	if opts.UpstreamURL != "" {
+		if err := bareGit.AddUpstreamRemote(opts.UpstreamURL); err != nil {
+			return nil, fmt.Errorf("configuring upstream remote: %w", err)
+		}
+		fmt.Printf("   ✓ Configured upstream remote: %s\n", util.RedactURL(opts.UpstreamURL))
 	}
 
 	// Determine default branch: use provided value or auto-detect from remote
@@ -453,6 +464,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if opts.PushURL != "" {
 		if err := mayorGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
 			return nil, fmt.Errorf("configuring mayor push URL: %w", err)
+		}
+	}
+	// Configure upstream remote on mayor clone (separate clone, doesn't inherit from bare repo)
+	if opts.UpstreamURL != "" {
+		if err := mayorGit.AddUpstreamRemote(opts.UpstreamURL); err != nil {
+			return nil, fmt.Errorf("configuring mayor upstream remote: %w", err)
 		}
 	}
 	fmt.Printf("   ✓ Created mayor clone\n")
@@ -744,10 +761,11 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:    opts.GitURL,
-		PushURL:   opts.PushURL,
-		LocalRepo: localRepo,
-		AddedAt:   time.Now(),
+		GitURL:      opts.GitURL,
+		PushURL:     opts.PushURL,
+		UpstreamURL: opts.UpstreamURL,
+		LocalRepo:   localRepo,
+		AddedAt:     time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
@@ -1236,6 +1254,7 @@ type RegisterRigOptions struct {
 	Name        string // Rig name (directory name)
 	GitURL      string // Override git URL (auto-detected from origin if empty)
 	PushURL     string // Override push URL (auto-detected from existing config/remotes if empty)
+	UpstreamURL string // Upstream repository URL (for fork workflows)
 	BeadsPrefix string // Beads issue prefix (defaults to derived from name or existing config)
 	Force       bool   // Register even if directory structure looks incomplete
 }
@@ -1383,11 +1402,28 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		}
 	}
 
+	// Configure upstream remote if provided (for fork workflows)
+	if opts.UpstreamURL != "" {
+		if _, err := os.Stat(bareRepoPath); err == nil {
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			if upErr := bareGit.AddUpstreamRemote(opts.UpstreamURL); upErr != nil {
+				return nil, fmt.Errorf("configuring upstream remote on bare repo: %w", upErr)
+			}
+		}
+		if _, err := os.Stat(mayorRigPath); err == nil {
+			mayorGit := git.NewGit(mayorRigPath)
+			if upErr := mayorGit.AddUpstreamRemote(opts.UpstreamURL); upErr != nil {
+				return nil, fmt.Errorf("configuring mayor upstream remote: %w", upErr)
+			}
+		}
+	}
+
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:  result.GitURL,
-		PushURL: pushURL,
-		AddedAt: time.Now(),
+		GitURL:      result.GitURL,
+		PushURL:     pushURL,
+		UpstreamURL: opts.UpstreamURL,
+		AddedAt:     time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: result.BeadsPrefix,
 		},

@@ -104,6 +104,15 @@ func TestDaemonThresholds_Defaults(t *testing.T) {
 	if got := daemon.MaxLifecycleMessageAgeD(); got != DefaultMaxLifecycleMessageAge {
 		t.Errorf("MaxLifecycleMessageAge: got %v, want %v", got, DefaultMaxLifecycleMessageAge)
 	}
+	if got := daemon.RecoveryHeartbeatIntervalD(); got != DefaultRecoveryHeartbeatInterval {
+		t.Errorf("RecoveryHeartbeatInterval: got %v, want %v", got, DefaultRecoveryHeartbeatInterval)
+	}
+	if got := daemon.BootSpawnCooldownD(); got != DefaultBootSpawnCooldown {
+		t.Errorf("BootSpawnCooldown: got %v, want %v", got, DefaultBootSpawnCooldown)
+	}
+	if got := daemon.DeaconGracePeriodD(); got != DefaultDeaconGracePeriod {
+		t.Errorf("DeaconGracePeriod: got %v, want %v", got, DefaultDeaconGracePeriod)
+	}
 }
 
 func TestDaemonThresholds_Overrides(t *testing.T) {
@@ -127,6 +136,29 @@ func TestDaemonThresholds_Overrides(t *testing.T) {
 	// Non-overridden fields should still return defaults
 	if got := daemon.MassDeathThresholdV(); got != DefaultMassDeathThreshold {
 		t.Errorf("MassDeathThreshold: got %v, want %v (default)", got, DefaultMassDeathThreshold)
+	}
+}
+
+func TestDaemonThresholds_NewFieldOverrides(t *testing.T) {
+	t.Parallel()
+
+	op := &OperationalConfig{
+		Daemon: &DaemonThresholds{
+			RecoveryHeartbeatInterval: "5m",
+			BootSpawnCooldown:         "90s",
+			DeaconGracePeriod:         "10m",
+		},
+	}
+
+	daemon := op.GetDaemonConfig()
+	if got := daemon.RecoveryHeartbeatIntervalD(); got != 5*time.Minute {
+		t.Errorf("RecoveryHeartbeatInterval: got %v, want 5m", got)
+	}
+	if got := daemon.BootSpawnCooldownD(); got != 90*time.Second {
+		t.Errorf("BootSpawnCooldown: got %v, want 90s", got)
+	}
+	if got := daemon.DeaconGracePeriodD(); got != 10*time.Minute {
+		t.Errorf("DeaconGracePeriod: got %v, want 10m", got)
 	}
 }
 

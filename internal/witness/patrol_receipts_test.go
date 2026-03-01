@@ -9,11 +9,12 @@ import (
 func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
 	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
-		PolecatName: "atlas",
-		AgentState:  "idle",
-		HookBead:    "gt-abc123",
-		WasActive:   true,
-		Action:      "restarted",
+		PolecatName:    "atlas",
+		AgentState:     "idle",
+		Classification: ZombieSessionDeadActive,
+		HookBead:       "gt-abc123",
+		WasActive:      true,
+		Action:         "restarted",
 	})
 
 	if receipt.Verdict != PatrolVerdictStale {
@@ -27,9 +28,10 @@ func TestBuildPatrolReceipt_StaleVerdictFromHookBead(t *testing.T) {
 func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
 	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
-		PolecatName: "echo",
-		AgentState:  "idle",
-		Action:      "cleanup-wisp-created",
+		PolecatName:    "echo",
+		AgentState:     "idle",
+		Classification: ZombieIdleDirtySandbox,
+		Action:         "cleanup-wisp-created",
 	})
 
 	if receipt.Verdict != PatrolVerdictOrphan {
@@ -40,10 +42,11 @@ func TestBuildPatrolReceipt_OrphanVerdictWithoutHookedWork(t *testing.T) {
 func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
 	t.Parallel()
 	receipt := BuildPatrolReceipt("gastown", ZombieResult{
-		PolecatName: "nux",
-		AgentState:  "running",
-		WasActive:   true,
-		Error:       errors.New("nuke failed"),
+		PolecatName:    "nux",
+		AgentState:     "running",
+		Classification: ZombieAgentDeadInSession,
+		WasActive:      true,
+		Error:          errors.New("nuke failed"),
 	})
 
 	if receipt.Evidence.Error != "nuke failed" {
@@ -54,38 +57,42 @@ func TestBuildPatrolReceipt_ErrorIncludedInEvidence(t *testing.T) {
 func TestReceiptVerdictForZombie_AllStates(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		state     string
-		hookBead  string
-		wasActive bool
-		want      PatrolVerdict
+		name           string
+		state          string
+		classification ZombieClassification
+		hookBead       string
+		wasActive      bool
+		want           PatrolVerdict
 	}{
-		// WasActive=true → stale (set by detection code for active/synthetic states)
-		{name: "active working", state: "working", wasActive: true, want: PatrolVerdictStale},
-		{name: "active with hook", state: "working", hookBead: "gt-1", wasActive: true, want: PatrolVerdictStale},
-		{name: "active running", state: "running", wasActive: true, want: PatrolVerdictStale},
-		{name: "active spawning", state: "spawning", wasActive: true, want: PatrolVerdictStale},
-		{name: "stuck-in-done", state: "stuck-in-done", wasActive: true, want: PatrolVerdictStale},
-		{name: "agent-dead-in-session", state: "agent-dead-in-session", wasActive: true, want: PatrolVerdictStale},
-		{name: "bead-closed-still-running", state: "bead-closed-still-running", wasActive: true, want: PatrolVerdictStale},
-		{name: "done-intent-dead", state: "done-intent-dead", wasActive: true, want: PatrolVerdictStale},
-		{name: "idle with hook (active)", state: "idle", hookBead: "gt-1", wasActive: true, want: PatrolVerdictStale},
+		// Classification-based verdicts (gt-tsut: typed classification drives verdict)
+		{name: "stuck-in-done", classification: ZombieStuckInDone, wasActive: true, want: PatrolVerdictStale},
+		{name: "agent-dead-in-session", classification: ZombieAgentDeadInSession, wasActive: true, want: PatrolVerdictStale},
+		{name: "bead-closed-still-running", classification: ZombieBeadClosedStillRunning, wasActive: true, want: PatrolVerdictStale},
+		{name: "done-intent-dead", classification: ZombieDoneIntentDead, wasActive: true, want: PatrolVerdictStale},
+		{name: "session-dead-active", classification: ZombieSessionDeadActive, wasActive: true, want: PatrolVerdictStale},
+		{name: "idle-dirty-sandbox", classification: ZombieIdleDirtySandbox, want: PatrolVerdictOrphan},
 
-		// WasActive=false → orphan (no evidence of recent work)
-		{name: "idle without hook", state: "idle", want: PatrolVerdictOrphan},
-		{name: "empty state", state: "", want: PatrolVerdictOrphan},
-		{name: "unknown state", state: "something-new", want: PatrolVerdictOrphan},
+		// Real agent states with classification
+		{name: "active working", state: "working", classification: ZombieSessionDeadActive, wasActive: true, want: PatrolVerdictStale},
+		{name: "active with hook", state: "working", classification: ZombieSessionDeadActive, hookBead: "gt-1", wasActive: true, want: PatrolVerdictStale},
+		{name: "active running", state: "running", classification: ZombieSessionDeadActive, wasActive: true, want: PatrolVerdictStale},
+
+		// Fallback: no classification (forward-compat), uses WasActive
+		{name: "legacy active", state: "working", wasActive: true, want: PatrolVerdictStale},
+		{name: "legacy idle without hook", state: "idle", want: PatrolVerdictOrphan},
+		{name: "legacy empty state", state: "", want: PatrolVerdictOrphan},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := receiptVerdictForZombie(ZombieResult{
-				AgentState: tt.state,
-				HookBead:   tt.hookBead,
-				WasActive:  tt.wasActive,
+				AgentState:     tt.state,
+				Classification: tt.classification,
+				HookBead:       tt.hookBead,
+				WasActive:      tt.wasActive,
 			})
 			if got != tt.want {
-				t.Errorf("receiptVerdictForZombie(wasActive=%v, state=%q) = %q, want %q",
-					tt.wasActive, tt.state, got, tt.want)
+				t.Errorf("receiptVerdictForZombie(classification=%q, wasActive=%v, state=%q) = %q, want %q",
+					tt.classification, tt.wasActive, tt.state, got, tt.want)
 			}
 		})
 	}

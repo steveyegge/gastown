@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // Default parameters for feed-stranded rate limiting.
@@ -327,7 +329,7 @@ func closeEmptyConvoy(townRoot, convoyID string) error {
 
 // dispatchFeedDog dispatches a dog to feed a stranded convoy via gt sling.
 func dispatchFeedDog(townRoot, convoyID string) error {
-	cmd := exec.Command("gt", "sling", "mol-convoy-feed", "deacon/dogs",
+	cmd := exec.Command("gt", "sling", constants.MolConvoyFeed, "deacon/dogs",
 		"--var", fmt.Sprintf("convoy=%s", convoyID))
 	cmd.Dir = townRoot
 	cmd.Stdout = os.Stdout

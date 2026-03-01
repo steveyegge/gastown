@@ -1392,6 +1392,15 @@ func nukeCleanupMolecules(workBeadID string, r *rig.Rig) {
 		return
 	}
 
+	// Remove dependency bond so collectExistingMolecules won't find the
+	// closed molecule and block re-dispatch. Without this, the bond persists
+	// and every sling attempt fails with "bead has existing molecule(s)".
+	if err := bd.RemoveDependency(workBeadID, moleculeID); err != nil {
+		fmt.Printf("  %s molecule bond removal failed for %s → %s: %v\n",
+			style.Warning.Render("⚠"), workBeadID, moleculeID, err)
+		// Non-fatal: detach already cleared the description pointer.
+	}
+
 	// Force-close the orphaned wisp root so it doesn't linger
 	if closeErr := bd.ForceCloseWithReason("burned: polecat nuked", moleculeID); closeErr != nil {
 		fmt.Printf("  %s molecule root close failed for %s: %v\n",

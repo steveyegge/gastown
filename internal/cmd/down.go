@@ -256,14 +256,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 4c: Sweep sessions on the legacy "-L gt" tmux socket.
-	// After the socket migration to "default" (registry.go:InitRegistry), new
-	// sessions are created on the "default" socket.  But sessions that were
-	// started before the migration still live on the old "-L gt" socket.
-	// Without this sweep, gt down leaves those sessions running, causing
-	// duplicate agent spawns on the next gt start.
-	sweepLegacySocketSessions(downDryRun, downForce)
-
 	// Phase 5: Orphan cleanup and verification (--all or --force)
 	if (downAll || downForce) && !downDryRun {
 		fmt.Println()
@@ -553,64 +545,3 @@ func findOrphanedClaudeProcesses(townRoot string) []int {
 	return orphaned
 }
 
-// legacySocket is the old tmux socket name used before the migration to "default".
-// Sessions created before the migration live on this socket and must be swept
-// during shutdown to prevent duplicate agents.
-const legacySocket = "gt"
-
-// sweepLegacySocketSessions kills Gas Town sessions on the legacy "-L gt" socket.
-// The current town socket is "default" (set by InitRegistry), but sessions
-// created before the migration remain on the old "gt" socket. If left running,
-// they cause duplicate agent spawns on the next gt start.
-func sweepLegacySocketSessions(dryRun, force bool) {
-	currentSocket := tmux.GetDefaultSocket()
-	if currentSocket == legacySocket || currentSocket == "" {
-		// Already on the legacy socket (or no socket configured) — nothing to sweep.
-		return
-	}
-
-	legacy := tmux.NewTmuxWithSocket(legacySocket)
-	sessions, err := legacy.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		return // No server on old socket or no sessions — nothing to do.
-	}
-
-	// Filter to only Gas Town sessions (those with known prefixes).
-	var gtSessions []string
-	for _, s := range sessions {
-		if session.IsKnownSession(s) {
-			gtSessions = append(gtSessions, s)
-		}
-	}
-
-	if len(gtSessions) == 0 {
-		return
-	}
-
-	if dryRun {
-		printDownStatus("Legacy socket (gt)", true,
-			fmt.Sprintf("%d session(s) would be swept", len(gtSessions)))
-		for _, s := range gtSessions {
-			fmt.Printf("  %s %s\n", style.Dim.Render("○"), s)
-		}
-		return
-	}
-
-	swept := 0
-	for _, s := range gtSessions {
-		var killErr error
-		if force {
-			killErr = legacy.KillSessionWithProcesses(s)
-		} else {
-			killErr = legacy.KillSession(s)
-		}
-		if killErr == nil {
-			swept++
-		}
-	}
-
-	if swept > 0 {
-		printDownStatus("Legacy socket (gt)", true,
-			fmt.Sprintf("swept %d session(s)", swept))
-	}
-}

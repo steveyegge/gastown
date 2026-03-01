@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
+
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 )
@@ -139,7 +141,7 @@ func (r *Resolver) validateAgentAddress(address string) error {
 
 	// Well-known town-level singletons always valid
 	switch normalized {
-	case "mayor/", "mayor", "deacon/", "deacon", "overseer":
+	case constants.RoleMayor + "/", constants.RoleMayor, constants.RoleDeacon + "/", constants.RoleDeacon, "overseer":
 		return nil
 	}
 
@@ -151,7 +153,7 @@ func (r *Resolver) validateAgentAddress(address string) error {
 	// Well-known rig-level singletons (rig/witness, rig/refinery)
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "witness", "refinery":
+		case constants.RoleWitness, constants.RoleRefinery:
 			return nil
 		}
 	}
@@ -485,11 +487,11 @@ func AgentBeadIDToAddress(id string) string {
 	// Scan from right for known role markers
 	for i := len(parts) - 1; i >= 1; i-- {
 		switch parts[i] {
-		case "witness", "refinery":
+		case constants.RoleWitness, constants.RoleRefinery:
 			// Singleton role: rig is everything before the role
 			rig := strings.Join(parts[:i], "-")
 			return rig + "/" + parts[i]
-		case "crew", "polecat":
+		case constants.RoleCrew, constants.RolePolecat:
 			// Named role: rig/role/name
 			rig := strings.Join(parts[:i], "-")
 			if i+1 < len(parts) {

@@ -42,13 +42,22 @@ func init() {
 
 // StageResult is the top-level JSON output for gt convoy stage --json.
 type StageResult struct {
-	Status   string         `json:"status"`    // "staged_ready", "staged_warnings", or "error"
-	ConvoyID string         `json:"convoy_id"` // empty if errors prevented creation
-	Restaged bool           `json:"restaged"`  // true if an existing convoy was updated in place
-	Errors   []FindingJSON  `json:"errors"`
-	Warnings []FindingJSON  `json:"warnings"`
-	Waves    []WaveJSON     `json:"waves"`
-	Tree     []TreeNodeJSON `json:"tree"`
+	Status   string           `json:"status"`    // "staged_ready", "staged_warnings", or "error"
+	ConvoyID string           `json:"convoy_id"` // empty if errors prevented creation
+	Restaged bool             `json:"restaged"`  // true if an existing convoy was updated in place
+	Errors   []FindingJSON    `json:"errors"`
+	Warnings []FindingJSON    `json:"warnings"`
+	Waves    []WaveJSON       `json:"waves"`
+	Gated    []GatedTaskJSON  `json:"gated,omitempty"` // tasks blocked by open non-slingable nodes
+	Tree     []TreeNodeJSON   `json:"tree"`
+}
+
+// GatedTaskJSON is the JSON representation of a task gated by non-slingable blockers.
+type GatedTaskJSON struct {
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Type    string   `json:"type"`
+	GatedBy []string `json:"gated_by"`
 }
 
 // FindingJSON is the JSON representation of a StagingFinding.
@@ -300,9 +309,23 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 11: Compute waves (only when no errors).
-	waves, err := computeWaves(dag)
+	waves, gated, err := computeWaves(dag)
 	if err != nil {
 		return err
+	}
+
+	// Step 11b: Add gated task warnings and recalculate status.
+	for _, g := range gated {
+		warns = append(warns, StagingFinding{
+			Severity:     "warning",
+			Category:     "gated",
+			BeadIDs:      []string{g.TaskID},
+			Message:      fmt.Sprintf("task %s is gated by non-slingable blocker(s): %s", g.TaskID, strings.Join(g.GatedBy, ", ")),
+			SuggestedFix: fmt.Sprintf("close or tombstone %s to include %s in waves", strings.Join(g.GatedBy, ", "), g.TaskID),
+		})
+	}
+	if len(gated) > 0 {
+		status = chooseStatus(errs, warns)
 	}
 
 	// Step 12: Render DAG tree and print.
@@ -312,6 +335,12 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 	// Step 13: Render wave table and print.
 	waveOutput := renderWaveTable(waves, dag)
 	fmt.Print(waveOutput)
+
+	// Step 13b: Render gated tasks if any.
+	if len(gated) > 0 {
+		gatedOutput := renderGatedTasks(gated, dag)
+		fmt.Print(gatedOutput)
+	}
 
 	// Step 14: If warnings, render and print.
 	if len(warns) > 0 {
@@ -376,13 +405,29 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 	}
 
 	// No errors: compute waves and create/update convoy.
-	waves, err := computeWaves(dag)
+	waves, gated, err := computeWaves(dag)
 	if err != nil {
 		return err
 	}
 
+	// Add gated task warnings and recalculate status.
+	for _, g := range gated {
+		warns = append(warns, StagingFinding{
+			Severity:     "warning",
+			Category:     "gated",
+			BeadIDs:      []string{g.TaskID},
+			Message:      fmt.Sprintf("task %s is gated by non-slingable blocker(s): %s", g.TaskID, strings.Join(g.GatedBy, ", ")),
+			SuggestedFix: fmt.Sprintf("close or tombstone %s to include %s in waves", strings.Join(g.GatedBy, ", "), g.TaskID),
+		})
+	}
+	if len(gated) > 0 {
+		status = chooseStatus(errs, warns)
+		result.Warnings = buildFindingsJSON(warns)
+	}
+
 	result.Status = status
 	result.Waves = buildWavesJSON(waves, dag)
+	result.Gated = buildGatedJSON(gated, dag)
 
 	// Resolve convoy title for JSON path.
 	title := resolveConvoyTitle(convoyStageTitle, input, nil)
@@ -861,6 +906,14 @@ type Wave struct {
 	Tasks  []string // bead IDs, sorted for determinism
 }
 
+// GatedTask represents a slingable task that cannot be placed in any wave
+// because it is blocked (directly or transitively) by an open non-slingable
+// node such as a decision or epic.
+type GatedTask struct {
+	TaskID  string
+	GatedBy []string // IDs of non-slingable open blockers (direct gates only)
+}
+
 // isSlingableType delegates to the canonical convoy.IsSlingableType, which
 // handles empty types (legacy beads that default to "task").
 func isSlingableType(beadType string) bool {
@@ -874,35 +927,33 @@ func isSlingableType(beadType string) bool {
 // blocking edges ARE respected — a task blocked by a decision bead will not
 // appear until that decision is resolved (fixes #2141).
 // Parent-child deps do NOT create execution edges.
-// Returns error if the DAG contains no slingable tasks.
-func computeWaves(dag *ConvoyDAG) ([]Wave, error) {
-	// Step 1: Identify slingable nodes (appear in wave output) vs gate nodes
-	// (decisions, epics — participate in DAG ordering but aren't dispatched).
+// Returns (waves, gatedTasks, error). gatedTasks lists tasks blocked by open
+// non-slingable nodes (decisions, epics) that cannot be placed in any wave.
+func computeWaves(dag *ConvoyDAG) ([]Wave, []GatedTask, error) {
+	// Step 1: Filter to slingable types only.
 	slingable := make(map[string]*ConvoyDAGNode)
-	allNodes := make(map[string]*ConvoyDAGNode) // all non-closed nodes in DAG
 	for id, node := range dag.Nodes {
-		if node.Status == "closed" {
-			continue
-		}
-		allNodes[id] = node
 		if isSlingableType(node.Type) {
 			slingable[id] = node
 		}
 	}
 	if len(slingable) == 0 {
-		return nil, fmt.Errorf("no slingable tasks in DAG (need task, bug, feature, or chore)")
+		return nil, nil, fmt.Errorf("no slingable tasks in DAG (need task, bug, feature, or chore)")
 	}
 
-	// Step 2: Calculate in-degree for ALL non-closed nodes.
-	// Count BlockedBy entries that reference other nodes in the DAG.
-	// This ensures decision→task edges are respected: a task blocked by an
-	// open decision gets in-degree > 0 and won't land in Wave 1.
-	inDegree := make(map[string]int, len(allNodes))
-	for id, node := range allNodes {
+	// Step 2: Calculate in-degree for each slingable node.
+	// Count slingable blockers (decremented by Kahn's) and open
+	// non-slingable blockers (never decremented — act as gates).
+	inDegree := make(map[string]int, len(slingable))
+	for id, node := range slingable {
 		deg := 0
 		for _, blocker := range node.BlockedBy {
-			if _, ok := allNodes[blocker]; ok {
-				deg++
+			if _, ok := slingable[blocker]; ok {
+				deg++ // slingable blocker — handled by Kahn's
+			} else if bNode, ok := dag.Nodes[blocker]; ok {
+				if bNode.Status != "closed" && bNode.Status != "tombstone" {
+					deg++ // non-slingable open blocker — gate
+				}
 			}
 		}
 		inDegree[id] = deg
@@ -913,48 +964,56 @@ func computeWaves(dag *ConvoyDAG) ([]Wave, error) {
 	processed := 0
 	waveNum := 0
 
-	for processed < len(allNodes) {
+	for processed < len(slingable) {
 		// Collect nodes with in-degree 0.
-		var readyAll []string
+		var ready []string
 		for id, deg := range inDegree {
 			if deg == 0 {
-				readyAll = append(readyAll, id)
+				ready = append(ready, id)
 			}
 		}
 
-		if len(readyAll) == 0 {
-			// All remaining nodes have dependencies — cycle (should be
-			// caught by detectCycles before reaching here).
-			return nil, fmt.Errorf("cycle detected among remaining %d nodes", len(allNodes)-processed)
-		}
-
-		// Filter to slingable tasks only for wave output.
-		var readySlingable []string
-		for _, id := range readyAll {
-			if _, ok := slingable[id]; ok {
-				readySlingable = append(readySlingable, id)
+		if len(ready) == 0 {
+			// No cycles exist (detectCycles ran before computeWaves),
+			// so remaining tasks are gated by open non-slingable nodes
+			// (decisions, epics, etc.) either directly or transitively.
+			var gated []GatedTask
+			for id := range inDegree {
+				node := slingable[id]
+				var gatedBy []string
+				for _, blocker := range node.BlockedBy {
+					if _, ok := slingable[blocker]; ok {
+						continue
+					}
+					if bNode, ok := dag.Nodes[blocker]; ok {
+						if bNode.Status != "closed" && bNode.Status != "tombstone" {
+							gatedBy = append(gatedBy, blocker)
+						}
+					}
+				}
+				sort.Strings(gatedBy)
+				gated = append(gated, GatedTask{TaskID: id, GatedBy: gatedBy})
 			}
+			sort.Slice(gated, func(i, j int) bool { return gated[i].TaskID < gated[j].TaskID })
+			return waves, gated, nil
 		}
 
-		// Only emit a wave if there are slingable tasks in it.
-		if len(readySlingable) > 0 {
-			// Step 7: Sort within each wave for determinism.
-			sort.Strings(readySlingable)
-			waveNum++
-			waves = append(waves, Wave{
-				Number: waveNum,
-				Tasks:  readySlingable,
-			})
-		}
+		// Step 7: Sort within each wave for determinism.
+		sort.Strings(ready)
+		waveNum++
 
-		// Remove ALL processed nodes (slingable and non-slingable) and
-		// decrement in-degrees of their dependents.
-		for _, id := range readyAll {
+		waves = append(waves, Wave{
+			Number: waveNum,
+			Tasks:  ready,
+		})
+
+		// Remove processed nodes and decrement in-degrees of their dependents.
+		for _, id := range ready {
 			delete(inDegree, id)
 			processed++
 
-			// Decrement in-degree of nodes this one blocks.
-			for _, blocked := range allNodes[id].Blocks {
+			// Decrement in-degree of nodes this one blocks (that are slingable).
+			for _, blocked := range slingable[id].Blocks {
 				if _, ok := inDegree[blocked]; ok {
 					inDegree[blocked]--
 				}
@@ -962,7 +1021,7 @@ func computeWaves(dag *ConvoyDAG) ([]Wave, error) {
 		}
 	}
 
-	return waves, nil
+	return waves, nil, nil
 }
 
 // BeadInfo represents raw bead data from bd show output.
@@ -1009,7 +1068,7 @@ func buildConvoyDAG(beads []BeadInfo, deps []DepInfo) *ConvoyDAG {
 		}
 
 		switch d.Type {
-		case "blocks", "conditional-blocks", "waits-for":
+		case "blocks", "conditional-blocks", "waits-for", "merge-blocks":
 			// Execution edges.
 			from.Blocks = append(from.Blocks, to.ID)
 			to.BlockedBy = append(to.BlockedBy, from.ID)
@@ -1158,7 +1217,7 @@ func renderWaveTable(waves []Wave, dag *ConvoyDAG) string {
 			title := node.Title
 			if utf8.RuneCountInString(title) > 28 {
 				runes := []rune(title)
-				title = string(runes[:26]) + ".."
+				title = string(runes[:28]) + ".."
 			}
 
 			rig := node.Rig
@@ -1181,6 +1240,57 @@ func renderWaveTable(waves []Wave, dag *ConvoyDAG) string {
 		totalTasks, len(waves), maxParallel, maxWave))
 
 	return buf.String()
+}
+
+// renderGatedTasks produces a display section for tasks gated by non-slingable nodes.
+func renderGatedTasks(gated []GatedTask, dag *ConvoyDAG) string {
+	var buf strings.Builder
+	buf.WriteString("\n  Gated (blocked by open non-slingable nodes):\n")
+	buf.WriteString("  " + strings.Repeat("─", 80) + "\n")
+
+	for _, g := range gated {
+		node := dag.Nodes[g.TaskID]
+		if node == nil {
+			continue
+		}
+
+		title := node.Title
+		if utf8.RuneCountInString(title) > 28 {
+			runes := []rune(title)
+			title = string(runes[:28]) + ".."
+		}
+
+		gateInfo := strings.Join(g.GatedBy, ", ")
+		if len(g.GatedBy) == 0 {
+			gateInfo = "(transitively gated)"
+		}
+
+		buf.WriteString(fmt.Sprintf("  %-15s %-30s ← gated by %s\n", g.TaskID, title, gateInfo))
+	}
+
+	buf.WriteString(fmt.Sprintf("\n  %d task(s) gated, will not be dispatched until blockers are resolved\n", len(gated)))
+	return buf.String()
+}
+
+// buildGatedJSON converts GatedTask slice to JSON representation.
+func buildGatedJSON(gated []GatedTask, dag *ConvoyDAG) []GatedTaskJSON {
+	if len(gated) == 0 {
+		return nil
+	}
+	result := make([]GatedTaskJSON, 0, len(gated))
+	for _, g := range gated {
+		node := dag.Nodes[g.TaskID]
+		if node == nil {
+			continue
+		}
+		result = append(result, GatedTaskJSON{
+			ID:      g.TaskID,
+			Title:   node.Title,
+			Type:    node.Type,
+			GatedBy: g.GatedBy,
+		})
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -1655,18 +1765,19 @@ func detectOrphans(dag *ConvoyDAG, input *StageInput) []StagingFinding {
 
 	var findings []StagingFinding
 	for id, node := range slingable {
-		// Calculate in-degree among slingable nodes.
+		// Calculate in-degree among all DAG nodes (not just slingable)
+		// to avoid false orphan warnings for decision-gated tasks.
 		inDeg := 0
 		for _, blocker := range node.BlockedBy {
-			if _, ok := slingable[blocker]; ok {
+			if _, ok := dag.Nodes[blocker]; ok {
 				inDeg++
 			}
 		}
 
-		// Calculate out-degree among slingable nodes.
+		// Calculate out-degree among all DAG nodes.
 		outDeg := 0
 		for _, blocked := range node.Blocks {
-			if _, ok := slingable[blocked]; ok {
+			if _, ok := dag.Nodes[blocked]; ok {
 				outDeg++
 			}
 		}
@@ -1799,7 +1910,7 @@ func detectCrossRig(dag *ConvoyDAG) []StagingFinding {
 // estimateCapacity checks each wave for task counts exceeding the threshold
 // and emits an informational warning.
 func estimateCapacity(dag *ConvoyDAG) []StagingFinding {
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		return nil // no slingable tasks → nothing to warn about
 	}

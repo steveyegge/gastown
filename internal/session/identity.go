@@ -34,10 +34,10 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 		return nil, fmt.Errorf("empty address")
 	}
 
-	if address == "mayor" || address == "mayor/" {
+	if address == string(RoleMayor) || address == string(RoleMayor)+"/" {
 		return &AgentIdentity{Role: RoleMayor}, nil
 	}
-	if address == "deacon" || address == "deacon/" {
+	if address == string(RoleDeacon) || address == string(RoleDeacon)+"/" {
 		return &AgentIdentity{Role: RoleDeacon}, nil
 	}
 	if address == "overseer" {
@@ -56,11 +56,11 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 	case 2:
 		name := parts[1]
 		switch name {
-		case "witness":
+		case string(RoleWitness):
 			return &AgentIdentity{Role: RoleWitness, Rig: rig, Prefix: prefix}, nil
-		case "refinery":
+		case string(RoleRefinery):
 			return &AgentIdentity{Role: RoleRefinery, Rig: rig, Prefix: prefix}, nil
-		case "crew", "polecats":
+		case string(RoleCrew), "polecats":
 			return nil, fmt.Errorf("invalid address %q", address)
 		default:
 			return &AgentIdentity{Role: RolePolecat, Rig: rig, Name: name, Prefix: prefix}, nil
@@ -69,7 +69,7 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 		role := parts[1]
 		name := parts[2]
 		switch role {
-		case "crew":
+		case string(RoleCrew):
 			return &AgentIdentity{Role: RoleCrew, Rig: rig, Name: name, Prefix: prefix}, nil
 		case "polecats":
 			return &AgentIdentity{Role: RolePolecat, Rig: rig, Name: name, Prefix: prefix}, nil
@@ -111,9 +111,9 @@ func ParseSessionNameWithRegistry(session string, registry *PrefixRegistry) (*Ag
 	if strings.HasPrefix(session, HQPrefix) {
 		suffix := strings.TrimPrefix(session, HQPrefix)
 		switch suffix {
-		case "mayor":
+		case string(RoleMayor):
 			return &AgentIdentity{Role: RoleMayor}, nil
-		case "deacon":
+		case string(RoleDeacon):
 			return &AgentIdentity{Role: RoleDeacon}, nil
 		case "boot":
 			return &AgentIdentity{Role: RoleDeacon, Name: "boot"}, nil
@@ -134,12 +134,12 @@ func ParseSessionNameWithRegistry(session string, registry *PrefixRegistry) (*Ag
 	rig := registry.RigForPrefix(prefix)
 
 	// Check for witness (suffix marker)
-	if rest == "witness" {
+	if rest == string(RoleWitness) {
 		return &AgentIdentity{Role: RoleWitness, Rig: rig, Prefix: prefix}, nil
 	}
 
 	// Check for refinery (suffix marker)
-	if rest == "refinery" {
+	if rest == string(RoleRefinery) {
 		return &AgentIdentity{Role: RoleRefinery, Rig: rig, Prefix: prefix}, nil
 	}
 

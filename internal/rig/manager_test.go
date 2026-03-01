@@ -1226,3 +1226,139 @@ func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {
 		}
 	}
 }
+
+// createTestGitRepoForRig creates a minimal git repo with one commit suitable
+// for use as a remote in AddRig tests. Returns the repo path.
+func createTestGitRepoForRig(t *testing.T, name string) string {
+	t.Helper()
+	repoDir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", name, err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# "+name+"\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "Initial commit"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	return repoDir
+}
+
+// fakeBDForAddRig puts a minimal no-op bd shim on PATH so that AddRig's
+// InitBeads and initAgentBeads calls succeed.
+func fakeBDForAddRig(t *testing.T) {
+	t.Helper()
+	script := `#!/bin/bash
+# no-op bd shim for AddRig tests
+cmd="$1"
+[[ "$cmd" == "--allow-stale" ]] && { shift; cmd="$1"; }
+shift
+case "$cmd" in
+  init|config|slot) exit 0 ;;
+  show) echo "[]" ;;
+  create)
+    id=""; title=""
+    for arg in "$@"; do
+      case "$arg" in --id=*) id="${arg#--id=}" ;; --title=*) title="${arg#--title=}" ;; esac
+    done
+    printf '{"id":"%s","title":"%s","description":"","issue_type":"agent"}' "$id" "$title"
+    ;;
+  *) exit 0 ;;
+esac
+`
+	windowsScript := "@echo off\r\nif \"%1\"==\"init\" exit /b 0\r\nif \"%1\"==\"config\" exit /b 0\r\nif \"%1\"==\"slot\" exit /b 0\r\nif \"%1\"==\"--allow-stale\" shift\r\nif \"%1\"==\"show\" echo [] & exit /b 0\r\nif \"%1\"==\"create\" echo {\"id\":\"x\",\"title\":\"x\"} & exit /b 0\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestAddRig_UpstreamURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based bd shim not reliable on Windows CI")
+	}
+
+	fakeBDForAddRig(t)
+
+	root, rigsConfig := setupTestTown(t)
+	forkURL := createTestGitRepoForRig(t, "fork")
+	upstreamURL := createTestGitRepoForRig(t, "upstream")
+
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rig, err := manager.AddRig(AddRigOptions{
+		Name:        "forkrig",
+		GitURL:      forkURL,
+		UpstreamURL: upstreamURL,
+		BeadsPrefix: "fk",
+	})
+	if err != nil {
+		t.Fatalf("AddRig: %v", err)
+	}
+
+	rigPath := filepath.Join(root, "forkrig")
+
+	t.Run("bare repo upstream remote", func(t *testing.T) {
+		bareGit := git.NewGitWithDir(filepath.Join(rigPath, ".repo.git"), "")
+		got, err := bareGit.GetUpstreamURL()
+		if err != nil {
+			t.Fatalf("GetUpstreamURL: %v", err)
+		}
+		if got != upstreamURL {
+			t.Errorf("bare upstream = %q, want %q", got, upstreamURL)
+		}
+	})
+
+	t.Run("mayor clone upstream remote", func(t *testing.T) {
+		mayorGit := git.NewGit(filepath.Join(rigPath, "mayor", "rig"))
+		got, err := mayorGit.GetUpstreamURL()
+		if err != nil {
+			t.Fatalf("GetUpstreamURL: %v", err)
+		}
+		if got != upstreamURL {
+			t.Errorf("mayor upstream = %q, want %q", got, upstreamURL)
+		}
+	})
+
+	t.Run("config.json round-trips upstream_url", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(rigPath, "config.json"))
+		if err != nil {
+			t.Fatalf("reading config.json: %v", err)
+		}
+		var cfg RigConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("parsing config.json: %v", err)
+		}
+		if cfg.UpstreamURL != upstreamURL {
+			t.Errorf("config.json UpstreamURL = %q, want %q", cfg.UpstreamURL, upstreamURL)
+		}
+	})
+
+	t.Run("town registry persists upstream_url", func(t *testing.T) {
+		entry, ok := rigsConfig.Rigs["forkrig"]
+		if !ok {
+			t.Fatal("rig not found in town config")
+		}
+		if entry.UpstreamURL != upstreamURL {
+			t.Errorf("RigEntry.UpstreamURL = %q, want %q", entry.UpstreamURL, upstreamURL)
+		}
+	})
+
+	_ = rig
+}

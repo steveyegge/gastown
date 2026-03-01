@@ -140,18 +140,32 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 
 	settings, err := config.LoadRigSettings(settingsPath)
 	if err == nil && settings.Namepool != nil {
-		// Use configured namepool settings
+		// If style is set but not built-in and no explicit names, resolve custom theme
+		names := settings.Namepool.Names
+		if len(names) == 0 && settings.Namepool.Style != "" && !IsBuiltinTheme(settings.Namepool.Style) {
+			if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
+				if resolved, rErr := ResolveThemeNames(townRoot, settings.Namepool.Style); rErr == nil {
+					names = resolved
+				}
+			}
+		}
 		pool = NewNamePoolWithConfig(
 			r.Path,
 			r.Name,
 			settings.Namepool.Style,
-			settings.Namepool.Names,
+			names,
 			settings.Namepool.MaxBeforeNumbering,
 		)
 	} else {
 		// Use defaults
 		pool = NewNamePool(r.Path, r.Name)
 	}
+
+	// Set town root for custom theme resolution in getNames()
+	if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
+		pool.SetTownRoot(townRoot)
+	}
+
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
 	return &Manager{

@@ -228,29 +228,29 @@ type ParsedIdentity struct {
 // All other functions should use the extracted components to look up role config.
 func parseIdentity(identity string) (*ParsedIdentity, error) {
 	switch identity {
-	case "mayor":
-		return &ParsedIdentity{RoleType: "mayor"}, nil
-	case "deacon":
-		return &ParsedIdentity{RoleType: "deacon"}, nil
+	case constants.RoleMayor:
+		return &ParsedIdentity{RoleType: constants.RoleMayor}, nil
+	case constants.RoleDeacon:
+		return &ParsedIdentity{RoleType: constants.RoleDeacon}, nil
 	}
 
 	// Pattern: <rig>-witness → witness role
 	if strings.HasSuffix(identity, "-witness") {
 		rigName := strings.TrimSuffix(identity, "-witness")
-		return &ParsedIdentity{RoleType: "witness", RigName: rigName}, nil
+		return &ParsedIdentity{RoleType: constants.RoleWitness, RigName: rigName}, nil
 	}
 
 	// Pattern: <rig>-refinery → refinery role
 	if strings.HasSuffix(identity, "-refinery") {
 		rigName := strings.TrimSuffix(identity, "-refinery")
-		return &ParsedIdentity{RoleType: "refinery", RigName: rigName}, nil
+		return &ParsedIdentity{RoleType: constants.RoleRefinery, RigName: rigName}, nil
 	}
 
 	// Pattern: <rig>-crew-<name> → crew role
 	if strings.Contains(identity, "-crew-") {
 		parts := strings.SplitN(identity, "-crew-", 2)
 		if len(parts) == 2 {
-			return &ParsedIdentity{RoleType: "crew", RigName: parts[0], AgentName: parts[1]}, nil
+			return &ParsedIdentity{RoleType: constants.RoleCrew, RigName: parts[0], AgentName: parts[1]}, nil
 		}
 	}
 
@@ -258,7 +258,7 @@ func parseIdentity(identity string) (*ParsedIdentity, error) {
 	if strings.Contains(identity, "-polecat-") {
 		parts := strings.SplitN(identity, "-polecat-", 2)
 		if len(parts) == 2 {
-			return &ParsedIdentity{RoleType: "polecat", RigName: parts[0], AgentName: parts[1]}, nil
+			return &ParsedIdentity{RoleType: constants.RolePolecat, RigName: parts[0], AgentName: parts[1]}, nil
 		}
 	}
 
@@ -266,7 +266,7 @@ func parseIdentity(identity string) (*ParsedIdentity, error) {
 	if strings.Contains(identity, "/polecats/") {
 		parts := strings.Split(identity, "/polecats/")
 		if len(parts) == 2 {
-			return &ParsedIdentity{RoleType: "polecat", RigName: parts[0], AgentName: parts[1]}, nil
+			return &ParsedIdentity{RoleType: constants.RolePolecat, RigName: parts[0], AgentName: parts[1]}, nil
 		}
 	}
 
@@ -317,17 +317,17 @@ func (d *Daemon) identityToSession(identity string) string {
 	}
 
 	switch parsed.RoleType {
-	case "mayor":
+	case constants.RoleMayor:
 		return session.MayorSessionName()
-	case "deacon":
+	case constants.RoleDeacon:
 		return session.DeaconSessionName()
-	case "witness":
+	case constants.RoleWitness:
 		return session.WitnessSessionName(session.PrefixFor(parsed.RigName))
-	case "refinery":
+	case constants.RoleRefinery:
 		return session.RefinerySessionName(session.PrefixFor(parsed.RigName))
-	case "crew":
+	case constants.RoleCrew:
 		return session.CrewSessionName(session.PrefixFor(parsed.RigName), parsed.AgentName)
-	case "polecat":
+	case constants.RolePolecat:
 		return session.PolecatSessionName(session.PrefixFor(parsed.RigName), parsed.AgentName)
 	default:
 		return ""
@@ -409,17 +409,17 @@ func (d *Daemon) getWorkDir(config *beads.RoleConfig, parsed *ParsedIdentity) st
 
 	// Fallback: use default patterns based on role type
 	switch parsed.RoleType {
-	case "mayor":
+	case constants.RoleMayor:
 		return d.config.TownRoot
-	case "deacon":
+	case constants.RoleDeacon:
 		return d.config.TownRoot
-	case "witness":
+	case constants.RoleWitness:
 		return filepath.Join(d.config.TownRoot, parsed.RigName)
-	case "refinery":
+	case constants.RoleRefinery:
 		return filepath.Join(d.config.TownRoot, parsed.RigName, "refinery", "rig")
-	case "crew":
+	case constants.RoleCrew:
 		return filepath.Join(d.config.TownRoot, parsed.RigName, "crew", parsed.AgentName)
-	case "polecat":
+	case constants.RolePolecat:
 		// New structure: polecats/<name>/<rigname>/ (for LLM ergonomics)
 		// Old structure: polecats/<name>/ (for backward compat)
 		newPath := filepath.Join(d.config.TownRoot, parsed.RigName, "polecats", parsed.AgentName, parsed.RigName)
@@ -442,7 +442,7 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 
 	// Fallback: roles with persistent git clones need pre-sync
 	switch parsed.RoleType {
-	case "refinery", "crew":
+	case constants.RoleRefinery, constants.RoleCrew:
 		return true
 	default:
 		return false
@@ -480,19 +480,47 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 	// PrependEnv produces "export K=V ... && exec cmd" which is safe for
 	// WaitForCommand/pane_current_command detection: exec replaces the shell,
 	// so tmux sees the agent process, not a shell running exports.
-	var sessionIDEnv string
-	if runtimeConfig.Session != nil {
-		sessionIDEnv = runtimeConfig.Session.SessionIDEnv
+	defaultEnv := map[string]string{}
+	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
+		defaultEnv["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
 	}
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:         parsed.RoleType,
-		Rig:          parsed.RigName,
-		AgentName:    parsed.AgentName,
-		TownRoot:     d.config.TownRoot,
-		SessionIDEnv: sessionIDEnv,
-	})
-	config.SanitizeAgentEnv(envVars, map[string]string{})
-	return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
+	config.SanitizeAgentEnv(defaultEnv, map[string]string{})
+	defaultCmd := config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), defaultEnv)
+
+	// Polecats and crew need environment variables set in the command
+	if parsed.RoleType == constants.RolePolecat {
+		var sessionIDEnv string
+		if runtimeConfig.Session != nil {
+			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
+		}
+		envVars := config.AgentEnv(config.AgentEnvConfig{
+			Role:         constants.RolePolecat,
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
+		})
+		config.SanitizeAgentEnv(envVars, map[string]string{})
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
+	}
+
+	if parsed.RoleType == constants.RoleCrew {
+		var sessionIDEnv string
+		if runtimeConfig.Session != nil {
+			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
+		}
+		envVars := config.AgentEnv(config.AgentEnvConfig{
+			Role:         constants.RoleCrew,
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
+		})
+		config.SanitizeAgentEnv(envVars, map[string]string{})
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
+	}
+
+	return defaultCmd
 }
 
 // setSessionEnvironment sets environment variables for the tmux session.
@@ -520,7 +548,7 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 
 // applySessionTheme applies tmux theming to the session.
 func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
-	if parsed.RoleType == "mayor" {
+	if parsed.RoleType == constants.RoleMayor {
 		theme := tmux.MayorTheme()
 		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
 	} else if parsed.RigName != "" {
@@ -821,20 +849,20 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 	}
 
 	switch parsed.RoleType {
-	case "deacon":
+	case constants.RoleDeacon:
 		return beads.DeaconBeadIDTown()
-	case "mayor":
+	case constants.RoleMayor:
 		return beads.MayorBeadIDTown()
-	case "witness":
+	case constants.RoleWitness:
 		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
 		return beads.WitnessBeadIDWithPrefix(prefix, parsed.RigName)
-	case "refinery":
+	case constants.RoleRefinery:
 		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
 		return beads.RefineryBeadIDWithPrefix(prefix, parsed.RigName)
-	case "crew":
+	case constants.RoleCrew:
 		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
 		return beads.CrewBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
-	case "polecat":
+	case constants.RolePolecat:
 		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
 		return beads.PolecatBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
 	default:
@@ -861,15 +889,15 @@ func identityToBDActor(identity string) string {
 	}
 
 	switch parsed.RoleType {
-	case "mayor", "deacon":
+	case constants.RoleMayor, constants.RoleDeacon:
 		return parsed.RoleType
-	case "witness":
+	case constants.RoleWitness:
 		return parsed.RigName + "/witness"
-	case "refinery":
+	case constants.RoleRefinery:
 		return parsed.RigName + "/refinery"
-	case "crew":
+	case constants.RoleCrew:
 		return parsed.RigName + "/crew/" + parsed.AgentName
-	case "polecat":
+	case constants.RolePolecat:
 		return parsed.RigName + "/polecats/" + parsed.AgentName
 	default:
 		return identity
@@ -1128,7 +1156,7 @@ func (d *Daemon) extractRigFromAgentID(agentID string) string {
 	// Use the beads package helper to correctly parse agent bead IDs.
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
 	rig, role, _, ok := beads.ParseAgentBeadID(agentID)
-	if !ok || role != "polecat" {
+	if !ok || role != constants.RolePolecat {
 		return ""
 	}
 	return rig

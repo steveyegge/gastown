@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/dog"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -94,7 +95,7 @@ func TestDetectStaleWorkingDogs_ClearsStaleWorkers(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Dog working for 3 hours with no activity — should be cleared.
-	testSetupWorkingDogState(t, townRoot, "stale", "mol-convoy-feed", time.Now().Add(-3*time.Hour))
+	testSetupWorkingDogState(t, townRoot, "stale", constants.MolConvoyFeed, time.Now().Add(-3*time.Hour))
 
 	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 
@@ -120,7 +121,7 @@ func TestDetectStaleWorkingDogs_SkipsRecentWorkers(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Dog working for 30 minutes — should NOT be cleared.
-	testSetupWorkingDogState(t, townRoot, "active", "mol-convoy-feed", time.Now().Add(-30*time.Minute))
+	testSetupWorkingDogState(t, townRoot, "active", constants.MolConvoyFeed, time.Now().Add(-30*time.Minute))
 
 	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 
@@ -131,8 +132,8 @@ func TestDetectStaleWorkingDogs_SkipsRecentWorkers(t *testing.T) {
 	if dg.State != dog.StateWorking {
 		t.Errorf("active dog state = %q, want working", dg.State)
 	}
-	if dg.Work != "mol-convoy-feed" {
-		t.Errorf("active dog work = %q, want mol-convoy-feed", dg.Work)
+	if dg.Work != constants.MolConvoyFeed {
+		t.Errorf("active dog work = %q, want %s", dg.Work, constants.MolConvoyFeed)
 	}
 }
 

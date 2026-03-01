@@ -1387,7 +1387,12 @@ func requireNotifyTestSocket(t *testing.T) string {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
 	}
-	socket := fmt.Sprintf("gt-test-notify-%d", os.Getpid())
+	// Use test name for unique socket per test to prevent cleanup interference.
+	// Sanitize: tmux socket names cannot contain slashes or dots.
+	safe := strings.NewReplacer("/", "-", ".", "-").Replace(t.Name())
+	socket := fmt.Sprintf("gt-test-%s-%d", safe, os.Getpid())
+	// Pre-kill any stale server on this socket (e.g., from a crashed prior run).
+	_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
 	t.Cleanup(func() {
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
 	})

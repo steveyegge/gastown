@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 const (
@@ -97,7 +98,7 @@ func (d *Daemon) reapWisps() {
 	dryRun := config.DryRun
 
 	// Pour molecule to track this patrol cycle.
-	mol := d.pourDogMolecule("mol-dog-reaper", map[string]string{
+	mol := d.pourDogMolecule(constants.MolDogReaper, map[string]string{
 		"max_age":   maxAge.String(),
 		"purge_age": deleteAge.String(),
 	})

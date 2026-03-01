@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // PatrolMoleculesExistCheck verifies that patrol formulas are accessible.
@@ -33,11 +34,7 @@ func NewPatrolMoleculesExistCheck() *PatrolMoleculesExistCheck {
 }
 
 // patrolFormulas are the required patrol formula names.
-var patrolFormulas = []string{
-	"mol-deacon-patrol",
-	"mol-witness-patrol",
-	"mol-refinery-patrol",
-}
+var patrolFormulas = constants.PatrolFormulas()
 
 // Run checks if patrol formulas are accessible.
 func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {

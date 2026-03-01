@@ -1091,9 +1091,9 @@ func runDeaconHealthState(cmd *cobra.Command, args []string) error {
 // Note: Town-level agents (Mayor, Deacon) use hq- prefix bead IDs stored in town beads.
 func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 	switch address {
-	case "deacon":
+	case constants.RoleDeacon:
 		return beads.DeaconBeadIDTown(), session.DeaconSessionName(), nil
-	case "mayor":
+	case constants.RoleMayor:
 		return beads.MayorBeadIDTown(), session.MayorSessionName(), nil
 	}
 
@@ -1103,9 +1103,9 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 		// rig/role: "gastown/witness", "gastown/refinery"
 		rig, role := parts[0], parts[1]
 		switch role {
-		case "witness":
+		case constants.RoleWitness:
 			return session.WitnessSessionName(session.PrefixFor(rig)), session.WitnessSessionName(session.PrefixFor(rig)), nil
-		case "refinery":
+		case constants.RoleRefinery:
 			return session.RefinerySessionName(session.PrefixFor(rig)), session.RefinerySessionName(session.PrefixFor(rig)), nil
 		default:
 			return "", "", fmt.Errorf("unknown role: %s", role)
@@ -1116,7 +1116,7 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 		switch agentType {
 		case "polecats":
 			return session.PolecatSessionName(session.PrefixFor(rig), name), session.PolecatSessionName(session.PrefixFor(rig), name), nil
-		case "crew":
+		case constants.RoleCrew:
 			return session.CrewSessionName(session.PrefixFor(rig), name), session.CrewSessionName(session.PrefixFor(rig), name), nil
 		default:
 			return "", "", fmt.Errorf("unknown agent type: %s", agentType)

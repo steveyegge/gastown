@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // EventSource represents a source of events
@@ -191,17 +192,17 @@ func parseBeadContext(beadID string) (actor, rig, role string) {
 
 	// Build actor identifier
 	switch parsedRole {
-	case "mayor", "deacon":
+	case constants.RoleMayor, constants.RoleDeacon:
 		actor = parsedRole
-	case "witness", "refinery":
+	case constants.RoleWitness, constants.RoleRefinery:
 		actor = parsedRole
-	case "crew":
+	case constants.RoleCrew:
 		if name != "" {
 			actor = parsedRig + "/crew/" + name
 		} else {
 			actor = parsedRole
 		}
-	case "polecat":
+	case constants.RolePolecat:
 		if name != "" {
 			actor = parsedRig + "/" + name
 		} else {
@@ -370,7 +371,7 @@ func parseGtEventLine(line string) *Event {
 	if rig == "" && ge.Actor != "" {
 		// Extract rig from actor like "gastown/witness"
 		parts := strings.Split(ge.Actor, "/")
-		if len(parts) > 0 && parts[0] != "mayor" && parts[0] != "deacon" {
+		if len(parts) > 0 && parts[0] != constants.RoleMayor && parts[0] != constants.RoleDeacon {
 			rig = parts[0]
 		}
 	}
@@ -383,16 +384,16 @@ func parseGtEventLine(line string) *Event {
 			role = parts[len(parts)-1]
 			// Check for known roles
 			switch parts[len(parts)-1] {
-			case "witness", "refinery":
+			case constants.RoleWitness, constants.RoleRefinery:
 				role = parts[len(parts)-1]
 			default:
 				// Could be polecat name - check second-to-last part
 				if len(parts) >= 2 {
 					switch parts[len(parts)-2] {
 					case "polecats":
-						role = "polecat"
-					case "crew":
-						role = "crew"
+						role = constants.RolePolecat
+					case constants.RoleCrew:
+						role = constants.RoleCrew
 					}
 				}
 			}

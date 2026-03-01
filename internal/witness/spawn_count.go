@@ -5,15 +5,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// defaultMaxBeadRespawns is the threshold above which a SPAWN_STORM warning is
-// included in the RECOVERED_BEAD mail sent to deacon. It does not block respawns
-// — the intent is audit visibility so deacon/mayor can investigate.
-const defaultMaxBeadRespawns = 2
+// respawnMu serializes recordBeadRespawn calls to prevent concurrent
+// load-modify-save cycles from losing respawn count increments.
+var respawnMu sync.Mutex
+
+// DefaultMaxBeadRespawns is the threshold at which respawns are BLOCKED and
+// the bead is escalated to mayor instead of re-dispatched. This is the
+// circuit breaker that prevents spawn storms (clown show #22).
+const DefaultMaxBeadRespawns = 3
 
 // beadRespawnRecord tracks how many times a single bead has been reset for re-dispatch.
 type beadRespawnRecord struct {
@@ -60,11 +65,37 @@ func saveBeadRespawnState(townRoot string, state *beadRespawnState) error {
 	return os.WriteFile(stateFile, data, 0600)
 }
 
-// recordBeadRespawn increments the respawn count for beadID and returns the new count.
+// ShouldBlockRespawn returns true if the bead has already been respawned
+// DefaultMaxBeadRespawns times. When true, the caller should escalate to
+// mayor instead of sending RECOVERED_BEAD to deacon for re-dispatch.
+// This is the primary circuit breaker for spawn storms (clown show #22).
+func ShouldBlockRespawn(workDir, beadID string) bool {
+	respawnMu.Lock()
+	defer respawnMu.Unlock()
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+	state := loadBeadRespawnState(townRoot)
+	rec, ok := state.Beads[beadID]
+	if !ok {
+		return false
+	}
+	return rec.Count >= DefaultMaxBeadRespawns
+}
+
+// RecordBeadRespawn increments the respawn count for beadID and returns the new count.
 // workDir is the rig path; townRoot is resolved internally via workspace.Find.
 // On state file errors the count is still incremented in memory and returned, so the
 // caller can log/warn without blocking the respawn itself.
-func recordBeadRespawn(workDir, beadID string) int {
+//
+// Serialized via respawnMu to prevent concurrent patrol cycles from racing on
+// the load-modify-save cycle and losing count increments.
+func RecordBeadRespawn(workDir, beadID string) int {
+	respawnMu.Lock()
+	defer respawnMu.Unlock()
+
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		townRoot = workDir
@@ -79,4 +110,19 @@ func recordBeadRespawn(workDir, beadID string) int {
 	rec.LastRespawn = time.Now().UTC()
 	_ = saveBeadRespawnState(townRoot, state) // Non-fatal: tracking failure must not block respawn
 	return rec.Count
+}
+
+// ResetBeadRespawnCount resets the respawn counter for beadID to zero.
+// Used by `gt sling respawn-reset` to allow re-dispatch after investigation.
+func ResetBeadRespawnCount(workDir, beadID string) error {
+	respawnMu.Lock()
+	defer respawnMu.Unlock()
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+	state := loadBeadRespawnState(townRoot)
+	delete(state.Beads, beadID)
+	return saveBeadRespawnState(townRoot, state)
 }

@@ -113,6 +113,10 @@ func collectExistingMolecules(info *beadInfo) []string {
 	// Check dependency bonds (ground truth - bd mol bond creates these)
 	for _, dep := range info.Dependencies {
 		if strings.Contains(dep.ID, "-wisp-") && !seen[dep.ID] {
+			// Skip molecules already closed/burned — bond is stale
+			if dep.Status == "closed" || dep.Status == "tombstone" {
+				continue
+			}
 			seen[dep.ID] = true
 			molecules = append(molecules, dep.ID)
 		}

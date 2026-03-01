@@ -297,6 +297,7 @@ var (
 	rigAddLocalRepo    string
 	rigAddBranch       string
 	rigAddPushURL      string
+	rigAddUpstreamURL  string
 	rigAddAdopt        bool
 	rigAddAdoptURL     string
 	rigAddAdoptForce   bool
@@ -356,6 +357,7 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
 	rigAddCmd.Flags().StringVar(&rigAddPushURL, "push-url", "", "Push URL for read-only upstreams (push to fork)")
+	rigAddCmd.Flags().StringVar(&rigAddUpstreamURL, "upstream-url", "", "Upstream repository URL (for fork workflows)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
 	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
@@ -522,6 +524,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid push URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddPushURL)
 	}
 
+	// Validate upstream URL if provided
+	rigAddUpstreamURL = strings.TrimSpace(rigAddUpstreamURL)
+	if rigAddUpstreamURL != "" && !isGitRemoteURL(rigAddUpstreamURL) {
+		return fmt.Errorf("invalid upstream URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddUpstreamURL)
+	}
+
 	startTime := time.Now()
 
 	// Add the rig
@@ -529,6 +537,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		Name:          name,
 		GitURL:        gitURL,
 		PushURL:       rigAddPushURL,
+		UpstreamURL:   rigAddUpstreamURL,
 		BeadsPrefix:   rigAddPrefix,
 		LocalRepo:     rigAddLocalRepo,
 		DefaultBranch: rigAddBranch,
@@ -907,11 +916,18 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid push URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddPushURL)
 	}
 
+	// Validate --upstream-url if provided
+	rigAddUpstreamURL = strings.TrimSpace(rigAddUpstreamURL)
+	if rigAddUpstreamURL != "" && !isGitRemoteURL(rigAddUpstreamURL) {
+		return fmt.Errorf("invalid upstream URL %q: expected a remote URL (e.g. https://, git@host:, ssh://, s3://)", rigAddUpstreamURL)
+	}
+
 	// Register the existing rig
 	result, err := mgr.RegisterRig(rig.RegisterRigOptions{
 		Name:        name,
 		GitURL:      rigAddAdoptURL,
 		PushURL:     rigAddPushURL,
+		UpstreamURL: rigAddUpstreamURL,
 		BeadsPrefix: rigAddPrefix,
 		Force:       rigAddAdoptForce,
 	})

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -83,7 +84,7 @@ func detectCrewFromCwd() (*crewDetection, error) {
 	}
 
 	rigName := parts[0]
-	if parts[1] != "crew" {
+	if parts[1] != constants.RoleCrew {
 		return nil, fmt.Errorf("not in a crew workspace (not in crew/ directory)")
 	}
 	crewName := parts[2]

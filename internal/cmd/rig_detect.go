@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -95,7 +96,7 @@ func detectRigFromPath(townRoot, absPath string) string {
 	candidateRig := parts[0]
 
 	switch candidateRig {
-	case "mayor", "deacon", ".beads", ".claude", ".git", "plugins":
+	case constants.RoleMayor, constants.RoleDeacon, ".beads", ".claude", ".git", "plugins":
 		return ""
 	}
 

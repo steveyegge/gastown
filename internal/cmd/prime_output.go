@@ -10,6 +10,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -33,17 +34,17 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 	var roleName string
 	switch ctx.Role {
 	case RoleMayor:
-		roleName = "mayor"
+		roleName = constants.RoleMayor
 	case RoleDeacon:
-		roleName = "deacon"
+		roleName = constants.RoleDeacon
 	case RoleWitness:
-		roleName = "witness"
+		roleName = constants.RoleWitness
 	case RoleRefinery:
-		roleName = "refinery"
+		roleName = constants.RoleRefinery
 	case RolePolecat:
-		roleName = "polecat"
+		roleName = constants.RolePolecat
 	case RoleCrew:
-		roleName = "crew"
+		roleName = constants.RoleCrew
 	case RoleBoot:
 		roleName = "boot"
 	case RoleDog:

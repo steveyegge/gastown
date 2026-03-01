@@ -41,7 +41,7 @@ jobs:
           mv dolt-linux-amd64/bin/dolt ~/go/bin/dolt
 
       - name: Pre-pull Dolt Docker image
-        run: docker pull dolthub/dolt-sql-server:1.82.4
+        run: docker pull dolthub/dolt-sql-server:1.83.0
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH

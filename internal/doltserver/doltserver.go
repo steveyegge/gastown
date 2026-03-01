@@ -380,8 +380,9 @@ func IsRunning(townRoot string) (bool, int, error) {
 			if err == nil {
 				// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
 				if err := process.Signal(syscall.Signal(0)); err == nil {
-					// Verify it's actually a dolt process
-					if isDoltProcess(pid) {
+					// Verify it's actually serving on the expected port.
+					// More reliable than ps string matching (ZFC fix: gt-utuk).
+					if isDoltServerOnPort(config.Port) {
 						return true, pid, nil
 					}
 				}
@@ -393,11 +394,11 @@ func IsRunning(townRoot string) (bool, int, error) {
 
 	// No valid PID file - check if port is in use by dolt anyway.
 	// This catches externally-started dolt servers.
-	// Verify --data-dir matches this town to avoid claiming another town's Dolt.
+	// Verify data-dir from state file matches this town to avoid claiming another town's Dolt.
 	pid := findDoltServerOnPort(config.Port)
 	if pid > 0 {
-		processDataDir := getProcessDataDir(pid)
-		if processDataDir == "" || processDataDir == config.DataDir {
+		serverDataDir := getServerDataDir(townRoot, pid)
+		if serverDataDir == "" || serverDataDir == config.DataDir {
 			return true, pid, nil
 		}
 		// Port is used by a different town's Dolt — not ours
@@ -556,15 +557,16 @@ func CheckPortConflict(townRoot string) (int, string) {
 	if pid <= 0 {
 		return 0, ""
 	}
-	dataDir := getProcessDataDir(pid)
+	dataDir := getServerDataDir(townRoot, pid)
 	if dataDir == "" || dataDir == cfg.DataDir {
 		return 0, "" // It's ours or unknown
 	}
 	return pid, dataDir
 }
 
-// findDoltServerOnPort finds a dolt sql-server process listening on the given port.
-// Returns the PID or 0 if not found.
+// findDoltServerOnPort finds a process listening on the given port.
+// Returns the PID or 0 if not found. Uses lsof to identify the listener PID.
+// Does not verify process identity via ps string matching (ZFC fix: gt-utuk).
 func findDoltServerOnPort(port int) int {
 	// Use lsof to find the LISTENING process on port (not clients connected to it).
 	// Without -sTCP:LISTEN, lsof returns client PIDs (e.g., gt daemon) first,
@@ -586,47 +588,34 @@ func findDoltServerOnPort(port int) int {
 		return 0
 	}
 
-	// Verify it's a dolt process
-	if isDoltProcess(pid) {
-		return pid
-	}
-
-	return 0
+	return pid
 }
 
-// isDoltProcess checks if a PID is actually a dolt sql-server process.
-func isDoltProcess(pid int) bool {
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	output, err := cmd.Output()
+// isDoltServerOnPort checks if a dolt server is accepting connections on the given port.
+// More reliable than ps string matching for process identity verification (ZFC fix: gt-utuk).
+func isDoltServerOnPort(port int) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 2*time.Second)
 	if err != nil {
 		return false
 	}
-
-	cmdline := strings.TrimSpace(string(output))
-	return strings.Contains(cmdline, "dolt") && strings.Contains(cmdline, "sql-server")
+	conn.Close()
+	return true
 }
 
-// getProcessDataDir extracts the --data-dir value from a dolt sql-server process's
-// command line. Returns empty string if the process doesn't have --data-dir set
-// (meaning it's using CWD-based launch) or if the command line can't be read.
-func getProcessDataDir(pid int) string {
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	output, err := cmd.Output()
+// getServerDataDir returns the data directory for the Dolt server associated with townRoot.
+// Reads from the persisted state file instead of parsing ps command output
+// (ZFC fix: gt-utuk — eliminates fragile ps string matching).
+// Returns empty string if the state file is missing or the PID doesn't match.
+func getServerDataDir(townRoot string, pid int) string {
+	state, err := LoadState(townRoot)
 	if err != nil {
 		return ""
 	}
-	cmdline := strings.TrimSpace(string(output))
-
-	// Look for --data-dir flag in command line
-	parts := strings.Fields(cmdline)
-	for i, part := range parts {
-		if part == "--data-dir" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-		if strings.HasPrefix(part, "--data-dir=") {
-			return strings.TrimPrefix(part, "--data-dir=")
-		}
+	// Only trust the state if the PID matches or we don't know the PID
+	if state.PID == pid || pid == 0 {
+		return state.DataDir
 	}
+	// PID mismatch — state is stale or belongs to a different server
 	return ""
 }
 
@@ -637,24 +626,24 @@ func getProcessDataDir(pid int) string {
 func VerifyServerDataDir(townRoot string) (bool, error) {
 	config := DefaultConfig(townRoot)
 
-	// First check: inspect the process's --data-dir flag
+	// First check: inspect the state file for data-dir (ZFC fix: gt-utuk).
 	running, pid, err := IsRunning(townRoot)
 	if err != nil || !running {
 		return false, fmt.Errorf("server not running")
 	}
 
-	processDataDir := getProcessDataDir(pid)
-	if processDataDir != "" {
+	stateDataDir := getServerDataDir(townRoot, pid)
+	if stateDataDir != "" {
 		// Normalize paths for comparison
 		expectedDir, _ := filepath.Abs(config.DataDir)
-		actualDir, _ := filepath.Abs(processDataDir)
+		actualDir, _ := filepath.Abs(stateDataDir)
 		if expectedDir != actualDir {
 			return false, fmt.Errorf("server data-dir mismatch: expected %s, got %s (PID %d)", expectedDir, actualDir, pid)
 		}
 		return true, nil
 	}
 
-	// No --data-dir flag means CWD-based launch — check served databases
+	// No state file or PID mismatch — check served databases
 	fsDatabases, fsErr := ListDatabases(townRoot)
 	if fsErr != nil || len(fsDatabases) == 0 {
 		// Can't verify if no databases expected
@@ -695,15 +684,20 @@ func KillImposters(townRoot string) error {
 		return nil // No server on port
 	}
 
-	processDataDir := getProcessDataDir(pid)
+	// Check state file for data-dir instead of ps string matching (ZFC fix: gt-utuk).
+	stateDataDir := getServerDataDir(townRoot, pid)
 	expectedDir, _ := filepath.Abs(config.DataDir)
 
 	isImposter := false
-	if processDataDir == "" {
-		// No --data-dir flag — CWD-based launch, likely an imposter
-		isImposter = true
+	if stateDataDir == "" {
+		// No state record for this PID — fall back to database verification.
+		// Query the server to check if it serves our databases.
+		legitimate, err := VerifyServerDataDir(townRoot)
+		if err != nil || !legitimate {
+			isImposter = true
+		}
 	} else {
-		actualDir, _ := filepath.Abs(processDataDir)
+		actualDir, _ := filepath.Abs(stateDataDir)
 		if expectedDir != actualDir {
 			isImposter = true
 		}
@@ -714,7 +708,7 @@ func KillImposters(townRoot string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Killing imposter dolt sql-server (PID %d, data-dir: %q, expected: %s)\n",
-		pid, processDataDir, expectedDir)
+		pid, stateDataDir, expectedDir)
 
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -752,12 +746,11 @@ func CheckPortAvailable(port int) error {
 
 // PortHolder returns the PID and data directory of the process holding port.
 // Returns (0, "") if the port is free or the holder cannot be identified.
+// Note: data directory is only available when townRoot context is known;
+// without it, returns PID only (ZFC fix: gt-utuk).
 func PortHolder(port int) (pid int, dataDir string) {
 	pid = findDoltServerOnPort(port)
-	if pid > 0 {
-		dataDir = getProcessDataDir(pid)
-	}
-	return pid, dataDir
+	return pid, ""
 }
 
 // FindFreePort returns the first free TCP port at or above startFrom.
@@ -778,9 +771,7 @@ func checkPortAvailable(port int) error {
 		// Try to identify who holds the port
 		detail := ""
 		if pid := findDoltServerOnPort(port); pid > 0 {
-			if dataDir := getProcessDataDir(pid); dataDir != "" {
-				detail = fmt.Sprintf("\nPort is held by dolt PID %d serving %s", pid, dataDir)
-			}
+			detail = fmt.Sprintf("\nPort is held by PID %d", pid)
 		}
 		return fmt.Errorf("port %d is already in use.%s\n"+
 			"If you're running multiple Gas Town instances, each needs a unique Dolt port.\n"+

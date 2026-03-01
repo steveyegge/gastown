@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestGetFormulaNames(t *testing.T) {
@@ -18,8 +19,8 @@ func TestGetFormulaNames(t *testing.T) {
 
 	// Create some formula files
 	formulas := []string{
-		"mol-deacon-patrol.formula.toml",
-		"mol-witness-patrol.formula.toml",
+		constants.MolDeaconPatrol + ".formula.toml",
+		constants.MolWitnessPatrol + ".formula.toml",
 		"shiny.formula.toml",
 	}
 	for _, f := range formulas {
@@ -40,7 +41,7 @@ func TestGetFormulaNames(t *testing.T) {
 		t.Fatal("getFormulaNames returned nil")
 	}
 
-	expected := []string{"mol-deacon-patrol", "mol-witness-patrol", "shiny"}
+	expected := []string{constants.MolDeaconPatrol, constants.MolWitnessPatrol, "shiny"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected formula name %q not found", name)
@@ -66,16 +67,16 @@ func TestGetFormulaNames_NonexistentDir(t *testing.T) {
 
 func TestFilterFormulaScaffolds(t *testing.T) {
 	formulaNames := map[string]bool{
-		"mol-deacon-patrol":  true,
-		"mol-witness-patrol": true,
+		constants.MolDeaconPatrol:  true,
+		constants.MolWitnessPatrol: true,
 	}
 
 	issues := []*beads.Issue{
-		{ID: "mol-deacon-patrol", Title: "mol-deacon-patrol"},
-		{ID: "mol-deacon-patrol.inbox-check", Title: "Handle callbacks"},
-		{ID: "mol-deacon-patrol.health-scan", Title: "Check health"},
-		{ID: "mol-witness-patrol", Title: "mol-witness-patrol"},
-		{ID: "mol-witness-patrol.loop-or-exit", Title: "Loop or exit"},
+		{ID: constants.MolDeaconPatrol, Title: constants.MolDeaconPatrol},
+		{ID: constants.MolDeaconPatrol + ".inbox-check", Title: "Handle callbacks"},
+		{ID: constants.MolDeaconPatrol + ".health-scan", Title: "Check health"},
+		{ID: constants.MolWitnessPatrol, Title: constants.MolWitnessPatrol},
+		{ID: constants.MolWitnessPatrol + ".loop-or-exit", Title: "Loop or exit"},
 		{ID: "hq-123", Title: "Real work item"},
 		{ID: "hq-wisp-abc", Title: "Actual wisp"},
 		{ID: "gt-456", Title: "Project issue"},
@@ -103,7 +104,7 @@ func TestFilterFormulaScaffolds(t *testing.T) {
 func TestFilterFormulaScaffolds_NilFormulaNames(t *testing.T) {
 	issues := []*beads.Issue{
 		{ID: "hq-123", Title: "Real work"},
-		{ID: "mol-deacon-patrol", Title: "Would be filtered"},
+		{ID: constants.MolDeaconPatrol, Title: "Would be filtered"},
 	}
 
 	// With nil formula names, should return all issues unchanged
@@ -116,7 +117,7 @@ func TestFilterFormulaScaffolds_NilFormulaNames(t *testing.T) {
 func TestFilterFormulaScaffolds_EmptyFormulaNames(t *testing.T) {
 	issues := []*beads.Issue{
 		{ID: "hq-123", Title: "Real work"},
-		{ID: "mol-deacon-patrol", Title: "Would be filtered"},
+		{ID: constants.MolDeaconPatrol, Title: "Would be filtered"},
 	}
 
 	// With empty formula names, should return all issues unchanged
@@ -127,7 +128,7 @@ func TestFilterFormulaScaffolds_EmptyFormulaNames(t *testing.T) {
 }
 
 func TestFilterFormulaScaffolds_EmptyIssues(t *testing.T) {
-	formulaNames := map[string]bool{"mol-deacon-patrol": true}
+	formulaNames := map[string]bool{constants.MolDeaconPatrol: true}
 	filtered := filterFormulaScaffolds([]*beads.Issue{}, formulaNames)
 	if len(filtered) != 0 {
 		t.Errorf("got %d issues, want 0", len(filtered))
@@ -136,7 +137,7 @@ func TestFilterFormulaScaffolds_EmptyIssues(t *testing.T) {
 
 func TestFilterFormulaScaffolds_DotInNonScaffold(t *testing.T) {
 	// Issue ID has a dot but prefix is not a formula name
-	formulaNames := map[string]bool{"mol-deacon-patrol": true}
+	formulaNames := map[string]bool{constants.MolDeaconPatrol: true}
 
 	issues := []*beads.Issue{
 		{ID: "hq-cv.synthesis-step", Title: "Convoy synthesis"},

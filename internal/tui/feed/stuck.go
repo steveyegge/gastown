@@ -286,17 +286,17 @@ func isRalphMode(issue *beads.Issue) bool {
 // not a rig name (e.g. "gastown"). Use session.PrefixFor(rig) to convert.
 func deriveSessionName(rig, role, name string) string {
 	switch role {
-	case "mayor":
+	case constants.RoleMayor:
 		return session.MayorSessionName()
-	case "deacon":
+	case constants.RoleDeacon:
 		return session.DeaconSessionName()
-	case "witness":
+	case constants.RoleWitness:
 		return session.WitnessSessionName(session.PrefixFor(rig))
-	case "refinery":
+	case constants.RoleRefinery:
 		return session.RefinerySessionName(session.PrefixFor(rig))
-	case "crew":
+	case constants.RoleCrew:
 		return session.CrewSessionName(session.PrefixFor(rig), name)
-	case "polecat":
+	case constants.RolePolecat:
 		return session.PolecatSessionName(session.PrefixFor(rig), name)
 	default:
 		// Fallback: construct from components

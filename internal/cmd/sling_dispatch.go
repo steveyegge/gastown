@@ -194,11 +194,17 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		}
 	}
 
-	// 2. Burn stale molecules (if formula and force)
+	// 2. Burn stale molecules (if formula applies)
 	if params.FormulaName != "" {
 		existingMolecules := collectExistingMolecules(info)
 		if len(existingMolecules) > 0 {
-			if params.Force {
+			// Auto-burn when bead is unassigned (molecules are definitionally stale),
+			// or when the assigned agent's session is dead. This unblocks the daemon's
+			// stranded convoy scan which never passes --force.
+			stale := params.Force ||
+				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
+				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
+			if stale {
 				fmt.Printf("  %s Burning %d stale molecule(s): %s\n",
 					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
 				if err := burnExistingMolecules(existingMolecules, params.BeadID, townRoot); err != nil {

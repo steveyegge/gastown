@@ -231,6 +231,46 @@ const (
 	EmojiPolecat = "😺"
 )
 
+// Molecule formula names for patrol and dog workflows.
+// These are used as formula identifiers in `bd mol wisp <name>` commands
+// and to match active patrol wisps by title prefix.
+const (
+	// MolDeaconPatrol is the deacon patrol formula name.
+	MolDeaconPatrol = "mol-deacon-patrol"
+
+	// MolWitnessPatrol is the witness patrol formula name.
+	MolWitnessPatrol = "mol-witness-patrol"
+
+	// MolRefineryPatrol is the refinery patrol formula name.
+	MolRefineryPatrol = "mol-refinery-patrol"
+
+	// MolDogReaper is the wisp reaper dog formula name.
+	MolDogReaper = "mol-dog-reaper"
+
+	// MolDogJSONL is the JSONL git backup dog formula name.
+	MolDogJSONL = "mol-dog-jsonl"
+
+	// MolDogCompactor is the Dolt compactor dog formula name.
+	MolDogCompactor = "mol-dog-compactor"
+
+	// MolDogDoctor is the health anomaly tracking dog formula name.
+	MolDogDoctor = "mol-dog-doctor"
+
+	// MolDogBackup is the Dolt backup dog formula name.
+	MolDogBackup = "mol-dog-backup"
+
+	// MolConvoyFeed is the convoy feeder formula name.
+	MolConvoyFeed = "mol-convoy-feed"
+
+	// MolConvoyCleanup is the convoy cleanup formula name.
+	MolConvoyCleanup = "mol-convoy-cleanup"
+)
+
+// PatrolFormulas returns the list of patrol formula names.
+func PatrolFormulas() []string {
+	return []string{MolDeaconPatrol, MolWitnessPatrol, MolRefineryPatrol}
+}
+
 // RoleEmoji returns the emoji for a given role name.
 func RoleEmoji(role string) string {
 	switch role {

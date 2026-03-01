@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -18,19 +16,9 @@ import (
 )
 
 // DoltDockerImage is the Docker image used for Dolt test containers.
-// Pinned to 1.43.0 because later versions only create root@localhost (not
-// root@%), so connections from Docker NAT fail. The initScriptPath()
-// workaround creates root@% at container init; once Dolt fixes the auth
-// bug upstream, bump this version.
-const DoltDockerImage = "dolthub/dolt-sql-server:1.43.0"
-
-// initScriptPath returns the absolute path to testdata/dolt-init.sql,
-// which creates root@'%' so the testcontainers module can connect
-// from outside the container network namespace.
-func initScriptPath() string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(thisFile), "testdata", "dolt-init.sql")
-}
+// DOLT_ROOT_HOST=% tells the entrypoint to create root@'%' (available
+// since Dolt 1.46.0), which lets testcontainers connect via TCP.
+const DoltDockerImage = "dolthub/dolt-sql-server:1.83.0"
 
 var (
 	doltCtr      *dolt.DoltContainer
@@ -56,7 +44,7 @@ func startSharedDoltContainer() {
 	ctx := context.Background()
 	ctr, err := dolt.Run(ctx, DoltDockerImage,
 		dolt.WithDatabase("gt_test"),
-		dolt.WithScripts(initScriptPath()),
+		testcontainers.WithEnv(map[string]string{"DOLT_ROOT_HOST": "%"}),
 	)
 	if err != nil {
 		doltCtrErr = fmt.Errorf("starting Dolt container: %w", err)
@@ -88,7 +76,7 @@ func StartIsolatedDoltContainer(t *testing.T) string {
 	ctx := context.Background()
 	ctr, err := dolt.Run(ctx, DoltDockerImage,
 		dolt.WithDatabase("gt_test"),
-		dolt.WithScripts(initScriptPath()),
+		testcontainers.WithEnv(map[string]string{"DOLT_ROOT_HOST": "%"}),
 	)
 	if err != nil {
 		t.Fatalf("starting Dolt container: %v", err)

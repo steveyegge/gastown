@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -191,22 +192,22 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 		rigPath := filepath.Join(townRoot, rig)
 
 		switch role {
-		case "crew":
+		case constants.RoleCrew:
 			crewDir := filepath.Join(rigPath, "crew")
 			if info, err := os.Stat(crewDir); err == nil && info.IsDir() {
 				targets = append(targets, crewDir)
 			}
-		case "polecat":
+		case constants.RolePolecat:
 			polecatsDir := filepath.Join(rigPath, "polecats")
 			if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
 				targets = append(targets, polecatsDir)
 			}
-		case "witness":
+		case constants.RoleWitness:
 			witnessDir := filepath.Join(rigPath, "witness")
 			if info, err := os.Stat(witnessDir); err == nil && info.IsDir() {
 				targets = append(targets, witnessDir)
 			}
-		case "refinery":
+		case constants.RoleRefinery:
 			refineryDir := filepath.Join(rigPath, "refinery")
 			if info, err := os.Stat(refineryDir); err == nil && info.IsDir() {
 				targets = append(targets, refineryDir)

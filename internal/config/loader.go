@@ -1303,9 +1303,9 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 // roles where settings and session directory are the same (mayor, deacon).
 func RoleSettingsDir(role, rigPath string) string {
 	switch role {
-	case "crew", "witness", "refinery":
+	case constants.RoleCrew, constants.RoleWitness, constants.RoleRefinery:
 		return filepath.Join(rigPath, role)
-	case "polecat":
+	case constants.RolePolecat:
 		return filepath.Join(rigPath, "polecats")
 	default:
 		return ""
@@ -1843,7 +1843,7 @@ func ExtractSimpleRole(gtRole string) string {
 		// "rig/crew/name" → "crew", "rig/polecats/name" → "polecat"
 		role := parts[1]
 		if role == "polecats" {
-			return "polecat"
+			return constants.RolePolecat
 		}
 		return role
 	default:
@@ -2185,7 +2185,7 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
+		Role:      constants.RolePolecat,
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
@@ -2201,7 +2201,7 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
+		Role:      constants.RolePolecat,
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
@@ -2218,7 +2218,7 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
+		Role:      constants.RoleCrew,
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
@@ -2234,7 +2234,7 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
+		Role:      constants.RoleCrew,
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,

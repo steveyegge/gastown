@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/style"
@@ -282,7 +283,7 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 	for id, issue := range agentBeads {
 		// Parse the bead ID to check if it's a polecat for this rig
 		beadRig, role, name, ok := beads.ParseAgentBeadID(id)
-		if !ok || role != "polecat" || beadRig != rigName {
+		if !ok || role != constants.RolePolecat || beadRig != rigName {
 			continue
 		}
 

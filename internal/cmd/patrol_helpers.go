@@ -182,9 +182,8 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
 	}
 
-	// Create root-only patrol wisp (steps are read inline from the formula).
-	// This avoids ~10 child wisps per cycle hitting Dolt.
-	spawnArgs := []string{"mol", "wisp", "create", protoID, "--root-only", "--actor", cfg.RoleName}
+	// Create the patrol wisp with all step children materialized
+	spawnArgs := []string{"mol", "wisp", "create", protoID, "--actor", cfg.RoleName}
 	for _, v := range cfg.ExtraVars {
 		spawnArgs = append(spawnArgs, "--var", v)
 	}

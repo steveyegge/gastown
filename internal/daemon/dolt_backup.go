@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 const (
@@ -35,7 +37,7 @@ func (d *Daemon) syncDoltBackups() {
 	}
 
 	// Pour molecule for observability (nil-safe — all methods are no-ops on nil).
-	mol := d.pourDogMolecule("mol-dog-backup", nil)
+	mol := d.pourDogMolecule(constants.MolDogBackup, nil)
 	defer mol.close()
 
 	// Resolve data dir: use DoltServerManager if available, else conventional path.

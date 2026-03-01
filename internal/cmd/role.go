@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -339,9 +340,9 @@ func parseRoleString(s string) (Role, string, string) {
 
 	// Simple roles
 	switch s {
-	case "mayor":
+	case constants.RoleMayor:
 		return RoleMayor, "", ""
-	case "deacon":
+	case constants.RoleDeacon:
 		return RoleDeacon, "", ""
 	case "boot":
 		return RoleBoot, "", ""
@@ -365,16 +366,16 @@ func parseRoleString(s string) (Role, string, string) {
 			return RoleBoot, "", ""
 		}
 		return Role(s), "", ""
-	case "witness":
+	case constants.RoleWitness:
 		return RoleWitness, rig, ""
-	case "refinery":
+	case constants.RoleRefinery:
 		return RoleRefinery, rig, ""
 	case "polecats":
 		if len(parts) >= 3 {
 			return RolePolecat, rig, parts[2]
 		}
 		return RolePolecat, rig, ""
-	case "crew":
+	case constants.RoleCrew:
 		if len(parts) >= 3 {
 			return RoleCrew, rig, parts[2]
 		}

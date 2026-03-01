@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 const (
@@ -117,7 +118,7 @@ func (d *Daemon) runCompactorDog() {
 		d.logger.Printf("compactor_dog: WARNING: surgical mode uses DOLT_REBASE which is not safe with concurrent writes — will retry on graph-change errors")
 	}
 
-	mol := d.pourDogMolecule("mol-dog-compactor", nil)
+	mol := d.pourDogMolecule(constants.MolDogCompactor, nil)
 	defer mol.close()
 
 	databases := d.compactorDatabases()

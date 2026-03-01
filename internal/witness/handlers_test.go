@@ -74,12 +74,13 @@ func TestZombieResult_Types(t *testing.T) {
 	t.Parallel()
 	// Verify the ZombieResult type has all expected fields
 	z := ZombieResult{
-		PolecatName:   "nux",
-		AgentState:    "working",
-		HookBead:      "gt-abc123",
-		Action:        "restarted",
-		BeadRecovered: true,
-		Error:         nil,
+		PolecatName:    "nux",
+		AgentState:     "working",
+		Classification: ZombieSessionDeadActive,
+		HookBead:       "gt-abc123",
+		Action:         "restarted",
+		BeadRecovered:  true,
+		Error:          nil,
 	}
 
 	if z.PolecatName != "nux" {
@@ -87,6 +88,9 @@ func TestZombieResult_Types(t *testing.T) {
 	}
 	if z.AgentState != "working" {
 		t.Errorf("AgentState = %q, want %q", z.AgentState, "working")
+	}
+	if z.Classification != ZombieSessionDeadActive {
+		t.Errorf("Classification = %q, want %q", z.Classification, ZombieSessionDeadActive)
 	}
 	if z.HookBead != "gt-abc123" {
 		t.Errorf("HookBead = %q, want %q", z.HookBead, "gt-abc123")
@@ -749,8 +753,9 @@ func TestBeadRecoveredField_DefaultFalse(t *testing.T) {
 	t.Parallel()
 	// BeadRecovered should default to false (zero value)
 	z := ZombieResult{
-		PolecatName: "nux",
-		AgentState:  "working",
+		PolecatName:    "nux",
+		AgentState:     "working",
+		Classification: ZombieSessionDeadActive,
 	}
 	if z.BeadRecovered {
 		t.Error("BeadRecovered should default to false")

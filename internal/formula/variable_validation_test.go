@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // TestExtractTemplateVariables verifies we can find all {{variable}} patterns.
@@ -172,7 +174,7 @@ required = true
 // aren't defined in [vars], causing wisp creation to fail.
 func TestMolConvoyFeedFormula_VariableValidation(t *testing.T) {
 	// Find the formula file
-	formulaPath := filepath.Join("formulas", "mol-convoy-feed.formula.toml")
+	formulaPath := filepath.Join("formulas", constants.MolConvoyFeed+".formula.toml")
 	data, err := os.ReadFile(formulaPath)
 	if err != nil {
 		t.Skipf("Formula file not found: %v", err)

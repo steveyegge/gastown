@@ -87,9 +87,9 @@ Early designs treated polecats as monolithic. This caused recurring issues:
 | **Sandbox** | Per-assignment (worktree, branch) | Destroyed on nuke |
 | **Session** | Ephemeral (Claude context window) | = polecat lifetime |
 
-Separating these three layers resolved the "Idle Polecat Heresy" (treating idle
-polecats as waste), eliminated unnecessary worktree creation overhead, and
-preserved capability records (CV, completion history) across assignments.
+Separating these three layers means idle polecats are a healthy state (not waste),
+eliminates unnecessary worktree creation overhead, and preserves capability
+records (CV, completion history) across assignments.
 
 ### Layer Summary
 
