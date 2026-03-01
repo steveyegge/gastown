@@ -8,15 +8,14 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// TestInitRegistry_SocketFromTownName verifies that InitRegistry derives the
-// tmux socket name from the town directory name, NOT from $TMUX.
+// TestInitRegistry_SocketIsAlwaysDefault verifies that InitRegistry always sets
+// the tmux socket to "default", regardless of the town directory name or $TMUX.
 //
-// This is the regression test for gt-qkekp: when gt up is run from a terminal
-// attached to the default tmux server ($TMUX=/tmp/tmux-1000/default,...),
-// InitRegistry used to parse "default" from $TMUX and set that as the socket.
-// This caused all sessions to land on the default server instead of a
-// town-specific socket (e.g., -L gt).
-func TestInitRegistry_SocketFromTownName(t *testing.T) {
+// Commit 635916ab intentionally changed InitRegistry to always use the default
+// tmux socket. Multi-town isolation already requires containers/VMs due to
+// singleton mayor/deacon session names, so per-town sockets provide no real
+// benefit while causing cross-socket bugs and split session visibility.
+func TestInitRegistry_SocketIsAlwaysDefault(t *testing.T) {
 	// Save and restore $TMUX and the default socket
 	origTMUX := os.Getenv("TMUX")
 	origSocket := tmux.GetDefaultSocket()
@@ -26,40 +25,34 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 	})
 
 	tests := []struct {
-		name       string
-		tmuxEnv    string // $TMUX value (simulating being inside tmux)
-		townDir    string // basename of the town root directory
-		wantSocket string // expected tmux socket name
+		name    string
+		tmuxEnv string // $TMUX value (simulating being inside tmux)
+		townDir string // basename of the town root directory
 	}{
 		{
-			name:       "inside default tmux, town=gt",
-			tmuxEnv:    "/tmp/tmux-1000/default,12345,0",
-			townDir:    "gt",
-			wantSocket: "gt",
+			name:    "inside default tmux, town=gt",
+			tmuxEnv: "/tmp/tmux-1000/default,12345,0",
+			townDir: "gt",
 		},
 		{
-			name:       "inside gt tmux, town=gt",
-			tmuxEnv:    "/tmp/tmux-1000/gt,12345,0",
-			townDir:    "gt",
-			wantSocket: "gt",
+			name:    "inside gt tmux, town=gt",
+			tmuxEnv: "/tmp/tmux-1000/gt,12345,0",
+			townDir: "gt",
 		},
 		{
-			name:       "outside tmux (daemon), town=gt",
-			tmuxEnv:    "",
-			townDir:    "gt",
-			wantSocket: "gt",
+			name:    "outside tmux (daemon), town=gt",
+			tmuxEnv: "",
+			townDir: "gt",
 		},
 		{
-			name:       "town name with spaces",
-			tmuxEnv:    "/tmp/tmux-1000/default,99,0",
-			townDir:    "My Town",
-			wantSocket: "my-town",
+			name:    "town name with spaces",
+			tmuxEnv: "/tmp/tmux-1000/default,99,0",
+			townDir: "My Town",
 		},
 		{
-			name:       "town name with caps",
-			tmuxEnv:    "",
-			townDir:    "GasTown",
-			wantSocket: "gastown",
+			name:    "town name with caps",
+			tmuxEnv: "",
+			townDir: "GasTown",
 		},
 	}
 
@@ -86,9 +79,9 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 			_ = InitRegistry(townRoot)
 
 			got := tmux.GetDefaultSocket()
-			if got != tt.wantSocket {
+			if got != "default" {
 				t.Errorf("after InitRegistry(%q) with TMUX=%q:\n  socket = %q, want %q",
-					townRoot, tt.tmuxEnv, got, tt.wantSocket)
+					townRoot, tt.tmuxEnv, got, "default")
 			}
 		})
 	}
