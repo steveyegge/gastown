@@ -2564,7 +2564,7 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // Used to skip redundant re-binding on repeated ConfigureGasTownSession /
 // EnsureBindingsOnSocket calls, preserving the user's original fallback.
 //
-// Two forms are recognised:
+// Two forms are recognized:
 //  1. Guarded form (set by SetAgentsBinding/SetFeedBinding): uses if-shell
 //     with a "gt " command — detects both old and new guarded bindings.
 //  2. Unguarded form (set by EnsureBindingsOnSocket): direct run-shell
