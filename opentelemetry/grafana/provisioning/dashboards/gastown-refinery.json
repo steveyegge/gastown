@@ -1,0 +1,477 @@
+{
+  "uid": "gastown-refinery",
+  "title": "Refinery",
+  "tags": ["gastown", "refinery", "merge"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "type": "custom",
+        "label": "Rig",
+        "query": "hq,sfgastown,lora_forge,sf_workflows",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "convoy_id",
+        "type": "query",
+        "label": "Convoy",
+        "datasource": { "uid": "dolt-beads" },
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 60), ' [', status, ']') AS __text FROM hq.issues WHERE issue_type = 'convoy' ORDER BY CASE WHEN status IN ('open','in_progress') THEN 0 ELSE 1 END, updated_at DESC LIMIT 100",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "## MR Queue Overview"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Open MRs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS open_mrs FROM (\n  SELECT w.id FROM sfgastown.wisps w JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT w.id FROM lora_forge.wisps w JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT w.id FROM sf_workflows.wisps w JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n) t",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "textMode": "value",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 6 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Merged (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS merged_24h FROM hq.wisps w WHERE w.title LIKE 'MERGED %' AND w.created_at >= NOW() - INTERVAL 24 HOUR",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "textMode": "value",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Failed/Rejected (7d)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 10, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS failed FROM (\n  SELECT w.id FROM sfgastown.wisps w JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'closed' AND w.created_at >= NOW() - INTERVAL 7 DAY\n  UNION ALL\n  SELECT w.id FROM lora_forge.wisps w JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'closed' AND w.created_at >= NOW() - INTERVAL 7 DAY\n  UNION ALL\n  SELECT w.id FROM sf_workflows.wisps w JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'closed' AND w.created_at >= NOW() - INTERVAL 7 DAY\n) t",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "textMode": "value",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Avg MR Age",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 15, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(CONCAT(ROUND(AVG(age_mins)), 'm'), '—') AS avg_age FROM (\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) AS age_mins FROM sfgastown.wisps w JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) AS age_mins FROM lora_forge.wisps w JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) AS age_mins FROM sf_workflows.wisps w JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n) t",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "textMode": "value",
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Oldest MR",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 2 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(CONCAT(ROUND(MAX(age_hrs), 1), 'h'), '—') AS oldest FROM (\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) / 60.0 AS age_hrs FROM sfgastown.wisps w JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) / 60.0 FROM lora_forge.wisps w JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n  UNION ALL\n  SELECT TIMESTAMPDIFF(MINUTE, w.created_at, NOW()) / 60.0 FROM sf_workflows.wisps w JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request' WHERE w.status = 'open'\n) t",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "textMode": "value",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 24 },
+              { "color": "red", "value": 72 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 6 },
+      "options": {
+        "mode": "markdown",
+        "content": "## MR Queue"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Open Merge Requests",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT rig, id, title, status, worker, source_issue, branch, retries, created_at,\n  TIMESTAMPDIFF(MINUTE, created_at, NOW()) AS age_mins\nFROM (\n  SELECT 'sfgastown' AS rig, w.id, w.title, w.status, w.created_at,\n    CASE WHEN w.description LIKE '%worker: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'worker: ', -1), '\\n', 1) ELSE '—' END AS worker,\n    CASE WHEN w.description LIKE '%source_issue: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'source_issue: ', -1), '\\n', 1) ELSE '—' END AS source_issue,\n    SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'branch: ', -1), '\\n', 1) AS branch,\n    CASE WHEN w.description LIKE '%retry_count: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'retry_count: ', -1), '\\n', 1) ELSE '0' END AS retries\n  FROM sfgastown.wisps w\n  JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n  WHERE w.status = 'open'\n  UNION ALL\n  SELECT 'lora_forge', w.id, w.title, w.status, w.created_at,\n    CASE WHEN w.description LIKE '%worker: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'worker: ', -1), '\\n', 1) ELSE '—' END,\n    CASE WHEN w.description LIKE '%source_issue: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'source_issue: ', -1), '\\n', 1) ELSE '—' END,\n    SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'branch: ', -1), '\\n', 1),\n    CASE WHEN w.description LIKE '%retry_count: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'retry_count: ', -1), '\\n', 1) ELSE '0' END\n  FROM lora_forge.wisps w\n  JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n  WHERE w.status = 'open'\n  UNION ALL\n  SELECT 'sf_workflows', w.id, w.title, w.status, w.created_at,\n    CASE WHEN w.description LIKE '%worker: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'worker: ', -1), '\\n', 1) ELSE '—' END,\n    CASE WHEN w.description LIKE '%source_issue: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'source_issue: ', -1), '\\n', 1) ELSE '—' END,\n    SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'branch: ', -1), '\\n', 1),\n    CASE WHEN w.description LIKE '%retry_count: %' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'retry_count: ', -1), '\\n', 1) ELSE '0' END\n  FROM sf_workflows.wisps w\n  JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n  WHERE w.status = 'open'\n) t\nORDER BY age_mins DESC",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "age_mins", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "source_issue" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Bead Detail",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "age_mins" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 60 },
+                    { "color": "red", "value": 1440 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": { "color": "blue", "text": "open" },
+                      "closed": { "color": "red", "text": "closed" }
+                    }
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 18 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Recent Merges"
+      }
+    },
+    {
+      "id": 21,
+      "title": "Completed Merges",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT w.id,\n  w.title,\n  SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'Branch: ', -1), '\\n', 1) AS branch,\n  SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'Issue: ', -1), '\\n', 1) AS source_issue,\n  SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'Merged-At: ', -1), '\\n', 1) AS merged_at,\n  w.created_at\nFROM hq.wisps w\nWHERE w.title LIKE 'MERGED %'\nORDER BY w.created_at DESC\nLIMIT 50",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "created_at", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "source_issue" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Bead Detail",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=hq&var-bead_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 30 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Merge Activity"
+      }
+    },
+    {
+      "id": 31,
+      "title": "gt done Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "sum by (gt_rig) (increase(gastown_done_total[5m]))",
+          "legendFormat": "{{gt_rig}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "stacking": { "mode": "normal" },
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 32,
+      "title": "Bead Call Rate (merge-related)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "sum by (subcommand) (rate(gastown_bd_calls_total{subcommand=~\"done|hook|close|update\"}[5m]))",
+          "legendFormat": "{{subcommand}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "pointSize": 5,
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 33,
+      "title": "Merge Signals",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 40 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  CASE\n    WHEN title LIKE 'MERGE_READY:%' THEN 'MERGE_READY'\n    WHEN title LIKE 'MERGED %' THEN 'MERGED'\n    ELSE 'Other'\n  END AS signal_type,\n  COUNT(*) AS cnt\nFROM hq.wisps\nWHERE title LIKE 'MERGE%'\nGROUP BY signal_type",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "reduceOptions": {
+          "calcs": ["sum"]
+        }
+      }
+    },
+    {
+      "id": 40,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 48 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Cross-Rig Summary"
+      }
+    },
+    {
+      "id": 41,
+      "title": "Per-Rig MR Breakdown",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT rig,\n  SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_mrs,\n  SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_mrs,\n  COUNT(*) AS total\nFROM (\n  SELECT 'sfgastown' AS rig, w.status\n  FROM sfgastown.wisps w\n  JOIN sfgastown.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n  UNION ALL\n  SELECT 'lora_forge', w.status\n  FROM lora_forge.wisps w\n  JOIN lora_forge.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n  UNION ALL\n  SELECT 'sf_workflows', w.status\n  FROM sf_workflows.wisps w\n  JOIN sf_workflows.wisp_labels wl ON wl.issue_id = w.id AND wl.label = 'gt:merge-request'\n) t\nGROUP BY rig\nORDER BY open_mrs DESC",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 42,
+      "title": "Merges per Worker",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  TRIM(REPLACE(REPLACE(w.title, 'MERGED ', ''), 'MERGED', '')) AS worker,\n  COUNT(*) AS merge_count\nFROM hq.wisps w\nWHERE w.title LIKE 'MERGED %'\nGROUP BY worker\nORDER BY merge_count DESC",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "merge_count", "desc": true }]
+      }
+    },
+    {
+      "id": 43,
+      "title": "Merges Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 40 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  w.created_at AS time,\n  TRIM(REPLACE(w.title, 'MERGED ', '')) AS worker,\n  1 AS merges\nFROM hq.wisps w\nWHERE w.title LIKE 'MERGED %'\n  AND w.created_at >= NOW() - INTERVAL 7 DAY\nORDER BY w.created_at",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "showPoints": "always"
+          }
+        }
+      }
+    }
+  ]
+}
