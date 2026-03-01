@@ -728,20 +728,20 @@ func TestDetectZombie_BeadClosedVsDoneIntent(t *testing.T) {
 
 func TestResetAbandonedBead_EmptyHookBead(t *testing.T) {
 	t.Parallel()
-	// resetAbandonedBead should return false for empty hookBead
-	result := resetAbandonedBead("/tmp", "testrig", "", "nux", nil)
-	if result {
-		t.Error("resetAbandonedBead should return false for empty hookBead")
+	// resetAbandonedBead should return false,false for empty hookBead
+	recovered, closed := resetAbandonedBead("/tmp", "testrig", "", "nux", nil)
+	if recovered || closed {
+		t.Error("resetAbandonedBead should return false,false for empty hookBead")
 	}
 }
 
 func TestResetAbandonedBead_NoRouter(t *testing.T) {
 	t.Parallel()
 	// resetAbandonedBead with nil router should not panic even if bead exists.
-	// It will return false because bd won't find the bead, but shouldn't crash.
-	result := resetAbandonedBead("/tmp/nonexistent", "testrig", "gt-fake123", "nux", nil)
-	if result {
-		t.Error("resetAbandonedBead should return false when bd commands fail")
+	// It will return false,false because bd won't find the bead, but shouldn't crash.
+	recovered, closed := resetAbandonedBead("/tmp/nonexistent", "testrig", "gt-fake123", "nux", nil)
+	if recovered || closed {
+		t.Error("resetAbandonedBead should return false,false when bd commands fail")
 	}
 }
 
@@ -770,9 +770,12 @@ func TestResetAbandonedBead_ClosesWhenWorkOnMain(t *testing.T) {
 		},
 	)
 
-	result := resetAbandonedBead("/tmp/test", "testrig", "gt-work123", "alpha", nil)
-	if !result {
-		t.Error("resetAbandonedBead should return true when work is on main")
+	recovered, closed := resetAbandonedBead("/tmp/test", "testrig", "gt-work123", "alpha", nil)
+	if recovered {
+		t.Error("recovered should be false when work is on main (bead was closed, not re-dispatched)")
+	}
+	if !closed {
+		t.Error("closed should be true when work is on main")
 	}
 
 	// Verify "close" was called, NOT "update ... --status=open"
@@ -816,9 +819,12 @@ func TestResetAbandonedBead_ResetsWhenWorkNotOnMain(t *testing.T) {
 		},
 	)
 
-	result := resetAbandonedBead("/tmp/test", "testrig", "gt-work123", "alpha", nil)
-	if !result {
-		t.Error("resetAbandonedBead should return true when bead is reset")
+	recovered, closed := resetAbandonedBead("/tmp/test", "testrig", "gt-work123", "alpha", nil)
+	if !recovered {
+		t.Error("recovered should be true when work is NOT on main (bead reset for re-dispatch)")
+	}
+	if closed {
+		t.Error("closed should be false when work is NOT on main")
 	}
 
 	// Verify "update --status=open" was called (normal reset path)

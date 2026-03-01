@@ -1630,14 +1630,15 @@ func getBeadStatus(workDir, beadID string) string {
 // 3. Clears assignee
 // 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
 //    prefix and Urgent priority when count exceeds defaultMaxBeadRespawns)
-// Returns true if the bead was recovered.
-func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
+// Returns (recovered, closed): recovered=true if bead was reset for re-dispatch,
+// closed=true if bead was closed because the work is already on main.
+func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *mail.Router) (recovered, closed bool) {
 	if hookBead == "" {
-		return false
+		return false, false
 	}
 	status := getBeadStatus(workDir, hookBead)
 	if status != "hooked" && status != "in_progress" {
-		return false
+		return false, false
 	}
 
 	// Guard: if the polecat's commit is already on the default branch,
@@ -1646,7 +1647,7 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 	if onMain, err := verifyCommitOnMain(workDir, rigName, polecatName); err == nil && onMain {
 		reason := fmt.Sprintf("Work already on main (verified by witness, polecat %s)", polecatName)
 		_ = bdRun(workDir, "close", hookBead, "-r", reason)
-		return true
+		return false, true
 	}
 
 	// Track respawn count for audit and storm detection.
@@ -1654,7 +1655,7 @@ func resetAbandonedBead(workDir, rigName, hookBead, polecatName string, router *
 
 	// Reset bead status to open and clear assignee
 	if err := bdRun(workDir, "update", hookBead, "--status=open", "--assignee="); err != nil {
-		return false
+		return false, false
 	}
 
 	// Send mail to deacon for re-dispatch
@@ -1689,7 +1690,7 @@ Please re-dispatch to an available polecat.`,
 		_ = router.Send(msg) // Best-effort
 	}
 
-	return true
+	return true, false
 }
 
 // OrphanedBeadResult contains a single detected orphaned bead.
@@ -1697,7 +1698,8 @@ type OrphanedBeadResult struct {
 	BeadID        string
 	Assignee      string // Original assignee (e.g. "gastown/polecats/alpha")
 	PolecatName   string // Extracted polecat name
-	BeadRecovered bool
+	BeadRecovered bool   // True if bead was reset to open for re-dispatch
+	BeadClosed    bool   // True if bead was closed (work already on main)
 }
 
 // DetectOrphanedBeadsResult contains the results of an orphaned bead scan.
@@ -1813,7 +1815,7 @@ func DetectOrphanedBeads(workDir, rigName string, router *mail.Router) *DetectOr
 			Assignee:    bead.Assignee,
 			PolecatName: polecatName,
 		}
-		orphan.BeadRecovered = resetAbandonedBead(workDir, assigneeRig, bead.ID, polecatName, router)
+		orphan.BeadRecovered, orphan.BeadClosed = resetAbandonedBead(workDir, assigneeRig, bead.ID, polecatName, router)
 		result.Orphans = append(result.Orphans, orphan)
 	}
 
@@ -1827,7 +1829,8 @@ type OrphanedMoleculeResult struct {
 	Assignee      string // The dead polecat's full address
 	PolecatName   string // Just the polecat name
 	Closed        int    // Number of issues closed (molecule + descendants)
-	BeadRecovered bool   // Whether the parent bead was reset for re-dispatch
+	BeadRecovered bool // Whether the parent bead was reset for re-dispatch
+	BeadClosed    bool // Whether the parent bead was closed (work already on main)
 	Error         error
 }
 
@@ -1965,7 +1968,7 @@ func DetectOrphanedMolecules(workDir, rigName string, router *mail.Router) *Dete
 		orphan.Closed = closed
 
 		// Reset the parent bead so it can be re-dispatched
-		orphan.BeadRecovered = resetAbandonedBead(workDir, rigName, b.ID, polecatName, router)
+		orphan.BeadRecovered, orphan.BeadClosed = resetAbandonedBead(workDir, rigName, b.ID, polecatName, router)
 
 		result.Orphans = append(result.Orphans, orphan)
 	}
