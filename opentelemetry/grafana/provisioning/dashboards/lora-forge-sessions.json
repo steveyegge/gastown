@@ -1,0 +1,364 @@
+{
+  "uid": "lora-forge-sessions",
+  "title": "Lora Forge Sessions",
+  "tags": [
+    "gastown",
+    "lora-forge"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 100,
+      "title": "Session Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "Active lf-* Sessions",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "sum(last_over_time(gastown_session_starts_total{gt_session=~\"lf-.*\"}[7d])) - sum(last_over_time(gastown_session_stops_total{gt_session=~\"lf-.*\"}[7d]))",
+          "legendFormat": "Active"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 1, "color": "green" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Total Done Events",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "count(last_over_time(gastown_done_total{gt_session=~\"lf-.*\"}[7d]))",
+          "legendFormat": "Done"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "blue" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Polecat Spawns",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "count(last_over_time(gastown_polecat_spawns_total{gt_rig=\"lora_forge\"}[7d]))",
+          "legendFormat": "Spawns"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "purple" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 200,
+      "title": "Session Outcomes (VictoriaLogs)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "id": 4,
+      "title": "Recent Done Events",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 6 },
+      "datasource": { "uid": "victorialogs", "type": "victoriametrics-logs-datasource" },
+      "targets": [
+        {
+          "expr": "_msg:\"done\" AND gt.rig:\"lora_forge\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "_time": true,
+              "gt.session": true,
+              "exit_type": true,
+              "status": true,
+              "gt.topic": true,
+              "gt.role": true
+            },
+            "indexByName": {
+              "_time": 0,
+              "gt.session": 1,
+              "exit_type": 2,
+              "status": 3,
+              "gt.topic": 4,
+              "gt.role": 5
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "exit_type" },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-text"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "COMPLETED": { "text": "COMPLETED", "color": "green" } } },
+                  { "type": "value", "options": { "DEFERRED": { "text": "DEFERRED", "color": "red" } } },
+                  { "type": "value", "options": { "ESCALATED": { "text": "ESCALATED", "color": "orange" } } }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-text"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "ok": { "text": "ok", "color": "green" } } },
+                  { "type": "value", "options": { "error": { "text": "error", "color": "red" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "title": "Exit Type Distribution",
+      "type": "piechart",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 6 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "last_over_time(gastown_done_total{gt_session=~\"lf-.*\"}[7d])",
+          "legendFormat": "{{gt_session}} ({{exit_type}})"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "pieType": "donut"
+      }
+    },
+    {
+      "id": 300,
+      "title": "Session Lifecycle",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "id": 6,
+      "title": "Session Start/Stop Rate (lf-*)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "increase(gastown_session_starts_total{gt_session=~\"lf-.*\"}[$__rate_interval])",
+          "legendFormat": "starts: {{gt_session}}"
+        },
+        {
+          "expr": "increase(gastown_session_stops_total{gt_session=~\"lf-.*\"}[$__rate_interval])",
+          "legendFormat": "stops: {{gt_session}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": { "mode": "normal" }
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Session Lifecycle Log",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "datasource": { "uid": "victorialogs", "type": "victoriametrics-logs-datasource" },
+      "targets": [
+        {
+          "expr": "(_msg:\"session.start\" OR _msg:\"session.stop\") AND gt.rig:\"lora_forge\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "_time": true,
+              "_msg": true,
+              "session_id": true,
+              "role": true,
+              "rig": true
+            },
+            "indexByName": {
+              "_time": 0,
+              "_msg": 1,
+              "session_id": 2,
+              "role": 3,
+              "rig": 4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "title": "Polecat Activity",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "title": "Polecat Spawns/Removes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "increase(gastown_polecat_spawns_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "legendFormat": "spawn: {{gt_agent}}"
+        },
+        {
+          "expr": "increase(gastown_polecat_removes_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "legendFormat": "remove: {{gt_agent}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "bd Call Rate (lora_forge)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "rate(gastown_bd_calls_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "legendFormat": "{{subcommand}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": { "mode": "normal" }
+          }
+        }
+      }
+    },
+    {
+      "id": 500,
+      "title": "Convoy Progress (Dolt)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "Lora Forge Beads",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 35 },
+      "datasource": { "uid": "dolt-beads" },
+      "targets": [
+        {
+          "rawSql": "SELECT id, title, status, type, priority, assignee, COALESCE(closed_at, '') AS closed_at, created_at FROM lora_forge.issues ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC LIMIT 50",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-text"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "open": { "text": "open", "color": "yellow" } } },
+                  { "type": "value", "options": { "closed": { "text": "closed", "color": "green" } } },
+                  { "type": "value", "options": { "in_progress": { "text": "in_progress", "color": "blue" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true
+}
