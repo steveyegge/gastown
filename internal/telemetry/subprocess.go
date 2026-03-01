@@ -25,6 +25,11 @@ func buildGTResourceAttrs() string {
 	} else if v := os.Getenv("GT_CREW"); v != "" {
 		attrs = append(attrs, "gt.agent="+v)
 	}
+	// Runtime harness type (claude, opencode, pirust, omp, pi).
+	// Enables filtering telemetry by which runtime is executing.
+	if v := os.Getenv("GT_AGENT"); v != "" {
+		attrs = append(attrs, "gt.harness="+v)
+	}
 	return strings.Join(attrs, ",")
 }
 

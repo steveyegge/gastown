@@ -12,6 +12,7 @@ func TestBuildGTResourceAttrs_Empty(t *testing.T) {
 	t.Setenv("BD_ACTOR", "")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_AGENT", "")
 
 	result := buildGTResourceAttrs()
 	if result != "" {
@@ -25,9 +26,10 @@ func TestBuildGTResourceAttrs_AllVars(t *testing.T) {
 	t.Setenv("BD_ACTOR", "mol/witness")
 	t.Setenv("GT_POLECAT", "furiosa")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_AGENT", "pirust")
 
 	result := buildGTResourceAttrs()
-	for _, want := range []string{"gt.role=mol/witness", "gt.rig=mol", "gt.actor=mol/witness", "gt.agent=furiosa"} {
+	for _, want := range []string{"gt.role=mol/witness", "gt.rig=mol", "gt.actor=mol/witness", "gt.agent=furiosa", "gt.harness=pirust"} {
 		if !strings.Contains(result, want) {
 			t.Errorf("expected %q in result, got %q", want, result)
 		}
