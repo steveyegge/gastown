@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/guardian"
@@ -141,10 +140,11 @@ func runJudgmentStatus(cmd *cobra.Command, _ []string) error {
 		avg := totalScore / float64(len(inWindow))
 		rejRate := float64(rejections) / float64(len(inWindow))
 
-		// Extract rig from first recent result if available.
+		// Extract rig from first recent result that has one.
 		rig := ""
 		for _, r := range pj.RecentResults {
-			if r.BeadID != "" {
+			if r.Rig != "" {
+				rig = r.Rig
 				break
 			}
 		}
@@ -319,6 +319,7 @@ func runJudgmentRecord(cmd *cobra.Command, _ []string) error {
 
 	state.AddResult(result.Worker, guardian.RecentResult{
 		BeadID:         result.BeadID,
+		Rig:            result.Rig,
 		Score:          result.Score,
 		Recommendation: result.Recommendation,
 		IssueCount:     len(result.Issues),
@@ -442,9 +443,6 @@ func formatJudgmentAge(d time.Duration) string {
 
 // statusStyle returns a styled status string.
 func statusStyle(status string) string {
-	// Guard against non-TTY environments where lipgloss might not work.
-	_ = lipgloss.NewStyle()
-
 	switch status {
 	case guardian.StatusOK:
 		return style.Success.Render(status)

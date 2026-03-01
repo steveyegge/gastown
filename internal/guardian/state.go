@@ -34,6 +34,7 @@ type PolecatJudgment struct {
 // RecentResult is a summary of a single review, stored in the ring buffer.
 type RecentResult struct {
 	BeadID         string    `json:"bead_id"`
+	Rig            string    `json:"rig,omitempty"`
 	Score          float64   `json:"score"`
 	Recommendation string    `json:"recommendation"`
 	IssueCount     int       `json:"issue_count"`
