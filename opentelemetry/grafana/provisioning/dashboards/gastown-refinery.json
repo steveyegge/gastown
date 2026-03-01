@@ -408,10 +408,106 @@
       }
     },
     {
-      "id": 40,
+      "id": 34,
       "title": "",
       "type": "text",
       "gridPos": { "h": 2, "w": 24, "x": 0, "y": 48 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Refinery Agent Activity"
+      }
+    },
+    {
+      "id": 35,
+      "title": "Refinery bd Calls (by subcommand)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "sum by (subcommand) (rate(gastown_bd_calls_total{gt_role=~\".*refinery.*\"}[5m]))",
+          "legendFormat": "{{subcommand}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "pointSize": 5,
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 36,
+      "title": "Refinery bd Call Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
+      "datasource": { "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gastown_bd_duration_ms_milliseconds_bucket{gt_role=~\".*refinery.*\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gastown_bd_duration_ms_milliseconds_bucket{gt_role=~\".*refinery.*\"}[5m])))",
+          "legendFormat": "p50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "pointSize": 5,
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 37,
+      "title": "Refinery Log Stream",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 58 },
+      "datasource": { "uid": "victorialogs", "type": "victoriametrics-logs-datasource" },
+      "targets": [
+        {
+          "expr": "gt.role:~\"refinery\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "_time": true,
+              "_msg": true,
+              "gt.rig": true,
+              "gt.session": true,
+              "subcommand": true,
+              "args": true,
+              "duration_ms": true,
+              "status": true
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "_time", "desc": true }]
+      }
+    },
+    {
+      "id": 40,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 68 },
       "options": {
         "mode": "markdown",
         "content": "## Cross-Rig Summary"
@@ -421,7 +517,7 @@
       "id": 41,
       "title": "Per-Rig MR Breakdown",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 70 },
       "datasource": { "uid": "dolt-beads" },
       "targets": [
         {
@@ -437,7 +533,7 @@
       "id": 42,
       "title": "Merges per Worker",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 70 },
       "datasource": { "uid": "dolt-beads" },
       "targets": [
         {
