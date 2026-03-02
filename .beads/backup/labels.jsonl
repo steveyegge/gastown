@@ -47,12 +47,14 @@
 {"issue_id":"sg-sfgastown-crew-dunks","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-crew-test","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-alpha","label":"gt:agent"}
+{"issue_id":"sg-sfgastown-polecat-amber","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-garnet","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-jasper","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-obsidian","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-onyx","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-opal","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-quartz","label":"gt:agent"}
+{"issue_id":"sg-sfgastown-polecat-ruby","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-test-polecat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-testcat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-topaz","label":"gt:agent"}
@@ -72,9 +74,8 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
-{"issue_id":"sg-wisp-48ta","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-cb09r","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-l8ix","label":"gt:merge-request"}
+{"issue_id":"sg-wisp-axwm4","label":"gt:merge-request"}
+{"issue_id":"sg-wisp-f2kf","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
