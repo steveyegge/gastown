@@ -16,7 +16,7 @@ import {
   ChevronRight,
   Rocket,
   Code2,
-  FileCheck,
+  Activity,
   Users,
   Building2,
 } from "lucide-react"
@@ -81,10 +81,12 @@ const governanceItems: NavItem[] = [
     description: "Compliance & audit workflows",
   },
   {
-    label: "Model Cards",
-    href: "/governance/model-cards",
-    icon: FileCheck,
-    description: "Evaluation & documentation",
+    label: "Observability",
+    href: "/observability",
+    icon: Activity,
+    badge: "Live",
+    badgeColor: "bg-emerald-500/20 text-emerald-400",
+    description: "Run status: models, agents & tools",
   },
   {
     label: "Analytics",
