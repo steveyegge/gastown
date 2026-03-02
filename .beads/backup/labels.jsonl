@@ -65,7 +65,7 @@
 {"issue_id":"sg-sfgastown-polecat-test-polecat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-testcat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-refinery","label":"gt:agent"}
-{"issue_id":"sg-sfgastown-witness","label":"backoff-until:1772421062"}
+{"issue_id":"sg-sfgastown-witness","label":"backoff-until:1772421786"}
 {"issue_id":"sg-sfgastown-witness","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-witness","label":"idle:2"}
 {"issue_id":"sg-svm2","label":"bug"}
