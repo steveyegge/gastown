@@ -35,7 +35,7 @@ export const GasTown = async ({ $, directory }) => {
   // Check if OTEL is available
   const otelAvailable = !!(process.env.GT_OTEL_METRICS_URL || process.env.GT_OTEL_LOGS_URL);
 
-  const otelAvailable = !!(process.env.GT_OTEL_METRICS_URL || process.env.GT_OTEL_LOGS_URL);
+  const agentType = "opencode";
 
   return {
     event: async ({ event }) => {

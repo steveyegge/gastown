@@ -10,6 +10,7 @@
 
 // Import OTEL if available
 let otelAvailable = false;
+let agentType = "pi-rust";
 try {
   // Check if OTEL environment variables are set
   const metricsURL = process.env.GT_OTEL_METRICS_URL;
@@ -38,6 +39,20 @@ export default (pi) => {
         console.error("[gastown] agent.instantiate failed:", e.message);
       }
     }
+
+    // Track tool calls as child spans for OTEL telemetry
+    pi.on("tool_call", async (event) => {
+      if (otelAvailable && event.toolName) {
+        try {
+          const sessionID = process.env.GT_SESSION_ID || "";
+          const toolName = event.toolName;
+          await pi.exec("gt", ["activity", "emit", "tool_call", "--session", sessionID, "--tool", toolName, "--agent-type", agentType]);
+          console.error(`[gastown] tool_call event emitted for ${toolName}`);
+        } catch (e) {
+          console.error("[gastown] tool_call failed:", e.message);
+        }
+      }
+    });
 
     // Capture gt prime context.
     try {
