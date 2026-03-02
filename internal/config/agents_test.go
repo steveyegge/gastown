@@ -627,6 +627,30 @@ func TestGetProcessNames(t *testing.T) {
 	}
 }
 
+func TestNeedsInlinePrime(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		agentName string
+		want      bool
+	}{
+		{"copilot", true},   // Copilot CLI hooks don't inject stdout
+		{"claude", false},   // Claude Code hooks inject stdout
+		{"gemini", false},   // No NoHookStdoutInjection set
+		{"codex", false},    // No NoHookStdoutInjection set
+		{"unknown", false},  // Unknown agent returns false
+		{"", false},         // Empty agent name returns false
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			got := NeedsInlinePrime(tt.agentName)
+			if got != tt.want {
+				t.Errorf("NeedsInlinePrime(%q) = %v, want %v", tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets

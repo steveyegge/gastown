@@ -371,7 +371,7 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	// NewSessionWithCommand (command as initial pane process). This eliminates
 	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
 	// the shell might not be ready to receive keystrokes, producing empty windows.
-	startCmd := d.getStartCommand(config, parsed)
+	startCmd := d.getStartCommand(config, parsed, workDir)
 
 	// Create session with command as initial process (replaces EnsureSessionFresh + SendKeys).
 	// EnsureSessionFreshWithCommand kills zombie sessions and creates a new one atomically.
@@ -452,7 +452,7 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 // getStartCommand determines the startup command for an agent.
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
 // Includes beacon + role-specific instructions in the CLI prompt.
-func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
+func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity, workDir string) string {
 	// If role config is available, use it
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		// Expand any patterns in the command
@@ -475,6 +475,21 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Sender:    "daemon",
 		Topic:     "lifecycle-restart",
 	}, "Run `gt prime --hook` and begin work.")
+
+	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
+	// is injected into LLM context (currently side-effect-only).
+	// See: https://github.com/github/copilot-cli/issues/1139
+	if config.NeedsInlinePrime(runtimeConfig.ResolvedAgent) {
+		primeEnv := map[string]string{
+			"GT_ROLE":    parsed.RoleType,
+			"GT_RIG":     parsed.RigName,
+			"GT_POLECAT": parsed.AgentName,
+			"GT_ROOT":    d.config.TownRoot,
+		}
+		if ctx := session.CapturePrimeContext(workDir, primeEnv); ctx != "" {
+			prompt += "\n\n" + ctx
+		}
+	}
 
 	// Build default command using the role-resolved runtime config.
 	// PrependEnv produces "export K=V ... && exec cmd" which is safe for

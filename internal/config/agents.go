@@ -123,6 +123,13 @@ type AgentPresetInfo struct {
 	// For these providers, Gas Town sends startup fallback commands via nudge.
 	HooksInformational bool `json:"hooks_informational,omitempty"`
 
+	// NoHookStdoutInjection indicates that this agent's sessionStart hook stdout
+	// is NOT injected into LLM context (side-effect-only). When true, prime context
+	// must be inlined in the startup prompt instead.
+	// TODO: Remove once all agents inject sessionStart hook stdout into LLM context.
+	// See: https://github.com/github/copilot-cli/issues/1139
+	NoHookStdoutInjection bool `json:"no_hook_stdout_injection,omitempty"`
+
 	// ReadyPromptPrefix is the prompt prefix for tmux readiness detection (e.g., "❯ ").
 	// Empty means delay-based detection only.
 	ReadyPromptPrefix string `json:"ready_prompt_prefix,omitempty"`
@@ -328,7 +335,8 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksProvider:      "copilot",
 		HooksDir:           ".github/hooks",
 		HooksSettingsFile:  "gastown.json",
-		HooksInformational: false,
+		HooksInformational:    false,
+		NoHookStdoutInjection: true, // Copilot CLI sessionStart hook stdout is side-effect-only
 		ReadyPromptPrefix:  "❯ ",
 		ReadyDelayMs:       5000,
 		InstructionsFile:   "AGENTS.md",
@@ -595,6 +603,14 @@ func GetProcessNames(agentName string) []string {
 		return []string{"node", "claude"}
 	}
 	return info.ProcessNames
+}
+
+// NeedsInlinePrime returns true if the agent's sessionStart hook stdout is not
+// injected into LLM context, requiring prime context to be inlined in the
+// startup prompt instead.
+func NeedsInlinePrime(agentName string) bool {
+	info := GetAgentPresetByName(agentName)
+	return info != nil && info.NoHookStdoutInjection
 }
 
 // ResolveProcessNames determines the correct process names for liveness detection

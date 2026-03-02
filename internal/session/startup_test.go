@@ -431,3 +431,14 @@ func TestBuildStartupPrompt(t *testing.T) {
 		t.Errorf("BuildStartupPrompt() missing blank line before instructions")
 	}
 }
+
+func TestCapturePrimeContext_InvalidDir(t *testing.T) {
+	// CapturePrimeContext should return empty string when workDir is invalid
+	result := CapturePrimeContext("/nonexistent/path/that/does/not/exist", map[string]string{
+		"GT_ROLE": "polecat",
+		"GT_ROOT": "/nonexistent",
+	})
+	if result != "" {
+		t.Errorf("CapturePrimeContext with invalid dir should return empty, got %q", result)
+	}
+}

@@ -733,11 +733,20 @@ func (rc *RuntimeConfig) BuildCommand() string {
 	return cmd
 }
 
+// maxInlinePromptLen is the threshold above which prompts are written to a temp
+// file and delivered via $(cat file) instead of inline shell quoting. Tmux's
+// respawn-pane has a command-length limit (~64KB depending on version/platform)
+// and large inline prime context easily exceeds it.
+const maxInlinePromptLen = 8192
+
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
 // When PromptFlag is set, uses that flag (e.g., "-i" for copilot, "--prompt" for opencode).
 // Otherwise falls back to positional argument.
+//
+// For prompts exceeding maxInlinePromptLen, the prompt is written to a temp file
+// and delivered via shell command substitution to avoid tmux command-length limits.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -752,13 +761,62 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
+	promptArg := promptShellArg(p)
+
 	// Use PromptFlag when set (e.g., copilot -i, opencode --prompt).
 	if resolved.PromptFlag != "" {
-		return base + " " + resolved.PromptFlag + " " + quoteForShell(p)
+		return base + " " + resolved.PromptFlag + " " + promptArg
 	}
 
 	// Quote the prompt for shell safety (positional arg for claude and others)
-	return base + " " + quoteForShell(p)
+	return base + " " + promptArg
+}
+
+// promptShellArg returns a shell expression for the given prompt. Short prompts
+// are inline-quoted. Long prompts are written to a temp file and referenced via
+// "$(cat /path/to/file)" to stay under tmux's command-length limit.
+func promptShellArg(prompt string) string {
+	if len(prompt) <= maxInlinePromptLen {
+		return quoteForShell(prompt)
+	}
+
+	// Write the prompt to a temp file. The file is read at shell execution
+	// time via a self-deleting wrapper script, keeping the tmux command short.
+	promptFile, err := os.CreateTemp("", "gt-prompt-*.txt")
+	if err != nil {
+		return quoteForShell(prompt)
+	}
+	if _, err := promptFile.WriteString(prompt); err != nil {
+		promptFile.Close()
+		os.Remove(promptFile.Name())
+		return quoteForShell(prompt)
+	}
+	promptFile.Close()
+
+	// Write a small wrapper script that cats the prompt and cleans up both
+	// files. Using a #!/bin/sh script avoids shell-compatibility issues
+	// (fish, tcsh) with $(...) command substitution in the tmux command line.
+	script, err := os.CreateTemp("", "gt-prompt-reader-*.sh")
+	if err != nil {
+		os.Remove(promptFile.Name())
+		return quoteForShell(prompt)
+	}
+	pPath := shellQuoteSingle(promptFile.Name())
+	sPath := shellQuoteSingle(script.Name())
+	// Uses ; instead of && so cleanup runs even if cat fails.
+	fmt.Fprintf(script, "#!/bin/sh\ncat %s; rm -f %s %s\n", pPath, pPath, sPath)
+	script.Close()
+	os.Chmod(script.Name(), 0o700)
+
+	// Return $(/path/to/script) which all POSIX shells and fish 3.4+ support.
+	// The script uses #!/bin/sh explicitly for portability.
+	return `"$(` + sPath + `)"` //nolint:gocritic
+}
+
+// shellQuoteSingle wraps a string in single quotes, escaping any embedded
+// single quotes with the standard '\'' pattern.
+func shellQuoteSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // BuildArgsWithPrompt returns the runtime command and args suitable for exec.

@@ -161,6 +161,24 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Topic:     "patrol",
 	}, "Run `gt prime --hook` and begin patrol.")
 
+	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
+	// is injected into LLM context (currently side-effect-only).
+	// See: https://github.com/github/copilot-cli/issues/1139
+	resolvedAgent := runtimeConfig.ResolvedAgent
+	if agentOverride != "" {
+		resolvedAgent = agentOverride
+	}
+	if config.NeedsInlinePrime(resolvedAgent) {
+		primeEnv := map[string]string{
+			"GT_ROLE": "refinery",
+			"GT_RIG":  m.rig.Name,
+			"GT_ROOT": townRoot,
+		}
+		if ctx := session.CapturePrimeContext(refineryRigDir, primeEnv); ctx != "" {
+			initialPrompt += "\n\n" + ctx
+		}
+	}
+
 	command, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
 		Role:        "refinery",
 		Rig:         m.rig.Name,
