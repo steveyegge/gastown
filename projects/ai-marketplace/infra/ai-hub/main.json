@@ -1,0 +1,195 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "6532980515491685366"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "prefix": {
+      "type": "string",
+      "defaultValue": "aimarket",
+      "maxLength": 10,
+      "metadata": {
+        "description": "Short prefix used in all resource names."
+      }
+    },
+    "servicePrincipalObjectId": {
+      "type": "string",
+      "metadata": {
+        "description": "Object ID (not client ID) of the service principal that the web app uses. Granted Contributor on the Hub workspace."
+      }
+    }
+  },
+  "variables": {
+    "contributorRoleId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "kvSecretsOfficerRoleId": "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+    "storageAccountName": "[take(toLower(format('{0}stor{1}', parameters('prefix'), uniqueString(resourceGroup().id))), 24)]",
+    "keyVaultName": "[take(format('{0}-kv-{1}', parameters('prefix'), uniqueString(resourceGroup().id)), 24)]",
+    "logAnalyticsName": "[format('{0}-logs', parameters('prefix'))]",
+    "appInsightsName": "[format('{0}-appins', parameters('prefix'))]",
+    "hubWorkspaceName": "[format('{0}-hub', parameters('prefix'))]",
+    "commonTags": {
+      "project": "ai-marketplace",
+      "environment": "dev",
+      "createdBy": "bicep"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2024-01-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "properties": {
+        "allowBlobPublicAccess": false,
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true
+      },
+      "tags": "[variables('commonTags')]"
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[tenant().tenantId]",
+        "enableSoftDelete": true,
+        "softDeleteRetentionInDays": 7,
+        "enableRbacAuthorization": true,
+        "enabledForTemplateDeployment": true
+      },
+      "tags": "[variables('commonTags')]"
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      },
+      "tags": "[variables('commonTags')]"
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      },
+      "tags": "[variables('commonTags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.MachineLearningServices/workspaces",
+      "apiVersion": "2024-10-01-preview",
+      "name": "[variables('hubWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "kind": "Hub",
+      "sku": {
+        "name": "Basic",
+        "tier": "Basic"
+      },
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "friendlyName": "AI Marketplace Hub",
+        "description": "Azure AI Hub workspace for the Healthcare AI Marketplace — enables live evaluation runs and model safety assessments",
+        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "publicNetworkAccess": "Enabled"
+      },
+      "tags": "[variables('commonTags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.KeyVault/vaults/{0}', variables('keyVaultName'))]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName')), variables('kvSecretsOfficerRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('kvSecretsOfficerRoleId'))]",
+        "principalId": "[reference(resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName')), '2024-10-01-preview', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.MachineLearningServices/workspaces/{0}', variables('hubWorkspaceName'))]",
+      "name": "[guid(resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName')), parameters('servicePrincipalObjectId'), variables('contributorRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('contributorRoleId'))]",
+        "principalId": "[parameters('servicePrincipalObjectId')]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "hubWorkspaceName": {
+      "type": "string",
+      "value": "[variables('hubWorkspaceName')]"
+    },
+    "hubWorkspaceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubWorkspaceName'))]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "value": "[variables('storageAccountName')]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[variables('keyVaultName')]"
+    },
+    "appInsightsName": {
+      "type": "string",
+      "value": "[variables('appInsightsName')]"
+    },
+    "evaluationsBaseUrl": {
+      "type": "string",
+      "value": "[format('https://{0}.api.azureml.ms/raisvc/v1.0/subscriptions/{1}/resourceGroups/{2}/providers/Microsoft.MachineLearningServices/workspaces/{3}', parameters('location'), subscription().subscriptionId, resourceGroup().name, variables('hubWorkspaceName'))]"
+    }
+  }
+}

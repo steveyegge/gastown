@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-segoe-ui: "Segoe UI", system-ui, sans-serif;
+}
+
+/* React Flow overrides */
+.react-flow__attribution {
+  display: none;
+}

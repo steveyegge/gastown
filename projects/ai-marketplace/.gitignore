@@ -1,0 +1,19 @@
+# Environment files — never commit these
+.env
+.env.local
+.env.*.local
+*.env
+
+# Build outputs
+apps/web/.next/
+apps/web/node_modules/
+apps/api/node_modules/
+apps/api/dist/
+
+# azd state
+.azure/
+
+# Logs
+*.log
+dev-out.txt
+azd-up.log

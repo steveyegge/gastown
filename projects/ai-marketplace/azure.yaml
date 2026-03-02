@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: ai-marketplace
+metadata:
+  template: ai-marketplace@0.9
+
+services:
+  web:
+    project: ./apps/web
+    language: ts
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: .
+
+  api:
+    project: ./apps/api
+    language: ts
+    host: function
+
+infra:
+  provider: bicep
+  path: ./infra
+  module: main
