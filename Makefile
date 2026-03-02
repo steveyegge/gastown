@@ -97,3 +97,8 @@ check-docs: build
 	fi; \
 	rm -rf "$$TMP_DIR"; \
 	echo "CLI documentation is up to date"
+
+
+# Generate CLI documentation with docs-cli target
+docs-cli:
+	./gt docgen -o docs/cli
