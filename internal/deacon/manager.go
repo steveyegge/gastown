@@ -126,21 +126,12 @@ func (m *Manager) Start(agentOverride string) error {
 		Topic:     "patrol",
 	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.")
 
-	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
-	// is injected into LLM context (currently side-effect-only).
-	// See: https://github.com/github/copilot-cli/issues/1139
 	resolvedAgent := runtimeConfig.ResolvedAgent
 	if agentOverride != "" {
 		resolvedAgent = agentOverride
 	}
-	if config.NeedsInlinePrime(resolvedAgent) {
-		primeEnv := map[string]string{
-			"GT_ROLE": "deacon",
-			"GT_ROOT": m.townRoot,
-		}
-		if ctx := session.CapturePrimeContext(deaconDir, primeEnv); ctx != "" {
-			initialPrompt += "\n\n" + ctx
-		}
+	if ctx := session.MaybeInlinePrime(resolvedAgent, deaconDir, "deacon", "", "", m.townRoot); ctx != "" {
+		initialPrompt += "\n\n" + ctx
 	}
 
 	startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{

@@ -96,6 +96,9 @@ func isCoveredByExisting(townRoot string, folders []string) bool {
 
 // isEqualOrParent reports whether candidate equals target or is a parent of target.
 func isEqualOrParent(candidate, target string) bool {
+	if candidate == "" || target == "" {
+		return false
+	}
 	candidate = filepath.Clean(candidate)
 	target = filepath.Clean(target)
 	if candidate == target {

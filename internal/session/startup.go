@@ -4,12 +4,14 @@ package session
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 // BeaconRecipient formats a human-readable, non-path-like recipient for the
@@ -162,7 +164,32 @@ func CapturePrimeContext(workDir string, env map[string]string) string {
 	cmd.Stderr = nil
 
 	if err := cmd.Run(); err != nil {
+		log.Printf("warning: gt prime --dry-run failed in %s: %v", workDir, err)
 		return ""
 	}
 	return strings.TrimSpace(stdout.String())
+}
+
+// MaybeInlinePrime checks if the given agent needs inline prime context and, if so,
+// captures and returns it. Returns empty string if the agent doesn't need it or
+// if capture fails. This centralizes the inline-prime workaround for Copilot CLI.
+//
+// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
+// is injected into LLM context (currently side-effect-only).
+// See: https://github.com/github/copilot-cli/issues/1139
+func MaybeInlinePrime(agentName, workDir, role, rig, polecat, townRoot string) string {
+	if !config.NeedsInlinePrime(agentName) {
+		return ""
+	}
+	primeEnv := map[string]string{
+		"GT_ROLE": role,
+		"GT_ROOT": townRoot,
+	}
+	if rig != "" {
+		primeEnv["GT_RIG"] = rig
+	}
+	if polecat != "" {
+		primeEnv["GT_POLECAT"] = polecat
+	}
+	return CapturePrimeContext(workDir, primeEnv)
 }

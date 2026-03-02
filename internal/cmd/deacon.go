@@ -518,21 +518,12 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		Topic:     "patrol",
 	}, "I am Deacon. First run `gt deacon heartbeat`. Then check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
 
-	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
-	// is injected into LLM context (currently side-effect-only).
-	// See: https://github.com/github/copilot-cli/issues/1139
 	resolvedAgent := runtimeConfig.ResolvedAgent
 	if agentOverride != "" {
 		resolvedAgent = agentOverride
 	}
-	if config.NeedsInlinePrime(resolvedAgent) {
-		primeEnv := map[string]string{
-			"GT_ROLE": "deacon",
-			"GT_ROOT": townRoot,
-		}
-		if ctx := session.CapturePrimeContext(deaconDir, primeEnv); ctx != "" {
-			initialPrompt += "\n\n" + ctx
-		}
+	if ctx := session.MaybeInlinePrime(resolvedAgent, deaconDir, "deacon", "", "", townRoot); ctx != "" {
+		initialPrompt += "\n\n" + ctx
 	}
 
 	startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{

@@ -476,19 +476,8 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		Topic:     "lifecycle-restart",
 	}, "Run `gt prime --hook` and begin work.")
 
-	// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
-	// is injected into LLM context (currently side-effect-only).
-	// See: https://github.com/github/copilot-cli/issues/1139
-	if config.NeedsInlinePrime(runtimeConfig.ResolvedAgent) {
-		primeEnv := map[string]string{
-			"GT_ROLE":    parsed.RoleType,
-			"GT_RIG":     parsed.RigName,
-			"GT_POLECAT": parsed.AgentName,
-			"GT_ROOT":    d.config.TownRoot,
-		}
-		if ctx := session.CapturePrimeContext(workDir, primeEnv); ctx != "" {
-			prompt += "\n\n" + ctx
-		}
+	if ctx := session.MaybeInlinePrime(runtimeConfig.ResolvedAgent, workDir, parsed.RoleType, parsed.RigName, parsed.AgentName, d.config.TownRoot); ctx != "" {
+		prompt += "\n\n" + ctx
 	}
 
 	// Build default command using the role-resolved runtime config.

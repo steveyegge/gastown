@@ -43,7 +43,7 @@ func init() {
 			return err
 		}
 		// 3. Trust the town root so Copilot CLI doesn't prompt for workspace trust
-		if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+		if townRoot := os.Getenv("GT_ROOT"); townRoot != "" {
 			if err := copilot.EnsureTownTrusted(townRoot); err != nil {
 				return err
 			}

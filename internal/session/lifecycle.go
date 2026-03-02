@@ -162,19 +162,8 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 	if command == "" {
 		prompt := buildPrompt(cfg)
 
-		// TODO: Remove this Copilot CLI workaround once sessionStart hook stdout
-		// is injected into LLM context (currently side-effect-only).
-		// See: https://github.com/github/copilot-cli/issues/1139
-		if config.NeedsInlinePrime(runtimeConfig.ResolvedAgent) {
-			primeEnv := map[string]string{
-				"GT_ROLE":    cfg.Role,
-				"GT_RIG":     cfg.RigName,
-				"GT_POLECAT": cfg.AgentName,
-				"GT_ROOT":    cfg.TownRoot,
-			}
-			if ctx := CapturePrimeContext(cfg.WorkDir, primeEnv); ctx != "" {
-				prompt += "\n\n" + ctx
-			}
+		if ctx := MaybeInlinePrime(runtimeConfig.ResolvedAgent, cfg.WorkDir, cfg.Role, cfg.RigName, cfg.AgentName, cfg.TownRoot); ctx != "" {
+			prompt += "\n\n" + ctx
 		}
 
 		var err error

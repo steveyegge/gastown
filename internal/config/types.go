@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -784,12 +785,16 @@ func promptShellArg(prompt string) string {
 	// time via a self-deleting wrapper script, keeping the tmux command short.
 	promptFile, err := os.CreateTemp("", "gt-prompt-*.txt")
 	if err != nil {
-		return quoteForShell(prompt)
+		// Fallback: truncate to avoid tmux "command too long" crash.
+		log.Printf("warning: cannot create prompt temp file: %v (truncating prompt)", err)
+		return quoteForShell(prompt[:maxInlinePromptLen])
 	}
+	os.Chmod(promptFile.Name(), 0o600) // Prompt contains sensitive operational context
 	if _, err := promptFile.WriteString(prompt); err != nil {
 		promptFile.Close()
 		os.Remove(promptFile.Name())
-		return quoteForShell(prompt)
+		log.Printf("warning: cannot write prompt temp file: %v (truncating prompt)", err)
+		return quoteForShell(prompt[:maxInlinePromptLen])
 	}
 	promptFile.Close()
 
@@ -799,7 +804,8 @@ func promptShellArg(prompt string) string {
 	script, err := os.CreateTemp("", "gt-prompt-reader-*.sh")
 	if err != nil {
 		os.Remove(promptFile.Name())
-		return quoteForShell(prompt)
+		log.Printf("warning: cannot create prompt script: %v (truncating prompt)", err)
+		return quoteForShell(prompt[:maxInlinePromptLen])
 	}
 	pPath := shellQuoteSingle(promptFile.Name())
 	sPath := shellQuoteSingle(script.Name())
