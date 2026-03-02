@@ -33,6 +33,12 @@ providers:
       temperature: 0.0
       max_tokens: 512
 
+  - id: pi-kimi
+    label: "pi-kimi (pir + Kimi K2.5)"
+    config:
+      temperature: 0.0
+      max_tokens: 512
+
 defaultTest:
   options:
     # Use Opus as the grading model — grader must be stronger than all test subjects

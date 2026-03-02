@@ -60,3 +60,17 @@ This document outlines the test plan for evaluating the pi-kimi agent (pir + Kim
 - Quantitative comparison of pi-kimi vs Claude models on witness patrol tasks
 - Identification of strengths and weaknesses in pi-kimi's decision-making
 - Recommendations for potential role assignments based on performance
+
+## Execution Instructions
+
+1. Ensure ANTHROPIC_API_KEY is set in the environment
+2. Navigate to the `gt-model-eval` directory
+3. Run the witness-specific tests with pi-kimi:
+   ```bash
+   ./run-witness-tests.sh
+   ```
+4. Results will be saved to `results.json` and `results.html`
+5. Use the results-to-discussion script to format findings:
+   ```bash
+   ./scripts/results-to-discussion.sh results.json
+   ```

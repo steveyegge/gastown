@@ -2,7 +2,15 @@
 
 ## Evaluation Status
 
-**IN PROGRESS**: Standard witness patrol evaluation on sfgastown for agent pi-kimi (pir + Kimi K2.5).
+**READY**: Infrastructure prepared for pi-kimi witness patrol evaluation on sfgastown.
+**TO RUN EVALUATION**:
+
+```bash
+cd gt-model-eval
+./run-witness-tests.sh
+```
+
+This will execute all 25 witness-specific test cases (22 Class B + 3 Class A) and generate results in JSON format.
 
 ## Test Coverage
 
@@ -23,6 +31,8 @@
 2. Analyze results against Claude model baselines
 3. Document detailed findings
 4. Provide recommendations for pi-kimi deployment in witness roles
+5. Run evaluation using `./run-witness-tests.sh` script
+6. Analyze generated results against Claude model baselines
 
 ## Notes
 
