@@ -76,8 +76,6 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
-{"issue_id":"sg-wisp-axwm4","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-f2kf","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
