@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -699,10 +700,50 @@ func joinStrings(parts []string, sep string) string {
 	return result
 }
 
-// discoverDoltDatabases returns the list of known production databases.
-// Hardcoded for now — matches the databases in daemon.json and dolt-data.
+// discoverDoltDatabases queries SHOW DATABASES on the Dolt server and returns
+// all production databases, filtering out test pollution and system databases.
 func (d *Daemon) discoverDoltDatabases() []string {
-	return []string{"hq", "beads", "gastown"}
+	dsn := fmt.Sprintf("root@tcp(127.0.0.1:%d)/?parseTime=true&timeout=5s", d.doltServerPort())
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		d.logger.Printf("wisp_reaper: discoverDoltDatabases: open failed: %v, using fallback", err)
+		return []string{"hq"}
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, "SHOW DATABASES")
+	if err != nil {
+		d.logger.Printf("wisp_reaper: discoverDoltDatabases: query failed: %v, using fallback", err)
+		return []string{"hq"}
+	}
+	defer rows.Close()
+
+	var databases []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		// Skip system databases and test pollution.
+		if name == "information_schema" || name == "mysql" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "testdb_") || strings.HasPrefix(lower, "beads_t") ||
+			strings.HasPrefix(lower, "beads_pt") || strings.HasPrefix(lower, "doctest_") {
+			continue
+		}
+		databases = append(databases, name)
+	}
+
+	if len(databases) == 0 {
+		return []string{"hq"}
+	}
+	d.logger.Printf("wisp_reaper: discovered %d databases: %v", len(databases), databases)
+	return databases
 }
 
 // doltServerPort returns the configured Dolt server port.
