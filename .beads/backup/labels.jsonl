@@ -47,6 +47,7 @@
 {"issue_id":"sg-sfgastown-crew-dunks","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-crew-test","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-alpha","label":"gt:agent"}
+{"issue_id":"sg-sfgastown-polecat-garnet","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-jasper","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-obsidian","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-onyx","label":"gt:agent"}
@@ -54,6 +55,7 @@
 {"issue_id":"sg-sfgastown-polecat-quartz","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-test-polecat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-testcat","label":"gt:agent"}
+{"issue_id":"sg-sfgastown-polecat-topaz","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-refinery","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-witness","label":"backoff-until:1772422396"}
 {"issue_id":"sg-sfgastown-witness","label":"gt:agent"}
