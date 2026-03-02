@@ -2,16 +2,6 @@
 {"issue_id":"sg-08o2","label":"metrics"}
 {"issue_id":"sg-08o2","label":"otel"}
 {"issue_id":"sg-0u0","label":"pinned"}
-{"issue_id":"sg-2zgd","label":"deacon"}
-{"issue_id":"sg-2zgd","label":"patrol"}
-{"issue_id":"sg-2zgd","label":"witness"}
-{"issue_id":"sg-2zgd.1","label":"patrol"}
-{"issue_id":"sg-2zgd.1","label":"witness"}
-{"issue_id":"sg-2zgd.2","label":"deacon"}
-{"issue_id":"sg-2zgd.2","label":"patrol"}
-{"issue_id":"sg-2zgd.2","label":"witness"}
-{"issue_id":"sg-2zgd.3","label":"cleanup"}
-{"issue_id":"sg-2zgd.3","label":"patrol"}
 {"issue_id":"sg-31h7","label":"pi-rust"}
 {"issue_id":"sg-31h7","label":"testing"}
 {"issue_id":"sg-3vwi","label":"agent:omp-kimi"}
@@ -65,7 +55,7 @@
 {"issue_id":"sg-sfgastown-polecat-test-polecat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-testcat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-refinery","label":"gt:agent"}
-{"issue_id":"sg-sfgastown-witness","label":"backoff-until:1772421786"}
+{"issue_id":"sg-sfgastown-witness","label":"backoff-until:1772422396"}
 {"issue_id":"sg-sfgastown-witness","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-witness","label":"idle:2"}
 {"issue_id":"sg-svm2","label":"bug"}
@@ -84,10 +74,6 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
-{"issue_id":"sg-wisp-00mh79","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-bdilul","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-gnwl5g","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-jesq1a","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
