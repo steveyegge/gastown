@@ -1171,6 +1171,9 @@
 {"actor":"sfgastown/polecats/jade","comment":null,"created_at":"2026-03-02T18:00:57Z","event_type":"closed","id":1800,"issue_id":"sg-ebo","new_value":"Closed","old_value":""}
 {"actor":"Claude Opus 4.6","comment":null,"created_at":"2026-03-02T19:18:42Z","event_type":"created","id":1801,"issue_id":"sg-mgzu","new_value":"","old_value":""}
 {"actor":"Claude Opus 4.6","comment":null,"created_at":"2026-03-02T19:18:47Z","event_type":"status_changed","id":1802,"issue_id":"sg-mgzu","new_value":"{\"assignee\":\"sfgastown/witness\",\"status\":\"hooked\"}","old_value":"{\"id\":\"sg-mgzu\",\"title\":\"mol-witness-patrol\",\"description\":\"Witness patrol cycle\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"epic\",\"owner\":\"noreply@anthropic.com\",\"created_at\":\"2026-03-02T08:18:43Z\",\"created_by\":\"Claude Opus 4.6\",\"updated_at\":\"2026-03-02T08:18:43Z\"}"}
+{"actor":"sfgastown/polecats/amber","comment":null,"created_at":"2026-03-02T19:35:37Z","event_type":"closed","id":1803,"issue_id":"sg-c61","new_value":"no-changes: Task was already completed in commits f90fd3ba and 51f6f3df (Feb 8-9, 2026). Bead was incorrectly created on Feb 24 after the fix was already merged.","old_value":""}
+{"actor":"sfgastown/witness","comment":null,"created_at":"2026-03-02T20:13:14Z","event_type":"updated","id":1804,"issue_id":"sg-mgzu","new_value":"{\"description\":\"Patrol report: Patrol cycle complete: Deacon+Refinery healthy, 3 polecats working (amber/garnet/jade active), 7 done, no timer gates, no active swarm, no cleanup pending\"}","old_value":"{\"id\":\"sg-mgzu\",\"title\":\"mol-witness-patrol\",\"description\":\"Witness patrol cycle\",\"status\":\"hooked\",\"priority\":2,\"issue_type\":\"epic\",\"assignee\":\"sfgastown/witness\",\"owner\":\"noreply@anthropic.com\",\"created_at\":\"2026-03-02T08:18:43Z\",\"created_by\":\"Claude Opus 4.6\",\"updated_at\":\"2026-03-02T08:18:47Z\"}"}
+{"actor":"sfgastown/witness","comment":null,"created_at":"2026-03-02T20:13:14Z","event_type":"closed","id":1805,"issue_id":"sg-mgzu","new_value":"patrol cycle complete: Patrol cycle complete: Deacon+Refinery healthy, 3 polecats working (amber/garnet/jade active), 7 done, no timer gates, no active swarm, no cleanup pending","old_value":""}
 {"actor":"lora_forge/polecats/slit","comment":null,"created_at":"2026-02-25T05:49:54Z","event_type":"created","id":2006,"issue_id":"sg-sfgastown-crew-dunks","new_value":"","old_value":""}
 {"actor":"lora_forge/polecats/slit","comment":"Added label: gt:agent","created_at":"2026-02-25T05:49:54Z","event_type":"label_added","id":2007,"issue_id":"sg-sfgastown-crew-dunks","new_value":null,"old_value":null}
 {"actor":"mayor","comment":null,"created_at":"2026-02-25T18:07:30Z","event_type":"created","id":2008,"issue_id":"sg-sfgastown-crew-test","new_value":"","old_value":""}
@@ -1793,31 +1796,3 @@
 {"actor":"claudecode/crew/cc","comment":"","created_at":"2026-03-02T16:56:35Z","event_type":"created","id":3395,"issue_id":"sg-sfgastown-polecat-ruby","new_value":"","old_value":""}
 {"actor":"claudecode/crew/cc","comment":"","created_at":"2026-03-02T17:03:13Z","event_type":"created","id":3398,"issue_id":"sg-sfgastown-polecat-amber","new_value":"","old_value":""}
 {"actor":"claudecode/crew/cc","comment":"","created_at":"2026-03-02T17:15:36Z","event_type":"created","id":3401,"issue_id":"sg-sfgastown-polecat-jade","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:39Z","event_type":"created","id":3410,"issue_id":"sg-wisp-dh4k","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3411,"issue_id":"sg-wisp-xzlt","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3412,"issue_id":"sg-wisp-wumk","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3413,"issue_id":"sg-wisp-jz5f","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3414,"issue_id":"sg-wisp-7w6q","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3415,"issue_id":"sg-wisp-pdz3","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:40Z","event_type":"created","id":3416,"issue_id":"sg-wisp-yana","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3417,"issue_id":"sg-wisp-uj8a","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3418,"issue_id":"sg-wisp-m2y2","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3419,"issue_id":"sg-wisp-uxyj","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3420,"issue_id":"sg-wisp-fanl","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3421,"issue_id":"sg-wisp-yybh","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3422,"issue_id":"sg-wisp-v9cx","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:41Z","event_type":"created","id":3423,"issue_id":"sg-wisp-i0ytj","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3424,"issue_id":"sg-wisp-g0729","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3425,"issue_id":"sg-wisp-3fn48","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3426,"issue_id":"sg-wisp-zx1ya","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3427,"issue_id":"sg-wisp-oxfdl","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3428,"issue_id":"sg-wisp-0nk1l","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3429,"issue_id":"sg-wisp-hkjiw","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3430,"issue_id":"sg-wisp-mddg7","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3431,"issue_id":"sg-wisp-vtml4","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3432,"issue_id":"sg-wisp-74076","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:42Z","event_type":"created","id":3433,"issue_id":"sg-wisp-rjfj5","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:43Z","event_type":"created","id":3434,"issue_id":"sg-wisp-keexp","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:43Z","event_type":"created","id":3435,"issue_id":"sg-wisp-nsg77","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:43Z","event_type":"created","id":3436,"issue_id":"sg-wisp-17g6o","new_value":"","old_value":""}
-{"actor":"deacon","comment":"","created_at":"2026-03-02T18:30:43Z","event_type":"created","id":3437,"issue_id":"sg-wisp-020nx","new_value":"","old_value":""}
