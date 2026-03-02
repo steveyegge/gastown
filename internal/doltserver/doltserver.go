@@ -2041,14 +2041,29 @@ func EnsureMetadata(townRoot, rigName string) error {
 		_ = json.Unmarshal(data, &existing) // best effort
 	}
 
-	// Patch dolt server fields. Only set fields that are gastown's responsibility
-	// (ensuring server mode). dolt_database is owned by bd init — only set it as
-	// a fallback when bd init hasn't run yet (no existing value).
-	existing["database"] = "dolt"
-	existing["backend"] = "dolt"
-	existing["dolt_mode"] = "server"
+	// Patch dolt server fields. Only write when values actually change so tracked
+	// metadata.json files in source repos stay clean.
+	changed := false
+	if existing["database"] != "dolt" {
+		existing["database"] = "dolt"
+		changed = true
+	}
+	if existing["backend"] != "dolt" {
+		existing["backend"] = "dolt"
+		changed = true
+	}
+	if existing["dolt_mode"] != "server" {
+		existing["dolt_mode"] = "server"
+		changed = true
+	}
 	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
 		existing["dolt_database"] = rigName
+		changed = true
+	}
+
+	// Fast path: avoid rewriting metadata.json when already correct.
+	if !changed {
+		return nil
 	}
 
 	data, err := json.MarshalIndent(existing, "", "  ")

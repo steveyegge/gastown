@@ -5,6 +5,7 @@ package cmd
 // explicit paths and env slices so callers control isolation.
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -59,16 +60,18 @@ func configureScheduler(t *testing.T, hqPath string, maxPolecats, batchSize int)
 
 // --- gt command helpers ---
 
-// runGTCmdOutput runs a gt command and returns combined stdout+stderr.
+// runGTCmdOutput runs a gt command and returns stdout only.
 // Fails the test if the command exits non-zero.
 func runGTCmdOutput(t *testing.T, binary, dir string, env []string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	out, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("gt %v failed: %v\n%s", args, err, out)
+		t.Fatalf("gt %v failed: %v\nstdout:\n%s\nstderr:\n%s", args, err, out, stderr.String())
 	}
 	return string(out)
 }
