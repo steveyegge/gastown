@@ -70,6 +70,7 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
+{"issue_id":"sg-wisp-48ta","label":"gt:merge-request"}
 {"issue_id":"sg-wisp-l8ix","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
