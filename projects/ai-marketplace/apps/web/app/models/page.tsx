@@ -195,10 +195,12 @@ export default function ModelMarketplacePage() {
                 <FileText className="h-4 w-4" />
                 Documentation
               </Button>
-              <Button size="sm" className="gap-2 bg-[var(--optum-orange)] hover:bg-[var(--optum-orange-light)] text-white">
-                <Plus className="h-4 w-4" />
-                Register Model (BYOM)
-              </Button>
+              <Link href="/models/register">
+                <Button size="sm" className="gap-2 bg-[var(--optum-orange)] hover:bg-[var(--optum-orange-light)] text-white">
+                  <Plus className="h-4 w-4" />
+                  Register Model (BYOM)
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
