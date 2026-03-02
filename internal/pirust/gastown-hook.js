@@ -138,4 +138,24 @@ export default (pi) => {
       console.error("[gastown] gt costs record failed:", e.message);
     }
   });
+
+  // AgentEnd — emit OTEL span for agent termination
+  pi.on("agent_end", async () => {
+    if (otelAvailable) {
+      try {
+        const sessionID = process.env.GT_SESSION_ID || "";
+        await pi.exec("gt", ["activity", "emit", "agent.terminate", "--session", sessionID, "--agent-type", agentType]);
+        console.error("[gastown] agent.terminate event emitted");
+      } catch (e) {
+        console.error("[gastown] agent.terminate failed:", e.message);
+      }
+    }
+    // Record API costs as before
+    try {
+      await pi.exec("gt", ["costs", "record"]);
+      console.error("[gastown] Costs recorded");
+    } catch (e) {
+      console.error("[gastown] gt costs record failed:", e.message);
+    }
+  });
 };

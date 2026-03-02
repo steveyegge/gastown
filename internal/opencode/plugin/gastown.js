@@ -69,6 +69,15 @@ export const GasTown = async ({ $, directory }) => {
           await $`gt costs record --session ${sessionID}`.catch(() => {});
         }
       }
+        // Emit agent.terminate event for OTEL telemetry
+        if (otelAvailable) {
+          try {
+            await $`gt activity emit agent.terminate --session ${sessionID} --agent-type opencode`; 
+            console.error("[gastown] agent.terminate event emitted");
+          } catch (err) {
+            console.error("[gastown] agent.terminate failed", err?.message || err);
+          }
+        }
     },
     "experimental.chat.system.transform": async (input, output) => {
       // If session.created hasn't fired yet, start loading now.
