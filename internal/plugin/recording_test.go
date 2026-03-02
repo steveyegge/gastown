@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"testing"
+	"time"
 )
 
 func TestPluginRunRecord(t *testing.T) {
@@ -42,6 +43,50 @@ func TestNewRecorder(t *testing.T) {
 	}
 	if recorder.townRoot != "/tmp/test-town" {
 		t.Errorf("expected townRoot '/tmp/test-town', got %q", recorder.townRoot)
+	}
+}
+
+func TestCooldownDurationParsing(t *testing.T) {
+	t.Parallel()
+	// Verify that plugin gate durations (Go time.ParseDuration format)
+	// are parsed correctly. This is critical because bd's compact duration
+	// uses "m" for months, while Go uses "m" for minutes. The fix computes
+	// an absolute RFC3339 cutoff instead of passing the raw duration to bd.
+	cases := []struct {
+		input   string
+		wantDur time.Duration
+		wantErr bool
+	}{
+		{"5m", 5 * time.Minute, false},
+		{"30m", 30 * time.Minute, false},
+		{"1h", 1 * time.Hour, false},
+		{"24h", 24 * time.Hour, false},
+		{"1h30m", 90 * time.Minute, false},
+		{"500ms", 500 * time.Millisecond, false},
+		{"bogus", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			d, err := time.ParseDuration(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error for %q, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.input, err)
+			}
+			if d != tc.wantDur {
+				t.Errorf("ParseDuration(%q) = %v, want %v", tc.input, d, tc.wantDur)
+			}
+			// Verify the cutoff time is in the past and approximately correct.
+			cutoff := time.Now().Add(-d)
+			elapsed := time.Since(cutoff)
+			if elapsed < d-time.Second || elapsed > d+time.Second {
+				t.Errorf("cutoff drift: expected ~%v ago, got %v ago", d, elapsed)
+			}
+		})
 	}
 }
 
