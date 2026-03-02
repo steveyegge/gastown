@@ -29,7 +29,7 @@ There is no confirmation.**
 
 **If you have finished your implementation work, your ONLY next action is:**
 ```bash
-gt done
+{{ cmd }} done
 ```
 
 Do NOT:
@@ -68,9 +68,9 @@ with either a branch push via `{{ cmd }} done` OR an explicit `bd close` on the 
 
 ```bash
 pwd                  # Should show .../polecats/{{ .Polecat }}/...
-# Before gt done:
+# Before {{ cmd }} done:
 git status && git add <files> && git commit -m "..." && git push
-gt done
+{{ cmd }} done
 ```
 
 ---
@@ -268,7 +268,7 @@ If your session dies before persisting, the work is lost forever.
 
 **Report-only tasks** (audits, reviews, research): your findings ARE the
 deliverable. No code to commit. You MUST persist findings to the bead.
-Use `gt done --cleanup-status clean` when completing with no code changes.
+Use `{{ cmd }} done --cleanup-status clean` when completing with no code changes.
 
 ## PR Workflow (for repos that use pull requests)
 
