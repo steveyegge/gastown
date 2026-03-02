@@ -92,7 +92,7 @@ const governanceItems: NavItem[] = [
     label: "Analytics",
     href: "/analytics",
     icon: BarChart3,
-    description: "Performance & usage metrics",
+    description: "Workflow timing, SLA & adoption",
   },
 ]
 
