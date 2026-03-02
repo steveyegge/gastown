@@ -1815,7 +1815,7 @@ func IsBeadActivelyWorked(workDir, rigName, beadID, excludePolecat string) bool 
 		// Check if this polecat has our bead hooked
 		prefix := beads.GetPrefixForRig(townRoot, rigName)
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
-		_, hookBead := getAgentBeadState(workDir, agentBeadID)
+		_, hookBead := getAgentBeadState(DefaultBdCli(), workDir, agentBeadID)
 		if hookBead != beadID {
 			continue
 		}
