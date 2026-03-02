@@ -66,7 +66,7 @@
 {"issue_id":"sg-sfgastown-polecat-testcat","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-refinery","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-witness","label":"gt:agent"}
-{"issue_id":"sg-sfgastown-witness","label":"idle:1"}
+{"issue_id":"sg-sfgastown-witness","label":"idle:2"}
 {"issue_id":"sg-svm2","label":"bug"}
 {"issue_id":"sg-svm2","label":"convoy"}
 {"issue_id":"sg-svm2","label":"daemon"}
@@ -86,7 +86,7 @@
 {"issue_id":"sg-wisp-00mh79","label":"gt:merge-request"}
 {"issue_id":"sg-wisp-bdilul","label":"gt:merge-request"}
 {"issue_id":"sg-wisp-gnwl5g","label":"gt:merge-request"}
-{"issue_id":"sg-wisp-zewl0r","label":"gt:merge-request"}
+{"issue_id":"sg-wisp-jesq1a","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
