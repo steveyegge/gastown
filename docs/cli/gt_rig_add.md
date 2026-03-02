@@ -42,14 +42,15 @@ gt rig add <name> <git-url> [flags]
 ### Options
 
 ```
-      --adopt               Adopt an existing directory instead of creating new
-      --branch string       Default branch name (default: auto-detected from remote)
-      --force               With --adopt, register even if git remote cannot be detected
-  -h, --help                help for add
-      --local-repo string   Local repo path to share git objects (optional)
-      --prefix string       Beads issue prefix (default: derived from name)
-      --push-url string     Push URL for read-only upstreams (push to fork)
-      --url string          Git remote URL for --adopt (default: auto-detected from origin)
+      --adopt                 Adopt an existing directory instead of creating new
+      --branch string         Default branch name (default: auto-detected from remote)
+      --force                 With --adopt, register even if git remote cannot be detected
+  -h, --help                  help for add
+      --local-repo string     Local repo path to share git objects (optional)
+      --prefix string         Beads issue prefix (default: derived from name)
+      --push-url string       Push URL for read-only upstreams (push to fork)
+      --upstream-url string   Upstream repository URL (for fork workflows)
+      --url string            Git remote URL for --adopt (default: auto-detected from origin)
 ```
 
 ### SEE ALSO

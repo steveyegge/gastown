@@ -28,6 +28,7 @@ gt dolt cleanup [flags]
 
 ```
       --dry-run   Preview what would be removed without making changes
+      --force     Remove databases even if they have user tables
   -h, --help      help for cleanup
 ```
 

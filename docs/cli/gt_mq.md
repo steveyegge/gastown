@@ -31,6 +31,7 @@ gt mq [flags]
 * [gt mq integration](../cli/gt_mq_integration/)	 - Manage integration branches for epics
 * [gt mq list](../cli/gt_mq_list/)	 - Show the merge queue
 * [gt mq next](../cli/gt_mq_next/)	 - Show the highest-priority merge request
+* [gt mq post-merge](../cli/gt_mq_post-merge/)	 - Run post-merge cleanup (close MR, delete branch)
 * [gt mq reject](../cli/gt_mq_reject/)	 - Reject a merge request
 * [gt mq retry](../cli/gt_mq_retry/)	 - Retry a failed merge request
 * [gt mq status](../cli/gt_mq_status/)	 - Show detailed merge request status

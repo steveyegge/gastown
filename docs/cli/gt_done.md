@@ -14,7 +14,8 @@ This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
 3. Notifies the Witness with the exit outcome
-4. Exits the Claude session (polecats don't stay alive after completion)
+4. Syncs worktree to main and transitions polecat to IDLE
+   (sandbox preserved, session stays alive for reuse)
 
 Exit statuses:
   COMPLETED      - Work done, MR submitted (default)
@@ -22,7 +23,7 @@ Exit statuses:
   DEFERRED       - Work paused, issue still open
 
 Examples:
-  gt done                              # Submit branch, notify COMPLETED, exit session
+  gt done                              # Submit branch, notify COMPLETED, transition to IDLE
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR

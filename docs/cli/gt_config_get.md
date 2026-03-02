@@ -18,11 +18,27 @@ Supported keys:
   scheduler.max_polecats      Dispatch mode (-1 = direct, N > 0 = deferred)
   scheduler.batch_size        Beads per heartbeat
   scheduler.spawn_delay       Delay between spawns
+  maintenance.window          Maintenance window start time (HH:MM)
+  maintenance.interval        How often: daily, weekly, monthly, or duration
+  maintenance.threshold       Commit count threshold
+
+  Lifecycle (Dolt data maintenance):
+  lifecycle.reaper.enabled     Wisp reaper enabled (true/false)
+  lifecycle.reaper.interval    Reaper check interval
+  lifecycle.reaper.delete_age  Duration before closed wisps are deleted
+  lifecycle.compactor.enabled  Compactor dog enabled (true/false)
+  lifecycle.compactor.interval Compactor check interval
+  lifecycle.compactor.threshold Commit count threshold for compaction
+  lifecycle.doctor.enabled     Doctor dog enabled (true/false)
+  lifecycle.doctor.interval    Doctor check interval
+  lifecycle.backup.enabled     JSONL + Dolt backups enabled (true/false)
+  lifecycle.backup.interval    Backup interval
 
 Examples:
   gt config get convoy.notify_on_complete
   gt config get cli_theme
-  gt config get scheduler.max_polecats
+  gt config get maintenance.window
+  gt config get lifecycle.reaper.delete_age
 
 ```
 gt config get <key> [flags]

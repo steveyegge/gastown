@@ -36,6 +36,8 @@ gt namepool [flags]
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
 * [gt namepool add](../cli/gt_namepool_add/)	 - Add a custom name to the pool
+* [gt namepool create](../cli/gt_namepool_create/)	 - Create a custom theme
+* [gt namepool delete](../cli/gt_namepool_delete/)	 - Delete a custom theme
 * [gt namepool reset](../cli/gt_namepool_reset/)	 - Reset the pool state (release all names)
 * [gt namepool set](../cli/gt_namepool_set/)	 - Set the namepool theme for this rig
 * [gt namepool themes](../cli/gt_namepool_themes/)	 - List available themes and their names

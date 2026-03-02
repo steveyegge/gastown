@@ -28,4 +28,5 @@ Examples:
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
 * [gt patrol digest](../cli/gt_patrol_digest/)	 - Aggregate patrol cycle digests into a daily summary bead
 * [gt patrol new](../cli/gt_patrol_new/)	 - Create a new patrol wisp with config variables
+* [gt patrol report](../cli/gt_patrol_report/)	 - Close patrol cycle with summary and start next cycle
 

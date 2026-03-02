@@ -34,13 +34,17 @@ gt dolt [flags]
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
 * [gt dolt cleanup](../cli/gt_dolt_cleanup/)	 - Remove orphaned databases from .dolt-data/
+* [gt dolt dump](../cli/gt_dolt_dump/)	 - Dump Dolt server goroutine stacks for debugging
 * [gt dolt fix-metadata](../cli/gt_dolt_fix-metadata/)	 - Update metadata.json in all rig .beads directories
+* [gt dolt flatten](../cli/gt_dolt_flatten/)	 - Flatten database history to a single commit (NUCLEAR OPTION)
 * [gt dolt init](../cli/gt_dolt_init/)	 - Initialize and repair Dolt workspace configuration
 * [gt dolt init-rig](../cli/gt_dolt_init-rig/)	 - Initialize a new rig database
+* [gt dolt kill-imposters](../cli/gt_dolt_kill-imposters/)	 - Kill dolt servers hijacking this workspace's port
 * [gt dolt list](../cli/gt_dolt_list/)	 - List available rig databases
 * [gt dolt logs](../cli/gt_dolt_logs/)	 - View Dolt server logs
 * [gt dolt migrate](../cli/gt_dolt_migrate/)	 - Migrate existing dolt databases to centralized data directory
 * [gt dolt migrate-wisps](../cli/gt_dolt_migrate-wisps/)	 - Migrate agent beads from issues to wisps table
+* [gt dolt rebase](../cli/gt_dolt_rebase/)	 - Surgical compaction: squash old commits, keep recent ones
 * [gt dolt recover](../cli/gt_dolt_recover/)	 - Detect and recover from Dolt read-only state
 * [gt dolt restart](../cli/gt_dolt_restart/)	 - Restart the Dolt server (kills imposters)
 * [gt dolt rollback](../cli/gt_dolt_rollback/)	 - Restore .beads directories from a migration backup

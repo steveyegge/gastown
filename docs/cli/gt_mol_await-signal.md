@@ -1,10 +1,10 @@
 ---
-title: "GT MOL STEP AWAIT-SIGNAL"
+title: "GT MOL AWAIT-SIGNAL"
 ---
 
-## gt mol step await-signal
+## gt mol await-signal
 
-Wait for activity feed signal with timeout
+Wait for activity feed signal with timeout (alias: gt mol step await-signal)
 
 ### Synopsis
 
@@ -50,7 +50,7 @@ EXAMPLES:
   gt mol await-signal --timeout 30s --quiet
 
 ```
-gt mol step await-signal [flags]
+gt mol await-signal [flags]
 ```
 
 ### Options
@@ -68,5 +68,5 @@ gt mol step await-signal [flags]
 
 ### SEE ALSO
 
-* [gt mol step](../cli/gt_mol_step/)	 - Molecule step operations
+* [gt mol](../cli/gt_mol/)	 - Agent molecule workflow commands
 

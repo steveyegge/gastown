@@ -65,6 +65,7 @@ gt mail [flags]
 * [gt mail clear](../cli/gt_mail_clear/)	 - Clear all messages from an inbox
 * [gt mail delete](../cli/gt_mail_delete/)	 - Delete messages
 * [gt mail directory](../cli/gt_mail_directory/)	 - List all valid mail recipient addresses
+* [gt mail drain](../cli/gt_mail_drain/)	 - Bulk-archive stale protocol messages
 * [gt mail group](../cli/gt_mail_group/)	 - Manage mail groups
 * [gt mail hook](../cli/gt_mail_hook/)	 - Attach mail to your hook (alias for 'gt hook attach')
 * [gt mail inbox](../cli/gt_mail_inbox/)	 - Check inbox

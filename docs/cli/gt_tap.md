@@ -40,4 +40,5 @@ See ~/gt/docs/HOOKS.md for full documentation.
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
 * [gt tap guard](../cli/gt_tap_guard/)	 - Block forbidden operations (PreToolUse hook)
+* [gt tap list](../cli/gt_tap_list/)	 - List available tap handlers
 

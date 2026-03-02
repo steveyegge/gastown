@@ -17,9 +17,10 @@ The dashboard shows real-time convoy status with:
 - Auto-refresh every 30 seconds via htmx
 
 Example:
-  gt dashboard              # Start on default port 8080
-  gt dashboard --port 3000  # Start on port 3000
-  gt dashboard --open       # Start and open browser
+  gt dashboard                    # Start on default port 8080
+  gt dashboard --port 3000        # Start on port 3000
+  gt dashboard --bind 0.0.0.0     # Listen on all interfaces
+  gt dashboard --open             # Start and open browser
 
 ```
 gt dashboard [flags]
@@ -28,9 +29,10 @@ gt dashboard [flags]
 ### Options
 
 ```
-  -h, --help       help for dashboard
-      --open       Open browser automatically
-      --port int   HTTP port to listen on (default 8080)
+      --bind string   Address to bind to (use 0.0.0.0 for all interfaces) (default "127.0.0.1")
+  -h, --help          help for dashboard
+      --open          Open browser automatically
+      --port int      HTTP port to listen on (default 8080)
 ```
 
 ### SEE ALSO

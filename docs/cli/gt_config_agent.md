@@ -26,6 +26,7 @@ gt config agent [flags]
 ### SEE ALSO
 
 * [gt config](../cli/gt_config/)	 - Manage Gas Town configuration
+* [gt config agent check](../cli/gt_config_agent_check/)	 - Verify agent configs will auto-start correctly
 * [gt config agent get](../cli/gt_config_agent_get/)	 - Show agent configuration
 * [gt config agent list](../cli/gt_config_agent_list/)	 - List all agents
 * [gt config agent remove](../cli/gt_config_agent_remove/)	 - Remove custom agent

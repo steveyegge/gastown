@@ -72,6 +72,7 @@ gt mail send <address> [flags]
       --self              Send to self (auto-detect from cwd)
       --stdin             Read message body from stdin (avoids shell quoting issues)
   -s, --subject string    Message subject (required)
+      --to string         Recipient address (alternative to positional argument)
       --type string       Message type (task, scavenge, notification, reply) (default "notification")
       --urgent            Set priority=0 (urgent)
       --wisp              Send as wisp (ephemeral, default) (default true)

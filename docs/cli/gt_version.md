@@ -20,7 +20,9 @@ gt version [flags]
 ### Options
 
 ```
-  -h, --help   help for version
+  -h, --help      help for version
+      --short     Output only the version number (e.g., 0.5.0-362)
+  -v, --verbose   Show extended version info including timestamp
 ```
 
 ### SEE ALSO

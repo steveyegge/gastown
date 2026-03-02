@@ -129,4 +129,5 @@ gt sling <bead-or-formula> [target] [flags]
 ### SEE ALSO
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
+* [gt sling respawn-reset](../cli/gt_sling_respawn-reset/)	 - Reset the respawn counter for a bead
 

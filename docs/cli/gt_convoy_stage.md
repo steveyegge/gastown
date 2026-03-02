@@ -29,9 +29,10 @@ gt convoy stage <epic-id | task-id... | convoy-id> [flags]
 ### Options
 
 ```
-  -h, --help     help for stage
-      --json     Output machine-readable JSON
-      --launch   Launch the convoy immediately after staging (transition to open)
+  -h, --help           help for stage
+      --json           Output machine-readable JSON
+      --launch         Launch the convoy immediately after staging (transition to open)
+      --title string   Human-readable title for the convoy (default: derived from epic title or auto-generated)
 ```
 
 ### SEE ALSO

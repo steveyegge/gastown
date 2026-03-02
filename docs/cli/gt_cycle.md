@@ -12,9 +12,8 @@ Cycle between related tmux sessions based on the current session type.
 
 Session groups:
 - Town sessions: Mayor ↔ Deacon
-- Crew sessions: All crew members in the same rig (e.g., greenplace/crew/max ↔ greenplace/crew/joe)
-- Rig infra sessions: Witness ↔ Refinery (per rig)
-- Polecat sessions: All polecats in the same rig (e.g., greenplace/Toast ↔ greenplace/Nux)
+- Crew sessions: All crew members in the same rig
+- Rig ops sessions: Witness + Refinery + Polecats in the same rig
 
 The appropriate cycling is detected automatically from the session name.
 

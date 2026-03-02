@@ -14,7 +14,7 @@ Shutdown levels (progressively more aggressive):
   gt down                    Stop infrastructure (default)
   gt down --polecats         Also stop all polecat sessions
   gt down --all              Full shutdown with orphan cleanup
-  gt down --nuke             Also kill the tmux server (DESTRUCTIVE)
+  gt down --nuke             Also kill the shared tmux server
 
 Infrastructure agents stopped:
   • Refineries - Per-rig work processors
@@ -44,7 +44,7 @@ gt down [flags]
       --dry-run    Preview what would be stopped without taking action
   -f, --force      Force kill without graceful shutdown
   -h, --help       help for down
-      --nuke       Kill entire tmux server (DESTRUCTIVE - kills non-GT sessions!)
+      --nuke       Kill the shared tmux server (default socket) and all its sessions
   -p, --polecats   Also stop all polecat sessions
   -q, --quiet      Only show errors
 ```

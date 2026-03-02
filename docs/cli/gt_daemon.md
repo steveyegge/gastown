@@ -30,8 +30,10 @@ gt daemon [flags]
 ### SEE ALSO
 
 * [gt](../cli/gt/)	 - Gas Town - Multi-agent workspace manager
+* [gt daemon clear-backoff](../cli/gt_daemon_clear-backoff/)	 - Clear crash loop backoff for an agent
 * [gt daemon enable-supervisor](../cli/gt_daemon_enable-supervisor/)	 - Configure launchd/systemd for daemon auto-restart
 * [gt daemon logs](../cli/gt_daemon_logs/)	 - View daemon logs
+* [gt daemon rotate-logs](../cli/gt_daemon_rotate-logs/)	 - Rotate daemon log files
 * [gt daemon start](../cli/gt_daemon_start/)	 - Start the daemon
 * [gt daemon status](../cli/gt_daemon_status/)	 - Show daemon status
 * [gt daemon stop](../cli/gt_daemon_stop/)	 - Stop the daemon

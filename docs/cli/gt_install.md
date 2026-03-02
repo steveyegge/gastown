@@ -38,6 +38,7 @@ gt install [path] [flags]
 ### Options
 
 ```
+      --dolt-port int        Dolt SQL server port (default 3307; set when another instance owns the default port)
   -f, --force                Re-run install in existing HQ (preserves town.json and rigs.json)
       --git                  Initialize git with .gitignore
       --github string        Create GitHub repo (format: owner/repo, private by default)

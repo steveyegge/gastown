@@ -37,10 +37,12 @@ Cleanup checks (fixable):
   - orphan-processes         Detect orphaned Claude processes
   - session-name-format      Detect sessions with outdated naming format (fixable)
   - wisp-gc                  Detect and clean abandoned wisps (>1h)
+  - misclassified-wisps      Detect issues that should be wisps (purges to wisps table, fixable)
+  - jsonl-bloat              Detect stale/bloated issues.jsonl vs live database
   - stale-beads-redirect     Detect stale files in .beads directories with redirects
 
 Clone divergence checks:
-  - persistent-role-branches Detect crew/witness/refinery not on main
+  - persistent-role-branches Detect witness/refinery not on main (excludes crew)
   - clone-divergence         Detect clones significantly behind origin/main
   - default-branch-all-rigs  Verify default_branch exists on remote for all rigs
   - worktree-gitdir-valid    Verify worktree .git files reference existing paths (fixable)
@@ -67,6 +69,12 @@ Routing checks (fixable):
   - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
   - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
+Lifecycle checks (fixable):
+  - lifecycle-defaults          Ensure daemon.json has all lifecycle patrol entries (fixable)
+
+Migration checks:
+  - town-claude-md           Check town-root CLAUDE.md matches embedded version (fixable)
+
 Session hook checks:
   - session-hooks            Check settings.json use session-start.sh
   - claude-settings          Check Claude settings.json match templates (fixable)
@@ -86,6 +94,7 @@ Patrol checks:
   - patrol-plugins-accessible Verify plugin directories
 
 Use --fix to attempt automatic fixes for issues that support it.
+Use --no-start with --fix to suppress starting the daemon and agents.
 Use --rig to check a specific rig instead of the entire workspace.
 Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).
 
@@ -98,6 +107,7 @@ gt doctor [flags]
 ```
       --fix                  Attempt to automatically fix issues
   -h, --help                 help for doctor
+      --no-start             Suppress starting daemon/agents during --fix
       --restart-sessions     Restart patrol sessions when fixing stale settings (use with --fix)
       --rig string           Check specific rig only
       --slow string[="1s"]   Highlight slow checks (optional threshold, default 1s)

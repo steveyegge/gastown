@@ -51,6 +51,7 @@ gt polecat [flags]
 * [gt polecat identity](../cli/gt_polecat_identity/)	 - Manage polecat identities
 * [gt polecat list](../cli/gt_polecat_list/)	 - List polecats in a rig
 * [gt polecat nuke](../cli/gt_polecat_nuke/)	 - Completely destroy a polecat (session, worktree, branch, agent bead)
+* [gt polecat pool-init](../cli/gt_polecat_pool-init/)	 - Initialize a persistent polecat pool for a rig
 * [gt polecat prune](../cli/gt_polecat_prune/)	 - Prune stale polecat branches (local and remote)
 * [gt polecat remove](../cli/gt_polecat_remove/)	 - Remove polecats from a rig
 * [gt polecat stale](../cli/gt_polecat_stale/)	 - Detect stale polecats that may need cleanup

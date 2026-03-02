@@ -47,6 +47,7 @@ gt mol [flags]
 * [gt mol attach](../cli/gt_mol_attach/)	 - Attach a molecule to a pinned bead
 * [gt mol attach-from-mail](../cli/gt_mol_attach-from-mail/)	 - Attach a molecule from a mail message
 * [gt mol attachment](../cli/gt_mol_attachment/)	 - Show attachment status of a pinned bead
+* [gt mol await-signal](../cli/gt_mol_await-signal/)	 - Wait for activity feed signal with timeout (alias: gt mol step await-signal)
 * [gt mol burn](../cli/gt_mol_burn/)	 - Burn current molecule without creating a digest
 * [gt mol current](../cli/gt_mol_current/)	 - Show what agent should be working on
 * [gt mol dag](../cli/gt_mol_dag/)	 - Visualize molecule dependency DAG

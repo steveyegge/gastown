@@ -61,5 +61,5 @@ gt convoy [flags]
 * [gt convoy list](../cli/gt_convoy_list/)	 - List convoys
 * [gt convoy stage](../cli/gt_convoy_stage/)	 - Stage a convoy: analyze dependencies, compute waves, create staged convoy
 * [gt convoy status](../cli/gt_convoy_status/)	 - Show convoy status
-* [gt convoy stranded](../cli/gt_convoy_stranded/)	 - Find stranded convoys (ready work or empty) needing attention
+* [gt convoy stranded](../cli/gt_convoy_stranded/)	 - Find stranded convoys (ready work, stuck, or empty) needing attention
 

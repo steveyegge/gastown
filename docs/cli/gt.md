@@ -58,6 +58,7 @@ across distributed teams of AI agents working on shared codebases.
 * [gt formula](../cli/gt_formula/)	 - Manage workflow formulas
 * [gt git-init](../cli/gt_git-init/)	 - Initialize git repository for a Gas Town HQ
 * [gt handoff](../cli/gt_handoff/)	 - Hand off to a fresh session, work continues from hook
+* [gt health](../cli/gt_health/)	 - Show comprehensive system health
 * [gt hook](../cli/gt_hook/)	 - Show or attach work on a hook
 * [gt hooks](../cli/gt_hooks/)	 - Centralized hook management for Gas Town
 * [gt info](../cli/gt_info/)	 - Show Gas Town information and what's new
@@ -67,6 +68,7 @@ across distributed teams of AI agents working on shared codebases.
 * [gt krc](../cli/gt_krc/)	 - Key Record Chronicle - manage ephemeral data TTLs
 * [gt log](../cli/gt_log/)	 - View town activity log
 * [gt mail](../cli/gt_mail/)	 - Agent messaging system
+* [gt maintain](../cli/gt_maintain/)	 - Run full Dolt maintenance (reap + flatten + gc)
 * [gt mayor](../cli/gt_mayor/)	 - Manage the Mayor (Chief of Staff for cross-rig coordination)
 * [gt metrics](../cli/gt_metrics/)	 - Show command usage statistics
 * [gt mol](../cli/gt_mol/)	 - Agent molecule workflow commands
@@ -75,6 +77,7 @@ across distributed teams of AI agents working on shared codebases.
 * [gt notify](../cli/gt_notify/)	 - Set notification level
 * [gt nudge](../cli/gt_nudge/)	 - Send a synchronous message to any Gas Town worker
 * [gt orphans](../cli/gt_orphans/)	 - Find lost polecat work
+* [gt override](../cli/gt_override/)	 - Manage role prompt overrides
 * [gt patrol](../cli/gt_patrol/)	 - Patrol digest management
 * [gt peek](../cli/gt_peek/)	 - View recent output from a polecat or crew session
 * [gt plugin](../cli/gt_plugin/)	 - Plugin management
@@ -108,7 +111,9 @@ across distributed teams of AI agents working on shared codebases.
 * [gt uninstall](../cli/gt_uninstall/)	 - Remove Gas Town from the system
 * [gt unsling](../cli/gt_unsling/)	 - Remove work from an agent's hook
 * [gt up](../cli/gt_up/)	 - Bring up all Gas Town services
+* [gt upgrade](../cli/gt_upgrade/)	 - Run post-install migration and sync workspace state
 * [gt version](../cli/gt_version/)	 - Print version information
+* [gt vitals](../cli/gt_vitals/)	 - Show unified health dashboard
 * [gt warrant](../cli/gt_warrant/)	 - Manage death warrants for stuck agents
 * [gt whoami](../cli/gt_whoami/)	 - Show current identity for mail commands
 * [gt witness](../cli/gt_witness/)	 - Manage the Witness (per-rig polecat health monitor)
