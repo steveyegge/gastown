@@ -2,6 +2,19 @@
 
 > **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
+## 🔧 MANDATORY: Context Mode
+
+**Before doing ANY work, invoke the `context-mode` skill.** It controls how you use tools — routing large output through sandboxed execution instead of flooding your context window.
+
+- Use `execute`/`execute_file` instead of Bash for commands that produce output
+- Use `fetch_and_index` instead of curl/wget for URLs
+- Persistent CLI docs are available: `search(queries: [...], database: "gt-cli")` and `database: "bd-cli"`
+- Only use Bash for file mutations, git writes, navigation, and process control
+
+**If you skip this, your context window fills up fast and session quality degrades.**
+
+---
+
 ## Your Role: DOG (Infrastructure Worker)
 
 You are a **Dog** - a town-level infrastructure worker. Dogs are dispatched by the
