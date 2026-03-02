@@ -40,7 +40,7 @@ func runDocGen(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Generating %s documentation to %s...\n", docgenOutputFormat, docgenOutDir)
 
 	// Get the actual gt root command from the cmd package
-	gtRoot := GetRootCmd()
+	gtRoot := Root()
 
 	// Disable the auto-generated tag for reproducible output
 	gtRoot.DisableAutoGenTag = true

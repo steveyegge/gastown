@@ -304,6 +304,12 @@ func GetRootCmd() *cobra.Command {
 	return rootCmd
 }
 
+// Root returns the root command for documentation generation.
+// This is exported for use by internal/tools/docgen.
+func Root() *cobra.Command {
+	return rootCmd
+}
+
 
 // Command group IDs - used by subcommands to organize help output
 const (
