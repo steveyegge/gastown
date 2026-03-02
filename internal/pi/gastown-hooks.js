@@ -16,6 +16,19 @@ export default (pi) => {
 
   // SessionStart — run gt prime and capture context for injection
   pi.on("session_start", async (event, context) => {
+    // Emit agent.instantiate event for OTEL telemetry
+    try {
+      const role = (process.env.GT_ROLE || "").toLowerCase();
+      const sessionID = process.env.GT_SESSION_ID || "";
+      const runID = sessionID || "unknown";
+      const rig = process.env.GT_RIG || "";
+      await pi.exec("gt", ["activity", "emit", "agent.instantiate", "--run-id", runID, "--role", role, "--session", sessionID, "--rig", rig, "--agent-type", "pi-mono"]);
+      console.error("[gastown] agent.instantiate event emitted");
+    } catch (e) {
+      console.error("[gastown] agent.instantiate failed:", e.message);
+    }
+
+    // Capture gt prime context.
     try {
       const result = await pi.exec("gt", ["prime", "--hook"]);
       if (result.code === 0 && result.stdout.trim()) {

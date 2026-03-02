@@ -8,12 +8,36 @@
 //   tool_call  → gt tap guard pr-workflow (on git push/pr create)
 //   agent_end  → gt costs record
 
+// Import OTEL if available
+let otelAvailable = false;
+try {
+  // Check if OTEL environment variables are set
+  const metricsURL = process.env.GT_OTEL_METRICS_URL;
+  const logsURL = process.env.GT_OTEL_LOGS_URL;
+  otelAvailable = !!(metricsURL || logsURL);
+} catch (e) {
+  // OTEL not available
+}
 export default (pi) => {
   const role = (process.env.GT_ROLE || "").toLowerCase();
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
 
   pi.on("startup", async (event) => {
     let context = null;
+
+    // Emit agent.instantiate event for OTEL telemetry
+    if (otelAvailable) {
+      try {
+        const role = (process.env.GT_ROLE || "").toLowerCase();
+        const sessionID = process.env.GT_SESSION_ID || "";
+        const runID = sessionID || "unknown";
+        const rig = process.env.GT_RIG || "";
+        await pi.exec("gt", ["activity", "emit", "agent.instantiate", "--run-id", runID, "--role", role, "--session", sessionID, "--rig", rig, "--agent-type", "pi-rust"]);
+        console.error("[gastown] agent.instantiate event emitted");
+      } catch (e) {
+        console.error("[gastown] agent.instantiate failed:", e.message);
+      }
+    }
 
     // Capture gt prime context.
     try {
@@ -65,6 +89,8 @@ export default (pi) => {
       }
     }
   });
+  });
+
 
   // ToolCall — guard dangerous git operations via gt tap.
   pi.on("tool_call", async (event) => {

@@ -32,6 +32,11 @@ export const GasTown = async ({ $, directory }) => {
     return context;
   };
 
+  // Check if OTEL is available
+  const otelAvailable = !!(process.env.GT_OTEL_METRICS_URL || process.env.GT_OTEL_LOGS_URL);
+
+  const otelAvailable = !!(process.env.GT_OTEL_METRICS_URL || process.env.GT_OTEL_LOGS_URL);
+
   return {
     event: async ({ event }) => {
       if (event?.type === "session.created") {
@@ -39,6 +44,20 @@ export const GasTown = async ({ $, directory }) => {
         didInit = true;
         // Start loading prime context early; system.transform will await it.
         primePromise = loadPrime();
+
+        // Emit agent.instantiate event for OTEL telemetry
+        if (otelAvailable) {
+          try {
+            const role = (process.env.GT_ROLE || "").toLowerCase();
+            const sessionID = event.properties?.info?.id || "";
+            const runID = sessionID || "unknown";
+            const rig = process.env.GT_RIG || "";
+            await $`gt activity emit agent.instantiate --run-id ${runID} --role ${role} --session ${sessionID} --rig ${rig} --agent-type opencode`;
+            console.error("[gastown] agent.instantiate event emitted");
+          } catch (err) {
+            console.error("[gastown] agent.instantiate failed", err?.message || err);
+          }
+        }
       }
       if (event?.type === "session.compacted") {
         // Reset so next system.transform gets fresh context.
@@ -74,5 +93,17 @@ export const GasTown = async ({ $, directory }) => {
 **Role:** ${roleDisplay}
 `);
     },
+    "experimental.tool.use": async (toolCall, context) => {
+      // Track tool calls as child spans for OTEL telemetry
+      if (otelAvailable) {
+        try {
+          const sessionID = context.sessionId || "";
+          const toolName = toolCall.name || "unknown";
+          await $`gt activity emit tool_call --session ${sessionID} --tool ${toolName} --agent-type opencode`;
+          console.error(`[gastown] tool_call event emitted for ${toolName}`);
+        } catch (err) {
+          console.error("[gastown] tool_call failed", err?.message || err);
+        }
+      }
+    },
   };
-};
