@@ -1116,8 +1116,11 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Pass the pre-generated message ID so bd uses it instead of generating its own.
 	// Without this, the ephemeral (SQLite) insert path produces empty IDs,
 	// causing UNIQUE constraint failures on subsequent sends (#2095).
+	// Use --force to bypass prefix validation: mail always goes to town-level beads
+	// (hq- prefix) but msg IDs use "msg-" prefix by design. Without --force,
+	// polecats in rig databases get "prefix mismatch" errors sending to mayor/.
 	if msg.ID != "" {
-		args = append(args, "--id", msg.ID)
+		args = append(args, "--id", msg.ID, "--force")
 	}
 
 	// Add --ephemeral flag for ephemeral messages (wisps, not synced to git)
