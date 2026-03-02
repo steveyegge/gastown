@@ -376,3 +376,17 @@ var DefaultRateLimitPatterns = []string{
 	`OAuth token revoked`,                            // Token invalidated after keychain swap
 	`OAuth token has expired`,                        // Token expired — needs fresh auth
 }
+
+// DefaultNearLimitPatterns are patterns that indicate a session is approaching
+// its rate limit but hasn't hit it yet. These enable proactive rotation before
+// the hard 429. Matched with (?i) for case-insensitive matching.
+var DefaultNearLimitPatterns = []string{
+	`\d{2,3}%\s*(of\s*)?(your\s*)?(daily\s*)?(usage|limit|quota)`, // "80% of your daily usage"
+	`usage\s+(is\s+)?(at|near|approaching)\s+\d+\s*%`,             // "usage is at 90%"
+	`approaching\s+(your\s+)?(rate\s+)?limit`,                     // "approaching your rate limit"
+	`nearing\s+(your\s+)?(rate\s+)?limit`,                         // "nearing your rate limit"
+	`close\s+to\s+(your\s+)?(rate\s+)?limit`,                     // "close to your rate limit"
+	`almost\s+(at|hit|reached)\s+(your\s+)?(rate\s+)?limit`,       // "almost reached your rate limit"
+	`\d+\s*(messages?|requests?)\s*(left|remaining)`,               // "10 messages remaining"
+}
+
