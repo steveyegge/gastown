@@ -63,10 +63,6 @@
 {"issue_id":"sg-svm2","label":"daemon"}
 {"issue_id":"sg-svm2","label":"stranded-scan"}
 {"issue_id":"sg-svm2","label":"utf8"}
-{"issue_id":"sg-swqs","label":"agent:pi-kimi"}
-{"issue_id":"sg-swqs","label":"gtbench"}
-{"issue_id":"sg-swqs","label":"harness:pir"}
-{"issue_id":"sg-swqs","label":"model:kimi-k2.5"}
 {"issue_id":"sg-tfup","label":"blocking"}
 {"issue_id":"sg-tfup","label":"pi-rust"}
 {"issue_id":"sg-tfup","label":"upstream"}
