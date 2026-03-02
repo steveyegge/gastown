@@ -48,6 +48,22 @@
         "refresh": 2
       },
       {
+        "name": "harness",
+        "type": "query",
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "query": "label_values(gastown_session_starts_total, harness)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      },
+      {
         "name": "subcommand",
         "type": "query",
         "datasource": {
@@ -81,7 +97,7 @@
       },
       "targets": [
         {
-          "expr": "increase(gastown_session_starts_total{role=~\"$role\"}[5m])",
+          "expr": "increase(gastown_session_starts_total{role=~\"$role\", harness=~\"$harness\"}[5m])",
           "legendFormat": "{{role}}"
         }
       ],

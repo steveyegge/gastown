@@ -12,25 +12,54 @@
     "to": "now"
   },
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "harness",
+        "type": "query",
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "query": "label_values(gastown_session_starts_total{gt_rig=\"lora_forge\"}, harness)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      }
+    ]
   },
   "panels": [
     {
       "id": 100,
       "title": "Session Overview",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false
     },
     {
       "id": 1,
       "title": "Active lf-* Sessions",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "sum(last_over_time(gastown_session_starts_total{gt_session=~\"lf-.*\"}[7d])) - sum(last_over_time(gastown_session_stops_total{gt_session=~\"lf-.*\"}[7d]))",
+          "expr": "sum(last_over_time(gastown_session_starts_total{gt_session=~\"lf-.*\", harness=~\"$harness\"}[7d])) - sum(last_over_time(gastown_session_stops_total{gt_session=~\"lf-.*\"}[7d]))",
           "legendFormat": "Active"
         }
       ],
@@ -38,8 +67,14 @@
         "defaults": {
           "thresholds": {
             "steps": [
-              { "value": null, "color": "red" },
-              { "value": 1, "color": "green" }
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 1,
+                "color": "green"
+              }
             ]
           }
         }
@@ -54,11 +89,18 @@
       "id": 2,
       "title": "Total Done Events",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "count(last_over_time(gastown_done_total{gt_session=~\"lf-.*\"}[7d]))",
+          "expr": "count(last_over_time(gastown_done_total{gt_session=~\"lf-.*\", harness=~\"$harness\"}[7d]))",
           "legendFormat": "Done"
         }
       ],
@@ -66,7 +108,10 @@
         "defaults": {
           "thresholds": {
             "steps": [
-              { "value": null, "color": "blue" }
+              {
+                "value": null,
+                "color": "blue"
+              }
             ]
           }
         }
@@ -81,11 +126,18 @@
       "id": 3,
       "title": "Polecat Spawns",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "count(last_over_time(gastown_polecat_spawns_total{gt_rig=\"lora_forge\"}[7d]))",
+          "expr": "count(last_over_time(gastown_polecat_spawns_total{gt_rig=\"lora_forge\", harness=~\"$harness\"}[7d]))",
           "legendFormat": "Spawns"
         }
       ],
@@ -93,7 +145,10 @@
         "defaults": {
           "thresholds": {
             "steps": [
-              { "value": null, "color": "purple" }
+              {
+                "value": null,
+                "color": "purple"
+              }
             ]
           }
         }
@@ -108,15 +163,28 @@
       "id": 200,
       "title": "Session Outcomes (VictoriaLogs)",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "collapsed": false
     },
     {
       "id": 4,
       "title": "Recent Done Events",
       "type": "table",
-      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 6 },
-      "datasource": { "uid": "victorialogs", "type": "victoriametrics-logs-datasource" },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "uid": "victorialogs",
+        "type": "victoriametrics-logs-datasource"
+      },
       "targets": [
         {
           "expr": "_msg:\"done\" AND gt.rig:\"lora_forge\"",
@@ -149,7 +217,10 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "exit_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "exit_type"
+            },
             "properties": [
               {
                 "id": "custom.displayMode",
@@ -158,15 +229,42 @@
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "COMPLETED": { "text": "COMPLETED", "color": "green" } } },
-                  { "type": "value", "options": { "DEFERRED": { "text": "DEFERRED", "color": "red" } } },
-                  { "type": "value", "options": { "ESCALATED": { "text": "ESCALATED", "color": "orange" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "COMPLETED": {
+                        "text": "COMPLETED",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "DEFERRED": {
+                        "text": "DEFERRED",
+                        "color": "red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "ESCALATED": {
+                        "text": "ESCALATED",
+                        "color": "orange"
+                      }
+                    }
+                  }
                 ]
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "status" },
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
             "properties": [
               {
                 "id": "custom.displayMode",
@@ -175,8 +273,24 @@
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "ok": { "text": "ok", "color": "green" } } },
-                  { "type": "value", "options": { "error": { "text": "error", "color": "red" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "text": "ok",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "error": {
+                        "text": "error",
+                        "color": "red"
+                      }
+                    }
+                  }
                 ]
               }
             ]
@@ -188,11 +302,18 @@
       "id": 5,
       "title": "Exit Type Distribution",
       "type": "piechart",
-      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 6 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "last_over_time(gastown_done_total{gt_session=~\"lf-.*\"}[7d])",
+          "expr": "last_over_time(gastown_done_total{gt_session=~\"lf-.*\", harness=~\"$harness\"}[7d])",
           "legendFormat": "{{gt_session}} ({{exit_type}})"
         }
       ],
@@ -208,22 +329,34 @@
       "id": 300,
       "title": "Session Lifecycle",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "collapsed": false
     },
     {
       "id": 6,
       "title": "Session Start/Stop Rate (lf-*)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "increase(gastown_session_starts_total{gt_session=~\"lf-.*\"}[$__rate_interval])",
+          "expr": "increase(gastown_session_starts_total{gt_session=~\"lf-.*\", harness=~\"$harness\"}[$__rate_interval])",
           "legendFormat": "starts: {{gt_session}}"
         },
         {
-          "expr": "increase(gastown_session_stops_total{gt_session=~\"lf-.*\"}[$__rate_interval])",
+          "expr": "increase(gastown_session_stops_total{gt_session=~\"lf-.*\", harness=~\"$harness\"}[$__rate_interval])",
           "legendFormat": "stops: {{gt_session}}"
         }
       ],
@@ -231,7 +364,9 @@
         "defaults": {
           "custom": {
             "drawStyle": "bars",
-            "stacking": { "mode": "normal" }
+            "stacking": {
+              "mode": "normal"
+            }
           }
         }
       }
@@ -240,8 +375,16 @@
       "id": 7,
       "title": "Session Lifecycle Log",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
-      "datasource": { "uid": "victorialogs", "type": "victoriametrics-logs-datasource" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "datasource": {
+        "uid": "victorialogs",
+        "type": "victoriametrics-logs-datasource"
+      },
       "targets": [
         {
           "expr": "(_msg:\"session.start\" OR _msg:\"session.stop\") AND gt.rig:\"lora_forge\"",
@@ -274,22 +417,34 @@
       "id": 400,
       "title": "Polecat Activity",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
       "collapsed": false
     },
     {
       "id": 8,
       "title": "Polecat Spawns/Removes",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "increase(gastown_polecat_spawns_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "expr": "increase(gastown_polecat_spawns_total{gt_rig=\"lora_forge\", harness=~\"$harness\"}[$__rate_interval])",
           "legendFormat": "spawn: {{gt_agent}}"
         },
         {
-          "expr": "increase(gastown_polecat_removes_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "expr": "increase(gastown_polecat_removes_total{gt_rig=\"lora_forge\", harness=~\"$harness\"}[$__rate_interval])",
           "legendFormat": "remove: {{gt_agent}}"
         }
       ]
@@ -298,11 +453,18 @@
       "id": 9,
       "title": "bd Call Rate (lora_forge)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
-      "datasource": { "uid": "victoriametrics" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
-          "expr": "rate(gastown_bd_calls_total{gt_rig=\"lora_forge\"}[$__rate_interval])",
+          "expr": "rate(gastown_bd_calls_total{gt_rig=\"lora_forge\", harness=~\"$harness\"}[$__rate_interval])",
           "legendFormat": "{{subcommand}}"
         }
       ],
@@ -310,7 +472,9 @@
         "defaults": {
           "custom": {
             "drawStyle": "bars",
-            "stacking": { "mode": "normal" }
+            "stacking": {
+              "mode": "normal"
+            }
           }
         }
       }
@@ -319,15 +483,27 @@
       "id": 500,
       "title": "Convoy Progress (Dolt)",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
       "collapsed": false
     },
     {
       "id": 10,
       "title": "Lora Forge Beads",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 35 },
-      "datasource": { "uid": "dolt-beads" },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "targets": [
         {
           "rawSql": "SELECT id, title, status, type, priority, assignee, COALESCE(closed_at, '') AS closed_at, created_at FROM lora_forge.issues ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC LIMIT 50",
@@ -338,7 +514,10 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "status" },
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
             "properties": [
               {
                 "id": "custom.displayMode",
@@ -347,9 +526,33 @@
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "open": { "text": "open", "color": "yellow" } } },
-                  { "type": "value", "options": { "closed": { "text": "closed", "color": "green" } } },
-                  { "type": "value", "options": { "in_progress": { "text": "in_progress", "color": "blue" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": {
+                        "text": "open",
+                        "color": "yellow"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "closed": {
+                        "text": "closed",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "in_progress": {
+                        "text": "in_progress",
+                        "color": "blue"
+                      }
+                    }
+                  }
                 ]
               }
             ]
