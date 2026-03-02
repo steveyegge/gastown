@@ -49,7 +49,11 @@
 {"issue_id":"sg-sfgastown-polecat-alpha","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-amber","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-garnet","label":"gt:agent"}
+{"issue_id":"sg-sfgastown-polecat-jade","label":"done-cp:mr-created:sg-wisp-gtp0:1772434853"}
+{"issue_id":"sg-sfgastown-polecat-jade","label":"done-cp:pushed:polecat/jade/sg-ebo@mm8sbujx:1772434845"}
+{"issue_id":"sg-sfgastown-polecat-jade","label":"done-cp:witness-notified:ok:1772434856"}
 {"issue_id":"sg-sfgastown-polecat-jade","label":"done-intent:COMPLETED:1772432259"}
+{"issue_id":"sg-sfgastown-polecat-jade","label":"done-intent:COMPLETED:1772434834"}
 {"issue_id":"sg-sfgastown-polecat-jade","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-jasper","label":"gt:agent"}
 {"issue_id":"sg-sfgastown-polecat-obsidian","label":"gt:agent"}
@@ -76,6 +80,7 @@
 {"issue_id":"sg-wawf","label":"grafana"}
 {"issue_id":"sg-wawf","label":"otel"}
 {"issue_id":"sg-wawf","label":"research"}
+{"issue_id":"sg-wisp-gtp0","label":"gt:merge-request"}
 {"issue_id":"sg-wj3n","label":"convoy"}
 {"issue_id":"sg-wj3n","label":"daemon"}
 {"issue_id":"sg-wj3n","label":"scheduler"}
