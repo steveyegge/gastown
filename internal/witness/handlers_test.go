@@ -825,7 +825,8 @@ func TestResetAbandonedBead_ClosesWhenWorkOnMain(t *testing.T) {
 		},
 	)
 
-	result := resetAbandonedBead(bd, "/tmp/test", "testrig", "gt-work123", "alpha", nil)
+	tmpDir := t.TempDir()
+	result := resetAbandonedBead(bd, tmpDir, "testrig", "gt-work123", "alpha", nil)
 	if result {
 		t.Error("resetAbandonedBead should return false when work is on main (bead closed, not re-dispatched)")
 	}
@@ -871,7 +872,8 @@ func TestResetAbandonedBead_ResetsWhenWorkNotOnMain(t *testing.T) {
 		},
 	)
 
-	result := resetAbandonedBead(bd, "/tmp/test", "testrig", "gt-work123", "alpha", nil)
+	tmpDir := t.TempDir()
+	result := resetAbandonedBead(bd, tmpDir, "testrig", "gt-work123", "alpha", nil)
 	if !result {
 		t.Error("resetAbandonedBead should return true when work is NOT on main (bead reset for re-dispatch)")
 	}
