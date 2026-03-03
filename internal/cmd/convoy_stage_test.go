@@ -1116,7 +1116,7 @@ func TestCategorize_CycleIsError(t *testing.T) {
 	findings := []StagingFinding{
 		{Severity: "error", Category: "cycle", BeadIDs: []string{"a", "b"}, Message: "cycle"},
 	}
-	errs, warns := categorizeFindings(findings)
+	errs, warns, _ := categorizeFindings(findings)
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d", len(errs))
 	}
@@ -1130,7 +1130,7 @@ func TestCategorize_NoRigIsError(t *testing.T) {
 	findings := []StagingFinding{
 		{Severity: "error", Category: "no-rig", BeadIDs: []string{"gt-xyz"}, Message: "no rig"},
 	}
-	errs, warns := categorizeFindings(findings)
+	errs, warns, _ := categorizeFindings(findings)
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d", len(errs))
 	}
@@ -1192,7 +1192,7 @@ func TestErrorDetection_CycleDetected(t *testing.T) {
 	}}
 
 	findings := detectErrors(dag)
-	errs, _ := categorizeFindings(findings)
+	errs, _, _ := categorizeFindings(findings)
 	if len(errs) == 0 {
 		t.Fatal("expected cycle error")
 	}
@@ -1207,7 +1207,7 @@ func TestErrorDetection_NoRig(t *testing.T) {
 		"a": {ID: "a", Type: "task", Rig: ""}, // no rig!
 	}}
 	findings := detectErrors(dag)
-	errs, _ := categorizeFindings(findings)
+	errs, _, _ := categorizeFindings(findings)
 	if len(errs) == 0 {
 		t.Fatal("expected no-rig error")
 	}
@@ -1832,7 +1832,7 @@ func TestCreateStagedConvoy_CleanReady(t *testing.T) {
 	// Run the full error/warning detection pipeline.
 	errFindings := detectErrors(convoyDAG)
 	warnFindings := detectWarnings(convoyDAG, input)
-	errs, warns := categorizeFindings(append(errFindings, warnFindings...))
+	errs, warns, _ := categorizeFindings(append(errFindings, warnFindings...))
 	status := chooseStatus(errs, warns)
 
 	if status != "staged_ready" {
@@ -2328,7 +2328,7 @@ func TestJSONOutput_ErrorsPopulatedOnCycle(t *testing.T) {
 
 	errFindings := detectErrors(dag)
 	warnFindings := detectWarnings(dag, input)
-	errs, warns := categorizeFindings(append(errFindings, warnFindings...))
+	errs, warns, _ := categorizeFindings(append(errFindings, warnFindings...))
 
 	if len(errs) == 0 {
 		t.Fatal("expected cycle error")

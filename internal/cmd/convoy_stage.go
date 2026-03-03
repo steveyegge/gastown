@@ -288,7 +288,7 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 
 	// Step 8: Categorize findings.
 	allFindings := append(errFindings, warnFindings...)
-	errs, warns := categorizeFindings(allFindings)
+	errs, warns, infos := categorizeFindings(allFindings)
 
 	// Step 9: Choose status.
 	status := chooseStatus(errs, warns)
@@ -342,6 +342,11 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 	if len(warns) > 0 {
 		warnOutput := renderWarnings(warns)
 		fmt.Print(warnOutput)
+	}
+
+	// Step 14a: If info findings, render and print.
+	if len(infos) > 0 {
+		fmt.Print(renderInfoFindings(infos))
 	}
 
 	// Step 14b: Resolve convoy title.
@@ -1092,12 +1097,15 @@ type StagingFinding struct {
 	SuggestedFix string   // actionable fix suggestion
 }
 
-// categorizeFindings splits findings into errors and warnings by severity.
-func categorizeFindings(findings []StagingFinding) (errors, warnings []StagingFinding) {
+// categorizeFindings splits findings into errors, warnings, and infos by severity.
+// Info findings are displayed but don't affect convoy status.
+func categorizeFindings(findings []StagingFinding) (errors, warnings, infos []StagingFinding) {
 	for _, f := range findings {
 		switch f.Severity {
 		case "error":
 			errors = append(errors, f)
+		case "info":
+			infos = append(infos, f)
 		default:
 			warnings = append(warnings, f)
 		}
@@ -1720,7 +1728,7 @@ func sortedNodeIDs(dag *ConvoyDAG) []string {
 // ---------------------------------------------------------------------------
 
 // waveCapacityThreshold returns the configured max concurrent polecats,
-// used as the threshold for capacity warnings during staging.
+// used as the threshold for capacity info during staging.
 func waveCapacityThreshold() int {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -1926,10 +1934,10 @@ func estimateCapacity(dag *ConvoyDAG) []StagingFinding {
 	for _, wave := range waves {
 		if len(wave.Tasks) > threshold {
 			findings = append(findings, StagingFinding{
-				Severity: "warning",
+				Severity: "info",
 				Category: "capacity",
 				BeadIDs:  wave.Tasks,
-				Message:  fmt.Sprintf("wave %d has %d tasks (threshold: %d) — may exceed parallel capacity", wave.Number, len(wave.Tasks), threshold),
+				Message:  fmt.Sprintf("wave %d has %d tasks (max concurrent: %d) — dispatch will be capacity-gated", wave.Number, len(wave.Tasks), threshold),
 			})
 		}
 	}
@@ -1977,6 +1985,19 @@ func renderWarnings(findings []StagingFinding) string {
 		if f.SuggestedFix != "" {
 			buf.WriteString(fmt.Sprintf("     Fix: %s\n", f.SuggestedFix))
 		}
+	}
+	return buf.String()
+}
+
+// renderInfoFindings formats info findings for console output.
+func renderInfoFindings(findings []StagingFinding) string {
+	if len(findings) == 0 {
+		return ""
+	}
+	var buf strings.Builder
+	buf.WriteString("Info:\n")
+	for i, f := range findings {
+		buf.WriteString(fmt.Sprintf("  %d. [%s] %s\n", i+1, f.Category, f.Message))
 	}
 	return buf.String()
 }
