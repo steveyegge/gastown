@@ -133,9 +133,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 	}
-	if rigName == "" {
-		// Last resort: try GT_RIG env var
-		rigName = os.Getenv("GT_RIG")
+	// Prefer GT_RIG over cwd-derived rig name when available.
+	// When Claude Code resets shell cwd (e.g., to mayor/rig), the cwd-derived
+	// rig name is wrong (e.g., "mayor" instead of "vets"). GT_RIG is set
+	// reliably for polecats via session env injection.
+	if envRig := os.Getenv("GT_RIG"); envRig != "" {
+		rigName = envRig
 	}
 	if rigName == "" {
 		return fmt.Errorf("cannot determine current rig (working directory may be deleted)")
@@ -299,7 +302,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// This handles cases where branch name doesn't contain issue ID
 	// (e.g., "polecat/furiosa-mkb0vq9f" doesn't have the actual issue).
 	if issueID == "" && agentBeadID != "" {
-		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		bd := beads.New(cwd)
 		if hookIssue := getIssueFromAgentHook(bd, agentBeadID); hookIssue != "" {
 			issueID = hookIssue
 		}
@@ -315,7 +318,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// skip those stages to avoid repeating work or hitting errors.
 	checkpoints := map[DoneCheckpoint]string{}
 	if agentBeadID != "" {
-		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		bd := beads.New(cwd)
 		setDoneIntentLabel(bd, agentBeadID, exitType)
 		checkpoints = readDoneCheckpoints(bd, agentBeadID)
 		if len(checkpoints) > 0 {
@@ -412,7 +415,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Normally the Refinery closes after merge, but with no MR, nothing
 			// would ever close the issue.
 			if issueID != "" {
-				bd := beads.New(beads.ResolveBeadsDir(cwd))
+				bd := beads.New(cwd)
 
 				// Acceptance criteria gate: check for unchecked criteria before closing.
 				// If criteria exist and are unchecked, warn and skip close — the bead stays
@@ -497,7 +500,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 			// Close the base issue — no MR/refinery will close it
 			if issueID != "" {
-				directBd := beads.New(beads.ResolveBeadsDir(cwd))
+				directBd := beads.New(cwd)
 				closeReason := fmt.Sprintf("Direct merge to %s (convoy strategy)", defaultBranch)
 				var closeErr error
 				for attempt := 1; attempt <= 3; attempt++ {
@@ -615,7 +618,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Write push checkpoint for resume (gt-aufru)
 		if agentBeadID != "" {
-			cpBd := beads.New(beads.ResolveBeadsDir(cwd))
+			cpBd := beads.New(cwd)
 			writeDoneCheckpoint(cpBd, agentBeadID, CheckpointPushed, branch)
 		}
 
@@ -632,7 +635,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			fmt.Fprintf(os.Stderr, "WARNING: beads resolved to local dir %s (no shared-beads redirect)\n", resolvedBeads)
 			fmt.Fprintf(os.Stderr, "  MR beads written here will be invisible to the Refinery — run 'gt polecat repair' to fix\n")
 		}
-		bd := beads.New(resolvedBeads)
+		bd := beads.NewWithBeadsDir(cwd, resolvedBeads)
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
 		sourceIssueForNoMerge, err := bd.Show(issueID)
@@ -856,7 +859,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Write MR checkpoint for resume (gt-aufru)
 		if mrID != "" && agentBeadID != "" {
-			cpBd := beads.New(beads.ResolveBeadsDir(cwd))
+			cpBd := beads.New(cwd)
 			writeDoneCheckpoint(cpBd, agentBeadID, CheckpointMRCreated, mrID)
 		}
 
@@ -891,7 +894,7 @@ notifyWitness:
 	// longer processes routine completions from these fields.
 	fmt.Printf("\nNotifying Witness...\n")
 	if agentBeadID != "" {
-		completionBd := beads.New(beads.ResolveBeadsDir(cwd))
+		completionBd := beads.New(cwd)
 		meta := &beads.CompletionMetadata{
 			ExitType:       exitType,
 			MRID:           mrID,
@@ -914,7 +917,7 @@ notifyWitness:
 
 	// Write witness notification checkpoint for resume (gt-aufru)
 	if agentBeadID != "" {
-		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
+		cpBd := beads.New(cwd)
 		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointWitnessNotified, "ok")
 	}
 
