@@ -94,7 +94,7 @@ Git-backed issue tracking system that stores work state as structured data.
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 
-### Setup
+### Setup (Docker-Compose below)
 
 ```bash
 # Install Gas Town
@@ -123,6 +123,25 @@ cd myproject/crew/yourname
 
 # Start the Mayor session (your main interface)
 gt mayor attach
+```
+
+### Docker Compose
+
+```bash
+export GIT_USER="<your name>"
+export GIT_EMAIL=<your email>
+export FOLDER="/Users/you/code" 
+
+docker-compose up --build -d
+
+docker-compose exec gastown zsh # or bash
+
+gt up
+
+gh auth login #if you want gh to work
+
+gt mayor attach
+
 ```
 
 ## Quick Start Guide
