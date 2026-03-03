@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -1718,9 +1719,16 @@ func sortedNodeIDs(dag *ConvoyDAG) []string {
 // Warning detection (gt-csl.3.4)
 // ---------------------------------------------------------------------------
 
-// waveCapacityThreshold is the maximum number of tasks in a wave before a
-// capacity warning is emitted.
-const waveCapacityThreshold = 5
+// waveCapacityThreshold returns the configured max concurrent polecats,
+// used as the threshold for capacity warnings during staging.
+func waveCapacityThreshold() int {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return config.DefaultPolecatMaxActive
+	}
+	opCfg := config.LoadOperationalConfig(townRoot)
+	return opCfg.GetPolecatConfig().MaxActiveV()
+}
 
 // detectWarnings runs all warning checks on the DAG.
 // Returns findings with severity="warning".
@@ -1913,14 +1921,15 @@ func estimateCapacity(dag *ConvoyDAG) []StagingFinding {
 		return nil // no slingable tasks → nothing to warn about
 	}
 
+	threshold := waveCapacityThreshold()
 	var findings []StagingFinding
 	for _, wave := range waves {
-		if len(wave.Tasks) > waveCapacityThreshold {
+		if len(wave.Tasks) > threshold {
 			findings = append(findings, StagingFinding{
 				Severity: "warning",
 				Category: "capacity",
 				BeadIDs:  wave.Tasks,
-				Message:  fmt.Sprintf("wave %d has %d tasks (threshold: %d) — may exceed parallel capacity", wave.Number, len(wave.Tasks), waveCapacityThreshold),
+				Message:  fmt.Sprintf("wave %d has %d tasks (threshold: %d) — may exceed parallel capacity", wave.Number, len(wave.Tasks), threshold),
 			})
 		}
 	}

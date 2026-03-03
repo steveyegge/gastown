@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -155,8 +156,9 @@ func checkBlockedRigsForLaunch(dag *ConvoyDAG, townRoot string, force bool) erro
 		len(rigs), strings.Join(details, "\n"))
 }
 
-// dispatchWave1 dispatches all tasks in Wave 1 of the computed waves.
+// dispatchWave1 dispatches tasks in Wave 1, capped by available polecat capacity.
 // Individual task failures do not abort remaining dispatches (I-14).
+// Tasks beyond the capacity limit are deferred to the daemon's feed loop.
 // Returns a result for every Wave 1 task and a non-nil error only if waves
 // are empty or contain no Wave 1.
 func dispatchWave1(convoyID string, dag *ConvoyDAG, waves []Wave, townRoot string) ([]DispatchResult, error) {
@@ -169,12 +171,34 @@ func dispatchWave1(convoyID string, dag *ConvoyDAG, waves []Wave, townRoot strin
 		return nil, fmt.Errorf("convoy %s: first wave has unexpected number %d", convoyID, wave1.Number)
 	}
 
+	// Capacity gate: dispatch up to (maxActive - activePolecats) tasks.
+	opCfg := config.LoadOperationalConfig(townRoot)
+	maxActive := opCfg.GetPolecatConfig().MaxActiveV()
+	active := countActivePolecats()
+	available := maxActive - active
+	if available < 0 {
+		available = 0
+	}
+
 	var results []DispatchResult
+	dispatched := 0
+	deferred := 0
 	for _, taskID := range wave1.Tasks {
 		node := dag.Nodes[taskID]
 		rig := ""
 		if node != nil {
 			rig = node.Rig
+		}
+
+		if dispatched >= available {
+			deferred++
+			results = append(results, DispatchResult{
+				BeadID:  taskID,
+				Rig:     rig,
+				Success: false,
+				Error:   fmt.Errorf("deferred: polecat capacity %d/%d (will be fed by daemon)", active+dispatched, maxActive),
+			})
+			continue
 		}
 
 		err := dispatchTaskDirect(townRoot, taskID, rig)
@@ -184,6 +208,13 @@ func dispatchWave1(convoyID string, dag *ConvoyDAG, waves []Wave, townRoot strin
 			Success: err == nil,
 			Error:   err,
 		})
+		if err == nil {
+			dispatched++
+		}
+	}
+
+	if deferred > 0 {
+		fmt.Printf("Dispatched %d of %d Wave 1 tasks (remaining %d will be fed by daemon)\n", dispatched, len(wave1.Tasks), deferred)
 	}
 
 	return results, nil

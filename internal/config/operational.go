@@ -64,12 +64,13 @@ const (
 
 // Polecat defaults.
 const (
-	DefaultPolecatHeartbeatStale = 3 * time.Minute
-	DefaultPolecatDoltMaxRetries = 10
+	DefaultPolecatHeartbeatStale  = 3 * time.Minute
+	DefaultPolecatDoltMaxRetries  = 10
 	DefaultPolecatDoltBaseBackoff = 500 * time.Millisecond
 	DefaultPolecatDoltBackoffMax  = 30 * time.Second
 	DefaultPolecatPendingMaxAge   = 5 * time.Minute
 	DefaultPolecatNamepoolSize    = 50
+	DefaultPolecatMaxActive       = 5
 )
 
 // Dolt defaults.
@@ -510,6 +511,14 @@ func (p *PolecatThresholds) NamepoolSizeV() int {
 		return *p.NamepoolSize
 	}
 	return DefaultPolecatNamepoolSize
+}
+
+// MaxActiveV returns the configured or default max concurrent polecats.
+func (p *PolecatThresholds) MaxActiveV() int {
+	if p != nil && p.MaxActive != nil {
+		return *p.MaxActive
+	}
+	return DefaultPolecatMaxActive
 }
 
 // --- Dolt accessors ---

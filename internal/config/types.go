@@ -364,6 +364,9 @@ type PolecatThresholds struct {
 
 	// NamepoolSize is number of name slots in pool (default 50).
 	NamepoolSize *int `json:"namepool_size,omitempty"`
+
+	// MaxActive is the max concurrent polecats allowed across the town (default 5).
+	MaxActive *int `json:"max_active,omitempty"`
 }
 
 // DoltThresholds configures Dolt server operation thresholds.
