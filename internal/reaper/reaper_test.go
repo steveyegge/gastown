@@ -48,21 +48,34 @@ func TestFormatJSON(t *testing.T) {
 	}
 }
 
-func TestParentCheckWhere(t *testing.T) {
-	sql := parentCheckWhere("testdb")
-	// Should reference the correct database in all subqueries.
-	if sql == "" {
-		t.Error("parentCheckWhere should not return empty string")
+func TestParentExcludeJoin(t *testing.T) {
+	joinClause, whereCondition := parentExcludeJoin("testdb")
+
+	// JOIN clause should reference the correct database.
+	if joinClause == "" {
+		t.Error("parentExcludeJoin joinClause should not be empty")
 	}
-	// Should contain all three branches: no parent, parent closed, dangling parent.
-	if !contains(sql, "NOT EXISTS") {
-		t.Error("parentCheckWhere should have NOT EXISTS branch for orphans")
+	if !contains(joinClause, "`testdb`") {
+		t.Error("parentExcludeJoin joinClause should reference the database")
 	}
-	if !contains(sql, "parent.status = 'closed'") {
-		t.Error("parentCheckWhere should check parent status is closed")
+
+	// JOIN should select wisps with open parents from wisp_dependencies.
+	if !contains(joinClause, "wisp_dependencies") {
+		t.Error("parentExcludeJoin should query wisp_dependencies")
 	}
-	if !contains(sql, "parent.id IS NULL") {
-		t.Error("parentCheckWhere should handle dangling parent refs")
+	if !contains(joinClause, "parent-child") {
+		t.Error("parentExcludeJoin should filter on parent-child type")
+	}
+	if !contains(joinClause, "'open', 'hooked', 'in_progress'") {
+		t.Error("parentExcludeJoin should check for open parent statuses")
+	}
+
+	// WHERE condition should be an IS NULL anti-join filter.
+	if whereCondition == "" {
+		t.Error("parentExcludeJoin whereCondition should not be empty")
+	}
+	if !contains(whereCondition, "IS NULL") {
+		t.Error("parentExcludeJoin whereCondition should use IS NULL for anti-join")
 	}
 }
 
