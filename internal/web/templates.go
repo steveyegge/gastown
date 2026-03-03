@@ -204,6 +204,10 @@ type ConvoyRow struct {
 	Progress      string // e.g., "2/5"
 	Completed     int
 	Total         int
+	ProgressPct   int      // 0-100, computed from Completed/Total
+	ReadyBeads    int      // open beads with no assignee (available to pick up)
+	InProgress    int      // beads currently being worked on
+	Assignees     []string // unique assignees across tracked issues
 	LastActivity  activity.Info
 	TrackedIssues []TrackedIssue
 }

@@ -209,6 +209,45 @@
             margin-left: 8px;
         }
 
+        .convoy-assignees {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .assignee-chip {
+            font-size: 0.65rem;
+            background: rgba(var(--blue-rgb, 79, 142, 255), 0.15);
+            color: var(--blue);
+            border-radius: 3px;
+            padding: 1px 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 120px;
+        }
+
+        .convoy-progress-cell {
+            min-width: 80px;
+        }
+
+        .convoy-progress-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .convoy-progress-fraction {
+            font-size: 0.8rem;
+            color: var(--text-primary);
+        }
+
+        .convoy-progress-pct {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
         .progress-bar {
             width: 60px;
             height: 4px;
@@ -223,6 +262,38 @@
             background: var(--green);
             border-radius: 2px;
             transition: width 0.3s ease;
+        }
+
+        .convoy-work-cell {
+            min-width: 80px;
+        }
+
+        .convoy-work-breakdown {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .work-chip {
+            font-size: 0.65rem;
+            border-radius: 3px;
+            padding: 1px 5px;
+            display: inline-block;
+        }
+
+        .work-ready {
+            background: rgba(var(--cyan-rgb, 0, 215, 210), 0.15);
+            color: var(--cyan);
+        }
+
+        .work-inprogress {
+            background: rgba(var(--yellow-rgb, 230, 192, 0), 0.15);
+            color: var(--yellow);
+        }
+
+        .work-done {
+            background: rgba(var(--green-rgb, 0, 200, 83), 0.15);
+            color: var(--green);
         }
 
         /* Convoy detail view */

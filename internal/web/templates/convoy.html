@@ -137,6 +137,7 @@
                                     <th>Status</th>
                                     <th>Convoy</th>
                                     <th>Progress</th>
+                                    <th>Work</th>
                                     <th>Activity</th>
                                 </tr>
                             </thead>
@@ -146,31 +147,44 @@
                                     <td>
                                         <span class="convoy-toggle">▶</span>
                                         {{if eq .WorkStatus "complete"}}
-                                        <span class="badge badge-green">✓</span>
+                                        <span class="badge badge-green" title="All issues completed">✓ Done</span>
                                         {{else if eq .WorkStatus "active"}}
-                                        <span class="badge badge-green">Active</span>
+                                        <span class="badge badge-green" title="Workers actively progressing">Active</span>
                                         {{else if eq .WorkStatus "stale"}}
-                                        <span class="badge badge-yellow">Stale</span>
+                                        <span class="badge badge-yellow" title="No activity in 5-10 minutes">Stale</span>
                                         {{else if eq .WorkStatus "stuck"}}
-                                        <span class="badge badge-red">Stuck</span>
+                                        <span class="badge badge-red" title="No activity for 10+ minutes">Stuck</span>
                                         {{else}}
-                                        <span class="badge badge-muted">Wait</span>
+                                        <span class="badge badge-muted" title="No workers assigned yet">Waiting</span>
                                         {{end}}
                                     </td>
                                     <td>
                                         <span class="convoy-id">{{.ID}}</span>
                                         {{if .Title}}<div class="convoy-title">{{.Title}}</div>{{end}}
+                                        {{if .Assignees}}<div class="convoy-assignees">{{range .Assignees}}<span class="assignee-chip">{{.}}</span>{{end}}</div>{{end}}
                                     </td>
-                                    <td>
-                                        {{.Progress}}
+                                    <td class="convoy-progress-cell">
+                                        <div class="convoy-progress-header">
+                                            <span class="convoy-progress-fraction">{{.Progress}}</span>
+                                            {{if .Total}}<span class="convoy-progress-pct">{{.ProgressPct}}%</span>{{end}}
+                                        </div>
                                         {{if .Total}}
                                         <div class="progress-bar">
-                                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                                            <div class="progress-fill" style="width: {{.ProgressPct}}%;"></div>
+                                        </div>
+                                        {{end}}
+                                    </td>
+                                    <td class="convoy-work-cell">
+                                        {{if .Total}}
+                                        <div class="convoy-work-breakdown">
+                                            {{if .ReadyBeads}}<span class="work-chip work-ready" title="Ready to pick up">{{.ReadyBeads}} ready</span>{{end}}
+                                            {{if .InProgress}}<span class="work-chip work-inprogress" title="Being worked on">{{.InProgress}} active</span>{{end}}
+                                            {{if eq .WorkStatus "complete"}}<span class="work-chip work-done">all done</span>{{end}}
                                         </div>
                                         {{end}}
                                     </td>
                                     <td class="{{activityClass .LastActivity}}">
-                                        <span class="activity-dot"></span>
+                                        <span class="activity-dot" title="Worker session activity"></span>
                                         {{.LastActivity.FormattedAge}}
                                     </td>
                                 </tr>
