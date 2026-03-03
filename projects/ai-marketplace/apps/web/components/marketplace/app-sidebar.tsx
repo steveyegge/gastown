@@ -31,6 +31,9 @@ import {
   Sparkles,
   Grid3X3,
   CloudCog,
+  Server,
+  Zap,
+  ShieldCheck,
 } from "lucide-react"
 
 interface NavItem {
@@ -194,14 +197,36 @@ const governanceItems: NavItem[] = [
 
 const bottomNavItems: NavItem[] = [
   {
-    label: "Settings",
-    href: "/settings",
-    icon: Settings,
-  },
-  {
     label: "Help & Docs",
     href: "/help",
     icon: HelpCircle,
+  },
+]
+
+const settingsSubItems = [
+  {
+    label: "Infrastructure",
+    href: "/settings/infrastructure",
+    icon: Server,
+    color: "text-sky-400",
+    activeBg: "bg-sky-500/10",
+    activeBorder: "border-sky-500/30",
+  },
+  {
+    label: "Performance",
+    href: "/settings/performance",
+    icon: Zap,
+    color: "text-amber-400",
+    activeBg: "bg-amber-500/10",
+    activeBorder: "border-amber-500/30",
+  },
+  {
+    label: "Reliability",
+    href: "/settings/reliability",
+    icon: ShieldCheck,
+    color: "text-emerald-400",
+    activeBg: "bg-emerald-500/10",
+    activeBorder: "border-emerald-500/30",
   },
 ]
 
@@ -419,6 +444,72 @@ function DataSection() {
   )
 }
 
+function SettingsSection() {
+  const pathname = usePathname()
+  const isSettings = pathname.startsWith("/settings")
+
+  return (
+    <div className="mb-1">
+      <Link
+        href="/settings/infrastructure"
+        className={cn(
+          "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+          isSettings
+            ? "bg-secondary text-foreground"
+            : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+        )}
+      >
+        <span className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+          isSettings
+            ? "bg-slate-500/20 text-slate-300"
+            : "bg-secondary/50 text-muted-foreground group-hover:text-foreground"
+        )}>
+          <Settings className="h-4 w-4" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <span className="truncate">Settings</span>
+          <p className="truncate text-xs text-muted-foreground/70">Persona-based configuration</p>
+        </div>
+        <ChevronRight className={cn(
+          "h-4 w-4 transition-transform",
+          isSettings ? "rotate-90 text-slate-400" : "text-muted-foreground/40"
+        )} />
+      </Link>
+
+      {isSettings && (
+        <ul className="mt-0.5 space-y-0.5 pl-2">
+          {settingsSubItems.map((item) => {
+            const SubIcon = item.icon
+            const isActive = pathname.startsWith(item.href)
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150",
+                    isActive
+                      ? cn(item.activeBg, "border", item.activeBorder, item.color)
+                      : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+                  )}
+                >
+                  <span className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors",
+                    isActive ? item.color : "text-muted-foreground group-hover:text-foreground"
+                  )}>
+                    <SubIcon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="flex-1 truncate">{item.label}</span>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function DevelopmentSection() {
   return (
     <div className="mb-6">
@@ -471,6 +562,7 @@ export function AppSidebar() {
       
       {/* Bottom section */}
       <div className="border-t border-border p-3">
+        <div className="mb-1"><SettingsSection /></div>
         <NavSection items={bottomNavItems} />
         
         {/* Organization Badge */}

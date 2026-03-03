@@ -8,7 +8,7 @@
 
 # IDE
 .idea/
-.vscode/
+
 *.swp
 *.swo
 *~
@@ -56,5 +56,5 @@ CLAUDE.md
 .beads/
 .logs/
 logs/
-settings/
+/settings/
 .events.jsonl
