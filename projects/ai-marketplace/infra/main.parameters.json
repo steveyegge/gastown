@@ -9,7 +9,7 @@
       "value": false
     },
     "environment": {
-      "value": "${AZURE_ENV_NAME}"
+      "value": "dev"
     }
   }
 }

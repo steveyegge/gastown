@@ -27,9 +27,10 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing 
 resource hostingPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: '${appName}-plan'
   location: location
+  kind: 'linux'
   sku: {
-    name: 'FC1'  // Flex Consumption
-    tier: 'FlexConsumption'
+    name: 'Y1'
+    tier: 'Dynamic'
   }
   properties: {
     reserved: true  // Linux
@@ -54,10 +55,6 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
         { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
         { name: 'APPINSIGHTS_INSTRUMENTATIONKEY', value: appInsightsInstrumentationKey }
-        { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
-        // If cosmosKey starts with '@Microsoft.KeyVault' it is resolved at runtime via managed identity
-        { name: 'COSMOS_KEY', value: cosmosKey }
-        { name: 'COSMOS_DATABASE', value: 'ai-marketplace' }
       ]
       cors: {
         allowedOrigins: ['*']  // Tighten in production
