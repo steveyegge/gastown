@@ -98,7 +98,7 @@ func (a *ClaudeCodeAdapter) Watch(ctx context.Context, sessionID, workDir string
 // Formula: $HOME/.claude/projects/<hash> where hash = workDir with '/' → '-'.
 // On Windows, backslashes are converted to forward slashes and the drive
 // letter (e.g. "C:") is stripped before hashing, matching Claude Code's
-// cross-platform behaviour.
+// cross-platform behavior.
 func claudeProjectDirFor(workDir string) (string, error) {
 	abs, err := filepath.Abs(workDir)
 	if err != nil {

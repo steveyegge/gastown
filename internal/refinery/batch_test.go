@@ -244,8 +244,9 @@ func TestBuildRebaseStack_SingleMR(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("expected a.txt to exist: %v", readErr)
 	}
-	if string(content) != "hello a\n" {
-		t.Errorf("expected 'hello a\\n', got %q", string(content))
+	got := strings.ReplaceAll(string(content), "\r\n", "\n")
+	if got != "hello a\n" {
+		t.Errorf("expected 'hello a\\n', got %q", got)
 	}
 }
 
