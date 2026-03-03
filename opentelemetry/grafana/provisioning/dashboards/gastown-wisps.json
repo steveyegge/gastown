@@ -1,558 +1,933 @@
 {
-  "uid": "gastown-wisps",
-  "title": "Wisp Monitor",
+  "editable": true,
+  "panels": [
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "options": {
+        "content": "## Wisp Health Overview\nEphemeral work units — molecule steps, patrol tracks, cleanup tasks. Reaper closes after 24h, deletes after 7d.",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "Alert threshold: 500",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 200
+              },
+              {
+                "color": "orange",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 800
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 2
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1"
+        }
+      ],
+      "title": "Total Open Wisps",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 2
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status = 'hooked' AND ephemeral = 1"
+        }
+      ],
+      "title": "Total Hooked",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 2
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status = 'closed' AND ephemeral = 1 AND closed_at \u003e= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+        }
+      ],
+      "title": "Closed (last 7d)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "Wisps table rows without ephemeral=1 — possible beads stored in wrong table",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 2
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE ephemeral = 0 OR ephemeral IS NULL"
+        }
+      ],
+      "title": "Non-Ephemeral Wisps",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 24
+              },
+              {
+                "color": "orange",
+                "value": 72
+              },
+              {
+                "color": "red",
+                "value": 168
+              }
+            ]
+          },
+          "unit": "h"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 2
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT TIMESTAMPDIFF(HOUR, MIN(created_at), NOW()) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1"
+        }
+      ],
+      "title": "Oldest Open Wisp (hours)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "If oldest \u003e 24h and open count \u003e 500, reaper is likely not running",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "BEHIND": {
+                  "color": "yellow",
+                  "text": "BEHIND"
+                },
+                "OK": {
+                  "color": "green",
+                  "text": "OK"
+                },
+                "STALLED": {
+                  "color": "red",
+                  "text": "STALLED"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 2
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN COUNT(*) \u003e 500 AND MIN(created_at) \u003c DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 'STALLED' WHEN COUNT(*) \u003e 200 THEN 'BEHIND' ELSE 'OK' END AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1"
+        }
+      ],
+      "title": "Reaper Status",
+      "type": "stat"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 200,
+      "options": {
+        "content": "## Age Distribution \u0026 Breakdown",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "count"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-GrYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 10,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) \u003c 1 THEN '1: \u003c 1h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) \u003c 4 THEN '2: 1-4h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) \u003c 24 THEN '3: 4-24h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) \u003c 72 THEN '4: 1-3d' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) \u003c 168 THEN '5: 3-7d' ELSE '6: \u003e 7d' END AS age_bucket, COUNT(*) AS count FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY age_bucket ORDER BY age_bucket"
+        }
+      ],
+      "title": "Open Wisps by Age",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT status AS metric, COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY status ORDER BY value DESC"
+        }
+      ],
+      "title": "Open Wisps by Status",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN created_by = '' THEN '(daemon)' ELSE created_by END AS metric, COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY metric ORDER BY value DESC LIMIT 10"
+        }
+      ],
+      "title": "Open Wisps by Creator",
+      "type": "piechart"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 300,
+      "options": {
+        "content": "## Wisp Activity",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "gradientMode": "scheme",
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 20,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00') AS time, COUNT(*) AS created FROM hq.wisps WHERE ephemeral = 1 AND created_at \u003e= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY time ORDER BY time"
+        }
+      ],
+      "title": "Wisp Creation Rate (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "gradientMode": "scheme",
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 21,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT DATE_FORMAT(closed_at, '%Y-%m-%d %H:00:00') AS time, COUNT(*) AS closed FROM hq.wisps WHERE ephemeral = 1 AND status = 'closed' AND closed_at \u003e= DATE_SUB(NOW(), INTERVAL 7 DAY) AND closed_at IS NOT NULL GROUP BY time ORDER BY time"
+        }
+      ],
+      "title": "Wisp Closure Rate (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 400,
+      "options": {
+        "content": "## Molecules \u0026 Mail",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "Hooked molecule patrol wisps — should cycle, not accumulate",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 28
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT status, COUNT(*) AS value FROM hq.wisps WHERE ephemeral = 1 AND (title LIKE 'mol-%' OR id LIKE '%-mol-%') GROUP BY status ORDER BY value DESC"
+        }
+      ],
+      "title": "Molecule Wisps (mol-*)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "Messages stored as wisps",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 28
+      },
+      "id": 31,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps w INNER JOIN hq.wisp_labels wl ON w.id = wl.issue_id WHERE wl.label = 'gt:message' AND w.status NOT IN ('closed')"
+        }
+      ],
+      "title": "Mail Wisps (gt:message)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "description": "Work context wisps from gt sling",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 28
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps w INNER JOIN hq.wisp_labels wl ON w.id = wl.issue_id WHERE wl.label = 'gt:sling-context' AND w.status NOT IN ('closed')"
+        }
+      ],
+      "title": "Sling Context Wisps",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 28
+      },
+      "id": 33,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT label, COUNT(*) AS count FROM hq.wisp_labels GROUP BY label ORDER BY count DESC LIMIT 10"
+        }
+      ],
+      "title": "Wisp Labels (top 10)",
+      "type": "barchart"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 500,
+      "options": {
+        "content": "## Wisp Detail Table",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "age_hours"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 24
+                    },
+                    {
+                      "color": "red",
+                      "value": 72
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tracked_bead"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=hq\u0026var-bead_id=${__value.raw}"
+                  },
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=hq\u0026var-root_bead=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "convoy_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq\u0026var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 40,
+      "options": {
+        "footer": {
+          "countRows": true,
+          "show": true
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "created_at"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT w.id, w.title, w.status, w.created_at, CASE WHEN w.created_by = '' THEN '(daemon)' ELSE w.created_by END AS created_by, TIMESTAMPDIFF(HOUR, w.created_at, NOW()) AS age_hours, w.wisp_type, (SELECT SUBSTRING_INDEX(wd.depends_on_id, ':', -1) FROM hq.wisp_dependencies wd WHERE wd.issue_id = w.id AND wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' LIMIT 1) AS tracked_bead, CASE WHEN w.description LIKE '%ConvoyID:%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'ConvoyID: ', -1), '\n', 1) ELSE NULL END AS convoy_id FROM hq.wisps w WHERE w.status NOT IN ('closed') AND w.ephemeral = 1 ORDER BY w.created_at DESC LIMIT 100"
+        }
+      ],
+      "title": "Open Wisps (newest first)",
+      "type": "table"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 600,
+      "options": {
+        "content": "## Recently Closed",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tracked_bead"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=hq\u0026var-bead_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "convoy_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Convoy Preview",
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq\u0026var-convoy_id=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 50,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "closed_at"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT w.id, w.title, w.closed_at, CASE WHEN w.created_by = '' THEN '(daemon)' ELSE w.created_by END AS created_by, TIMESTAMPDIFF(MINUTE, w.created_at, w.closed_at) AS lifespan_min, w.close_reason, (SELECT SUBSTRING_INDEX(wd.depends_on_id, ':', -1) FROM hq.wisp_dependencies wd WHERE wd.issue_id = w.id AND wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' LIMIT 1) AS tracked_bead, CASE WHEN w.description LIKE '%ConvoyID:%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'ConvoyID: ', -1), '\n', 1) ELSE NULL END AS convoy_id FROM hq.wisps w WHERE w.status = 'closed' AND w.ephemeral = 1 ORDER BY w.closed_at DESC LIMIT 50"
+        }
+      ],
+      "title": "Recently Closed Wisps",
+      "type": "table"
+    },
+    {
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 700,
+      "options": {
+        "content": "## Wisp → Bead Tracking\nSling-context wisps linked to their source beads via `wisp_dependencies` (type=tracks).",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bead_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Bead",
+                    "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}\u0026var-bead_id=${__value.raw}"
+                  },
+                  {
+                    "title": "View in Graph",
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}\u0026var-root_bead=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "id": 60,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "created_at"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT w.id AS wisp_id, w.title AS wisp_title, w.status AS wisp_status, w.created_at, SUBSTRING_INDEX(SUBSTRING_INDEX(wd.depends_on_id, ':', 2), ':', -1) AS rig, SUBSTRING_INDEX(wd.depends_on_id, ':', -1) AS bead_id FROM hq.wisps w JOIN hq.wisp_dependencies wd ON w.id = wd.issue_id WHERE wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' ORDER BY w.created_at DESC LIMIT 50"
+        }
+      ],
+      "title": "Wisps Tracking Beads (sling-context)",
+      "type": "table"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
   "tags": [
     "gastown",
     "wisps"
   ],
-  "timezone": "browser",
-  "refresh": "1m",
   "time": {
     "from": "now-7d",
     "to": "now"
   },
-  "panels": [
-    {
-      "id": 100,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Wisp Health Overview\nEphemeral work units — molecule steps, patrol tracks, cleanup tasks. Reaper closes after 24h, deletes after 7d."
-      }
-    },
-
-    {
-      "id": 1,
-      "title": "Total Open Wisps",
-      "description": "Alert threshold: 500",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 200 },
-              { "color": "orange", "value": 500 },
-              { "color": "red", "value": 800 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none"
-      }
-    },
-    {
-      "id": 2,
-      "title": "Total Hooked",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status = 'hooked' AND ephemeral = 1",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "blue", "value": null },
-              { "color": "yellow", "value": 20 },
-              { "color": "red", "value": 50 }
-            ]
-          }
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "id": 3,
-      "title": "Closed (last 7d)",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE status = 'closed' AND ephemeral = 1 AND closed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 10 },
-              { "color": "green", "value": 50 }
-            ]
-          }
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "id": 4,
-      "title": "Non-Ephemeral Wisps",
-      "description": "Wisps table rows without ephemeral=1 — possible beads stored in wrong table",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps WHERE ephemeral = 0 OR ephemeral IS NULL",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "id": 5,
-      "title": "Oldest Open Wisp (hours)",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT TIMESTAMPDIFF(HOUR, MIN(created_at), NOW()) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "h",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 24 },
-              { "color": "orange", "value": 72 },
-              { "color": "red", "value": 168 }
-            ]
-          }
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "id": 6,
-      "title": "Reaper Status",
-      "description": "If oldest > 24h and open count > 500, reaper is likely not running",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 2 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT CASE WHEN COUNT(*) > 500 AND MIN(created_at) < DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 'STALLED' WHEN COUNT(*) > 200 THEN 'BEHIND' ELSE 'OK' END AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "type": "value", "options": { "OK": { "color": "green", "text": "OK" }, "BEHIND": { "color": "yellow", "text": "BEHIND" }, "STALLED": { "color": "red", "text": "STALLED" } } }
-          ]
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-
-    {
-      "id": 200,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 6 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Age Distribution & Breakdown"
-      }
-    },
-
-    {
-      "id": 10,
-      "title": "Open Wisps by Age",
-      "type": "barchart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT CASE WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) < 1 THEN '1: < 1h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) < 4 THEN '2: 1-4h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) < 24 THEN '3: 4-24h' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) < 72 THEN '4: 1-3d' WHEN TIMESTAMPDIFF(HOUR, created_at, NOW()) < 168 THEN '5: 3-7d' ELSE '6: > 7d' END AS age_bucket, COUNT(*) AS count FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY age_bucket ORDER BY age_bucket",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" }
-        },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "count" }, "properties": [{ "id": "color", "value": { "mode": "continuous-GrYlRd" } }] }
-        ]
-      },
-      "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "showValue": "always"
-      }
-    },
-    {
-      "id": 11,
-      "title": "Open Wisps by Status",
-      "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT status AS metric, COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY status ORDER BY value DESC",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "pieType": "donut"
-      }
-    },
-    {
-      "id": 12,
-      "title": "Open Wisps by Creator",
-      "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT CASE WHEN created_by = '' THEN '(daemon)' ELSE created_by END AS metric, COUNT(*) AS value FROM hq.wisps WHERE status NOT IN ('closed') AND ephemeral = 1 GROUP BY metric ORDER BY value DESC LIMIT 10",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "pieType": "donut"
-      }
-    },
-
-    {
-      "id": 300,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 16 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Wisp Activity"
-      }
-    },
-
-    {
-      "id": 20,
-      "title": "Wisp Creation Rate (per hour)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00') AS time, COUNT(*) AS created FROM hq.wisps WHERE ephemeral = 1 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY time ORDER BY time",
-          "format": "time_series"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50,
-            "lineWidth": 1,
-            "gradientMode": "scheme"
-          },
-          "color": { "mode": "palette-classic" }
-        }
-      }
-    },
-    {
-      "id": 21,
-      "title": "Wisp Closure Rate (per hour)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT DATE_FORMAT(closed_at, '%Y-%m-%d %H:00:00') AS time, COUNT(*) AS closed FROM hq.wisps WHERE ephemeral = 1 AND status = 'closed' AND closed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND closed_at IS NOT NULL GROUP BY time ORDER BY time",
-          "format": "time_series"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50,
-            "lineWidth": 1,
-            "gradientMode": "scheme"
-          },
-          "color": { "mode": "palette-classic" }
-        }
-      }
-    },
-
-    {
-      "id": 400,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 26 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Molecules & Mail"
-      }
-    },
-
-    {
-      "id": 30,
-      "title": "Molecule Wisps (mol-*)",
-      "description": "Hooked molecule patrol wisps — should cycle, not accumulate",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT status, COUNT(*) AS value FROM hq.wisps WHERE ephemeral = 1 AND (title LIKE 'mol-%' OR id LIKE '%-mol-%') GROUP BY status ORDER BY value DESC",
-          "format": "table"
-        }
-      ],
-      "options": { "colorMode": "value", "graphMode": "none" }
-    },
-    {
-      "id": 31,
-      "title": "Mail Wisps (gt:message)",
-      "description": "Messages stored as wisps",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps w INNER JOIN hq.wisp_labels wl ON w.id = wl.issue_id WHERE wl.label = 'gt:message' AND w.status NOT IN ('closed')",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        }
-      },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "id": 32,
-      "title": "Sling Context Wisps",
-      "description": "Work context wisps from gt sling",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 28 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT COUNT(*) AS value FROM hq.wisps w INNER JOIN hq.wisp_labels wl ON w.id = wl.issue_id WHERE wl.label = 'gt:sling-context' AND w.status NOT IN ('closed')",
-          "format": "table"
-        }
-      ],
-      "options": { "colorMode": "value", "graphMode": "none" }
-    },
-    {
-      "id": 33,
-      "title": "Wisp Labels (top 10)",
-      "type": "barchart",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT label, COUNT(*) AS count FROM hq.wisp_labels GROUP BY label ORDER BY count DESC LIMIT 10",
-          "format": "table"
-        }
-      ],
-      "options": { "orientation": "horizontal", "showValue": "always" }
-    },
-
-    {
-      "id": 500,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 32 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Wisp Detail Table"
-      }
-    },
-
-    {
-      "id": 40,
-      "title": "Open Wisps (newest first)",
-      "type": "table",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 34 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT w.id, w.title, w.status, w.created_at, CASE WHEN w.created_by = '' THEN '(daemon)' ELSE w.created_by END AS created_by, TIMESTAMPDIFF(HOUR, w.created_at, NOW()) AS age_hours, w.wisp_type, (SELECT SUBSTRING_INDEX(wd.depends_on_id, ':', -1) FROM hq.wisp_dependencies wd WHERE wd.issue_id = w.id AND wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' LIMIT 1) AS tracked_bead, CASE WHEN w.description LIKE '%ConvoyID:%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'ConvoyID: ', -1), '\n', 1) ELSE NULL END AS convoy_id FROM hq.wisps w WHERE w.status NOT IN ('closed') AND w.ephemeral = 1 ORDER BY w.created_at DESC LIMIT 100",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "age_hours" },
-            "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 24 }, { "color": "red", "value": 72 }] } }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "id" },
-            "properties": [
-              { "id": "custom.width", "value": 180 }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "tracked_bead" },
-            "properties": [
-              { "id": "links", "value": [
-                { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=hq&var-bead_id=${__value.raw}" },
-                { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=hq&var-root_bead=${__value.raw}" }
-              ]}
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "convoy_id" },
-            "properties": [
-              { "id": "links", "value": [
-                { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq&var-convoy_id=${__value.raw}" }
-              ]}
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "sortBy": [{ "displayName": "created_at", "desc": true }],
-        "footer": { "show": true, "countRows": true }
-      }
-    },
-
-    {
-      "id": 600,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 46 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Recently Closed"
-      }
-    },
-
-    {
-      "id": 50,
-      "title": "Recently Closed Wisps",
-      "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT w.id, w.title, w.closed_at, CASE WHEN w.created_by = '' THEN '(daemon)' ELSE w.created_by END AS created_by, TIMESTAMPDIFF(MINUTE, w.created_at, w.closed_at) AS lifespan_min, w.close_reason, (SELECT SUBSTRING_INDEX(wd.depends_on_id, ':', -1) FROM hq.wisp_dependencies wd WHERE wd.issue_id = w.id AND wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' LIMIT 1) AS tracked_bead, CASE WHEN w.description LIKE '%ConvoyID:%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(w.description, 'ConvoyID: ', -1), '\n', 1) ELSE NULL END AS convoy_id FROM hq.wisps w WHERE w.status = 'closed' AND w.ephemeral = 1 ORDER BY w.closed_at DESC LIMIT 50",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "tracked_bead" },
-            "properties": [
-              { "id": "links", "value": [
-                { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=hq&var-bead_id=${__value.raw}" }
-              ]}
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "convoy_id" },
-            "properties": [
-              { "id": "links", "value": [
-                { "title": "Convoy Preview", "url": "/d/gastown-convoy-preview/convoy-preview?var-database=hq&var-convoy_id=${__value.raw}" }
-              ]}
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "sortBy": [{ "displayName": "closed_at", "desc": true }]
-      }
-    },
-
-    {
-      "id": 700,
-      "title": "",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 56 },
-      "options": {
-        "mode": "markdown",
-        "content": "## Wisp → Bead Tracking\nSling-context wisps linked to their source beads via `wisp_dependencies` (type=tracks)."
-      }
-    },
-    {
-      "id": 60,
-      "title": "Wisps Tracking Beads (sling-context)",
-      "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 58 },
-      "datasource": { "uid": "dolt-beads" },
-      "targets": [
-        {
-          "rawSql": "SELECT w.id AS wisp_id, w.title AS wisp_title, w.status AS wisp_status, w.created_at, SUBSTRING_INDEX(SUBSTRING_INDEX(wd.depends_on_id, ':', 2), ':', -1) AS rig, SUBSTRING_INDEX(wd.depends_on_id, ':', -1) AS bead_id FROM hq.wisps w JOIN hq.wisp_dependencies wd ON w.id = wd.issue_id WHERE wd.type = 'tracks' AND wd.depends_on_id LIKE 'external:%' ORDER BY w.created_at DESC LIMIT 50",
-          "format": "table"
-        }
-      ],
-      "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "bead_id" },
-            "properties": [
-              { "id": "links", "value": [
-                { "title": "View Bead", "url": "/d/gastown-bead-detail/bead-detail?var-database=${__data.fields.rig}&var-bead_id=${__value.raw}" },
-                { "title": "View in Graph", "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${__data.fields.rig}&var-root_bead=${__value.raw}" }
-              ]}
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "sortBy": [{ "displayName": "created_at", "desc": true }]
-      }
-    }
-  ],
-  "schemaVersion": 39,
-  "version": 1,
-  "editable": true
+  "timezone": "browser",
+  "title": "Wisp Monitor",
+  "uid": "gastown-wisps"
 }

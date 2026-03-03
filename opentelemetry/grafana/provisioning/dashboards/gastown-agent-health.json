@@ -1,293 +1,317 @@
 {
-  "uid": "gastown-agent-health",
-  "title": "Agent Health",
-  "tags": [
-    "gastown",
-    "agents",
-    "health"
-  ],
-  "timezone": "browser",
-  "refresh": "30s",
-  "time": {
-    "from": "now-3d",
-    "to": "now"
-  },
-  "templating": {
-    "list": [
-      {
-        "name": "role",
-        "label": "Role",
-        "type": "query",
-        "datasource": {
-          "uid": "victoriametrics"
-        },
-        "query": "label_values(gastown_bd_calls_total, gt_role)",
-        "includeAll": true,
-        "multi": true,
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "refresh": 2
-      },
-      {
-        "name": "rig",
-        "label": "Rig",
-        "type": "query",
-        "datasource": {
-          "uid": "victoriametrics"
-        },
-        "query": "label_values(gastown_bd_calls_total, gt_rig)",
-        "includeAll": true,
-        "multi": true,
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "refresh": 2
-      }
-    ]
-  },
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
-      "title": "Activity & Stuck Detection",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "collapsed": false
+      "title": "Activity \u0026 Stuck Detection",
+      "type": "row"
     },
     {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "description": "Per-role bd command rate. Zero activity for \u003e10 min suggests stuck agent.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "pointSize": 5,
+            "showPoints": "auto"
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
-      "title": "bd Call Rate by Role",
-      "description": "Per-role bd command rate. Zero activity for >10 min suggests stuck agent.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(gastown_bd_calls_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "pointSize": 5,
-            "showPoints": "auto"
-          }
-        }
-      }
+      "title": "bd Call Rate by Role",
+      "type": "timeseries"
     },
     {
-      "id": 2,
-      "title": "Pane Read Rate by Role",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "How actively agents are reading tmux output. Flat = idle or stuck.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 2,
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(gastown_pane_reads_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
+      "title": "Pane Read Rate by Role",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "description": "Agent sending prompts to its subprocess. Activity = working, silence = stuck or done.",
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 15
-          }
+          },
+          "unit": "reqps"
         }
-      }
-    },
-    {
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
       "id": 3,
-      "title": "Prompt Sends by Role",
-      "description": "Agent sending prompts to its subprocess. Activity = working, silence = stuck or done.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(gastown_prompt_sends_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15
-          }
-        }
-      }
+      "title": "Prompt Sends by Role",
+      "type": "timeseries"
     },
     {
-      "id": 4,
-      "title": "Agent State Changes",
-      "description": "State transitions (spawning -> working -> done). Stuck in one state too long = anomaly.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
-      "datasource": { "uid": "victoriametrics" },
-      "targets": [
-        {
-          "expr": "increase(gastown_agent_state_changes_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])",
-          "legendFormat": "{{gt_role}} -> {{new_state}}"
-        }
-      ],
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "description": "State transitions (spawning -\u003e working -\u003e done). Stuck in one state too long = anomaly.",
       "fieldConfig": {
         "defaults": {
           "custom": {
             "drawStyle": "bars",
             "fillOpacity": 50,
-            "stacking": { "mode": "normal" }
+            "stacking": {
+              "mode": "normal"
+            }
           }
         }
-      }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "increase(gastown_agent_state_changes_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])",
+          "legendFormat": "{{gt_role}} -\u003e {{new_state}}"
+        }
+      ],
+      "title": "Agent State Changes",
+      "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
       "id": 200,
-      "title": "Error Rate & Anomaly Detection",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
-      "collapsed": false
+      "title": "Error Rate \u0026 Anomaly Detection",
+      "type": "row"
     },
     {
-      "id": 5,
-      "title": "bd Error Rate by Role",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Rate of bd commands returning errors. Sustained errors = agent thrashing.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 5,
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(gastown_bd_calls_total{status=\"error\", gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}} errors"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 20
-          },
-          "color": {
-            "mode": "palette-classic"
-          }
-        }
-      }
+      "title": "bd Error Rate by Role",
+      "type": "timeseries"
     },
     {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "description": "Percentage of bd calls that fail. \u003e50% = agent is fighting something.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
       "id": 6,
-      "title": "bd Error Ratio by Role",
-      "description": "Percentage of bd calls that fail. >50% = agent is fighting something.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(gastown_bd_calls_total{status=\"error\", gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])) / sum by (gt_role) (rate(gastown_bd_calls_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.3 },
-              { "color": "red", "value": 0.5 }
-            ]
-          }
-        }
-      }
+      "title": "bd Error Ratio by Role",
+      "type": "timeseries"
     },
     {
-      "id": 7,
-      "title": "bd Errors by Subcommand",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Which bd subcommands are failing, per role.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 7,
       "targets": [
         {
           "expr": "sum by (gt_role, subcommand) (rate(gastown_bd_calls_total{status=\"error\", gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}: {{subcommand}}"
         }
       ],
+      "title": "bd Errors by Subcommand",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 300,
+      "title": "Token \u0026 Cost Tracking",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "description": "Token consumption rate. Sudden spikes may indicate loops or excessive retries.",
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
           "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50,
-            "stacking": { "mode": "normal" }
-          }
+            "drawStyle": "line",
+            "fillOpacity": 15
+          },
+          "unit": "short"
         }
-      }
-    },
-    {
-      "id": 300,
-      "title": "Token & Cost Tracking",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
-      "collapsed": false
-    },
-    {
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
       "id": 8,
-      "title": "Token Burn Rate by Role",
-      "description": "Token consumption rate. Sudden spikes may indicate loops or excessive retries.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(claude_code_token_usage_tokens_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15
-          }
-        }
-      }
+      "title": "Token Burn Rate by Role",
+      "type": "timeseries"
     },
     {
-      "id": 9,
-      "title": "Cost Rate by Role (USD/hr)",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Dollar burn rate per agent role. High values warrant investigation.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
-      "datasource": { "uid": "victoriametrics" },
-      "targets": [
-        {
-          "expr": "sum by (gt_role) (rate(claude_code_cost_usage_USD_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])) * 3600",
-          "legendFormat": "{{gt_role}}"
-        }
-      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "currencyUSD",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 15
@@ -295,45 +319,93 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
             ]
-          }
+          },
+          "unit": "currencyUSD"
         }
-      }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum by (gt_role) (rate(claude_code_cost_usage_USD_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])) * 3600",
+          "legendFormat": "{{gt_role}}"
+        }
+      ],
+      "title": "Cost Rate by Role (USD/hr)",
+      "type": "timeseries"
     },
     {
-      "id": 10,
-      "title": "Token Usage by Model & Role",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Token breakdown by model (opus/sonnet/haiku) per role.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
+      "id": 10,
       "targets": [
         {
           "expr": "sum by (gt_role, model) (rate(claude_code_token_usage_tokens_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}} ({{model}})"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50,
-            "stacking": { "mode": "normal" }
-          }
-        }
-      }
+      "title": "Token Usage by Model \u0026 Role",
+      "type": "timeseries"
     },
     {
-      "id": 11,
-      "title": "Code Edits by Role",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Lines edited and edit tool decisions. Progress indicator for implementation work.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
+      "id": 11,
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(claude_code_lines_of_code_count_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
@@ -344,125 +416,166 @@
           "legendFormat": "{{gt_role}} edits"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15
-          }
-        }
-      }
+      "title": "Code Edits by Role",
+      "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
       "id": 400,
       "title": "Summary Stats",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
-      "collapsed": false
+      "type": "row"
     },
     {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 52
+      },
       "id": 12,
-      "title": "Total Tokens",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 52 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum(claude_code_token_usage_tokens_total{gt_role=~\"$role\", gt_rig=~\"$rig\"})"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        }
-      }
+      "title": "Total Tokens",
+      "type": "stat"
     },
     {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 52
+      },
       "id": 13,
-      "title": "Total Cost",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 52 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum(claude_code_cost_usage_USD_total{gt_role=~\"$role\", gt_rig=~\"$rig\"})"
         }
       ],
+      "title": "Total Cost",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "currencyUSD",
           "thresholds": {
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 20 }
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
             ]
           }
         }
-      }
-    },
-    {
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 52
+      },
       "id": 14,
-      "title": "Total bd Errors",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 52 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum(gastown_bd_calls_total{status=\"error\", gt_role=~\"$role\", gt_rig=~\"$rig\"})"
         }
       ],
+      "title": "Total bd Errors",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "yellow", "value": 10 },
-              { "color": "red", "value": 50 }
+              {
+                "color": "blue",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
-      }
-    },
-    {
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 52
+      },
       "id": 15,
-      "title": "Total Commits",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 52 },
-      "datasource": { "uid": "victoriametrics" },
       "targets": [
         {
           "expr": "sum(claude_code_commit_count_total{gt_role=~\"$role\", gt_rig=~\"$rig\"})"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "steps": [
-              { "color": "blue", "value": 0 },
-              { "color": "green", "value": 1 }
-            ]
-          }
-        }
-      }
+      "title": "Total Commits",
+      "type": "stat"
     },
     {
-      "id": 16,
-      "title": "bd Latency by Role (p95)",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Per-role bd call latency. High latency may indicate Dolt contention.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
-      "datasource": { "uid": "victoriametrics" },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (gt_role, le) (rate(gastown_bd_duration_ms_milliseconds_bucket{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])))",
-          "legendFormat": "{{gt_role}} p95"
-        }
-      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10
@@ -470,37 +583,120 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 500 },
-              { "color": "red", "value": 2000 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 2000
+              }
             ]
-          }
+          },
+          "unit": "ms"
         }
-      }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "id": 16,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (gt_role, le) (rate(gastown_bd_duration_ms_milliseconds_bucket{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m])))",
+          "legendFormat": "{{gt_role}} p95"
+        }
+      ],
+      "title": "bd Latency by Role (p95)",
+      "type": "timeseries"
     },
     {
-      "id": 17,
-      "title": "Active Time by Role",
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "description": "Claude Code active processing time per role.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
-      "datasource": { "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "id": 17,
       "targets": [
         {
           "expr": "sum by (gt_role) (rate(claude_code_active_time_seconds_total{gt_role=~\"$role\", gt_rig=~\"$rig\"}[5m]))",
           "legendFormat": "{{gt_role}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15
-          }
-        }
-      }
+      "title": "Active Time by Role",
+      "type": "timeseries"
     }
   ],
-  "schemaVersion": 39
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "gastown",
+    "agents",
+    "health"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "includeAll": true,
+        "label": "Role",
+        "multi": true,
+        "name": "role",
+        "query": "label_values(gastown_bd_calls_total, gt_role)",
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "includeAll": true,
+        "label": "Rig",
+        "multi": true,
+        "name": "rig",
+        "query": "label_values(gastown_bd_calls_total, gt_rig)",
+        "refresh": 2,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Agent Health",
+  "uid": "gastown-agent-health"
 }

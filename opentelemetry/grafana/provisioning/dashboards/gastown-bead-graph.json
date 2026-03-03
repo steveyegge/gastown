@@ -1,96 +1,37 @@
 {
-  "uid": "gastown-bead-graph",
-  "title": "Gas Town Bead Graph",
-  "tags": [
-    "gastown",
-    "beads",
-    "graph"
-  ],
-  "timezone": "browser",
-  "refresh": "1m",
-  "time": {
-    "from": "now-30d",
-    "to": "now"
-  },
-  "templating": {
-    "list": [
-      {
-        "name": "database",
-        "type": "query",
-        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
-        "includeAll": false,
-        "current": {
-          "text": "hq",
-          "value": "hq"
-        },
-        "label": "Rig Database",
-        "datasource": {
-          "uid": "dolt-beads"
-        },
-        "refresh": 1,
-        "multi": false
-      },
-      {
-        "name": "root_bead",
-        "label": "Bead",
-        "type": "query",
-        "datasource": {
-          "uid": "dolt-beads"
-        },
-        "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY CASE issue_type WHEN 'convoy' THEN 0 WHEN 'epic' THEN 1 ELSE 2 END, priority ASC, created_at DESC",
-        "refresh": 1,
-        "includeAll": false
-      }
-    ]
-  },
   "panels": [
     {
-      "id": 1,
-      "title": "Dependency Graph",
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "description": "Select a database and optionally enter a root bead ID to filter. Nodes = beads, edges = dependencies (parent-child, blocks).",
-      "type": "nodeGraph",
       "gridPos": {
         "h": 20,
         "w": 24,
         "x": 0,
         "y": 0
       },
-      "datasource": {
-        "uid": "dolt-beads"
-      },
+      "id": 1,
+      "options": {},
       "targets": [
         {
-          "refId": "nodes",
+          "format": "table",
           "rawSql": "SELECT i.id, CONCAT(i.issue_type, ': ', LEFT(i.title, 60)) AS title, i.status AS subtitle, CASE i.issue_type WHEN 'convoy' THEN 1.0 WHEN 'epic' THEN 0.8 ELSE 0.5 END AS mainstat FROM ${database}.issues i WHERE i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies)",
-          "format": "table"
+          "refId": "nodes"
         },
         {
-          "refId": "edges",
-          "rawSql": "SELECT CONCAT(d.depends_on_id, '->', d.issue_id) AS id, d.depends_on_id AS source, d.issue_id AS target, d.type AS mainstat FROM ${database}.dependencies d WHERE d.depends_on_id IN (SELECT id FROM ${database}.issues) AND d.issue_id IN (SELECT id FROM ${database}.issues)",
-          "format": "table"
+          "format": "table",
+          "rawSql": "SELECT CONCAT(d.depends_on_id, '-\u003e', d.issue_id) AS id, d.depends_on_id AS source, d.issue_id AS target, d.type AS mainstat FROM ${database}.dependencies d WHERE d.depends_on_id IN (SELECT id FROM ${database}.issues) AND d.issue_id IN (SELECT id FROM ${database}.issues)",
+          "refId": "edges"
         }
       ],
-      "options": {}
+      "title": "Dependency Graph",
+      "type": "nodeGraph"
     },
     {
-      "id": 2,
-      "title": "Bead Detail (select root bead above)",
-      "type": "table",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 20
-      },
       "datasource": {
         "uid": "dolt-beads"
       },
-      "targets": [
-        {
-          "rawSql": "SELECT i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'\u2014') AS assignee, i.created_at, COALESCE(NULLIF(i.created_by,''),'\u2014') AS created_by, LEFT(i.description, 500) AS description, LEFT(i.design, 300) AS design, LEFT(i.acceptance_criteria, 300) AS acceptance_criteria, LEFT(i.notes, 300) AS notes FROM ${database}.issues i WHERE ('${root_bead}' = '' OR i.id = '${root_bead}' OR i.id IN (SELECT issue_id FROM ${database}.dependencies WHERE depends_on_id = '${root_bead}') OR i.id IN (SELECT depends_on_id FROM ${database}.dependencies WHERE issue_id = '${root_bead}')) AND i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY i.priority ASC LIMIT 50",
-          "format": "table"
-        }
-      ],
       "fieldConfig": {
         "overrides": [
           {
@@ -104,11 +45,11 @@
                 "value": [
                   {
                     "title": "Focus in Graph",
-                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}\u0026var-root_bead=${__value.raw}"
                   },
                   {
                     "title": "Convoy Preview",
-                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}"
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}\u0026var-convoy_id=${__value.raw}"
                   }
                 ]
               }
@@ -124,34 +65,34 @@
                 "id": "mappings",
                 "value": [
                   {
-                    "from": "0",
-                    "to": "0",
                     "color": "red",
-                    "text": "P0"
+                    "from": "0",
+                    "text": "P0",
+                    "to": "0"
                   },
                   {
-                    "from": "1",
-                    "to": "1",
                     "color": "orange",
-                    "text": "P1"
+                    "from": "1",
+                    "text": "P1",
+                    "to": "1"
                   },
                   {
-                    "from": "2",
-                    "to": "2",
                     "color": "yellow",
-                    "text": "P2"
+                    "from": "2",
+                    "text": "P2",
+                    "to": "2"
                   },
                   {
-                    "from": "3",
-                    "to": "3",
                     "color": "blue",
-                    "text": "P3"
+                    "from": "3",
+                    "text": "P3",
+                    "to": "3"
                   },
                   {
-                    "from": "4",
-                    "to": "4",
                     "color": "grey",
-                    "text": "P4"
+                    "from": "4",
+                    "text": "P4",
+                    "to": "4"
                   }
                 ]
               }
@@ -167,40 +108,40 @@
                 "id": "mappings",
                 "value": [
                   {
+                    "color": "red",
                     "from": "convoy",
-                    "to": "convoy",
-                    "color": "red",
-                    "text": "convoy"
+                    "text": "convoy",
+                    "to": "convoy"
                   },
                   {
-                    "from": "epic",
-                    "to": "epic",
                     "color": "purple",
-                    "text": "epic"
+                    "from": "epic",
+                    "text": "epic",
+                    "to": "epic"
                   },
                   {
-                    "from": "task",
-                    "to": "task",
                     "color": "green",
-                    "text": "task"
+                    "from": "task",
+                    "text": "task",
+                    "to": "task"
                   },
                   {
-                    "from": "bug",
-                    "to": "bug",
                     "color": "red",
-                    "text": "bug"
+                    "from": "bug",
+                    "text": "bug",
+                    "to": "bug"
                   },
                   {
-                    "from": "feature",
-                    "to": "feature",
                     "color": "blue",
-                    "text": "feature"
+                    "from": "feature",
+                    "text": "feature",
+                    "to": "feature"
                   },
                   {
-                    "from": "agent",
-                    "to": "agent",
                     "color": "orange",
-                    "text": "agent"
+                    "from": "agent",
+                    "text": "agent",
+                    "to": "agent"
                   }
                 ]
               }
@@ -208,29 +149,29 @@
           }
         ]
       },
-      "options": {
-        "showHeader": true
-      }
-    },
-    {
-      "id": 3,
-      "title": "Dependency Edges",
-      "type": "table",
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 20
       },
-      "datasource": {
-        "uid": "dolt-beads"
+      "id": 2,
+      "options": {
+        "showHeader": true
       },
       "targets": [
         {
-          "rawSql": "SELECT d.depends_on_id AS parent, p.title AS parent_title, p.status AS parent_status, d.type AS relationship, d.issue_id AS child, c.title AS child_title, c.status AS child_status FROM ${database}.dependencies d LEFT JOIN ${database}.issues p ON d.depends_on_id = p.id LEFT JOIN ${database}.issues c ON d.issue_id = c.id WHERE ('${root_bead}' = '' OR d.depends_on_id = '${root_bead}' OR d.issue_id = '${root_bead}') ORDER BY d.depends_on_id, d.type, d.issue_id",
-          "format": "table"
+          "format": "table",
+          "rawSql": "SELECT i.id, i.title, i.issue_type, i.status, i.priority, COALESCE(NULLIF(i.assignee,''),'—') AS assignee, i.created_at, COALESCE(NULLIF(i.created_by,''),'—') AS created_by, LEFT(i.description, 500) AS description, LEFT(i.design, 300) AS design, LEFT(i.acceptance_criteria, 300) AS acceptance_criteria, LEFT(i.notes, 300) AS notes FROM ${database}.issues i WHERE ('${root_bead}' = '' OR i.id = '${root_bead}' OR i.id IN (SELECT issue_id FROM ${database}.dependencies WHERE depends_on_id = '${root_bead}') OR i.id IN (SELECT depends_on_id FROM ${database}.dependencies WHERE issue_id = '${root_bead}')) AND i.id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY i.priority ASC LIMIT 50"
         }
       ],
+      "title": "Bead Detail (select root bead above)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "uid": "dolt-beads"
+      },
       "fieldConfig": {
         "overrides": [
           {
@@ -244,7 +185,7 @@
                 "value": [
                   {
                     "title": "Focus in Graph",
-                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}\u0026var-root_bead=${__value.raw}"
                   }
                 ]
               }
@@ -261,7 +202,7 @@
                 "value": [
                   {
                     "title": "Focus in Graph",
-                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}\u0026var-root_bead=${__value.raw}"
                   }
                 ]
               }
@@ -269,44 +210,44 @@
           }
         ]
       },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 3,
       "options": {
         "showHeader": true
-      }
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT d.depends_on_id AS parent, p.title AS parent_title, p.status AS parent_status, d.type AS relationship, d.issue_id AS child, c.title AS child_title, c.status AS child_status FROM ${database}.dependencies d LEFT JOIN ${database}.issues p ON d.depends_on_id = p.id LEFT JOIN ${database}.issues c ON d.issue_id = c.id WHERE ('${root_bead}' = '' OR d.depends_on_id = '${root_bead}' OR d.issue_id = '${root_bead}') ORDER BY d.depends_on_id, d.type, d.issue_id"
+        }
+      ],
+      "title": "Dependency Edges",
+      "type": "table"
     },
     {
-      "id": 10,
-      "title": "",
-      "type": "text",
       "gridPos": {
         "h": 2,
         "w": 24,
         "x": 0,
         "y": 36
       },
+      "id": 10,
       "options": {
-        "mode": "markdown",
-        "content": "## Convoy Breakdown"
-      }
+        "content": "## Convoy Breakdown",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
     },
     {
-      "id": 11,
-      "title": "Convoy Children (all active convoys)",
-      "type": "table",
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 38
-      },
       "datasource": {
         "uid": "dolt-beads"
       },
-      "targets": [
-        {
-          "rawSql": "SELECT convoy.id AS convoy_id, LEFT(convoy.title, 80) AS convoy_title, convoy.status AS convoy_status, child.id AS child_id, LEFT(child.title, 80) AS child_title, child.issue_type AS child_type, child.status AS child_status, child.priority, COALESCE(NULLIF(child.assignee,''),'\u2014') AS assignee FROM ${database}.dependencies d JOIN ${database}.issues convoy ON d.depends_on_id = convoy.id AND convoy.issue_type = 'convoy' JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.type = 'parent-child' ORDER BY convoy.id, child.priority ASC",
-          "format": "table"
-        }
-      ],
       "fieldConfig": {
         "overrides": [
           {
@@ -320,7 +261,7 @@
                 "value": [
                   {
                     "title": "Convoy Preview",
-                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}&var-convoy_id=${__value.raw}"
+                    "url": "/d/gastown-convoy-preview/convoy-preview?var-database=${database}\u0026var-convoy_id=${__value.raw}"
                   }
                 ]
               }
@@ -337,7 +278,7 @@
                 "value": [
                   {
                     "title": "View in Graph",
-                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}&var-root_bead=${__value.raw}"
+                    "url": "/d/gastown-bead-graph/gas-town-bead-graph?var-database=${database}\u0026var-root_bead=${__value.raw}"
                   }
                 ]
               }
@@ -353,34 +294,34 @@
                 "id": "mappings",
                 "value": [
                   {
-                    "from": "0",
-                    "to": "0",
                     "color": "red",
-                    "text": "P0"
+                    "from": "0",
+                    "text": "P0",
+                    "to": "0"
                   },
                   {
-                    "from": "1",
-                    "to": "1",
                     "color": "orange",
-                    "text": "P1"
+                    "from": "1",
+                    "text": "P1",
+                    "to": "1"
                   },
                   {
-                    "from": "2",
-                    "to": "2",
                     "color": "yellow",
-                    "text": "P2"
+                    "from": "2",
+                    "text": "P2",
+                    "to": "2"
                   },
                   {
-                    "from": "3",
-                    "to": "3",
                     "color": "blue",
-                    "text": "P3"
+                    "from": "3",
+                    "text": "P3",
+                    "to": "3"
                   },
                   {
-                    "from": "4",
-                    "to": "4",
                     "color": "grey",
-                    "text": "P4"
+                    "from": "4",
+                    "text": "P4",
+                    "to": "4"
                   }
                 ]
               }
@@ -396,40 +337,40 @@
                 "id": "mappings",
                 "value": [
                   {
+                    "color": "red",
                     "from": "convoy",
-                    "to": "convoy",
-                    "color": "red",
-                    "text": "convoy"
+                    "text": "convoy",
+                    "to": "convoy"
                   },
                   {
-                    "from": "epic",
-                    "to": "epic",
                     "color": "purple",
-                    "text": "epic"
+                    "from": "epic",
+                    "text": "epic",
+                    "to": "epic"
                   },
                   {
-                    "from": "task",
-                    "to": "task",
                     "color": "green",
-                    "text": "task"
+                    "from": "task",
+                    "text": "task",
+                    "to": "task"
                   },
                   {
-                    "from": "bug",
-                    "to": "bug",
                     "color": "red",
-                    "text": "bug"
+                    "from": "bug",
+                    "text": "bug",
+                    "to": "bug"
                   },
                   {
-                    "from": "feature",
-                    "to": "feature",
                     "color": "blue",
-                    "text": "feature"
+                    "from": "feature",
+                    "text": "feature",
+                    "to": "feature"
                   },
                   {
-                    "from": "agent",
-                    "to": "agent",
                     "color": "orange",
-                    "text": "agent"
+                    "from": "agent",
+                    "text": "agent",
+                    "to": "agent"
                   }
                 ]
               }
@@ -437,10 +378,69 @@
           }
         ]
       },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 11,
       "options": {
         "showHeader": true
-      }
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT convoy.id AS convoy_id, LEFT(convoy.title, 80) AS convoy_title, convoy.status AS convoy_status, child.id AS child_id, LEFT(child.title, 80) AS child_title, child.issue_type AS child_type, child.status AS child_status, child.priority, COALESCE(NULLIF(child.assignee,''),'—') AS assignee FROM ${database}.dependencies d JOIN ${database}.issues convoy ON d.depends_on_id = convoy.id AND convoy.issue_type = 'convoy' JOIN ${database}.issues child ON d.issue_id = child.id WHERE d.type = 'parent-child' ORDER BY convoy.id, child.priority ASC"
+        }
+      ],
+      "title": "Convoy Children (all active convoys)",
+      "type": "table"
     }
   ],
-  "schemaVersion": 39
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "gastown",
+    "beads",
+    "graph"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "hq",
+          "value": "hq"
+        },
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "includeAll": false,
+        "label": "Rig Database",
+        "multi": false,
+        "name": "database",
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "includeAll": false,
+        "label": "Bead",
+        "name": "root_bead",
+        "query": "SELECT id AS __value, CONCAT(LEFT(title, 80), ' [', issue_type, ' / ', status, ']') AS __text FROM ${database}.issues WHERE id IN (SELECT issue_id FROM ${database}.dependencies UNION SELECT depends_on_id FROM ${database}.dependencies) ORDER BY CASE issue_type WHEN 'convoy' THEN 0 WHEN 'epic' THEN 1 ELSE 2 END, priority ASC, created_at DESC",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Gas Town Bead Graph",
+  "uid": "gastown-bead-graph"
 }
