@@ -414,11 +414,10 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if opts.DefaultBranch != "" {
 		defaultBranch = opts.DefaultBranch
 	} else {
-		// Try to get default branch from remote first, fall back to local detection
-		defaultBranch = bareGit.RemoteDefaultBranch()
-		if defaultBranch == "" {
-			defaultBranch = bareGit.DefaultBranch()
-		}
+		// Bare repos don't have refs/remotes/origin/* tracking branches,
+		// so detect the default branch from HEAD (which git sets to the
+		// remote's default branch during clone --bare).
+		defaultBranch = bareGit.DefaultBranch()
 	}
 	// When user specified --default-branch, the shallow single-branch clone may not
 	// have that branch (it only clones the remote HEAD). Fetch it explicitly.
