@@ -19,6 +19,11 @@ import {
   Activity,
   Users,
   Building2,
+  FlaskConical,
+  BookOpen,
+  GitBranch,
+  RefreshCw,
+  Upload,
 } from "lucide-react"
 
 interface NavItem {
@@ -48,6 +53,48 @@ const marketplaceItems: NavItem[] = [
   },
 ]
 
+// IMDE sub-navigation items
+export const imdeSubItems: NavItem[] = [
+  {
+    label: "Workspace",
+    href: "/imde",
+    icon: Code2,
+    description: "Sandboxes & compute",
+  },
+  {
+    label: "Notebooks",
+    href: "/imde/notebooks",
+    icon: BookOpen,
+    description: "Shared Jupyter notebooks",
+  },
+  {
+    label: "Experiments",
+    href: "/imde/experiments",
+    icon: FlaskConical,
+    description: "Run tracking & comparison",
+  },
+  {
+    label: "Push to Marketplace",
+    href: "/imde/push",
+    icon: Upload,
+    description: "One-command publish",
+  },
+  {
+    label: "Collaboration",
+    href: "/imde/collaboration",
+    icon: GitBranch,
+    description: "Version control & audit",
+  },
+  {
+    label: "Improvement Loop",
+    href: "/imde/improvement",
+    icon: RefreshCw,
+    badge: "Live",
+    badgeColor: "bg-emerald-500/20 text-emerald-400",
+    description: "Retrain from production",
+  },
+]
+
 // UAP Development & Deployment
 const developmentItems: NavItem[] = [
   {
@@ -60,8 +107,8 @@ const developmentItems: NavItem[] = [
     label: "IMDE",
     href: "/imde",
     icon: Code2,
-    badge: "Dev",
-    badgeColor: "bg-[var(--uhg-blue)]/20 text-[var(--uhg-blue-light)]",
+    badge: "New",
+    badgeColor: "bg-violet-500/20 text-violet-400",
     description: "Integrated Model Dev Environment",
   },
   {
@@ -109,7 +156,7 @@ const bottomNavItems: NavItem[] = [
   },
 ]
 
-function NavSection({ title, items }: { title?: string; items: NavItem[] }) {
+function NavSection({ title, items, indent }: { title?: string; items: NavItem[]; indent?: boolean }) {
   const pathname = usePathname()
 
   return (
@@ -122,26 +169,30 @@ function NavSection({ title, items }: { title?: string; items: NavItem[] }) {
       <ul className="space-y-1">
         {items.map((item) => {
           const Icon = item.icon
-          const isActive = pathname === item.href
-          
+          const isActive = indent
+            ? pathname === item.href || (item.href !== "/imde" && pathname.startsWith(item.href))
+            : pathname === item.href
+
           return (
             <li key={item.href}>
               <Link
                 href={item.href}
                 className={cn(
                   "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                  indent ? "pl-6" : "",
                   isActive
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
                 )}
               >
                 <span className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
-                  isActive 
-                    ? "bg-[var(--optum-orange)]/20 text-[var(--optum-orange)]" 
+                  "flex shrink-0 items-center justify-center rounded-lg transition-colors",
+                  indent ? "h-6 w-6" : "h-8 w-8",
+                  isActive
+                    ? "bg-[var(--optum-orange)]/20 text-[var(--optum-orange)]"
                     : "bg-secondary/50 text-muted-foreground group-hover:text-foreground"
                 )}>
-                  <Icon className="h-4 w-4" />
+                  <Icon className={indent ? "h-3.5 w-3.5" : "h-4 w-4"} />
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -155,7 +206,7 @@ function NavSection({ title, items }: { title?: string; items: NavItem[] }) {
                       </span>
                     )}
                   </div>
-                  {item.description && (
+                  {!indent && item.description && (
                     <p className="truncate text-xs text-muted-foreground/70">
                       {item.description}
                     </p>
@@ -168,6 +219,99 @@ function NavSection({ title, items }: { title?: string; items: NavItem[] }) {
             </li>
           )
         })}
+      </ul>
+    </div>
+  )
+}
+
+function ImdeSection() {
+  const pathname = usePathname()
+  const isImde = pathname === "/imde" || pathname.startsWith("/imde/")
+  const Icon = Code2
+  const isMainActive = pathname === "/imde"
+
+  return (
+    <div className="mb-1">
+      <Link
+        href="/imde"
+        className={cn(
+          "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+          isMainActive
+            ? "bg-secondary text-foreground"
+            : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+        )}
+      >
+        <span className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+          isImde
+            ? "bg-violet-500/20 text-violet-400"
+            : "bg-secondary/50 text-muted-foreground group-hover:text-foreground"
+        )}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate">IMDE</span>
+            <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-violet-500/20 text-violet-400">New</span>
+          </div>
+          <p className="truncate text-xs text-muted-foreground/70">Integrated Model Dev Environment</p>
+        </div>
+        <ChevronRight className={cn("h-4 w-4 transition-transform", isImde ? "rotate-90 text-violet-400" : "text-muted-foreground/40")} />
+      </Link>
+      {isImde && (
+        <ul className="mt-0.5 space-y-0.5 pl-2">
+          {imdeSubItems.map((item) => {
+            const SubIcon = item.icon
+            const isActive = pathname === item.href || (item.href !== "/imde" && pathname.startsWith(item.href))
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150",
+                    isActive
+                      ? "bg-violet-500/10 text-violet-300"
+                      : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+                  )}
+                >
+                  <span className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors",
+                    isActive ? "text-violet-400" : "text-muted-foreground group-hover:text-foreground"
+                  )}>
+                    <SubIcon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.badge && (
+                    <span className={cn("rounded px-1 py-0.5 text-[10px] font-medium", item.badgeColor)}>
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function DevelopmentSection() {
+  return (
+    <div className="mb-6">
+      <h3 className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Development
+      </h3>
+      <ul className="space-y-1">
+        <li>
+          <NavSection items={[{ label: "Agent Builder", href: "/orchestration", icon: Workflow, description: "Visual workflow designer" }]} />
+        </li>
+        <li>
+          <ImdeSection />
+        </li>
+        <li>
+          <NavSection items={[{ label: "One-Click Deploy", href: "/deployments", icon: Rocket, description: "CI/CD & deployment management" }]} />
+        </li>
       </ul>
     </div>
   )
@@ -190,7 +334,7 @@ export function AppSidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-3">
         <NavSection title="Marketplaces" items={marketplaceItems} />
-        <NavSection title="Development" items={developmentItems} />
+        <DevelopmentSection />
         <NavSection title="Operations" items={governanceItems} />
       </nav>
       
